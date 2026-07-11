@@ -77,6 +77,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	vision, _ := cfg.Extra["vision"].(bool)
+	webSearch, _ := cfg.Extra["web_search"].(bool)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	authHeader, _ := cfg.Extra["auth_header"].(bool)
 	httpClient, err := newHTTPClient(cfg)
@@ -109,6 +110,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		effort:      effort,
 		vision:      vision,
 		mimo:        provider.IsMiMoEndpoint(root),
+		webSearch:   webSearch,
 		headers:     cleanCustomHeaders(headers),
 		authHeader:  authHeader,
 		http:        httpClient, // no overall timeout; lifecycle is ctx-driven
@@ -132,6 +134,7 @@ type client struct {
 	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
 	vision      bool   // model accepts image input — embed attached images as base64 image blocks
 	mimo        bool   // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	webSearch   bool   // enable server-side web_search tool (DeepSeek Anthropic API)
 	headers     map[string]string
 	authHeader  bool // send Authorization: Bearer instead of Anthropic's x-api-key header
 	http        *http.Client
@@ -303,6 +306,9 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 	}
 
 	var tools []anthTool
+	if c.webSearch {
+		tools = append(tools, anthTool{Type: "web_search_20250305", Name: "web_search"})
+	}
 	for _, t := range req.Tools {
 		schema := t.Parameters
 		if len(schema) == 0 {
@@ -464,11 +470,27 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				mergeUsage(ev.Message.Usage)
 			}
 		case "content_block_start":
-			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
-				tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
-				tools[ev.Index] = tc
-				if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
-					return
+			if ev.ContentBlock != nil {
+				switch ev.ContentBlock.Type {
+				case "tool_use":
+					tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
+					tools[ev.Index] = tc
+					if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
+						return
+					}
+				case "web_search_tool_result":
+					// Search results are delivered inline in content_block.content as a
+					// JSON array of result objects (title, url, encrypted_content).
+					// Only the model sees the plain text; we surface titles and URLs.
+					// server_tool_use blocks (the model initiating the search) are
+					// intentionally skipped — the API executes them server-side and
+					// the results appear here.
+					formatted := formatWebSearchResults(ev.ContentBlock.Content)
+					if formatted != "" {
+						if !send(provider.Chunk{Type: provider.ChunkText, Text: formatted}) {
+							return
+						}
+					}
 				}
 			}
 		case "content_block_delta":
@@ -587,6 +609,46 @@ func mapStopReason(s string) string {
 	}
 }
 
+// webSearchResult is a single result from a web_search_tool_result block.
+type webSearchResult struct {
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+	Text     string `json:"text"`
+	SiteName string `json:"site_name"`
+}
+
+// formatWebSearchResults parses a web_search_tool_result content array
+// and formats titles and URLs as human-readable text. DeepSeek returns
+// encrypted_content rather than plain text at the transport layer; the
+// model still sees the original content.
+func formatWebSearchResults(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var results []webSearchResult
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return ""
+	}
+	if len(results) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	for i, r := range results {
+		if r.Title == "" && r.URL == "" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("\n- **%s**", r.Title))
+		if r.URL != "" {
+			b.WriteString(fmt.Sprintf("\n  <%s>", r.URL))
+		}
+		if i == len(results)-1 {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
 // --- Messages API wire protocol ---
 
 func ephemeral() *cacheControl { return &cacheControl{Type: "ephemeral"} }
@@ -667,9 +729,10 @@ func toolResultBlocks(text string, images []string) []contentBlock {
 }
 
 type anthTool struct {
-	Name         string          `json:"name"`
+	Type         string          `json:"type,omitempty"` // "web_search" for server-side search; empty for named tools
+	Name         string          `json:"name,omitempty"`
 	Description  string          `json:"description,omitempty"`
-	InputSchema  json.RawMessage `json:"input_schema"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 
@@ -681,17 +744,20 @@ type streamEvent struct {
 		Usage *wireUsage `json:"usage"`
 	} `json:"message"`
 	ContentBlock *struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		Type      string          `json:"type"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		ToolUseID string          `json:"tool_use_id"` // web_search_tool_result
+		Content   json.RawMessage `json:"content"`     // web_search_tool_result: array of result objects
 	} `json:"content_block"`
 	Delta *struct {
-		Type        string `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta
-		Text        string `json:"text"`         // text_delta
-		Thinking    string `json:"thinking"`     // thinking_delta
-		Signature   string `json:"signature"`    // signature_delta
-		PartialJSON string `json:"partial_json"` // input_json_delta
-		StopReason  string `json:"stop_reason"`  // message_delta
+		Type             string          `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta | web_search_tool_result_delta
+		Text             string          `json:"text"`         // text_delta
+		Thinking         string          `json:"thinking"`     // thinking_delta
+		Signature        string          `json:"signature"`    // signature_delta
+		PartialJSON      string          `json:"partial_json"` // input_json_delta
+		StopReason       string          `json:"stop_reason"`  // message_delta
+		WebSearchResults json.RawMessage `json:"results"`      // web_search_tool_result_delta
 	} `json:"delta"`
 	Usage *wireUsage `json:"usage"` // message_delta (cumulative output_tokens)
 	Error *struct {

@@ -1179,6 +1179,13 @@ type ProviderEntry struct {
 	// (the field is omitted). "low" caps an image to a fixed ~85 tokens for cheap
 	// coarse reads; ignored by providers without the knob (e.g. anthropic).
 	VisionDetail string `toml:"vision_detail"`
+	// WebSearch enables the server-side web_search tool for the anthropic
+	// provider kind. When true, the provider includes {"type":"web_search"} in
+	// the tools array, and the API executes searches server-side, returning
+	// web_search_tool_result content blocks in the stream. This is the primary
+	// way to use DeepSeek's built-in search via its Anthropic-compatible
+	// endpoint (https://api.deepseek.com/anthropic). Off by default.
+	WebSearch bool `toml:"web_search"`
 	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
 	// models. Empty/auto uses the model capability registry plus endpoint
 	// heuristics; none disables automatic reasoning controls for this provider.
