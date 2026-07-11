@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2551,6 +2553,19 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		if !json.Valid([]byte(call.Arguments)) {
 			detail = strings.TrimRight(detail, "\n") + "\nThe arguments were not valid JSON. Re-emit them exactly per this schema:\n" + string(t.Schema())
 		}
+		// Retry-annotate for edit_file / multi_edit: when the edit fails because
+		// old_string was not found or was ambiguous, the file may have changed since
+		// the model last read it. Append the current file state so the model can
+		// re-send matching anchors without needing a separate read_file call.
+		// Use the provider-specific anchor-edit level: Aggressive providers (DeepSeek)
+		// get auto-annotation on every error; Default providers get it only for
+		// "not found" / "not unique" errors.
+		level := provider.AnchorEditStrictness(a.prov)
+		if isEditFileAnchorError(call.Name, err, level) {
+			if fileCtx := readFileContext(json.RawMessage(call.Arguments)); fileCtx != "" {
+				detail = strings.TrimRight(detail, "\n") + "\n\nThe file may have changed since you last read it. Here is its current state around the region you tried to edit:\n" + fileCtx
+			}
+		}
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
 		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
 	}
@@ -2563,6 +2578,53 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	body, truncMsg := truncateToolOutput(result)
 	return toolOutcome{output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg}
+}
+
+// isEditFileAnchorError reports whether the tool and its error suggest a stale
+// anchor that could be resolved by showing the current file state.
+// When level is Aggressive, every error from edit_file/multi_edit triggers
+// annotation; when Default, only "not found" / "not unique" errors do.
+func isEditFileAnchorError(name string, err error, level provider.AnchorEditLevel) bool {
+	if name != "edit_file" && name != "multi_edit" {
+		return false
+	}
+	if level == provider.AnchorEditAggressive {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "not unique")
+}
+
+// readFileContext tries to extract a "path" from the call's JSON args and
+// return the file's current first 80 lines. Returns "" when the path can't
+// be extracted or the file can't be read (the original error stands alone).
+func readFileContext(args json.RawMessage) string {
+	var p struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil || p.Path == "" {
+		return ""
+	}
+	// Resolve relative paths the same way edit_file/multi_edit's resolveIn
+	// would: convert to an absolute path so the file is found regardless of
+	// the agent's working directory.
+	resolved := p.Path
+	if !filepath.IsAbs(resolved) {
+		abs, err := filepath.Abs(resolved)
+		if err == nil {
+			resolved = abs
+		}
+	}
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return ""
+	}
+	lines := strings.SplitN(string(content), "\n", 81)
+	if len(lines) > 80 {
+		lines = lines[:80]
+	}
+	return "file: " + resolved + "\n" + strings.Join(lines, "\n")
 }
 
 func (a *Agent) checkPlanModeMCPReadOnlyTrust(ctx context.Context, call provider.ToolCall, t tool.Tool) (bool, toolOutcome, bool) {

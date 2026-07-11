@@ -662,6 +662,40 @@ func WarnOnMissingToolCallReasoning(p Provider) bool {
 	return RequiresToolCallReasoning(p)
 }
 
+// AnchorEditLevel controls how aggressively the agent should auto-annotate
+// edit_file/multi_edit anchor errors with the current file context.
+type AnchorEditLevel int
+
+const (
+	// AnchorEditDefault uses the default strategy: auto-annotate on the
+	// first "not found" / "not unique" error. Safest for all models.
+	AnchorEditDefault AnchorEditLevel = iota
+	// AnchorEditAggressive auto-annotates every edit tool call's error,
+	// even for non-anchor errors like write permission failures. Produces
+	// more noise but can help models that frequently misreport anchors.
+	AnchorEditAggressive
+)
+
+// AnchorEditPolicy is optionally implemented by providers whose models
+// have known difficulty with edit_file/multi_edit anchor accuracy.
+// The default (interface not implemented) is AnchorEditDefault.
+type AnchorEditPolicy interface {
+	AnchorEditStrictness() AnchorEditLevel
+}
+
+// AnchorEditStrictness reports how aggressively the agent should
+// annotate edit-file anchor errors for provider p.
+func AnchorEditStrictness(p Provider) AnchorEditLevel {
+	if nilutil.IsNil(p) {
+		return AnchorEditDefault
+	}
+	policy, ok := p.(AnchorEditPolicy)
+	if !ok {
+		return AnchorEditDefault
+	}
+	return policy.AnchorEditStrictness()
+}
+
 // Config is a resolved provider instance configuration.
 type Config struct {
 	Name    string         // instance name, e.g. "deepseek"
