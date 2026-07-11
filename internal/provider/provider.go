@@ -100,6 +100,11 @@ type Request struct {
 	Tools       []ToolSchema
 	Temperature *float64 // nil = omit; non-nil = send the value, including 0
 	MaxTokens   int
+
+	// OPT-04: LogProbs 控制是否请求返回 token 的对数概率。
+	// 0 = 不请求, 1 = 请求输出 token 的 logprob, >1 = 请求 top-N
+	// B3 置信度校准系统依赖此数据。
+	LogProbs int
 }
 
 // TemperaturePtr wraps v in a pointer so callers that explicitly want a
@@ -488,6 +493,17 @@ type Usage struct {
 	CacheMissTokens  int    // prompt tokens not cached
 	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
 	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
+
+	// OPT-04: token 级置信度数据，用于 B3 置信度校准。
+	// 仅当 Request.LogProbs > 0 时填充。
+	LogProbs []LogProb
+}
+
+// LogProb 是单个 token 的对数概率
+type LogProb struct {
+	Token       string  `json:"token"`
+	LogProb     float64 `json:"logprob"`
+	Probability float64 `json:"probability"` // exp(logprob)
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency

@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strings"
@@ -513,6 +514,11 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		ReasoningEffort: c.effort,
 		ExtraBody:       c.extraBody,
 	}
+	// OPT-04: 如果请求了 logprobs，设置到 wire 请求中
+	if req.LogProbs > 0 {
+		out.LogProbs = true
+		out.TopLogProbs = req.LogProbs
+	}
 	switch {
 	case c.deepseek:
 		// DeepSeek's CoT is controlled by `thinking` plus `reasoning_effort` for
@@ -622,6 +628,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	var lastFinishReason string
 	var sawDone bool
 	var think thinkSplitter
+	// OPT-04: 收集流式 logprobs
+	var collectedLogProbs []provider.LogProb
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -654,6 +662,10 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		if sr.Usage != nil {
 			u := normaliseUsage(sr.Usage)
 			u.FinishReason = lastFinishReason
+			// OPT-04: 将收集到的 logprobs 填充到 Usage
+			if len(collectedLogProbs) > 0 {
+				u.LogProbs = collectedLogProbs
+			}
 			emitted = true
 			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkUsage, Usage: u}) {
 				return emitted, ctx.Err()
@@ -667,6 +679,16 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		reasoningDelta := delta.ReasoningContent
 		if reasoningDelta == "" {
 			reasoningDelta = delta.Reasoning
+		}
+		// OPT-04: 收集 logprobs
+		if sr.Choices[0].LogProbs != nil {
+			for _, lp := range sr.Choices[0].LogProbs.Content {
+				collectedLogProbs = append(collectedLogProbs, provider.LogProb{
+					Token:       lp.Token,
+					LogProb:     lp.LogProb,
+					Probability: math.Exp(lp.LogProb),
+				})
+			}
 		}
 		if reasoningDelta != "" {
 			emitted = true
@@ -804,7 +826,10 @@ type chatRequest struct {
 	MaxTokens       int            `json:"max_tokens,omitempty"`
 	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 	Thinking        *thinkingMode  `json:"thinking,omitempty"`
-	ExtraBody       map[string]any `json:"-"`
+	// OPT-04: logprob 请求
+	LogProbs    bool           `json:"logprobs,omitempty"`
+	TopLogProbs int            `json:"top_logprobs,omitempty"`
+	ExtraBody   map[string]any `json:"-"`
 }
 
 func (r chatRequest) MarshalJSON() ([]byte, error) {
@@ -906,6 +931,13 @@ type streamResponse struct {
 			ToolCalls        []chatToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
+		// OPT-04: 流式 logprobs
+		LogProbs *struct {
+			Content []struct {
+				Token   string  `json:"token"`
+				LogProb float64 `json:"logprob"`
+			} `json:"content"`
+		} `json:"logprobs"`
 	} `json:"choices"`
 	Usage *wireUsage `json:"usage"`
 	Error *struct {
