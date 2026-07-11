@@ -1708,6 +1708,8 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 
 	a.tabs[tabID] = tab
 	a.tabOrder = append(a.tabOrder, tabID)
+	// 注册到虚空 UI
+	a.registerTabInPhantom(tab)
 	if activate {
 		a.activeTabID = tabID
 	}
@@ -1912,6 +1914,7 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 		created.sink = &tabEventSink{tabID: tabID, app: a}
 		a.tabs[tabID] = created
 		a.tabOrder = append(a.tabOrder, tabID)
+		a.registerTabInPhantom(created)
 		a.activeTabID = tabID
 		prePath, err := createEmptySessionFile(desktopSessionDir(actualRoot), inheritedModel)
 		if err != nil {
@@ -1961,6 +1964,7 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 	created.sink = &tabEventSink{tabID: tabID, app: a}
 	a.tabs[tabID] = created
 	a.tabOrder = append(a.tabOrder, tabID)
+	a.registerTabInPhantom(created)
 	a.activeTabID = tabID
 	prePath, err := createEmptySessionFile(desktopSessionDir(actualRoot), inheritedModel)
 	if err != nil {
@@ -2280,6 +2284,8 @@ func (a *App) CloseTab(tabID string) error {
 	}
 	delete(a.tabs, tabID)
 	a.removeTabOrderLocked(tabID)
+	// 从虚空 UI 移除
+	a.unregisterTabFromPhantom(tabID)
 	wasActive := a.activeTabID == tabID
 	if wasActive {
 		a.activeTabID = ""
@@ -6179,6 +6185,8 @@ func (a *App) setTabActivityStatus(tabID, status string) bool {
 		return false
 	}
 	tab.ActivityStatus = status
+	// 更新虚空 UI 状态
+	a.updateTabStatusInPhantom(tab.ID, status, 0)
 	return true
 }
 

@@ -467,6 +467,17 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   };
 }
 
+// onPhantomUpdate subscribes to Phantom Panel (虚空 UI) update events.
+// These are zero-token Go channel updates pushed via Wails EventsEmit.
+// Returns an unsubscribe function.
+export function onPhantomUpdate(cb: (u: unknown) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("phantom:update", (payload) => cb(payload));
+  }
+  // Mock 模式下不推送
+  return () => {};
+}
+
 function errorMessage(err: unknown): string {
   if (err && typeof err === "object" && "message" in err) {
     const msg = (err as { message?: unknown }).message;

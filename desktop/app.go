@@ -191,6 +191,10 @@ type App struct {
 	skillRootsCache skillRootsCache
 
 	heartbeat *HeartbeatEngine // scheduled heartbeat tasks; nil until startup
+
+	// phantomRegistry 管理虚空 UI 条目（零 token 更新中心）
+	// 每个 WorkspaceTab 的状态变更通过 Go channel 异步推送到前端
+	phantomRegistry *PhantomRegistry
 }
 
 type skillRootsCache struct {
@@ -371,6 +375,7 @@ func NewApp() *App {
 		mediaTokens:      newMediaTokenStore(),
 		botInstalls:      map[string]*botInstallSession{},
 		botRuntime:       newDesktopBotRuntime(),
+		phantomRegistry:  NewPhantomRegistry(),
 	}
 }
 
@@ -395,6 +400,9 @@ func (a *App) startup(ctx context.Context) {
 	installSystemQuitHook()
 	a.startTray()
 	a.enableDeferredRebuildRetry()
+
+	// 启动虚空 UI 事件推送
+	a.startPhantomPanel(ctx)
 
 	if cfg, err := config.Load(); err == nil && cfg.DesktopMetrics() && version != "dev" {
 		a.metrics.Store(newMetricsAggregator(config.MemoryUserDir()))

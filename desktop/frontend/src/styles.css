@@ -29889,3 +29889,159 @@ body > .mermaid-diagram--fullscreen {
   border-left-color: transparent;
   box-shadow: none;
 }
+
+/* ── A2 设计修订五：虚空 UI（Phantom Panel）样式 ── */
+.phantom-panel {
+  border: 1px dashed var(--phantom-border, var(--border-color, #444));
+  border-radius: 6px;
+  margin: 4px 8px;
+  background: var(--phantom-bg, color-mix(in srgb, var(--bg, #1a1a2e) 92%, transparent));
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.phantom-panel-collapsed {
+  border-radius: 4px;
+}
+
+.phantom-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px dashed var(--phantom-border-light, color-mix(in srgb, var(--border-color, #444) 50%, transparent));
+}
+
+.phantom-panel-title {
+  font-weight: 600;
+  color: var(--phantom-title, var(--text-secondary, #aaa));
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.phantom-panel-count {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 10px;
+}
+
+.phantom-active-count {
+  color: var(--phantom-active, #22c55e);
+  font-weight: 600;
+}
+
+.phantom-total-count {
+  color: var(--phantom-count, var(--text-muted, #666));
+}
+
+.phantom-entries {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.phantom-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color, #333) 30%, transparent);
+  transition: background 0.15s ease;
+}
+
+.phantom-entry:hover {
+  background: color-mix(in srgb, var(--accent, #555) 12%, transparent);
+}
+
+.phantom-entry:last-child {
+  border-bottom: none;
+}
+
+.phantom-isolation-bar {
+  width: 3px;
+  height: 20px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.phantom-status-icon {
+  flex-shrink: 0;
+}
+
+.phantom-status-active { color: #22c55e; }
+.phantom-status-idle { color: #6b7280; }
+.phantom-status-failed { color: #ef4444; }
+.phantom-status-waiting { color: #eab308; }
+.phantom-status-archived { color: #6b7280; }
+
+.phantom-entry-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.phantom-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.phantom-entry-name {
+  font-weight: 500;
+  color: var(--text-primary, #e0e0e0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.phantom-comm-badge {
+  font-size: 10px;
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border-color, #333) 40%, transparent);
+}
+
+.phantom-comm-unread {
+  color: var(--accent, #6366f1);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--accent, #6366f1) 15%, transparent);
+}
+
+.phantom-comm-arrow {
+  font-size: 10px;
+}
+
+.phantom-entry-conclusion {
+  font-size: 10px;
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+.phantom-conclusion-status {
+  color: var(--text-secondary, #aaa);
+}
+
+.phantom-conclusion-summary {
+  color: var(--text-muted, #666);
+}
+
+.phantom-jump-arrow {
+  color: var(--text-muted, #666);
+  flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+
+.phantom-entry:hover .phantom-jump-arrow {
+  opacity: 1;
+}
