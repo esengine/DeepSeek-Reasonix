@@ -1086,6 +1086,7 @@ func TestBuildDiscoversSkills(t *testing.T) {
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("REASONIX_HOME", filepath.Join(home, ".reasonix"))
 	t.Chdir(dir)
 	writeFile(t, dir, "reasonix.toml", `
 default_model = "test-model"
@@ -2979,11 +2980,18 @@ func TestBuildSkipsLegacySessionMigrationWhenIsolated(t *testing.T) {
 // would persist startup stats and cached schemas into the developer's real
 // ~/Library/Application Support tree and bleed state across tests. Mirrors the
 // withTempCache helper in internal/plugin/stats_test.go.
+//
+// REASONIX_HOME pins config.ReasonixHomeDir() at the same temp dir so global
+// skill discovery is isolated on every platform: Go's os.UserHomeDir() reads
+// USERPROFILE (not HOME) on Windows and os.UserConfigDir() reads APPDATA, so
+// without this override the developer's real ~50 global skills would bleed into
+// the skills index and shove per-test project skills past IndexMaxChars.
 func isolateConfigHome(t *testing.T) string {
 	t.Helper()
 	dir := robustTempDir(t)
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("REASONIX_HOME", dir)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	return dir
 }
