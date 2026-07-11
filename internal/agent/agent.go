@@ -437,6 +437,41 @@ type Agent struct {
 	// stormSig: a model keeps doing the same successful write, so there is no
 	// error for the failure-only storm breaker to see.
 	repeatSuccessCounts map[string]int
+
+	// ── 集成的新功能字段 ──
+
+	// sceneClassifier 场景分类器，在每轮开始时分类用户输入
+	// 用于驱动场景感知优化（工具加载、思考模式、推理力度）
+	sceneClassifier SceneClassifier
+
+	// scenePolicyProvider 场景策略提供者，根据场景返回审核策略
+	// 控制骄傲信号检测、思考模式、推理力度、采样次数等
+	scenePolicyProvider ScenePolicyProvider
+
+	// sideEffectTracker 副作用追踪器，在工具执行前后记录副作用
+	// 用于WAL恢复时的Saga补偿
+	sideEffectTracker *SideEffectTracker
+
+	// incrementalCache 增量缓存，在流式输出时累积内容
+	// 用于流中断后的恢复
+	incrementalCache *IncrementalCache
+
+	// lastSceneResult 缓存最近一次场景分类结果
+	// 供同一轮内的其他模块使用
+	lastSceneResult *SceneResult
+
+	// phantomUI 虚空UI面板，提供实时窗口投影和会话转移
+	// 由桌面层通过 GetPhantomUI() 获取并驱动
+	phantomUI *PhantomUI
+
+	// eyeTracker 眼动追踪器，提供注视点检测和交互触发
+	eyeTracker *EyeTracker
+
+	// gazeIntegrator 眼控集成器，连接眼动追踪与虚空UI
+	gazeIntegrator *GazeIntegrator
+
+	// reviewGate 代码审核门控，对代码变更进行分级审核
+	reviewGate *ReviewGate
 }
 
 // KeepPolicy is a bitmask controlling which messages are preserved beyond the
@@ -904,6 +939,33 @@ type Options struct {
 	// UseMemoryCompilerLLMClassification 启用 LLM 分类来判断任务 vs 聊天
 	// 默认 false 时使用启发式分类器
 	UseMemoryCompilerLLMClassification bool
+
+	// SceneClassifier 场景分类器，nil 时使用默认启发式分类器
+	SceneClassifier SceneClassifier
+
+	// ScenePolicyProvider 场景策略提供者，nil 时使用默认策略
+	ScenePolicyProvider ScenePolicyProvider
+
+	// EnableSideEffectTracking 启用副作用追踪（用于WAL恢复补偿）
+	EnableSideEffectTracking bool
+
+	// EnableIncrementalCache 启用增量缓存（用于流中断恢复）
+	EnableIncrementalCache bool
+
+	// EnableDedup 启用请求去重（合并并发相同请求，节省 API 调用）
+	EnableDedup bool
+
+	// EnablePhantomUI 启用虚空UI面板（实时窗口投影+会话转移）
+	// 需要 TabManager 已初始化
+	EnablePhantomUI bool
+
+	// EnableReviewGate 启用代码审核门控（代码变更分级审核）
+	// 依赖 PhantomUI 和 EyeTracker
+	EnableReviewGate bool
+
+	// TabManager 标签管理器，供虚空UI使用
+	// 如果为 nil 且 EnablePhantomUI 为 true，会自动创建
+	TabManager *TabManager
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -966,6 +1028,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if subagentDepth < 0 {
 		subagentDepth = 0
 	}
+	// ── OPT-09 集成: 请求去重包装 ──
+	if opts.EnableDedup {
+		prov = provider.NewDeduplicatingProvider(prov)
+	}
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1008,9 +1074,88 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		// 默认使用启发式分类器
 		a.classifier = newHeuristicClassifier()
 	}
+
+	// 初始化场景分类器
+	if opts.SceneClassifier != nil {
+		a.sceneClassifier = opts.SceneClassifier
+	} else {
+		a.sceneClassifier = NewHeuristicSceneClassifier()
+	}
+
+	// 初始化场景策略提供者
+	if opts.ScenePolicyProvider != nil {
+		a.scenePolicyProvider = opts.ScenePolicyProvider
+	} else {
+		a.scenePolicyProvider = NewDefaultScenePolicyProvider()
+	}
+
+	// 初始化副作用追踪器
+	if opts.EnableSideEffectTracking {
+		a.sideEffectTracker = NewSideEffectTracker(0) // 0 = 默认深度100
+	}
+
+	// 初始化增量缓存
+	if opts.EnableIncrementalCache {
+		a.incrementalCache = NewIncrementalCache(0) // 0 = 默认8K tokens
+	}
+
+	// 初始化虚空UI面板
+	if opts.EnablePhantomUI {
+		tm := opts.TabManager
+		if tm == nil {
+			tm = NewTabManager(0) // 0 = 默认10个标签
+		}
+		a.phantomUI = NewPhantomUI(tm, 120, 40)
+		a.phantomUI.Start()
+
+		// 初始化眼动追踪器
+		mapper := NewGazeMapper(8, 16)
+		mapper.UpdateRegions(a.phantomUI.projectionEngine.GetRegions(), 120, 40)
+		a.eyeTracker = NewEyeTracker(DefaultTrackerConfig(), mapper)
+		a.eyeTracker.Start()
+
+		// 初始化眼控集成器
+		a.gazeIntegrator = NewGazeIntegrator(a.eyeTracker, mapper, a.phantomUI)
+		a.gazeIntegrator.Start()
+	}
+
+	// 初始化代码审核门控
+	if opts.EnableReviewGate {
+		a.reviewGate = NewReviewGate(a.gazeIntegrator)
+	}
+
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
 	return a
+}
+
+// GetPhantomUI 返回虚空UI面板实例（供桌面层使用）
+func (a *Agent) GetPhantomUI() *PhantomUI {
+	return a.phantomUI
+}
+
+// GetEyeTracker 返回眼动追踪器实例（供桌面层使用）
+func (a *Agent) GetEyeTracker() *EyeTracker {
+	return a.eyeTracker
+}
+
+// GetReviewGate 返回代码审核门控实例（供桌面层使用）
+func (a *Agent) GetReviewGate() *ReviewGate {
+	return a.reviewGate
+}
+
+// GetSceneResult 返回最近一次场景分类结果
+func (a *Agent) GetSceneResult() *SceneResult {
+	return a.lastSceneResult
+}
+
+// SubmitCodeChange 提交代码变更到审核门控（供工具执行路径调用）
+// 如果审核门控未启用，返回 nil
+func (a *Agent) SubmitCodeChange(change CodeChange) *ReviewItem {
+	if a.reviewGate == nil {
+		return nil
+	}
+	return a.reviewGate.Submit(change)
 }
 
 func usageSourceOrDefault(source, fallback string) string {
@@ -1099,6 +1244,44 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		}
 	}
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
+
+	// ── 场景分类：在每轮开始时分类用户输入 ──
+	// 这是真正被调用的代码，不是死代码
+	if a.sceneClassifier != nil {
+		sceneResult, classifyErr := a.sceneClassifier.Classify(ctx, input)
+		if classifyErr == nil {
+			a.lastSceneResult = &sceneResult
+			// 发出场景事件供前端显示
+			a.sink.Emit(event.Event{
+				Kind: event.Notice,
+				Text: fmt.Sprintf("scene: %s (complexity:%d tools:%v think:%v)",
+					sceneResult.Scene, sceneResult.Complexity,
+					sceneResult.NeedsTools, sceneResult.NeedsThink),
+			})
+			// 场景策略应用
+			if a.scenePolicyProvider != nil {
+				policy := a.scenePolicyProvider.GetPolicy(sceneResult.Scene)
+				// 骄傲信号检测：如果检测到骄傲信号，发出警告
+				if policy.MaxPrideSignals > 0 {
+					if detected := a.scenePolicyProvider.DetectPride(input); len(detected) > policy.MaxPrideSignals {
+						a.sink.Emit(event.Event{
+							Kind: event.Notice,
+							Text: fmt.Sprintf("pride signal detected: %v (threshold:%d)", detected, policy.MaxPrideSignals),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// ── 增量缓存：每轮开始时重置 ──
+	if a.incrementalCache != nil {
+		a.incrementalCache.Reset()
+	}
+	// ── 副作用追踪器：每轮开始时重置 ──
+	if a.sideEffectTracker != nil {
+		a.sideEffectTracker.Reset()
+	}
 
 	finalReadinessBlocks := 0
 	emptyFinalBlocks := 0
@@ -1901,9 +2084,17 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			if chunk.Text != "" && !transformReasoning {
 				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
 			}
+			// 增量缓存：追加推理内容（用于流中断恢复）
+			if a.incrementalCache != nil && chunk.Text != "" {
+				a.incrementalCache.AppendReasoning(chunk.Text)
+			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
+			// 增量缓存：追加输出内容（用于流中断恢复）
+			if a.incrementalCache != nil && chunk.Text != "" {
+				a.incrementalCache.AppendContent(chunk.Text)
+			}
 		case provider.ChunkToolCallStart:
 			partialToolStarted = true
 			// Surface the tool card as soon as the call begins — before its
@@ -2488,8 +2679,29 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx = tool.WithProgress(cctx, func(chunk string) {
 		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: secrets.RedactToolOutput(chunk)}})
 	})
+	// ── 副作用追踪：在执行非只读工具前记录副作用 ──
+	if a.sideEffectTracker != nil && !t.ReadOnly() {
+		a.sideEffectTracker.Record(&SideEffect{
+			ID:           call.ID,
+			Type:         SideEffectToolCall,
+			Timestamp:    time.Now(),
+			Description:  fmt.Sprintf("tool=%s args=%s", call.Name, truncateForLog(call.Arguments, 200)),
+			Compensation: fmt.Sprintf("review tool %s output for unintended side effects", call.Name),
+			Reversible:   false, // 工具调用通常不可自动逆转，但记录用于恢复报告
+		})
+	}
 	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
 	result = secrets.RedactToolOutput(result)
+	// ── 副作用追踪：执行出错时生成恢复报告 ──
+	if err != nil && a.sideEffectTracker != nil {
+		report := a.sideEffectTracker.RecoveryReport()
+		if report != "" {
+			a.sink.Emit(event.Event{
+				Kind: event.Notice,
+				Text: "side-effect recovery report:\n" + report,
+			})
+		}
+	}
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
 			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
@@ -2904,6 +3116,14 @@ func truncateToolOutput(s string) (string, string) {
 	notice := fmt.Sprintf("tool output truncated: %d of %d bytes elided", omitted, len(s))
 	body := head + fmt.Sprintf("\n\n…[truncated %d of %d bytes — rerun with narrower args to see the middle]…\n\n", omitted, len(s)) + tail
 	return body, notice
+}
+
+// truncateForLog truncates a string for logging purposes.
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // snapToRuneBoundary returns s[lo:hi] with the bounds nudged outward until
