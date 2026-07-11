@@ -4759,7 +4759,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 		id, reply = c.approval.register(tool, subject, reason)
 	}
 
-	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: c.approvalWithPreview(id, tool, subject, reason, args)})
+	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: c.approvalWithPreview(ctx, id, tool, subject, reason, args)})
 	if hookSubject, hookArgs, ok := permissionRequestHookPayload(tool, subject, args); ok {
 		go c.hooks.PermissionRequest(ctx, tool, hookSubject, hookArgs)
 	}
@@ -4784,7 +4784,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 // render a diff / "src → dst" card in the approval prompt. A Preview error is
 // ignored (the approval still emits; the call will likely fail on Execute
 // anyway), and non-Previewer tools get an empty FileDiff (all fields omitempty).
-func (c *Controller) approvalWithPreview(id, toolName, subject, reason string, args json.RawMessage) event.Approval {
+func (c *Controller) approvalWithPreview(ctx context.Context, id, toolName, subject, reason string, args json.RawMessage) event.Approval {
 	ap := event.Approval{ID: id, Tool: toolName, Subject: subject, Reason: reason}
 	if len(args) == 0 {
 		return ap
@@ -4797,8 +4797,18 @@ func (c *Controller) approvalWithPreview(id, toolName, subject, reason string, a
 	if !ok {
 		return ap
 	}
-	if pv, ok := t.(tool.Previewer); ok {
-		if ch, perr := pv.Preview(args); perr == nil {
+	// Preview runs synchronously on the approval-emit path and may touch a
+	// third-party (MCP/custom) tool. A panic here must not unwind past the
+	// caller — that would leave the already-registered reply channel orphaned
+	// and the run blocked until the wait context times out. Recover and emit
+	// the approval without a preview instead.
+	//
+	// PreviewMemoized reuses the result under ctx's per-call memo (seeded by the
+	// agent's executeOne), so the checkpoint preview that follows approval does
+	// not recompute the same diff. ok=false means the tool isn't a Previewer.
+	func() {
+		defer func() { _ = recover() }()
+		if ch, perr, ok := tool.PreviewMemoized(ctx, t, args); ok && perr == nil {
 			ap.FileDiff = event.FileDiff{
 				Diff:    ch.Diff,
 				Added:   ch.Added,
@@ -4808,7 +4818,7 @@ func (c *Controller) approvalWithPreview(id, toolName, subject, reason string, a
 				DstPath: ch.DestPath,
 			}
 		}
-	}
+	}()
 	return ap
 }
 

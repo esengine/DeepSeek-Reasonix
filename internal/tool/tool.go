@@ -60,6 +60,45 @@ func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
 	return ch, true
 }
 
+// PendingBatchState describes the filesystem effects earlier calls in the same
+// tool batch will have produced by the time this call executes. A batch-aware
+// Previewer consults it to preview a chained operation whose input does not yet
+// exist on disk at preview time — e.g. `rename a→b; rename b→c`, where b is
+// absent when the second call is previewed but will exist once the first runs.
+// Keys are resolved (absolute, cleaned) paths, matching the Path/DestPath a
+// prior Preview returned.
+type PendingBatchState struct {
+	Created map[string]bool // paths earlier calls will create
+	Removed map[string]bool // paths earlier calls will remove
+}
+
+// BatchPreviewer refines Previewer for tools whose preview depends on earlier
+// calls in the same batch. move_file implements it so a chained rename still
+// renders a "src → dst" card even though its source does not exist on disk until
+// the earlier rename runs. Tools that don't implement it are previewed with the
+// plain Preview and see only the on-disk state.
+type BatchPreviewer interface {
+	Previewer
+	PreviewInBatch(args json.RawMessage, pending PendingBatchState) (diff.Change, error)
+}
+
+// PreviewChangeInBatch is PreviewChange with batch awareness: when t implements
+// BatchPreviewer it previews against pending, otherwise it falls back to the
+// plain Preview. ok=false follows the same rules as PreviewChange.
+func PreviewChangeInBatch(t Tool, args json.RawMessage, pending PendingBatchState) (diff.Change, bool) {
+	if t == nil || t.ReadOnly() {
+		return diff.Change{}, false
+	}
+	if bp, ok := t.(BatchPreviewer); ok {
+		ch, err := bp.PreviewInBatch(args, pending)
+		if err != nil || ch.Binary {
+			return diff.Change{}, false
+		}
+		return ch, true
+	}
+	return PreviewChange(t, args)
+}
+
 // PlanModeClassifier is an optional capability a Tool may implement to declare
 // its stance on running during the planning phase. It is deliberately distinct
 // from ReadOnly(): a tool can be side-effect-free yet belong only to the

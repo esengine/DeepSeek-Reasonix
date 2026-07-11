@@ -12,26 +12,26 @@ package checkpoint
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // FileSnap is one file's state at the moment it was first touched in a turn.
 // Content == nil means the file did not exist then, so a restore deletes it.
-// DestPath is retained for backward compatibility with rename snapshots written
-// by older versions. New rename snapshots store both paths' contents directly.
+// DestPath, when set, marks a move-back pointer: the rename moved Path→DestPath
+// and could not be content-captured, so restore reverses it by moving DestPath
+// back to Path. Renames whose source content was readable are stored as ordinary
+// content snapshots instead and never set DestPath.
 type FileSnap struct {
 	Path     string        `json:"path"`
 	Content  *string       `json:"content"`
@@ -171,9 +171,14 @@ func (s *Store) Snapshot(ch diff.Change) {
 	s.persist(s.cur)
 }
 
-// snapshotRename records both rename paths as ordinary content snapshots.
-// First-touch dedup preserves the turn-start state when a chained rename or a
-// later edit touches either path again.
+// snapshotRename captures enough turn-start state to reverse a move. When the
+// source content is readable it records both paths as ordinary content
+// snapshots (src's turn-start content, dst's turn-start state) — content-based
+// restore stays correct even if dst is later edited, deleted, or renamed again.
+// When the source cannot be content-captured (unreadable, or resolving outside
+// the checkpoint root) it falls back to a move-back pointer: a FileSnap whose
+// DestPath tells RestoreCode to move dst back to src with a rename, so a
+// transient read error never silently forfeits reversibility.
 func (s *Store) snapshotRename(ch diff.Change) {
 	src, srcOK := s.snapshotDiskPath(ch.Path)
 	dst, dstOK := s.snapshotDiskPath(ch.DestPath)
@@ -183,14 +188,38 @@ func (s *Store) snapshotRename(ch diff.Change) {
 	if s.cur == nil {
 		return
 	}
-	if srcOK && !s.seen[ch.Path] {
-		s.seen[ch.Path] = true
-		s.cur.Files = append(s.cur.Files, src)
+
+	if srcOK {
+		// Content path: record src's turn-start content and dst's turn-start
+		// state (nil when absent → restore deletes the moved copy), each deduped
+		// independently on first touch. Independent dedup is what preserves a
+		// chained rename (a→b→c): the second rename's src (b) was already the
+		// first's dst, so it is skipped, but its dst (c) is still recorded as nil
+		// so restore removes it.
+		if !s.seen[ch.Path] {
+			s.seen[ch.Path] = true
+			s.cur.Files = append(s.cur.Files, src)
+		}
+		if dstOK && ch.DestPath != "" && !s.seen[ch.DestPath] {
+			s.seen[ch.DestPath] = true
+			s.cur.Files = append(s.cur.Files, dst)
+		}
+		s.persist(s.cur)
+		return
 	}
-	if dstOK && ch.DestPath != "" && !s.seen[ch.DestPath] {
-		s.seen[ch.DestPath] = true
-		s.cur.Files = append(s.cur.Files, dst)
+
+	// Fallback: source content is unknown (unreadable, or resolving outside the
+	// checkpoint root). Record a move-back pointer instead of a content snapshot
+	// so a transient read error never silently forfeits reversibility.
+	// Deliberately no paired nil-dst snapshot — that could delete the moved file
+	// before the reversal runs. If src resolves outside the checkpoint root,
+	// RestoreCode's safePath rejects the pointer and leaves dst intact rather
+	// than destroying the only copy.
+	if ch.DestPath == "" || s.seen[ch.Path] {
+		return
 	}
+	s.seen[ch.Path] = true
+	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, DestPath: ch.DestPath})
 	s.persist(s.cur)
 }
 
@@ -361,8 +390,10 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 			continue
 		}
 		snap := earliest[p]
-		// DestPath identifies a legacy rename snapshot. New snapshots restore
-		// both paths by content and never enter this compatibility branch.
+		// DestPath marks a move-back pointer: the rename could not be content-
+		// captured, so reverse it by moving DestPath back to Path. Content-captured
+		// renames are restored by the ordinary content branch below and never
+		// set DestPath.
 		if snap.DestPath != "" {
 			dstAbs, gerr := safePath(root, snap.DestPath)
 			if gerr != nil {
@@ -435,7 +466,7 @@ func moveForRestore(src, dst string) error {
 	}
 	if err := renameForRestore(src, dst); err == nil {
 		return nil
-	} else if !isCrossDeviceRename(err) {
+	} else if !fileutil.IsCrossDeviceError(err) {
 		return err
 	}
 
@@ -443,7 +474,14 @@ func moveForRestore(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	inClosed := false
+	closeIn := func() {
+		if !inClosed {
+			inClosed = true
+			_ = in.Close()
+		}
+	}
+	defer closeIn()
 	info, err := in.Stat()
 	if err != nil {
 		return err
@@ -474,9 +512,7 @@ func moveForRestore(src, dst string) error {
 	if closeErr := tmp.Close(); err == nil {
 		err = closeErr
 	}
-	if closeErr := in.Close(); err == nil {
-		err = closeErr
-	}
+	closeIn()
 	if err != nil {
 		return err
 	}
@@ -488,17 +524,6 @@ func moveForRestore(src, dst string) error {
 		return err
 	}
 	return nil
-}
-
-func isCrossDeviceRename(err error) bool {
-	if errors.Is(err, syscall.EXDEV) {
-		return true
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "cross-device") ||
-		strings.Contains(msg, "cross device") ||
-		strings.Contains(msg, "not same device") ||
-		strings.Contains(msg, "different disk drive")
 }
 
 func detectCurrentEncoding(path string) *fileenc.Kind {

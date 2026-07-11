@@ -145,12 +145,12 @@ type Tool struct {
 // diffing; SrcPath/DstPath are set only for Kind="rename" and let a UI render
 // "src → dst".
 type FileDiff struct {
-	Diff    string
-	Added   int
-	Removed int
+	Diff    string `json:"diff,omitempty"`
+	Added   int    `json:"added,omitempty"`
+	Removed int    `json:"removed,omitempty"`
 	Kind    string `json:"kind,omitempty"`
-	SrcPath string `json:"src_path,omitempty"`
-	DstPath string `json:"dst_path,omitempty"`
+	SrcPath string `json:"srcPath,omitempty"`
+	DstPath string `json:"dstPath,omitempty"`
 }
 
 // Approval identifies a pending tool-call approval for an ApprovalRequest
