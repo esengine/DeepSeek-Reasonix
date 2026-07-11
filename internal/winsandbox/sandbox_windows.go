@@ -21,6 +21,7 @@ import (
 	"unsafe"
 
 	"reasonix/internal/proc"
+	"reasonix/internal/safeops"
 	"reasonix/internal/secrets"
 
 	"golang.org/x/sys/windows"
@@ -917,17 +918,17 @@ func snapshotPathDACLWithICACLS(path string) (func() error, func(), error) {
 	}
 	snapshot := f.Name()
 	if err := f.Close(); err != nil {
-		_ = os.Remove(snapshot)
+		_ = safeops.SafeDelete(snapshot)
 		return nil, nil, err
 	}
 	if err := icacls(path, "/save", snapshot, "/C"); err != nil {
-		_ = os.Remove(snapshot)
+		_ = safeops.SafeDelete(snapshot)
 		return nil, nil, err
 	}
 	restore := func() error {
 		return icacls(windowsACLRestoreRoot(path), "/restore", snapshot, "/C")
 	}
-	cleanup := func() { _ = os.Remove(snapshot) }
+	cleanup := func() { _ = safeops.SafeDelete(snapshot) }
 	return restore, cleanup, nil
 }
 
@@ -1230,7 +1231,7 @@ func windowsSandboxTempRoot(spec Spec) (string, func(), error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("create sandbox temp root: %w", err)
 	}
-	return dir, func() { _ = os.RemoveAll(dir) }, nil
+	return dir, func() { _ = safeops.SafeDeleteDir(dir) }, nil
 }
 
 func windowsSandboxEnv(spec Spec, tempRoot string, env []string) []string {
