@@ -3,6 +3,8 @@ package vcs
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -31,20 +33,29 @@ func LoadJJInfo(ctx context.Context, cwd string) (VCSInfo, error) {
 
 	info := VCSInfo{Type: "jj", Repo: filepath.Base(root)}
 
-	// Current bookmark(s) attached to @. `jj bookmark list` alone returns all
-	// local bookmarks, so taking the first one can show an unrelated bookmark.
-	if branch, err := jjRun(ctx, cwd,
-		"log", "-r", "@", "--no-graph",
-		"-T", `local_bookmarks.map(|b| b.name()).join("\n") ++ "\n"`,
-	); err == nil {
-		branch = strings.TrimSpace(branch)
-		if branch != "" {
-			// Take first bookmark if multiple
-			if idx := strings.IndexByte(branch, '\n'); idx != -1 {
-				branch = branch[:idx]
-			}
-			info.Branch = branch
+	// Current bookmark(s) attached to @ or its parent.
+	// `jj bookmark list` alone returns all bookmarks, so taking the first
+	// one can show an unrelated bookmark. Querying @ first covers pure jj
+	// repos; falling back to @- covers git-backed repos where jj git init
+	// creates a working-copy child commit that never carries bookmarks.
+	branchName := func(rev string) string {
+		out, err := jjRun(ctx, cwd,
+			"log", "-r", rev, "--no-graph",
+			"-T", `local_bookmarks.map(|b| b.name()).join("\n") ++ "\n"`,
+		)
+		if err != nil {
+			return ""
 		}
+		out = strings.TrimSpace(out)
+		if idx := strings.IndexByte(out, '\n'); idx != -1 {
+			out = out[:idx]
+		}
+		return out
+	}
+	if b := branchName("@"); b != "" {
+		info.Branch = b
+	} else if b := branchName("@-"); b != "" {
+		info.Branch = b
 	}
 
 	// Fallback: short commit id (equivalent to detached HEAD)
@@ -194,7 +205,7 @@ func jjRun(ctx context.Context, cwd string, args ...string) (string, error) {
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(cmd.Environ(), "JJ_CONFIG=/dev/null")
+	cmd.Env = append(cmd.Environ(), fmt.Sprintf("JJ_CONFIG=%s", os.DevNull))
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -208,7 +219,7 @@ func jjRunCombined(ctx context.Context, cwd string, args ...string) ([]byte, err
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(cmd.Environ(), "JJ_CONFIG=/dev/null")
+	cmd.Env = append(cmd.Environ(), fmt.Sprintf("JJ_CONFIG=%s", os.DevNull))
 	return cmd.CombinedOutput()
 }
 
