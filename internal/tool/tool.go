@@ -60,6 +60,20 @@ func PreviewChange(t Tool, args json.RawMessage) (diff.Change, bool) {
 	return ch, true
 }
 
+// ImageTool is an optional capability a Tool may implement when its results can
+// carry images alongside text (e.g. an MCP tool returning a screenshot).
+// ExecuteWithImages returns the same text Execute would — including a short
+// placeholder marker where each image occurred — plus the images as data URLs
+// (data:<mime>;base64,<payload>). Callers with a structural image channel (the
+// agent stores them on the tool message, where vision-capable providers embed
+// them) use this instead of Execute; everything else falls back to Execute and
+// the placeholders alone describe the images. Keeping images out of the text
+// matters: tool output text is truncated at a fixed byte budget, which would
+// corrupt an embedded base64 payload.
+type ImageTool interface {
+	ExecuteWithImages(ctx context.Context, args json.RawMessage) (text string, images []string, err error)
+}
+
 // PlanModeClassifier is an optional capability a Tool may implement to declare
 // its stance on running during the planning phase. It is deliberately distinct
 // from ReadOnly(): a tool can be side-effect-free yet belong only to the

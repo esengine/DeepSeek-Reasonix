@@ -1231,11 +1231,12 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
 		}
 
-		results := a.executeBatch(ctx, calls)
+		results, images := a.executeBatch(ctx, calls)
 		for i, call := range calls {
 			a.session.Add(provider.Message{
 				Role:       provider.RoleTool,
 				Content:    results[i],
+				Images:     images[i],
 				ToolCallID: call.ID,
 				Name:       call.Name,
 			})
@@ -1964,8 +1965,9 @@ func (a *Agent) systemPrompt() string {
 // goroutines; unknown and writer calls run as single-call serial segments so
 // write/read ordering stays provider-ordered. ToolResult events are emitted
 // after the batch in call order, so emission stays serial even when execution
-// parallelised.
-func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []string {
+// parallelised. The second return carries each call's tool-result images (nil
+// for most calls), aligned by index with the first.
+func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]string, [][]string) {
 	for _, c := range calls {
 		t, ok := a.tools.Get(c.Name)
 		ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly()}
@@ -2092,7 +2094,11 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	if !cancelled {
 		a.applyStormBreaker(calls, outcomes, results, receiptMark)
 	}
-	return results
+	images := make([][]string, len(calls))
+	for i := range outcomes {
+		images[i] = outcomes[i].images
+	}
+	return results, images
 }
 
 func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolCall {
@@ -2331,9 +2337,12 @@ func batchStormSignature(calls []provider.ToolCall, outcomes []toolOutcome) (str
 // success) — a refused call, an unknown tool, or an execution error — so a sink
 // renders the result as failed ("⊘ name <errMsg>" / a red card) instead of OK;
 // blocked narrows that to a refusal (plan mode / permission). truncMsg is set
-// (without the "· " prefix) when the output was head+tailed.
+// (without the "· " prefix) when the output was head+tailed. images carries
+// data URLs from a tool.ImageTool result; they ride outside output so text
+// truncation can never corrupt an image payload.
 type toolOutcome struct {
 	output    string
+	images    []string
 	blocked   bool
 	errMsg    string
 	truncated bool
@@ -2488,7 +2497,14 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx = tool.WithProgress(cctx, func(chunk string) {
 		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: secrets.RedactToolOutput(chunk)}})
 	})
-	result, err := t.Execute(cctx, json.RawMessage(call.Arguments))
+	var result string
+	var images []string
+	var err error
+	if it, ok := t.(tool.ImageTool); ok {
+		result, images, err = it.ExecuteWithImages(cctx, json.RawMessage(call.Arguments))
+	} else {
+		result, err = t.Execute(cctx, json.RawMessage(call.Arguments))
+	}
 	result = secrets.RedactToolOutput(result)
 	if a.evidence != nil {
 		if call.Name == "complete_step" {
@@ -2530,7 +2546,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		a.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutput(result)
-	return toolOutcome{output: body, truncated: truncMsg != "", truncMsg: truncMsg}
+	return toolOutcome{output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg}
 }
 
 func (a *Agent) checkPlanModeMCPReadOnlyTrust(ctx context.Context, call provider.ToolCall, t tool.Tool) (bool, toolOutcome, bool) {

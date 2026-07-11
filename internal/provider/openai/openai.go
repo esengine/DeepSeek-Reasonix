@@ -452,8 +452,27 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
 	// rejects with a 400 ("must be followed by tool messages …").
 	src := provider.SanitizeToolPairing(req.Messages)
-	msgs := make([]chatMessage, len(src))
-	for i, m := range src {
+	msgs := make([]chatMessage, 0, len(src))
+	// Images returned by tool calls can't ride in the tool message itself — the
+	// OpenAI API accepts only text content parts under role "tool" — so they are
+	// carried by a synthetic user message injected after the turn's full run of
+	// tool results, before the next non-tool message (splitting a tool-result
+	// run would break the API's tool-call pairing validation).
+	var pendingToolImages []string
+	flushToolImages := func() {
+		if len(pendingToolImages) == 0 {
+			return
+		}
+		msgs = append(msgs, chatMessage{
+			Role:    "user",
+			Content: imageContentParts("Images returned by the preceding tool call(s):", pendingToolImages, c.visionDetail),
+		})
+		pendingToolImages = nil
+	}
+	for _, m := range src {
+		if m.Role != provider.RoleTool {
+			flushToolImages()
+		}
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
@@ -487,8 +506,12 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
 			cm.Content = m.Content
 		}
-		msgs[i] = cm
+		msgs = append(msgs, cm)
+		if c.vision && m.Role == provider.RoleTool {
+			pendingToolImages = append(pendingToolImages, m.Images...)
+		}
 	}
+	flushToolImages()
 
 	var tools []chatTool
 	for _, t := range req.Tools {

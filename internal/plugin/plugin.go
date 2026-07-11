@@ -8,6 +8,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1328,10 +1329,18 @@ func (t *remoteTool) Schema() json.RawMessage {
 }
 
 func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	text, _, err := t.ExecuteWithImages(ctx, args)
+	return text, err
+}
+
+// ExecuteWithImages implements tool.ImageTool: MCP results may carry image
+// content items, which callers with a structural image channel (the agent)
+// forward to vision models instead of relying on the text placeholders alone.
+func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
 	var argMap map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argMap); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
+			return "", nil, fmt.Errorf("invalid args: %w", err)
 		}
 	}
 	res, err := t.client.call(ctx, "tools/call", map[string]any{
@@ -1339,32 +1348,97 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 		"arguments": argMap,
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	return parseToolResult(res)
 }
 
-// parseToolResult flattens an MCP tools/call result into plain text.
-func parseToolResult(res json.RawMessage) (string, error) {
+// Tool-result images are forwarded to vision models as base64 data URLs, so
+// each item is validated and budgeted here rather than trusted from the MCP
+// server: payloads that are oversized, unparseable, beyond the per-result
+// count, or of a mime type outside the set every supported vision API accepts
+// are replaced with a text placeholder instead of poisoning the provider
+// request.
+const (
+	maxToolResultImageBytes = 4 << 20 // base64 length; stays under provider per-image and request caps
+	maxToolResultImages     = 5
+)
+
+var toolResultImageMimes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// parseToolResult flattens an MCP tools/call result into plain text plus the
+// image content items as data URLs. Every image item leaves a short placeholder
+// in the text at its position, so text-only consumers (and non-vision models)
+// still learn an image was returned.
+func parseToolResult(res json.RawMessage) (string, []string, error) {
 	var out struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Data     string `json:"data"`
+			MimeType string `json:"mimeType"`
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(res, &out); err != nil {
-		return "", fmt.Errorf("decode tool result: %w", err)
+		return "", nil, fmt.Errorf("decode tool result: %w", err)
 	}
 	var sb strings.Builder
+	var images []string
 	for _, c := range out.Content {
-		if c.Type == "text" {
+		switch c.Type {
+		case "text":
 			sb.WriteString(c.Text)
+		case "image":
+			placeholder, url := toolResultImage(c.MimeType, c.Data, len(images))
+			sb.WriteString(placeholder)
+			if url != "" {
+				images = append(images, url)
+			}
 		}
 	}
 	text := sb.String()
 	if out.IsError {
-		return text, fmt.Errorf("plugin tool reported error: %s", text)
+		return text, images, fmt.Errorf("plugin tool reported error: %s", text)
 	}
-	return text, nil
+	return text, images, nil
+}
+
+// toolResultImage validates one MCP image content item and returns its text
+// placeholder plus the data URL to forward ("" when the item is dropped).
+func toolResultImage(mime, data string, kept int) (placeholder, url string) {
+	if kept >= maxToolResultImages {
+		return "[image omitted: per-result image limit reached]", ""
+	}
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	if mime == "" {
+		mime = "image/png"
+	}
+	if !toolResultImageMimes[mime] {
+		return "[image omitted: unsupported type " + mime + "]", ""
+	}
+	// Some servers wrap base64 in whitespace; vision APIs reject non-canonical
+	// payloads, so normalize before validating.
+	data = strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t', ' ':
+			return -1
+		}
+		return r
+	}, data)
+	if data == "" {
+		return "[image omitted: no data]", ""
+	}
+	if len(data) > maxToolResultImageBytes {
+		return fmt.Sprintf("[image omitted: %d bytes exceeds the %d-byte limit]", len(data), maxToolResultImageBytes), ""
+	}
+	if _, err := base64.StdEncoding.DecodeString(data); err != nil {
+		return "[image omitted: invalid base64]", ""
+	}
+	return "[image: " + mime + "]", "data:" + mime + ";base64," + data
 }
