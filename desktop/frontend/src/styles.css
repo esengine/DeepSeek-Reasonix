@@ -4489,12 +4489,7 @@ a[href] {
   color: var(--fg-faint);
   background: var(--fg-faint);
 }
-.reasoning__body {
-  overflow: hidden;
-  margin: 2px 0 6px 8px;
-  border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
-  padding-left: 12px;
-}
+.reasoning__body,
 .turn-collapse__inline-reasoning {
   overflow: hidden;
   border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
@@ -4505,6 +4500,11 @@ a[href] {
   font-style: normal;
   line-height: 1.72;
   white-space: pre-wrap;
+}
+/* .reasoning__body 保留外边距缩进；.turn-collapse__inline-reasoning 由 GSAP 折叠，
+   不能带竖直外边距（否则折叠高度动画残留间距）。 */
+.reasoning__body {
+  margin: 2px 0 6px 8px;
 }
 /* ── markdown prose ──────────────────────────────────────────────────────── */
 .md {
@@ -17413,6 +17413,10 @@ body > .mermaid-diagram--fullscreen {
 .tool__rename-arrow {
   flex-shrink: 0;
   color: var(--fg-faint);
+}
+/* 审批弹窗内的 rename 卡片：紧凑 shelf 里去掉 tool body 的上下留白。 */
+.approval-rename {
+  padding: 2px 0 0;
 }
 /* sub-agent calls render indented under their parent task card — the base
    tool__body already provides border-left + 12px padding, so subagent just

@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Compass, ArrowRight } from "lucide-react";
+import { ChevronRight, Compass } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
+import { RenameCard } from "./RenameCard";
 import { useT } from "../lib/i18n";
 import { languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
 import { toolPresentation } from "../lib/toolPresentation";
@@ -116,8 +117,11 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const openRef = useRef(open);
   openRef.current = open;
 
-  // Track first render to avoid mount noise in debug logs
-  const isFirstRenderRef = useRef(true);
+  // Track first render to avoid mount noise in debug logs. Each debug effect
+  // needs its OWN flag: a shared ref lets whichever effect runs first flip it,
+  // so the other logs a phantom "changed" line on mount.
+  const openFirstRenderRef = useRef(true);
+  const fullDataFirstRenderRef = useRef(true);
 
   // Debug logging (after variable declarations) - stripped in production builds
   if (IS_DEV) {
@@ -142,8 +146,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const prevOpenRef = useRef(open);
   useEffect(() => {
     if (IS_DEV) {
-      if (isFirstRenderRef.current) {
-        isFirstRenderRef.current = false;
+      if (openFirstRenderRef.current) {
+        openFirstRenderRef.current = false;
       } else if (prevOpenRef.current !== open) {
         console.debug("[ToolCard] open changed", { itemId: item.id, toolName: item.name, open, userOpen, defaultOpen });
         prevOpenRef.current = open;
@@ -155,8 +159,8 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Skip first render
   useEffect(() => {
     if (IS_DEV) {
-      if (isFirstRenderRef.current) {
-        isFirstRenderRef.current = false;
+      if (fullDataFirstRenderRef.current) {
+        fullDataFirstRenderRef.current = false;
       } else {
         console.debug("[ToolCard] fullData changed", { itemId: item.id, hasFullData: !!fullData, argsLength: fullData?.args?.length ?? 0 });
       }
@@ -178,7 +182,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // else folds its args/output away by default.  Open while running so the
   // user sees progress; closed by default once settled.
   const hasArchivedOnDemandBody = Boolean(item.dataArchived && tabId);
-  const hasArgsOrOutput = detail.kind === "none" && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody);
+  // rename 卡片上方已渲染 "src → dst"，其 args（源/目标路径）只是重复，故 rename 时
+  // 不显示 args JSON，但仍显示 output 确认文本与归档懒加载内容。kind "none" 时两者都显示。
+  const showArgsBlock = detail.kind === "none" && !!effectiveArgs;
+  const hasArgsOrOutput =
+    (detail.kind === "none" && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody)) ||
+    (detail.kind === "rename" && (!!displayOutput || hasArchivedOnDemandBody));
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && displayOutput ? displayOutput : null;
@@ -265,11 +274,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
       <div ref={toolBodyRef} className="tool__body">
 
         {detail.kind === "rename" ? (
-          <div className="tool__rename">
-            <span className="tool__rename-path tool__rename-src">{detail.srcPath}</span>
-            <ArrowRight size={14} className="tool__rename-arrow" aria-hidden="true" />
-            <span className="tool__rename-path tool__rename-dst">{detail.dstPath}</span>
-          </div>
+          <RenameCard srcPath={detail.srcPath} dstPath={detail.dstPath} />
         ) : detail.kind === "unified-diff" ? (
           <DiffView diff={detail.preview.diff} language={languageForToolArgs(fullData?.args ?? item.args)} maxHeight={260} />
         ) : detail.kind === "inline-diffs" ? (
@@ -319,7 +324,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
 
         {!shellPreview && hasArgsOrOutput && (
           <>
-            {effectiveArgs && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
+            {showArgsBlock && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
             {displayOutput && (
               <>
                 <CodeViewer value={displayOutput} maxHeight={280} />

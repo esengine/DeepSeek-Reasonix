@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import gsap from "gsap";
-import { ArrowRight } from "lucide-react";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
 import { fileDiffFromWire } from "../lib/tools";
+import { RenameCard } from "./RenameCard";
+import { DiffView } from "./DiffView";
 import { PromptAction, PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 import { DUR_FAST } from "../lib/gsapAnimations";
 import {
@@ -176,8 +177,11 @@ export function ApprovalModal({
   const toolMeta = reason || subjectSummary || approval.tool;
   const hasToolDetails = Boolean(reason || subject);
   const showToolDetailsByDefault = !isPlanApproval && hasToolDetails;
-  const renameDiff = fileDiffFromWire(approval);
-  const hasRenamePreview = renameDiff?.kind === "rename";
+  const previewDiff = fileDiffFromWire(approval);
+  const hasRenamePreview = previewDiff?.kind === "rename";
+  // 非 rename 的写工具审批（write_file/edit_file/multi_edit…）此前后端已计算并下发
+  // diff，但弹窗从不渲染。补上：有实际 diff 文本时展示统一 diff 预览。
+  const hasDiffPreview = !hasRenamePreview && Boolean(previewDiff?.diff && previewDiff.diff.trim());
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionText, setRevisionText] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(() => showToolDetailsByDefault);
@@ -495,18 +499,17 @@ export function ApprovalModal({
         }
       >
         {/* Guard the whole block: PromptShelf only renders its body when children
-            are truthy, and a fragment of two false branches would still count. */}
-        {(approvalModeRelaxed || detailsOpen || hasRenamePreview) && (
+            are truthy, and a fragment of false branches would still count. */}
+        {(approvalModeRelaxed || detailsOpen || hasRenamePreview || hasDiffPreview) && (
           <>
             {approvalModeRelaxed && (
               <div className="approval-mode-hint">{t("approval.modeSwitchPendingHint")}</div>
             )}
-            {hasRenamePreview && renameDiff && (
-              <div className="tool__rename approval-rename">
-                <span className="tool__rename-path tool__rename-src">{renameDiff.srcPath ?? ""}</span>
-                <ArrowRight size={14} className="tool__rename-arrow" aria-hidden="true" />
-                <span className="tool__rename-path tool__rename-dst">{renameDiff.dstPath ?? ""}</span>
-              </div>
+            {hasRenamePreview && previewDiff && (
+              <RenameCard srcPath={previewDiff.srcPath ?? ""} dstPath={previewDiff.dstPath ?? ""} className="approval-rename" />
+            )}
+            {hasDiffPreview && previewDiff && (
+              <DiffView diff={previewDiff.diff} maxHeight={220} />
             )}
             {detailsOpen && (
               <div className="approval-details">

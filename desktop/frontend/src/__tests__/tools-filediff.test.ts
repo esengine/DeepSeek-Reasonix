@@ -61,13 +61,18 @@ console.log("\nfileDiffFromWire rename parsing");
 }
 
 {
-  // 行为5: rename 但缺 srcPath/dstPath — 仍应返回 kind="rename"（容错）
+  // 行为5: rename 但缺 srcPath/dstPath — 返回 undefined。两个路径都缺时无内容可渲染，
+  // 返回对象会让 UI 渲染出只有一个箭头、两端为空的破损卡片，故按空 diff 丢弃。
   const result = fileDiffFromWire({ kind: "rename" });
-  deepEq(
-    result,
-    { diff: "", added: 0, removed: 0, kind: "rename", srcPath: "", dstPath: "" },
-    "rename: kind without paths still preserved (graceful)",
-  );
+  eq(result, undefined, "rename: kind without both paths → undefined (no broken card)");
+}
+
+{
+  // 行为6: rename 仅缺其中一个路径 — 同样返回 undefined（必须两个路径都在才可渲染）
+  const onlySrc = fileDiffFromWire({ kind: "rename", srcPath: "/a.txt" });
+  eq(onlySrc, undefined, "rename: kind with only srcPath → undefined");
+  const onlyDst = fileDiffFromWire({ kind: "rename", dstPath: "/b.txt" });
+  eq(onlyDst, undefined, "rename: kind with only dstPath → undefined");
 }
 
 if (failed) {
