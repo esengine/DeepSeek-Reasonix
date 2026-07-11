@@ -34,7 +34,7 @@ type editStep struct {
 func (multiEdit) Name() string { return "multi_edit" }
 
 func (multiEdit) Description() string {
-	return "Apply a list of edits to a single file atomically: each edit runs against the result of the previous one, all in memory; the file is rewritten only if every edit succeeds. Cheaper and safer than chaining edit_file calls — a failure in step 3 leaves the file untouched instead of half-edited."
+	return "Apply a list of edits to a single file atomically: each edit runs against the result of the previous one, all in memory; the file is rewritten only if every edit succeeds. Cheaper and safer than chaining edit_file calls — a failure in step 3 leaves the file untouched instead of half-edited. If any step fails with 'old_string not found', first re-read the file with read_file — its content may have changed since you last read it — then retry with the correct text."
 }
 
 func (multiEdit) Schema() json.RawMessage {
@@ -49,7 +49,7 @@ func (multiEdit) Schema() json.RawMessage {
     "items":{
       "type":"object",
       "properties":{
-        "old_string":{"type":"string","description":"Exact text to find. Without replace_all, must match exactly once."},
+        "old_string":{"type":"string","description":"Exact text to find. Without replace_all, must match exactly once. If the edit fails with 'not found', re-read the file first — the content may have changed since you last read it."},
         "new_string":{"type":"string","description":"Replacement text (empty deletes)."},
         "replace_all":{"type":"boolean","description":"Replace every occurrence instead of requiring uniqueness."}
       },
