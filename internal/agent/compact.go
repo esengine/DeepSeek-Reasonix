@@ -35,6 +35,21 @@ const (
 	pinnedFirstUserWindowFrac  = 0.15  // and never pin a first turn worth more than this fraction of the window
 )
 
+// adaptiveTailTokens 根据上下文窗口大小返回自适应的尾部保留 token 数
+// 大窗口保留更多上下文（减少信息丢失），小窗口保留更少（避免过度占用）
+func adaptiveTailTokens(contextWindow int) int {
+	switch {
+	case contextWindow >= 500000: // 1M 级别（Gemini 2.5 等）
+		return 32768
+	case contextWindow >= 100000: // 128K 级别（DeepSeek/GPT 等）
+		return 16384
+	case contextWindow >= 30000: // 32K 级别
+		return 8192
+	default: // 小窗口或未知
+		return 4096
+	}
+}
+
 // summaryTag wraps the compaction summary so the model can distinguish it from
 // live user input and later strip or skip it when reasoning about the current turn.
 const (
@@ -525,7 +540,10 @@ func toolCallIDs(m provider.Message) map[string]bool {
 func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
 	head = a.pinnedPrefixLen(msgs)
 	if a.contextWindow > 0 {
-		budget := defaultTailTokens
+		// ── 自适应 tail budget ──
+		// 根据上下文窗口大小动态调整保留的尾部 token 数量
+		// 大窗口(1M)保留更多上下文，小窗口(32K)保留更少
+		budget := adaptiveTailTokens(a.contextWindow)
 		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
 			budget = maxByWin
 		}

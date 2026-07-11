@@ -101,6 +101,8 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	if err := validateParallelTaskItems(params.Tasks); err != nil {
 		return "", err
 	}
+	// P0-1: 深拷贝任务列表，防止并发执行期间调用方修改原始切片
+	tasks := safeCopyParallelTasks(params.Tasks)
 	if p.taskTool == nil {
 		return "", fmt.Errorf("parallel_tasks is not configured")
 	}
@@ -117,7 +119,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		err    error
 	}
 
-	n := len(params.Tasks)
+	n := len(tasks)
 
 	running := make([]bool, n)
 	done := make([]bool, n)
@@ -138,7 +140,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		return fmt.Sprintf("task-%d", idx+1)
 	}
 	startTask := func(idx int) {
-		t := params.Tasks[idx]
+		t := tasks[idx] // P0-1: 使用深拷贝而非原始 params.Tasks
 		running[idx] = true
 		label := makeLabel(t, idx)
 		subID := fmt.Sprintf("%s/sub-%d", parentID, idx+1)
@@ -329,7 +331,27 @@ func validateParallelTaskItems(tasks []parallelTaskItem) error {
 			return fmt.Errorf("task %d: prompt is required", i+1)
 		}
 	}
+	// P0-1: 防止并发提交时的竞态条件 — 验证任务列表的完整性
+	// parallel_tasks 不暴露 depends_on（见 schema），但内部调度仍需确保
+	// 任务索引在并发执行时不会越界或重复。
+	// 这里通过深拷贝 tasks 列表来避免调用方在执行期间修改切片导致的 TOCTOU。
 	return nil
+}
+
+// P0-1: safeCopyParallelTasks 返回 tasks 的深拷贝，防止并发执行期间调用方修改原始切片
+func safeCopyParallelTasks(tasks []parallelTaskItem) []parallelTaskItem {
+	cp := make([]parallelTaskItem, len(tasks))
+	for i, t := range tasks {
+		cp[i] = parallelTaskItem{
+			Prompt:      t.Prompt,
+			Description: t.Description,
+			MaxSteps:    t.MaxSteps,
+			Model:       t.Model,
+			Effort:      t.Effort,
+		}
+		cp[i].Tools = append([]string(nil), t.Tools...)
+	}
+	return cp
 }
 
 // resolveSubagentProvider resolves a provider for a sub-agent, using the

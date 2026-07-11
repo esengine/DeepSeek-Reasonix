@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -30,6 +31,59 @@ type PruneStats struct {
 	Results    int
 	SavedChars int
 	Archive    string
+}
+
+// ── 语义重要性评分 ──
+// 裁剪工具结果时，不是简单按时间顺序，而是按语义重要性排序：
+// 高重要性（错误/测试结果/代码定义）优先保留，低重要性（普通输出）先裁剪。
+type toolResultImportance int
+
+const (
+	importanceLow    toolResultImportance = iota // 普通输出
+	importanceMedium                             // 包含路径/警告
+	importanceHigh                               // 包含错误/代码定义/测试结果
+)
+
+// assessImportance 评估工具结果内容的语义重要性
+func assessImportance(content string) toolResultImportance {
+	if content == "" {
+		return importanceLow
+	}
+
+	// 错误结果优先保留
+	lower := strings.ToLower(content)
+	if strings.HasPrefix(lower, "error:") || strings.HasPrefix(lower, "error ") ||
+		strings.Contains(lower, "panic:") || strings.Contains(lower, "fatal:") {
+		return importanceHigh
+	}
+
+	// 测试结果
+	if strings.Contains(content, "PASS") || strings.Contains(content, "FAIL") ||
+		strings.Contains(content, "ok  ") || strings.Contains(lower, "test failed") {
+		return importanceHigh
+	}
+
+	// 代码定义（func/type/class/interface/struct）
+	if strings.Contains(content, "func ") || strings.Contains(content, "type ") ||
+		strings.Contains(content, "class ") || strings.Contains(content, "interface ") ||
+		strings.Contains(content, "struct ") {
+		return importanceHigh
+	}
+
+	// 文件路径
+	if strings.Contains(content, "file:") || strings.Contains(content, ".go:") ||
+		strings.Contains(content, ".rs:") || strings.Contains(content, ".ts:") ||
+		strings.Contains(content, ".py:") {
+		return importanceMedium
+	}
+
+	// 警告
+	if strings.Contains(lower, "warning:") || strings.Contains(lower, "warn:") ||
+		strings.Contains(lower, "deprecated") {
+		return importanceMedium
+	}
+
+	return importanceLow
 }
 
 // SnipStaleToolResults shortens stale tool-result content older than the
@@ -79,6 +133,18 @@ func (a *Agent) maintainStaleToolResults(mode toolResultMaintenanceMode) (PruneS
 	if len(idx) == 0 {
 		return st, nil
 	}
+
+	// ── 语义重要性排序 ──
+	// 低重要性先裁剪，同重要性按时间顺序（旧的先裁剪）
+	sort.SliceStable(idx, func(i, j int) bool {
+		mi := assessImportance(msgs[idx[i]].Content)
+		mj := assessImportance(msgs[idx[j]].Content)
+		if mi != mj {
+			return mi < mj // 低重要性排前面（先被裁剪）
+		}
+		return idx[i] < idx[j] // 同重要性：旧的先裁剪
+	})
+
 	if a.archiveDir != "" {
 		originals := make([]provider.Message, 0, len(idx))
 		for _, i := range idx {
