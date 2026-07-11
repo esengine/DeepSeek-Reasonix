@@ -24,6 +24,10 @@ const (
 	Modify Kind = "modify"
 	// Delete empties an existing file to nothing.
 	Delete Kind = "delete"
+	// Rename moves a file from Path to DestPath without changing content.
+	// OldText/NewText/Diff are empty: a rename is not a content change, so
+	// there is nothing to render as a unified diff.
+	Rename Kind = "rename"
 )
 
 // Change is a previewed (not-yet-applied) edit to one file: the before/after
@@ -41,6 +45,8 @@ type Change struct {
 	Binary  bool   `json:"binary"`
 	Mode    string `json:"mode,omitempty"`  // optional render mode metadata
 	Hunks   int    `json:"hunks,omitempty"` // unified diff hunk count when rendered
+	// DestPath is the target path for a Rename; empty for other Kinds.
+	DestPath string `json:"dest_path,omitempty"`
 }
 
 type OutputMode string
@@ -73,6 +79,14 @@ const maxDiffEdits = 2000
 // binary: the tallies are left zero and Diff is empty.
 func Build(path, oldText, newText string, kind Kind) Change {
 	return BuildWithOptions(path, oldText, newText, kind, BuildOptions{ContextLines: -1})
+}
+
+// BuildRename returns a Change representing a file move from src to dst.
+// Unlike Build it does not read file content: a rename preserves content, so
+// OldText/NewText/Diff are empty and Added/Removed are zero. Path holds the
+// source path and DestPath the destination, so a UI can render "src → dst".
+func BuildRename(src, dst string) Change {
+	return Change{Path: src, Kind: Rename, DestPath: dst}
 }
 
 // BuildWithOptions computes a Change like Build, with explicit render options

@@ -17397,6 +17397,23 @@ body > .mermaid-diagram--fullscreen {
 .tool__body + .tool__body .tool__difflabel {
   margin-top: 2px;
 }
+/* rename 卡片：move_file 的路径变更用 "src → dst" 一行展示，无内容 diff */
+.tool__rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tool__rename-path {
+  color: var(--fg);
+  word-break: break-all;
+}
+.tool__rename-arrow {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+}
 /* sub-agent calls render indented under their parent task card — the base
    tool__body already provides border-left + 12px padding, so subagent just
    needs left indent for hierarchy.  Expanded padding is handled by

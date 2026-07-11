@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/diff"
 	"reasonix/internal/tool"
 )
 
@@ -39,6 +40,47 @@ func (moveFile) Schema() json.RawMessage {
 }
 
 func (moveFile) ReadOnly() bool { return false }
+
+// Preview computes the rename change move_file would make, without touching
+// disk. It mirrors Execute's arg parsing, path resolution, and source-existence
+// checks so a UI can render "src → dst" for an approval card. Like the other
+// writer Previews it does not enforce workspace confinement — that stays on
+// Execute's confineWrite — and it does not write, create the destination, or
+// remove the source.
+func (m moveFile) Preview(args json.RawMessage) (diff.Change, error) {
+	var p struct {
+		SourcePath      string `json:"source_path"`
+		DestinationPath string `json:"destination_path"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
+	}
+	if p.SourcePath == "" {
+		return diff.Change{}, fmt.Errorf("source_path is required")
+	}
+	if p.DestinationPath == "" {
+		return diff.Change{}, fmt.Errorf("destination_path is required")
+	}
+	src := resolveIn(m.workDir, p.SourcePath)
+	dst := resolveIn(m.workDir, p.DestinationPath)
+	info, err := os.Stat(src)
+	if err != nil {
+		return diff.Change{}, fmt.Errorf("stat %s: %w", src, err)
+	}
+	if info.IsDir() {
+		return diff.Change{}, fmt.Errorf("%s is a directory; move_file only moves files", src)
+	}
+	if filepath.Clean(src) != filepath.Clean(dst) {
+		if dstInfo, err := os.Stat(dst); err == nil {
+			if !os.SameFile(info, dstInfo) {
+				return diff.Change{}, fmt.Errorf("destination %s already exists", dst)
+			}
+		} else if !os.IsNotExist(err) {
+			return diff.Change{}, fmt.Errorf("stat %s: %w", dst, err)
+		}
+	}
+	return diff.BuildRename(src, dst), nil
+}
 
 func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {

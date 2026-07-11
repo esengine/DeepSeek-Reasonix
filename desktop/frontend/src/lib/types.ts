@@ -88,6 +88,12 @@ export interface WireApproval {
   tool: string;
   subject: string;
   reason?: string;
+  diff?: string;
+  added?: number;
+  removed?: number;
+  kind?: string;
+  srcPath?: string;
+  dstPath?: string;
 }
 
 export interface WireGuardian {
@@ -354,6 +360,9 @@ export interface HistoryToolCall {
   diff?: string;
   added?: number;
   removed?: number;
+  kind?: string;
+  srcPath?: string;
+  dstPath?: string;
   argumentsArchived?: boolean;
 }
 

@@ -20,6 +20,9 @@ export interface ToolFileDiff {
   diff: string;
   added: number;
   removed: number;
+  kind?: string; // "create"/"modify"/"delete"/"rename"；rename 时 diff/added/removed 为空
+  srcPath?: string; // rename 的源路径
+  dstPath?: string; // rename 的目标路径
 }
 
 function parse(args: string): Record<string, unknown> {
@@ -38,10 +41,20 @@ function num(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
-export function fileDiffFromWire(value?: { diff?: unknown; added?: unknown; removed?: unknown }): ToolFileDiff | undefined {
+export function fileDiffFromWire(
+  value?: { diff?: unknown; added?: unknown; removed?: unknown; kind?: unknown; srcPath?: unknown; dstPath?: unknown },
+): ToolFileDiff | undefined {
   const diff = typeof value?.diff === "string" ? value.diff : "";
   const added = num(value?.added);
   const removed = num(value?.removed);
+  const kind = typeof value?.kind === "string" ? value.kind : "";
+  const srcPath = typeof value?.srcPath === "string" ? value.srcPath : "";
+  const dstPath = typeof value?.dstPath === "string" ? value.dstPath : "";
+  // rename 的 diff/added/removed 全空，但 kind="rename" 标记了这是一次重命名，
+  // 必须保留 srcPath/dstPath 让前端渲染 "src → dst" 卡片，不能按"空 diff"丢弃。
+  if (kind === "rename") {
+    return { diff: "", added: 0, removed: 0, kind: "rename", srcPath, dstPath };
+  }
   if (!diff && added === 0 && removed === 0) return undefined;
   return { diff, added, removed };
 }

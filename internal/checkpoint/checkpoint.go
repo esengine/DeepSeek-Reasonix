@@ -12,12 +12,16 @@ package checkpoint
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"reasonix/internal/diff"
@@ -26,10 +30,13 @@ import (
 
 // FileSnap is one file's state at the moment it was first touched in a turn.
 // Content == nil means the file did not exist then, so a restore deletes it.
+// DestPath is retained for backward compatibility with rename snapshots written
+// by older versions. New rename snapshots store both paths' contents directly.
 type FileSnap struct {
 	Path     string        `json:"path"`
 	Content  *string       `json:"content"`
 	Encoding *fileenc.Kind `json:"encoding,omitempty"`
+	DestPath string        `json:"dest_path,omitempty"`
 }
 
 // Checkpoint anchors the pre-edit state of every distinct file touched during one
@@ -129,10 +136,21 @@ func (s *Store) Bounds() map[int]int {
 // Snapshot records the pre-edit state of the file a writer is about to change.
 // Only the first touch of a path in the current turn is kept (that is its
 // turn-start content). A no-op before the first Begin.
+//
+// Rename is special: Preview carries no OldText, so Snapshot reads the source
+// and destination from disk and records both paths' actual turn-start state.
+// Content-based restore remains correct if the destination is later edited,
+// deleted, or renamed again in the same or a later turn.
 func (s *Store) Snapshot(ch diff.Change) {
 	if ch.Path == "" {
 		return
 	}
+
+	if ch.Kind == diff.Rename {
+		s.snapshotRename(ch)
+		return
+	}
+
 	var enc *fileenc.Kind
 	if ch.Kind != diff.Create {
 		enc = s.detectEncoding(ch.Path)
@@ -151,6 +169,56 @@ func (s *Store) Snapshot(ch diff.Change) {
 	}
 	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, Content: content, Encoding: enc})
 	s.persist(s.cur)
+}
+
+// snapshotRename records both rename paths as ordinary content snapshots.
+// First-touch dedup preserves the turn-start state when a chained rename or a
+// later edit touches either path again.
+func (s *Store) snapshotRename(ch diff.Change) {
+	src, srcOK := s.snapshotDiskPath(ch.Path)
+	dst, dstOK := s.snapshotDiskPath(ch.DestPath)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cur == nil {
+		return
+	}
+	if srcOK && !s.seen[ch.Path] {
+		s.seen[ch.Path] = true
+		s.cur.Files = append(s.cur.Files, src)
+	}
+	if dstOK && ch.DestPath != "" && !s.seen[ch.DestPath] {
+		s.seen[ch.DestPath] = true
+		s.cur.Files = append(s.cur.Files, dst)
+	}
+	s.persist(s.cur)
+}
+
+// snapshotDiskPath captures a path exactly as it exists immediately before a
+// rename. A missing path is a valid nil-content snapshot; other read failures
+// are not recorded because treating them as missing would make rewind delete a
+// file whose original state was unknown.
+func (s *Store) snapshotDiskPath(path string) (FileSnap, bool) {
+	snap := FileSnap{Path: path}
+	if path == "" {
+		return snap, false
+	}
+	abs, err := safePath(s.root, path)
+	if err != nil {
+		return snap, false
+	}
+	b, err := os.ReadFile(abs)
+	if os.IsNotExist(err) {
+		return snap, true
+	}
+	if err != nil {
+		return snap, false
+	}
+	enc, raw := fileenc.Detect(b)
+	content := string(fileenc.Decode(raw, enc))
+	snap.Content = &content
+	snap.Encoding = &enc
+	return snap, true
 }
 
 func (s *Store) detectEncoding(p string) *fileenc.Kind {
@@ -287,13 +355,48 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 	root := s.root
 	s.mu.Unlock()
 
+	protected := map[string]bool{}
 	for _, p := range order {
+		if protected[p] {
+			continue
+		}
+		snap := earliest[p]
+		// DestPath identifies a legacy rename snapshot. New snapshots restore
+		// both paths by content and never enter this compatibility branch.
+		if snap.DestPath != "" {
+			dstAbs, gerr := safePath(root, snap.DestPath)
+			if gerr != nil {
+				err = gerr
+				protected[snap.DestPath] = true
+				continue
+			}
+			srcAbs, gerr := safePath(root, snap.Path)
+			if gerr != nil {
+				err = gerr
+				protected[snap.DestPath] = true
+				continue
+			}
+			if _, statErr := os.Stat(dstAbs); statErr == nil {
+				if moveErr := moveForRestore(dstAbs, srcAbs); moveErr == nil {
+					written = append(written, snap.Path)
+					deleted = append(deleted, snap.DestPath)
+				} else {
+					err = moveErr
+					// The destination may be the only remaining copy. Do not let
+					// its paired nil snapshot delete it after a failed reversal.
+					protected[snap.DestPath] = true
+				}
+			} else if !os.IsNotExist(statErr) {
+				err = statErr
+				protected[snap.DestPath] = true
+			}
+			continue
+		}
 		abs, gerr := safePath(root, p)
 		if gerr != nil {
 			err = gerr
 			continue
 		}
-		snap := earliest[p]
 		if snap.Content == nil {
 			if rmErr := os.Remove(abs); rmErr == nil {
 				deleted = append(deleted, p)
@@ -319,6 +422,83 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 		written = append(written, p)
 	}
 	return written, deleted, err
+}
+
+var renameForRestore = os.Rename
+
+// moveForRestore mirrors move_file's cross-filesystem fallback for legacy
+// rename checkpoints. The source is removed only after a complete destination
+// copy exists, so failures retain at least one intact copy.
+func moveForRestore(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := renameForRestore(src, dst); err == nil {
+		return nil
+	} else if !isCrossDeviceRename(err) {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("checkpoint restore source %q is not a regular file", src)
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("checkpoint restore destination %q already exists", dst)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".reasonix-restore-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	keepTemp := false
+	defer func() {
+		if !keepTemp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err = io.Copy(tmp, in); err == nil {
+		err = tmp.Chmod(info.Mode().Perm())
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if closeErr := in.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	keepTemp = true // tmpName is now dst; never remove the completed copy.
+	if err = os.Remove(src); err != nil {
+		return err
+	}
+	return nil
+}
+
+func isCrossDeviceRename(err error) bool {
+	if errors.Is(err, syscall.EXDEV) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "cross-device") ||
+		strings.Contains(msg, "cross device") ||
+		strings.Contains(msg, "not same device") ||
+		strings.Contains(msg, "different disk drive")
 }
 
 func detectCurrentEncoding(path string) *fileenc.Kind {

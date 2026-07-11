@@ -27,6 +27,25 @@ func TestToWireRetryingJSON(t *testing.T) {
 	}
 }
 
+func TestToWireRenameFileDiff(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "rename", Name: "move_file",
+		FileDiff: event.FileDiff{Kind: "rename", SrcPath: "old.txt", DstPath: "new.txt"},
+	}})
+	if w.Tool == nil || w.Tool.Kind != "rename" || w.Tool.SrcPath != "old.txt" || w.Tool.DstPath != "new.txt" {
+		t.Fatalf("wire rename tool = %+v", w.Tool)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"rename"`, `"srcPath":"old.txt"`, `"dstPath":"new.txt"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("rename JSON = %s, want %s", b, want)
+		}
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {

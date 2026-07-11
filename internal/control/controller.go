@@ -4759,7 +4759,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 		id, reply = c.approval.register(tool, subject, reason)
 	}
 
-	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason}})
+	c.sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: c.approvalWithPreview(id, tool, subject, reason, args)})
 	if hookSubject, hookArgs, ok := permissionRequestHookPayload(tool, subject, args); ok {
 		go c.hooks.PermissionRequest(ctx, tool, hookSubject, hookArgs)
 	}
@@ -4777,6 +4777,39 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 		c.approval.cancel(id)
 		return approvalReply{}, waitCtx.Err()
 	}
+}
+
+// approvalWithPreview builds an event.Approval and, when the tool implements
+// tool.Previewer, attaches the Preview-computed FileDiff so a frontend can
+// render a diff / "src → dst" card in the approval prompt. A Preview error is
+// ignored (the approval still emits; the call will likely fail on Execute
+// anyway), and non-Previewer tools get an empty FileDiff (all fields omitempty).
+func (c *Controller) approvalWithPreview(id, toolName, subject, reason string, args json.RawMessage) event.Approval {
+	ap := event.Approval{ID: id, Tool: toolName, Subject: subject, Reason: reason}
+	if len(args) == 0 {
+		return ap
+	}
+	reg := c.mcp.registry()
+	if reg == nil {
+		return ap
+	}
+	t, ok := reg.Get(toolName)
+	if !ok {
+		return ap
+	}
+	if pv, ok := t.(tool.Previewer); ok {
+		if ch, perr := pv.Preview(args); perr == nil {
+			ap.FileDiff = event.FileDiff{
+				Diff:    ch.Diff,
+				Added:   ch.Added,
+				Removed: ch.Removed,
+				Kind:    string(ch.Kind),
+				SrcPath: ch.Path,
+				DstPath: ch.DestPath,
+			}
+		}
+	}
+	return ap
 }
 
 func (c *Controller) emitRememberResult(r RememberResult) {

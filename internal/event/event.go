@@ -140,20 +140,29 @@ type Tool struct {
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch
 // and on its ApprovalRequest, so a frontend can render +/- lines before the
 // call runs. Diff is the unified diff (empty for read-only tools, binary files,
-// or no-op changes); Added/Removed are its line tallies.
+// or no-op changes); Added/Removed are its line tallies. Kind classifies the
+// change ("create"/"modify"/"delete"/"rename") so a UI can label it without
+// diffing; SrcPath/DstPath are set only for Kind="rename" and let a UI render
+// "src → dst".
 type FileDiff struct {
 	Diff    string
 	Added   int
 	Removed int
+	Kind    string `json:"kind,omitempty"`
+	SrcPath string `json:"src_path,omitempty"`
+	DstPath string `json:"dst_path,omitempty"`
 }
 
 // Approval identifies a pending tool-call approval for an ApprovalRequest
 // event. ID correlates the request with the controller's Approve(ID, …) reply.
+// FileDiff, when set, carries the Preview-computed change so a frontend can
+// render a diff / "src → dst" card in the approval prompt before the call runs.
 type Approval struct {
 	ID      string
 	Tool    string
 	Subject string
 	Reason  string // optional annotation explaining why approval is needed
+	FileDiff
 }
 
 // AskOption is one choice the user can pick for an AskQuestion.

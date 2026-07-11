@@ -1,9 +1,10 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Compass } from "lucide-react";
+import { ChevronRight, Compass, ArrowRight } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
-import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
+import { languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
+import { toolPresentation } from "../lib/toolPresentation";
 import { useShellExpand } from "../lib/shellExpand";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item } from "../lib/useController";
@@ -13,7 +14,6 @@ import { ReadOnlyBatch } from "./ReadOnlyBatch";
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
-const WRITE_TOOLS = new Set(["write_file", "edit_file", "multi_edit", "move_file", "delete_range", "delete_symbol", "notebook_edit"]);
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
@@ -94,22 +94,22 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Write/edit tools show their diff inline — that's the primary signal — so they
   // default to OPEN. Sub-agent tools open while running so the user sees nested
   // calls; they collapse when done. All other tools default to collapsed.
+  // toolPresentation 集中了"是否写工具 / 有无可渲染 diff / 默认是否展开"的决策，ToolCard 只消费结果。
   const [fullData, setFullData] = useState<{ args: string; output?: string } | null>(null);
   const archivedWithoutFullData = Boolean(item.dataArchived && !fullData);
   const effectiveArgs = archivedWithoutFullData ? "" : fullData?.args ?? item.args;
   const effectiveOutput = fullData?.output ?? item.output;
   const displayOutput = toolOutputDuplicatesError(effectiveOutput, item.error) ? undefined : effectiveOutput;
-  const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
 
-  // Cache diffsFor result to avoid calling it twice
-  const argsDiffs = archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
-  const diffs = previewDiff ? [] : argsDiffs;
-
-  const isWriteTool = WRITE_TOOLS.has(item.name);
-  const hasFileDiff = Boolean(item.fileDiff?.diff && item.fileDiff.diff.trim());
-  const hasArgsDiff = !archivedWithoutFullData && argsDiffs.length > 0;
-  const hasDiff = hasFileDiff || hasArgsDiff;
-  const defaultOpen = isWriteTool && hasDiff ? true : hasNested ? item.status === "running" : false;
+  const { detail, defaultOpen } = toolPresentation({
+    name: item.name,
+    args: effectiveArgs,
+    fileDiff: item.fileDiff,
+    archivedWithoutFullData,
+    hasNested,
+    status: item.status,
+  });
+  const hasDiff = detail.kind !== "none";
 
   const [userOpen, setUserOpen] = useState<boolean | null>(null);
   const open = userOpen ?? defaultOpen;
@@ -125,14 +125,10 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
       toolName: item.name,
       itemId: item.id,
       status: item.status,
-      isWriteTool,
-      hasFileDiff,
-      hasArgsDiff,
+      detailKind: detail.kind,
       hasDiff,
       archivedWithoutFullData,
       effectiveArgsLength: effectiveArgs?.length ?? 0,
-      previewDiffExists: !!previewDiff,
-      diffsCount: diffs.length,
       defaultOpen,
       userOpen,
       open,
@@ -182,12 +178,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // else folds its args/output away by default.  Open while running so the
   // user sees progress; closed by default once settled.
   const hasArchivedOnDemandBody = Boolean(item.dataArchived && tabId);
-  const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody);
+  const hasArgsOrOutput = detail.kind === "none" && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody);
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && displayOutput ? displayOutput : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
+  const hasBody = Boolean(hasDiff || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
   const errorText = item.error ? normalizeErrorText(item.error) : "";
   const errorSummary = errorText ? summarizeToolError(errorText, t("tool.errorReceiptMismatch")) : "";
   const hasErrorDetails = errorText ? errorNeedsDetails(errorText, errorSummary) : false;
@@ -268,16 +264,22 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
 
       <div ref={toolBodyRef} className="tool__body">
 
-        {previewDiff ? (
-          <DiffView diff={previewDiff.diff} language={languageForToolArgs(fullData?.args ?? item.args)} maxHeight={260} />
-        ) : (
-          diffs.map((d, i) => (
+        {detail.kind === "rename" ? (
+          <div className="tool__rename">
+            <span className="tool__rename-path tool__rename-src">{detail.srcPath}</span>
+            <ArrowRight size={14} className="tool__rename-arrow" aria-hidden="true" />
+            <span className="tool__rename-path tool__rename-dst">{detail.dstPath}</span>
+          </div>
+        ) : detail.kind === "unified-diff" ? (
+          <DiffView diff={detail.preview.diff} language={languageForToolArgs(fullData?.args ?? item.args)} maxHeight={260} />
+        ) : detail.kind === "inline-diffs" ? (
+          detail.diffs.map((d, i) => (
             <div key={i}>
               {d.label && <div className="tool__difflabel">{d.label}</div>}
               <DiffView original={d.original} modified={d.modified} language={d.lang} maxHeight={260} />
             </div>
           ))
-        )}
+        ) : null}
 
         {hasNested && (
           <div className="tool__nested">

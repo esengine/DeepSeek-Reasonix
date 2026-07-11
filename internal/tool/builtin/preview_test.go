@@ -14,7 +14,7 @@ import (
 // optional Previewer capability the front-end type-asserts on. A new writer
 // that forgets Preview fails here.
 func TestWritersImplementPreviewer(t *testing.T) {
-	for _, tl := range []tool.Tool{writeFile{}, editFile{}, multiEdit{}} {
+	for _, tl := range []tool.Tool{writeFile{}, editFile{}, multiEdit{}, moveFile{}} {
 		if _, ok := tl.(tool.Previewer); !ok {
 			t.Errorf("%s does not implement tool.Previewer", tl.Name())
 		}

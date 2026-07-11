@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import gsap from "gsap";
+import { ArrowRight } from "lucide-react";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
+import { fileDiffFromWire } from "../lib/tools";
 import { PromptAction, PromptBadge, PromptHeaderAction, PromptShelf } from "./PromptShelf";
 import { DUR_FAST } from "../lib/gsapAnimations";
 import {
@@ -174,6 +176,8 @@ export function ApprovalModal({
   const toolMeta = reason || subjectSummary || approval.tool;
   const hasToolDetails = Boolean(reason || subject);
   const showToolDetailsByDefault = !isPlanApproval && hasToolDetails;
+  const renameDiff = fileDiffFromWire(approval);
+  const hasRenamePreview = renameDiff?.kind === "rename";
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionText, setRevisionText] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(() => showToolDetailsByDefault);
@@ -492,10 +496,17 @@ export function ApprovalModal({
       >
         {/* Guard the whole block: PromptShelf only renders its body when children
             are truthy, and a fragment of two false branches would still count. */}
-        {(approvalModeRelaxed || detailsOpen) && (
+        {(approvalModeRelaxed || detailsOpen || hasRenamePreview) && (
           <>
             {approvalModeRelaxed && (
               <div className="approval-mode-hint">{t("approval.modeSwitchPendingHint")}</div>
+            )}
+            {hasRenamePreview && renameDiff && (
+              <div className="tool__rename approval-rename">
+                <span className="tool__rename-path tool__rename-src">{renameDiff.srcPath ?? ""}</span>
+                <ArrowRight size={14} className="tool__rename-arrow" aria-hidden="true" />
+                <span className="tool__rename-path tool__rename-dst">{renameDiff.dstPath ?? ""}</span>
+              </div>
             )}
             {detailsOpen && (
               <div className="approval-details">

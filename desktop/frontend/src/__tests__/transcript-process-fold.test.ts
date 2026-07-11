@@ -36,6 +36,10 @@ Object.defineProperty(globalThis, "localStorage", {
   },
 });
 
+// 锁定英文 locale：测试断言硬编码英文文本（"Working 24s" / "Worked 24s"），
+// 避免在中文系统（navigator.language=zh-CN）下 detectLocale 返回 "zh" 导致翻译不匹配
+Object.defineProperty(navigator, "language", { value: "en-US", configurable: true });
+
 let server: ViteDevServer | undefined;
 try {
   server = await createServer({

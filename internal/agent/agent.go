@@ -295,7 +295,8 @@ type Agent struct {
 	// just before it runs — the seam the checkpoint store uses to snapshot a
 	// file's pre-edit content. Only fires for non-ReadOnly tools that implement
 	// tool.Previewer (so bash, whose targets are unknowable, is never tracked).
-	// Set via SetPreEditHook.
+	// Rename is included: the checkpoint store records the path change (not
+	// content) so rewind can reverse the move. Set via SetPreEditHook.
 	onPreEdit func(diff.Change)
 
 	// jobs, when non-nil, is the session's background-job manager. executeOne
@@ -1969,10 +1970,20 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) []s
 	for _, c := range calls {
 		t, ok := a.tools.Get(c.Name)
 		ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly()}
-		ev.FileDiff = event.FileDiff{Diff: c.Diff, Added: c.Added, Removed: c.Removed}
+		ev.FileDiff = event.FileDiff{
+			Diff: c.Diff, Added: c.Added, Removed: c.Removed,
+			Kind: c.Kind, SrcPath: c.SrcPath, DstPath: c.DstPath,
+		}
 		if ok && ev.Diff == "" && ev.Added == 0 && ev.Removed == 0 {
 			if ch, ok := tool.PreviewChange(t, json.RawMessage(c.Arguments)); ok {
-				ev.FileDiff = event.FileDiff{Diff: ch.Diff, Added: ch.Added, Removed: ch.Removed}
+				ev.FileDiff = event.FileDiff{
+					Diff:    ch.Diff,
+					Added:   ch.Added,
+					Removed: ch.Removed,
+					Kind:    string(ch.Kind),
+					SrcPath: ch.Path,
+					DstPath: ch.DestPath,
+				}
 			}
 		}
 		if ok {
@@ -2113,6 +2124,9 @@ func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolC
 			out[i].Diff = ch.Diff
 			out[i].Added = ch.Added
 			out[i].Removed = ch.Removed
+			out[i].Kind = string(ch.Kind)
+			out[i].SrcPath = ch.Path
+			out[i].DstPath = ch.DestPath
 		}
 	}
 	return out
@@ -2446,6 +2460,8 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	// rewound. Fires after all gating (the edit is cleared to run) and only for
 	// tools that can describe their change; a Preview error means the edit will
 	// likely fail anyway, so we skip rather than snapshot a stale state.
+	// Rename is included: the checkpoint store records the path change (not
+	// content) so rewind can reverse the move.
 	if a.onPreEdit != nil && !t.ReadOnly() {
 		if pv, ok := t.(tool.Previewer); ok {
 			if change, perr := pv.Preview(json.RawMessage(call.Arguments)); perr == nil {

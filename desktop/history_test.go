@@ -454,6 +454,33 @@ func TestHistoryMessagesKeepToolFileDiffMetadata(t *testing.T) {
 	}
 }
 
+func TestHistoryMessagesKeepRenameMetadata(t *testing.T) {
+	src, dst := "docs/old.md", "docs/new.md"
+	msgs := []provider.Message{
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+			ID: "rename", Name: "move_file",
+			Arguments: `{"source_path":"docs/old.md","destination_path":"docs/new.md"}`,
+			Kind:      "rename", SrcPath: src, DstPath: dst,
+		}}},
+		{Role: provider.RoleTool, Name: "move_file", ToolCallID: "rename", Content: "moved docs/old.md to docs/new.md"},
+	}
+
+	got := historyMessages(msgs, func(content string) string { return content })
+	call := got[0].ToolCalls[0]
+	if call.Kind != "rename" || call.SrcPath != src || call.DstPath != dst {
+		t.Fatalf("history rename metadata = kind:%q src:%q dst:%q", call.Kind, call.SrcPath, call.DstPath)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal history: %v", err)
+	}
+	for _, want := range []string{`"kind":"rename"`, `"srcPath":"docs/old.md"`, `"dstPath":"docs/new.md"`} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("history JSON = %s, want %s", encoded, want)
+		}
+	}
+}
+
 func TestHistoryMessagesKeepBoundedToolErrors(t *testing.T) {
 	largeError := "error: " + strings.Repeat("permission denied ", 400)
 	msgs := []provider.Message{
