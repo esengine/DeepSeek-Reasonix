@@ -588,9 +588,9 @@ func anchorRefreshRead(r Receipt) bool {
 	if err := json.Unmarshal(r.Args, &fields); err != nil {
 		return false
 	}
-	if limit, ok := intField(fields, "limit"); ok && limit > 0 {
-		return false
-	}
+	// offset>0 means the model read a partial region — it may not have
+	// observed the area the next anchor-based edit targets. limit alone
+	// (reading from the beginning with a window) is fine.
 	if offset, ok := intField(fields, "offset"); ok && offset > 0 {
 		return false
 	}
