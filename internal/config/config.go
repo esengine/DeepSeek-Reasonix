@@ -1018,19 +1018,20 @@ func (c *Config) BashModeForGOOS(goos string) string {
 // each model's prompt prefix stays cache-stable). SubagentModel is the optional
 // default for runAs=subagent skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
-	SystemPrompt        string            `toml:"system_prompt"`
-	SystemPromptFile    string            `toml:"system_prompt_file"`
-	MaxSteps            int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
-	PlannerMaxSteps     int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
-	Temperature         float64           `toml:"temperature"`
-	PlannerModel        string            `toml:"planner_model"`
-	GuardianModel       string            `toml:"guardian_model"`
-	GuardianTemperature float64           `toml:"guardian_temperature"`
-	SubagentModel       string            `toml:"subagent_model"`
-	SubagentModels      map[string]string `toml:"subagent_models"`
-	SubagentEffort      string            `toml:"subagent_effort"`
-	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
-	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	SystemPrompt         string            `toml:"system_prompt"`
+	SystemPromptFile     string            `toml:"system_prompt_file"`
+	MaxSteps             int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
+	PlannerMaxSteps      int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
+	MaxParallelReadTools int               `toml:"max_parallel_read_tools"`
+	Temperature          float64           `toml:"temperature"`
+	PlannerModel         string            `toml:"planner_model"`
+	GuardianModel        string            `toml:"guardian_model"`
+	GuardianTemperature  float64           `toml:"guardian_temperature"`
+	SubagentModel        string            `toml:"subagent_model"`
+	SubagentModels       map[string]string `toml:"subagent_models"`
+	SubagentEffort       string            `toml:"subagent_effort"`
+	SubagentEfforts      map[string]string `toml:"subagent_efforts"`
+	MaxSubagentDepth     int               `toml:"max_subagent_depth"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -1081,7 +1082,26 @@ type MemoryCompilerConfig struct {
 const (
 	MemoryCompilerVerbosityObserve = "observe"
 	MemoryCompilerVerbosityCompact = "compact"
+	DefaultMaxParallelReadTools    = 8
+	MaxParallelReadToolsLimit      = 32
 )
+
+func NormalizeMaxParallelReadTools(value int) int {
+	if value <= 0 {
+		return DefaultMaxParallelReadTools
+	}
+	if value > MaxParallelReadToolsLimit {
+		return MaxParallelReadToolsLimit
+	}
+	return value
+}
+
+func (c *Config) MaxParallelReadTools() int {
+	if c == nil {
+		return DefaultMaxParallelReadTools
+	}
+	return NormalizeMaxParallelReadTools(c.Agent.MaxParallelReadTools)
+}
 
 // MemoryCompilerEnabled reports whether the v5 execution-memory compiler should
 // participate in future turns. Missing config defaults to true.

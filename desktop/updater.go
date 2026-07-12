@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/minio/selfupdate"
 	"golang.org/x/mod/semver"
 
 	"reasonix/desktop/internal/update"
@@ -136,16 +135,26 @@ func newHTTPClient(forceIPv4 bool) (*http.Client, error) {
 	return netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{ForceIPv4: forceIPv4})
 }
 
-// canSelfUpdate reports whether in-place update is possible. Windows and Linux
-// can replace the verified artifact directly; macOS requires an explicitly
-// signed/notarized build flag so local or ad-hoc builds stay manual.
+// canSelfUpdate reports whether in-place update is possible. Package-managed
+// Linux installs are manual when their binary/runtime roots are not writable;
+// macOS requires an explicitly signed and notarized build.
 func canSelfUpdate() bool {
-	return runtime.GOOS != "darwin" || macSelfUpdateAllowed()
+	switch runtime.GOOS {
+	case "darwin":
+		return macSelfUpdateAllowed()
+	case "linux":
+		return linuxSelfUpdateAvailable()
+	default:
+		return true
+	}
 }
 
 func manualUpdateReason() string {
 	if runtime.GOOS == "darwin" && !macSelfUpdateAllowed() {
 		return "macOS automatic updates require a Developer ID signed and notarized build"
+	}
+	if runtime.GOOS == "linux" && !linuxSelfUpdateAvailable() {
+		return linuxSelfUpdateManualReason()
 	}
 	return ""
 }
@@ -586,16 +595,6 @@ func extractBinary(targz []byte, name string) ([]byte, error) {
 		}
 	}
 	return nil, fmt.Errorf("update: %q not found in archive", name)
-}
-
-// applyLinux replaces the running binary with the one inside the downloaded
-// tar.gz; the caller relaunches afterwards.
-func applyLinux(targz []byte) error {
-	bin, err := extractBinary(targz, "reasonix-desktop")
-	if err != nil {
-		return err
-	}
-	return selfupdate.Apply(bytes.NewReader(bin), selfupdate.Options{})
 }
 
 func applyWindowsFile(path string) error {

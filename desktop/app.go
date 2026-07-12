@@ -202,6 +202,8 @@ type App struct {
 	skillRootsCache skillRootsCache
 
 	heartbeat *HeartbeatEngine // scheduled heartbeat tasks; nil until startup
+	terminals *terminalManager
+	browsers  *browserManager
 }
 
 type skillRootsCache struct {
@@ -383,6 +385,8 @@ func NewApp() *App {
 		botInstalls:      map[string]*botInstallSession{},
 		botRuntime:       newDesktopBotRuntime(),
 	}
+	a.terminals = newTerminalManager(a)
+	a.browsers = newBrowserManager(a)
 	a.botBridge = a.newBotBridge()
 	return a
 }
@@ -743,6 +747,12 @@ func (a *App) snapshotAllTabs() {
 func (a *App) shutdown(context.Context) {
 	a.stopDeferredRebuildRetry()
 	a.stopMainThreadWatchdog()
+	if a.terminals != nil {
+		a.terminals.closeAll()
+	}
+	if a.browsers != nil {
+		a.browsers.shutdown()
+	}
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
 	}
@@ -2597,6 +2607,13 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 	a.mu.Unlock()
 
 	a.saveTabsWrite(dir, entries, activeID, version)
+	if a.browsers != nil {
+		for _, item := range removed {
+			if item.tab != nil {
+				a.browsers.closeForTab(item.tab.ID)
+			}
+		}
+	}
 
 	return removed, fallback
 }
@@ -2656,6 +2673,13 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 	a.mu.Unlock()
 
 	a.saveTabsWrite(dir, entries, activeID, version)
+	if a.browsers != nil {
+		for _, item := range removed {
+			if item.tab != nil {
+				a.browsers.closeForTab(item.tab.ID)
+			}
+		}
+	}
 
 	return removed, fallback
 }
@@ -2815,6 +2839,9 @@ func (a *App) closeRemainingRemovedSessionRuntimesAfterDestroy(removed []removed
 
 func (a *App) closeRemovedSessionRuntime(item removedSessionRuntime, closed map[control.SessionAPI]bool, releasedTabs map[*WorkspaceTab]bool, afterDestroy bool) {
 	if item.tab != nil {
+		if a.browsers != nil {
+			a.browsers.closeForTab(item.tab.ID)
+		}
 		if releasedTabs == nil || !releasedTabs[item.tab] {
 			if releasedTabs != nil {
 				releasedTabs[item.tab] = true

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   CSSProperties,
@@ -42,8 +42,8 @@ import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
 import { mergeWorkspaceSearchResults } from "../lib/workspaceTreeSearch";
 import type { DirEntry, FilePreview, GitCommitView, GitCommitDetailView, WorkspaceChangesView } from "../lib/types";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
+import { formatWorkspaceLineReference, type WorkspaceLineRange } from "../lib/workspaceLineReference";
 import { cleanGitDiff } from "../lib/diff";
-import { CodeViewer } from "./CodeViewer";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { FloatingMenu, FloatingMenuItems } from "./FloatingMenu";
 import { Markdown } from "./Markdown";
@@ -61,10 +61,17 @@ const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
+const WorkspaceMonacoPreview = lazy(() => import("./WorkspaceMonacoPreview"));
+const WorkspaceCodeViewer = lazy(() => import("./CodeViewer").then((module) => ({ default: module.CodeViewer })));
+
 type WorkspaceRevealRequest = { id: number; path: string };
 type WorkspaceFileListRequest = { id: number; paths: string[] };
 type WorkspaceChangeListEntry = { key: string; path: string; meta: string; time: string; detail: string };
 type WorkspaceChangeListRequest = { id: number; changes: WorkspaceChangeListEntry[] };
+
+function CodePreviewFallback({ value }: { value: string }) {
+  return <pre className="workspace-code-fallback">{value || " "}</pre>;
+}
 
 function clampWorkspaceTreeWidth(width: number, panelWidth?: number): number {
   return clampWorkspaceSplitTreeWidth({
@@ -107,19 +114,30 @@ function languageFor(path: string): string | undefined {
   const name = basename(path).toLowerCase();
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
   const byExt: Record<string, string> = {
+    c: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    cs: "csharp",
     css: "css",
+    cxx: "cpp",
     go: "go",
     html: "html",
+    java: "java",
     js: "javascript",
     json: "json",
-    jsx: "jsx",
+    jsx: "javascript",
     md: "markdown",
+    php: "php",
+    ps1: "powershell",
     py: "python",
+    rb: "ruby",
     rs: "rust",
     sh: "bash",
+    sql: "sql",
     toml: "toml",
     ts: "typescript",
-    tsx: "tsx",
+    tsx: "typescript",
+    xml: "xml",
     yaml: "yaml",
     yml: "yaml",
   };
@@ -225,7 +243,7 @@ export function WorkspacePanel({
   onClose: () => void;
   onToggleMaximized: () => void;
   onPreviewModeChange?: (active: boolean) => void;
-  onAddToChat?: (text: string) => void;
+  onAddToChat?: (text: string, options?: { parseWorkspaceRef?: boolean; insertSpacing?: "block" | "inline" }) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
   refreshKey?: number;
@@ -257,7 +275,10 @@ export function WorkspacePanel({
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null);
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
   const [loadingCommit, setLoadingCommit] = useState(false);
-  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<
+    | { kind: "text"; x: number; y: number; text: string; path: string }
+    | null
+  >(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [filter, setFilter] = useState("");
@@ -1030,12 +1051,21 @@ export function WorkspacePanel({
     if (text.trim() === "") return;
     event.preventDefault();
     event.stopPropagation();
-    setSelectionMenu({ x: event.clientX, y: event.clientY, text, path: selectedPath });
+    setSelectionMenu({ kind: "text", x: event.clientX, y: event.clientY, text, path: selectedPath });
   };
 
   const addSelectionToChat = () => {
     if (!selectionMenu) return;
     onAddToChat?.(formatSelectionReference(selectionMenu.path, selectionMenu.text));
+    setSelectionMenu(null);
+  };
+
+  const addLineRangeToChat = (event: { path: string } & WorkspaceLineRange) => {
+    if (!selectedPath || loadingPreview || preview?.err || preview?.binary || preview?.kind) return;
+    onAddToChat?.(
+      formatWorkspaceLineReference(event.path, event.startLine, event.endLine),
+      { parseWorkspaceRef: false, insertSpacing: "inline" },
+    );
     setSelectionMenu(null);
   };
 
@@ -1441,7 +1471,9 @@ export function WorkspacePanel({
                           {loadingCommit ? (
                             <div className="workspace-empty">{t("workspace.loading")}</div>
                           ) : commitDetail?.diff ? (
-                            <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
+                            <Suspense fallback={<CodePreviewFallback value={cleanGitDiff(commitDetail.diff)} />}>
+                              <WorkspaceCodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
+                            </Suspense>
                           ) : commitDetail?.files ? (
                             <div className="workspace-git-history__files">
                               {commitDetail.files.map((file) => (
@@ -1494,7 +1526,9 @@ export function WorkspacePanel({
                           {loadingCommit ? (
                             <div className="workspace-empty">{t("workspace.loading")}</div>
                           ) : commitDetail?.diff ? (
-                            <CodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
+                            <Suspense fallback={<CodePreviewFallback value={cleanGitDiff(commitDetail.diff)} />}>
+                              <WorkspaceCodeViewer value={cleanGitDiff(commitDetail.diff)} language="diff" />
+                            </Suspense>
                           ) : (
                             <div className="workspace-empty">No details available</div>
                           )}
@@ -1521,7 +1555,14 @@ export function WorkspacePanel({
               {isMarkdown ? (
                 <Markdown text={preview.body} />
               ) : (
-                <CodeViewer value={preview.body || " "} language={languageFor(selectedPath)} />
+                <Suspense fallback={<CodePreviewFallback value={preview.body || " "} />}>
+                  <WorkspaceMonacoPreview
+                    value={preview.body || " "}
+                    language={languageFor(selectedPath)}
+                    path={selectedPath}
+                    onSelectionContextMenu={addLineRangeToChat}
+                  />
+                </Suspense>
               )}
             </>
           ) : null}

@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +58,10 @@ type ref struct {
 	baseDir     string // refFile override for session-authorized external roots
 	displayPath string // refFile label/path exposed in the resolved context block
 	raw         string // the original token after '@', for labelling
+	lineRange   bool
+	lineStart   int
+	lineEnd     int
+	lineInvalid bool
 }
 
 // ExternalFolderRefEntry is a session-authorized entry under a dropped external
@@ -71,7 +77,8 @@ type ExternalFolderRefEntry struct {
 
 // refTokenRe matches an @reference token: '@' then a run of non-space chars.
 var refTokenRe = regexp.MustCompile(`@([^\s]+)`)
-var pathLocationSuffixRe = regexp.MustCompile(`:\d+(?::\d+)?:?$`)
+var pathLocationSuffixRe = regexp.MustCompile(`:\d+(?:(?::\d+)|(?:-\d+))?:?$`)
+var refLineRangeSuffixRe = regexp.MustCompile(`^(.+):([1-9]\d*)(?:-([1-9]\d*))?$`)
 
 const externalFolderRefPrefix = "__reasonix_external_folder"
 
@@ -99,16 +106,36 @@ func classifyRef(token string, known map[string]bool, exists func(string) bool) 
 	if i := strings.Index(token, ":"); i > 0 && i+1 < len(token) && known[token[:i]] {
 		return ref{kind: refResource, server: token[:i], uri: token[i+1:], raw: token}, true
 	}
-	if isAttachmentRef(token) && exists(token) {
-		if isImageAttachmentRef(token) {
-			return ref{kind: refImage, path: token, raw: token}, true
+	path, start, end, hasRange, invalidRange := splitRefLineRangeToken(token)
+	if isAttachmentRef(path) && exists(path) {
+		if isImageAttachmentRef(path) && !hasRange {
+			return ref{kind: refImage, path: path, raw: token}, true
 		}
-		return ref{kind: refFile, path: token, raw: token}, true
+		return ref{kind: refFile, path: path, raw: token, lineRange: hasRange, lineStart: start, lineEnd: end, lineInvalid: invalidRange}, true
 	}
-	if exists(token) {
-		return ref{kind: refFile, path: token, raw: token}, true
+	if exists(path) {
+		return ref{kind: refFile, path: path, raw: token, lineRange: hasRange, lineStart: start, lineEnd: end, lineInvalid: invalidRange}, true
 	}
 	return ref{}, false
+}
+
+func splitRefLineRangeToken(token string) (path string, start, end int, hasRange, invalid bool) {
+	m := refLineRangeSuffixRe.FindStringSubmatch(token)
+	if m == nil {
+		return token, 0, 0, false, false
+	}
+	start64, startErr := strconv.ParseInt(m[2], 10, 32)
+	endText := m[3]
+	if endText == "" {
+		endText = m[2]
+	}
+	end64, endErr := strconv.ParseInt(endText, 10, 32)
+	if startErr != nil || endErr != nil {
+		return m[1], 0, 0, true, true
+	}
+	start = int(start64)
+	end = int(end64)
+	return m[1], start, end, true, end < start
 }
 
 func isAttachmentRef(token string) bool {
@@ -449,12 +476,21 @@ func (c *Controller) detectRefsMode(line string, scopedOnly bool) []ref {
 			continue
 		}
 		if c.workspaceRoot != "" {
-			if rel, ok := workspaceRefPath(tok, c.workspaceRoot); ok {
+			path, start, end, hasRange, invalidRange := splitRefLineRangeToken(tok)
+			if rel, ok := workspaceRefPath(path, c.workspaceRoot); ok {
 				kind := refFile
-				if isAttachmentRef(rel) && isImageAttachmentRef(rel) {
+				if isAttachmentRef(rel) && isImageAttachmentRef(rel) && !hasRange {
 					kind = refImage
 				}
-				refs = append(refs, ref{kind: kind, path: rel, raw: tok})
+				refs = append(refs, ref{
+					kind:        kind,
+					path:        rel,
+					raw:         tok,
+					lineRange:   hasRange,
+					lineStart:   start,
+					lineEnd:     end,
+					lineInvalid: invalidRange,
+				})
 			}
 			continue
 		}
@@ -788,7 +824,18 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 			if r.baseDir != "" {
 				baseDir = r.baseDir
 			}
-			text, isDir, err := readFileRef(r.path, baseDir)
+			var text string
+			var isDir bool
+			var err error
+			if r.lineRange {
+				if r.lineInvalid {
+					err = fmt.Errorf("invalid line range %d-%d", r.lineStart, r.lineEnd)
+				} else {
+					text, err = readFileLineRangeRef(r.path, baseDir, r.lineStart, r.lineEnd)
+				}
+			} else {
+				text, isDir, err = readFileRef(r.path, baseDir)
+			}
 			if err != nil {
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
@@ -801,7 +848,11 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 			if r.displayPath != "" {
 				displayPath = r.displayPath
 			}
-			appendRefBlock(&b, tag, `path="`+displayPath+`"`, text)
+			attr := `path="` + displayPath + `"`
+			if r.lineRange {
+				attr += ` lines="` + formatRefLineRange(r.lineStart, r.lineEnd) + `"`
+			}
+			appendRefBlock(&b, tag, attr, text)
 		case refImage:
 			appendRefBlock(&b, "image", `path="`+r.path+`"`, "[image attachment available at @"+r.path+"; sent as direct model image input only when the selected model supports vision. Text-only models can still use an available OCR/image/vision tool with this local path; image bytes are not inlined into prompt text.]")
 		}
@@ -814,6 +865,13 @@ func appendRefBlock(b *strings.Builder, tag, attr, body string) {
 		b.WriteString("\n\n")
 	}
 	fmt.Fprintf(b, "<%s %s>\n%s\n</%s>", tag, attr, body, tag)
+}
+
+func formatRefLineRange(start, end int) string {
+	if start == end {
+		return strconv.Itoa(start)
+	}
+	return fmt.Sprintf("%d-%d", start, end)
 }
 
 // maxDirEntries caps how many directory entries are injected so @some-huge-dir
@@ -900,6 +958,122 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 		return string(data[:maxFileRefBytes]) + fmt.Sprintf("\n…[truncated; file is %d bytes]…", info.Size()), false, nil
 	}
 	return string(data), false, nil
+}
+
+func readFileLineRangeRef(path, baseDir string, start, end int) (string, error) {
+	if start <= 0 || end < start {
+		return "", fmt.Errorf("invalid line range %d-%d", start, end)
+	}
+	absPath, absBase, ok := resolveAbsRef(path, baseDir)
+	if !ok {
+		return "", os.ErrNotExist
+	}
+	if absBase == "" {
+		return readFileLineRangeRefUnscoped(absPath, path, start, end)
+	}
+
+	root, rerr := os.OpenRoot(absBase)
+	if rerr != nil {
+		return "", rerr
+	}
+	defer root.Close()
+
+	rel, rerr := filepath.Rel(absBase, absPath)
+	if rerr != nil {
+		return "", rerr
+	}
+	info, err := root.Stat(rel)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("line range references require a text file, got directory")
+	}
+	if strings.EqualFold(filepath.Ext(rel), ".pdf") {
+		return "", fmt.Errorf("line range references require a text file, got PDF")
+	}
+	f, err := root.Open(rel)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return readLineRangeFromFile(f, filepath.ToSlash(rel), info.Size(), start, end)
+}
+
+func readFileLineRangeRefUnscoped(absPath, displayPath string, start, end int) (string, error) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("line range references require a text file, got directory")
+	}
+	if strings.EqualFold(filepath.Ext(absPath), ".pdf") {
+		return "", fmt.Errorf("line range references require a text file, got PDF")
+	}
+	f, err := os.Open(absPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	return readLineRangeFromFile(f, displayPath, info.Size(), start, end)
+}
+
+func readLineRangeFromFile(f *os.File, displayPath string, size int64, start, end int) (string, error) {
+	probe := make([]byte, 8192)
+	n, err := f.Read(probe)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	data := probe[:n]
+	if mime := imageMime(data, displayPath); mime != "" {
+		return "", fmt.Errorf("line range references require a text file, got image file %s (%s, %d bytes)", displayPath, mime, size)
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return "", fmt.Errorf("line range references require a text file, got binary file %s (%d bytes)", displayPath, size)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+
+	reader := bufio.NewReader(f)
+	var b strings.Builder
+	lineNo := 1
+	found := false
+	truncated := false
+	for {
+		line, readErr := reader.ReadString('\n')
+		if lineNo >= start && lineNo <= end {
+			found = true
+			if b.Len()+len(line) > maxFileRefBytes {
+				remaining := maxFileRefBytes - b.Len()
+				if remaining > 0 {
+					b.WriteString(line[:remaining])
+				}
+				truncated = true
+				break
+			}
+			b.WriteString(line)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return "", readErr
+		}
+		if lineNo >= end {
+			break
+		}
+		lineNo++
+	}
+	if !found {
+		return "", fmt.Errorf("line range starts after end of file")
+	}
+	out := strings.TrimRight(b.String(), "\n")
+	if truncated {
+		out += fmt.Sprintf("\n…[truncated; selected range exceeds %d bytes]…", maxFileRefBytes)
+	}
+	return out, nil
 }
 
 // readFileRefUnscoped is the legacy readFileRef body kept for CLI single-workspace

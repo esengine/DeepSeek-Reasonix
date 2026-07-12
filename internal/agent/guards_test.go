@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -109,11 +110,13 @@ func TestEmptyFinalNotice(t *testing.T) {
 // configurable and Execute sleeps a fixed duration so we can measure
 // serial vs parallel behaviour by wall-clock.
 type fakeTool struct {
-	name     string
-	readOnly bool
-	delay    time.Duration
-	err      error
-	calls    *int32 // shared counter to assert all dispatched
+	name      string
+	readOnly  bool
+	delay     time.Duration
+	err       error
+	calls     *int32 // shared counter to assert all dispatched
+	active    *int32 // shared active-call counter for concurrency bounds
+	maxActive *int32
 }
 
 func (f fakeTool) Name() string            { return f.name }
@@ -124,6 +127,16 @@ func (f fakeTool) Execute(ctx context.Context, _ json.RawMessage) (string, error
 	if f.calls != nil {
 		atomic.AddInt32(f.calls, 1)
 	}
+	if f.active != nil && f.maxActive != nil {
+		n := atomic.AddInt32(f.active, 1)
+		for {
+			prev := atomic.LoadInt32(f.maxActive)
+			if n <= prev || atomic.CompareAndSwapInt32(f.maxActive, prev, n) {
+				break
+			}
+		}
+		defer atomic.AddInt32(f.active, -1)
+	}
 	select {
 	case <-time.After(f.delay):
 	case <-ctx.Done():
@@ -133,6 +146,21 @@ func (f fakeTool) Execute(ctx context.Context, _ json.RawMessage) (string, error
 		return "", f.err
 	}
 	return f.name + " done", nil
+}
+
+func TestNormalizeMaxParallelReadTools(t *testing.T) {
+	if got := NormalizeMaxParallelReadTools(0); got != DefaultMaxParallelReadTools {
+		t.Fatalf("default max parallel read tools = %d, want %d", got, DefaultMaxParallelReadTools)
+	}
+	if got := NormalizeMaxParallelReadTools(-2); got != DefaultMaxParallelReadTools {
+		t.Fatalf("negative max parallel read tools = %d, want %d", got, DefaultMaxParallelReadTools)
+	}
+	if got := NormalizeMaxParallelReadTools(2); got != 2 {
+		t.Fatalf("configured max parallel read tools = %d, want 2", got)
+	}
+	if got := NormalizeMaxParallelReadTools(99); got != MaxParallelReadToolsLimit {
+		t.Fatalf("clamped max parallel read tools = %d, want %d", got, MaxParallelReadToolsLimit)
+	}
 }
 
 func TestPartitionToolCallsAllReadOnly(t *testing.T) {
@@ -243,6 +271,50 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	// Allow generous slack for CI; even 2x serial would prove we got parallelism.
 	if elapsed >= 2*delay {
 		t.Errorf("read-only batch took %v (>= %v) — not parallel", elapsed, 2*delay)
+	}
+}
+
+func TestExecuteBatchDefaultMaxParallelReadTools(t *testing.T) {
+	const delay = 80 * time.Millisecond
+	var active, maxActive int32
+	reg := tool.NewRegistry()
+	calls := make([]provider.ToolCall, 10)
+	for i := range calls {
+		name := fmt.Sprintf("ro%d", i)
+		reg.Add(fakeTool{name: name, readOnly: true, delay: delay, active: &active, maxActive: &maxActive})
+		calls[i] = provider.ToolCall{Name: name}
+	}
+
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	results := a.executeBatch(context.Background(), calls)
+
+	if len(results) != len(calls) {
+		t.Fatalf("got %d results, want %d", len(results), len(calls))
+	}
+	if maxActive != DefaultMaxParallelReadTools {
+		t.Fatalf("max concurrent read-only tools = %d, want default %d", maxActive, DefaultMaxParallelReadTools)
+	}
+}
+
+func TestExecuteBatchConfiguredMaxParallelReadTools(t *testing.T) {
+	const delay = 80 * time.Millisecond
+	var active, maxActive int32
+	reg := tool.NewRegistry()
+	calls := make([]provider.ToolCall, 6)
+	for i := range calls {
+		name := fmt.Sprintf("ro%d", i)
+		reg.Add(fakeTool{name: name, readOnly: true, delay: delay, active: &active, maxActive: &maxActive})
+		calls[i] = provider.ToolCall{Name: name}
+	}
+
+	a := New(nil, reg, NewSession(""), Options{MaxParallelReadTools: 2}, event.Discard)
+	results := a.executeBatch(context.Background(), calls)
+
+	if len(results) != len(calls) {
+		t.Fatalf("got %d results, want %d", len(results), len(calls))
+	}
+	if maxActive != 2 {
+		t.Fatalf("max concurrent read-only tools = %d, want 2", maxActive)
 	}
 }
 

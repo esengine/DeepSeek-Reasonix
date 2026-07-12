@@ -119,6 +119,131 @@ interface DesktopWindowState {
   maximised: boolean;
 }
 
+export interface TerminalSessionView {
+  sessionId: string;
+  cwd: string;
+  shell: string;
+  snapshot?: string;
+  sequence: number;
+  mock?: boolean;
+}
+
+export interface TerminalDataEvent {
+  tabId: string;
+  sessionId: string;
+  data: string;
+  sequence: number;
+}
+
+export interface TerminalExitEvent {
+  tabId: string;
+  sessionId: string;
+  error?: string;
+  expected: boolean;
+}
+
+export interface BrowserRuntimeInfo {
+  available: boolean;
+  executablePath?: string;
+  profilePath?: string;
+  error?: string;
+}
+
+export interface BrowserSessionView {
+  tabId: string;
+  pageId: string;
+  url: string;
+  title?: string;
+  width: number;
+  height: number;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  sequence: number;
+}
+
+export interface BrowserFrameEvent {
+  tabId: string;
+  pageId: string;
+  sequence: number;
+  data: string;
+  metadata: {
+    offsetTop: number;
+    pageScale: number;
+    deviceWidth: number;
+    deviceHeight: number;
+    scrollOffsetX: number;
+    scrollOffsetY: number;
+  };
+}
+
+export interface BrowserExitEvent {
+  tabId: string;
+  pageId: string;
+  error?: string;
+  expected: boolean;
+}
+
+export interface BrowserElementBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface BrowserElementView {
+  tabId: string;
+  pageId: string;
+  frameId?: string;
+  backendNodeId: number;
+  url: string;
+  title?: string;
+  tag: string;
+  selector: string;
+  accessibleName?: string;
+  text?: string;
+  outerHTML?: string;
+  box: BrowserElementBox;
+  computedStyles: Record<string, string>;
+  styleOverrides?: Record<string, string>;
+}
+
+export interface BrowserSelectionEvent {
+  tabId: string;
+  pageId: string;
+  sequence: number;
+  selection?: BrowserElementView;
+}
+
+export interface BrowserAnnotationCapture {
+  screenshotData: string;
+  elementScreenshotData?: string;
+}
+
+export interface BrowserMouseEvent {
+  type: "mousePressed" | "mouseReleased" | "mouseMoved" | "mouseWheel";
+  x: number;
+  y: number;
+  button?: "none" | "left" | "middle" | "right" | "back" | "forward";
+  buttons?: number;
+  clickCount?: number;
+  deltaX?: number;
+  deltaY?: number;
+  modifiers?: number;
+}
+
+export interface BrowserKeyEvent {
+  type: "keyDown" | "keyUp" | "rawKeyDown" | "char";
+  key?: string;
+  code?: string;
+  text?: string;
+  unmodifiedText?: string;
+  windowsVirtualKeyCode?: number;
+  nativeVirtualKeyCode?: number;
+  modifiers?: number;
+  autoRepeat?: boolean;
+  isKeypad?: boolean;
+}
+
 // AppBindings is the hand-written contract between the React app and the Go
 // kernel. It uses local types (types.ts) so components don't import generated
 // model classes. _CheckGeneratedBindings catches drift: when a Go method is
@@ -145,6 +270,28 @@ export interface AppBindings {
   SubmitEditedDisplayToTab(tabID: string, display: string, input: string, original: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
+  TerminalStart(tabID: string, cols: number, rows: number): Promise<TerminalSessionView>;
+  TerminalWrite(tabID: string, sessionID: string, data: string): Promise<void>;
+  TerminalResize(tabID: string, sessionID: string, cols: number, rows: number): Promise<void>;
+  TerminalClose(tabID: string, sessionID: string): Promise<void>;
+  BrowserRuntimeInfo(): Promise<BrowserRuntimeInfo>;
+  BrowserOpen(tabID: string, rawURL: string, width: number, height: number): Promise<BrowserSessionView>;
+  BrowserClose(tabID: string, pageID: string): Promise<void>;
+  BrowserStartScreencast(tabID: string, pageID: string): Promise<void>;
+  BrowserFrameAck(tabID: string, pageID: string, sequence: number): Promise<void>;
+  BrowserNavigate(tabID: string, pageID: string, rawURL: string): Promise<BrowserSessionView>;
+  BrowserReload(tabID: string, pageID: string): Promise<BrowserSessionView>;
+  BrowserGoBack(tabID: string, pageID: string): Promise<BrowserSessionView>;
+  BrowserGoForward(tabID: string, pageID: string): Promise<BrowserSessionView>;
+  BrowserResize(tabID: string, pageID: string, width: number, height: number): Promise<BrowserSessionView>;
+  BrowserMouse(tabID: string, pageID: string, event: BrowserMouseEvent): Promise<void>;
+  BrowserKey(tabID: string, pageID: string, event: BrowserKeyEvent): Promise<void>;
+  BrowserInsertText(tabID: string, pageID: string, text: string): Promise<void>;
+  BrowserInspectorHover(tabID: string, pageID: string, x: number, y: number): Promise<void>;
+  BrowserInspectorSelect(tabID: string, pageID: string, x: number, y: number): Promise<BrowserElementView>;
+  BrowserApplyStyles(tabID: string, pageID: string, styles: Record<string, string>): Promise<BrowserElementView>;
+  BrowserCaptureAnnotation(tabID: string, pageID: string): Promise<BrowserAnnotationCapture>;
+  BrowserInspectorClear(tabID: string, pageID: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
   Cancel(): Promise<void>;
@@ -495,6 +642,48 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   };
 }
 
+export function onTerminalData(cb: (event: TerminalDataEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("terminal:data", (payload) => cb(payload as TerminalDataEvent));
+  }
+  return () => {};
+}
+
+export function onTerminalExit(cb: (event: TerminalExitEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("terminal:exit", (payload) => cb(payload as TerminalExitEvent));
+  }
+  return () => {};
+}
+
+export function onBrowserFrame(cb: (event: BrowserFrameEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:frame", (payload) => cb(payload as BrowserFrameEvent));
+  }
+  return () => {};
+}
+
+export function onBrowserState(cb: (event: BrowserSessionView) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:state", (payload) => cb(payload as BrowserSessionView));
+  }
+  return () => {};
+}
+
+export function onBrowserExit(cb: (event: BrowserExitEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:exit", (payload) => cb(payload as BrowserExitEvent));
+  }
+  return () => {};
+}
+
+export function onBrowserSelection(cb: (event: BrowserSelectionEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("browser:selection", (payload) => cb(payload as BrowserSelectionEvent));
+  }
+  return () => {};
+}
+
 function errorMessage(err: unknown): string {
   if (err && typeof err === "object" && "message" in err) {
     const msg = (err as { message?: unknown }).message;
@@ -648,6 +837,7 @@ function bridgeBreadcrumb(method: string): string {
   if (method === "ReportCrash") return "";
   if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
     return `turn ${method}`;
+  if (/^Terminal(Start|Close)$/.test(method)) return `terminal ${method}`;
   if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth)/.test(method))
     return `model ${method}`;
   if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetMemoryCompilerEnabled|SetReasoningLanguage)/.test(method))
@@ -2128,6 +2318,72 @@ function makeMockApp(): AppBindings {
         },
         async RunShellForTab(_tabID, command) {
           await withMockTabScope(_tabID, () => this.RunShell(command));
+        },
+        async TerminalStart(tabID, _cols, _rows) {
+          return {
+            sessionId: `mock-terminal-${tabID}`,
+            cwd,
+            shell: "browser-preview",
+            snapshot: "",
+            sequence: 0,
+            mock: true,
+          };
+        },
+        async TerminalWrite(_tabID, _sessionID, _data) {},
+        async TerminalResize(_tabID, _sessionID, _cols, _rows) {},
+        async TerminalClose(_tabID, _sessionID) {},
+        async BrowserRuntimeInfo() {
+          return {
+            available: false,
+            error: t("browser.desktopOnly"),
+          };
+        },
+        async BrowserOpen(_tabID, _rawURL, _width, _height) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserClose(_tabID, _pageID) {},
+        async BrowserStartScreencast(_tabID, _pageID) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserFrameAck(_tabID, _pageID, _sequence) {},
+        async BrowserNavigate(_tabID, _pageID, _rawURL) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserReload(_tabID, _pageID) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserGoBack(_tabID, _pageID) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserGoForward(_tabID, _pageID) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserResize(_tabID, _pageID, _width, _height) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserMouse(_tabID, _pageID, _event) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserKey(_tabID, _pageID, _event) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserInsertText(_tabID, _pageID, _text) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserInspectorHover(_tabID, _pageID, _x, _y) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserInspectorSelect(_tabID, _pageID, _x, _y) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserApplyStyles(_tabID, _pageID, _styles) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserCaptureAnnotation(_tabID, _pageID) {
+          throw new Error(t("browser.desktopOnly"));
+        },
+        async BrowserInspectorClear(_tabID, _pageID) {
+          throw new Error(t("browser.desktopOnly"));
         },
         async Steer(_text) {
           // Mock: emit a steer event as confirmation in the transcript.

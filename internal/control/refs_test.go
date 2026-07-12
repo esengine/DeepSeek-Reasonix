@@ -754,6 +754,71 @@ func TestResolveRefsWithWorkspaceRootStoresRelativePath(t *testing.T) {
 	}
 }
 
+func TestResolveRefsWorkspaceLineRange(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "docs", "a.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "line 1\nline 2\nline 3\nline 4\nline 5\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Controller{workspaceRoot: workspace}
+	block, errs := c.ResolveRefs(context.Background(), "inspect @docs/a.go:2-4")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs line range errors = %v", errs)
+	}
+	if !strings.Contains(block, `<file path="docs/a.go" lines="2-4">`) {
+		t.Fatalf("ResolveRefs line range missing lines attr:\n%s", block)
+	}
+	if strings.Contains(block, "line 1") || strings.Contains(block, "line 5") {
+		t.Fatalf("ResolveRefs line range included lines outside range:\n%s", block)
+	}
+	if !strings.Contains(block, "line 2\nline 3\nline 4") {
+		t.Fatalf("ResolveRefs line range missing selected lines:\n%s", block)
+	}
+
+	single, errs := c.ResolveRefs(context.Background(), "inspect @docs/a.go:3")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs single line errors = %v", errs)
+	}
+	if !strings.Contains(single, `<file path="docs/a.go" lines="3">`) || !strings.Contains(single, "line 3") || strings.Contains(single, "line 2") {
+		t.Fatalf("ResolveRefs single line block wrong:\n%s", single)
+	}
+}
+
+func TestResolveRefsWorkspaceLineRangeErrors(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "docs", "a.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("line 1\nline 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(workspace, "docs", "dir")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(workspace, "docs", "bin.dat")
+	if err := os.WriteFile(bin, []byte{'a', 0, 'b'}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &Controller{workspaceRoot: workspace}
+	if _, errs := c.ResolveRefs(context.Background(), "inspect @docs/a.go:4-2"); len(errs) == 0 {
+		t.Fatal("invalid descending line range should report an error")
+	}
+	if _, errs := c.ResolveRefs(context.Background(), "inspect @docs/dir:1-2"); len(errs) == 0 {
+		t.Fatal("directory line range should report an error")
+	}
+	if _, errs := c.ResolveRefs(context.Background(), "inspect @docs/bin.dat:1-2"); len(errs) == 0 {
+		t.Fatal("binary line range should report an error")
+	}
+}
+
 func TestWorkspaceImageRefsAlsoAttachAsModelImages(t *testing.T) {
 	workspace := t.TempDir()
 	diagram := filepath.Join(workspace, "docs", "diagram.png")

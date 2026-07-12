@@ -69,11 +69,13 @@ jobs:
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
           - { runner: windows-11-arm, platform: windows/arm64, name: windows-arm64 }
           - { runner: ubuntu-22.04, platform: linux/amd64, name: linux-amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64, name: linux-arm64 }
     runs-on: ${{ matrix.runner }}
     env:
       # Windows Authenticode signing engages only when the SignPath token is set, so
       # forks / token-less runs still build (unsigned), mirroring the APPLE_* gate.
       HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+      REASONIX_CHROMIUM_CACHE: ${{ runner.temp }}/reasonix-chromium-cache
     defaults:
       run:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
@@ -92,6 +94,12 @@ jobs:
       - uses: pnpm/action-setup@v6
         with:
           version: 10
+
+      - name: Cache bundled Chromium archive
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.REASONIX_CHROMIUM_CACHE }}
+          key: chromium-${{ matrix.name }}-${{ hashFiles('desktop/build/chromium/manifest.json') }}
 
       # Linux: WebKitGTK 4.1 toolchain (-tags webkit2_41 in desktop-build.sh).
       # 4.1 ships from ubuntu-22.04 on and is the only one present on 24.04+/Fedora 40+.

@@ -23,6 +23,9 @@ mem.prof
 /desktop/build/*
 !/desktop/build/appicon.png
 !/desktop/build/appicon.svg
+!/desktop/build/chromium/
+/desktop/build/chromium/*
+!/desktop/build/chromium/manifest.json
 /desktop/desktop
 /desktop/frontend/dist/*
 !/desktop/frontend/dist/.gitkeep

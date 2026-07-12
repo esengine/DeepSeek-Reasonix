@@ -172,6 +172,32 @@ function workspaceReferenceKey(ref: WorkspaceReference): string {
   return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
 }
 
+export function shouldParseWorkspaceInsertRequest(request: ComposerInsertRequest): boolean {
+  return request.parseWorkspaceRef !== false;
+}
+
+export function composeComposerInsertText(
+  text: string,
+  snippet: string,
+  start: number,
+  end: number,
+  spacing: ComposerInsertRequest["insertSpacing"] = "block",
+): { next: string; caret: number } {
+  const safeStart = Math.max(0, Math.min(start, text.length));
+  const safeEnd = Math.max(safeStart, Math.min(end, text.length));
+  const before = text.slice(0, safeStart);
+  const after = text.slice(safeEnd);
+  if (spacing === "inline") {
+    const next = before + snippet + after;
+    return { next, caret: before.length + snippet.length };
+  }
+  const leading = before.length === 0 || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
+  const body = snippet.trimEnd();
+  const trailing = after.length === 0 ? "\n" : after.startsWith("\n") ? "" : "\n\n";
+  const inserted = leading + body + trailing;
+  return { next: before + inserted + after, caret: before.length + inserted.length };
+}
+
 type PastChatToken = {
   from: number;
   query: string;
@@ -1324,23 +1350,19 @@ export function Composer({
     lastSelectionRef.current = { start: ta.selectionStart ?? text.length, end: ta.selectionEnd ?? text.length };
   };
 
-  const insertTextAtCaret = (snippet: string) => {
+  const insertTextAtCaret = (snippet: string, spacing?: ComposerInsertRequest["insertSpacing"]) => {
     const selection = getComposerSelection();
     const start = selection.start;
     const end = selection.end;
-    const before = text.slice(0, start);
     const after = text.slice(end);
-    const leading = before.length === 0 || before.endsWith("\n\n") ? "" : before.endsWith("\n") ? "\n" : "\n\n";
-    const body = snippet.trimEnd();
-    const trailing = after.length === 0 ? "\n" : after.startsWith("\n") ? "" : "\n\n";
-    const inserted = leading + body + trailing;
-    const pos = before.length + inserted.length;
+    const { next, caret } = composeComposerInsertText(text, snippet, start, end, spacing);
+    const inserted = next.slice(start, next.length - after.length);
     const updated = replaceInvocationTextRange(text, invocationsRef.current, start, end, inserted);
     textRef.current = updated.text;
     invocationsRef.current = updated.invocations;
     setText(updated.text);
     setInvocations(updated.invocations);
-    setComposerSelection(pos);
+    setComposerSelection(caret);
   };
 
   const replaceComposerText = (next: string) => {
@@ -1367,8 +1389,19 @@ export function Composer({
   useEffect(() => {
     if (!insertRequest || insertRequest.id === consumedInsertIdByDraftRef.current[draftKey]) return;
     consumedInsertIdByDraftRef.current[draftKey] = insertRequest.id;
+    const addInsertedAttachments = () => {
+      const next = [...attachmentsRef.current];
+      for (const attachment of insertRequest.attachments ?? []) {
+        if (!next.some((item) => item.path === attachment.path)) next.push(attachment);
+      }
+      if (next.length !== attachmentsRef.current.length) {
+        attachmentsRef.current = next;
+        setAttachments(next);
+      }
+    };
     if (insertRequest.mode === "replace") {
       replaceComposerText(insertRequest.text);
+      addInsertedAttachments();
       return;
     }
     if (insertRequest.mode === "prefix") {
@@ -1377,12 +1410,16 @@ export function Composer({
       setTextCaretEnd(current ? prefix + current : prefix);
       return;
     }
-    const ref = parseWorkspaceReference(insertRequest.text);
+    const ref = shouldParseWorkspaceInsertRequest(insertRequest)
+      ? parseWorkspaceReference(insertRequest.text)
+      : null;
     if (ref) {
       addWorkspaceReference(ref);
+      addInsertedAttachments();
       return;
     }
-    insertTextAtCaret(insertRequest.text);
+    insertTextAtCaret(insertRequest.text, insertRequest.insertSpacing);
+    addInsertedAttachments();
   }, [draftKey, insertRequest]);
 
   const expandPastedBlocks = (displayText: string, blocks = pastedBlocksRef.current): string => {
