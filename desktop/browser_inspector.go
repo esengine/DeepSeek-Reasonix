@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,7 +13,6 @@ import (
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/dom"
 	"github.com/chromedp/cdproto/overlay"
-	"github.com/chromedp/cdproto/page"
 	cdpruntime "github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
@@ -61,12 +59,8 @@ type BrowserElementView struct {
 	OuterHTML      string            `json:"outerHTML,omitempty"`
 	Box            BrowserElementBox `json:"box"`
 	ComputedStyles map[string]string `json:"computedStyles"`
+	OriginalStyles map[string]string `json:"originalStyles,omitempty"`
 	StyleOverrides map[string]string `json:"styleOverrides,omitempty"`
-}
-
-type BrowserAnnotationCapture struct {
-	ScreenshotData        string `json:"screenshotData"`
-	ElementScreenshotData string `json:"elementScreenshotData,omitempty"`
 }
 
 type browserSelectionPayload struct {
@@ -84,10 +78,13 @@ type browserInspectorState struct {
 	sequence      uint64
 }
 
-func (a *App) BrowserInspectorHover(tabID, pageID string, x, y float64) error {
+func (a *App) BrowserInspectorHover(tabID, pageID string, x, y float64) (BrowserElementView, error) {
 	session, err := a.browserManager().session(strings.TrimSpace(tabID), strings.TrimSpace(pageID))
 	if err != nil {
-		return err
+		return BrowserElementView{}, err
+	}
+	if err := session.requireLocalAnnotation(); err != nil {
+		return BrowserElementView{}, err
 	}
 	return session.inspectorHover(x, y)
 }
@@ -95,6 +92,9 @@ func (a *App) BrowserInspectorHover(tabID, pageID string, x, y float64) error {
 func (a *App) BrowserInspectorSelect(tabID, pageID string, x, y float64) (BrowserElementView, error) {
 	session, err := a.browserManager().session(strings.TrimSpace(tabID), strings.TrimSpace(pageID))
 	if err != nil {
+		return BrowserElementView{}, err
+	}
+	if err := session.requireLocalAnnotation(); err != nil {
 		return BrowserElementView{}, err
 	}
 	return session.inspectorSelect(x, y)
@@ -105,15 +105,10 @@ func (a *App) BrowserApplyStyles(tabID, pageID string, styles map[string]string)
 	if err != nil {
 		return BrowserElementView{}, err
 	}
-	return session.applyInspectorStyles(styles)
-}
-
-func (a *App) BrowserCaptureAnnotation(tabID, pageID string) (BrowserAnnotationCapture, error) {
-	session, err := a.browserManager().session(strings.TrimSpace(tabID), strings.TrimSpace(pageID))
-	if err != nil {
-		return BrowserAnnotationCapture{}, err
+	if err := session.requireLocalAnnotation(); err != nil {
+		return BrowserElementView{}, err
 	}
-	return session.captureInspectorScreenshots()
+	return session.applyInspectorStyles(styles)
 }
 
 func (a *App) BrowserInspectorClear(tabID, pageID string) error {
@@ -124,15 +119,41 @@ func (a *App) BrowserInspectorClear(tabID, pageID string) error {
 	return session.clearInspector(true)
 }
 
-func (s *browserSession) inspectorHover(x, y float64) error {
-	return s.runCommand(func(ctx context.Context) error {
+func (s *browserSession) requireLocalAnnotation() error {
+	if !s.view().CanAnnotate {
+		return errors.New("browser annotations are only available for local pages")
+	}
+	return nil
+}
+
+func (s *browserSession) inspectorHover(x, y float64) (BrowserElementView, error) {
+	var selection BrowserElementView
+	var backendNodeID cdp.BackendNodeID
+	var frameID cdp.FrameID
+	err := s.runCommand(func(ctx context.Context) error {
+		var err error
 		x, y := s.clampInspectorPoint(x, y)
-		backendNodeID, _, err := browserNodeAt(ctx, x, y)
+		backendNodeID, frameID, err = browserNodeAt(ctx, x, y)
 		if err != nil {
 			return err
 		}
-		return browserHighlightNode(ctx, backendNodeID, false)
+		if err := browserHighlightNode(ctx, backendNodeID, false); err != nil {
+			return err
+		}
+		selection, err = browserDescribeElement(ctx, backendNodeID)
+		return err
 	})
+	if err != nil {
+		return BrowserElementView{}, err
+	}
+	state := s.view()
+	selection.TabID = s.tabID
+	selection.PageID = s.pageID()
+	selection.FrameID = string(frameID)
+	selection.BackendNodeID = int64(backendNodeID)
+	selection.URL = state.URL
+	selection.Title = state.Title
+	return selection, nil
 }
 
 func (s *browserSession) inspectorSelect(x, y float64) (BrowserElementView, error) {
@@ -162,6 +183,7 @@ func (s *browserSession) inspectorSelect(x, y float64) (BrowserElementView, erro
 	selection.BackendNodeID = int64(backendNodeID)
 	selection.URL = state.URL
 	selection.Title = state.Title
+	selection.OriginalStyles = cloneBrowserStyles(selection.ComputedStyles)
 
 	s.inspectorMu.Lock()
 	s.inspectorSequence++
@@ -188,22 +210,47 @@ func (s *browserSession) applyInspectorStyles(styles map[string]string) (Browser
 		s.inspectorMu.Unlock()
 		return BrowserElementView{}, errors.New("no browser element is selected")
 	}
+	backendNodeID := s.inspector.backendNodeID
+	frameID := s.inspector.frameID
 	selector := s.inspector.selection.Selector
+	originalStyles := cloneBrowserStyles(s.inspector.selection.OriginalStyles)
 	s.inspectorMu.Unlock()
 
+	var refreshed BrowserElementView
 	if err := s.runCommand(func(ctx context.Context) error {
-		return applyBrowserStyleSheet(ctx, selector, normalized)
+		if err := applyBrowserStyleSheet(ctx, selector, normalized); err != nil {
+			return err
+		}
+		var err error
+		refreshed, err = browserDescribeElement(ctx, backendNodeID)
+		if err != nil {
+			return err
+		}
+		if err := browserHighlightNode(ctx, backendNodeID, true); err != nil {
+			return err
+		}
+		return s.captureAndEmitCurrentFrame(ctx)
 	}); err != nil {
 		return BrowserElementView{}, err
 	}
 
+	state := s.view()
+	refreshed.TabID = s.tabID
+	refreshed.PageID = s.pageID()
+	refreshed.FrameID = string(frameID)
+	refreshed.BackendNodeID = int64(backendNodeID)
+	refreshed.URL = state.URL
+	refreshed.Title = state.Title
+	refreshed.OriginalStyles = originalStyles
+	refreshed.StyleOverrides = cloneBrowserStyles(normalized)
+
 	s.inspectorMu.Lock()
-	if s.inspector == nil || s.inspector.selection.Selector != selector {
+	if s.inspector == nil || s.inspector.backendNodeID != backendNodeID || s.inspector.selection.Selector != selector {
 		s.inspectorMu.Unlock()
 		return BrowserElementView{}, errors.New("browser selection changed")
 	}
 	s.inspector.overrides = normalized
-	s.inspector.selection.StyleOverrides = cloneBrowserStyles(normalized)
+	s.inspector.selection = refreshed
 	s.inspectorSequence++
 	sequence := s.inspectorSequence
 	s.inspector.sequence = sequence
@@ -211,55 +258,6 @@ func (s *browserSession) applyInspectorStyles(styles map[string]string) (Browser
 	s.inspectorMu.Unlock()
 	s.emitSelection(sequence, &selection)
 	return selection, nil
-}
-
-func (s *browserSession) captureInspectorScreenshots() (BrowserAnnotationCapture, error) {
-	s.inspectorMu.Lock()
-	if s.inspector == nil {
-		s.inspectorMu.Unlock()
-		return BrowserAnnotationCapture{}, errors.New("no browser element is selected")
-	}
-	box := s.inspector.selection.Box
-	s.inspectorMu.Unlock()
-
-	state := s.view()
-	x := math.Max(0, box.X)
-	y := math.Max(0, box.Y)
-	width := math.Min(box.Width, float64(state.Width)-x)
-	height := math.Min(box.Height, float64(state.Height)-y)
-	if width <= 0 || height <= 0 {
-		return BrowserAnnotationCapture{}, errors.New("selected browser element is outside the viewport")
-	}
-
-	var screenshot []byte
-	var elementScreenshot []byte
-	err := s.runCommand(func(ctx context.Context) error {
-		var err error
-		screenshot, err = page.CaptureScreenshot().
-			WithFormat(page.CaptureScreenshotFormatJpeg).
-			WithQuality(88).
-			WithFromSurface(true).
-			WithCaptureBeyondViewport(false).
-			Do(ctx)
-		if err != nil {
-			return err
-		}
-		elementScreenshot, err = page.CaptureScreenshot().
-			WithFormat(page.CaptureScreenshotFormatJpeg).
-			WithQuality(92).
-			WithFromSurface(true).
-			WithCaptureBeyondViewport(false).
-			WithClip(&page.Viewport{X: x, Y: y, Width: width, Height: height, Scale: 1}).
-			Do(ctx)
-		return err
-	})
-	if err != nil {
-		return BrowserAnnotationCapture{}, fmt.Errorf("capture browser annotation: %w", err)
-	}
-	return BrowserAnnotationCapture{
-		ScreenshotData:        base64.StdEncoding.EncodeToString(screenshot),
-		ElementScreenshotData: base64.StdEncoding.EncodeToString(elementScreenshot),
-	}, nil
 }
 
 func (s *browserSession) clearInspector(emit bool) error {
@@ -339,13 +337,13 @@ func browserHighlightNode(ctx context.Context, backendNodeID cdp.BackendNodeID, 
 		return err
 	}
 	config := &overlay.HighlightConfig{
-		ShowInfo:              selected,
+		ShowInfo:              true,
 		ShowStyles:            selected,
 		ShowAccessibilityInfo: selected,
-		ContentColor:          &cdp.RGBA{R: 80, G: 150, B: 255, A: 0.18},
-		PaddingColor:          &cdp.RGBA{R: 90, G: 210, B: 150, A: 0.16},
-		BorderColor:           &cdp.RGBA{R: 255, G: 190, B: 70, A: 0.5},
-		MarginColor:           &cdp.RGBA{R: 255, G: 120, B: 90, A: 0.16},
+		ContentColor:          &cdp.RGBA{R: 64, G: 142, B: 255, A: 0.22},
+		PaddingColor:          &cdp.RGBA{R: 90, G: 210, B: 150, A: 0.14},
+		BorderColor:           &cdp.RGBA{R: 34, G: 133, B: 255, A: 0.95},
+		MarginColor:           &cdp.RGBA{R: 255, G: 120, B: 90, A: 0.12},
 		ColorFormat:           overlay.ColorFormatHex,
 	}
 	return overlay.HighlightNode(config).WithBackendNodeID(backendNodeID).Do(ctx)
@@ -449,9 +447,17 @@ func normalizeBrowserStyleOverrides(styles map[string]string) (map[string]string
 	return out, nil
 }
 
-func applyBrowserStyleSheet(ctx context.Context, selector string, styles map[string]string) error {
-	if strings.ContainsAny(selector, "{}<>\r\n") {
+func validateBrowserSelector(selector string) error {
+	selector = strings.TrimSpace(selector)
+	if selector == "" || utf8.RuneCountInString(selector) > 2048 || strings.ContainsAny(selector, "{}<\r\n") {
 		return errors.New("browser selector contains unsupported characters")
+	}
+	return nil
+}
+
+func applyBrowserStyleSheet(ctx context.Context, selector string, styles map[string]string) error {
+	if err := validateBrowserSelector(selector); err != nil {
+		return err
 	}
 	payload, err := json.Marshal(struct {
 		Selector string            `json:"selector"`

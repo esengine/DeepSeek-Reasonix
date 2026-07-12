@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -99,6 +101,7 @@ type BrowserSessionView struct {
 	Height       int    `json:"height"`
 	CanGoBack    bool   `json:"canGoBack"`
 	CanGoForward bool   `json:"canGoForward"`
+	CanAnnotate  bool   `json:"canAnnotate"`
 	Sequence     uint64 `json:"sequence"`
 }
 
@@ -136,6 +139,7 @@ type browserSession struct {
 	closed  atomic.Bool
 
 	frameMu              sync.Mutex
+	frameEmitMu          sync.Mutex
 	screencastStarted    bool
 	frameSequence        uint64
 	pendingFrameSequence uint64
@@ -315,11 +319,12 @@ func (m *browserManager) open(tabID, rawURL string, width, height int) (BrowserS
 		generation: m.generation,
 		ready:      make(chan struct{}),
 		state: BrowserSessionView{
-			TabID:    tabID,
-			URL:      normalizedURL,
-			Width:    width,
-			Height:   height,
-			Sequence: 1,
+			TabID:       tabID,
+			URL:         normalizedURL,
+			Width:       width,
+			Height:      height,
+			CanAnnotate: isLocalBrowserURL(normalizedURL),
+			Sequence:    1,
 		},
 	}
 	m.sessions[tabID] = session
@@ -809,6 +814,8 @@ func (s *browserSession) handleScreencastFrame(frame *page.EventScreencastFrame)
 		}
 	}
 
+	s.frameEmitMu.Lock()
+	defer s.frameEmitMu.Unlock()
 	s.frameMu.Lock()
 	staleCDPSessionID := s.pendingCDPSessionID
 	s.frameSequence++
@@ -826,6 +833,41 @@ func (s *browserSession) handleScreencastFrame(frame *page.EventScreencastFrame)
 		Data:     frame.Data,
 		Metadata: metadata,
 	})
+}
+
+func (s *browserSession) captureAndEmitCurrentFrame(ctx context.Context) error {
+	pageID := s.pageID()
+	if s.closed.Load() || pageID == "" {
+		return errors.New("browser session is closed")
+	}
+	image, err := page.CaptureScreenshot().
+		WithFormat(page.CaptureScreenshotFormatJpeg).
+		WithQuality(78).
+		WithFromSurface(true).
+		WithCaptureBeyondViewport(false).
+		Do(ctx)
+	if err != nil {
+		return fmt.Errorf("capture refreshed browser frame: %w", err)
+	}
+	state := s.view()
+	s.frameEmitMu.Lock()
+	defer s.frameEmitMu.Unlock()
+	s.frameMu.Lock()
+	s.frameSequence++
+	sequence := s.frameSequence
+	s.frameMu.Unlock()
+	s.manager.app.runtimeEvents.Emit(s.manager.app.bootContext(), browserFrameEvent, BrowserFramePayload{
+		TabID:    s.tabID,
+		PageID:   pageID,
+		Sequence: sequence,
+		Data:     base64.StdEncoding.EncodeToString(image),
+		Metadata: BrowserFrameMetadata{
+			PageScale:    1,
+			DeviceWidth:  float64(state.Width),
+			DeviceHeight: float64(state.Height),
+		},
+	})
+	return nil
 }
 
 func (s *browserSession) ackFrame(sequence uint64) error {
@@ -992,6 +1034,7 @@ func (s *browserSession) refreshStateLocked(ctx context.Context) error {
 	if location != "" {
 		s.state.URL = location
 	}
+	s.state.CanAnnotate = isLocalBrowserURL(s.state.URL)
 	s.state.Title = title
 	s.state.CanGoBack = index > 0
 	s.state.CanGoForward = index+1 < int64(len(entries))
@@ -1214,6 +1257,19 @@ func normalizeBrowserURL(raw string) (string, error) {
 	default:
 		return "", fmt.Errorf("browser URL scheme %q is not allowed", parsed.Scheme)
 	}
+}
+
+func isLocalBrowserURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }
 
 func clampBrowserViewport(width, height int) (int, int) {

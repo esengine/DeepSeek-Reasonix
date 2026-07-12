@@ -680,9 +680,8 @@ export interface BrowserAnnotation {
     box: { x: number; y: number; width: number; height: number };
   };
   viewport: { width: number; height: number };
+  note?: string;
   styleChanges: Record<string, { before: string; after: string }>;
-  screenshotPath?: string;
-  elementScreenshotPath?: string;
 }
 
 // MCP & Skills drawer (desktop/app.go Capabilities) — the GUI counterpart to

@@ -48,6 +48,32 @@ func TestNormalizeBrowserURL(t *testing.T) {
 	}
 }
 
+func TestLocalBrowserURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{name: "localhost", url: "http://localhost:5173", want: true},
+		{name: "localhost subdomain", url: "https://app.localhost:8443", want: true},
+		{name: "ipv4 loopback", url: "http://127.12.3.4:3000", want: true},
+		{name: "ipv6 loopback", url: "http://[::1]:5173", want: true},
+		{name: "unspecified ipv4", url: "http://0.0.0.0:4173", want: true},
+		{name: "unspecified ipv6", url: "http://[::]:4173", want: true},
+		{name: "private lan", url: "http://192.168.1.10:5173", want: false},
+		{name: "public", url: "https://example.com", want: false},
+		{name: "lookalike", url: "https://localhost.example.com", want: false},
+		{name: "blank", url: "about:blank", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isLocalBrowserURL(tt.url); got != tt.want {
+				t.Fatalf("isLocalBrowserURL(%q) = %t, want %t", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBrowserProfilePathUsesReasonixHome(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("REASONIX_HOME", root)
@@ -260,6 +286,25 @@ func TestNormalizeBrowserStyleOverrides(t *testing.T) {
 	}
 }
 
+func TestValidateBrowserSelector(t *testing.T) {
+	valid := []string{
+		"#submit",
+		"div.flex.justify-end:nth-of-type(1) > button.el-button",
+		`button.hover\:bg-blue-500`,
+	}
+	for _, selector := range valid {
+		if err := validateBrowserSelector(selector); err != nil {
+			t.Fatalf("validateBrowserSelector(%q): %v", selector, err)
+		}
+	}
+	invalid := []string{"", "button{display:none}", "button\nbody"}
+	for _, selector := range invalid {
+		if err := validateBrowserSelector(selector); err == nil {
+			t.Fatalf("validateBrowserSelector(%q) succeeded", selector)
+		}
+	}
+}
+
 func TestBrowserRuntimeSmoke(t *testing.T) {
 	executable := os.Getenv("REASONIX_CHROMIUM_SMOKE")
 	if executable == "" {
@@ -274,7 +319,7 @@ func TestBrowserRuntimeSmoke(t *testing.T) {
 			_, _ = w.Write([]byte("<!doctype html><title>Popup Target</title><main>popup</main>"))
 			return
 		}
-		_, _ = w.Write([]byte(`<!doctype html><title>Reasonix Browser Smoke</title><main>ready</main><a id="popup" target="_blank" href="/popup">popup</a><a id="restricted" target="_blank" href="chrome://version">restricted</a>`))
+		_, _ = w.Write([]byte(`<!doctype html><title>Reasonix Browser Smoke</title><div class="bg-white rounded-lg px-4 py-5 mb-3" style="padding:20px"><button class="el-button hover:bg-blue-500">ready</button></div><section><button class="el-button hover:bg-blue-500">other</button></section><a id="popup" target="_blank" href="/popup">popup</a><a id="restricted" target="_blank" href="chrome://version">restricted</a>`))
 	}))
 	defer server.Close()
 
@@ -345,42 +390,104 @@ func TestBrowserRuntimeSmoke(t *testing.T) {
 	if err := app.BrowserStartScreencast(view.TabID, view.PageID); err != nil {
 		t.Fatalf("BrowserStartScreencast: %v", err)
 	}
-	selection, err := app.BrowserInspectorSelect(view.TabID, view.PageID, 20, 20)
+	hovered, err := app.BrowserInspectorHover(view.TabID, view.PageID, 40, 40)
+	if err != nil {
+		t.Fatalf("BrowserInspectorHover: %v", err)
+	}
+	if hovered.Selector == "" || hovered.Tag == "" || hovered.ComputedStyles["font-size"] == "" {
+		t.Fatalf("BrowserInspectorHover = %+v", hovered)
+	}
+	selection, err := app.BrowserInspectorSelect(view.TabID, view.PageID, 40, 40)
 	if err != nil {
 		t.Fatalf("BrowserInspectorSelect: %v", err)
 	}
-	if selection.Selector == "" || selection.Tag == "" {
-		t.Fatalf("BrowserInspectorSelect = %+v", selection)
+	if selection.Selector == "" || selection.Tag == "" || !strings.Contains(selection.Selector, " > ") || !strings.Contains(selection.Selector, `hover\:`) {
+		t.Fatalf("BrowserInspectorSelect did not produce the expected escaped descendant selector: %+v", selection)
 	}
-	styled, err := app.BrowserApplyStyles(view.TabID, view.PageID, map[string]string{"color": "rgb(217, 119, 87)"})
+	runtimeSession, err := app.browsers.session(view.TabID, view.PageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+drainFrames:
+	for {
+		select {
+		case frame := <-frames:
+			if err := app.BrowserFrameAck(frame.TabID, frame.PageID, frame.Sequence); err != nil {
+				t.Fatalf("BrowserFrameAck before style update: %v", err)
+			}
+		default:
+			break drainFrames
+		}
+	}
+	runtimeSession.frameMu.Lock()
+	frameSequenceBeforeStyle := runtimeSession.frameSequence
+	runtimeSession.frameMu.Unlock()
+	originalWidth := selection.Box.Width
+	originalHeight := selection.Box.Height
+	originalComputedWidth := selection.ComputedStyles["width"]
+	originalComputedHeight := selection.ComputedStyles["height"]
+	styled, err := app.BrowserApplyStyles(view.TabID, view.PageID, map[string]string{
+		"color":  "rgb(217, 119, 87)",
+		"width":  "240px",
+		"height": "80px",
+	})
 	if err != nil {
 		t.Fatalf("BrowserApplyStyles: %v", err)
 	}
-	if styled.StyleOverrides["color"] == "" {
-		t.Fatalf("BrowserApplyStyles = %+v", styled)
+	if styled.StyleOverrides["color"] == "" || styled.ComputedStyles["width"] != "240px" || styled.ComputedStyles["height"] != "80px" {
+		t.Fatalf("BrowserApplyStyles did not refresh computed styles: %+v", styled)
 	}
-	capture, err := app.BrowserCaptureAnnotation(view.TabID, view.PageID)
-	if err != nil {
-		t.Fatalf("BrowserCaptureAnnotation: %v", err)
+	if styled.Box.Width <= originalWidth || styled.Box.Height <= originalHeight {
+		t.Fatalf("BrowserApplyStyles did not refresh element bounds: before=%+v after=%+v", selection.Box, styled.Box)
 	}
-	if len(capture.ScreenshotData) < 100 || len(capture.ElementScreenshotData) < 100 {
-		t.Fatalf("BrowserCaptureAnnotation returned empty screenshots: %+v", capture)
+	if styled.OriginalStyles["width"] != originalComputedWidth || styled.OriginalStyles["height"] != originalComputedHeight {
+		t.Fatalf("BrowserApplyStyles replaced original style baseline: before=%+v after=%+v", selection.ComputedStyles, styled.OriginalStyles)
 	}
+	styleFrameDeadline := time.After(10 * time.Second)
+	for {
+		select {
+		case frame := <-frames:
+			if err := app.BrowserFrameAck(frame.TabID, frame.PageID, frame.Sequence); err != nil {
+				t.Fatalf("BrowserFrameAck after style update: %v", err)
+			}
+			if frame.Sequence <= frameSequenceBeforeStyle {
+				continue
+			}
+			if frame.TabID != view.TabID || frame.PageID != view.PageID || frame.Data == "" {
+				t.Fatalf("invalid browser frame after style update: %+v", frame)
+			}
+			goto styleFrameReceived
+		case <-styleFrameDeadline:
+			t.Fatal("timed out waiting for screencast frame after style update")
+		}
+	}
+
+styleFrameReceived:
 	if err := app.BrowserInspectorClear(view.TabID, view.PageID); err != nil {
 		t.Fatalf("BrowserInspectorClear: %v", err)
 	}
 
-	select {
-	case frame := <-frames:
-		if frame.TabID != view.TabID || frame.PageID != view.PageID || frame.Data == "" {
-			t.Fatalf("invalid browser frame: %+v", frame)
-		}
-		if err := app.BrowserFrameAck(frame.TabID, frame.PageID, frame.Sequence); err != nil {
-			t.Fatalf("BrowserFrameAck: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("timed out waiting for browser screencast frame")
+	permissionSession, err := app.browsers.session(view.TabID, view.PageID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	permissionSession.stateMu.Lock()
+	permissionSession.state.URL = "https://example.com"
+	permissionSession.state.CanAnnotate = false
+	permissionSession.stateMu.Unlock()
+	if _, err := app.BrowserInspectorHover(view.TabID, view.PageID, 20, 20); err == nil {
+		t.Fatal("BrowserInspectorHover allowed an external page")
+	}
+	if _, err := app.BrowserInspectorSelect(view.TabID, view.PageID, 20, 20); err == nil {
+		t.Fatal("BrowserInspectorSelect allowed an external page")
+	}
+	if _, err := app.BrowserApplyStyles(view.TabID, view.PageID, map[string]string{"color": "red"}); err == nil {
+		t.Fatal("BrowserApplyStyles allowed an external page")
+	}
+	permissionSession.stateMu.Lock()
+	permissionSession.state.URL = server.URL
+	permissionSession.state.CanAnnotate = true
+	permissionSession.stateMu.Unlock()
 
 	resized, err := app.BrowserResize(view.TabID, view.PageID, 800, 500)
 	if err != nil {

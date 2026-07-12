@@ -1,0 +1,65 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/build-windows-installer.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-amd64:
+    name: Windows amd64 installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      REASONIX_CHROMIUM_CACHE: ${{ runner.temp }}/reasonix-chromium-cache
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Cache bundled Chromium archive
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.REASONIX_CHROMIUM_CACHE }}
+          key: chromium-windows-amd64-${{ hashFiles('desktop/build/chromium/manifest.json') }}
+
+      - name: Install NSIS
+        run: |
+          choco install nsis -y --no-progress
+          echo "C:\Program Files (x86)\NSIS" >> "$GITHUB_PATH"
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Build installer and portable archive
+        run: scripts/desktop-build.sh windows/amd64 "v1.17.11-build.${{ github.run_number }}" canary
+
+      - name: Upload Windows packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: Reasonix-windows-amd64-${{ github.run_number }}
+          path: |
+            dist/Reasonix-windows-amd64-installer.exe
+            dist/Reasonix-windows-amd64.zip
+          if-no-files-found: error
+          retention-days: 14

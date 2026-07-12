@@ -158,6 +158,7 @@ export interface BrowserSessionView {
   height: number;
   canGoBack: boolean;
   canGoForward: boolean;
+  canAnnotate: boolean;
   sequence: number;
 }
 
@@ -204,6 +205,7 @@ export interface BrowserElementView {
   outerHTML?: string;
   box: BrowserElementBox;
   computedStyles: Record<string, string>;
+  originalStyles?: Record<string, string>;
   styleOverrides?: Record<string, string>;
 }
 
@@ -212,11 +214,6 @@ export interface BrowserSelectionEvent {
   pageId: string;
   sequence: number;
   selection?: BrowserElementView;
-}
-
-export interface BrowserAnnotationCapture {
-  screenshotData: string;
-  elementScreenshotData?: string;
 }
 
 export interface BrowserMouseEvent {
@@ -287,10 +284,9 @@ export interface AppBindings {
   BrowserMouse(tabID: string, pageID: string, event: BrowserMouseEvent): Promise<void>;
   BrowserKey(tabID: string, pageID: string, event: BrowserKeyEvent): Promise<void>;
   BrowserInsertText(tabID: string, pageID: string, text: string): Promise<void>;
-  BrowserInspectorHover(tabID: string, pageID: string, x: number, y: number): Promise<void>;
+  BrowserInspectorHover(tabID: string, pageID: string, x: number, y: number): Promise<BrowserElementView>;
   BrowserInspectorSelect(tabID: string, pageID: string, x: number, y: number): Promise<BrowserElementView>;
   BrowserApplyStyles(tabID: string, pageID: string, styles: Record<string, string>): Promise<BrowserElementView>;
-  BrowserCaptureAnnotation(tabID: string, pageID: string): Promise<BrowserAnnotationCapture>;
   BrowserInspectorClear(tabID: string, pageID: string): Promise<void>;
   Steer(text: string): Promise<void>;
   SteerForTab(tabID: string, text: string): Promise<void>;
@@ -2377,9 +2373,6 @@ function makeMockApp(): AppBindings {
           throw new Error(t("browser.desktopOnly"));
         },
         async BrowserApplyStyles(_tabID, _pageID, _styles) {
-          throw new Error(t("browser.desktopOnly"));
-        },
-        async BrowserCaptureAnnotation(_tabID, _pageID) {
           throw new Error(t("browser.desktopOnly"));
         },
         async BrowserInspectorClear(_tabID, _pageID) {

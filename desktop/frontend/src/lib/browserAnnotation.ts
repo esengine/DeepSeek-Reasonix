@@ -14,7 +14,7 @@ export function browserStyleChanges(
       .map(([name, after]) => [
         name,
         {
-          before: selection.computedStyles[name] ?? "",
+          before: selection.originalStyles?.[name] ?? selection.computedStyles[name] ?? "",
           after,
         },
       ]),
@@ -24,8 +24,7 @@ export function browserStyleChanges(
 export function createBrowserAnnotation(
   selection: BrowserElementView,
   session: BrowserSessionView,
-  screenshotPath?: string,
-  elementScreenshotPath?: string,
+  note?: string,
 ): BrowserAnnotation {
   return {
     page: {
@@ -43,9 +42,8 @@ export function createBrowserAnnotation(
       width: session.width,
       height: session.height,
     },
+    note: note?.trim() || undefined,
     styleChanges: browserStyleChanges(selection),
-    screenshotPath,
-    elementScreenshotPath,
   };
 }
 
@@ -62,6 +60,7 @@ export function formatBrowserAnnotation(annotation: BrowserAnnotation): string {
 
   return [
     "[Browser annotation]",
+    annotation.note ? `用户批注:\n${annotation.note}` : "",
     `URL: ${annotation.page.url}`,
     annotation.page.title ? `Title: ${annotation.page.title}` : "",
     `Element: ${element}`,
@@ -70,8 +69,6 @@ export function formatBrowserAnnotation(annotation: BrowserAnnotation): string {
     `Viewport: ${annotation.viewport.width}x${annotation.viewport.height}`,
     "Style changes:",
     ...styleLines,
-    annotation.screenshotPath ? `Screenshot: ${annotation.screenshotPath}` : "Screenshot: unavailable",
-    annotation.elementScreenshotPath ? `Element screenshot: ${annotation.elementScreenshotPath}` : "",
-    "Request: 按以上标注修改对应源码样式。",
+    "Request: 请根据以上元素标识和批注定位对应源码并完成修改。",
   ].filter(Boolean).join("\n");
 }
