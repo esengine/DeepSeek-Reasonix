@@ -265,7 +265,9 @@ darwin)
 	;;
 windows)
 	archive="$ROOT/dist/${APPNAME}-windows-${arch}.zip"
-	tar -xf "$archive" -C "$package_check"
+	archive_win=$(cygpath -w "$archive")
+	package_check_win=$(cygpath -w "$package_check")
+	powershell.exe -NoProfile -Command "Expand-Archive -Force -LiteralPath '$archive_win' -DestinationPath '$package_check_win'"
 	go run ./cmd/chromium-runtime verify --platform "windows/$arch" \
 		--output "$package_check/chromium"
 	;;
