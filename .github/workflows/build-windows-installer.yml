@@ -17,10 +17,10 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      REASONIX_CHROMIUM_CACHE: ${{ runner.temp }}/reasonix-chromium-cache
-
     steps:
+      - name: Configure Chromium cache path
+        run: echo "REASONIX_CHROMIUM_CACHE=$RUNNER_TEMP/reasonix-chromium-cache" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
