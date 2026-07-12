@@ -125,6 +125,11 @@ interface State {
   pendingUser?: string;
   discardTurn?: boolean;
   turnStartAt: number;
+  // Time spent waiting on the user (approval/ask) within the current turn.
+  // Closed intervals accumulate here; an open interval uses promptWaitStartedAt
+  // so background tabs keep counting while not rendered by Composer.
+  turnWaitAccumMs: number;
+  promptWaitStartedAt?: number;
   turnTokens: number;
   turnTotalTokens: number;
   turnCost: number;
@@ -154,6 +159,7 @@ export const initialState: State = {
   historyOlderLoading: false,
   backendActivationPending: false,
   turnStartAt: 0,
+  turnWaitAccumMs: 0,
   turnTokens: 0,
   turnTotalTokens: 0,
   turnCost: 0,
@@ -588,9 +594,57 @@ function completeLiveReasoning(live: LiveStream, now = Date.now()): LiveStream {
   };
 }
 
-function currentTurnDurationMs(s: Pick<State, "turnStartAt">, now = Date.now()): number | undefined {
+/** Closed + open user-wait ms for the active turn (approval/ask). */
+export function currentTurnWaitMs(
+  s: Pick<State, "turnWaitAccumMs" | "promptWaitStartedAt">,
+  now = Date.now(),
+): number {
+  const closed = Math.max(0, s.turnWaitAccumMs || 0);
+  const open = s.promptWaitStartedAt && s.promptWaitStartedAt > 0
+    ? Math.max(0, now - s.promptWaitStartedAt)
+    : 0;
+  return closed + open;
+}
+
+function currentTurnDurationMs(
+  s: Pick<State, "turnStartAt" | "turnWaitAccumMs" | "promptWaitStartedAt">,
+  now = Date.now(),
+): number | undefined {
   if (!Number.isFinite(s.turnStartAt) || s.turnStartAt <= 0 || now < s.turnStartAt) return undefined;
-  return Math.max(1, now - s.turnStartAt);
+  return Math.max(1, now - s.turnStartAt - currentTurnWaitMs(s, now));
+}
+
+function beginPromptWait(s: State, now = Date.now()): State {
+  if (s.promptWaitStartedAt && s.promptWaitStartedAt > 0) return s;
+  return { ...s, promptWaitStartedAt: now };
+}
+
+function endPromptWait(s: State, now = Date.now()): State {
+  if (!s.promptWaitStartedAt || s.promptWaitStartedAt <= 0) {
+    return s.promptWaitStartedAt === undefined ? s : { ...s, promptWaitStartedAt: undefined };
+  }
+  const delta = Math.max(0, now - s.promptWaitStartedAt);
+  return {
+    ...s,
+    turnWaitAccumMs: Math.max(0, s.turnWaitAccumMs || 0) + delta,
+    promptWaitStartedAt: undefined,
+  };
+}
+
+function endPromptWaitIfIdle(s: State, now = Date.now()): State {
+  if (s.approval || s.ask) return s;
+  return endPromptWait(s, now);
+}
+
+function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnWaitAccumMs" | "promptWaitStartedAt" | "turnTokens" | "turnTotalTokens" | "turnCost"> {
+  return {
+    turnStartAt: now,
+    turnWaitAccumMs: 0,
+    promptWaitStartedAt: undefined,
+    turnTokens: 0,
+    turnTotalTokens: 0,
+    turnCost: 0,
+  };
 }
 
 function flushPendingUser(s: State): State {
@@ -632,7 +686,19 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
+      return {
+        ...cur,
+        items,
+        currentAssistant: id,
+        seq,
+        live: { id, text: "", reasoning: "", reasoningComplete: false },
+        running: true,
+        turnActive: true,
+        pendingPrompt: false,
+        cancelRequested: false,
+        cancellable: true,
+        ...resetTurnTiming(),
+      };
     }
     case "text":
     case "reasoning": {
@@ -794,11 +860,25 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `↪ ${e.text ?? ""}` }] };
     case "approval_request": {
       if (s.cancelRequested) return s;
-      return { ...s, approval: e.approval, pendingPrompt: true, running: true, turnActive: true, cancellable: true };
+      return beginPromptWait({
+        ...s,
+        approval: e.approval,
+        pendingPrompt: true,
+        running: true,
+        turnActive: true,
+        cancellable: true,
+      });
     }
     case "ask_request": {
       if (s.cancelRequested) return s;
-      return { ...s, ask: e.ask, pendingPrompt: true, running: true, turnActive: true, cancellable: true };
+      return beginPromptWait({
+        ...s,
+        ask: e.ask,
+        pendingPrompt: true,
+        running: true,
+        turnActive: true,
+        cancellable: true,
+      });
     }
     case "guardian_assessment": {
       if (!e.guardian) return s;
@@ -850,7 +930,7 @@ function applyEvent(s: State, e: WireEvent): State {
       // Plan approval can arrive before turn_done on some Wails event paths.
       // Keep that gate visible instead of clearing the only UI that can answer it.
       const keepPlanApproval = s.approval?.tool === "exit_plan_mode";
-      return {
+      let next: State = {
         ...s,
         items,
         live: undefined,
@@ -864,6 +944,9 @@ function applyEvent(s: State, e: WireEvent): State {
         ask: undefined,
         seq: s.seq + 1,
       };
+      // Close user-wait unless the plan approval gate remains open.
+      if (!keepPlanApproval) next = endPromptWait(next, now);
+      return next;
     }
     default: return s;
   }
@@ -881,16 +964,36 @@ export function reducer(s: State, a: Action): State {
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: true,
-        turnStartAt: Date.now(),
-        turnTokens: 0,
-        turnTotalTokens: 0,
-        turnCost: 0,
+        ...resetTurnTiming(),
         pendingUser: a.text,
         discardTurn: false,
       };
     }
-    case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, pendingPrompt: false, cancelRequested: true, cancellable: false, approval: undefined, ask: undefined, live: undefined };
-    case "cancel_requested": return { ...s, pendingPrompt: false, cancelRequested: true, approval: undefined, ask: undefined, cancellable: s.running || s.turnActive };
+    case "unsend": {
+      const cleared = endPromptWait({
+        ...s,
+        pendingUser: undefined,
+        discardTurn: true,
+        running: false,
+        pendingPrompt: false,
+        cancelRequested: true,
+        cancellable: false,
+        approval: undefined,
+        ask: undefined,
+        live: undefined,
+      });
+      return cleared;
+    }
+    case "cancel_requested": {
+      return endPromptWait({
+        ...s,
+        pendingPrompt: false,
+        cancelRequested: true,
+        approval: undefined,
+        ask: undefined,
+        cancellable: s.running || s.turnActive,
+      });
+    }
     case "send_failed": {
       if (s.pendingUser === undefined) return s;
       let idx = -1;
@@ -933,7 +1036,20 @@ export function reducer(s: State, a: Action): State {
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      return { ...s, items: finalized, running: false, turnActive: false, pendingPrompt, backgroundJobs, cancelRequested, cancellable, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
+      return endPromptWait({
+        ...s,
+        items: finalized,
+        running: false,
+        turnActive: false,
+        pendingPrompt,
+        backgroundJobs,
+        cancelRequested,
+        cancellable,
+        live: undefined,
+        currentAssistant: undefined,
+        approval: undefined,
+        ask: undefined,
+      });
     }
     case "meta": {
       const meta = a.meta.sessionPath === undefined && s.meta?.sessionPath !== undefined ? { ...a.meta, sessionPath: s.meta.sessionPath } : a.meta;
@@ -1007,8 +1123,14 @@ export function reducer(s: State, a: Action): State {
     case "history_checkpoint_turns":
       return { ...s, items: mergeHistoryCheckpointTurns(s.items, a.turns, s.historyStartTurn) };
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
-    case "clearApproval": return { ...s, approval: undefined, pendingPrompt: false };
-    case "clearAsk": return { ...s, ask: undefined, pendingPrompt: false };
+    case "clearApproval": {
+      const next = { ...s, approval: undefined, pendingPrompt: Boolean(s.ask) };
+      return endPromptWaitIfIdle(next);
+    }
+    case "clearAsk": {
+      const next = { ...s, ask: undefined, pendingPrompt: Boolean(s.approval) };
+      return endPromptWaitIfIdle(next);
+    }
     case "reset": return { ...initialState, meta: s.meta, context: { used: 0, window: s.context.window, sessionTokens: 0, compactRatio: s.context.compactRatio }, balance: s.balance, effort: s.effort, jobs: s.jobs, hydrating: s.hydrating, hydrateReason: s.hydrateReason, hydrateError: s.hydrateError, hydrateHistoryLoaded: s.hydrateHistoryLoaded, hydratePlaceholderItems: s.hydratePlaceholderItems, backendActivationPending: s.backendActivationPending, sessionGen: s.sessionGen + 1 };
     case "event": return applyEvent(s, a.e);
     default: return s;
@@ -1859,7 +1981,7 @@ export function useController() {
     replayPendingPromptsForActiveTab(activeTabId);
   }, [activeTabId]);
 
-  const sendToTab = useCallback(async (tabId: string, displayText: string, submitText = displayText, originalText?: string) => {
+  const sendToTab = useCallback(async (tabId: string, displayText: string, submitText = displayText, originalText?: string, structured?: import("./invocationDisplay").StructuredInvocationSubmit) => {
     if (!tabId) throw new Error(t("composer.workspaceStarting"));
     const seq = getOrCreateState(statesRef.current, tabId).seq;
     const display = displayText.trim();
@@ -1868,7 +1990,9 @@ export function useController() {
     dispatchTo(tabId, { type: "user", text: displayText, submitText: display !== submit ? submit : undefined, seq });
     invalidateCache();
     try {
-      const submitPromise = original
+      const submitPromise = structured
+        ? app.SubmitInvocationsToTab(tabId, structured.display.trim(), structured.input.trim(), structured.invocations)
+        : original
         ? app.SubmitEditedDisplayToTab(tabId, display, submit, original)
         : display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit);
       void submitPromise.catch((error) => {

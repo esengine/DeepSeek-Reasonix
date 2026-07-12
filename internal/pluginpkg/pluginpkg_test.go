@@ -40,7 +40,7 @@ func TestParseCodexSuperpowersManifest(t *testing.T) {
 	if len(inv.Skills) != 1 || inv.Skills[0].Name != "plan" || inv.Skills[0].Invocation != "/plan" {
 		t.Fatalf("Inventory().Skills = %+v", inv.Skills)
 	}
-	if skills, hooks, _ := pkg.CapabilityCounts(); skills != 1 || hooks != 1 {
+	if skills, _, hooks, _ := pkg.CapabilityCounts(); skills != 1 || hooks != 1 {
 		t.Fatalf("CapabilityCounts skills=%d hooks=%d", skills, hooks)
 	}
 }
@@ -225,7 +225,7 @@ func TestInstalledTextDescribesUsageInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"plugin superpowers [enabled]", "usage: enabled plugins load into new sessions", "/plan [subagent] - Plan work", "SessionStart"} {
+	for _, want := range []string{"plugin superpowers [enabled]", "usage: enabled plugins load into new sessions", "/superpowers:plan [subagent] - Plan work", "SessionStart"} {
 		if !strings.Contains(details, want) {
 			t.Fatalf("InstalledShowText missing %q:\n%s", want, details)
 		}
@@ -329,13 +329,111 @@ func TestParseClaudePluginWarnsOnUnmappedCapabilities(t *testing.T) {
 		t.Fatalf("ParseDir: %v", err)
 	}
 	joined := strings.Join(warnings, "\n")
-	for _, want := range []string{"commands", "hooks/hooks.json", ".mcp.json"} {
+	for _, want := range []string{"hooks/hooks.json", ".mcp.json"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("warnings = %v, want mention of %s", warnings, want)
 		}
 	}
+	// commands map to custom slash commands now — they must not warn.
+	if strings.Contains(joined, "commands") {
+		t.Fatalf("warnings = %v, must not warn about the mapped commands dir", warnings)
+	}
 	if strings.Contains(joined, "agents") {
 		t.Fatalf("warnings = %v, must not mention absent agents dir", warnings)
+	}
+}
+
+// TestParseClaudePluginMapsCommandsDir pins the commands mapping: a Claude
+// plugin's conventional commands/ dir becomes a Manifest.Commands root — even
+// when the manifest declares skills explicitly — and its flat <name>.md
+// templates surface in the inventory as /<name> invocations.
+func TestParseClaudePluginMapsCommandsDir(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "pwf-pack"}`)
+	writeTestFile(t, filepath.Join(root, "skills", "planner", "SKILL.md"), "---\ndescription: planner skill\n---\nbody")
+	writeTestFile(t, filepath.Join(root, "commands", "plan.md"), "---\ndescription: \"Start planning\"\nargument-hint: \"[task]\"\n---\nPlan: $ARGUMENTS")
+	writeTestFile(t, filepath.Join(root, "commands", "status.md"), "Show status")
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none for a fully mapped plugin", warnings)
+	}
+	if got := pkg.CommandRoots(); len(got) != 1 || got[0] != filepath.Join(root, "commands") {
+		t.Fatalf("CommandRoots = %#v, want the conventional commands dir", got)
+	}
+	inv := pkg.Inventory()
+	if len(inv.Commands) != 2 {
+		t.Fatalf("inventory commands = %#v, want plan and status", inv.Commands)
+	}
+	byName := map[string]CommandRef{}
+	for _, c := range inv.Commands {
+		byName[c.Name] = c
+	}
+	plan, ok := byName["plan"]
+	if !ok || plan.Invocation != "/plan" || plan.Description != "Start planning" || plan.ArgHint != "[task]" {
+		t.Fatalf("plan command = %+v, want /plan with description and arg hint", plan)
+	}
+	if _, ok := byName["status"]; !ok {
+		t.Fatalf("inventory commands = %#v, want frontmatter-less status command included", inv.Commands)
+	}
+	skills, commands, hooks, mcp := pkg.CapabilityCounts()
+	if skills != 1 || commands != 2 || hooks != 0 || mcp != 0 {
+		t.Fatalf("CapabilityCounts = %d skills %d commands %d hooks %d mcp, want 1/2/0/0", skills, commands, hooks, mcp)
+	}
+
+	// Explicit skills declaration must not disable command adoption.
+	root2 := t.TempDir()
+	writeTestFile(t, filepath.Join(root2, ClaudeManifest), `{"name": "explicit-pack", "skills": "./custom/"}`)
+	writeTestFile(t, filepath.Join(root2, "custom", "one", "SKILL.md"), "---\ndescription: one\n---\nbody")
+	writeTestFile(t, filepath.Join(root2, "commands", "go.md"), "go")
+	pkg2, _, err := ParseDir(root2)
+	if err != nil {
+		t.Fatalf("ParseDir explicit: %v", err)
+	}
+	if got := pkg2.CommandRoots(); len(got) != 1 || got[0] != filepath.Join(root2, "commands") {
+		t.Fatalf("CommandRoots = %#v, want commands adopted alongside explicit skills", got)
+	}
+
+	// A docs-only commands dir (no installable <name>.md) is not adopted.
+	root3 := t.TempDir()
+	writeTestFile(t, filepath.Join(root3, ClaudeManifest), `{"name": "docs-pack"}`)
+	writeTestFile(t, filepath.Join(root3, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nbody")
+	writeTestFile(t, filepath.Join(root3, "commands", "notes.txt"), "not a command")
+	pkg3, _, err := ParseDir(root3)
+	if err != nil {
+		t.Fatalf("ParseDir docs-only: %v", err)
+	}
+	if got := pkg3.CommandRoots(); len(got) != 0 {
+		t.Fatalf("CommandRoots = %#v, want none for a commands dir without .md files", got)
+	}
+}
+
+// TestNativeManifestCommandsField pins the explicit "commands" declaration in
+// reasonix-plugin.json, including path validation.
+func TestNativeManifestCommandsField(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, NativeManifest), `{"name": "native-pack", "commands": ["cmds"]}`)
+	writeTestFile(t, filepath.Join(root, "cmds", "ship.md"), "---\ndescription: ship it\n---\nShip $1")
+
+	pkg, _, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if got := pkg.CommandRoots(); len(got) != 1 || got[0] != filepath.Join(root, "cmds") {
+		t.Fatalf("CommandRoots = %#v, want declared cmds dir", got)
+	}
+	inv := pkg.Inventory()
+	if len(inv.Commands) != 1 || inv.Commands[0].Name != "ship" {
+		t.Fatalf("inventory commands = %#v, want ship", inv.Commands)
+	}
+
+	rootBad := t.TempDir()
+	writeTestFile(t, filepath.Join(rootBad, NativeManifest), `{"name": "bad-pack", "commands": ["../escape"]}`)
+	if _, _, err := ParseDir(rootBad); err == nil {
+		t.Fatal("ParseDir must reject a commands path escaping the plugin root")
 	}
 }
 
@@ -377,5 +475,66 @@ func TestParseCodexManifestNotAffectedByClaudeFallback(t *testing.T) {
 	}
 	if got := pkg.SkillRoots(); len(got) != 0 {
 		t.Fatalf("SkillRoots = %#v, codex parsing must not adopt convention dirs", got)
+	}
+}
+
+// TestParseClaudePluginAdoptsNestedCommands pins that namespace layouts like
+// commands/git/commit.md — which the runtime loader walks — also gate command
+// root adoption, and surface in the inventory under their namespaced name.
+func TestParseClaudePluginAdoptsNestedCommands(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "nested-pack"}`)
+	writeTestFile(t, filepath.Join(root, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nbody")
+	writeTestFile(t, filepath.Join(root, "commands", "git", "commit.md"), "---\ndescription: commit helper\n---\nCommit: $ARGUMENTS")
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	if got := pkg.CommandRoots(); len(got) != 1 || got[0] != filepath.Join(root, "commands") {
+		t.Fatalf("CommandRoots = %#v, want commands adopted for nested-only layout", got)
+	}
+	inv := pkg.Inventory()
+	if len(inv.Commands) != 1 || inv.Commands[0].Name != "git:commit" || inv.Commands[0].Invocation != "/git:commit" {
+		t.Fatalf("inventory commands = %#v, want namespaced git:commit", inv.Commands)
+	}
+}
+
+// TestInventoryTextCommandsOnly pins that a commands-only inventory does not
+// also claim "no detailed inventory available".
+func TestInventoryTextCommandsOnly(t *testing.T) {
+	var b strings.Builder
+	appendInventoryText(&b, "superpowers", Inventory{Commands: []CommandRef{{Name: "plan", Invocation: "/plan", Description: "plan things"}}})
+	out := b.String()
+	if !strings.Contains(out, "commands:") || !strings.Contains(out, "/superpowers:plan") {
+		t.Fatalf("output = %q, want the commands listing", out)
+	}
+	if strings.Contains(out, "no detailed inventory available") {
+		t.Fatalf("output = %q, must not claim an empty inventory after listing commands", out)
+	}
+}
+
+// TestParseClaudePluginAdoptsDeeplyNestedCommands pins that adoption gating
+// shares the runtime loader's discovery semantics with no depth ceiling: a
+// plugin whose only command sits six levels deep is still adopted.
+func TestParseClaudePluginAdoptsDeeplyNestedCommands(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "deep-pack"}`)
+	writeTestFile(t, filepath.Join(root, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nbody")
+	writeTestFile(t, filepath.Join(root, "commands", "a", "b", "c", "d", "e", "commit.md"), "---\ndescription: deep commit\n---\nCommit")
+
+	pkg, _, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if got := pkg.CommandRoots(); len(got) != 1 || got[0] != filepath.Join(root, "commands") {
+		t.Fatalf("CommandRoots = %#v, want commands adopted for the deeply nested layout", got)
+	}
+	inv := pkg.Inventory()
+	if len(inv.Commands) != 1 || inv.Commands[0].Name != "a:b:c:d:e:commit" {
+		t.Fatalf("inventory commands = %#v, want the namespaced deep command", inv.Commands)
 	}
 }

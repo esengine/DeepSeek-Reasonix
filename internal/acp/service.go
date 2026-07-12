@@ -1607,6 +1607,9 @@ func availableCommandsFor(ctrl acpController) []AvailableCommand {
 	}
 	byName := map[string]AvailableCommand{}
 	for _, cmd := range ctrl.Commands() {
+		if cmd.Hidden {
+			continue
+		}
 		name := strings.TrimSpace(cmd.Name)
 		if name == "" {
 			continue
@@ -1621,8 +1624,8 @@ func availableCommandsFor(ctrl acpController) []AvailableCommand {
 		}
 		byName[name] = ac
 	}
-	for _, sk := range ctrl.Skills() {
-		name := strings.TrimSpace(sk.Name)
+	for _, sk := range ctrl.SlashSkills() {
+		name := strings.TrimSpace(sk.SlashName())
 		if name == "" {
 			continue
 		}

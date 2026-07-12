@@ -57,8 +57,8 @@ func TestEnsureBlankTabInheritsActiveTabLocalSettings(t *testing.T) {
 	if created.tokenMode != "economy" {
 		t.Fatalf("tokenMode = %q, want inherited \"economy\"", created.tokenMode)
 	}
-	if created.toolApprovalMode != control.ToolApprovalAsk {
-		t.Fatalf("toolApprovalMode = %q, want global default ask", created.toolApprovalMode)
+	if created.toolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("toolApprovalMode = %q, want global default auto", created.toolApprovalMode)
 	}
 	if created.mode != "normal" {
 		t.Fatalf("mode = %q, want global default normal", created.mode)
@@ -126,5 +126,21 @@ func TestEnsureBlankTabUsesGlobalSessionDefaultsForModelAndToolApproval(t *testi
 	}
 	if !strings.Contains(filepath.Base(created.SessionPath), "deepseek-v4-pro") {
 		t.Fatalf("new session path = %q, want filename seeded by global default model", created.SessionPath)
+	}
+}
+
+func TestDesktopNewSessionDefaultsHonorExplicitAsk(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if err := cfg.SetDesktopDefaultToolApprovalMode(control.ToolApprovalAsk); err != nil {
+		t.Fatalf("SetDesktopDefaultToolApprovalMode: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	_, approvalMode := desktopNewSessionDefaults()
+	if approvalMode != control.ToolApprovalAsk {
+		t.Fatalf("explicit desktop approval default = %q, want ask", approvalMode)
 	}
 }

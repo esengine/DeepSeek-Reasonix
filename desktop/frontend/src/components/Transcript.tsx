@@ -1,8 +1,9 @@
 import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
+import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
-import { AssistantMessage, TurnActions, UserMessage } from "./Message";
+import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
 import { ProcessBrainIcon, ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ArrowDown, ChevronRight } from "lucide-react";
@@ -252,6 +253,7 @@ export function Transcript({
   loadingOlderHistory = false,
   onLoadOlderHistory,
   turnStartAt,
+  invocationMetadata = {},
 }: {
   items: Item[];
   live?: LiveStream;
@@ -276,6 +278,7 @@ export function Transcript({
   loadingOlderHistory?: boolean;
   onLoadOlderHistory?: () => void;
   turnStartAt?: number;
+  invocationMetadata?: InvocationMetadataMap;
 }) {
   const t = useT();
   const {
@@ -655,6 +658,7 @@ export function Transcript({
   // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
   // LiveStreamContext) so streaming updates are captured immediately.
   return (
+    <InvocationMetadataContext.Provider value={invocationMetadata}>
     <div className="transcript-shell">
       <div
         className={`transcript${empty ? " transcript--empty" : ""}`}
@@ -729,6 +733,7 @@ export function Transcript({
         </button>
       )}
     </div>
+    </InvocationMetadataContext.Provider>
   );
 }
 

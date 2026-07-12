@@ -20,8 +20,15 @@ var (
 	// The optional auth-scheme group keeps schemes like "Basic"/"Digest" out of
 	// the value capture, so the credential after the scheme word is what gets
 	// masked (an uncaptured scheme would itself be swallowed as the value,
-	// leaving the real credential in the clear right behind it).
-	keyValuePattern     = regexp.MustCompile(`(?i)\b([A-Z0-9_.-]*(?:API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_.-]*|[A-Z0-9_.-]+[_-]PWD[A-Z0-9_.-]*|AUTHORIZATION)\b(\s*[:=]\s*)((?:Bearer|Basic|Digest|Negotiate|NTLM|Token|Bot|ApiKey)\s+)?(['"]?)([^'"\s,;]+)(['"]?)`)
+	// leaving the real credential in the clear right behind it). The separator
+	// group tolerates quotes around the key and before the value so JSON bodies
+	// ("access_token":"...") match, not just env/header text.
+	keyValuePattern = regexp.MustCompile(`(?i)\b([A-Z0-9_.-]*(?:API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_.-]*|[A-Z0-9_.-]+[_-]PWD[A-Z0-9_.-]*|AUTHORIZATION)\b(['"]?\s*[:=]\s*['"]?)((?:Bearer|Basic|Digest|Negotiate|NTLM|Token|Bot|ApiKey)\s+)?(['"]?)([^'"\s,;]+)(['"]?)`)
+	// cookieHeaderPattern captures Cookie/Set-Cookie header values so every
+	// name=value pair gets its value masked; attribute flags without a value
+	// (HttpOnly, Secure) pass through untouched.
+	cookieHeaderPattern = regexp.MustCompile(`(?i)\b((?:set-)?cookie)(\s*[:=]\s*)([^=;\s]+=[^;\s]*(?:;\s*[^=;\s]+(?:=[^;\s]*)?)*)`)
+	cookiePairPattern   = regexp.MustCompile(`([^=;\s]+)=([^;\s]*)`)
 	bearerTokenPattern  = regexp.MustCompile(`(?i)\bBearer\s+([A-Za-z0-9._~+/=-]{16,})`)
 	openAIKeyPattern    = regexp.MustCompile(`\b((?:sk|rk)-(?:proj-)?[A-Za-z0-9_-]{12,})\b`)
 	githubTokenPattern  = regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b`)
@@ -143,6 +150,13 @@ func Redact(s string) string {
 			return key + sep + scheme + quote + redactedValue + endQuote
 		}
 		return key + sep + scheme + quote + mask(value) + endQuote
+	})
+	s = cookieHeaderPattern.ReplaceAllStringFunc(s, func(match string) string {
+		parts := cookieHeaderPattern.FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return redactedValue
+		}
+		return parts[1] + parts[2] + cookiePairPattern.ReplaceAllString(parts[3], "$1="+redactedValue)
 	})
 	s = bearerTokenPattern.ReplaceAllStringFunc(s, func(match string) string {
 		token := strings.TrimSpace(strings.TrimPrefix(match, "Bearer"))

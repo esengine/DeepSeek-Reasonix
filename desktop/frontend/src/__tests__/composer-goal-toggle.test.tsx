@@ -5,10 +5,12 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Composer, composerPickFileEntry } from "../components/Composer";
+import { InvocationMetadataContext, UserMessage } from "../components/Message";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
-import type { CollaborationMode, DirEntry, ToolApprovalMode, TokenMode } from "../lib/types";
+import type { StructuredInvocationSubmit } from "../lib/invocationDisplay";
+import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode, TokenMode } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -28,8 +30,8 @@ function eq(actual: unknown, expected: unknown, label: string) {
   else ok(false, `${label}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
 }
 
-function flushTimers(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+function flushTimers(ms = 0): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 class TestResizeObserver {
@@ -65,6 +67,7 @@ function installDom() {
   globalThis.ResizeObserver = TestResizeObserver;
   Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => {} });
   Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => {} });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => {} });
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: () => ({
@@ -88,12 +91,14 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   const calls: {
     send: string[];
     submit: (string | undefined)[];
+    structured: (StructuredInvocationSubmit | undefined)[];
     cancel: number;
     clearGoal: number;
     setCollaborationMode: CollaborationMode[];
   } = {
     send: [],
     submit: [],
+    structured: [],
     cancel: 0,
     clearGoal: 0,
     setCollaborationMode: [],
@@ -107,9 +112,10 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     cwd: "/repo",
     tabId: "tab-a",
     modelLabel: "DeepSeek-R1",
-    onSend: (displayText, submitText) => {
+    onSend: (displayText, submitText, _tabId, structured) => {
       calls.send.push(displayText);
       calls.submit.push(submitText);
+      calls.structured.push(structured);
     },
     onCancel: () => {
       calls.cancel += 1;
@@ -153,6 +159,7 @@ function mockApp(methods: Partial<AppBindings>) {
         Commands: async () => [],
         Models: async () => [],
         ModelsForTab: async () => [],
+        SlashArgs: async () => ({ items: [], from: 0 }),
         ...methods,
       } as Partial<AppBindings> as AppBindings,
     },
@@ -217,21 +224,48 @@ console.log("\ncomposer goal toggle");
   const dom = installDom();
   const { root, calls, rerender } = await renderComposer();
 
-  const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  let textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea did not render");
 
   await rerender({ insertRequest: { id: 1, text: "ship the release notes", mode: "replace" } });
   eq(textarea.value, "ship the release notes", "insert request populates the composer draft");
+  // The insert queues a rAF that refocuses the textarea; drain that frame
+  // before focusing the trigger, or the late refocus blurs the tooltip away.
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
 
-  const intentButton = document.querySelector(".composer-action-trigger") as HTMLButtonElement | null;
+  await rerender({ insertRequest: { id: 2, text: "/reviewer ", mode: "prefix" } });
+  eq(textarea.value, "/reviewer ship the release notes", "prefix insert preserves the draft as a subagent task");
+  eq(calls.send.length, 0, "prefix insert does not send the subagent task");
+
+  const intentButton = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
   if (!intentButton) throw new Error("composer intent button did not render");
+  eq(intentButton.textContent?.trim(), "Standard", "execution method trigger shows only the current method");
+  eq(intentButton.getAttribute("aria-label"), "Execution method · Standard", "execution method trigger keeps its full accessible name");
+  const intentTooltipTrigger = intentButton.closest(".tooltip-trigger");
+  if (!intentTooltipTrigger) throw new Error("composer intent tooltip trigger did not render");
+  await act(async () => {
+    intentTooltipTrigger.dispatchEvent(new Event("focusin", { bubbles: true }));
+    await flushTimers();
+  });
+  await waitFor("execution method tooltip", () => document.querySelector('[role="tooltip"]') !== null);
+  eq(document.querySelector('[role="tooltip"]')?.textContent, "Execution method · Standard: Analyze and act as you go", "execution method tooltip combines category, value, and summary");
+  await act(async () => {
+    intentTooltipTrigger.dispatchEvent(new Event("focusout", { bubbles: true }));
+    await flushTimers();
+  });
 
   await act(async () => {
     intentButton.click();
     await flushTimers();
   });
 
-  const goalButton = document.querySelectorAll(".composer-intent-menu__item")[1] as HTMLButtonElement | undefined;
+  const taskModeItems = document.querySelectorAll(".composer-intent-menu__item");
+  eq(taskModeItems.length, 3, "task method menu exposes three mutually exclusive choices");
+  eq(document.querySelectorAll(".composer-intent-switch").length, 0, "task method menu does not present independent switches");
+  const goalButton = taskModeItems[2] as HTMLButtonElement | undefined;
   if (!goalButton) throw new Error("composer goal menu item did not render");
 
   await act(async () => {
@@ -241,7 +275,39 @@ console.log("\ncomposer goal toggle");
 
   eq(calls.send.length, 0, "enabling goal mode with a draft does not send");
   eq(calls.setCollaborationMode.join(","), "goal", "enabling goal mode switches only the collaboration axis");
-  eq(textarea.value, "ship the release notes", "enabling goal mode preserves the draft text");
+  eq(textarea.value, "/reviewer ship the release notes", "enabling goal mode preserves the prefixed draft text");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const { root, calls } = await renderComposer({
+    collaborationMode: "goal",
+    goal: "finish the migration",
+  });
+
+  const intentButton = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
+  if (!intentButton) throw new Error("active goal task method trigger did not render");
+  ok(intentButton.textContent?.includes("Goal") === true, "task method trigger exposes an active goal");
+
+  await act(async () => {
+    intentButton.click();
+    await flushTimers();
+  });
+
+  const stopGoal = document.querySelector(".composer-intent-menu__stop") as HTMLButtonElement | null;
+  if (!stopGoal) throw new Error("explicit stop goal action did not render");
+  eq(stopGoal.textContent, "Stop goal", "active goal uses an explicit stop action");
+  await act(async () => {
+    stopGoal.click();
+    await flushTimers();
+  });
+  eq(calls.clearGoal, 1, "explicit stop action clears the active goal");
+  eq(calls.setCollaborationMode.length, 0, "stopping a goal does not race a second mode update");
 
   await act(async () => {
     root.unmount();
@@ -285,7 +351,7 @@ console.log("\ncomposer goal toggle");
   const { root, rerender } = await renderComposer();
   await rerender({ insertRequest: { id: 2, text: "keep this draft", mode: "replace" } });
 
-  const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  let textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea did not render");
   const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
   if (!sendButton) throw new Error("composer send button did not render");
@@ -473,6 +539,9 @@ console.log("\ncomposer goal toggle");
 
   const localDir = composerPickFileEntry("ask @sr", "sr", "", { name: "src", isDir: true });
   eq(localDir.text, "ask @src/", "local dir selection still keeps the menu-open slash");
+
+  const trailingNewline = composerPickFileEntry("ask @src/mai\n", "src/mai", "src/", { name: "main.go", isDir: false });
+  eq(trailingNewline.text, "ask @src/main.go ", "file selection ignores an invisible trailing newline");
 }
 
 {
@@ -1022,6 +1091,533 @@ console.log("\ncomposer goal toggle");
   });
 
   eq(textarea.value, "@current-session-a.txt ", "same-tab A→B→A keeps the current composer file-ref search cache");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let commandsCalls = 0;
+  const slashArgInputs: string[] = [];
+  let availableCommands: CommandInfo[] = [
+    { name: "mcp", description: "Manage MCP servers", kind: "builtin", group: "integrations" },
+    { name: "explore", description: "Investigate the codebase", kind: "subagent" },
+    { name: "superpowers:writing-plans", description: "Write a plan", kind: "skill", plugin: "superpowers" },
+    { name: "toolbox:writing-plans", description: "Write another plan", kind: "skill", plugin: "toolbox" },
+    { name: "superpowers:brainstorming", description: "Explore an idea", kind: "skill", plugin: "superpowers" },
+  ];
+  mockApp({
+    Commands: async () => {
+      commandsCalls += 1;
+      return availableCommands;
+    },
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+    SlashArgs: async (input) => {
+      slashArgInputs.push(input);
+      return input === "/mcp "
+        ? { items: [{ label: "show", insert: "show", hint: "Show an MCP server", descend: false }], from: 5 }
+        : { items: [], from: 0 };
+    },
+  });
+  const { root, calls, rerender } = await renderComposer({ workspaceScopeKey: "runtime-0" });
+
+  await waitFor("plugin commands loaded", () => commandsCalls > 0);
+  await replaceComposerDraft(rerender, 1999, "/\n");
+  await waitFor("slash menu before trailing newline", () => Boolean(document.querySelector(".slashmenu")));
+  ok(document.querySelector(".slashmenu") !== null, "slash menu ignores an invisible trailing newline");
+
+  await replaceComposerDraft(rerender, 1998, "@\n");
+  await waitFor("file menu before trailing newline", () => Boolean(document.querySelector(".slashmenu")));
+  ok(document.querySelector(".slashmenu") !== null, "file menu ignores an invisible trailing newline");
+
+  await replaceComposerDraft(rerender, 1997, "/mcp \n");
+  await act(async () => {
+    await flushTimers(150);
+  });
+  await waitFor("slash argument menu before trailing newline", () => document.querySelector(".slashmenu")?.textContent?.includes("show") === true);
+  ok(slashArgInputs.includes("/mcp "), "slash argument completion removes an invisible trailing newline before lookup");
+
+  await replaceComposerDraft(rerender, 2000, "/m");
+  await waitFor("initial skill command menu", () => Boolean(document.querySelector(".slashmenu")));
+  ok(
+    document.querySelector(".slashmenu")?.textContent?.includes("/my-formatter") === false,
+    "new subagent command is absent before runtime refresh",
+  );
+
+  availableCommands = [
+    ...availableCommands,
+    { name: "my-formatter", description: "Formats code the way I like it", kind: "subagent", color: "amber" },
+  ];
+  const initialCommandsCalls = commandsCalls;
+  await rerender({ workspaceScopeKey: "runtime-1" });
+  await waitFor("commands refreshed after runtime rebuild", () => commandsCalls > initialCommandsCalls);
+  ok(commandsCalls > initialCommandsCalls, "runtime rebuild refetches subagent slash commands");
+
+  await replaceComposerDraft(rerender, 2001, "/writing-plans");
+  await waitFor("qualified plugin skill menu", () => Boolean(document.querySelector(".slashmenu")));
+
+  const menuSizer = document.querySelector<HTMLElement>(".slashmenu__sizer");
+  eq(menuSizer?.style.height, "94px", "short skill query keeps one group heading and both matching plugin names");
+  let textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not render");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  ok(document.querySelector(".composer__rich-input") !== null, "selecting a plugin skill switches to the rich task input");
+  ok(document.querySelector(".invocation-display--composer")?.textContent?.includes("Writing Plans") === true, "selected skill renders as composer context");
+  ok(document.querySelector(".invocation-display--composer")?.textContent?.includes("superpowers") === true, "selected plugin skill keeps its source visible");
+  ok(document.querySelector(".composer__rich-input .composer-invocation-token") !== null, "selected skill is an inline task entity");
+  ok(document.querySelector(".composer__rich-input .composer-invocation-caret-anchor")?.textContent === "\u00A0", "selected skill keeps a caret anchor after the inline entity");
+
+  const richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("rich composer did not render");
+  const richContent = document.querySelector(".composer__content") as HTMLDivElement | null;
+  if (!richContent) throw new Error("rich composer content area did not render");
+  richInput.blur();
+  await act(async () => {
+    richContent.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
+  ok(document.activeElement === richInput, "clicking blank rich-composer space focuses the editable task input");
+
+  const invocationToken = richInput.querySelector(".composer-invocation-token");
+  if (!invocationToken) throw new Error("rich invocation token did not render");
+  const richRange = document.createRange();
+  richRange.setStartAfter(invocationToken);
+  richRange.collapse(true);
+  document.getSelection()?.removeAllRanges();
+  document.getSelection()?.addRange(richRange);
+  await act(async () => {
+    richInput.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  ok(document.querySelector(".invocation-display--composer") === null, "Backspace removes a selected skill from an empty task input");
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
+  const textareaAfterEntityRemoval = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textareaAfterEntityRemoval) throw new Error("textarea did not return after removing the last entity");
+  ok(
+    document.activeElement === textareaAfterEntityRemoval,
+    "removing the last entity hands focus to the textarea that replaces the rich input",
+  );
+
+  await replaceComposerDraft(rerender, 2002, "/writing-plans");
+  await waitFor("skill menu after removal", () => Boolean(document.querySelector(".slashmenu")));
+  textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not return after removing the skill");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+
+  let sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("composer send button did not render for skill-only invocation");
+  ok(sendButton.disabled === false, "inline skill-only invocation enables submit");
+  await act(async () => {
+    sendButton?.click();
+    await flushTimers();
+  });
+  eq(calls.submit[0], "/superpowers:writing-plans", "inline skill-only submission retains display metadata");
+  eq(calls.structured[0]?.input, "", "inline skill-only submission sends an empty explicit task");
+  eq(calls.structured[0]?.display, "/superpowers:writing-plans", "inline skill-only submission preserves reloadable invocation display metadata");
+  eq(calls.structured[0]?.invocations[0]?.name, "superpowers:writing-plans", "inline skill-only submission sends a structured skill entity");
+
+  await replaceComposerDraft(rerender, 20021, "/writing-plans");
+  await waitFor("skill menu for task submission", () => Boolean(document.querySelector(".slashmenu")));
+  textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not return after skill-only send");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+
+  await replaceComposerDraft(rerender, 2003, "Draft the release plan");
+  sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("composer send button did not render");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+  eq(calls.send[1], "Draft the release plan", "selected skill keeps the visible transcript text clean");
+  eq(calls.submit[1], "/superpowers:writing-plans Draft the release plan", "selected skill preserves invocation display metadata");
+  eq(calls.structured[1]?.input, "Draft the release plan", "selected skill sends task text separately from invocation metadata");
+  ok(document.querySelector(".invocation-display--composer") === null, "selected skill clears after send");
+
+  await replaceComposerDraft(rerender, 2004, "/mcp");
+  await waitFor("builtin command menu", () => Boolean(document.querySelector(".slashmenu")));
+  textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not render for management command");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(textarea.value, "/mcp ", "management commands keep the existing inline argument flow");
+  ok(document.querySelector(".invocation-display--composer") === null, "management commands do not become selected abilities");
+
+  await replaceComposerDraft(rerender, 2005, "/my-formatter");
+  await waitFor("colored subagent command menu", () => Boolean(document.querySelector(".slashmenu")));
+  textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not render for colored subagent");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  ok(document.querySelector<HTMLElement>(".invocation-display--composer")?.style.getPropertyValue("--invocation-color") === "#d59a2f", "selected custom subagent uses its configured color");
+  sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  ok(sendButton?.disabled === true, "subagent-only invocation remains blocked until a task is entered");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <UserMessage
+          id="h1"
+          text="Draft the release plan"
+          submitText="/superpowers:writing-plans Draft the release plan"
+        />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  ok(document.querySelector(".invocation-display--message")?.textContent?.includes("Writing Plans") === true, "restored history renders the selected skill header");
+  ok(document.querySelector(".invocation-display--message")?.textContent?.includes("superpowers") === true, "restored history retains plugin source from the qualified command");
+  ok(document.querySelector(".msg__rich-text")?.textContent?.endsWith("Draft the release plan") === true, "history message keeps slash syntax out of the task body");
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <InvocationMetadataContext.Provider value={{ "my-formatter": { kind: "subagent", color: "amber" } }}>
+          <UserMessage
+            id="h2"
+            text="Format this file"
+            submitText={"以下是用户引用的历史会话上下文：\n\n[会话：Earlier]\n...\n\n---\n\n当前用户问题：\n/my-formatter Format this file"}
+          />
+        </InvocationMetadataContext.Provider>
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  ok(document.querySelector(".invocation-display--message")?.textContent?.includes("My Formatter") === true, "history and trash previews recover selected abilities after referenced-session context");
+  ok(document.querySelector(".invocation-display--subagent") !== null, "restored custom subagents keep their command type styling");
+  ok(document.querySelector<HTMLElement>(".invocation-display--subagent")?.style.getPropertyValue("--invocation-color") === "#d59a2f", "restored custom subagents keep their configured color");
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <UserMessage
+          id="h3"
+          text={"Compare these commands\n/other-command"}
+          submitText={"/reasonix-develop Compare these commands\n/other-command"}
+        />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  ok(document.querySelector(".invocation-display--message")?.textContent?.includes("Reasonix Develop") === true, "history recovery ignores slash-prefixed lines inside the task body");
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <UserMessage
+          id="h4"
+          text={"Compare these commands\n/other-command"}
+          submitText={"以下是用户引用的历史会话上下文：\n\n[会话：Earlier]\n...\n\n---\n\n当前用户问题：\nCompare these commands\n/other-command"}
+        />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  ok(document.querySelector(".invocation-display--message") === null, "ordinary referenced-session text does not turn task slash lines into a skill header");
+
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  let savedFiles = 0;
+  mockApp({
+    Commands: async () => [{ name: "skill", description: "Manage skills", kind: "builtin" }],
+    ListDirForTab: async () => [fileEntry("README.md")],
+    SearchFileRefsForTab: async () => [],
+    ListSessions: async () => [{ path: "/sessions/recent.jsonl", title: "Recent session", current: false }],
+    SavePastedFile: async () => {
+      savedFiles += 1;
+      return ".reasonix/attachments/notes.txt";
+    },
+  });
+  const { root, rerender } = await renderComposer();
+  const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not render");
+
+  await replaceComposerDraft(rerender, 3000, "Follow up #recent\n");
+  await waitFor("typed hash recent-session picker", () => Boolean(document.querySelector(".slashmenu__search")));
+  const typedSessionSearch = document.querySelector(".slashmenu__search") as HTMLInputElement | null;
+  eq(typedSessionSearch?.value, "recent", "typing # opens recent sessions and carries the query across an invisible trailing newline");
+  ok(document.activeElement !== typedSessionSearch, "the typed # flow leaves focus in the composer instead of the panel search box");
+  await act(async () => {
+    typedSessionSearch?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(textarea.value, "Follow up #recent\n", "Escape closes the typed recent-session picker and keeps the literal # text");
+  ok(!document.querySelector(".slashmenu__search"), "Escape dismisses the typed recent-session panel until the query changes");
+
+  await replaceComposerDraft(rerender, 3005, "issue#6310");
+  await act(async () => {
+    await flushTimers();
+  });
+  ok(!document.querySelector(".slashmenu__search"), "an embedded hash remains ordinary composer text");
+
+  await replaceComposerDraft(rerender, 3006, "#\n");
+  await waitFor("typed hash picker before session selection", () => Boolean(document.querySelector(".slashmenu__search")));
+  const typedSessionButton = Array.from(document.querySelectorAll<HTMLButtonElement>(".slashmenu button"))
+    .find((button) => button.textContent?.includes("Recent session"));
+  if (!typedSessionButton) throw new Error("typed recent-session option did not render");
+  await act(async () => {
+    typedSessionButton.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(textarea.value, "", "selecting a typed recent-session reference removes the # token");
+  ok(document.querySelector(".composer-context__item--session")?.textContent?.includes("Recent session") === true, "selecting a typed recent-session reference adds its context card");
+  const removeTypedSession = document.querySelector<HTMLButtonElement>(".composer-context__item--session button");
+  await act(async () => {
+    removeTypedSession?.click();
+    await flushTimers();
+  });
+
+  const contentTrigger = document.querySelector(".composer-content-trigger") as HTMLButtonElement | null;
+  if (!contentTrigger) throw new Error("content menu trigger did not render");
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  ok(Boolean(document.querySelector(".composer-content-menu")), "plus trigger opens the add-content menu");
+  const initialContentItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item"));
+  eq(initialContentItems.length, 4, "add-content menu exposes four focused actions");
+  const contentItemIcons = initialContentItems.map((item) => item.querySelector("svg")?.getAttribute("class") ?? "");
+  ok(contentItemIcons[0]?.includes("lucide-file-plus"), "attachment action uses the file attachment icon");
+  ok(contentItemIcons[1]?.includes("lucide-at-sign"), "workspace action uses the mention icon");
+  ok(contentItemIcons[2]?.includes("lucide-hash"), "recent-session action uses the history reference icon");
+  eq(initialContentItems[3]?.querySelector(".composer-content-menu__trigger-icon")?.textContent, "/", "command action uses the literal slash trigger icon");
+  ok(!document.querySelector(".composer-content-menu__divider"), "add-content actions remain one unified group without a divider");
+  ok(initialContentItems.every((item) => !item.querySelector("kbd")), "add-content actions do not duplicate their trigger icons on the right");
+
+  const attachmentButton = initialContentItems[0];
+  const fileInput = document.querySelector(".composer-content-file-input") as HTMLInputElement | null;
+  if (!attachmentButton || !fileInput) throw new Error("attachment picker controls did not render");
+  await act(async () => {
+    attachmentButton.click();
+    Object.defineProperty(fileInput, "files", { configurable: true, value: [new File(["notes"], "notes.txt", { type: "text/plain" })] });
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushTimers();
+  });
+  await waitFor("attachment chosen from add-content menu", () => savedFiles === 1);
+  eq(savedFiles, 1, "attachment action reuses the existing file-save path");
+
+  await replaceComposerDraft(rerender, 3001, "@");
+  await waitFor("workspace menu before plus toggle", () => Boolean(document.querySelector(".slashmenu")));
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  ok(!document.querySelector(".slashmenu"), "opening add-content closes the active suggestion panel");
+  ok(Boolean(document.querySelector(".composer-content-menu")), "add-content remains the only open composer surface");
+
+  const sessionButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[2];
+  if (!sessionButton) throw new Error("recent-session action did not render");
+  await act(async () => {
+    sessionButton.click();
+    await flushTimers();
+  });
+  await waitFor("direct recent-session picker", () => Boolean(document.querySelector(".slashmenu__search")));
+  eq(textarea.value, "@ #", "recent-session action inserts # at the remembered caret");
+  ok(!document.querySelector(".composer-content-menu"), "recent-session picker replaces the add-content menu");
+  const sessionSearch = document.querySelector(".slashmenu__search") as HTMLInputElement | null;
+  if (!sessionSearch) throw new Error("recent-session search did not render");
+  await act(async () => {
+    sessionSearch.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(textarea.value, "@ #", "Escape closes the direct recent-session picker and keeps the inserted # trigger");
+
+  await replaceComposerDraft(rerender, 3002, "");
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  const commandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  if (!commandButton) throw new Error("command action did not render");
+  await act(async () => {
+    commandButton.click();
+    await flushTimers();
+  });
+  eq(textarea.value, "/", "command action inserts / at the caret");
+  await waitFor("slash menu from add-content action", () => Boolean(document.querySelector(".slashmenu")));
+
+  await replaceComposerDraft(rerender, 3003, "existing text");
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  const disabledCommandButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[3];
+  if (!disabledCommandButton) throw new Error("command action did not render for non-empty input");
+  ok(disabledCommandButton.disabled, "command action is disabled while the composer has text");
+  await act(async () => {
+    disabledCommandButton.click();
+    await flushTimers();
+  });
+  eq(textarea.value, "existing text", "disabled command action does not insert / into existing text");
+
+  await rerender({ running: true });
+  await waitFor("content menu closes when a run starts", () => !document.querySelector(".composer-content-menu"));
+  await rerender({ running: false });
+  ok(!document.querySelector(".composer-content-menu"), "content menu stays closed after the run ends");
+
+  await replaceComposerDraft(rerender, 3004, "");
+  await act(async () => {
+    contentTrigger.click();
+    await flushTimers();
+  });
+  const runningSessionButton = document.querySelectorAll<HTMLButtonElement>(".composer-content-menu__item")[2];
+  if (!runningSessionButton) throw new Error("recent-session action did not render before running");
+  await act(async () => {
+    runningSessionButton.click();
+    await flushTimers();
+  });
+  await waitFor("recent-session picker before running", () => Boolean(document.querySelector(".slashmenu__search")));
+  await rerender({ running: true });
+  await waitFor("recent-session picker closes when a run starts", () => !document.querySelector(".slashmenu__search"));
+  await rerender({ running: false });
+  ok(!document.querySelector(".slashmenu__search"), "recent-session picker stays closed after the run ends");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  // An entity-only submit while a turn is running must queue as guidance,
+  // rendered with its slash form — not be dropped silently while
+  // clearSubmittedDraft wipes the composer.
+  const dom = installDom();
+  mockApp({
+    Commands: async () => [
+      { name: "superpowers:writing-plans", description: "Write a plan", kind: "skill", plugin: "superpowers" },
+    ],
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+  });
+  const { root, calls, rerender } = await renderComposer();
+  await replaceComposerDraft(rerender, 4000, "/writing-plans");
+  await waitFor("skill menu for the running-queue entity", () => Boolean(document.querySelector(".slashmenu")));
+  const queueTextarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!queueTextarea) throw new Error("composer textarea did not render");
+  await act(async () => {
+    queueTextarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  const queueRichInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!queueRichInput) throw new Error("rich composer did not render for the running-queue entity");
+
+  await rerender({ running: true });
+  await act(async () => {
+    queueRichInput.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  eq(calls.send.length, 0, "an entity-only submit while running queues instead of sending");
+  ok(
+    document.querySelector(".composer-guidance-item__text")?.textContent?.includes("/superpowers:writing-plans") === true,
+    "the queued guidance shows the entity's slash form instead of dropping it silently",
+  );
+  ok(document.querySelector(".composer__rich-input") === null, "queueing an entity-only submit clears the draft");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  // While an IME is composing, the rich input must neither resync the model
+  // nor restore the DOM selection (removeAllRanges cancels or commits an
+  // in-progress composition); compositionend performs the one authoritative
+  // sync.
+  const dom = installDom();
+  mockApp({
+    Commands: async () => [
+      { name: "superpowers:writing-plans", description: "Write a plan", kind: "skill", plugin: "superpowers" },
+    ],
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+  });
+  const { root, calls, rerender } = await renderComposer();
+  await replaceComposerDraft(rerender, 4100, "/writing-plans");
+  await waitFor("skill menu for the composition guard", () => Boolean(document.querySelector(".slashmenu")));
+  const compositionTextarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!compositionTextarea) throw new Error("composer textarea did not render");
+  await act(async () => {
+    compositionTextarea.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  const compositionRichInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!compositionRichInput) throw new Error("rich composer did not render for the composition guard");
+
+  // Drain the entity-pick flow's pending animation frames (imperative caret
+  // restore) so the spy below counts only composition-window work.
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
+  const domSelection = document.getSelection();
+  if (!domSelection) throw new Error("document selection unavailable");
+  let selectionStomps = 0;
+  const originalRemoveAllRanges = domSelection.removeAllRanges.bind(domSelection);
+  (domSelection as { removeAllRanges: () => void }).removeAllRanges = () => {
+    selectionStomps += 1;
+    originalRemoveAllRanges();
+  };
+  await act(async () => {
+    compositionRichInput.dispatchEvent(new window.Event("compositionstart", { bubbles: true }));
+    compositionRichInput.appendChild(document.createTextNode("拼"));
+    compositionRichInput.dispatchEvent(new window.Event("input", { bubbles: true }));
+    await flushTimers();
+  });
+  eq(selectionStomps, 0, "composition input neither resyncs the model nor restores the selection");
+  await act(async () => {
+    compositionRichInput.dispatchEvent(new window.Event("compositionend", { bubbles: true }));
+    await flushTimers();
+  });
+  (domSelection as { removeAllRanges: () => void }).removeAllRanges = originalRemoveAllRanges;
+
+  const compositionSendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!compositionSendButton) throw new Error("send button did not render after composition");
+  await act(async () => {
+    compositionSendButton.click();
+    await flushTimers();
+  });
+  eq(calls.structured[0]?.input, "拼", "compositionend commits the composed text to the model exactly once");
 
   await act(async () => {
     root.unmount();

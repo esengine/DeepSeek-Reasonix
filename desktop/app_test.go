@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
@@ -220,6 +221,43 @@ func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	}
 	if hasCommand(cmds, "thinking") {
 		t.Fatalf("Commands() should not include thinking: %+v", cmds)
+	}
+}
+
+func TestCommandsClassifiesSubagentSkills(t *testing.T) {
+	ctrl := control.New(control.Options{Skills: []skill.Skill{
+		{Name: "init", Description: "inline skill", RunAs: skill.RunInline},
+		{Name: "explore", Description: "isolated skill", RunAs: skill.RunSubagent, Color: "amber"},
+	}})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	kinds := map[string]string{}
+	groups := map[string]string{}
+	colors := map[string]string{}
+	for _, cmd := range app.Commands() {
+		kinds[cmd.Name] = cmd.Kind
+		groups[cmd.Name] = cmd.Group
+		colors[cmd.Name] = cmd.Color
+	}
+	if kinds["init"] != "skill" {
+		t.Fatalf("inline skill kind = %q, want skill", kinds["init"])
+	}
+	if kinds["explore"] != "subagent" {
+		t.Fatalf("subagent skill kind = %q, want subagent", kinds["explore"])
+	}
+	if colors["explore"] != "amber" {
+		t.Fatalf("subagent skill color = %q, want amber", colors["explore"])
+	}
+	if groups["new"] != "actions" {
+		t.Fatalf("new command group = %q, want actions", groups["new"])
+	}
+	if groups["mcp"] != "integrations" || groups["plugins"] != "integrations" {
+		t.Fatalf("integration command groups = mcp:%q plugins:%q", groups["mcp"], groups["plugins"])
+	}
+	if groups["skill"] != "skills" {
+		t.Fatalf("skill command group = %q, want skills", groups["skill"])
 	}
 }
 
@@ -4530,6 +4568,39 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode(boot.TokenModeDelivery); err != nil {
+		t.Fatalf("SetTokenMode(delivery): %v", err)
+	}
+	if c := app.activeCtrl(); c == nil || c == old {
+		t.Fatal("delivery profile should rebuild the active controller")
+	}
+	tab := app.activeTab()
+	if got := currentTabTokenMode(tab); got != boot.TokenModeDelivery {
+		t.Fatalf("token mode = %q, want delivery", got)
+	}
+	if got := app.Meta().TokenMode; got != boot.TokenModeDelivery {
+		t.Fatalf("Meta token mode = %q, want delivery", got)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != boot.TokenModeDelivery {
+		t.Fatalf("saved tabs = %+v, want delivery profile", saved.Tabs)
+	}
+}
+
 func TestSetTokenModeReusesCurrentSessionLease(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
@@ -6499,7 +6570,7 @@ func TestCapabilitiesIncludesInstalledPlugins(t *testing.T) {
 	if len(plugins) != 1 || plugins[0].Name != "superpowers" || plugins[0].Skills != 1 {
 		t.Fatalf("Capabilities().Plugins = %+v", plugins)
 	}
-	if len(plugins[0].SkillDetails) != 1 || plugins[0].SkillDetails[0].Invocation != "/plan" {
+	if len(plugins[0].SkillDetails) != 1 || plugins[0].SkillDetails[0].Invocation != "/superpowers:plan" {
 		t.Fatalf("Capabilities().Plugins skill details = %+v", plugins[0].SkillDetails)
 	}
 }

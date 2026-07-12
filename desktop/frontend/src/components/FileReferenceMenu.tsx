@@ -22,7 +22,8 @@ export function dirEntryMenuLabel(entry: DirEntry): string {
 }
 
 export function activeFileReferenceToken(text: string): { raw: string; dir: string; frag: string } | null {
-  const match = /(?:^|\s)@([^\s]*)$/.exec(text);
+  const queryText = text.replace(/[\r\n]+$/u, "");
+  const match = /(?:^|\s)@([^\s]*)$/.exec(queryText);
   if (!match) return null;
   const raw = match[1];
   const slash = raw.lastIndexOf("/");
@@ -34,8 +35,9 @@ export function activeFileReferenceToken(text: string): { raw: string; dir: stri
 }
 
 export function pickInlineFileReference(text: string, atRaw: string | null, atDir: string, entry: DirEntry): string {
-  const atPos = text.length - (atRaw?.length ?? 0) - 1;
-  const prefix = text.slice(0, Math.max(0, atPos));
+  const queryText = text.replace(/[\r\n]+$/u, "");
+  const atPos = queryText.length - (atRaw?.length ?? 0) - 1;
+  const prefix = queryText.slice(0, Math.max(0, atPos));
   const refPath = dirEntrySubmitPath(entry, atDir);
   return prefix + "@" + refPath + (entry.isDir ? "/" : " ");
 }

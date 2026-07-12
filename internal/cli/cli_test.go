@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
@@ -1504,5 +1505,23 @@ func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
 	got := providersWithMissingKeys(cfg)
 	if len(got) != 1 || got[0].APIKeyEnv != "MIMO_API_KEY" {
 		t.Errorf("planner model's missing key must be prompted, got %+v", got)
+	}
+}
+
+func TestParseRuntimeProfile(t *testing.T) {
+	for input, want := range map[string]string{
+		"":         boot.TokenModeFull,
+		"balanced": boot.TokenModeFull,
+		"full":     boot.TokenModeFull,
+		"economy":  boot.TokenModeEconomy,
+		"delivery": boot.TokenModeDelivery,
+	} {
+		got, err := parseRuntimeProfile(input)
+		if err != nil || got != want {
+			t.Errorf("parseRuntimeProfile(%q) = %q, %v; want %q", input, got, err, want)
+		}
+	}
+	if _, err := parseRuntimeProfile("fast"); err == nil {
+		t.Fatal("unknown profile should fail")
 	}
 }

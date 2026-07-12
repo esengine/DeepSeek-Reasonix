@@ -122,6 +122,9 @@ func TestSendWithRetryAuthError(t *testing.T) {
 	if !errors.As(err, &authErr) || authErr.KeyEnv != "DEEPSEEK_API_KEY" {
 		t.Errorf("want *AuthError naming the key env, got %v", err)
 	}
+	if authErr != nil && authErr.Body != "body" {
+		t.Errorf("AuthError should carry the response body, got %q", authErr.Body)
+	}
 }
 
 func TestSendWithRetryRetriesTransientAuthForKnownKey(t *testing.T) {

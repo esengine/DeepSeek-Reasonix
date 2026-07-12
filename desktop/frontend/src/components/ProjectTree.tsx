@@ -1140,7 +1140,13 @@ export function ProjectTree({
       const meta = projectTreeTopicMetaLine(node, t, compactTopics);
       const status = topicStatus(node);
       const statusLabel = topicStatusLabel(node, t);
+      const waitingConfirmation = status === "waiting_confirmation";
+      // Compact workbench: waiting shows an amber "待确认" pill instead of a
+      // spinning orange dot, and that pill replaces the relative time so the
+      // paused-for-user state is scannable in the background tab list.
       const showStatusInSide = status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job";
+      const showWaitingPill = waitingConfirmation;
+      const showSideTime = sideTimeVisible && !showWaitingPill;
       const unread = projectTreeTopicHasUnreadActivity(node, readActivity, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
       const topicId = node.topicId ?? "";
       const imSource = scope === "global" && topicId ? imTopicSources[topicId] : undefined;
@@ -1225,7 +1231,7 @@ export function ProjectTree({
       }
       const row = (
         <div
-          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${unread ? " project-tree__topic--unread" : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
+          className={`project-tree__topic${scopeClass}${isSessionNode ? " project-tree__topic--session" : ""}${active ? " project-tree__topic--active" : ""}${node.running ? " project-tree__topic--running" : ""}${status ? ` project-tree__topic--status-${status}` : ""}${unread ? " project-tree__topic--unread" : ""}${!isSessionNode && pinned ? " project-tree__topic--pinned" : ""}${topicMenuOpen ? " project-tree__topic--menu-open" : ""}${sideTimeVisible && (timeLabel || showStatusInSide || showWaitingPill) ? " project-tree__topic--with-side" : meta ? " project-tree__topic--has-meta" : ""}${imSource ? " project-tree__topic--im-source" : ""}${shortcutIndex > 0 ? " project-tree__topic--show-shortcut" : ""}`}
           style={accentStyle}
           onContextMenu={isSessionNode ? undefined : openTopicMenu}
         >
@@ -1287,12 +1293,31 @@ export function ProjectTree({
               )}
             </span>
             {sideTimeVisible && (
-              <span className={`project-tree__topic-side${!timeLabel && !showStatusInSide ? " project-tree__topic-side--empty" : ""}`} aria-hidden="true">
-                {showStatusInSide && <span className={`project-tree__topic-state project-tree__topic-state--${status}`} title={statusLabel} />}
-                {timeLabel && <span className="project-tree__topic-time">{timeLabel}</span>}
+              <span className={`project-tree__topic-side${!timeLabel && !showStatusInSide && !showWaitingPill ? " project-tree__topic-side--empty" : ""}`}>
+                {showWaitingPill && statusLabel ? (
+                  <span
+                    className="project-tree__topic-waiting-pill"
+                    title={statusLabel}
+                  >
+                    {statusLabel}
+                  </span>
+                ) : (
+                  <>
+                    {showStatusInSide && (
+                      <span
+                        className={`project-tree__topic-state project-tree__topic-state--${status}`}
+                        title={statusLabel}
+                        aria-hidden="true"
+                      />
+                    )}
+                    {showSideTime && timeLabel && (
+                      <span className="project-tree__topic-time" aria-hidden="true">{timeLabel}</span>
+                    )}
+                  </>
+                )}
               </span>
             )}
-            {compactTopics && statusLabel && (
+            {compactTopics && statusLabel && !showWaitingPill && (
               <span className="sr-only">
                 {statusLabel}
               </span>

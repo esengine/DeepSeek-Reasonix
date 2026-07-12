@@ -200,7 +200,41 @@ function textPasteEvent(text: string): Event {
   return event;
 }
 
+async function drainAnimationFrame() {
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await flushTimers();
+}
+
 console.log("\ncomposer session draft");
+
+{
+  const dom = installDom();
+  const { root, rerender } = await renderComposer();
+  const content = document.querySelector(".composer__content") as HTMLDivElement | null;
+  if (!content) throw new Error("composer content area did not render");
+
+  textarea().blur();
+  await act(async () => {
+    content.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await drainAnimationFrame();
+  });
+  eq(document.activeElement, textarea(), "clicking empty composer space focuses the text input");
+  eq(textarea().selectionStart, 0, "empty composer space click places the caret on the first line");
+
+  await rerender({ insertRequest: { id: 100, text: "existing draft", mode: "replace" } });
+  await act(async () => {
+    textarea().setSelectionRange(0, 0);
+    textarea().blur();
+    content.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    await drainAnimationFrame();
+  });
+  eq(textarea().selectionStart, textarea().value.length, "clicking composer space places an existing draft caret at the end");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
 
 {
   const withoutPath = composerDraftKeyForTab({

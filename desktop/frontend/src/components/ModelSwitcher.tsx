@@ -99,7 +99,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          <Brain size={13} className="modelsw__kind" />
+          <Brain size={14} className="modelsw__kind" />
           <span className="modelsw__label">{label}</span>
           <ChevronsUpDown size={11} />
         </button>

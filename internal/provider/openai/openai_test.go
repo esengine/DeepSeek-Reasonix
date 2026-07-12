@@ -90,6 +90,45 @@ func TestStreamInsufficientBalance(t *testing.T) {
 	}
 }
 
+func TestStreamAnnotatesIndexedToolSchemaError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Tool 1 function has invalid 'parameters' schema"}}`))
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "mimo", BaseURL: srv.URL, Model: "mimo-v2.5-pro", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Tools: []provider.ToolSchema{
+			{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)},
+			{Name: "mcp__files__search", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+	})
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) || !strings.Contains(apiErr.ToolContext, `MCP server "files"`) {
+		t.Fatalf("Stream error = %v, want MCP tool source context", err)
+	}
+}
+
+func TestBuildRequestScopesLegacyTupleMigrationToMiMo(t *testing.T) {
+	legacy := json.RawMessage(`{"type":"object","properties":{"pair":{"type":"array","items":[{"type":"string"},{"type":"number"}]}}}`)
+	req := provider.Request{Tools: []provider.ToolSchema{{Name: "tuple", Parameters: legacy}}}
+
+	mimo := (&client{mimo: true}).buildRequest(req)
+	if got := string(mimo.Tools[0].Function.Parameters); !strings.Contains(got, `"prefixItems"`) || strings.Contains(got, `"items":[`) {
+		t.Fatalf("MiMo parameters = %s, want Draft 2020-12 tuple keywords", got)
+	}
+
+	other := (&client{}).buildRequest(req)
+	if got := string(other.Tools[0].Function.Parameters); got != string(legacy) {
+		t.Fatalf("non-MiMo parameters changed:\n got: %s\nwant: %s", got, legacy)
+	}
+}
+
 // TestStreamAuthError verifies a 401 surfaces as an actionable *provider.AuthError
 // (naming the provider and its key env var) rather than a raw status body.
 func TestStreamAuthError(t *testing.T) {
@@ -245,6 +284,9 @@ func TestStreamUsesMiMoAPIKeyHeader(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := p.(*client)
+	if !c.mimo {
+		t.Fatal("official MiMo endpoint did not enable the Draft 2020-12 schema adapter")
+	}
 	c.chatURL = srv.URL
 
 	ch, err := p.Stream(context.Background(), provider.Request{

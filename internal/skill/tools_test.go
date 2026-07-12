@@ -37,6 +37,34 @@ func TestRunSkillUnknown(t *testing.T) {
 	}
 }
 
+func TestRunSkillEnforcesRuntimeProfile(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/delivery-only.md", "---\ndescription: ship it\nprofiles: delivery\n---\nDeliver it.")
+	store := New(Options{HomeDir: home, DisableBuiltins: true})
+	store.ConfigureInvocationPolicy("economy", nil)
+	tl := NewRunSkillTool(store, nil)
+
+	_, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"delivery-only"}`))
+	if err == nil || !errors.Is(err, ErrInvocationUnavailable) || !strings.Contains(err.Error(), "unavailable in the economy profile") {
+		t.Fatalf("profile-restricted run_skill error = %v", err)
+	}
+}
+
+func TestRunSkillEnforcesRequiredCapabilities(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/github-review.md", "---\ndescription: review github\nrequires: mcp-server:github, mcp-tool:github/search_issues\n---\nReview it.")
+	store := New(Options{HomeDir: home, DisableBuiltins: true})
+	store.ConfigureInvocationPolicy("delivery", func(requires []string) []string {
+		return []string{"mcp-tool:github/search_issues"}
+	})
+	tl := NewRunSkillTool(store, nil)
+
+	_, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"github-review"}`))
+	if err == nil || !errors.Is(err, ErrInvocationUnavailable) || !strings.Contains(err.Error(), "requires unavailable capabilities: mcp-tool:github/search_issues") {
+		t.Fatalf("requires-gated run_skill error = %v", err)
+	}
+}
+
 func TestRunSkillSubagentNeedsRunner(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
@@ -420,6 +448,111 @@ func TestInstallSkill(t *testing.T) {
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
 		`{"name":"x","description":"","body":"b"}`)); err == nil {
 		t.Error("install_skill should require a description")
+	}
+}
+
+func TestRenderSkillFileEmitsColorAndInvocationWhenSet(t *testing.T) {
+	content := RenderSkillFile(SkillFileOptions{
+		Name:        "my-agent",
+		Description: "a private helper",
+		Body:        "be helpful",
+		RunAs:       RunSubagent,
+		Color:       "amber",
+		Invocation:  "manual",
+	})
+	for _, want := range []string{"color: amber\n", "invocation: manual\n", "runAs: subagent\n"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("rendered content missing %q:\n%s", want, content)
+		}
+	}
+
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, err := st.CreateWithContent("my-agent", ScopeGlobal, content); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	sk, ok := st.Read("my-agent")
+	if !ok {
+		t.Fatal("skill not readable after CreateWithContent")
+	}
+	if sk.Color != "amber" || sk.Invocation != "manual" {
+		t.Errorf("round-trip mismatch: color=%q invocation=%q", sk.Color, sk.Invocation)
+	}
+}
+
+// TestRenderSkillFileEscapesYAMLMetacharacters pins the security contract the
+// reviewer flagged: free text with YAML metacharacters must round-trip intact.
+// Before the yaml.v3 renderer, a description like "Review code: focus on
+// security" produced an unparseable block; frontmatter.Split then returned an
+// EMPTY map and the loader silently fell back to runAs=inline +
+// invocation=auto — dissolving both the isolation boundary and the
+// no-autodiscovery guarantee.
+func TestRenderSkillFileEscapesYAMLMetacharacters(t *testing.T) {
+	cases := []struct {
+		label string
+		desc  string
+	}{
+		{"colon", "Review code: focus on security"},
+		{"hash", "Reviews #security and #perf tags"},
+		{"double-quote", `Says "hello" politely`},
+		{"single-quote", "Don't break on apostrophes"},
+		{"newline", "First line\nsecond line"},
+		{"leading-special", "- starts like a list item"},
+		{"yaml-lookalike", "runAs: inline"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			home := t.TempDir()
+			st := New(Options{HomeDir: home, DisableBuiltins: true})
+			content := RenderSkillFile(SkillFileOptions{
+				Name:        "esc",
+				Description: tc.desc,
+				Body:        "the body",
+				RunAs:       RunSubagent,
+				Invocation:  "manual",
+			})
+			if _, err := st.CreateWithContent("esc", ScopeGlobal, content); err != nil {
+				t.Fatalf("CreateWithContent: %v", err)
+			}
+			sk, ok := st.Read("esc")
+			if !ok {
+				t.Fatalf("skill unreadable; rendered content:\n%s", content)
+			}
+			// The load-bearing assertions: the security-relevant fields must
+			// survive, never silently reset to their permissive defaults.
+			if sk.RunAs != RunSubagent {
+				t.Errorf("RunAs = %q, want subagent (isolation lost); content:\n%s", sk.RunAs, content)
+			}
+			if sk.Invocation != "manual" {
+				t.Errorf("Invocation = %q, want manual (autodiscovery re-enabled); content:\n%s", sk.Invocation, content)
+			}
+			wantDesc := strings.TrimSpace(tc.desc)
+			if tc.label == "newline" {
+				// frontmatter.Split returns the scalar as parsed; the multi-line
+				// value survives YAML round-trip intact.
+				wantDesc = "First line\nsecond line"
+			}
+			if sk.Description != wantDesc {
+				t.Errorf("Description = %q, want %q", sk.Description, wantDesc)
+			}
+			if sk.Body != "the body" {
+				t.Errorf("Body = %q, want %q", sk.Body, "the body")
+			}
+		})
+	}
+}
+
+func TestRenderSkillFileOmitsColorAndInvocationByDefault(t *testing.T) {
+	content := RenderSkillFile(SkillFileOptions{
+		Name:        "plain-inline",
+		Description: "no extras",
+		Body:        "body text",
+		RunAs:       RunInline,
+	})
+	for _, unwanted := range []string{"color:", "invocation:", "runAs:"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("rendered content should omit %q when unset:\n%s", unwanted, content)
+		}
 	}
 }
 

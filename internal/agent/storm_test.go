@@ -61,7 +61,7 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 	var last string
 	for i := 0; i < stormBreakThreshold; i++ {
 		call := provider.ToolCall{Name: "write_file", Arguments: args[i]}
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if !strings.Contains(last, "[loop guard]") {
@@ -99,7 +99,7 @@ func TestStormBreakerEscalatesRepeatedBlockedPermission(t *testing.T) {
 	var last string
 	for i := 0; i < stormBreakThreshold; i++ {
 		call := provider.ToolCall{Name: "bash", Arguments: args[i]}
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if !strings.Contains(last, "[loop guard]") {
@@ -133,7 +133,7 @@ func TestStormBreakerEscalatesAlternatingBlockedShapes(t *testing.T) {
 	}
 	var last string
 	for _, call := range calls {
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if !strings.Contains(last, "[loop guard]") {
@@ -165,7 +165,7 @@ func TestStormBreakerBlockedStreakResetBySuccess(t *testing.T) {
 	}
 	var last string
 	for _, call := range calls {
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if strings.Contains(last, "[loop guard]") {
@@ -192,7 +192,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 	}
 	var first string
 	for i := 0; i < stormBreakThreshold; i++ {
-		first = a.executeBatch(context.Background(), batch)[0]
+		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
 	if !strings.Contains(first, "[loop guard]") {
@@ -222,7 +222,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 	}
 	var first string
 	for i := 0; i < stormBreakThreshold+2; i++ {
-		first = a.executeBatch(context.Background(), batch)[0]
+		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
 	if strings.Contains(first, "[loop guard]") {
@@ -244,7 +244,7 @@ func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
 	var last string
 	for i := 0; i < stormBreakThreshold-1; i++ {
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if strings.Contains(last, "[loop guard]") {
@@ -268,11 +268,11 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	good := provider.ToolCall{Name: "read_file", Arguments: `{"path":"x"}`}
 	ctx := context.Background()
 
-	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 1
-	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 2
-	a.executeBatch(ctx, []provider.ToolCall{good})            // success → reset
-	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 1
-	last := a.executeBatch(ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
+	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
+	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 2
+	a.executeBatch(ctx, []provider.ToolCall{good})                    // success → reset
+	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
+	last := executeBatchOutputs(a, ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
 
 	if strings.Contains(last, "[loop guard]") {
 		t.Fatalf("guard should have reset after a successful turn, got: %q", last)
@@ -280,4 +280,10 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	if len(*notices) != 0 {
 		t.Errorf("no notice expected when a success breaks the run, got %v", *notices)
 	}
+}
+
+// executeBatchOutputs runs the batch and returns just the model-facing outputs.
+func executeBatchOutputs(a *Agent, ctx context.Context, calls []provider.ToolCall) []string {
+	outputs, _ := a.executeBatch(ctx, calls)
+	return outputs
 }

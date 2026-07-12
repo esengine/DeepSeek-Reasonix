@@ -27,6 +27,7 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 		{"SearchFileRefsForTab", app.SearchFileRefsForTab("missing", "file")},
 		{"ListTabs", app.ListTabs()},
 		{"ListProjectTree", app.ListProjectTree()},
+		{"AvailableSubagentTools", app.AvailableSubagentTools()},
 	}
 	for _, tc := range cases {
 		assertNonNilSliceJSON(t, tc.name, tc.got)

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"reasonix/internal/config"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
@@ -376,19 +378,34 @@ func repairOwnerWrite(root *os.Root, path string, dir bool) {
 	_ = root.Chmod(path, info.Mode().Perm()|need)
 }
 
-// render serializes a memory to frontmatter + body. The frontmatter mirrors the
-// auto-memory shape (name / description / metadata.type) so the files are
-// interchangeable with that ecosystem and re-readable by loadMemory.
+// memoryFrontmatter is the YAML shape render emits, mirroring the auto-memory
+// shape (name / description / metadata.type) so the files are interchangeable
+// with that ecosystem and re-readable by loadMemory. Marshaled by yaml.v3 so a
+// title or description containing ": ", '#', or quotes is escaped instead of
+// corrupting the block — frontmatter.Split returns an EMPTY map for
+// unparseable YAML, which would silently drop the memory's name/title/type on
+// the next load. Plain values render byte-identically to the previous
+// hand-built format.
+type memoryFrontmatter struct {
+	Name     string `yaml:"name"`
+	Title    string `yaml:"title,omitempty"`
+	Desc     string `yaml:"description"`
+	Metadata struct {
+		Type string `yaml:"type"`
+	} `yaml:"metadata"`
+}
+
+// render serializes a memory to frontmatter + body.
 func render(m Memory, name string) string {
+	fm := memoryFrontmatter{Name: name, Title: oneLine(m.Title), Desc: oneLine(m.Description)}
+	fm.Metadata.Type = string(NormalizeType(string(m.Type)))
 	var b strings.Builder
 	b.WriteString("---\n")
-	b.WriteString("name: " + name + "\n")
-	if t := oneLine(m.Title); t != "" {
-		b.WriteString("title: " + t + "\n")
-	}
-	b.WriteString("description: " + oneLine(m.Description) + "\n")
-	b.WriteString("metadata:\n")
-	b.WriteString("  type: " + string(NormalizeType(string(m.Type))) + "\n")
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	// Encoding a flat struct of strings cannot fail.
+	_ = enc.Encode(fm)
+	_ = enc.Close()
 	b.WriteString("---\n\n")
 	b.WriteString(strings.TrimSpace(m.Body))
 	b.WriteString("\n")

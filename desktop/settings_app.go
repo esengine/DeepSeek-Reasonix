@@ -808,7 +808,7 @@ func (a *App) Settings() SettingsView {
 			DisplayMode:             "standard",
 			StatusBarStyle:          "text",
 			StatusBarItems:          config.DefaultDesktopStatusBarItems(),
-			DefaultToolApprovalMode: "ask",
+			DefaultToolApprovalMode: "auto",
 			CheckUpdates:            true,
 			Telemetry:               true,
 			Metrics:                 true,
@@ -1731,6 +1731,87 @@ func (a *App) SetSubagentEffort(level string) error {
 			return err
 		}
 		c.Agent.SubagentEffort = effort
+		return nil
+	})
+}
+
+// deleteSubagentOverrideAliases removes every underscore/hyphen alias entry
+// for name (boot.SubagentModelKeys — the same key set runtime dispatch
+// reads). Deleting only the exact key would leave a legacy alias entry (e.g.
+// `security_review` for the security-review skill) silently active.
+func deleteSubagentOverrideAliases(overrides map[string]string, name string) {
+	for _, key := range boot.SubagentModelKeys(name) {
+		delete(overrides, key)
+	}
+}
+
+// SetSubagentProfileModel sets (or clears) a per-name model override for a
+// subagent — the only way to influence a built-in subagent's model in the
+// Subagents settings page, since built-ins have no editable frontmatter file
+// to carry a `model:` line. Writes into the same cfg.Agent.SubagentModels map
+// internal/boot's subagentModelRef already reads at dispatch time. Set and
+// clear both sweep the underscore/hyphen alias keys so a legacy alias entry
+// can neither shadow the new value nor survive a clear.
+func (a *App) SetSubagentProfileModel(name, ref string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	return a.applyConfigChange(func(c *config.Config) error {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			deleteSubagentOverrideAliases(c.Agent.SubagentModels, name)
+			return nil
+		}
+		resolved, err := selectableDesktopModelRef(c, ref)
+		if err != nil {
+			return err
+		}
+		if c.Agent.SubagentModels == nil {
+			c.Agent.SubagentModels = map[string]string{}
+		}
+		deleteSubagentOverrideAliases(c.Agent.SubagentModels, name)
+		c.Agent.SubagentModels[name] = resolved
+		return nil
+	})
+}
+
+// SetSubagentProfileEffort sets (or clears) a per-name effort override. See
+// SetSubagentProfileModel.
+func (a *App) SetSubagentProfileEffort(name, level string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name is required")
+	}
+	return a.applyConfigChange(func(c *config.Config) error {
+		level = strings.TrimSpace(level)
+		if level == "" || level == "auto" {
+			deleteSubagentOverrideAliases(c.Agent.SubagentEfforts, name)
+			return nil
+		}
+		// Validate against the model the override will actually apply to:
+		// the alias-aware per-name model override first, then the global
+		// subagent default, then the session default.
+		model := subagentOverrideFor(c.Agent.SubagentModels, name)
+		if model == "" {
+			model = strings.TrimSpace(c.Agent.SubagentModel)
+		}
+		if model == "" {
+			model = c.DefaultModel
+		}
+		entry, ok := c.ResolveModel(model)
+		if !ok {
+			return fmt.Errorf("unknown subagent model %q", model)
+		}
+		effort, err := config.NormalizeEffort(entry, level)
+		if err != nil {
+			return err
+		}
+		if c.Agent.SubagentEfforts == nil {
+			c.Agent.SubagentEfforts = map[string]string{}
+		}
+		deleteSubagentOverrideAliases(c.Agent.SubagentEfforts, name)
+		c.Agent.SubagentEfforts[name] = effort
 		return nil
 	})
 }

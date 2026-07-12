@@ -30,7 +30,7 @@ const (
 type Message struct {
 	Role             Role     `json:"role"`
 	Content          string   `json:"content,omitempty"`
-	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…); embedded only for vision-capable models
+	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
@@ -673,15 +673,21 @@ type Config struct {
 
 // AuthError reports that a provider rejected the API key (HTTP 401/403). Its
 // message is already user-facing and actionable — it names the provider and,
-// when known, the environment variable the key comes from — so the CLI can
-// surface it verbatim instead of dumping a raw status body. Providers should
-// return this (rather than a generic status error) for auth failures.
+// when known, the environment variable the key comes from — and it carries the
+// server's own reason as Body, because relay gateways explain *why* the key was
+// rejected ("token expired", key not entitled to the model) in the response
+// body. Body is deliberately NOT part of Error(): servers echo masked key
+// fragments in auth bodies, and the ambient error string flows into logs,
+// status lines, and traces where key material must never propagate. Display
+// layers that want the reason read Body and extract it themselves. Providers
+// should return this (rather than a generic status error) for auth failures.
 type AuthError struct {
 	Provider  string // the provider instance name, e.g. "deepseek"
 	KeyEnv    string // the api_key_env the key is read from, when known
 	KeySource string // human-readable source of KeyEnv, when known
 	Status    int    // the HTTP status (401 or 403)
 	HasKey    bool   // a non-empty key was sent — the server rejected it, vs. no key configured at all
+	Body      string // trimmed response-body snippet, the server's verbatim reason when it gave one
 }
 
 func (e *AuthError) Error() string {

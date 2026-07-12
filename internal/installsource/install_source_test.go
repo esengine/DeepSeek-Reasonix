@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -1654,4 +1655,316 @@ func ExampleNewTool() {
 	fmt.Printf("status=%s kind=%s skill=%d mcp=%d\n",
 		resp.Status, resp.Kind, resp.Kinds.Skill, resp.Kinds.MCP)
 	// Output: status=planned kind=mcp skill=0 mcp=1
+}
+
+// TestGitHubPluginPlanMatchesApply pins the approval contract: the plan the
+// user approves must describe exactly the capability set apply installs. Both
+// phases resolve the source through pluginSource, so convention-discovered
+// capabilities (skills/, commands/ — including nested namespaces) appear in
+// the plan, not only after installation.
+func TestGitHubPluginPlanMatchesApply(t *testing.T) {
+	src := t.TempDir()
+	writeFile(t, filepath.Join(src, ".claude-plugin", "plugin.json"), `{"name": "pwf", "version": "1.0.0"}`)
+	writeFile(t, filepath.Join(src, "skills", "planner", "SKILL.md"), "---\ndescription: planner\n---\nbody")
+	writeFile(t, filepath.Join(src, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan: $ARGUMENTS")
+	writeFile(t, filepath.Join(src, "commands", "git", "commit.md"), "---\ndescription: commit\n---\nCommit")
+
+	project := t.TempDir()
+	home := t.TempDir()
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	tool := tl.(*installSourceTool)
+	tool.preparePlugin = func(ctx context.Context, source, mode string) (string, string, func(), error) {
+		return src, "cafe0001", func() {}, nil
+	}
+
+	plan := execInstall(t, tl, map[string]any{
+		"source": "https://github.com/acme/pwf",
+		"kind":   "plugin",
+	})
+	if !plan.OK || plan.Status != "planned" || len(plan.Actions) != 1 {
+		t.Fatalf("plan response = %+v", plan)
+	}
+	planned := plan.Actions[0]
+	if planned.SkillCount != 1 || planned.CommandCount != 2 {
+		t.Fatalf("planned counts = %d skills / %d commands, want 1/2 (plan must see convention dirs)", planned.SkillCount, planned.CommandCount)
+	}
+
+	applied := execInstall(t, tl, map[string]any{
+		"source": "https://github.com/acme/pwf",
+		"kind":   "plugin",
+		"apply":  true,
+	})
+	if !applied.OK || applied.Status != "done" || len(applied.Actions) != 1 {
+		t.Fatalf("apply response = %+v", applied)
+	}
+	got := applied.Actions[0]
+	if got.SkillCount != planned.SkillCount || got.CommandCount != planned.CommandCount ||
+		got.HookCount != planned.HookCount || got.ToolCount != planned.ToolCount {
+		t.Fatalf("apply counts (%d/%d/%d/%d) diverge from approved plan (%d/%d/%d/%d)",
+			got.SkillCount, got.CommandCount, got.HookCount, got.ToolCount,
+			planned.SkillCount, planned.CommandCount, planned.HookCount, planned.ToolCount)
+	}
+}
+
+// TestGitHubPluginApplyRefusesUnpinnableDrift pins the snapshot contract: when
+// the source resolves to a different commit than the plan approved and the
+// approved snapshot cannot be restored, apply must refuse instead of
+// installing content the approval never covered.
+func TestGitHubPluginApplyRefusesUnpinnableDrift(t *testing.T) {
+	tree1 := t.TempDir()
+	writeFile(t, filepath.Join(tree1, ".claude-plugin", "plugin.json"), `{"name": "pwf", "version": "1.0.0"}`)
+	writeFile(t, filepath.Join(tree1, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	tree2 := t.TempDir()
+	writeFile(t, filepath.Join(tree2, ".claude-plugin", "plugin.json"), `{"name": "pwf", "version": "1.0.1"}`)
+	writeFile(t, filepath.Join(tree2, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	writeFile(t, filepath.Join(tree2, "commands", "extra.md"), "---\ndescription: extra\n---\nExtra")
+
+	project := t.TempDir()
+	home := t.TempDir()
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	tool := tl.(*installSourceTool)
+	calls := 0
+	tool.preparePlugin = func(ctx context.Context, source, mode string) (string, string, func(), error) {
+		calls++
+		if calls == 1 {
+			return tree1, "cafe0001", func() {}, nil // plan recompute inside the apply call
+		}
+		return tree2, "cafe0002", func() {}, nil // apply resolution: source moved
+	}
+
+	resp := execInstall(t, tl, map[string]any{
+		"source": "https://github.com/acme/pwf",
+		"kind":   "plugin",
+		"apply":  true,
+	})
+	if resp.OK || resp.Status != "failed" {
+		t.Fatalf("response = %+v, want a failed apply when the source drifted past the approved commit", resp)
+	}
+	if len(resp.Actions) != 1 || resp.Actions[0].Status != "failed" {
+		t.Fatalf("actions = %+v, want the single install action failed", resp.Actions)
+	}
+	if !strings.Contains(resp.Actions[0].Error, "approved commit cafe0001") {
+		t.Fatalf("action error = %q, want the approved-commit drift refusal", resp.Actions[0].Error)
+	}
+	if _, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "pwf"); ok {
+		t.Fatal("drifted plugin must not be installed")
+	}
+}
+
+// TestCopyMaterializesInRootSymlinkedCommands pins that a command alias
+// symlinked to a file inside the package survives copy-mode installs: the
+// installed tree must resolve to the same capability set the plan counted.
+func TestCopyMaterializesInRootSymlinkedCommands(t *testing.T) {
+	src := t.TempDir()
+	writeFile(t, filepath.Join(src, ".claude-plugin", "plugin.json"), `{"name": "aliases"}`)
+	writeFile(t, filepath.Join(src, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nbody")
+	writeFile(t, filepath.Join(src, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	if err := os.Symlink(filepath.Join(src, "commands", "plan.md"), filepath.Join(src, "commands", "pwf.md")); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+
+	project := t.TempDir()
+	home := t.TempDir()
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	tool := tl.(*installSourceTool)
+	tool.preparePlugin = func(ctx context.Context, source, mode string) (string, string, func(), error) {
+		return src, "cafe0001", func() {}, nil
+	}
+
+	resp := execInstall(t, tl, map[string]any{
+		"source": "https://github.com/acme/aliases",
+		"kind":   "plugin",
+		"apply":  true,
+	})
+	if !resp.OK || resp.Status != "done" || len(resp.Actions) != 1 {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.Actions[0].CommandCount != 2 {
+		t.Fatalf("planned commands = %d, want 2 (alias followed)", resp.Actions[0].CommandCount)
+	}
+	installedRoot := filepath.Join(home, ".reasonix", "plugins", "aliases")
+	pkg, _, err := pluginpkg.ParseDir(installedRoot)
+	if err != nil {
+		t.Fatalf("ParseDir installed: %v", err)
+	}
+	if _, commands, _, _ := pkg.CapabilityCounts(); commands != 2 {
+		t.Fatalf("installed commands = %d, want the symlinked alias materialized", commands)
+	}
+}
+
+// TestCopyRefusesUnmaterializableSymlinkCommands pins the fail-closed path: a
+// command symlinked to a file OUTSIDE the package counts during planning but
+// cannot be materialized by copy mode, so apply must refuse (and clean up)
+// rather than silently install fewer commands than approved.
+func TestCopyRefusesUnmaterializableSymlinkCommands(t *testing.T) {
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "evil.md"), "---\ndescription: evil\n---\nEvil")
+	src := t.TempDir()
+	writeFile(t, filepath.Join(src, ".claude-plugin", "plugin.json"), `{"name": "escapes"}`)
+	writeFile(t, filepath.Join(src, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	if err := os.Symlink(filepath.Join(outside, "evil.md"), filepath.Join(src, "commands", "evil.md")); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+
+	project := t.TempDir()
+	home := t.TempDir()
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	tool := tl.(*installSourceTool)
+	tool.preparePlugin = func(ctx context.Context, source, mode string) (string, string, func(), error) {
+		return src, "cafe0001", func() {}, nil
+	}
+
+	resp := execInstall(t, tl, map[string]any{
+		"source": "https://github.com/acme/escapes",
+		"kind":   "plugin",
+		"apply":  true,
+	})
+	if resp.OK || resp.Status != "failed" || len(resp.Actions) != 1 || resp.Actions[0].Status != "failed" {
+		t.Fatalf("response = %+v, want a failed apply for the unmaterializable symlink", resp)
+	}
+	if !strings.Contains(resp.Actions[0].Error, "approved plan counted") {
+		t.Fatalf("action error = %q, want the capability-verification refusal", resp.Actions[0].Error)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".reasonix", "plugins", "escapes")); !os.IsNotExist(err) {
+		t.Fatal("failed install must not leave the copied tree behind")
+	}
+	if _, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "escapes"); ok {
+		t.Fatal("failed install must not be registered")
+	}
+}
+
+// TestFailedReplaceKeepsExistingPluginInstall pins the update-safety contract:
+// when a replace=true update fails capability verification (e.g. the new
+// version ships an unmaterializable symlink), the previously installed
+// version must survive on disk and stay registered — a failed update may
+// never leave an enabled plugin pointing at a missing or gutted root.
+func TestFailedReplaceKeepsExistingPluginInstall(t *testing.T) {
+	v1 := t.TempDir()
+	writeFile(t, filepath.Join(v1, ".claude-plugin", "plugin.json"), `{"name": "pwf", "version": "1.0.0"}`)
+	writeFile(t, filepath.Join(v1, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "evil.md"), "---\ndescription: evil\n---\nEvil")
+	v2 := t.TempDir()
+	writeFile(t, filepath.Join(v2, ".claude-plugin", "plugin.json"), `{"name": "pwf", "version": "2.0.0"}`)
+	writeFile(t, filepath.Join(v2, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	if err := os.Symlink(filepath.Join(outside, "evil.md"), filepath.Join(v2, "commands", "evil.md")); err != nil {
+		t.Skipf("symlinks unavailable on this platform: %v", err)
+	}
+
+	project := t.TempDir()
+	home := t.TempDir()
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	tool := tl.(*installSourceTool)
+	current, commit := v1, "cafe0001"
+	tool.preparePlugin = func(ctx context.Context, source, mode string) (string, string, func(), error) {
+		return current, commit, func() {}, nil
+	}
+
+	install := execInstall(t, tl, map[string]any{
+		"source": "https://github.com/acme/pwf",
+		"kind":   "plugin",
+		"apply":  true,
+	})
+	if !install.OK || install.Status != "done" {
+		t.Fatalf("initial install = %+v", install)
+	}
+
+	current, commit = v2, "cafe0002"
+	update := execInstall(t, tl, map[string]any{
+		"source":  "https://github.com/acme/pwf",
+		"kind":    "plugin",
+		"apply":   true,
+		"replace": true,
+	})
+	if update.OK || update.Status != "failed" {
+		t.Fatalf("update = %+v, want a failed apply for the unmaterializable symlink", update)
+	}
+
+	installedRoot := filepath.Join(home, ".reasonix", "plugins", "pwf")
+	if _, err := os.Stat(filepath.Join(installedRoot, "commands", "plan.md")); err != nil {
+		t.Fatalf("previous install must survive a failed update: %v", err)
+	}
+	pkg, _, err := pluginpkg.ParseDir(installedRoot)
+	if err != nil {
+		t.Fatalf("ParseDir installed: %v", err)
+	}
+	if pkg.Manifest.Version != "1.0.0" {
+		t.Fatalf("installed version = %q, want the previous 1.0.0 kept", pkg.Manifest.Version)
+	}
+	if p, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "pwf"); !ok || !p.Enabled {
+		t.Fatal("previous registration must survive a failed update")
+	}
+	if _, err := os.Stat(installedRoot + ".pre-replace"); !os.IsNotExist(err) {
+		t.Fatal("failed update must not leave a backup tree behind")
+	}
+	entries, err := os.ReadDir(filepath.Dir(installedRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".staging-") {
+			t.Fatalf("failed update must not leave staging dir %q behind", e.Name())
+		}
+	}
+}
+
+// TestBackupPathCannotCollideWithSiblingPlugin pins the backup-naming
+// contract: plugin names may legally contain dots, so a plugin literally
+// named "foo.pre-replace" must survive an update of plugin "foo" — the swap
+// backup must use a name no valid plugin can occupy.
+func TestBackupPathCannotCollideWithSiblingPlugin(t *testing.T) {
+	fooV1 := t.TempDir()
+	writeFile(t, filepath.Join(fooV1, ".claude-plugin", "plugin.json"), `{"name": "foo", "version": "1.0.0"}`)
+	writeFile(t, filepath.Join(fooV1, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan")
+	fooV2 := t.TempDir()
+	writeFile(t, filepath.Join(fooV2, ".claude-plugin", "plugin.json"), `{"name": "foo", "version": "2.0.0"}`)
+	writeFile(t, filepath.Join(fooV2, "commands", "plan.md"), "---\ndescription: plan\n---\nPlan v2")
+	sibling := t.TempDir()
+	writeFile(t, filepath.Join(sibling, ".claude-plugin", "plugin.json"), `{"name": "foo.pre-replace", "version": "1.0.0"}`)
+	writeFile(t, filepath.Join(sibling, "commands", "keep.md"), "---\ndescription: keep\n---\nKeep")
+
+	project := t.TempDir()
+	home := t.TempDir()
+	tl := NewTool(Options{ProjectRoot: project, HomeDir: home})
+	tool := tl.(*installSourceTool)
+	sources := map[string]string{
+		"https://github.com/acme/foo":     fooV1,
+		"https://github.com/acme/sibling": sibling,
+	}
+	tool.preparePlugin = func(ctx context.Context, source, mode string) (string, string, func(), error) {
+		return sources[source], "cafe-" + source, func() {}, nil
+	}
+
+	for _, source := range []string{"https://github.com/acme/foo", "https://github.com/acme/sibling"} {
+		resp := execInstall(t, tl, map[string]any{"source": source, "kind": "plugin", "apply": true})
+		if !resp.OK || resp.Status != "done" {
+			t.Fatalf("install %s = %+v", source, resp)
+		}
+	}
+
+	sources["https://github.com/acme/foo"] = fooV2
+	update := execInstall(t, tl, map[string]any{
+		"source":  "https://github.com/acme/foo",
+		"kind":    "plugin",
+		"apply":   true,
+		"replace": true,
+	})
+	if !update.OK || update.Status != "done" {
+		t.Fatalf("update = %+v", update)
+	}
+
+	siblingRoot := filepath.Join(home, ".reasonix", "plugins", "foo.pre-replace")
+	if _, err := os.Stat(filepath.Join(siblingRoot, "commands", "keep.md")); err != nil {
+		t.Fatalf("sibling plugin's files must survive the update of foo: %v", err)
+	}
+	if _, ok, _ := pluginpkg.FindInstalled(filepath.Join(home, ".reasonix"), "foo.pre-replace"); !ok {
+		t.Fatal("sibling plugin must stay registered")
+	}
+	pkg, _, err := pluginpkg.ParseDir(filepath.Join(home, ".reasonix", "plugins", "foo"))
+	if err != nil {
+		t.Fatalf("ParseDir foo: %v", err)
+	}
+	if pkg.Manifest.Version != "2.0.0" {
+		t.Fatalf("foo version = %q, want the update applied", pkg.Manifest.Version)
+	}
 }

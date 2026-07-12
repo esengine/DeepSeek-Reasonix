@@ -295,3 +295,11 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
+	task := (&TaskTool{}).WithDeliveryProfile(true)
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1)
+	if !opts.DeliveryProfile {
+		t.Fatal("sub-agent options did not inherit delivery profile")
+	}
+}

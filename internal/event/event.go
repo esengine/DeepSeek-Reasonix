@@ -228,12 +228,13 @@ type CacheDiagnostics struct {
 }
 
 const (
-	UsageSourceExecutor   = "executor"
-	UsageSourcePlanner    = "planner"
-	UsageSourceSubagent   = "subagent"
-	UsageSourceCompaction = "compaction"
-	UsageSourceClassifier = "classifier"
-	UsageSourceTitle      = "title"
+	UsageSourceExecutor         = "executor"
+	UsageSourcePlanner          = "planner"
+	UsageSourceSubagent         = "subagent"
+	UsageSourceCompaction       = "compaction"
+	UsageSourceClassifier       = "classifier"
+	UsageSourceTitle            = "title"
+	UsageSourceCapabilityRouter = "capability-router"
 )
 
 // Event is one increment in a turn's event stream. Read the field(s) documented

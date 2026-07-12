@@ -200,7 +200,7 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
-func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
+func TestSaveTabsPersistsNonBalancedTokenModes(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -222,6 +222,16 @@ func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
 		t.Fatalf("saved token mode = %q, want economy", got.Tabs[0].TokenMode)
 	}
 
+	tab.tokenMode = "delivery"
+	app.mu.Lock()
+	app.saveTabsLocked()
+	app.mu.Unlock()
+
+	got = loadTabsFile()
+	if got.Tabs[0].TokenMode != "delivery" {
+		t.Fatalf("saved token mode = %q, want delivery", got.Tabs[0].TokenMode)
+	}
+
 	tab.tokenMode = "full"
 	app.mu.Lock()
 	app.saveTabsLocked()
@@ -229,7 +239,7 @@ func TestSaveTabsPersistsTokenModeOnlyWhenEconomy(t *testing.T) {
 
 	got = loadTabsFile()
 	if got.Tabs[0].TokenMode != "" {
-		t.Fatalf("full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
+		t.Fatalf("balanced/full token mode should be omitted from persistence, got %q", got.Tabs[0].TokenMode)
 	}
 }
 

@@ -258,7 +258,7 @@ func renderSkillRow(num int, selected bool, s skill.Skill, enabled bool, w int) 
 		prefix = accent("  › ")
 	}
 	nameWidth := min(30, max(14, w/3))
-	name := compactMiddle(s.Name, nameWidth)
+	name := compactMiddle(s.SlashName(), nameWidth)
 	if selected {
 		name = bold(name)
 	}
@@ -370,7 +370,7 @@ func renderSkillDetail(s skill.Skill, w int) string {
 
 func renderSkillDetailHeader(s skill.Skill, w int) string {
 	var b strings.Builder
-	b.WriteString(accent("/" + s.Name))
+	b.WriteString(accent("/" + s.SlashName()))
 	b.WriteByte('\n')
 
 	meta := fmt.Sprintf(i18n.M.SkillPickerDetailMetaFmt, scopeLabel(s.Scope), string(s.RunAs))

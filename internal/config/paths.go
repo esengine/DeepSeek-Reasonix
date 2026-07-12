@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"unicode/utf8"
+
+	"reasonix/internal/command"
 )
 
 var (
@@ -468,40 +470,57 @@ func CommandDirs() []string {
 // dirs under root instead of the current working directory. Global dirs are
 // unchanged — they are always user-scoped.
 func CommandDirsForRoot(root string) []string {
+	roots := CommandRootsForRoot(root)
+	dirs := make([]string, 0, len(roots))
+	for _, spec := range roots {
+		dirs = append(dirs, spec.Path)
+	}
+	return dirs
+}
+
+// CommandRootsForRoot is the ownership-aware form of CommandDirsForRoot.
+// Plugin roots retain their package name so the loader can expose stable,
+// package-qualified command names and hidden short-name compatibility aliases.
+func CommandRootsForRoot(root string) []command.Root {
 	root = resolveRoot(root)
-	var dirs []string
-	add := func(dir string) {
-		if dir == "" {
+	var roots []command.Root
+	add := func(spec command.Root) {
+		if spec.Path == "" {
 			return
 		}
-		for _, existing := range dirs {
-			if samePath(existing, dir) {
+		for _, existing := range roots {
+			if samePath(existing.Path, spec.Path) && existing.Plugin == spec.Plugin {
 				return
 			}
 		}
-		dirs = append(dirs, dir)
+		roots = append(roots, spec)
+	}
+	// Enabled plugin packages contribute command dirs before user/project dirs,
+	// so explicit commands still win exact canonical-name clashes.
+	for _, spec := range pluginPackageCommandRoots() {
+		add(spec)
 	}
 	if dir := legacyOSSupportDir(); dir != "" {
-		add(filepath.Join(dir, "commands"))
+		add(command.Root{Path: filepath.Join(dir, "commands")})
 	}
 	for _, legacy := range legacyXDGConfigPaths() {
-		add(filepath.Join(filepath.Dir(legacy), "commands"))
+		add(command.Root{Path: filepath.Join(filepath.Dir(legacy), "commands")})
 	}
 	if home, err := osUserHomeDir(); err == nil {
 		for _, dir := range conventionSubdirsAsc(home, "commands") {
-			add(dir)
+			add(command.Root{Path: dir})
 		}
 	}
 	if dir := userConfigDir(); dir != "" {
-		add(filepath.Join(dir, "commands"))
+		add(command.Root{Path: filepath.Join(dir, "commands")})
 	}
 	if dir := userSupportDir(); dir != "" && !samePath(dir, userConfigDir()) {
-		add(filepath.Join(dir, "commands"))
+		add(command.Root{Path: filepath.Join(dir, "commands")})
 	}
 	for _, dir := range conventionSubdirsAsc(root, "commands") {
-		add(dir)
+		add(command.Root{Path: dir})
 	}
-	return dirs
+	return roots
 }
 
 // SourcePath returns the highest-priority config file that exists, or "" if none.

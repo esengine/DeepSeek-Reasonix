@@ -190,6 +190,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		minimax:      minimax,
 		zhipu:        zhipu,
 		longcat:      longcat,
+		mimo:         IsMiMo(cfg.BaseURL),
 		thinkingType: thinkingType,
 		vision:       vision,
 		visionDetail: visionDetail,
@@ -224,6 +225,7 @@ type client struct {
 	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
 	zhipu        bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
 	longcat      bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	mimo         bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
 	thinkingType string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision       bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
@@ -387,7 +389,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, err
+		return nil, provider.AnnotateToolSchemaError(err, req.Tools)
 	}
 	c.authed.Store(true)
 
@@ -452,8 +454,27 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
 	// rejects with a 400 ("must be followed by tool messages …").
 	src := provider.SanitizeToolPairing(req.Messages)
-	msgs := make([]chatMessage, len(src))
-	for i, m := range src {
+	msgs := make([]chatMessage, 0, len(src))
+	// Images returned by tool calls can't ride in the tool message itself — the
+	// OpenAI API accepts only text content parts under role "tool" — so they are
+	// carried by a synthetic user message injected after the turn's full run of
+	// tool results, before the next non-tool message (splitting a tool-result
+	// run would break the API's tool-call pairing validation).
+	var pendingToolImages []string
+	flushToolImages := func() {
+		if len(pendingToolImages) == 0 {
+			return
+		}
+		msgs = append(msgs, chatMessage{
+			Role:    "user",
+			Content: imageContentParts("Images returned by the preceding tool call(s):", pendingToolImages, c.visionDetail),
+		})
+		pendingToolImages = nil
+	}
+	for _, m := range src {
+		if m.Role != provider.RoleTool {
+			flushToolImages()
+		}
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
@@ -487,14 +508,21 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
 			cm.Content = m.Content
 		}
-		msgs[i] = cm
+		msgs = append(msgs, cm)
+		if c.vision && m.Role == provider.RoleTool {
+			pendingToolImages = append(pendingToolImages, m.Images...)
+		}
 	}
+	flushToolImages()
 
 	var tools []chatTool
 	for _, t := range req.Tools {
 		parameters := t.Parameters
 		if len(parameters) == 0 {
 			parameters = provider.CanonicalizeSchema(nil)
+		}
+		if c.mimo {
+			parameters = provider.NormalizeLegacyTupleItemsForDraft202012(parameters)
 		}
 		tools = append(tools, chatTool{
 			Type:     "function",

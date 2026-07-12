@@ -17,6 +17,7 @@ import (
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/skill"
 	"reasonix/internal/store"
 )
 
@@ -185,6 +186,13 @@ func Collect(opts Options) Report {
 			DenyRules:  len(cfg.Permissions.Deny),
 		},
 		Warnings: warnings,
+	}
+	// Skill / MCP capability health (optional diagnostics; never fail doctor).
+	if skStore := skill.New(skill.Options{ProjectRoot: cwd}); skStore != nil {
+		report.Warnings = append(report.Warnings, CollectSkillHealthWarnings(SkillHealthOptions{
+			Skills:  skStore.List(),
+			Plugins: cfg.Plugins,
+		})...)
 	}
 	report.Sessions.Dir = redactHome(report.Sessions.Dir)
 	for i := range cfg.Providers {

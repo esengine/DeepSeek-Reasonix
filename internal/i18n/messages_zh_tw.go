@@ -208,6 +208,7 @@ var ChineseTraditional = Messages{
 	CmdSwitchBranch:     "切換對話分支",
 	CmdResume:           "恢復已儲存的會話",
 	CmdModel:            "切換模型",
+	CmdWorkMode:         "切換工作模式",
 	CmdMemory:           "檢視記憶檔案",
 	CmdMigrate:          "重試舊資料遷移",
 	CmdRemember:         "儲存一條記憶",
@@ -271,33 +272,46 @@ var ChineseTraditional = Messages{
 	ListMcpHeader:       "MCP 伺服器",
 	ListMcpNone:         "未連線 MCP 伺服器 — 在 reasonix.toml（[[plugins]]）或專案 .mcp.json 中新增",
 
-	MemoryNone:             "還沒有載入任何記憶 — 輸入 “/remember 內容” 可快速記錄，也可以在專案根目錄建立 REASONIX.md",
-	MemoryLoaded:           "當前已載入的記憶：",
-	MemorySavedHeader:      "  已記錄的條目（用 “/forget <name>” 刪除）：",
-	MemoryStoredUnderFmt:   "  存放於 %s",
-	MemoryEditHint:         "可直接編輯記憶文件，或輸入 “/remember 內容” 快速記錄；文件變動會在下次會話生效",
-	ForgetUsage:            "用法：/forget <name> — name 是 /memory 中顯示的條目標識",
-	ForgetDoneFmt:          "已刪除記憶：%s",
-	QuickRememberEmpty:     "沒有要記錄的內容",
-	QuickRememberDoneFmt:   "已記住 → %s",
-	ModelSwitchUnavailable: "本會話不支援切換模型",
-	ModelSwitchBusy:        "請先完成或取消當前這一輪再切換模型",
-	ModelAlreadyOnFmt:      "已經在使用 %s",
-	ModelSwitchingFmt:      "正在切換到 %s…",
-	ModelSwitchedFmt:       "已切換到 %s（會保留當前對話，但提示詞快取會重新計算）",
-	ModelListHeader:        "模型（/model <provider/model> 切換）",
-	RewindNone:             "暫無可回滾的內容",
-	RewindCodeConversation: "程式碼 + 對話",
-	RewindConversationOnly: "僅對話",
-	RewindCodeOnly:         "僅程式碼",
-	RewindFork:             "從這裡分叉（保留當前程式碼）",
-	RewindSummarizeFrom:    "總結這一輪之後的內容",
-	RewindSummarizeUpto:    "總結到這一輪為止",
-	RewindPickTitle:        "⟲ 回滾 — 選擇一輪",
-	RewindPickHint:         "↑/↓ 移動 · Enter 選擇 · Esc 關閉",
-	RewindRestoreTitleFmt:  "⟲ 恢復到第 %d 輪 ",
-	RewindApplyHint:        "↑/↓ · Enter 套用 · Esc 返回",
-	RewindEmpty:            "(空)",
+	MemoryNone:                "還沒有載入任何記憶 — 輸入 “/remember 內容” 可快速記錄，也可以在專案根目錄建立 REASONIX.md",
+	MemoryLoaded:              "當前已載入的記憶：",
+	MemorySavedHeader:         "  已記錄的條目（用 “/forget <name>” 刪除）：",
+	MemoryStoredUnderFmt:      "  存放於 %s",
+	MemoryEditHint:            "可直接編輯記憶文件，或輸入 “/remember 內容” 快速記錄；文件變動會在下次會話生效",
+	ForgetUsage:               "用法：/forget <name> — name 是 /memory 中顯示的條目標識",
+	ForgetDoneFmt:             "已刪除記憶：%s",
+	QuickRememberEmpty:        "沒有要記錄的內容",
+	QuickRememberDoneFmt:      "已記住 → %s",
+	ModelSwitchUnavailable:    "本會話不支援切換模型",
+	ModelSwitchBusy:           "請先完成或取消當前這一輪再切換模型",
+	ModelAlreadyOnFmt:         "已經在使用 %s",
+	ModelSwitchingFmt:         "正在切換到 %s…",
+	ModelSwitchedFmt:          "已切換到 %s（會保留當前對話，但提示詞快取會重新計算）",
+	ModelListHeader:           "模型（/model <provider/model> 切換）",
+	RuntimeSwitchPending:      "請等待目前執行階段切換完成",
+	WorkModeStatusFmt:         "工作 %s",
+	WorkModeListHeaderFmt:     "工作模式（目前：%s）",
+	WorkModeListHint:          "使用 /work-mode economy|balanced|delivery 切換（/profile 為相容別名）",
+	WorkModeEconomyDesc:       "降低 Token 消耗，按需連接可選工具來源",
+	WorkModeBalancedDesc:      "完整工具面，由模型判斷所需工作量",
+	WorkModeDeliveryDesc:      "強調完整驗證與交付，增強 skill 與插件呼叫",
+	WorkModeUsage:             "用法：/work-mode economy|balanced|delivery",
+	WorkModeSwitchUnavailable: "本會話不支援切換工作模式",
+	WorkModeSwitchBusy:        "請先完成或取消目前工作，再切換工作模式",
+	WorkModeAlreadyOnFmt:      "目前已經是 %s 工作模式",
+	WorkModeSwitchingFmt:      "正在切換到 %s 工作模式…",
+	WorkModeSwitchedFmt:       "已切換到 %s 工作模式（保留目前對話，但提示詞快取會重新計算）",
+	RewindNone:                "暫無可回滾的內容",
+	RewindCodeConversation:    "程式碼 + 對話",
+	RewindConversationOnly:    "僅對話",
+	RewindCodeOnly:            "僅程式碼",
+	RewindFork:                "從這裡分叉（保留當前程式碼）",
+	RewindSummarizeFrom:       "總結這一輪之後的內容",
+	RewindSummarizeUpto:       "總結到這一輪為止",
+	RewindPickTitle:           "⟲ 回滾 — 選擇一輪",
+	RewindPickHint:            "↑/↓ 移動 · Enter 選擇 · Esc 關閉",
+	RewindRestoreTitleFmt:     "⟲ 恢復到第 %d 輪 ",
+	RewindApplyHint:           "↑/↓ · Enter 套用 · Esc 返回",
+	RewindEmpty:               "(空)",
 
 	SelectProvidersLabel:  "選擇要啟用的 provider",
 	EnterAPIKeysHeader:    "輸入 API key（Enter 跳過、稍後再設）：",
@@ -384,6 +398,7 @@ var ChineseTraditional = Messages{
   reasonix config memory-v5 [off|observe|compact|on|status]  設定 Memory v5
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
+  reasonix subagent <list|create|edit|delete|try|run>   管理和執行隔離子智慧體 profile
   reasonix init                                         查看如何產生專案記憶（AGENTS.md）
   reasonix doctor [--json]                              輸出脫敏的本機診斷資訊
   reasonix doctor session <branch-id> [--zip] [--out PATH]  匯出會話衝突診斷 zip
@@ -397,6 +412,7 @@ var ChineseTraditional = Messages{
   reasonix --continue
   reasonix run "把 main.go 裡的 TODO 實現掉"
   reasonix run --model mimo-pro "給這個函式補單元測試"
+  reasonix subagent run review "審查目前變更"
   echo "解釋這段程式碼" | reasonix run
 
 設定：

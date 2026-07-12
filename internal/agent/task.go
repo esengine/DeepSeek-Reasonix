@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
@@ -69,6 +70,19 @@ var readOnlySubagentWorkflowTools = []string{
 }
 
 const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
+
+// AlwaysHiddenSubagentTools returns the tool names excluded from every
+// subagent's registry regardless of an explicit allowlist or delegation
+// depth (unlike subagentRecursiveTools, which depends on remaining depth).
+// That covers both subagentAlwaysHiddenTools and subagentJobTools —
+// SubagentToolRegistryForDepth and its read-only variant strip the job tools
+// unconditionally too. Host UIs offering a tool picker for a subagent
+// profile's allowed-tools should exclude these from the offered choices —
+// selecting them would be silently ignored at runtime.
+func AlwaysHiddenSubagentTools() []string {
+	names := append([]string(nil), subagentAlwaysHiddenTools...)
+	return append(names, subagentJobTools...)
+}
 
 // SubagentMetaTools returns the tool names that spawned agents should not inherit
 // from the parent registry unless a future call site deliberately opts into a
@@ -206,6 +220,7 @@ type TaskTool struct {
 	baseEffort           string
 	identityProfile      func(modelRef, effort string) (string, string)
 	maxSubagentDepth     int
+	deliveryProfile      bool
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -267,6 +282,14 @@ func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 
 func (t *TaskTool) WithMaxParallelReadTools(value int) *TaskTool {
 	t.maxParallelReadTools = NormalizeMaxParallelReadTools(value)
+	return t
+}
+
+// WithDeliveryProfile propagates the parent's runtime delivery contract into
+// writer-capable sub-agents. Read-only sub-agents may receive the flag too, but
+// the mutation gate remains dormant for them.
+func (t *TaskTool) WithDeliveryProfile(enabled bool) *TaskTool {
+	t.deliveryProfile = enabled
 	return t
 }
 
@@ -797,6 +820,7 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		ReasoningLanguage:    ReasoningLanguageFromContext(ctx),
 		SubagentDepth:        childDepth,
 		MaxSubagentDepth:     t.maxDepth(),
+		DeliveryProfile:      t.deliveryProfile,
 	}
 }
 
@@ -876,7 +900,18 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	}
 	sub := New(prov, reg, sess, opts, sink)
 	if err := sub.Run(ctx, prompt); err != nil {
+		// Still merge any partial child evidence so parent gates see real writes.
+		mergeChildEvidence(ctx, sub)
 		return "", fmt.Errorf("sub-agent: %w", err)
+	}
+	mergeChildEvidence(ctx, sub)
+	// Review/security subagents must hand back a typed report the parent's
+	// delivery gate can verify; prose alone would leave the gate demanding a
+	// review forever with no way to tell why it never arrives.
+	if kind := opts.RequireReviewReportKind; kind != "" {
+		if !sub.HasSuccessfulReviewReport(kind) {
+			return "", fmt.Errorf("%s subagent finished without submitting review_report (kind=%s); re-run it and call review_report with the host-read paths before finishing", kind, kind)
+		}
 	}
 	// Walk the session backwards for the last assistant message with content —
 	// that's the sub-agent's final answer. Intermediate assistant messages with
@@ -888,6 +923,27 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		}
 	}
 	return "", fmt.Errorf("sub-agent finished without producing a final answer")
+}
+
+// mergeChildEvidence folds a sub-agent's real receipts into the parent ledger
+// carried on ctx. Meta tools themselves are never mutations.
+func mergeChildEvidence(ctx context.Context, sub *Agent) {
+	if sub == nil {
+		return
+	}
+	parent, ok := evidence.FromContext(ctx)
+	if !ok || parent == nil {
+		return
+	}
+	parent.MergeChild(sub.EvidenceSummary())
+}
+
+// EvidenceSummary exports this agent's turn-scoped receipts for parent merge.
+func (a *Agent) EvidenceSummary() evidence.ChildEvidenceSummary {
+	if a == nil || a.evidence == nil {
+		return evidence.ChildEvidenceSummary{}
+	}
+	return a.evidence.Summary()
 }
 
 func isFreshSubagentSession(sess *Session) bool {

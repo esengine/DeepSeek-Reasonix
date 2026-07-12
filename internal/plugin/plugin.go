@@ -8,6 +8,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -190,6 +191,11 @@ type StartPolicy struct {
 	// return an error (StartAll semantics). When false, failures are recorded
 	// on the host and other plugins keep going (StartAvailable semantics).
 	AbortOnError bool
+
+	// SkipPersistence disables RecordStartup / SaveCachedSchema side effects.
+	// Use for read-only live probes (capability diagnostics) that must not
+	// write MCP stats or schema cache files under Reasonix home.
+	SkipPersistence bool
 }
 
 // defaultStartConcurrency caps parallel handshakes for the batch-start wrappers.
@@ -315,8 +321,10 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			if err != nil {
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
-				h.bgWrites.Add(1)
-				go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+				if !p.SkipPersistence {
+					h.bgWrites.Add(1)
+					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+				}
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("start plugin %q: %w", spec.Name, err)}
 				return
 			}
@@ -325,8 +333,10 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			if err != nil {
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
-				h.bgWrites.Add(1)
-				go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+				if !p.SkipPersistence {
+					h.bgWrites.Add(1)
+					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+				}
 				c.close()
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("list tools from %q: %w", spec.Name, err)}
 				return
@@ -338,20 +348,22 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			// recoverable (we just re-handshake or skip auto-demote).
 			phaseADur := recordedPhaseADur()
 			cancelStartup()
-			h.bgWrites.Add(1)
-			go func() {
-				defer h.bgWrites.Done()
-				_ = RecordStartup(spec.Name, phaseADur)
-				_ = SaveCachedSchema(spec.Name, CachedSchema{
-					SpecHash: SpecFingerprint(spec),
-					Capabilities: map[string]bool{
-						"tools":     c.hasTools,
-						"prompts":   c.hasPrompts,
-						"resources": c.hasResources,
-					},
-					Tools: cacheableToolsOf(ts),
-				})
-			}()
+			if !p.SkipPersistence {
+				h.bgWrites.Add(1)
+				go func() {
+					defer h.bgWrites.Done()
+					_ = RecordStartup(spec.Name, phaseADur)
+					_ = SaveCachedSchema(spec.Name, CachedSchema{
+						SpecHash: SpecFingerprint(spec),
+						Capabilities: map[string]bool{
+							"tools":     c.hasTools,
+							"prompts":   c.hasPrompts,
+							"resources": c.hasResources,
+						},
+						Tools: cacheableToolsOf(ts),
+					})
+				}()
+			}
 
 			// Prompts and resources are deferred to StartPhaseB so the boot path
 			// can return as soon as tools are ready — the slow-to-list surfaces
@@ -1230,6 +1242,23 @@ func ToolPrefix(server string) string {
 	return "mcp__" + normalizeName(server) + "__"
 }
 
+// MCPConnectPermissionName is the canonical permission and hook identity for
+// starting server on demand. It is intentionally outside the mcp__ tool
+// namespace: permission rules match tool names exactly, so a connect must have
+// its own non-colliding name instead of pretending a tool-prefix is a glob.
+func MCPConnectPermissionName(server string) string {
+	return "mcp_connect__" + normalizeName(server)
+}
+
+// ModelToolName is the canonical model-visible name for server's raw tool —
+// including the collision-hash suffix normalizeName appends when the raw name
+// needed sanitising. Every permission/hook/audit surface that names an MCP
+// tool must build the name through this function; a second normalization that
+// skips the hash would let deny/ask rules written for the executed name miss.
+func ModelToolName(server, raw string) string {
+	return toolName(server, raw)
+}
+
 var invalidNameChars = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
 
 func normalizeName(s string) string {
@@ -1328,10 +1357,18 @@ func (t *remoteTool) Schema() json.RawMessage {
 }
 
 func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	text, _, err := t.ExecuteWithImages(ctx, args)
+	return text, err
+}
+
+// ExecuteWithImages implements tool.ImageTool: MCP results may carry image
+// content items, which callers with a structural image channel (the agent)
+// forward to vision models instead of relying on the text placeholders alone.
+func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage) (string, []string, error) {
 	var argMap map[string]any
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argMap); err != nil {
-			return "", fmt.Errorf("invalid args: %w", err)
+			return "", nil, fmt.Errorf("invalid args: %w", err)
 		}
 	}
 	res, err := t.client.call(ctx, "tools/call", map[string]any{
@@ -1339,32 +1376,97 @@ func (t *remoteTool) Execute(ctx context.Context, args json.RawMessage) (string,
 		"arguments": argMap,
 	})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	return parseToolResult(res)
 }
 
-// parseToolResult flattens an MCP tools/call result into plain text.
-func parseToolResult(res json.RawMessage) (string, error) {
+// Tool-result images are forwarded to vision models as base64 data URLs, so
+// each item is validated and budgeted here rather than trusted from the MCP
+// server: payloads that are oversized, unparseable, beyond the per-result
+// count, or of a mime type outside the set every supported vision API accepts
+// are replaced with a text placeholder instead of poisoning the provider
+// request.
+const (
+	maxToolResultImageBytes = 4 << 20 // base64 length; stays under provider per-image and request caps
+	maxToolResultImages     = 5
+)
+
+var toolResultImageMimes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// parseToolResult flattens an MCP tools/call result into plain text plus the
+// image content items as data URLs. Every image item leaves a short placeholder
+// in the text at its position, so text-only consumers (and non-vision models)
+// still learn an image was returned.
+func parseToolResult(res json.RawMessage) (string, []string, error) {
 	var out struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			Data     string `json:"data"`
+			MimeType string `json:"mimeType"`
 		} `json:"content"`
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(res, &out); err != nil {
-		return "", fmt.Errorf("decode tool result: %w", err)
+		return "", nil, fmt.Errorf("decode tool result: %w", err)
 	}
 	var sb strings.Builder
+	var images []string
 	for _, c := range out.Content {
-		if c.Type == "text" {
+		switch c.Type {
+		case "text":
 			sb.WriteString(c.Text)
+		case "image":
+			placeholder, url := toolResultImage(c.MimeType, c.Data, len(images))
+			sb.WriteString(placeholder)
+			if url != "" {
+				images = append(images, url)
+			}
 		}
 	}
 	text := sb.String()
 	if out.IsError {
-		return text, fmt.Errorf("plugin tool reported error: %s", text)
+		return text, images, fmt.Errorf("plugin tool reported error: %s", text)
 	}
-	return text, nil
+	return text, images, nil
+}
+
+// toolResultImage validates one MCP image content item and returns its text
+// placeholder plus the data URL to forward ("" when the item is dropped).
+func toolResultImage(mime, data string, kept int) (placeholder, url string) {
+	if kept >= maxToolResultImages {
+		return "[image omitted: per-result image limit reached]", ""
+	}
+	mime = strings.ToLower(strings.TrimSpace(mime))
+	if mime == "" {
+		mime = "image/png"
+	}
+	if !toolResultImageMimes[mime] {
+		return "[image omitted: unsupported type " + mime + "]", ""
+	}
+	// Some servers wrap base64 in whitespace; vision APIs reject non-canonical
+	// payloads, so normalize before validating.
+	data = strings.Map(func(r rune) rune {
+		switch r {
+		case '\n', '\r', '\t', ' ':
+			return -1
+		}
+		return r
+	}, data)
+	if data == "" {
+		return "[image omitted: no data]", ""
+	}
+	if len(data) > maxToolResultImageBytes {
+		return fmt.Sprintf("[image omitted: %d bytes exceeds the %d-byte limit]", len(data), maxToolResultImageBytes), ""
+	}
+	if _, err := base64.StdEncoding.DecodeString(data); err != nil {
+		return "[image omitted: invalid base64]", ""
+	}
+	return "[image: " + mime + "]", "data:" + mime + ";base64," + data
 }

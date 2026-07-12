@@ -532,3 +532,108 @@ func TestLedgerNumericCompleteStepAuthorizesRephrasedTodo(t *testing.T) {
 		t.Fatalf("rephrased todo without complete_step should still be missing, got %+v", missing)
 	}
 }
+
+func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolName string
+		args     string
+		readOnly bool
+		want     bool
+	}{
+		{name: "trusted reader", toolName: "read_file", args: `{"path":"a.go"}`, readOnly: true},
+		{name: "file writer", toolName: "edit_file", args: `{"path":"a.go"}`, want: true},
+		{name: "delegated task meta", toolName: "task", args: `{"prompt":"fix it"}`},
+		{name: "run_skill meta", toolName: "run_skill", args: `{"name":"review"}`},
+		{name: "review meta", toolName: "review", args: `{"task":"review changes"}`},
+		{name: "security_review meta", toolName: "security_review", args: `{"task":"security"}`},
+		{name: "use_capability meta", toolName: "use_capability", args: `{"action":"inspect","capability_id":"mcp-server:github"}`},
+		{name: "test command", toolName: "bash", args: `{"command":"go test ./..."}`},
+		{name: "diff review", toolName: "bash", args: `{"command":"git diff --check"}`},
+		{name: "formatter write", toolName: "bash", args: `{"command":"gofmt -w internal/a.go"}`, want: true},
+		{name: "file redirect", toolName: "bash", args: `{"command":"printf x > generated.txt"}`, want: true},
+		{name: "compound verification", toolName: "bash", args: `{"command":"go test ./... 2>&1 | tail -20"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ToolCallMutates(tt.toolName, json.RawMessage(tt.args), tt.readOnly); got != tt.want {
+				t.Fatalf("ToolCallMutates(%q, %s) = %v, want %v", tt.toolName, tt.args, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestToolCallRequiresDeliveryCriteriaForExecutionCommands(t *testing.T) {
+	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"go test ./..."}`), false) {
+		t.Fatal("verification command should require delivery acceptance criteria")
+	}
+	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"npm run test"}`), false) {
+		t.Fatal("npm run test should require delivery acceptance criteria")
+	}
+	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"git diff --check"}`), false) {
+		t.Fatal("git diff --check is a verification command and should require acceptance criteria")
+	}
+}
+
+func TestLedgerDeliverySignoffRequiresPostMutationVerificationAndReview(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("todo_write", json.RawMessage(`{"todos":[{"content":"Ship parser","status":"in_progress"}]}`), true, true))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/parser.go"}`), true, false))
+	mutation, ok := ledger.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("expected mutation receipt")
+	}
+	ledger.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/parser.go"}`), true, true))
+	ledger.Record(ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./internal/..."}`), true, false))
+	ledger.Record(ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"Ship parser",
+		"result":"parser shipped",
+		"evidence":[{"kind":"verification","summary":"tests passed","command":"go test ./internal/..."}]
+	}`), true, true))
+
+	if !ledger.HasSuccessfulAcceptanceCriteria() {
+		t.Fatal("expected non-empty todo_write to establish acceptance criteria")
+	}
+	if !ledger.HasSuccessfulReviewAfter(mutation) {
+		t.Fatal("expected post-mutation read to satisfy review")
+	}
+	if !ledger.HasSuccessfulDeliverySignoffAfter(mutation) {
+		t.Fatal("expected post-mutation verification cited by complete_step")
+	}
+}
+
+func TestLedgerDeliverySignoffRejectsPreMutationVerification(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, false))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"main.go"}`), true, false))
+	mutation, ok := ledger.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("expected mutation receipt")
+	}
+	ledger.Record(ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"change",
+		"result":"changed",
+		"evidence":[{"kind":"verification","summary":"tests passed before edit","command":"go test ./..."}]
+	}`), true, true))
+	if ledger.HasSuccessfulDeliverySignoffAfter(mutation) {
+		t.Fatal("pre-mutation verification must not sign off changed work")
+	}
+}
+
+func TestLedgerDeliverySignoffRejectsInspectionCommandMasqueradingAsVerification(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"main.go"}`), true, false))
+	mutation, ok := ledger.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("expected mutation receipt")
+	}
+	ledger.Record(ReceiptFromToolCall("bash", json.RawMessage(`{"command":"git status --short"}`), true, false))
+	ledger.Record(ReceiptFromToolCall("complete_step", json.RawMessage(`{
+		"step":"change",
+		"result":"changed",
+		"evidence":[{"kind":"verification","summary":"claimed verification","command":"git status --short"}]
+	}`), true, true))
+	if ledger.HasSuccessfulDeliverySignoffAfter(mutation) {
+		t.Fatal("inspection-only git status must not count as delivery verification")
+	}
+}

@@ -331,6 +331,43 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 	assertSkillStates(t, a.Capabilities().Skills)
 }
 
+func TestSkillsSettingsCarriesSubagentProfileFields(t *testing.T) {
+	a := NewApp()
+	a.setTestCtrl(control.New(control.Options{
+		AllSkills: []skill.Skill{
+			{
+				Name: "my-agent", Description: "a custom subagent", Scope: skill.ScopeGlobal, RunAs: skill.RunSubagent,
+				Model: "deepseek-pro", Effort: "high", AllowedTools: []string{"read_file", "grep"},
+				Color: "amber", Invocation: "manual",
+			},
+		},
+	}), "")
+	defer a.activeCtrl().Close()
+
+	views := a.SkillsSettings().Skills
+	if len(views) != 1 {
+		t.Fatalf("Skills = %+v, want exactly one entry", views)
+	}
+	got := views[0]
+	if got.Model != "deepseek-pro" || got.Effort != "high" || got.Color != "amber" || got.Invocation != "/my-agent" || got.InvocationMode != "manual" {
+		t.Fatalf("subagent profile fields not carried through: %+v", got)
+	}
+	if len(got.AllowedTools) != 2 || got.AllowedTools[0] != "read_file" || got.AllowedTools[1] != "grep" {
+		t.Fatalf("AllowedTools not carried through: %v", got.AllowedTools)
+	}
+}
+
+func TestAvailableSubagentToolsExcludesAlwaysHiddenTools(t *testing.T) {
+	a := NewApp()
+	for _, view := range a.AvailableSubagentTools() {
+		for _, hidden := range []string{"install_skill", "install_source", "parallel_tasks", "wait", "bash_output", "kill_shell"} {
+			if view.Name == hidden {
+				t.Fatalf("AvailableSubagentTools should exclude always-hidden tool %q", hidden)
+			}
+		}
+	}
+}
+
 func TestSkillsSettingsRefreshInvalidatesSkillRootsCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

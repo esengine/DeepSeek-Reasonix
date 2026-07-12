@@ -47,10 +47,13 @@ import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPl
 import { Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TodoPanel } from "./components/TodoPanel";
-import { ApprovalModal, approvalToolLabel } from "./components/ApprovalModal";
+import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
+
+/** Footer decision surface kinds. Priority: tool/plan approval > ask > clear context. */
+type DecisionSurfaceKind = "tool_approval" | "plan_approval" | "ask" | "clear_context";
 import { StatusBar } from "./components/StatusBar";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
@@ -91,6 +94,7 @@ import {
   type TokenMode,
   type ToolApprovalMode,
 } from "./lib/types";
+import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import {
   composerProfileFromMeta,
   composerProfileFromTab,
@@ -1177,6 +1181,8 @@ export default function App() {
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
   const topicRenameSkipCommitRef = useRef(false);
+  const prevDecisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
+  const decisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
   const topicRenameCommitHandledRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -1357,12 +1363,25 @@ export default function App() {
   }, []);
 
   const [pendingPlanRevisionsByTab, setPendingPlanRevisionsByTab] = useState<Record<string, string>>({});
+  const [invocationMetadataByTab, setInvocationMetadataByTab] = useState<Record<string, InvocationMetadataMap>>({});
   const pendingPlanRevisionSendingTabsRef = useRef(new Set<string>());
   const [footerHeight, setFooterHeight] = useState(0);
   const footerHeightRef = useRef(0);
   const footerRef = useRef<HTMLElement>(null);
   const activeTabIdRef = useRef(activeTabId);
-  const commitThenSendRef = useRef<(tabId: string, displayText: string, submitText?: string) => Promise<void>>(async () => {});
+  const commitThenSendRef = useRef<(tabId: string, displayText: string, submitText?: string, structured?: StructuredInvocationSubmit) => Promise<void>>(async () => {});
+  const handleInvocationMetadataChange = useCallback((metadata: InvocationMetadataMap) => {
+    const sourceTabId = activeTabIdRef.current;
+    if (!sourceTabId) return;
+    setInvocationMetadataByTab((current) => {
+      const previous = current[sourceTabId] ?? {};
+      const names = Object.keys(metadata);
+      if (names.length === Object.keys(previous).length && names.every((name) => (
+        previous[name]?.kind === metadata[name]?.kind && previous[name]?.color === metadata[name]?.color
+      ))) return current;
+      return { ...current, [sourceTabId]: metadata };
+    });
+  }, []);
   const rightDockDetailActive = rightDockMode === "terminal" || rightDockMode === "browser" || (rightDockMode !== "context" && workspacePreviewActive);
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
@@ -1414,6 +1433,13 @@ export default function App() {
       ? planRevisionInsertRequest.request
       : null;
   const composerInsertRequest = activeTabId ? composerInsertRequestsByTab[activeTabId] ?? null : null;
+  const prefillSubagentCommand = useCallback((command: string) => {
+    if (!activeTabId) return;
+    setComposerInsertRequestsByTab((current) => ({
+      ...current,
+      [activeTabId]: { id: Date.now(), text: command, mode: "prefix" },
+    }));
+  }, [activeTabId]);
   const composerSessionKey = useMemo(() => {
     return composerDraftKeyForTab(activeTab, activeTabId);
   }, [activeTab, activeTabId]);
@@ -1473,6 +1499,38 @@ export default function App() {
   const toolApprovalMode = composerProfile.toolApprovalMode;
   const tokenMode: TokenMode = composerProfile.tokenMode;
   const controllerReady = state.meta?.ready === true && !state.backendActivationPending;
+  // Single footer decision surface. Composer stays mounted underneath and is
+  // only visually/a11y-hidden so per-session draft caches survive.
+  const decisionSurface = useMemo((): DecisionSurfaceKind | null => {
+    if (state.approval) {
+      return state.approval.tool === "exit_plan_mode" ? "plan_approval" : "tool_approval";
+    }
+    if (state.ask) return "ask";
+    if (clearContextPending) return "clear_context";
+    return null;
+  }, [clearContextPending, state.approval, state.ask]);
+  decisionSurfaceRef.current = decisionSurface;
+  useEffect(() => {
+    // Close composer menus/popovers when a decision takes over the footer.
+    if (decisionSurface) {
+      closeTransientOverlays();
+      prevDecisionSurfaceRef.current = decisionSurface;
+      return;
+    }
+    // Restore composer focus on the next frame only if the tab did not switch
+    // and no new decision arrived (remote resolution / rapid consecutive prompts).
+    const hadDecision = prevDecisionSurfaceRef.current != null;
+    prevDecisionSurfaceRef.current = null;
+    if (!hadDecision) return;
+    const tabAtRelease = activeTabId;
+    const frame = requestAnimationFrame(() => {
+      if (decisionSurfaceRef.current != null) return;
+      if (activeTabIdRef.current !== tabAtRelease) return;
+      const input = document.getElementById("composer-input") as HTMLTextAreaElement | null;
+      input?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTabId, closeTransientOverlays, decisionSurface]);
   const patchActiveComposerProfile = useCallback(
     (patch: Partial<Omit<ComposerProfile, "pending">>, pendingFields: ComposerProfileField[]) => {
       if (!activeTabId) return;
@@ -1553,16 +1611,17 @@ export default function App() {
     [activeTabId, patchActiveComposerProfile, syncModeToController],
   );
   const applyCollaborationMode = useCallback(
-    (m: CollaborationMode): Promise<void> => {
+    async (m: CollaborationMode): Promise<void> => {
       userPlanModeByTabRef.current = updateUserPlanModeIntent(userPlanModeByTabRef.current, activeTabId, m === "plan");
       if (m === "goal") {
         patchActiveComposerProfile({ collaborationMode: "normal", goalDraftMode: true, goal: "" }, ["collaborationMode", "goal"]);
         return setControllerCollaborationMode("normal");
       }
       patchActiveComposerProfile({ collaborationMode: m, goalDraftMode: false, goal: "" }, ["collaborationMode", "goal"]);
-      return setControllerCollaborationMode(m);
+      if (goal.trim()) await clearControllerGoal();
+      await setControllerCollaborationMode(m);
     },
-    [activeTabId, patchActiveComposerProfile, setControllerCollaborationMode],
+    [activeTabId, clearControllerGoal, goal, patchActiveComposerProfile, setControllerCollaborationMode],
   );
   const applyToolApprovalMode = useCallback(
     (m: ToolApprovalMode) => {
@@ -1793,7 +1852,7 @@ export default function App() {
   // (/skill, /hooks, /mcp) — goes straight to Submit, which the controller
   // resolves (a turn, or a listing Notice).
   const handleSend = useCallback(
-    async (displayText: string, submitText = displayText, requestedTabId = activeTabId) => {
+    async (displayText: string, submitText = displayText, requestedTabId = activeTabId, structured?: StructuredInvocationSubmit) => {
       const sourceTabId = requestedTabId || activeTabId;
       if (!sourceTabId) throw new Error(t("composer.workspaceStarting"));
       const trimmed = displayText.trim();
@@ -1889,7 +1948,7 @@ export default function App() {
       await setControllerCollaborationModeForTab(sourceTabId, controllerComposerProfileCollaborationMode(composerProfile));
       await setControllerToolApprovalModeForTab(sourceTabId, toolApprovalMode);
       if (goal.trim()) await setControllerGoalForTab(sourceTabId, goal);
-      await commitThenSendRef.current(sourceTabId, trimmed, submitText.trim());
+      await commitThenSendRef.current(sourceTabId, trimmed, submitText.trim(), structured);
     },
     [activeTabId, applyGoal, closeTransientOverlays, collaborationMode, composerProfile, controllerReady, goal, notice, runShellForTab,
       setControllerCollaborationModeForTab, setControllerGoalForTab, setControllerToolApprovalModeForTab, switchModel, t, toolApprovalMode, showToast],
@@ -2464,7 +2523,7 @@ export default function App() {
   }, [state.items]);
 
   // send wrapper: commits any pending optimistic rewind before sending.
-  const commitThenSend = useCallback(async (sourceTabId: string, displayText: string, submitText?: string) => {
+  const commitThenSend = useCallback(async (sourceTabId: string, displayText: string, submitText?: string, structured?: StructuredInvocationSubmit) => {
     const sourceTab = tabMetas.find((tab) => tab.id === sourceTabId);
     if (!sourceTab) throw new Error(t("composer.workspaceStarting"));
     if (sourceTab.readOnly) throw new Error(t("composer.readOnlyChannel"));
@@ -2492,7 +2551,7 @@ export default function App() {
         setProjectRevision((v) => v + 1);
       }
     }
-    await sendToTab(sourceTabId, displayText, submitText);
+    await sendToTab(sourceTabId, displayText, submitText, undefined, structured);
   }, [rewindForTab, sendToTab, setRewindCommittingForTab, setRewindStateForTab, t, tabMetas]);
 
   const handleTranscriptPrompt = useCallback((text: string) => {
@@ -3664,6 +3723,7 @@ export default function App() {
                 olderHistoryCount={state.historyStartTurn}
                 loadingOlderHistory={state.historyOlderLoading}
                 onLoadOlderHistory={() => activeTabId && loadOlderHistory(activeTabId)}
+                invocationMetadata={activeTabId ? invocationMetadataByTab[activeTabId] : undefined}
               />
             )}
           </main>
@@ -3696,7 +3756,8 @@ export default function App() {
                 }}
               />
             )}
-            {state.approval && (
+            {decisionSurface === "tool_approval" || decisionSurface === "plan_approval"
+              ? state.approval && (
               <ApprovalModal
                 key={`${activeTabId ?? ""}:${state.approval.id}`}
                 approval={state.approval}
@@ -3727,8 +3788,9 @@ export default function App() {
                 }}
                 toolApprovalMode={toolApprovalMode}
               />
-            )}
-            {state.ask && (
+              )
+            : decisionSurface === "ask"
+              ? state.ask && (
               <AskCard
                 key={`${activeTabId ?? ""}:${state.ask.id}`}
                 ask={state.ask}
@@ -3738,15 +3800,23 @@ export default function App() {
                   cancel();
                 }}
               />
-            )}
-            {clearContextPending && (
+              )
+            : decisionSurface === "clear_context" ? (
               <ClearContextCard
                 onCancel={cancelClearContext}
                 onConfirm={() => {
                   void confirmClearContext();
                 }}
               />
-            )}
+            ) : null}
+            {/* Composer stays mounted under a decision so per-session draft
+                caches (text, attachments, paste blocks, guidance) survive. */}
+            <div
+              className={decisionSurface ? "composer-decision-host composer-decision-host--hidden" : "composer-decision-host"}
+              hidden={Boolean(decisionSurface) || undefined}
+              inert={decisionSurface ? true : undefined}
+              aria-hidden={decisionSurface ? true : undefined}
+            >
             <Composer
               running={state.running || rewindCommitting}
               collaborationMode={collaborationMode}
@@ -3759,6 +3829,7 @@ export default function App() {
               tabId={activeTabId}
               effort={state.effort}
               onSend={handleSend}
+              onInvocationMetadataChange={handleInvocationMetadataChange}
               onSteer={handleSteer}
               onCancel={cancel}
               onCycleMode={cycleMode}
@@ -3772,15 +3843,16 @@ export default function App() {
               onSetTokenMode={applyTokenMode}
               insertRequest={composerInsertRequest}
               readOnly={Boolean(activeTab?.readOnly)}
-              disabled={rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              disabled={rewindCommitting || state.messageAction != null || Boolean(decisionSurface)}
               submitDisabled={!controllerReady}
-              decisionPending={rewindCommitting || state.messageAction != null || state.approval != null || state.ask != null || clearContextPending}
+              decisionPending={rewindCommitting || state.messageAction != null || Boolean(decisionSurface)}
               ready={controllerReady}
               turnStartAt={state.turnStartAt}
+              turnWaitAccumMs={state.turnWaitAccumMs}
+              promptWaitStartedAt={state.promptWaitStartedAt}
               turnTokens={state.turnTokens}
               retry={state.retry}
-              pendingApprovalLabel={state.approval ? approvalToolLabel(state.approval.tool, t) : null}
-              pendingAsk={state.ask != null}
+              suspendedByDecision={Boolean(decisionSurface)}
               transientDismissSignal={transientOverlayDismissSignal}
               sessionKey={composerSessionKey}
               workspaceScopeKey={workspaceScopeKey}
@@ -3795,6 +3867,7 @@ export default function App() {
               cacheMissTokens={state.usage?.cacheMissTokens}
               balance={state.balance}
             />
+            </div>
             <StatusBar
               context={state.context}
               usage={state.usage}
@@ -4000,6 +4073,7 @@ export default function App() {
             initialFocus={settingsFocus ?? undefined}
             agentRunning={state.running}
             desktopPlatform={desktopPlatform}
+            onUseSubagent={prefillSubagentCommand}
             onClose={() => {
               setSettingsFocus(null);
               setSettingsTarget(null);

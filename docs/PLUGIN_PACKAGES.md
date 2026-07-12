@@ -83,7 +83,9 @@ reasonix plugin show superpowers
 
 `show` also prints the concrete capability inventory when available:
 
-- **skills** include suggested `/<skill>` invocations and descriptions.
+- **skills** include suggested `/<plugin>:<skill>` invocations and descriptions.
+- **commands** include `/<plugin>:<command>` invocations, argument hints, and
+  descriptions.
 - **hooks** list lifecycle events, matchers, and commands or context files.
 - **mcpServers** list server names, transports, and launch targets.
 
@@ -91,6 +93,15 @@ Check that the manifest and skill roots are readable:
 
 ```bash
 reasonix plugin doctor superpowers
+```
+
+For a workspace-wide capability report (skills, hooks, MCP merge, package roots), see
+[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md):
+
+```bash
+reasonix doctor capabilities --json
+# Desktop: Settings → Diagnostics
+# Agent:   /reasonix-guide
 ```
 
 Enable or disable a plugin without uninstalling it:
@@ -118,7 +129,8 @@ Reasonix loads its capabilities into normal interactive sessions:
 - Run `/plugins` inside an interactive session to list installed plugin
   packages. Run `/plugins show <name>` to inspect a plugin's exported skills,
   hooks, MCP servers, and usage hints without leaving the chat.
-- **Skills** appear in `/skills`. Invoke a skill with `/<skill> [args]`, or ask
+- **Skills** appear in `/skills`. Invoke a plugin skill with
+  `/<plugin>:<skill> [args]`, or ask
   naturally and let the agent choose a matching skill by description.
 - **Hooks** run automatically at their configured lifecycle events, such as
   `SessionStart`, `UserPromptSubmit`, `PreToolUse`, or `PostToolUse`.
@@ -185,8 +197,11 @@ The desktop settings page uses the same runtime model as the CLI:
 - Expand an installed plugin to see its **How to use** section.
 - In any desktop session, type `/plugins` to list installed plugins, or
   `/plugins show <name>` to see the same usage details from the chat surface.
-- Skills are shown with suggested direct commands such as `/plan`; they are also
-  discoverable from `/skills` in a session.
+- Skills are shown with package-qualified direct commands such as
+  `/superpowers:writing-plans`; they are also discoverable from `/skills` in a
+  session.
+- Plugin commands are shown and invoked with package-qualified names such as
+  `/superpowers:plan`.
 - Hooks and MCP servers are listed for transparency. They do not need a manual
   "run" button: enabled hooks trigger automatically, and MCP tools are available
   through ordinary tool use.
@@ -226,7 +241,7 @@ third-party install scripts during plugin installation.
 
 Reasonix also reads Codex plugin manifests at `.codex-plugin/plugin.json` and
 Claude Marketplace manifests at `.claude-plugin/plugin.json`. Claude plugin
-capabilities Reasonix does not map yet (`commands/`, `agents/`,
+capabilities Reasonix does not map yet (`agents/`,
 `hooks/hooks.json`, `.mcp.json`) surface as install warnings instead of being
 silently dropped; multi-plugin `marketplace.json` indexes are not supported —
 install each plugin directory individually. For packages such
@@ -234,7 +249,24 @@ as Superpowers and Claude-style skill packs, Reasonix maps:
 
 - `skills` to Reasonix skill roots. A Claude manifest that declares no
   `skills` field falls back to the conventional `skills/` (or `.claude/skills/`)
-  directory, matching Claude's own auto-discovery.
+  directory, matching Claude's own auto-discovery. Plugin skills are displayed
+  and invoked canonically as `/<plugin>:<skill>`. An unambiguous `/<skill>` is
+  still accepted as a hidden compatibility alias; project and user skills keep
+  their short names, while same-name skills from multiple plugins remain
+  independently addressable only by their qualified names. This user-facing
+  namespace does not change the bare skill identifiers in the model skill index
+  or the `run_skill` tool.
+- `commands/` (and `.claude/commands/`) to Reasonix custom slash commands: each
+  `<name>.md` prompt template is displayed and invoked canonically as
+  `/<plugin>:<name>`, with frontmatter `description` / `argument-hint` and
+  `$ARGUMENTS` / `$1..$N` substitution honored. An unambiguous `/<name>` remains
+  accepted as a hidden compatibility alias, but it is omitted from completion,
+  help, desktop menus, ACP command discovery, and the model-visible command
+  list. User- and project-authored commands own their short names, and no short
+  alias is created when multiple plugins export the same command name. An
+  explicit custom command can also occupy the qualified name; desktop plugin
+  details report that conflict. Native `reasonix-plugin.json` manifests can
+  declare the same thing explicitly with a `"commands"` path list.
 - `hooks/session-start-codex` to the Reasonix `SessionStart` hook when present.
 - A plugin-root `CLAUDE.md` file to a built-in `SessionStart` context hook. The
   file is read directly by Reasonix, without spawning a shell command.

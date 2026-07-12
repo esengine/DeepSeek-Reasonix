@@ -79,7 +79,8 @@ reasonix plugin show superpowers
 
 如果能读取到能力明细，`show` 也会输出具体清单：
 
-- **skills** 会展示建议的 `/<skill>` 调用方式和描述。
+- **skills** 会展示建议的 `/<插件名>:<技能名>` 调用方式和描述。
+- **commands** 会展示 `/<插件名>:<命令名>` 调用方式、参数提示和描述。
 - **hooks** 会展示生命周期事件、matcher、命令或上下文文件。
 - **mcpServers** 会展示服务器名称、传输方式和启动目标。
 
@@ -87,6 +88,15 @@ reasonix plugin show superpowers
 
 ```bash
 reasonix plugin doctor superpowers
+```
+
+工作区级能力总览（skills / hooks / MCP 合并 / 包根目录）见
+[能力诊断](./CAPABILITY_DIAGNOSTICS.zh-CN.md)：
+
+```bash
+reasonix doctor capabilities --json
+# 桌面端：设置 → 诊断
+# Agent：  /reasonix-guide
 ```
 
 在不卸载的情况下启用或禁用插件：
@@ -113,7 +123,7 @@ reasonix plugin remove superpowers --yes
 - 在交互会话里运行 `/plugins` 可以列出已安装插件包。
   运行 `/plugins show <name>` 可以在不离开聊天的情况下查看该插件导出的
   skills、hooks、MCP servers 和使用提示。
-- **Skills** 会出现在 `/skills` 中。可以用 `/<skill> [args]` 直接调用，
+- **Skills** 会出现在 `/skills` 中。可以用 `/<插件名>:<技能名> [args]` 直接调用，
   也可以自然描述任务，让 agent 按 description 选择匹配的 skill。
 - **Hooks** 会在配置的生命周期事件里自动运行，例如 `SessionStart`、
   `UserPromptSubmit`、`PreToolUse` 或 `PostToolUse`。
@@ -171,7 +181,9 @@ reasonix plugin remove superpowers --yes
 - 展开已安装插件，可以看到 **使用方法** 区域。
 - 在任意桌面会话里输入 `/plugins` 可以列出已安装插件；
   输入 `/plugins show <name>` 可以直接从聊天界面查看同一套使用详情。
-- Skills 会展示建议的直接命令，例如 `/plan`；在会话中也可以通过 `/skills` 浏览。
+- Skills 会展示带插件名的直接命令，例如 `/superpowers:writing-plans`；
+  在会话中也可以通过 `/skills` 浏览。
+- 插件命令统一以带插件名的形式展示和调用，例如 `/superpowers:plan`。
 - Hooks 和 MCP servers 作为透明能力清单展示。它们不需要单独的“运行”按钮：
   启用的 hooks 会自动触发，MCP 工具会通过普通工具调用流程可用。
 - 如果当前打开的会话没有反映插件变更，刷新插件列表并开启新会话。
@@ -207,13 +219,25 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
 ## Codex 与 Claude 兼容
 
 Reasonix 也会读取 `.codex-plugin/plugin.json` 和 `.claude-plugin/plugin.json`。
-Reasonix 尚未映射的 Claude 插件能力（`commands/`、`agents/`、`hooks/hooks.json`、
+Reasonix 尚未映射的 Claude 插件能力（`agents/`、`hooks/hooks.json`、
 `.mcp.json`）会以安装警告的形式提示，而不是被静默丢弃；多插件的
 `marketplace.json` 索引暂不支持——请逐个安装插件目录。
 对于 Superpowers 和 Claude 风格 skill 包，Reasonix 会映射：
 
 - `skills` 到 Reasonix skill root。Claude 清单若未声明 `skills` 字段，会回退到
   约定目录 `skills/`（或 `.claude/skills/`），与 Claude 自身的自动发现一致。
+  插件 skill 统一以 `/<插件名>:<技能名>` 展示和调用。无歧义的 `/<技能名>`
+  仍作为隐藏兼容别名接受输入；项目和用户 skill 保留短名称，多个插件导出的
+  同名 skill 则只能通过各自的限定名称独立调用。这一用户侧命名空间不会改变
+  模型 skill 索引或 `run_skill` 工具使用的内部短标识。
+- `commands/`（以及 `.claude/commands/`）映射为 Reasonix 自定义斜杠命令：每个
+  `<name>.md` 提示词模板统一以 `/<插件名>:<命令名>` 展示和调用，frontmatter 的
+  `description` / `argument-hint` 以及 `$ARGUMENTS` / `$1..$N` 替换均生效。
+  当短名称没有歧义时，`/<命令名>` 仍作为隐藏兼容别名接受输入，但不会出现在
+  补全、帮助、桌面菜单、ACP 命令发现或提供给模型的命令清单中。用户和项目命令
+  始终占有自己的短名称；多个插件导出同名命令时不会生成短名称别名。显式自定义
+  命令也可以占用限定名称，Desktop 插件详情会报告该冲突。原生
+  `reasonix-plugin.json` 清单也可以通过 `"commands"` 路径列表显式声明。
 - 如果存在 `hooks/session-start-codex`，映射为 Reasonix `SessionStart` hook。
 - 插件根目录的 `CLAUDE.md` 会映射为内置的 `SessionStart` 上下文 hook。
   Reasonix 会直接读取该文件，不通过 shell 命令。

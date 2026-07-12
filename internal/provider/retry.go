@@ -67,16 +67,23 @@ func retryNotifyFromContext(ctx context.Context) RetryNotify {
 // carries the code so the display layer can map it to an actionable, localized
 // message; Body is a trimmed snippet of the response.
 type APIError struct {
-	Provider string
-	Status   int
-	Body     string
+	Provider    string
+	Status      int
+	Body        string
+	ToolContext string // resolved Reasonix/MCP identity for provider-indexed tool schema errors
 }
 
 func (e *APIError) Error() string {
+	var base string
 	if e.Body == "" {
-		return fmt.Sprintf("%s: status %d", e.Provider, e.Status)
+		base = fmt.Sprintf("%s: status %d", e.Provider, e.Status)
+	} else {
+		base = fmt.Sprintf("%s: status %d: %s", e.Provider, e.Status, e.Body)
 	}
-	return fmt.Sprintf("%s: status %d: %s", e.Provider, e.Status, e.Body)
+	if e.ToolContext != "" {
+		return base + "\n" + e.ToolContext
+	}
+	return base
 }
 
 // RetryableStatus reports whether a backoff can plausibly recover from status s:
@@ -194,7 +201,7 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, KeySource: opts.KeySource, Status: resp.StatusCode, HasKey: opts.KeyPresent}
+			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, KeySource: opts.KeySource, Status: resp.StatusCode, HasKey: opts.KeyPresent, Body: strings.TrimSpace(string(msg))}
 			if opts.RetryAuth && authRetries < maxAuthRetries {
 				authRetries++
 				lastErr = authErr

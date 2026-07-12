@@ -1037,8 +1037,8 @@ func TestSetDefaultToolApprovalModePersistsToUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
-	if app.Settings().DefaultToolApprovalMode != control.ToolApprovalAsk {
-		t.Fatalf("Settings().DefaultToolApprovalMode = %q, want ask", app.Settings().DefaultToolApprovalMode)
+	if app.Settings().DefaultToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("Settings().DefaultToolApprovalMode = %q, want auto", app.Settings().DefaultToolApprovalMode)
 	}
 	if err := app.SetDefaultToolApprovalMode(control.ToolApprovalAuto); err != nil {
 		t.Fatalf("SetDefaultToolApprovalMode: %v", err)

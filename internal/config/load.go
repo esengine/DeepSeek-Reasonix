@@ -25,7 +25,22 @@ func Load() (*Config, error) {
 // like Load(). This is the workspace-aware entry point: desktop tabs use it so
 // each project's reasonix.toml + .mcp.json are resolved independently without
 // changing the process cwd, while provider keys stay rooted in Reasonix home.
+//
+// Note: LoadForRoot may rewrite legacy MCP `tier` lines on disk (see
+// mergeRuntimeTOMLFile). Callers that must not mutate config files should use
+// LoadForRootReadOnly instead.
 func LoadForRoot(root string) (*Config, error) {
+	return loadForRoot(root, true)
+}
+
+// LoadForRootReadOnly is like LoadForRoot but never writes config files: it skips
+// on-disk legacy MCP tier migration. Prefer this for diagnostics, doctor, and
+// other read-only inspection paths.
+func LoadForRootReadOnly(root string) (*Config, error) {
+	return loadForRoot(root, false)
+}
+
+func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	root = resolveRoot(root)
 	expansionEnv := loadDotEnvForRoot(root)
 	cfg := Default()
@@ -37,17 +52,25 @@ func LoadForRoot(root string) (*Config, error) {
 		projectTOML = filepath.Join(root, "reasonix.toml")
 	}
 
+	mergeTOML := mergeFile
+	if migrateOnDisk {
+		mergeTOML = mergeRuntimeTOMLFile
+	}
+
 	var tomlSources []string
+	userDefaultModelExplicit := false
 	if uc := userConfigLoadPath(); uc != "" {
 		tomlSources = append(tomlSources, uc)
-		if err := mergeRuntimeTOMLFile(cfg, uc); err != nil {
+		if err := mergeTOML(cfg, uc); err != nil {
 			return nil, err
 		}
+		userDefaultModelExplicit = tomlFileDefinesKey(uc, "default_model")
 	}
 	globalMaxSteps := cfg.Agent.MaxSteps
 	globalPlannerMaxSteps := cfg.Agent.PlannerMaxSteps
 	globalMaxParallelReadTools := cfg.Agent.MaxParallelReadTools
 	globalMemoryCompiler := cfg.Agent.MemoryCompiler
+	userDefaultModel := cfg.DefaultModel
 	// Deep-copy: TOML decoding writes through an existing *bool rather than
 	// replacing it, so a shallow struct copy would alias the pointer and the
 	// project merge below would mutate the captured global value in place.
@@ -58,7 +81,7 @@ func LoadForRoot(root string) (*Config, error) {
 	}
 
 	tomlSources = append(tomlSources, projectTOML)
-	if err := mergeRuntimeTOMLFile(cfg, projectTOML); err != nil {
+	if err := mergeTOML(cfg, projectTOML); err != nil {
 		return nil, err
 	}
 	// Runtime step caps are user/global controls, not project policy. Keep the
@@ -75,6 +98,7 @@ func LoadForRoot(root string) (*Config, error) {
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
+	// mergeTOMLPlugins only reads files; it does not run on-disk migrations.
 	plugins, err := mergeTOMLPlugins(tomlSources)
 	if err != nil {
 		return nil, err
@@ -126,6 +150,9 @@ func LoadForRoot(root string) (*Config, error) {
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
 	backfillDeepSeekPro(cfg)
+	if userDefaultModelExplicit {
+		restoreUnresolvableProjectDefaultModel(cfg, userDefaultModel)
+	}
 	cfg.Agent.AutoPlan = userAutoPlanMode()
 	cfg.CredentialsStore = credentialsStoreMode()
 	cfg.setExpansionEnv(expansionEnv)
@@ -165,6 +192,48 @@ func userAutoPlanMode() string {
 	default:
 		return "off"
 	}
+}
+
+// restoreUnresolvableProjectDefaultModel falls back to the user/global
+// default_model when a project reasonix.toml overrides it with a reference no
+// configured provider serves (#4218). Pre-v1.11 persistence paths (e.g. the
+// "always allow" writer) full-rendered ./reasonix.toml and pinned the built-in
+// default_model ("deepseek-flash") into it; once the user's [[providers]]
+// replaced the built-in presets, that stale name resolved to nothing and boot
+// hard-failed in every launch from that folder. In-memory only — the project
+// file is untouched, and a project override that does resolve still wins. The
+// ignored value is kept so boot can surface a notice.
+//
+// Callers must only invoke this when the user config explicitly defines
+// default_model: falling back to the built-in default would silently mask a
+// broken ref when the project file is the user's only config, and that case
+// must keep the actionable boot error (TestBuildUnknownModelErrorIsActionable).
+func restoreUnresolvableProjectDefaultModel(c *Config, userDefault string) {
+	if c == nil {
+		return
+	}
+	if c.DefaultModel == userDefault {
+		return
+	}
+	if _, ok := c.ResolveModel(c.DefaultModel); ok {
+		return
+	}
+	if _, ok := c.ResolveModel(userDefault); !ok {
+		return
+	}
+	c.ignoredProjectDefaultModel = c.DefaultModel
+	c.DefaultModel = userDefault
+}
+
+// tomlFileDefinesKey reports whether the TOML file at path explicitly defines
+// the given top-level key. Missing or unparseable files report false.
+func tomlFileDefinesKey(path string, key ...string) bool {
+	var f Config
+	meta, err := decodeTOMLFile(path, &f)
+	if err != nil {
+		return false
+	}
+	return meta.IsDefined(key...)
 }
 
 // backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard

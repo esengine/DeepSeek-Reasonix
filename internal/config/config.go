@@ -62,10 +62,22 @@ type Config struct {
 	Serve            ServeConfig         `toml:"serve"`
 	Secrets          SecretsConfig       `toml:"secrets"`
 
-	providerSources          map[string]providerSourceScope
-	shadowedProjectProviders []ProviderEntry
-	expansionEnv             map[string]string
-	pluginPackageOwners      map[string]string
+	providerSources            map[string]providerSourceScope
+	shadowedProjectProviders   []ProviderEntry
+	ignoredProjectDefaultModel string
+	expansionEnv               map[string]string
+	pluginPackageOwners        map[string]string
+	pluginPackageSkillOwners   map[string][]string
+}
+
+// IgnoredProjectDefaultModel returns the project reasonix.toml default_model
+// that LoadForRoot ignored because no configured provider serves it (see
+// restoreUnresolvableProjectDefaultModel), or "" when none was ignored.
+func (c *Config) IgnoredProjectDefaultModel() string {
+	if c == nil {
+		return ""
+	}
+	return c.ignoredProjectDefaultModel
 }
 
 // SecretsConfig controls the credential protection layers. It is a user-global
@@ -126,7 +138,7 @@ type DesktopConfig struct {
 	DisplayMode             string   `toml:"display_mode"`               // standard|compact (legacy "minimal" maps to compact); transcript display mode
 	StatusBarStyle          string   `toml:"status_bar_style"`           // icon|text; desktop status bar metric labels
 	StatusBarItems          []string `toml:"status_bar_items"`           // ordered visible desktop status bar items
-	DefaultToolApprovalMode string   `toml:"default_tool_approval_mode"` // ask|auto|yolo; default for newly-created desktop sessions
+	DefaultToolApprovalMode string   `toml:"default_tool_approval_mode"` // ask|auto|yolo; defaults to auto for newly-created desktop sessions
 	CheckUpdates            *bool    `toml:"check_updates"`              // startup update checks; nil keeps the default enabled
 	Telemetry               *bool    `toml:"telemetry"`                  // anonymous launch ping (install id + version + OS); nil keeps the default enabled
 	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
@@ -1564,6 +1576,7 @@ func Default() *Config {
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto"},
+		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto"},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
 			TurnDone:        true,

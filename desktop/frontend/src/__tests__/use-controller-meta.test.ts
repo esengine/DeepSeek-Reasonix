@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
 import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
@@ -14,6 +14,16 @@ function eq(a: unknown, b: unknown, label: string) {
     passed += 1;
   } else {
     process.stdout.write(`  FAIL  ${label}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}\n`);
+    failed += 1;
+  }
+}
+
+function ok(value: boolean, label: string) {
+  if (value) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}\n`);
     failed += 1;
   }
 }
@@ -146,13 +156,13 @@ console.log("\nuse controller meta");
 {
   eq(
     tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
-    "Token saver cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
-    "token mode busy guard is localized",
+    "Work mode cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "work mode busy guard is localized",
   );
   eq(
     tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
-    "The current session changed while switching token saver. Try once more.",
-    "token mode tab race asks the user to retry",
+    "The current session changed while switching work mode. Try once more.",
+    "work mode tab race asks the user to retry",
   );
 }
 
@@ -361,12 +371,15 @@ console.log("\nuse controller meta");
   eq(waiting.running, true, "approval prompt keeps the turn running");
   eq(waiting.pendingPrompt, true, "approval prompt marks pendingPrompt");
   eq(waiting.cancellable, true, "approval prompt remains cancellable");
+  ok(typeof waiting.promptWaitStartedAt === "number" && waiting.promptWaitStartedAt > 0, "approval_request starts tab-scoped prompt wait");
 
   const canceling = reducer(waiting, { type: "cancel_requested" });
   eq(canceling.approval, undefined, "cancel_requested clears approval prompt locally");
   eq(canceling.pendingPrompt, false, "cancel_requested clears pendingPrompt locally");
   eq(canceling.cancelRequested, true, "cancel_requested marks cancelling");
   eq(canceling.running, true, "cancel_requested waits for backend turn_done before idling");
+  eq(canceling.promptWaitStartedAt, undefined, "cancel_requested closes the open prompt wait");
+  ok((canceling.turnWaitAccumMs ?? 0) >= 0, "cancel_requested accumulates closed wait into the turn");
   const stalePrompt = reducer(canceling, { type: "event", e: { kind: "approval_request", approval: { id: "late", tool: "bash", subject: "sleep" } } });
   eq(stalePrompt.approval, undefined, "late approval after cancel_requested stays hidden");
 
@@ -381,6 +394,40 @@ console.log("\nuse controller meta");
   eq(foregroundRunningFromRuntimeMeta({ running: true }), true, "legacy running metadata remains foreground-running");
   eq(foregroundRunningFromRuntimeMeta({ running: true, pendingPrompt: true, backgroundJobs: 1 }), true, "pending prompts remain foreground-running");
   eq(foregroundRunningFromRuntimeMeta({ running: true, backgroundJobs: 1 }), false, "background jobs without cancellable are background-only");
+}
+
+// User-wait is tab-scoped: approval_request starts the clock even while the tab
+// is not rendered; clearApproval folds the open interval into turnWaitAccumMs.
+// workDurationMs excludes that wait so background suspension is not model work.
+{
+  const originalNow = Date.now;
+  let now = 10_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+    eq(s.turnStartAt, 10_000, "turn starts at t0");
+    eq(s.turnWaitAccumMs, 0, "fresh turn has no wait accum");
+    now = 12_000;
+    s = reducer(s, {
+      type: "event",
+      e: { kind: "approval_request", approval: { id: "bg-1", tool: "bash", subject: "sleep 1" } },
+    });
+    eq(s.promptWaitStartedAt, 12_000, "approval_request records wait start at event time");
+    now = 15_000;
+    // Tab stays off-screen for 3s; controller still counts via open interval.
+    eq(currentTurnWaitMs(s, now), 3_000, "open wait counts while tab is backgrounded");
+    s = reducer(s, { type: "clearApproval" });
+    eq(s.promptWaitStartedAt, undefined, "clearApproval closes the open wait");
+    eq(s.turnWaitAccumMs, 3_000, "clearApproval accumulates background wait into the turn");
+    now = 16_000;
+    s = reducer(s, { type: "event", e: { kind: "message", text: "done", reasoning: "" } });
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    const assistant = s.items.find((item) => item.kind === "assistant");
+    // Wall 6s (10k→16k) − 3s wait = 3s model work.
+    eq(assistant?.kind === "assistant" && assistant.workDurationMs, 3_000, "workDurationMs excludes user-wait including background wait");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 {

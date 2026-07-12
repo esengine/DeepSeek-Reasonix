@@ -104,25 +104,34 @@ func SpecFingerprint(s Spec) string {
 // a corrupt file just means we re-handshake. Returning an error here would
 // only invite callers to log it on every launch — silence is intentional.
 func LoadCachedSchema(name, expectedHash string) (*CachedSchema, bool) {
+	cs, ok, hashOK := LoadCachedSchemaAny(name, expectedHash)
+	if !ok || !hashOK {
+		return nil, false
+	}
+	return cs, true
+}
+
+// LoadCachedSchemaAny returns the cached schema regardless of spec-hash match,
+// plus whether the hash matched expectedHash. Catalog building uses it so a
+// fingerprint-mismatched cache can still surface tools as stale candidates;
+// execution paths must keep using LoadCachedSchema, which refuses mismatches.
+func LoadCachedSchemaAny(name, expectedHash string) (cs *CachedSchema, ok bool, hashOK bool) {
 	p := cachePath(name)
 	if p == "" {
-		return nil, false
+		return nil, false, false
 	}
 	b, err := fileencoding.ReadFileUTF8(p)
 	if err != nil {
-		return nil, false
+		return nil, false, false
 	}
-	var cs CachedSchema
-	if err := json.Unmarshal(b, &cs); err != nil {
-		return nil, false
+	var out CachedSchema
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, false, false
 	}
-	if cs.Version != cacheVersion {
-		return nil, false
+	if out.Version != cacheVersion {
+		return nil, false, false
 	}
-	if cs.SpecHash != expectedHash {
-		return nil, false
-	}
-	return &cs, true
+	return &out, true, out.SpecHash == expectedHash
 }
 
 // SaveCachedSchema atomically writes cs under name. Best-effort: an error

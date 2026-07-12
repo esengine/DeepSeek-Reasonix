@@ -8,6 +8,7 @@
 // @ts-ignore `wails generate module` creates this locally; fresh checkouts keep
 // typecheck green by falling back to a disabled drift check below.
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
+import type { InvocationRequest } from "./invocationDisplay";
 
 import { addBreadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
@@ -26,6 +27,7 @@ import type {
   BotRuntimeStatusView,
   BotSettingsView,
   CapabilitiesView,
+  CapabilityDiagnosticsReport,
   CheckpointMeta,
   CommandInfo,
   ContextInfo,
@@ -41,6 +43,7 @@ import type {
   HooksSettingsView,
   JobView,
   MCPServerInput,
+  MCPToolView,
   MemorySuggestion,
   MemorySuggestionsView,
   MemoryView,
@@ -66,6 +69,7 @@ import type {
   SkillSuggestion,
   SkillView,
   SlashArgsResult,
+  SubagentProfileInput,
   TabMeta,
   TopicMeta,
   ToolApprovalMode,
@@ -262,6 +266,7 @@ export interface AppBindings {
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitInvocationsToTab(tabID: string, display: string, input: string, invocations: InvocationRequest[]): Promise<void>;
   SubmitEditedDisplayToTab(tabID: string, display: string, input: string, original: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
@@ -368,6 +373,7 @@ export interface AppBindings {
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
   SkillsSettings(): Promise<SkillsSettingsView>;
+  CapabilityDiagnostics(includeSessionRuntime: boolean): Promise<CapabilityDiagnosticsReport>;
   Plugins(): Promise<PluginView[]>;
   PlanPluginInstall(source: string, options: PluginInstallOptions): Promise<string>;
   InstallPlugin(source: string, options: PluginInstallOptions): Promise<string>;
@@ -390,6 +396,14 @@ export interface AppBindings {
   RefreshSkills(): Promise<void>;
   ReloadCommands(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  AvailableSubagentTools(): Promise<MCPToolView[]>;
+  CreateSubagentProfile(input: SubagentProfileInput): Promise<string>;
+  UpdateSubagentProfile(name: string, scope: string, input: SubagentProfileInput): Promise<void>;
+  DeleteSubagentProfile(name: string, scope: string): Promise<void>;
+  SetSubagentProfileModel(name: string, ref: string): Promise<void>;
+  SetSubagentProfileEffort(name: string, level: string): Promise<void>;
+  TrySubagentProfile(input: SubagentProfileInput, task: string): Promise<string>;
+  CancelTrySubagentProfile(): Promise<void>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerTier(name: string, tier: string): Promise<void>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
@@ -833,7 +847,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(CheckUpdate|DownloadUpdate|InstallUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
   if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|TrustMCPServerTool|TrustMCPServerTools|UntrustMCPServerTool|SetMCPServer)/.test(method))
     return `mcp ${method}`;
-  if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion)/.test(method))
+  if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
   if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace)/.test(method))
@@ -1173,9 +1187,19 @@ function makeMockApp(): AppBindings {
     { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
-    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
-    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false },
-    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true },
+    {
+      name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true,
+      allowedTools: ["read_file", "ls", "glob", "grep", "code_index"], invocation: "/explore", invocationMode: "auto",
+      configuredModel: "deepseek/deepseek-v4-pro", configuredEffort: "high",
+    },
+    { name: "research", description: "Combine web_fetch + code reading in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true, allowedTools: ["read_file", "ls", "glob", "grep", "code_index", "web_fetch"], invocation: "/research", invocationMode: "auto" },
+    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false, invocation: "/review" },
+    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true, invocation: "/init" },
+    {
+      name: "my-formatter", description: "Formats code the way I like it", scope: "global", runAs: "subagent", enabled: true,
+      model: "deepseek-pro", effort: "high", allowedTools: ["read_file", "edit_file"], color: "amber", invocation: "/my-formatter", invocationMode: "manual",
+      body: "You are a code formatting assistant. Reformat the given file to match project style without changing behavior.",
+    },
   ];
   let capSkillRoots: SkillRootView[] = [
     { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
@@ -1445,7 +1469,7 @@ function makeMockApp(): AppBindings {
     displayMode: "compact",
     statusBarStyle: "text",
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
-    defaultToolApprovalMode: "ask",
+    defaultToolApprovalMode: "auto",
     checkUpdates: true,
     telemetry: true,
     metrics: true,
@@ -2271,6 +2295,9 @@ function makeMockApp(): AppBindings {
         async SubmitDisplayToTab(_tabID, display, input) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
+        async SubmitInvocationsToTab(_tabID, display, input, _invocations) {
+          await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
+        },
         async SubmitEditedDisplayToTab(_tabID, display, input, _original) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
@@ -2808,17 +2835,32 @@ function makeMockApp(): AppBindings {
           console.info("mock AutoResearchRecordEvidence");
         },
     async Commands() {
-      return [
-        { name: "new", description: "start new session; save transcript", kind: "builtin" as const },
-        { name: "clear", description: "discard current context", kind: "builtin" as const },
-        { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const },
-        { name: "model", description: "Switch model", kind: "builtin" as const },
-        { name: "effort", description: "Set reasoning effort", kind: "builtin" as const },
-        { name: "skill", description: "List skills", kind: "builtin" as const },
-        { name: "plugins", description: "Manage plugin packages", kind: "builtin" as const },
-        { name: "explore", description: "Investigate the codebase in an isolated subagent", kind: "skill" as const },
-        { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const },
+      const commands: CommandInfo[] = [
+        { name: "new", description: "start new session; save transcript", kind: "builtin" as const, group: "actions" },
+        { name: "clear", description: "discard current context", kind: "builtin" as const, group: "actions" },
+        { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const, group: "actions" },
+        { name: "model", description: "Switch model", kind: "builtin" as const, group: "actions" },
+        { name: "effort", description: "Set reasoning effort", kind: "builtin" as const, group: "actions" },
+        { name: "skill", description: "List skills", kind: "builtin" as const, group: "skills" },
+        { name: "mcp", description: "Manage MCP servers", kind: "builtin" as const, group: "integrations" },
+        { name: "plugins", description: "Manage plugin packages", kind: "builtin" as const, group: "integrations" },
+        { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const, group: "skills" },
       ];
+      const seen = new Set(commands.map((command) => command.name));
+      for (const skill of capSkills) {
+        if (skill.enabled === false) continue;
+        const name = (skill.invocation || `/${skill.name}`).replace(/^\/+/, "");
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        commands.push({
+          name,
+          description: skill.description,
+          kind: skill.runAs === "subagent" ? "subagent" : "skill",
+          group: skill.runAs === "subagent" ? "subagents" : "skills",
+          color: skill.color,
+        });
+      }
+      return commands;
     },
     async Capabilities() {
       return {
@@ -2836,6 +2878,85 @@ function makeMockApp(): AppBindings {
         skills: capSkills.map((s) => ({ ...s })),
         skillRoots: capSkillRoots.map((s) => ({ ...s })),
       };
+    },
+    async CapabilityDiagnostics(includeSessionRuntime: boolean) {
+      const report: CapabilityDiagnosticsReport = {
+        schema_version: 1,
+        root: "<workspace>",
+        live: false,
+        summary: {
+          errors: 0,
+          warnings: 1,
+          infos: includeSessionRuntime ? 1 : 0,
+          instructions: 1,
+          skills: capSkills.length,
+          commands: 0,
+          hooks: 0,
+          plugins: capPlugins.length,
+          mcp_servers: capServers.length,
+        },
+        instructions: { docs: [{ path: "<workspace>/AGENTS.md", scope: "project", order: 1 }] },
+        skills: {
+          roots: [{ path: "<workspace>/.reasonix/skills", scope: "project", status: "ok" }],
+          entries: capSkills.map((s) => ({
+            name: s.name,
+            description: s.description,
+            scope: s.scope,
+            path: "(mock)",
+            status: "winner",
+            run_as: s.runAs,
+          })),
+          winners: capSkills.length,
+          shadowed: 0,
+        },
+        commands: { roots: [], entries: [], winners: 0, shadowed: 0 },
+        hooks: { trusted_project: true, project_defines_hooks: false, sources: [], entries: [] },
+        plugins: {
+          packages: capPlugins.map((p) => ({
+            name: p.name,
+            enabled: p.enabled,
+            root: p.root || "<external>/plugin",
+            skills: p.skills ?? 0,
+            commands: 0,
+            hooks: p.hooks ?? 0,
+            mcp_servers: p.mcpServers ?? 0,
+            status: p.enabled ? "ok" : "disabled",
+          })),
+        },
+        mcp: {
+          servers: capServers.map((s) => ({
+            name: s.name,
+            transport: s.transport || "stdio",
+            start_intent: s.startIntent === "off" ? "off" : "automatic",
+            source: "toml",
+            runtime_status: includeSessionRuntime ? s.status || "connected" : undefined,
+            tool_count: s.tools,
+            env_keys: s.envKeys ?? [],
+            header_keys: s.headerKeys ?? [],
+          })),
+        },
+        issues: [
+          {
+            severity: "warning",
+            code: "skill.missing_description",
+            subsystem: "skills",
+            name: "example",
+            message: "mock warning for browser harness",
+            remediation: "Add a description frontmatter field",
+            settings_tab: "skills",
+          },
+          ...(includeSessionRuntime
+            ? [{
+                severity: "info" as const,
+                code: "mcp.runtime_unavailable",
+                subsystem: "mcp",
+                message: "browser mock has no live Host; runtime fields are synthetic",
+                settings_tab: "mcp",
+              }]
+            : []),
+        ],
+      };
+      return JSON.parse(JSON.stringify(report)) as CapabilityDiagnosticsReport;
     },
     async Plugins() {
       return capPlugins.map((p) => ({ ...p }));
@@ -3029,6 +3150,60 @@ function makeMockApp(): AppBindings {
     async SetSkillEnabled(name: string, enabled: boolean) {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
+    },
+    async AvailableSubagentTools() {
+      return [
+        { name: "read_file", description: "Read a file's contents", readOnlyHint: true },
+        { name: "ls", description: "List a directory", readOnlyHint: true },
+        { name: "glob", description: "Find files by name pattern", readOnlyHint: true },
+        { name: "grep", description: "Search file contents", readOnlyHint: true },
+        { name: "code_index", description: "Look up symbol definitions and file outlines", readOnlyHint: true },
+        { name: "edit_file", description: "Edit an existing file" },
+        { name: "write_file", description: "Write a new file" },
+        { name: "bash", description: "Run a shell command" },
+        { name: "web_fetch", description: "Fetch a URL" },
+      ];
+    },
+    async CreateSubagentProfile(input: SubagentProfileInput) {
+      const name = input.name.trim();
+      const builtinNames = ["init", "explore", "research", "install-capability", "review", "security-review", "test"];
+      if (builtinNames.includes(name)) throw new Error(`"${name}" is a built-in subagent name and cannot be reused`);
+      if (capSkills.some((s) => s.name === name)) throw new Error(`"${name}" already exists`);
+      capSkills.push({
+        name, description: input.description, scope: input.scope === "project" ? "project" : "global",
+        runAs: "subagent", enabled: true, model: input.model, effort: input.effort,
+        allowedTools: input.allowedTools, color: input.color, invocation: `/${name}`, invocationMode: "manual",
+      });
+      return `~/.reasonix/skills/${name}/SKILL.md`;
+    },
+    async UpdateSubagentProfile(name: string, scope: string, input: SubagentProfileInput) {
+      const skill = capSkills.find((s) => s.name === name && s.scope === scope);
+      if (!skill) throw new Error(`"${name}" resolves at a different scope — refusing to update`);
+      skill.description = input.description;
+      skill.color = input.color;
+      skill.model = input.model;
+      skill.effort = input.effort;
+      skill.allowedTools = input.allowedTools;
+    },
+    async DeleteSubagentProfile(name: string, scope: string) {
+      const idx = capSkills.findIndex((s) => s.name === name && s.scope === scope);
+      if (idx < 0) throw new Error(`"${name}" resolves at a different scope — refusing to delete`);
+      capSkills.splice(idx, 1);
+    },
+    async SetSubagentProfileModel(name: string, ref: string) {
+      const skill = capSkills.find((s) => s.name === name);
+      if (skill) skill.configuredModel = ref || undefined;
+    },
+    async SetSubagentProfileEffort(name: string, level: string) {
+      const skill = capSkills.find((s) => s.name === name);
+      if (skill) skill.configuredEffort = level || undefined;
+    },
+    async CancelTrySubagentProfile() {},
+    async TrySubagentProfile(input: SubagentProfileInput, task: string) {
+      if (!task.trim()) throw new Error("task is required");
+      if (!input.systemPrompt.trim()) throw new Error("system prompt is required");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return `[mock run of "${input.name || "draft"}"]\n\nTask: ${task}\n\n(This is a dev-mode mock response — the real backend runs an isolated subagent loop against your configured model.)`;
     },
     async SetMCPServerEnabled(name: string, enabled: boolean) {
       capServers = capServers.map((s) =>

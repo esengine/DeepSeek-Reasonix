@@ -117,6 +117,9 @@ func Run(args []string, version string) int {
 	case "plugin":
 		configureCLIThemeFromConfigNoProbe()
 		return pluginCommand(rest)
+	case "subagent":
+		configureCLIThemeFromConfigForTTYOutput()
+		return subagentCommand(rest)
 	case "doctor":
 		configureCLIThemeFromConfigNoProbe()
 		return doctorCommand(rest, version)
@@ -155,7 +158,7 @@ func isDefaultInteractiveFlag(arg string) bool {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "plugin", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
 		return true
 	default:
 		return false
@@ -201,21 +204,22 @@ func configureCLIThemeFromConfigNoProbe() {
 	withoutTerminalProbe(configureCLIThemeFromConfig)
 }
 
-// setup builds a ready-to-drive Controller from config via boot.Build. It is a
-// thin adapter kept so the subcommands below read the same as before; the actual
-// assembly (model resolution, tool registry, permission gate, two-model
+// setupProfile builds a ready-to-drive Controller from config via boot.Build.
+// The assembly (model resolution, tool registry, permission gate, two-model
 // Coordinator) lives in internal/boot, shared with the desktop frontend.
 // requireKey forces the executor's API key to be present (used by run); chat
 // passes false so the session UI is reachable before a key is set. sink receives
 // the agent's typed event stream — runAgent passes a TextSink that renders to
 // stdout, the TUI passes an event-channel sink so events become tea.Msgs.
-func setup(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+// profile selects economy|balanced|delivery (empty = balanced/full).
+func setupProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string) (*control.Controller, error) {
 	migrateMCPConfigForCLIWorkspace()
 	return boot.Build(ctx, boot.Options{
 		Model:      modelName,
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
+		TokenMode:  profile,
 		SessionDir: resolveCLISessionDir(),
 	})
 }
@@ -234,17 +238,31 @@ func resolveCLISessionDir() string {
 	return config.SessionDir()
 }
 
-// setupQuiet is like setup but suppresses plugin subprocess stderr output.
-// Used during model switch inside a bubbletea session to prevent plugin logs
-// from corrupting the TUI's terminal raw mode.
-func setupQuiet(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink) (*control.Controller, error) {
+// setupQuietProfile is like setupProfile but suppresses plugin subprocess
+// stderr. Used during model switch inside a bubbletea session to prevent plugin
+// logs from corrupting the TUI's terminal raw mode.
+func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string) (*control.Controller, error) {
 	return boot.Build(ctx, boot.Options{
 		Model:      modelName,
 		MaxSteps:   maxStepsOverride,
 		RequireKey: requireKey,
 		Sink:       sink,
 		Stderr:     io.Discard,
+		TokenMode:  profile,
 	})
+}
+
+func parseRuntimeProfile(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "balanced", boot.TokenModeFull:
+		return boot.TokenModeFull, nil
+	case boot.TokenModeEconomy:
+		return boot.TokenModeEconomy, nil
+	case boot.TokenModeDelivery:
+		return boot.TokenModeDelivery, nil
+	default:
+		return "", fmt.Errorf("unknown runtime profile %q (want economy, balanced, or delivery)", value)
+	}
 }
 
 // chdirTo honours --dir: it switches the working directory before anything reads
@@ -298,6 +316,7 @@ func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
 func runAgent(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
+	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
@@ -307,6 +326,11 @@ func runAgent(args []string) int {
 	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	profile, err := parseRuntimeProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
 	if rc := chdirTo(*dir); rc != 0 {
@@ -399,7 +423,7 @@ func runAgent(args []string) int {
 	if resumePath != "" {
 		*model = modelForResumePath(*model, resumePath, cfg)
 	}
-	ctrl, err := setup(ctx, *model, *maxSteps, true, sink)
+	ctrl, err := setupProfile(ctx, *model, *maxSteps, true, sink, profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -428,6 +452,21 @@ func runAgent(args []string) int {
 		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{Kind: event.TurnDone, Err: runErr})
 	}
 	if metrics != nil {
+		if exec := ctrl.Executor(); exec != nil {
+			if audit := exec.CapabilityAudit(); audit != nil {
+				snap := audit.Snapshot()
+				metrics.m.MergeCapabilityAuditCounters(
+					snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
+					snap.SemanticRoutes, snap.SemanticFallbacks,
+					snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
+					snap.SkillInvocations, snap.SkillFailures, snap.SkillUnavailable,
+					snap.MCPInspect, snap.MCPCall, snap.MCPCallFailures,
+					snap.ReviewBlocks, snap.SecurityReviewBlocks,
+					snap.RouterPromptTokens, snap.RouterCompletionTokens,
+					snap.RouterCost, snap.RouterLatencyMs,
+				)
+			}
+		}
 		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
@@ -446,6 +485,7 @@ func runAgent(args []string) int {
 func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
+	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
@@ -455,6 +495,11 @@ func runServe(args []string) int {
 	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
 	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	profile, err := parseRuntimeProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
 
@@ -542,7 +587,7 @@ func runServe(args []string) int {
 			}
 		}
 	}
-	ctrl, err := setup(ctx, *model, *maxSteps, true, bc)
+	ctrl, err := setupProfile(ctx, *model, *maxSteps, true, bc, profile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -598,6 +643,7 @@ func runServe(args []string) int {
 func chatREPL(args []string) int {
 	fs := flag.NewFlagSet("reasonix", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
+	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
@@ -607,6 +653,11 @@ func chatREPL(args []string) int {
 	fs.BoolVar(yolo, "yolo", false, "alias for --dangerously-skip-permissions")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	profile, err := parseRuntimeProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
 	if rc := chdirTo(*dir); rc != 0 {
@@ -678,7 +729,7 @@ func chatREPL(args []string) int {
 
 	var sink event.Sink = &eventSink{ch: eventCh}
 	sink = withNotifications(sink, cfg)
-	ctrl, err := setup(ctx, *model, *maxSteps, false, sink)
+	ctrl, err := setupProfile(ctx, *model, *maxSteps, false, sink, profile)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
 		// With a config present, fall through to the descriptive error — re-running
@@ -687,7 +738,7 @@ func chatREPL(args []string) int {
 		if rc := interactiveSetup(defaultConfigTarget(), defaultEnvTarget()); rc != 0 {
 			return rc
 		}
-		ctrl, err = setup(ctx, *model, *maxSteps, false, sink)
+		ctrl, err = setupProfile(ctx, *model, *maxSteps, false, sink, profile)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -756,8 +807,8 @@ func chatREPL(args []string) int {
 	// model (carrying the conversation). It must NOT touch the running model —
 	// runModelSubcommand performs the swap on the live copy. The same stable sink
 	// feeds the new controller, so events keep flowing to this TUI.
-	m.buildController = func(ref string, carry []provider.Message, resumePath string) (*control.Controller, error) {
-		c, err := setupQuiet(ctx, ref, *maxSteps, false, sink)
+	m.buildController = func(spec controllerBuildSpec, carry []provider.Message, resumePath string) (*control.Controller, error) {
+		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile)
 		if err != nil {
 			return nil, err
 		}
@@ -766,11 +817,13 @@ func chatREPL(args []string) int {
 		path := agent.ContinueSessionPath(resumePath, c.SessionDir(), c.Label())
 		c.AdoptHistory(carry, path)
 		c.EnableInteractiveApproval()
-		if *yolo {
-			c.SetAutoApproveTools(true)
+		c.SetPlanMode(spec.PlanMode)
+		if spec.ToolApprovalMode != "" {
+			c.SetToolApprovalMode(spec.ToolApprovalMode)
 		}
 		return c, nil
 	}
+	m.runtimeProfile = profile
 	if cfg, e := config.Load(); e == nil {
 		name := *model
 		if name == "" {

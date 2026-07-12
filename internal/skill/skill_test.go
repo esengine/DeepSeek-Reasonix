@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -78,6 +79,85 @@ func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 	}
 	if _, ok := find(list, "onlyglobal"); !ok {
 		t.Fatal("global-only skill should be discovered")
+	}
+}
+
+func TestPluginSkillsUseQualifiedSlashNamesWithoutChangingModelIndex(t *testing.T) {
+	home := t.TempDir()
+	alpha := t.TempDir()
+	beta := t.TempDir()
+	writeSkill(t, alpha, "plan/SKILL.md", "---\ndescription: alpha plan\n---\nALPHA")
+	writeSkill(t, beta, "plan/SKILL.md", "---\ndescription: beta plan\n---\nBETA")
+	writeSkill(t, beta, "review/SKILL.md", "---\ndescription: beta review\n---\nREVIEW")
+
+	st := New(Options{
+		HomeDir:         home,
+		CustomPaths:     []string{alpha, beta},
+		PluginPaths:     map[string][]string{config.CanonicalSkillPath(alpha): {"alpha"}, config.CanonicalSkillPath(beta): {"beta"}},
+		DisableBuiltins: true,
+	})
+
+	modelSkills := st.List()
+	if len(modelSkills) != 2 || modelSkills[0].Name != "plan" || modelSkills[1].Name != "review" {
+		t.Fatalf("model skills = %+v", modelSkills)
+	}
+	if got := IndexBlock(modelSkills); strings.Contains(got, "alpha:plan") || strings.Contains(got, "beta:plan") {
+		t.Fatalf("model index must keep bare run_skill identifiers:\n%s", got)
+	}
+	withoutPluginMetadata := append([]Skill(nil), modelSkills...)
+	for i := range withoutPluginMetadata {
+		withoutPluginMetadata[i].Plugin = ""
+	}
+	if got, want := IndexBlock(modelSkills), IndexBlock(withoutPluginMetadata); got != want {
+		t.Fatalf("plugin ownership changed cache-stable model index:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+
+	slashSkills := st.SlashList()
+	gotNames := make([]string, 0, len(slashSkills))
+	for _, sk := range slashSkills {
+		gotNames = append(gotNames, sk.SlashName())
+	}
+	wantNames := []string{"alpha:plan", "beta:plan", "beta:review"}
+	if !slices.Equal(gotNames, wantNames) {
+		t.Fatalf("slash skills = %v, want %v", gotNames, wantNames)
+	}
+	if _, ok := st.ReadSlash("plan"); ok {
+		t.Fatal("ambiguous short plugin skill must not resolve")
+	}
+	if sk, ok := st.ReadSlash("/beta:plan"); !ok || sk.Body != "BETA" || sk.Name != "plan" {
+		t.Fatalf("qualified beta skill = %+v, %v", sk, ok)
+	}
+	if sk, ok := st.Read("plan"); !ok || sk.Body != "ALPHA" || sk.Name != "plan" {
+		t.Fatalf("run_skill bare winner changed = %+v, %v", sk, ok)
+	}
+}
+
+func TestPluginSkillShortAliasIsHiddenAndProjectSkillKeepsShortName(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	pluginRoot := t.TempDir()
+	writeSkill(t, pluginRoot, "plan/SKILL.md", "---\ndescription: plugin plan\n---\nPLUGIN")
+
+	st := New(Options{
+		HomeDir:         home,
+		ProjectRoot:     project,
+		CustomPaths:     []string{pluginRoot},
+		PluginPaths:     map[string][]string{config.CanonicalSkillPath(pluginRoot): {"superpowers"}},
+		DisableBuiltins: true,
+	})
+	if sk, ok := st.ReadSlash("plan"); !ok || sk.Body != "PLUGIN" {
+		t.Fatalf("unambiguous short compatibility alias = %+v, %v", sk, ok)
+	}
+	if got := st.SlashList(); len(got) != 1 || got[0].SlashName() != "superpowers:plan" {
+		t.Fatalf("visible plugin skills = %+v", got)
+	}
+
+	writeSkill(t, project, ".reasonix/skills/plan/SKILL.md", "---\ndescription: project plan\n---\nPROJECT")
+	if sk, ok := st.ReadSlash("plan"); !ok || sk.Body != "PROJECT" || sk.Plugin != "" {
+		t.Fatalf("project short skill = %+v, %v", sk, ok)
+	}
+	if sk, ok := st.ReadSlash("superpowers:plan"); !ok || sk.Body != "PLUGIN" {
+		t.Fatalf("qualified plugin skill beside project winner = %+v, %v", sk, ok)
 	}
 }
 
@@ -794,7 +874,7 @@ func TestReadOnlyIndexBlockPointsAtReadOnlySkill(t *testing.T) {
 
 func TestSkillRoutingMetadataParsesButStaysOutOfIndex(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/router.md", "---\ndescription: route me\ntriggers: code review, 检查代码\nnegative-triggers: explain only\nauto-use: prefer\nneeds-fresh-data: true\ncost: low\n---\nbody")
+	writeSkill(t, home, ".reasonix/skills/router.md", "---\ndescription: route me\ntriggers: code review, 检查代码\nnegative-triggers: explain only\nauto-use: prefer\nneeds-fresh-data: true\ncost: low\nrequires: mcp-server:github, mcp-tool:github/search_issues\nprofiles: delivery, balanced, economy, invalid\n---\nbody")
 	sk, ok := New(Options{HomeDir: home, DisableBuiltins: true}).Read("router")
 	if !ok {
 		t.Fatal("skill not loaded")
@@ -808,11 +888,79 @@ func TestSkillRoutingMetadataParsesButStaysOutOfIndex(t *testing.T) {
 	if sk.AutoUse != "prefer" || !sk.NeedsFreshData || sk.Cost != "low" {
 		t.Fatalf("routing metadata = auto:%q fresh:%v cost:%q", sk.AutoUse, sk.NeedsFreshData, sk.Cost)
 	}
+	if got := strings.Join(sk.Requires, ","); got != "mcp-server:github,mcp-tool:github/search_issues" {
+		t.Fatalf("Requires = %q", got)
+	}
+	if got := strings.Join(sk.Profiles, ","); got != "delivery,balanced,economy" {
+		t.Fatalf("Profiles = %q (invalid values should be dropped)", got)
+	}
+	if got := strings.Join(sk.InvalidProfiles, ","); got != "invalid" {
+		t.Fatalf("InvalidProfiles = %q (rejected values must be preserved for doctor)", got)
+	}
 	index := IndexBlock([]Skill{sk})
-	for _, forbidden := range []string{"code review", "auto-use", "needs-fresh-data"} {
+	for _, forbidden := range []string{"code review", "auto-use", "needs-fresh-data", "mcp-server:github", "profiles"} {
 		if strings.Contains(index, forbidden) {
 			t.Fatalf("routing metadata leaked into index (%q):\n%s", forbidden, index)
 		}
+	}
+}
+
+func TestColorFrontmatterParses(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/tagged.md", "---\ndescription: has a color\ncolor: amber\n---\nbody")
+	sk, ok := New(Options{HomeDir: home, DisableBuiltins: true}).Read("tagged")
+	if !ok {
+		t.Fatal("skill not loaded")
+	}
+	if sk.Color != "amber" {
+		t.Fatalf("Color = %q, want amber", sk.Color)
+	}
+}
+
+func TestInvocationDefaultsToAutoForExistingSkills(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/plain.md", "---\ndescription: no invocation field\n---\nbody")
+	sk, ok := New(Options{HomeDir: home, DisableBuiltins: true}).Read("plain")
+	if !ok {
+		t.Fatal("skill not loaded")
+	}
+	if sk.Invocation != "auto" {
+		t.Fatalf("Invocation = %q, want auto (default)", sk.Invocation)
+	}
+	if sk.Color != "" {
+		t.Fatalf("Color = %q, want empty for a file with no color: key", sk.Color)
+	}
+}
+
+func TestManualInvocationSkillExcludedFromIndex(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/private-agent.md", "---\ndescription: my private subagent\nrunAs: subagent\ninvocation: manual\n---\nbody")
+	writeSkill(t, home, ".reasonix/skills/public-agent.md", "---\ndescription: a discoverable subagent\nrunAs: subagent\n---\nbody")
+	store := New(Options{HomeDir: home, DisableBuiltins: true})
+	private, ok := store.Read("private-agent")
+	if !ok {
+		t.Fatal("private-agent not loaded")
+	}
+	if private.Invocation != "manual" {
+		t.Fatalf("Invocation = %q, want manual", private.Invocation)
+	}
+	public, ok := store.Read("public-agent")
+	if !ok {
+		t.Fatal("public-agent not loaded")
+	}
+
+	index := IndexBlock([]Skill{private, public})
+	if strings.Contains(index, "private-agent") {
+		t.Fatalf("manual-invocation skill leaked into index:\n%s", index)
+	}
+	if !strings.Contains(index, "public-agent") {
+		t.Fatalf("auto-invocation skill missing from index:\n%s", index)
+	}
+
+	// A read-only index built from only manual-invocation skills must render
+	// as empty, not a header wrapped around nothing.
+	if got := IndexBlock([]Skill{private}); got != "" {
+		t.Fatalf("IndexBlock of only manual-invocation skills = %q, want empty", got)
 	}
 }
 

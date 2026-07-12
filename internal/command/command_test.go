@@ -101,6 +101,88 @@ func TestLoadOverrideAndMissingDir(t *testing.T) {
 	}
 }
 
+func TestLoadRootsUsesCanonicalPluginNamesAndHiddenCompatibleShortName(t *testing.T) {
+	pluginDir := t.TempDir()
+	projectDir := t.TempDir()
+	write(t, pluginDir, "plan.md", "---\ndescription: Plugin plan\n---\nPLUGIN $ARGUMENTS")
+	write(t, pluginDir, "status.md", "PLUGIN STATUS")
+	write(t, projectDir, "plan.md", "---\ndescription: Project plan\n---\nPROJECT $ARGUMENTS")
+
+	cmds, err := LoadRoots(
+		Root{Path: pluginDir, Plugin: "planning-with-files"},
+		Root{Path: projectDir},
+	)
+	if err != nil {
+		t.Fatalf("LoadRoots: %v", err)
+	}
+	byName := map[string]Command{}
+	for _, cmd := range cmds {
+		byName[cmd.Name] = cmd
+	}
+	if got := byName["plan"]; got.Body != "PROJECT $ARGUMENTS" || got.Plugin != "" || got.ShortName != "" || got.Hidden {
+		t.Fatalf("short-name winner = %+v, want project command", got)
+	}
+	canonical, ok := byName["planning-with-files:plan"]
+	if !ok || canonical.Body != "PLUGIN $ARGUMENTS" || canonical.Plugin != "planning-with-files" || canonical.ShortName != "plan" || canonical.Hidden {
+		t.Fatalf("canonical plugin command = %+v, %v", canonical, ok)
+	}
+	if got := byName["status"]; got.Plugin != "planning-with-files" || got.ShortName != "status" || !got.Hidden {
+		t.Fatalf("short compatibility command = %+v, want hidden plugin alias", got)
+	}
+	if got := byName["planning-with-files:status"]; got.Plugin != "planning-with-files" || got.ShortName != "status" || got.Hidden {
+		t.Fatalf("canonical status command = %+v", got)
+	}
+	if got := canonical.Render([]string{"feature"}); got != "PLUGIN feature" {
+		t.Fatalf("canonical command render = %q", got)
+	}
+}
+
+func TestLoadRootsDoesNotReplaceAnExplicitQualifiedCommand(t *testing.T) {
+	pluginDir := t.TempDir()
+	projectDir := t.TempDir()
+	write(t, pluginDir, "plan.md", "PLUGIN")
+	write(t, projectDir, "plan.md", "PROJECT")
+	write(t, projectDir, "planning-with-files/plan.md", "EXPLICIT QUALIFIED")
+
+	cmds, err := LoadRoots(
+		Root{Path: pluginDir, Plugin: "planning-with-files"},
+		Root{Path: projectDir},
+	)
+	if err != nil {
+		t.Fatalf("LoadRoots: %v", err)
+	}
+	for _, cmd := range cmds {
+		if cmd.Name == "planning-with-files:plan" {
+			if cmd.Body != "EXPLICIT QUALIFIED" || cmd.Plugin != "" || cmd.ShortName != "" || cmd.Hidden {
+				t.Fatalf("explicit qualified command was replaced: %+v", cmd)
+			}
+			return
+		}
+	}
+	t.Fatal("explicit qualified command missing")
+}
+
+func TestLoadRootsOmitsAmbiguousShortPluginName(t *testing.T) {
+	alpha := t.TempDir()
+	beta := t.TempDir()
+	write(t, alpha, "plan.md", "ALPHA")
+	write(t, beta, "plan.md", "BETA")
+	cmds, err := LoadRoots(Root{Path: alpha, Plugin: "alpha"}, Root{Path: beta, Plugin: "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Command{}
+	for _, cmd := range cmds {
+		byName[cmd.Name] = cmd
+	}
+	if _, ok := byName["plan"]; ok {
+		t.Fatal("ambiguous plugin short name must not remain invocable")
+	}
+	if byName["alpha:plan"].Body != "ALPHA" || byName["beta:plan"].Body != "BETA" {
+		t.Fatalf("canonical plugin commands = %+v", cmds)
+	}
+}
+
 func names(cmds []Command) []string {
 	out := make([]string, len(cmds))
 	for i, c := range cmds {

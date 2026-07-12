@@ -226,6 +226,25 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
+  # The site/ auth client has security-sensitive redirect-validation logic
+  # (safeNext) covered by node:test unit tests. Those tests use only Node
+  # builtins, so no `npm install` is needed — run them directly on every PR so
+  # a regression in redirect validation fails the build instead of shipping.
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: test
+        run: npm test
+
   govulncheck:
     runs-on: ubuntu-latest
     continue-on-error: true # informational — stdlib vulns need a Go patch release

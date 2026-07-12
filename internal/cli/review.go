@@ -79,7 +79,7 @@ func reviewCommand(args []string) int {
 	}
 
 	// 5. Build a review-scoped sub-agent registry.
-	reg := buildReviewSubagentRegistry(reviewSk, cfg)
+	reg := buildReviewSubagentRegistry(reviewSk, cfg, root)
 
 	// 6. Prepare the review prompt.
 	task := buildReviewTask(diff, *instructions)
@@ -106,7 +106,7 @@ func reviewCommand(args []string) int {
 	return 0
 }
 
-func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config) *tool.Registry {
+func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config, root string) *tool.Registry {
 	// The shared helper strips subagent-unavailable background capabilities while
 	// preserving foreground bash. This direct CLI path does not go through boot,
 	// so it first builds the small parent set from the review skill allow-list.
@@ -116,11 +116,29 @@ func buildReviewSubagentRegistry(reviewSk skill.Skill, cfg *config.Config) *tool
 			parentReg.Add(tl)
 		}
 	}
-	// Attach the session-data guard so commands touching Reasonix's own state
-	// warn the same way the boot-assembled bash does.
-	if _, ok := parentReg.Get("bash"); ok {
-		guard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
-		parentReg.Add(builtin.ConfineBash(sandbox.Spec{}, guard))
+	// Replace the unconfined init-time defaults with confined instances,
+	// mirroring boot's addBuiltins: readers/search bound to the configured
+	// forbid-read roots, bash to the OS sandbox spec plus the session-data
+	// guard. The zero-value tools registered at init honor none of the user's
+	// [sandbox] config, so `reasonix review` previously read forbid_read
+	// paths a normal session would refuse.
+	writeRoots := cfg.WriteRootsForRoot(root)
+	forbidReadRoots := cfg.ForbidReadRootsForRoot(root)
+	guard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
+	bashSpec := sandbox.Spec{
+		Mode:            cfg.BashMode(),
+		WriteRoots:      writeRoots,
+		ForbidReadRoots: forbidReadRoots,
+		Network:         cfg.Sandbox.Network,
+	}
+	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, os.Stderr)
+	confined := append(builtin.ConfineReaders(forbidReadRoots),
+		builtin.ConfineBash(bashSpec, guard),
+		builtin.ConfineSearch(searchSpec, bashSpec, forbidReadRoots))
+	for _, tl := range confined {
+		if _, ok := parentReg.Get(tl.Name()); ok {
+			parentReg.Add(tl)
+		}
 	}
 	if reviewSk.ReadOnly {
 		// The built-in review skill declares read-only; enforce it here exactly
