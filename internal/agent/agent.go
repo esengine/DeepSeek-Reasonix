@@ -358,6 +358,21 @@ type Agent struct {
 	// OPT-40: 智能压缩触发器
 	smartCompaction *SmartCompactionTrigger
 
+	// OPT-41: Token 感知消息排序器 — 追踪缓存前缀稳定性
+	messageSorter *TokenAwareMessageSorter
+
+	// OPT-42: 流式 token 守卫 — 实时监控 token 预算
+	streamingGuard *StreamingTokenGuard
+
+	// OPT-43: 工具结果智能截断器 — 内容感知截断
+	toolResultTruncator *ToolResultTruncator
+
+	// OPT-44: Token 预算分配器 — 动态分配上下文窗口
+	budgetAllocator *TokenBudgetAllocator
+
+	// OPT-45: 系统提示精简器 — 动态精简系统提示
+	promptMinimizer *SystemPromptMinimizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1290,6 +1305,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	breakpointOptimizer := NewBreakpointOptimizer(ProviderUnknown)
 	smartCompaction := NewSmartCompactionTrigger(windowPredictor)
 
+	// ── OPT-41~45 集成: 第五批 token 优化模块 ──
+	messageSorter := NewTokenAwareMessageSorter()
+	streamingGuard := NewStreamingTokenGuard(opts.ContextWindow)
+	toolResultTruncator := NewToolResultTruncator(0) // 0 = 默认 4000
+	budgetAllocator := NewTokenBudgetAllocator(opts.ContextWindow)
+	promptMinimizer := NewSystemPromptMinimizer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1348,6 +1370,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		disclosureCoordinator:    disclosureCoordinator,
 		breakpointOptimizer:      breakpointOptimizer,
 		smartCompaction:          smartCompaction,
+		messageSorter:            messageSorter,
+		streamingGuard:           streamingGuard,
+		toolResultTruncator:      toolResultTruncator,
+		budgetAllocator:          budgetAllocator,
+		promptMinimizer:          promptMinimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1555,6 +1582,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	if a.smartCompaction != nil {
 		stats["opt40_smartCompaction"] = a.smartCompaction.GetStats()
 	}
+	if a.messageSorter != nil {
+		stats["opt41_messageSorter"] = a.messageSorter.GetStats()
+	}
+	if a.streamingGuard != nil {
+		stats["opt42_streamingGuard"] = a.streamingGuard.GetStats()
+	}
+	if a.toolResultTruncator != nil {
+		stats["opt43_toolResultTruncator"] = a.toolResultTruncator.GetTotalStats()
+	}
+	if a.budgetAllocator != nil {
+		stats["opt44_budgetAllocator"] = a.budgetAllocator.GetStats()
+	}
+	if a.promptMinimizer != nil {
+		stats["opt45_promptMinimizer"] = a.promptMinimizer.GetStats()
+	}
 	return stats
 }
 
@@ -1739,6 +1781,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	if a.phantomReporter != nil {
 		a.phantomReporter.ShouldReport() // 重置报告计时
 	}
+	// ── OPT-42: 流式 token 守卫每轮重置 ──
+	if a.streamingGuard != nil {
+		a.streamingGuard.ResetTurn()
+	}
 
 	finalReadinessBlocks := 0
 	readinessReceiptMark := -1
@@ -1885,6 +1931,43 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		case CompactionActionImmediate:
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "immediate compaction triggered — context window critical"})
 		}
+	}
+
+	// OPT-41: Token 感知消息排序器 — 记录前缀稳定性
+	if a.messageSorter != nil {
+		msgs := a.session.Snapshot()
+		report := a.messageSorter.RecordPrefix(msgs)
+		if report.PrefixChanged {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache prefix changed — expect cache miss"})
+		}
+	}
+
+	// OPT-42: 流式 token 守卫 — 记录 token 消耗并检查预算
+	if a.streamingGuard != nil && usage != nil {
+		a.streamingGuard.RecordInput(usage.PromptTokens)
+		a.streamingGuard.RecordOutput(usage.CompletionTokens)
+		status := a.streamingGuard.CheckBudget()
+		if status.Status == "warning" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token budget approaching limit"})
+		} else if status.Status == "critical" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget critical — consider terminating"})
+		}
+	}
+
+	// OPT-44: Token 预算分配器 — 动态分配上下文窗口
+	if a.budgetAllocator != nil && usage != nil {
+		// 估算各组件 token 占用
+		systemPromptTokens := usage.PromptTokens / 10 // 估算 ~10% 为系统提示
+		toolsTokens := len(a.tools.Schemas()) * 200    // 每个工具 schema ~200 token
+		historyTokens := usage.PromptTokens - systemPromptTokens - toolsTokens
+		if historyTokens < 0 {
+			historyTokens = 0
+		}
+		alloc := a.budgetAllocator.Allocate(systemPromptTokens, toolsTokens, historyTokens)
+		if a.budgetAllocator.ShouldCompact(historyTokens) {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "budget allocator: history exceeds optimal limit — consider compacting"})
+		}
+		_ = alloc
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
@@ -3542,6 +3625,11 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	// OPT-17: 对话历史去重 — 记录工具结果指纹
 	if a.conversationDedup != nil {
 		a.conversationDedup.Record(result, len(a.session.Snapshot()))
+	}
+
+	// OPT-43: 工具结果智能截断 — 内容感知截断过长输出
+	if a.toolResultTruncator != nil && len(result) > 16000 {
+		result = a.toolResultTruncator.Truncate(call.Name, result, 0)
 	}
 
 	// OPT-07: 预测性预取 — 记录工具调用并预测下一步
