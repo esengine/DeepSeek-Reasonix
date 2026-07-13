@@ -373,6 +373,21 @@ type Agent struct {
 	// OPT-45: 系统提示精简器 — 动态精简系统提示
 	promptMinimizer *SystemPromptMinimizer
 
+	// OPT-46: 对话阶段检测器 — 探索/执行/收尾阶段感知
+	phaseDetector *ConversationPhaseDetector
+
+	// OPT-47: Token 高效格式化器 — 压缩工具参数和输出
+	efficientFormatter *TokenEfficientFormatter
+
+	// OPT-48: 缓存预热调度器 — 预测并预热下一轮查询
+	cacheWarmingScheduler *CacheWarmingScheduler
+
+	// OPT-49: Provider 重试优化器 — 最小化重试 token 浪费
+	retryOptimizer *ProviderRetryOptimizer
+
+	// OPT-50: 上下文工具过滤器 — 按对话上下文过滤可用工具
+	contextualToolFilter *ContextualToolFilter
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1312,6 +1327,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	budgetAllocator := NewTokenBudgetAllocator(opts.ContextWindow)
 	promptMinimizer := NewSystemPromptMinimizer()
 
+	// ── OPT-46~50 集成: 第六批 token 优化模块 ──
+	phaseDetector := NewConversationPhaseDetector()
+	efficientFormatter := NewTokenEfficientFormatter()
+	cacheWarmingScheduler := NewCacheWarmingScheduler()
+	retryOptimizer := NewProviderRetryOptimizer()
+	contextualToolFilter := NewContextualToolFilter()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1375,6 +1397,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		toolResultTruncator:      toolResultTruncator,
 		budgetAllocator:          budgetAllocator,
 		promptMinimizer:          promptMinimizer,
+		phaseDetector:            phaseDetector,
+		efficientFormatter:       efficientFormatter,
+		cacheWarmingScheduler:    cacheWarmingScheduler,
+		retryOptimizer:           retryOptimizer,
+		contextualToolFilter:     contextualToolFilter,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1596,6 +1623,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptMinimizer != nil {
 		stats["opt45_promptMinimizer"] = a.promptMinimizer.GetStats()
+	}
+	if a.phaseDetector != nil {
+		stats["opt46_phaseDetector"] = a.phaseDetector.GetStats()
+	}
+	if a.efficientFormatter != nil {
+		stats["opt47_efficientFormatter"] = a.efficientFormatter.GetStats()
+	}
+	if a.cacheWarmingScheduler != nil {
+		stats["opt48_cacheWarming"] = a.cacheWarmingScheduler.GetStats()
+	}
+	if a.retryOptimizer != nil {
+		stats["opt49_retryOptimizer"] = a.retryOptimizer.GetStats()
+	}
+	if a.contextualToolFilter != nil {
+		stats["opt50_contextualToolFilter"] = a.contextualToolFilter.GetStats()
 	}
 	return stats
 }
@@ -1968,6 +2010,27 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "budget allocator: history exceeds optimal limit — consider compacting"})
 		}
 		_ = alloc
+	}
+
+	// OPT-46: 对话阶段检测器 — 分析当前对话阶段
+	if a.phaseDetector != nil {
+		msgs := a.session.Snapshot()
+		toolCalls := 0
+		if calls != nil {
+			toolCalls = len(calls)
+		}
+		phase := a.phaseDetector.Analyze(msgs, toolCalls)
+		_ = phase // 可用于调整其他 OPT 模块行为
+	}
+
+	// OPT-48: 缓存预热调度器 — 记录查询并预测下一步
+	if a.cacheWarmingScheduler != nil && step == 0 {
+		a.cacheWarmingScheduler.RecordQuery(input)
+	}
+
+	// OPT-49: Provider 重试优化器 — 错误时记录重试
+	if a.retryOptimizer != nil && err != nil && !interrupted {
+		a.retryOptimizer.RecordRetry("server_error", 0)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
@@ -3630,6 +3693,11 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	// OPT-43: 工具结果智能截断 — 内容感知截断过长输出
 	if a.toolResultTruncator != nil && len(result) > 16000 {
 		result = a.toolResultTruncator.Truncate(call.Name, result, 0)
+	}
+
+	// OPT-47: Token 高效格式化 — 压缩工具输出格式
+	if a.efficientFormatter != nil && len(result) > 1000 {
+		result = a.efficientFormatter.FormatToolOutput(result, 0)
 	}
 
 	// OPT-07: 预测性预取 — 记录工具调用并预测下一步
