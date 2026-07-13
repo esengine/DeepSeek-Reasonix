@@ -892,6 +892,7 @@ export const zh: Record<DictKey, string> = {
   "status.tokens": "tokens",
   "status.retrying": "正在重试 ({attempt}/{max})…",
   "status.balanceTitle": "钱包余额",
+  "status.balanceDoubleClick": "双击打开用量页面",
   "status.spendTitle": "当前会话估算计费费用，包含主模型、子代理和辅助调用",
 
   // ── Heartbeat ──

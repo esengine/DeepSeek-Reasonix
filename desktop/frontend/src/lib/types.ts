@@ -1845,6 +1845,7 @@ export interface BalanceInfo {
   costDisplayCurrency?: string;
   multiCurrency?: boolean;
   err?: string;
+  usageUrl?: string;
 }
 
 // ── Usage statistics (desktop/stats_app.go) ────────────────────────────────

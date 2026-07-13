@@ -1359,6 +1359,7 @@ type ProviderEntry struct {
 	resolvedAPIKey    string
 	resolvedSource    CredentialSource
 	BalanceURL        string `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	UsageURL          string `toml:"usage_url"`   // optional; provider's usage/billing web page URL (DeepSeek: https://platform.deepseek.com/usage). Empty = no double-click action in UI.
 	ContextWindow     int    `toml:"context_window"`
 	// MaxOutputTokens is a protocol-neutral total output budget for one turn.
 	// Zero means official DeepSeek omits the field (server 384K ceiling) and
@@ -1892,7 +1893,7 @@ func Default() *Config {
 			{
 				Name: "deepseek-flash", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
 				Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
-				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				BalanceURL: "https://api.deepseek.com/user/balance", UsageURL: "https://platform.deepseek.com/usage", Thinking: "enabled",
 				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
 				ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD(),
 				BillingCurrency: "USD", BillingMode: "payg",
@@ -1900,7 +1901,7 @@ func Default() *Config {
 			{
 				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
 				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
-				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				BalanceURL: "https://api.deepseek.com/user/balance", UsageURL: "https://platform.deepseek.com/usage", Thinking: "enabled",
 				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
 				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
 				BillingCurrency: "USD", BillingMode: "payg",

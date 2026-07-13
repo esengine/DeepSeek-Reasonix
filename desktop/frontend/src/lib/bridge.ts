@@ -3420,7 +3420,7 @@ function makeMockApp(): AppBindings {
       // Mirror the active mock provider: deepseek-flash carries a balance_url.
       const p = settings.providers.find((x) => x.name === settings.defaultModel);
       if (!p?.balanceUrl) return { available: false, display: "" };
-          return { available: true, display: "¥128.50" };
+          return { available: true, display: "¥128.50", usageUrl: p.balanceUrl ? "https://platform.deepseek.com/usage" : "" };
         },
         async BalanceForTab() {
           return this.Balance();

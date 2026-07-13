@@ -1739,6 +1739,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		// controller must observe the final chain at Close time.
 		Cleanup:               func() { cleanup() },
 		BalanceURL:            entry.BalanceURL,
+		UsageURL:              entry.UsageURL,
 		BalanceKey:            entry.APIKey(),
 		BalanceClient:         balanceClient,
 		Jobs:                  jm,

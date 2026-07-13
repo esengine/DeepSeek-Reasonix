@@ -11,6 +11,7 @@ import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailu
 import type { ExtensionStatusEntry } from "../lib/useController";
 import { type BackgroundRuntimeView, type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
 import { useRemoteStore } from "../store/remote";
+import { openExternal } from "../lib/bridge";
 
 type StatusBarLabelStyle = "icon" | "text";
 
@@ -419,7 +420,22 @@ export function StatusBar({
     ),
     balance: (
       <Tooltip label={balanceTitle} className="statusbar__metric statusbar__metric--balance">
-        <span className="stat stat--balance statusbar__balance">
+        <span
+          className="stat stat--balance statusbar__balance"
+          role={balance?.usageUrl ? "button" : undefined}
+          tabIndex={balance?.usageUrl ? 0 : undefined}
+          title={balance?.usageUrl ? t("status.balanceDoubleClick") : undefined}
+          onDoubleClick={() => {
+            if (balance?.usageUrl) openExternal(balance.usageUrl);
+          }}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === " ") && balance?.usageUrl) {
+              e.preventDefault();
+              openExternal(balance.usageUrl);
+            }
+          }}
+          style={{ cursor: balance?.usageUrl ? "pointer" : "default" }}
+        >
           <MetricLabel style={metricLabelStyle} icon={<Wallet size={12} />} label={t("status.balanceLabel")} />
           <b className={balanceLabel === "-" ? "stat__value--empty" : undefined}>{balanceLabel}</b>
         </span>

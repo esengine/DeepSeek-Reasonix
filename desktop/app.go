@@ -6265,6 +6265,7 @@ type BalanceInfo struct {
 	CostDisplayCurrency string   `json:"costDisplayCurrency,omitempty"`
 	MultiCurrency       bool     `json:"multiCurrency,omitempty"`
 	Err                 string   `json:"err,omitempty"`
+	UsageURL            string   `json:"usageUrl,omitempty"`
 }
 
 // Balance queries the active provider's wallet balance (a network call). It
@@ -6302,6 +6303,7 @@ func (a *App) BalanceForTab(tabID string) BalanceInfo {
 		PrimaryCurrency:     primary,
 		CostDisplayCurrency: firstNonEmptyString(currency, primary),
 		MultiCurrency:       len(currencies) > 1,
+		UsageURL:            ctrl.UsageURL(),
 	}
 }
 

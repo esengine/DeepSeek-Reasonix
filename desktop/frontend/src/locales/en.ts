@@ -891,6 +891,7 @@ export const en = {
   "status.tokens": "tokens",
   "status.retrying": "retrying ({attempt}/{max})…",
   "status.balanceTitle": "Wallet balance",
+  "status.balanceDoubleClick": "Double-click to open usage page",
   "status.spendTitle": "Estimated billable spend in this session, including model, subagent, and helper calls",
 
   // ── Heartbeat ──
