@@ -295,6 +295,27 @@ type Agent struct {
 	// changes to system prompt or tools invalidate the cache prefix.
 	cacheEnforcer *CachePrefixEnforcer
 
+	// OPT-16: 工具结果记忆化 — 缓存只读工具结果避免重复消耗
+	toolMemo *ToolResultMemo
+
+	// OPT-17: 对话历史去重 — 检测并移除重复内容
+	conversationDedup *ConversationDeduplicator
+
+	// OPT-18: 自适应上下文预算 — 按任务复杂度分配 token 预算
+	contextBudget *ContextBudget
+
+	// OPT-19: Provider 感知缓存策略 — 按 provider 调整缓存行为
+	providerCacheStrategy *ProviderCacheStrategy
+
+	// OPT-20: 缓存健康监控器 — 自动诊断和修复缓存问题
+	cacheHealthMonitor *CacheHealthMonitor
+
+	// OPT-21: 工具调用批处理 — 合并多个只读工具调用
+	toolBatcher *ToolCallBatcher
+
+	// OPT-22: Prompt 前缀钉扎 — 防止稳定段被意外修改
+	prefixPinner *PrefixPinner
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1199,6 +1220,15 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 
 	// ── OPT-12 集成: 缓存前缀稳定性强制器 ──
 	cacheEnforcer := NewCachePrefixEnforcer()
+
+	// ── OPT-16~22 集成: 新一代 token 优化模块 ──
+	toolMemo := NewToolResultMemo(50)
+	conversationDedup := NewConversationDeduplicator()
+	contextBudget := NewContextBudget(opts.ContextWindow)
+	providerCacheStrategy := NewProviderCacheStrategy(ProviderUnknown) // Will be updated on first request
+	cacheHealthMonitor := NewCacheHealthMonitor()
+	toolBatcher := NewToolCallBatcher()
+	prefixPinner := NewPrefixPinner()
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1236,6 +1266,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		memoryCompiler:           opts.MemoryCompiler,
 		memoryCompilerVerbosity:  normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
 		cacheEnforcer:            cacheEnforcer,
+		toolMemo:                 toolMemo,
+		conversationDedup:        conversationDedup,
+		contextBudget:            contextBudget,
+		providerCacheStrategy:    providerCacheStrategy,
+		cacheHealthMonitor:       cacheHealthMonitor,
+		toolBatcher:              toolBatcher,
+		prefixPinner:             prefixPinner,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1321,6 +1358,87 @@ func (a *Agent) GetCacheEnforcerChangeHistory() []PrefixChange {
 		return nil
 	}
 	return a.cacheEnforcer.GetChangeHistory()
+}
+
+// GetToolMemoStats 返回工具结果记忆化统计（OPT-16）
+func (a *Agent) GetToolMemoStats() *MemoStats {
+	if a.toolMemo == nil {
+		return nil
+	}
+	stats := a.toolMemo.GetStats()
+	return &stats
+}
+
+// GetConversationDedupStats 返回对话去重统计（OPT-17）
+func (a *Agent) GetConversationDedupStats() *DedupStats {
+	if a.conversationDedup == nil {
+		return nil
+	}
+	stats := a.conversationDedup.GetStats()
+	return &stats
+}
+
+// GetContextBudgetStats 返回上下文预算统计（OPT-18）
+func (a *Agent) GetContextBudgetStats() *BudgetStats {
+	if a.contextBudget == nil {
+		return nil
+	}
+	stats := a.contextBudget.GetStats()
+	return &stats
+}
+
+// GetProviderCacheStats 返回 provider 缓存策略统计（OPT-19）
+func (a *Agent) GetProviderCacheStats() *ProviderCacheStats {
+	if a.providerCacheStrategy == nil {
+		return nil
+	}
+	stats := a.providerCacheStrategy.GetStats()
+	return &stats
+}
+
+// GetCacheHealthStatus 返回缓存健康状态（OPT-20）
+func (a *Agent) GetCacheHealthStatus() *CacheHealthStatus {
+	if a.cacheHealthMonitor == nil {
+		return nil
+	}
+	status := a.cacheHealthMonitor.GetHealth()
+	return &status
+}
+
+// GetPrefixPinnerStats 返回前缀钉扎统计（OPT-22）
+func (a *Agent) GetPrefixPinnerStats() *PrefixPinnerStats {
+	if a.prefixPinner == nil {
+		return nil
+	}
+	stats := a.prefixPinner.GetStats()
+	return &stats
+}
+
+// GetAllTokenOptStats 返回所有 token 优化统计
+func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
+	stats := map[string]interface{}{}
+	if s := a.GetCacheEnforcerStats(); s != nil {
+		stats["opt12_cacheEnforcer"] = s
+	}
+	if s := a.GetToolMemoStats(); s != nil {
+		stats["opt16_toolMemo"] = s
+	}
+	if s := a.GetConversationDedupStats(); s != nil {
+		stats["opt17_conversationDedup"] = s
+	}
+	if s := a.GetContextBudgetStats(); s != nil {
+		stats["opt18_contextBudget"] = s
+	}
+	if s := a.GetProviderCacheStats(); s != nil {
+		stats["opt19_providerCache"] = s
+	}
+	if s := a.GetCacheHealthStatus(); s != nil {
+		stats["opt20_cacheHealth"] = s
+	}
+	if s := a.GetPrefixPinnerStats(); s != nil {
+		stats["opt22_prefixPinner"] = s
+	}
+	return stats
 }
 
 // GetEyeTracker 返回眼动追踪器实例（供桌面层使用）
@@ -1488,6 +1606,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	if a.sideEffectTracker != nil {
 		a.sideEffectTracker.Reset()
 	}
+	// ── OPT-16: 工具记忆化每轮重置 ──
+	if a.toolMemo != nil {
+		a.toolMemo.Reset()
+	}
+	// ── OPT-21: 工具批处理每轮重置 ──
+	if a.toolBatcher != nil {
+		a.toolBatcher.Reset()
+	}
 
 	finalReadinessBlocks := 0
 	readinessReceiptMark := -1
@@ -1547,6 +1673,25 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		fp := a.cacheEnforcer.CaptureFingerprint(a.systemPrompt(), schemas)
 		a.cacheEnforcer.CheckPrefixStability(fp, step+1)
 		a.cacheEnforcer.RecordCacheUsage(usage)
+	}
+
+	// OPT-18: 自适应上下文预算调整
+	if a.contextBudget != nil && usage != nil {
+		a.contextBudget.AdjustForUsage(usage.PromptTokens, 0)
+	}
+
+	// OPT-20: 缓存健康监控
+	if a.cacheHealthMonitor != nil && usage != nil {
+		hit := usage.CacheHitTokens > 0
+		a.cacheHealthMonitor.RecordRequest(hit, usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+
+	// OPT-22: 前缀钉扎验证
+	if a.prefixPinner != nil && step == 0 {
+		sp := a.systemPrompt()
+		if sp != "" {
+			a.prefixPinner.Pin("L1_base_prompt", sp)
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
@@ -3188,6 +3333,24 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		result, err = runTool.Execute(cctx, runArgs)
 	}
 	result = secrets.RedactToolOutput(result)
+
+	// OPT-16: 工具结果记忆化 — 如果是只读工具且结果已在缓存中，用占位符替代
+	if a.toolMemo != nil && IsMemoizable(call.Name, t.ReadOnly()) {
+		key := MemoKey(call.Name, []byte(call.Arguments))
+		if entry, ok := a.toolMemo.Get(key); ok {
+			// 缓存命中，用占位符替代完整结果
+			result = GetCachedPlaceholder(entry)
+		} else {
+			// 缓存未命中，存储结果
+			a.toolMemo.Put(call.Name, []byte(call.Arguments), result)
+		}
+	}
+
+	// OPT-17: 对话历史去重 — 记录工具结果指纹
+	if a.conversationDedup != nil {
+		a.conversationDedup.Record(result, len(a.session.Snapshot()))
+	}
+
 	// ── 副作用追踪：执行出错时生成恢复报告 ──
 	if err != nil && a.sideEffectTracker != nil {
 		report := a.sideEffectTracker.RecoveryReport()
