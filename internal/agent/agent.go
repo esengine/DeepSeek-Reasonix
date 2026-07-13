@@ -448,6 +448,21 @@ type Agent struct {
 	// OPT-70: Token 流分析器 — 分析 token 流模式
 	tokenFlowAnalyzer *TokenFlowAnalyzer
 
+	// OPT-71: 缓存前缀稳定器 — 防止不必要的前缀变更
+	cachePrefixStabilizer *CachePrefixStabilizer
+
+	// OPT-72: 响应 token 控制器 — 按查询类型调整 max_tokens
+	responseTokenController *ResponseTokenController
+
+	// OPT-73: 上下文衰减管理器 — 渐进式衰减旧上下文
+	contextDecayManager *ContextDecayManager
+
+	// OPT-74: 工具调用优化器 — 减少冗余工具调用
+	toolCallOptimizer *ToolCallOptimizer
+
+	// OPT-75: Token 效率评分器 — 评分并提供优化建议
+	tokenEfficiencyScorer *TokenEfficiencyScorer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1422,6 +1437,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	smartToolSelector := NewSmartToolSelector()
 	tokenFlowAnalyzer := NewTokenFlowAnalyzer()
 
+	// ── OPT-71~75 集成: 第十一批 token 优化模块 ──
+	cachePrefixStabilizer := NewCachePrefixStabilizer()
+	responseTokenController := NewResponseTokenController()
+	contextDecayManager := NewContextDecayManager()
+	toolCallOptimizer := NewToolCallOptimizer()
+	tokenEfficiencyScorer := NewTokenEfficiencyScorer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1510,6 +1532,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		turnAwareDeduplicator:    turnAwareDeduplicator,
 		smartToolSelector:        smartToolSelector,
 		tokenFlowAnalyzer:        tokenFlowAnalyzer,
+		cachePrefixStabilizer:    cachePrefixStabilizer,
+		responseTokenController:  responseTokenController,
+		contextDecayManager:      contextDecayManager,
+		toolCallOptimizer:        toolCallOptimizer,
+		tokenEfficiencyScorer:    tokenEfficiencyScorer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1806,6 +1833,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenFlowAnalyzer != nil {
 		stats["opt70_tokenFlowAnalyzer"] = a.tokenFlowAnalyzer.GetStats()
+	}
+	if a.cachePrefixStabilizer != nil {
+		stats["opt71_cachePrefixStabilizer"] = a.cachePrefixStabilizer.GetStats()
+	}
+	if a.responseTokenController != nil {
+		stats["opt72_responseTokenController"] = a.responseTokenController.GetStats()
+	}
+	if a.contextDecayManager != nil {
+		stats["opt73_contextDecayManager"] = a.contextDecayManager.GetStats()
+	}
+	if a.toolCallOptimizer != nil {
+		stats["opt74_toolCallOptimizer"] = a.toolCallOptimizer.GetStats()
+	}
+	if a.tokenEfficiencyScorer != nil {
+		stats["opt75_tokenEfficiencyScorer"] = a.tokenEfficiencyScorer.GetOverallStats()
 	}
 	return stats
 }
@@ -2274,6 +2316,22 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	if a.dedupStatsReporter != nil && a.dedupStatsReporter.ShouldReport() {
 		report := a.dedupStatsReporter.GetReport()
 		_ = report // 通过零 token 通道推送
+	}
+
+	// OPT-73: 上下文衰减管理 — 老化消息
+	if a.contextDecayManager != nil {
+		a.contextDecayManager.AgeMessages(step + 1)
+	}
+
+	// OPT-75: Token 效率评分 — 每轮评分
+	if a.tokenEfficiencyScorer != nil && usage != nil {
+		a.tokenEfficiencyScorer.ScoreEfficiency(
+			usage.PromptTokens,
+			usage.CompletionTokens,
+			usage.CacheHitTokens,
+			usage.CacheMissTokens,
+			func() int { if calls != nil { return len(calls) }; return 0 }(),
+		)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
@@ -3945,11 +4003,23 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 
 	// OPT-64: 工具输出缓存 — 缓存结果避免重复调用
 	if a.toolOutputCache != nil {
-		cached, hit := a.toolOutputCache.Get(call.Name, call.Arguments)
-		if hit {
-			result = cached
+		// OPT-74: 工具调用优化 — 检测是否可以跳过重复调用
+		if a.toolCallOptimizer != nil && a.toolCallOptimizer.ShouldSkipCall(call.Name, call.Arguments) {
+			// 尝试从缓存获取
+			cached, hit := a.toolOutputCache.Get(call.Name, call.Arguments)
+			if hit {
+				result = cached
+			}
 		} else {
-			a.toolOutputCache.Set(call.Name, call.Arguments, result)
+			cached, hit := a.toolOutputCache.Get(call.Name, call.Arguments)
+			if hit {
+				result = cached
+			} else {
+				a.toolOutputCache.Set(call.Name, call.Arguments, result)
+			}
+			if a.toolCallOptimizer != nil {
+				a.toolCallOptimizer.RecordCall(call.Name, call.Arguments, result, 0)
+			}
 		}
 	}
 
