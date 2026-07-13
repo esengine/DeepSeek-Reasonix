@@ -11,6 +11,9 @@ import (
 // globalCacheGuardian 全局缓存守护者（在 startup 中设置）
 var globalCacheGuardian *CachePrefixGuardian
 
+// globalPrefixRegistry 全局指纹注册表（在 startup 中设置）
+var globalPrefixRegistry *PrefixFingerprintRegistry
+
 func systemPromptFrom(messages []provider.Message) string {
 	for _, m := range messages {
 		if m.Role == provider.RoleSystem {
@@ -74,6 +77,13 @@ func sessionWithFreshSystemPrompt(session *agent.Session, system string) *agent.
 		return session // 保持 persisted，不 swap
 	}
 	return session.CloneWithMessages(withFreshSystemPrompt(messages, system))
+}
+
+// recordPrefixFingerprint 记录 system prompt 指纹到全局注册表
+func recordPrefixFingerprint(workspaceRoot, systemPrompt, tabID string) {
+	if globalPrefixRegistry != nil && workspaceRoot != "" && systemPrompt != "" {
+		globalPrefixRegistry.Record(workspaceRoot, systemPrompt, "session_prompt", tabID)
+	}
 }
 
 func resumeWithFreshSystemPrompt(ctrl interface {

@@ -215,6 +215,9 @@ type App struct {
 
 	// leaseRecovery 自动恢复崩溃残留的 session lease
 	leaseRecovery *SessionLeaseRecovery
+
+	// cacheWarmup OPT-15 跨会话缓存预热
+	cacheWarmup *CacheWarmupManager
 }
 
 type skillRootsCache struct {
@@ -403,16 +406,18 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // last session's desktop-tabs.json.
 func NewApp() *App {
 	prefixRegistry := NewPrefixFingerprintRegistry()
+	phantomReg := NewPhantomRegistry()
 	a := &App{
 		tabs:                      map[string]*WorkspaceTab{},
 		detachedSessions:          map[string]*WorkspaceTab{},
 		mediaTokens:               newMediaTokenStore(),
 		botInstalls:               map[string]*botInstallSession{},
 		botRuntime:                newDesktopBotRuntime(),
-		phantomRegistry:           NewPhantomRegistry(),
+		phantomRegistry:           phantomReg,
 		prefixFingerprintRegistry: prefixRegistry,
 		cacheGuardian:             NewCachePrefixGuardian(prefixRegistry),
 		leaseRecovery:             NewSessionLeaseRecovery(),
+		cacheWarmup:               NewCacheWarmupManager(phantomReg),
 	}
 	a.botBridge = a.newBotBridge()
 	return a
@@ -445,6 +450,12 @@ func (a *App) startup(ctx context.Context) {
 
 	// 设置全局缓存守护者
 	globalCacheGuardian = a.cacheGuardian
+	globalPrefixRegistry = a.prefixFingerprintRegistry
+
+	// OPT-15: 启动缓存预热清理循环
+	if a.cacheWarmup != nil {
+		a.cacheWarmup.StartCleanupLoop(ctx)
+	}
 
 	if cfg, err := config.Load(); err == nil && cfg.DesktopMetrics() && version != "dev" {
 		a.metrics.Store(newMetricsAggregator(config.MemoryUserDir()))

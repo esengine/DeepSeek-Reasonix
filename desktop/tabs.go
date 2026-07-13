@@ -2709,6 +2709,22 @@ func (a *App) startTabControllerBuild(tab *WorkspaceTab) {
 	generation := tab.buildGeneration
 	tab.buildCancel = cancel
 	a.mu.Unlock()
+
+	// OPT: 恢复崩溃残留的 session lease
+	if a.leaseRecovery != nil && tab.SessionPath != "" {
+		if err := a.leaseRecovery.RecoverLeaseIfNeeded(tab.SessionPath); err != nil {
+			slog.Warn("session lease recovery failed",
+				"path", tab.SessionPath,
+				"err", err,
+			)
+		}
+	}
+
+	// OPT-15: 为新 Tab 预热缓存
+	if a.cacheWarmup != nil {
+		a.cacheWarmup.WarmupNewTab(tab)
+	}
+
 	if a.ctx == nil {
 		a.buildTabControllerWithContext(tab, loadedTabSession{}, buildCtx, generation, cancel)
 		return
@@ -3070,10 +3086,18 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 				return
 			}
 			if resumeSession != nil {
-				ctrl.Resume(sessionWithFreshSystemPrompt(resumeSession, systemPromptFrom(ctrl.History())), path)
-			} else {
-				ctrl.SetSessionPath(path)
+			ctrl.Resume(sessionWithFreshSystemPrompt(resumeSession, systemPromptFrom(ctrl.History())), path)
+		} else {
+			ctrl.SetSessionPath(path)
+		}
+		// 记录 system prompt 指纹和缓存预热
+		sp := systemPromptFrom(ctrl.History())
+		if sp != "" {
+			recordPrefixFingerprint(root, sp, tab.ID)
+			if a.cacheWarmup != nil {
+				a.cacheWarmup.RecordWarmup(root, hashSystemPrompt(sp), "", len(sp)/4)
 			}
+		}
 			a.persistTabSessionPath(tab, path)
 			a.mu.RLock()
 			indexScope := tab.Scope
