@@ -11,10 +11,18 @@ import (
 	"reasonix/internal/event"
 )
 
+// messageEditor 是适配器的可选能力：原地编辑已发送的消息。实现它的适配器
+// （目前是飞书，经 Im.Message.Patch）获得回合中的流式输出——渲染器不断更新
+// 同一条“live 消息”，而不是攒到回合结束一次性分段发送。
+type messageEditor interface {
+	EditMessage(ctx context.Context, messageID string, msg OutboundMessage) error
+}
+
 // renderSink 将 Reasonix 事件流渲染为平台消息。
 type renderSink struct {
 	ctx        context.Context
 	adapter    Adapter
+	editor     messageEditor // 非 nil 时启用原地编辑流式输出
 	connID     string
 	domain     string
 	chatID     string
@@ -34,6 +42,11 @@ type renderSink struct {
 	lastFlush     time.Time
 	lastProgress  time.Time
 	progressCount int
+
+	// 流式 live 消息状态（editor != nil 时使用）
+	liveMsgID     string    // 正在原地编辑的消息 ID；空表示当前块还没创建消息
+	liveSentBytes int       // buf 前缀中已成功送达 live 消息的字节数
+	lastEdit      time.Time // 上次成功 create/edit 的时间，用于限频
 }
 
 const (
@@ -45,9 +58,11 @@ const (
 )
 
 func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, logger *slog.Logger, onApproval func(event.Approval), onAsk func(event.Ask)) *renderSink {
+	editor, _ := adapter.(messageEditor)
 	return &renderSink{
 		ctx:        ctx,
 		adapter:    adapter,
+		editor:     editor,
 		connID:     connID,
 		domain:     domain,
 		chatID:     chatID,
@@ -71,6 +86,9 @@ func (s *renderSink) Emit(e event.Event) {
 		s.toolNames = make(map[string]string)
 		s.progressCount = 0
 		s.lastProgress = time.Time{}
+		s.liveMsgID = ""
+		s.liveSentBytes = 0
+		s.lastEdit = time.Time{}
 
 	case event.Reasoning:
 		if !s.inThinking {
@@ -83,6 +101,7 @@ func (s *renderSink) Emit(e event.Event) {
 			s.inThinking = false
 		}
 		s.buf.WriteString(e.Text)
+		s.maybeStream()
 
 	case event.Message:
 		// full message received, do nothing extra
@@ -189,12 +208,23 @@ func (s *renderSink) Emit(e event.Event) {
 
 func (s *renderSink) flush() {
 	for strings.TrimSpace(s.buf.String()) != "" {
-		idx := renderFlushIndex(s.buf.String(), renderSoftFlushAfter)
-		if idx <= 0 {
-			idx = byteIndexForRuneLimit(s.buf.String(), renderMaxChunkRunes)
+		raw := s.buf.String()
+		// When streaming into a live message, finalize the whole remaining text
+		// with one edit instead of splitting at a semantic boundary — otherwise
+		// a final answer that does not end on a boundary (code block, list, URL)
+		// gets shrunk in place and its tail re-sent as a separate message,
+		// defeating the point of in-place streaming. Only fall back to boundary
+		// chunking when the remainder genuinely exceeds the hard cap.
+		if s.editor != nil && s.liveMsgID != "" && len([]rune(raw)) < renderHardChunkRunes {
+			s.flushPrefix(len(raw))
+			continue
 		}
-		if idx <= 0 || idx > len(s.buf.String()) {
-			idx = len(s.buf.String())
+		idx := renderFlushIndex(raw, renderSoftFlushAfter)
+		if idx <= 0 {
+			idx = byteIndexForRuneLimit(raw, renderMaxChunkRunes)
+		}
+		if idx <= 0 || idx > len(raw) {
+			idx = len(raw)
 		}
 		s.flushPrefix(idx)
 	}
@@ -213,18 +243,131 @@ func (s *renderSink) flushPrefix(idx int) {
 		s.lastFlush = time.Now()
 		return
 	}
-	_ = s.send(OutboundMessage{
+	// resumeFrom marks where the not-yet-delivered remainder starts. On success
+	// it is idx (the block boundary). On edit failure the live message is frozen
+	// at raw[:liveSentBytes], so anything already shown past idx must NOT be
+	// re-queued — the resume point becomes max(idx, liveSentBytes), otherwise the
+	// [idx, liveSentBytes] span is both displayed and re-sent (duplication).
+	resumeFrom := idx
+	if s.liveMsgID != "" {
+		// 当前块已有 live 消息：把最终内容原地编辑进去，而不是再发一条。
+		if err := s.editLive(text); err != nil {
+			s.logger.Warn("bot live message final edit failed; sending tail as new message", "err", err)
+			if tail := strings.TrimSpace(raw[min(s.liveSentBytes, idx):idx]); tail != "" {
+				_ = s.send(s.textMessage(tail))
+			}
+			if s.liveSentBytes > resumeFrom {
+				resumeFrom = s.liveSentBytes
+			}
+		}
+		s.liveMsgID = ""
+		s.liveSentBytes = 0
+	} else {
+		_ = s.send(s.textMessage(text))
+	}
+	if resumeFrom > len(raw) {
+		resumeFrom = len(raw)
+	}
+	remaining := raw[resumeFrom:]
+	s.buf.Reset()
+	s.buf.WriteString(remaining)
+	s.lastFlush = time.Now()
+}
+
+// maybeStream 在每个文本增量后驱动流式输出：把已缓冲文本 create/edit 到
+// live 消息。仅当适配器支持原地编辑时启用；限频间隔复用 renderSoftFlushAfter
+// （1.2s，低于飞书单消息 Patch 的 QPS 上限）。
+func (s *renderSink) maybeStream() {
+	if s.editor == nil {
+		return
+	}
+	raw := s.buf.String()
+	if len([]rune(raw)) >= renderHardChunkRunes {
+		// 当前块过长：按语义边界收尾 live 消息，剩余文本进入下一块。
+		idx := lastSemanticBoundary(raw, renderMaxChunkRunes)
+		if idx <= 0 {
+			idx = byteIndexForRuneLimit(raw, renderMaxChunkRunes)
+		}
+		s.flushPrefix(idx)
+		return
+	}
+	last := s.lastEdit
+	if s.liveMsgID == "" {
+		last = s.lastFlush
+	}
+	if time.Since(last) < renderSoftFlushAfter {
+		return
+	}
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return
+	}
+	if s.liveMsgID == "" {
+		res, err := s.adapter.Send(s.ctx, s.textMessage(text))
+		if err != nil {
+			// 创建失败（可能是瞬时网络错误）：文本留在 buf 里，限频后重试；
+			// 就算一直失败，回合末的 flush 也会兜底发送。
+			s.logger.Warn("bot live message create failed", "err", err)
+			s.lastFlush = time.Now()
+			return
+		}
+		if strings.TrimSpace(res.MessageID) == "" {
+			// 平台没回消息 ID，无法编辑：本回合退回“攒到回合末分段发送”，
+			// 已发出的前缀从 buf 里去掉避免重复。
+			s.editor = nil
+			s.cutBufPrefix(len(raw))
+			return
+		}
+		s.liveMsgID = res.MessageID
+		s.liveSentBytes = len(raw)
+		s.lastEdit = time.Now()
+		return
+	}
+	if err := s.editLive(text); err != nil {
+		// 编辑失败（限频/超长/消息被撤回）：结束这个块，已送达前缀不再重发，
+		// 未送达的尾部留在 buf 里由下一条消息续上。
+		s.logger.Warn("bot live message edit failed; rotating to new message", "err", err)
+		s.cutBufPrefix(s.liveSentBytes)
+		s.liveMsgID = ""
+		s.liveSentBytes = 0
+		return
+	}
+	s.liveSentBytes = len(raw)
+	s.lastEdit = time.Now()
+}
+
+func (s *renderSink) editLive(text string) error {
+	err := s.editor.EditMessage(s.ctx, s.liveMsgID, s.textMessage(text))
+	if err == nil {
+		s.lastEdit = time.Now()
+	}
+	return err
+}
+
+// cutBufPrefix 从 buf 头部移除 n 个字节（已送达 live 消息的内容）。
+func (s *renderSink) cutBufPrefix(n int) {
+	raw := s.buf.String()
+	if n <= 0 {
+		return
+	}
+	if n > len(raw) {
+		n = len(raw)
+	}
+	remaining := raw[n:]
+	s.buf.Reset()
+	s.buf.WriteString(remaining)
+	s.lastFlush = time.Now()
+}
+
+func (s *renderSink) textMessage(text string) OutboundMessage {
+	return OutboundMessage{
 		ConnectionID: s.connID,
 		Domain:       s.domain,
 		ChatID:       s.chatID,
 		ChatType:     s.chatType,
 		Text:         text,
 		ReplyToMsgID: s.replyTo,
-	})
-	remaining := raw[idx:]
-	s.buf.Reset()
-	s.buf.WriteString(remaining)
-	s.lastFlush = time.Now()
+	}
 }
 
 func (s *renderSink) sendProgress(text string, force bool) {

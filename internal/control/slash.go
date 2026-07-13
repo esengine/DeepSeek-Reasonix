@@ -475,7 +475,13 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		if err := c.ReloadCommands(context.Background()); err != nil {
 			c.notice("reload-cmd: " + err.Error())
 		} else {
-			c.notice("commands reloaded (" + strconv.Itoa(len(c.Commands())) + " available)")
+			visible := 0
+			for _, cmd := range c.Commands() {
+				if !cmd.Hidden {
+					visible++
+				}
+			}
+			c.notice("commands reloaded (" + strconv.Itoa(visible) + " available)")
 		}
 	case "/hooks":
 		sub := ""

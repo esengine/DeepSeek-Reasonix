@@ -91,7 +91,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
-  const calls = { cancel: 0 };
+  const calls = { cancel: 0, tokenModes: [] as TokenMode[] };
   let currentProps: Parameters<typeof Composer>[0] = {
     running: false,
     collaborationMode: "normal" as CollaborationMode,
@@ -113,7 +113,9 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onClearGoal: () => {},
     onSwitchModel: () => {},
     onSetEffort: () => {},
-    onSetTokenMode: () => {},
+    onSetTokenMode: (mode) => {
+      calls.tokenModes.push(mode);
+    },
     ready: true,
     ...props,
   };
@@ -145,6 +147,61 @@ console.log("\ncomposer run strip");
   eq(document.querySelector(".composer__btn--stop"), null, "idle composer renders no stop button");
   ok(document.querySelector(".composer__btn--send") !== null, "idle composer keeps the send button");
   eq(document.querySelector(".composer-toolbar--status-only"), null, "floating status pill is gone");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// Work mode is a first-class, always-visible selector. Its three profiles live
+// in their own menu instead of the task-intent menu, and selecting a profile
+// preserves the existing token-mode callback contract.
+{
+  const dom = installDom();
+  const { root, calls } = await renderComposer();
+
+  const profileTrigger = document.querySelector(".composer-profile-trigger") as HTMLButtonElement | null;
+  if (!profileTrigger) throw new Error("work mode trigger did not render");
+  eq(profileTrigger.textContent?.trim(), "Balanced", "standalone control shows only the current profile");
+  eq(profileTrigger.getAttribute("aria-label"), "Work mode · Balanced", "work mode trigger keeps its full accessible name");
+  ok(profileTrigger.querySelector(".lucide-equal") !== null, "balanced work mode uses a simple equal icon");
+  await act(async () => {
+    profileTrigger.focus();
+    await flushTimers();
+  });
+  eq(document.querySelector('[role="tooltip"]')?.textContent, "Work mode · Balanced: Full tools, model-directed execution", "work mode tooltip combines category, value, and summary");
+  await act(async () => {
+    profileTrigger.blur();
+    await flushTimers();
+  });
+
+  await act(async () => {
+    profileTrigger.click();
+    await flushTimers();
+  });
+  const profileMenu = document.querySelector(".composer-profile-menu");
+  ok(profileMenu !== null, "standalone work mode trigger opens its own menu");
+  eq(profileMenu?.querySelectorAll('[role="menuitemradio"]').length, 3, "work mode menu exposes exactly three profiles");
+
+  const delivery = Array.from(profileMenu?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]') ?? [])
+    .find((item) => item.textContent?.includes("Delivery"));
+  if (!delivery) throw new Error("delivery work mode option did not render");
+  ok(delivery.querySelector(".lucide-flag") !== null, "delivery work mode uses a simple completion flag");
+  await act(async () => {
+    delivery.click();
+    await flushTimers();
+  });
+  eq(calls.tokenModes.at(-1), "delivery", "selecting delivery keeps the token-mode callback contract");
+
+  const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
+  if (!intentTrigger) throw new Error("task intent trigger did not render");
+  await act(async () => {
+    intentTrigger.click();
+    await flushTimers();
+  });
+  eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu no longer owns work mode");
+  eq(document.querySelectorAll('.composer-intent-menu [role="menuitemradio"]').length, 3, "task method menu exposes direct, plan, and goal");
 
   await act(async () => {
     root.unmount();
@@ -265,6 +322,84 @@ console.log("\ncomposer run strip");
   const ticker = document.querySelector(".composer-run-strip__text")?.textContent ?? "";
   ok(/ 30s| 31s/.test(ticker), `ticker excludes the time spent waiting for approval (got "${ticker}")`);
   ok(!/ 32s| 33s/.test(ticker), "ticker does not count the ~2.4s approval wait as model time");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// Decision surface suspension pauses the clock without a waiting strip.
+{
+  const dom = installDom();
+  const start = Date.now() - 15000;
+  const { root, rerender } = await renderComposer({ running: true, turnStartAt: start });
+
+  await rerender({ suspendedByDecision: true, disabled: true });
+  eq(document.querySelector(".composer-run-strip--waiting"), null, "decision suspension does not render a waiting strip");
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2400));
+  });
+  await rerender({ suspendedByDecision: false, disabled: false });
+
+  const ticker = document.querySelector(".composer-run-strip__text")?.textContent ?? "";
+  ok(/ 15s| 16s/.test(ticker), `suspendedByDecision excludes wait time from model clock (got "${ticker}")`);
+  ok(!/ 17s| 18s/.test(ticker), "suspended wait is not counted as model work");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// Background user-wait is controller-scoped: B already waited ~3s off-screen
+// while A was foregrounded. Model work for B must stay ~5s (8s turn − 3s wait),
+// and tab A's local pause must never be subtracted from B.
+{
+  const dom = installDom();
+  const tabAStart = Date.now() - 60_000;
+  const tabBStart = Date.now() - 8_000;
+  const tabBWaitStarted = Date.now() - 3_000;
+  const { root, rerender } = await renderComposer({
+    running: true,
+    turnStartAt: tabAStart,
+    sessionKey: "tab-a",
+    suspendedByDecision: true,
+    disabled: true,
+  });
+
+  // A stays locally suspended for a while (clear-context style / no controller wait).
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2400));
+  });
+
+  // Switch to B, already awaiting approval since tabBWaitStarted (background).
+  await rerender({
+    sessionKey: "tab-b",
+    turnStartAt: tabBStart,
+    turnWaitAccumMs: 0,
+    promptWaitStartedAt: tabBWaitStarted,
+    suspendedByDecision: true,
+    disabled: true,
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+
+  // Controller closes the open wait into turnWaitAccumMs on resolve.
+  const closedWaitMs = Date.now() - tabBWaitStarted;
+  await rerender({
+    suspendedByDecision: false,
+    disabled: false,
+    promptWaitStartedAt: undefined,
+    turnWaitAccumMs: closedWaitMs,
+  });
+
+  const ticker = document.querySelector(".composer-run-strip__text")?.textContent ?? "";
+  // 8s turn age − ~3.3s user wait ≈ 5s model work (not ~8s wall, not ~0–2s from A leak).
+  ok(/ 4s| 5s| 6s/.test(ticker), `tab B excludes background user-wait from model clock (got "${ticker}")`);
+  ok(!/ 7s| 8s| 9s| 10s| 11s/.test(ticker), "background suspension is not counted as model work");
+  ok(!/ 5[5-9]s| 6[0-9]s/.test(ticker), "tab B does not show tab A's ~60s turn age as model time");
 
   await act(async () => {
     root.unmount();

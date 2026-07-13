@@ -74,6 +74,7 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp},
 		{label: "/plugins", insert: "/plugins", hint: i18n.M.CmdPlugins},
 		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
+		{label: "/work-mode", insert: "/work-mode ", hint: i18n.M.CmdWorkMode, descend: true},
 		{label: "/provider", insert: "/provider ", hint: i18n.M.CmdProvider, descend: true},
 		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill},
 		{label: "/reload-cmd", insert: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
@@ -101,14 +102,17 @@ func (m *chatTUI) slashItems() []compItem {
 		{label: "/export", insert: "/export", hint: i18n.M.CmdExport},
 	}
 	for _, c := range m.commands {
-		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: c.Description})
+		if c.Hidden {
+			continue
+		}
+		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: customCommandHint(c)})
 	}
 	for _, s := range m.skills {
 		hint := s.Description
 		if s.RunAs == skill.RunSubagent {
 			hint = "🧬 " + hint
 		}
-		items = append(items, compItem{label: "/" + s.Name, insert: "/" + s.Name + " ", hint: hint})
+		items = append(items, compItem{label: "/" + s.SlashName(), insert: "/" + s.SlashName() + " ", hint: skillCommandHint(s, hint)})
 	}
 	for _, p := range m.prompts() {
 		items = append(items, compItem{label: "/" + p.Name, insert: "/" + p.Name + " ", hint: p.Description})
@@ -162,6 +166,9 @@ func (m *chatTUI) updateCompletion() {
 // currently /mcp; custom commands and MCP prompts take free-form template args,
 // so they yield nothing.
 func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
+	if items, from, ok := m.workModeArgItems(val); ok {
+		return items, from, len(items) > 0
+	}
 	if items, from, ok := m.branchArgItems(val); ok {
 		return items, from, len(items) > 0
 	}

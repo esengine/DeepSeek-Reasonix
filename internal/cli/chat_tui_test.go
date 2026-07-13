@@ -20,6 +20,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/skill"
 )
 
 type blockingTurnRunner struct{ started chan struct{} }
@@ -1278,7 +1279,7 @@ func TestEffortCommandWritesCurrentDeepSeekProvider(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
@@ -1303,7 +1304,7 @@ func TestEffortCommandRejectsUnsupportedProvider(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "mimo-pro"})
 	m.modelRef = "mimo-pro/mimo-v2.5-pro"
-	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
 		return control.New(control.Options{Label: "mimo-pro"}), nil
 	}
 
@@ -1321,13 +1322,16 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.buildController = func(_ string, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
-	if cmd := m.runEffortCommand("/effort max"); cmd == nil {
+	cmd := m.runEffortCommand("/effort max")
+	if cmd == nil {
 		t.Fatal("/effort max should return a rebuild command")
 	}
+	next, _ := m.Update(cmd())
+	m = next.(chatTUI)
 	if cmd := m.runEffortCommand("/effort auto"); cmd == nil {
 		t.Fatal("/effort auto should return a rebuild command")
 	}
@@ -2451,6 +2455,24 @@ func TestSlashQuitExit(t *testing.T) {
 		if _, ok := msg.(tea.QuitMsg); !ok {
 			t.Errorf("%s cmd should produce QuitMsg, got %T", cmd, msg)
 		}
+	}
+}
+
+func TestSlashSubagentWithoutTaskStaysIdleWithUsageHint(t *testing.T) {
+	ctrl := control.New(control.Options{Skills: []skill.Skill{{
+		Name: "helper", RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+	}}})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+
+	if cmd := m.runSlashCommand("/helper"); cmd != nil {
+		t.Fatal("taskless subagent slash should be handled locally")
+	}
+	if m.state != tuiIdle {
+		t.Fatalf("taskless subagent slash left TUI state=%v, want idle", m.state)
+	}
+	if out := strings.Join(m.transcript, "\n"); !strings.Contains(out, "usage: /helper <task>") {
+		t.Fatalf("missing task usage hint:\n%s", out)
 	}
 }
 

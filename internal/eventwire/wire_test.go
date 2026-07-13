@@ -27,6 +27,33 @@ func TestToWireRetryingJSON(t *testing.T) {
 	}
 }
 
+func TestToWireNoticeCarriesCode(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeFinalReadiness, Text: "readiness copy"})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"code":"final_readiness"`) {
+		t.Fatalf("notice JSON = %s, want a stable code field", b)
+	}
+
+	w = ToWire(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "codeless notice"})
+	if b, err = json.Marshal(w); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"code"`) {
+		t.Fatalf("codeless notice JSON = %s, must omit the code field", b)
+	}
+
+	w = ToWire(event.Event{Kind: event.Text, Code: "stray"})
+	if b, err = json.Marshal(w); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"code"`) {
+		t.Fatalf("non-notice JSON = %s, must not carry a code", b)
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
@@ -49,6 +76,7 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
 		"detail?: string;",
+		`outcome?: "final_readiness";`,
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"memoryCitations?: MemoryCitation[];",
@@ -81,6 +109,32 @@ func TestToWireNoticeDetail(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("notice JSON = %s, want it to contain %s", string(b), want)
 		}
+	}
+}
+
+func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
+	readiness := ToWire(event.Event{
+		Kind:    event.TurnDone,
+		Err:     errors.New("final-answer readiness failed 3 times: missing verification"),
+		Outcome: event.TurnOutcomeFinalReadiness,
+	})
+	if readiness.Outcome != event.TurnOutcomeFinalReadiness || readiness.Err == "" {
+		t.Fatalf("readiness wire event = %+v", readiness)
+	}
+	b, err := json.Marshal(readiness)
+	if err != nil {
+		t.Fatalf("marshal readiness: %v", err)
+	}
+	if !strings.Contains(string(b), `"outcome":"final_readiness"`) {
+		t.Fatalf("readiness JSON = %s, want structured outcome", b)
+	}
+
+	ordinary, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, Err: errors.New("provider failed")}))
+	if err != nil {
+		t.Fatalf("marshal ordinary error: %v", err)
+	}
+	if strings.Contains(string(ordinary), `"outcome"`) {
+		t.Fatalf("ordinary error JSON must omit outcome: %s", ordinary)
 	}
 }
 

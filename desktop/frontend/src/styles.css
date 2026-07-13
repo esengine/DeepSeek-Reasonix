@@ -3285,15 +3285,40 @@ a[href] {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
+.notice-line--delivery {
+  gap: 9px;
+  padding: 10px 12px;
+  color: var(--fg-dim);
+  background: color-mix(in srgb, var(--bg-soft) 76%, var(--bg-elev));
+  border: 1px solid var(--border-soft);
+}
+.notice-line--delivery .notice-line__icon {
+  color: var(--fg-faint);
+  margin-top: 2px;
+}
 .notice-line__icon {
   flex: 0 0 auto;
-  font-size: 14px;
-  line-height: 1.5;
 }
 .notice-line__text {
   flex: 1;
   min-width: 0;
   word-break: break-word;
+}
+.notice-line__title {
+  color: var(--fg);
+  font-weight: 600;
+}
+.notice-line__body {
+  min-width: 0;
+}
+.notice-line__title + .notice-line__body {
+  margin-top: 2px;
+}
+.notice-line__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
 }
 .notice-line__details {
   margin-top: 4px;
@@ -3307,6 +3332,35 @@ a[href] {
 }
 .notice-line__details div {
   margin-top: 4px;
+  white-space: pre-wrap;
+}
+
+/* ── Steer line (mid-turn user guidance, rendered on the user side) ── */
+.steer-line {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.steer-line__bubble {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 82%;
+  padding: 6px 12px;
+  border: 1px solid var(--chat-user-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--chat-user-bg) 55%, transparent);
+  color: var(--chat-user-fg);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.steer-line__icon {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+}
+.steer-line__text {
+  min-width: 0;
+  word-break: break-word;
   white-space: pre-wrap;
 }
 
@@ -4213,10 +4267,24 @@ a[href] {
   align-items: center;
   gap: 6px;
   min-height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--fg-faint);
+  font-family: inherit;
   font-size: 13px;
   font-weight: 560;
   line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.turn-collapse__reasoning-head:hover {
+  color: var(--fg);
+}
+.turn-collapse__reasoning-head .reasoning__chevron {
+  flex: 0 0 auto;
+  transition: transform 0.2s;
 }
 
 .turn-collapse__reasoning-head > svg:first-child {
@@ -5620,7 +5688,7 @@ body > .mermaid-diagram--fullscreen {
   bottom: calc(100% + 6px);
   left: 0;
   right: 0;
-  max-height: 280px;
+  max-height: min(360px, 50vh);
   overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -5638,6 +5706,15 @@ body > .mermaid-diagram--fullscreen {
   top: 0;
   left: 0;
   width: 100%;
+}
+.slashmenu__group {
+  display: flex;
+  align-items: flex-end;
+  height: 26px;
+  padding: 0 9px 4px;
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-weight: 600;
 }
 .slashmenu__item {
   display: flex;
@@ -5695,8 +5772,9 @@ body > .mermaid-diagram--fullscreen {
 }
 .composer {
   display: flex;
-  gap: 8px;
-  align-items: center;
+  flex-direction: column;
+  gap: 5px;
+  align-items: stretch;
   min-height: 0;
   background: transparent;
   border: none;
@@ -5707,7 +5785,121 @@ body > .mermaid-diagram--fullscreen {
 .composer-card--resized .composer,
 .composer-card--autosized .composer {
   flex: 1;
+}
+.composer__input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+.composer__content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.composer-card--resized .composer__input-row,
+.composer-card--autosized .composer__input-row {
   align-items: flex-start;
+}
+.invocation-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--invocation-color, var(--accent));
+}
+.invocation-display--composer {
+  min-height: 24px;
+  vertical-align: baseline;
+}
+.invocation-display--message {
+  vertical-align: baseline;
+  color: var(--accent);
+}
+.invocation-display--subagent,
+.invocation-display--subagent .invocation-display__name {
+  color: var(--invocation-color, var(--ok));
+}
+.invocation-display--custom-color,
+.invocation-display--custom-color .invocation-display__name {
+  color: color-mix(in srgb, var(--invocation-color) 68%, var(--fg));
+}
+.invocation-display--message .invocation-display__name {
+  font-size: 13px;
+  font-weight: 620;
+}
+.invocation-display--message .invocation-display__source {
+  font-size: 10.5px;
+}
+.invocation-display__identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 2px;
+}
+.invocation-display__identity > svg {
+  flex: 0 0 auto;
+  stroke-width: 1.8;
+}
+.invocation-display__name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--invocation-color, var(--accent));
+  font-size: 15px;
+  font-weight: 590;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.invocation-display--subagent .invocation-display__name {
+  color: var(--invocation-color, var(--ok));
+}
+.invocation-display__source {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.invocation-display__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.invocation-display:hover .invocation-display__remove,
+.invocation-display:focus-within .invocation-display__remove {
+  opacity: 1;
+}
+.invocation-display__remove:hover,
+.invocation-display__remove:focus-visible {
+  outline: none;
+  background: var(--hover);
+  color: var(--fg);
+}
+@media (hover: none) {
+  .invocation-display__remove {
+    opacity: 1;
+  }
 }
 .composer--dragover {
   outline: 1px dashed var(--accent);
@@ -5740,6 +5932,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .composer__input {
   flex: 1;
+  width: 100%;
   resize: none;
   border: none;
   background: none;
@@ -5752,11 +5945,69 @@ body > .mermaid-diagram--fullscreen {
   overflow-y: hidden;
   scrollbar-width: none;           /* Firefox */
 }
+.composer__rich-input {
+  width: 100%;
+  min-height: calc(var(--font-content) * 1.55);
+  max-height: none;
+  overflow-y: hidden;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-content);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  caret-color: var(--fg);
+}
+.composer__rich-input:empty::before {
+  color: var(--fg-faint);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+.composer-invocation-token {
+  display: inline-block;
+  max-width: min(100%, 320px);
+  margin: 0 3px;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+.composer-invocation-token:first-child {
+  margin-left: 0;
+}
+.composer-invocation-caret-anchor {
+  display: inline-block;
+  min-width: 8px;
+  min-height: 1em;
+  vertical-align: text-bottom;
+}
+.composer-card--resized .composer__rich-input {
+  /* Fill the user's fixed card height and scroll inside; height: auto would
+     collapse the input to its intrinsic height and break the resized layout. */
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.msg__rich-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.msg__rich-text .invocation-display {
+  margin: 0 3px;
+}
+.msg__rich-text .invocation-display:first-child {
+  margin-left: 0;
+}
 .composer__input::-webkit-scrollbar {
   display: none;                    /* Chrome / Safari / Wails webview */
 }
 .composer-card--resized .composer__input {
+  /* The resized card gets no inline textarea height from JS; height: auto
+     would pin the rows=1 textarea to a single visible line forever. */
   height: 100%;
+  min-height: 0;
   max-height: none;
   overflow-y: auto;
   scrollbar-width: thin;           /* restore scrollbar when resized */
@@ -5833,6 +6084,10 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: var(--focus-ring);
 }
 .composer-meta {
+  --composer-control-height: 32px;
+  --composer-control-radius: 7px;
+  --composer-control-font-size: 12px;
+  --composer-control-font-weight: 620;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -5856,28 +6111,76 @@ body > .mermaid-diagram--fullscreen {
   margin-left: 0;
 }
 
-.composer-meta--has-intent-chip .composer-meta__params {
-  gap: 6px;
-}
-
 .composer-meta__control {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 32px;
+  height: var(--composer-control-height);
   min-width: 0;
+}
+
+.composer-meta__control--content {
+  flex: 0 0 40px;
+  width: 40px;
+}
+
+.composer-content-trigger {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--composer-control-radius);
+  background: transparent;
+  color: var(--fg-dim);
+  transition: color 0.12s, border-color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+
+.composer-content-trigger svg {
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+.composer-content-trigger:hover:not(:disabled),
+.composer-content-trigger:focus-visible,
+.composer-content-trigger--open {
+  outline: none;
+  color: var(--fg);
+  border-color: var(--border);
+  background: var(--bg-soft);
+}
+
+.composer-content-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.composer-content-trigger--open svg {
+  transform: rotate(45deg);
+}
+
+.composer-content-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.composer-content-file-input {
+  display: none;
+}
+
+.composer-meta__divider {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 18px;
+  margin-inline: -3px;
+  background: color-mix(in srgb, var(--fg-faint) 22%, transparent);
 }
 
 .composer-meta__control--model {
   flex: 0 1 auto;
   width: fit-content;
   max-width: min(380px, 50vw);
-}
-
-.composer-meta--has-intent-chip .composer-meta__control--model {
-  flex: 0 1 auto;
-  width: fit-content;
-  max-width: min(320px, 50vw);
 }
 
 .composer-meta__control--model .modelsw__trigger {
@@ -5897,13 +6200,18 @@ body > .mermaid-diagram--fullscreen {
 
 .composer-meta__control--intent {
   flex: 0 0 auto;
-  gap: 6px;
-  min-width: 32px;
-  max-width: min(132px, 24vw);
+  min-width: 0;
+  max-width: min(168px, 28vw);
 }
 
-.composer-meta--has-intent-chip .composer-meta__control--intent {
-  max-width: none;
+.composer-meta__control--profile {
+  flex: 0 0 auto;
+  max-width: min(158px, 24vw);
+}
+
+.composer-meta__control--profile .tooltip-trigger {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .composer-meta__control--approval {
@@ -5924,7 +6232,7 @@ body > .mermaid-diagram--fullscreen {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: center;
   width: 100%;
-  height: 32px;
+  height: var(--composer-control-height);
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -5993,8 +6301,8 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
   color: var(--fg-dim);
   font: inherit;
-  font-size: 12px;
-  font-weight: 620;
+  font-size: var(--composer-control-font-size);
+  font-weight: var(--composer-control-font-weight);
   line-height: 14px;
   transition: color 0.12s, transform 0.12s;
 }
@@ -6032,41 +6340,137 @@ body > .mermaid-diagram--fullscreen {
   transform: none;
 }
 
-.composer-action-trigger {
+.composer-task-mode-trigger {
   --wails-draggable: no-drag;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 32px;
-  width: 32px;
+  gap: 6px;
+  width: 100%;
   min-width: 0;
-  height: 32px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  background: transparent;
+  height: var(--composer-control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--composer-control-radius);
+  background: var(--surface-2);
   color: var(--fg-dim);
-  box-shadow: none;
+  box-shadow: var(--app-graphite-shadow);
   font: inherit;
+  font-size: var(--composer-control-font-size);
+  font-weight: var(--composer-control-font-weight);
   transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
 }
 
-.composer-action-trigger:hover:not(:disabled),
-.composer-action-trigger:focus-visible,
-.composer-action-trigger--open {
-  outline: none;
-  color: var(--fg);
-  border-color: transparent;
-  background: color-mix(in srgb, var(--fg-faint) 10%, var(--surface-2));
+.composer-task-mode-trigger > svg {
+  flex: 0 0 auto;
 }
 
-.composer-action-trigger:hover:not(:disabled) {
+.composer-task-mode-trigger__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-task-mode-trigger__value {
+  color: var(--fg);
+  font-weight: var(--composer-control-font-weight);
+}
+
+.composer-task-mode-trigger:hover:not(:disabled),
+.composer-task-mode-trigger:focus-visible,
+.composer-task-mode-trigger--open {
+  outline: none;
+  color: var(--fg);
+  border-color: var(--border-soft);
+  background: var(--bg-soft);
+  transform: translateY(-1px);
+}
+
+.composer-task-mode-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
   transform: none;
 }
 
-.composer-action-trigger:disabled {
+.composer-task-mode-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
+  transform: none;
+}
+
+.composer-profile-trigger {
+  --wails-draggable: no-drag;
+  --composer-profile-accent: var(--fg-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: var(--composer-control-height);
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--composer-control-radius);
+  background: var(--surface-2);
+  color: var(--fg-dim);
+  box-shadow: var(--app-graphite-shadow);
+  font: inherit;
+  font-size: var(--composer-control-font-size);
+  font-weight: var(--composer-control-font-weight);
+  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
+}
+
+.composer-profile-trigger[data-profile="economy"] {
+  --composer-profile-accent: #3b82f6;
+}
+
+.composer-profile-trigger[data-profile="delivery"] {
+  --composer-profile-accent: #f97316;
+}
+
+.composer-profile-trigger > svg:first-child {
+  flex: 0 0 auto;
+  color: var(--composer-profile-accent);
+}
+
+.composer-profile-trigger > svg:last-child {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+}
+
+.composer-profile-trigger__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-profile-trigger__value {
+  color: var(--fg);
+  font-weight: var(--composer-control-font-weight);
+}
+
+.composer-profile-trigger:hover:not(:disabled),
+.composer-profile-trigger:focus-visible,
+.composer-profile-trigger--open {
+  outline: none;
+  color: var(--fg);
+  border-color: var(--border-soft);
+  background: var(--bg-soft);
+  transform: translateY(-1px);
+}
+
+.composer-profile-trigger:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+  transform: none;
+}
+
+.composer-profile-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
   transform: none;
 }
 
@@ -6078,15 +6482,16 @@ body > .mermaid-diagram--fullscreen {
   gap: 6px;
   width: 100%;
   min-width: 0;
-  height: 32px;
+  height: var(--composer-control-height);
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--composer-control-radius);
   background: var(--surface-2);
   color: var(--fg-dim);
+  box-shadow: var(--app-graphite-shadow);
   font: inherit;
-  font-size: 12px;
-  font-weight: 620;
+  font-size: var(--composer-control-font-size);
+  font-weight: var(--composer-control-font-weight);
   transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
 }
 
@@ -6107,8 +6512,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .composer-more-trigger--effort {
-  gap: 5px;
-  padding-inline: 7px;
+  gap: 6px;
+  padding-inline: 8px;
 }
 
 .composer-more-trigger--explicit {
@@ -6132,126 +6537,8 @@ body > .mermaid-diagram--fullscreen {
   transform: none;
 }
 
-.composer-mode-chip {
-  --wails-draggable: no-drag;
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 1 82px;
-  gap: 6px;
-  min-width: 0;
-  max-width: 86px;
-  height: 32px;
-  padding: 0 10px 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-2) 88%, var(--fg) 3%);
-  color: var(--fg);
-  box-shadow: var(--app-graphite-shadow);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 650;
-  transition: border-color 0.14s, background 0.14s, color 0.14s, transform 0.14s var(--ease-out);
-}
-
-.composer-mode-chip__label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-mode-chip__icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  transition: opacity 0.14s, transform 0.14s var(--ease-out), background 0.14s, color 0.14s;
-}
-
-.composer-mode-chip__icon--mode {
-  color: var(--fg-dim);
-}
-
-.composer-mode-chip__icon--dismiss {
-  position: absolute;
-  left: 8px;
-  color: #fff;
-  background: color-mix(in srgb, var(--fg-dim) 64%, transparent);
-  opacity: 0;
-  transform: scale(0.86);
-}
-
-.composer-mode-chip:hover:not(:disabled),
-.composer-mode-chip:focus-visible,
-.composer-mode-chip:active:not(:disabled),
-.tooltip-trigger:hover > .composer-mode-chip:not(:disabled),
-.tooltip-trigger:focus-within > .composer-mode-chip:not(:disabled) {
-  outline: none;
-  color: var(--fg);
-  border-color: var(--border-soft);
-  background: var(--bg-soft);
-  transform: translateY(-1px);
-}
-
-.composer-mode-chip:hover:not(:disabled) .composer-mode-chip__icon--mode,
-.composer-mode-chip:focus-visible .composer-mode-chip__icon--mode,
-.composer-mode-chip:active:not(:disabled) .composer-mode-chip__icon--mode,
-.tooltip-trigger:hover > .composer-mode-chip:not(:disabled) .composer-mode-chip__icon--mode,
-.tooltip-trigger:focus-within > .composer-mode-chip:not(:disabled) .composer-mode-chip__icon--mode {
-  opacity: 0;
-  transform: scale(0.86);
-}
-
-.composer-mode-chip:hover:not(:disabled) .composer-mode-chip__icon--dismiss,
-.composer-mode-chip:focus-visible .composer-mode-chip__icon--dismiss,
-.composer-mode-chip:active:not(:disabled) .composer-mode-chip__icon--dismiss,
-.tooltip-trigger:hover > .composer-mode-chip:not(:disabled) .composer-mode-chip__icon--dismiss,
-.tooltip-trigger:focus-within > .composer-mode-chip:not(:disabled) .composer-mode-chip__icon--dismiss {
-  opacity: 1;
-  transform: scale(1);
-}
-
-.composer-mode-chip:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  transform: none;
-}
-
-.composer-mode-chip--plan,
-.composer-mode-chip--goal {
-  flex: 0 0 72px;
-  min-width: 72px;
-  max-width: 72px;
-}
-
-.composer-mode-chip--plan .composer-mode-chip__label,
-.composer-mode-chip--goal .composer-mode-chip__label {
-  overflow: visible;
-  text-overflow: clip;
-}
-
-.composer-mode-chip--token {
-  flex: 0 0 62px;
-  min-width: 62px;
-  max-width: 62px;
-  gap: 4px;
-  padding: 0 8px 0 7px;
-  border-color: color-mix(in srgb, #10b981 34%, var(--border));
-  background: color-mix(in srgb, var(--surface-2) 82%, #10b981 10%);
-}
-
-.composer-mode-chip--token .composer-mode-chip__icon--mode {
-  color: #10b981;
-}
-
-.composer-mode-chip--token .composer-mode-chip__label {
-  overflow: visible;
-  text-overflow: clip;
+.composer-more-trigger:focus-visible {
+  box-shadow: var(--focus-ring);
 }
 
 .composer-meta .modelsw {
@@ -6263,14 +6550,16 @@ body > .mermaid-diagram--fullscreen {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  height: 32px;
-  gap: 8px;
+  height: var(--composer-control-height);
+  gap: 6px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--composer-control-radius);
   background: var(--surface-2);
   color: var(--fg-dim);
-  font-size: 12px;
+  box-shadow: var(--app-graphite-shadow);
+  font-size: var(--composer-control-font-size);
+  font-weight: var(--composer-control-font-weight);
 }
 .composer-meta .modelsw__trigger:hover:not(:disabled),
 .composer-meta .modelsw__trigger:focus-visible {
@@ -6278,6 +6567,10 @@ body > .mermaid-diagram--fullscreen {
   border-color: var(--border-soft);
   background: var(--bg-soft);
   outline: none;
+}
+
+.composer-meta .modelsw__trigger:focus-visible {
+  box-shadow: var(--focus-ring);
 }
 .composer-meta .modelsw__label {
   flex: 1 1 auto;
@@ -6303,27 +6596,23 @@ body > .mermaid-diagram--fullscreen {
     max-width: min(240px, 42vw);
   }
 
-  .composer-meta--has-intent-chip .composer-meta__control--model {
-    flex: 0 1 auto;
-    width: fit-content;
-    max-width: min(220px, 38vw);
-  }
-
   .composer-meta__control--approval {
     flex-basis: 178px;
     min-width: 164px;
     max-width: 178px;
   }
 
-  .composer-mode-chip {
-    gap: 5px;
-    padding-inline: 8px;
+  .composer-meta__control--profile {
+    max-width: 126px;
+  }
+
+  .composer-meta__control--intent {
+    max-width: 128px;
   }
 
   .composer-modebar__item {
     gap: 4px;
     padding-inline: 4px;
-    font-size: 11.5px;
   }
 
   .composer-meta__control--effort {
@@ -6348,6 +6637,11 @@ body > .mermaid-diagram--fullscreen {
     gap: 4px;
   }
 
+  .composer-meta__control--content {
+    flex-basis: 34px;
+    width: 34px;
+  }
+
   .app--creation .composer-meta .composer-meta__params,
   :root[data-theme-style] .app--creation .composer-meta .composer-meta__params {
     gap: 4px;
@@ -6363,6 +6657,40 @@ body > .mermaid-diagram--fullscreen {
     flex-basis: 92px;
     min-width: 86px;
     max-width: 92px;
+  }
+
+  .composer-meta__control--profile {
+    flex-basis: 68px;
+    width: 68px;
+    max-width: 68px;
+  }
+
+  .composer-meta__divider {
+    display: none;
+  }
+
+  .composer-meta__control--intent {
+    flex-basis: 72px;
+    width: 72px;
+    max-width: 72px;
+  }
+
+  .composer-task-mode-trigger {
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .composer-task-mode-trigger > svg:last-child {
+    display: none;
+  }
+
+  .composer-profile-trigger {
+    gap: 4px;
+    padding-inline: 6px;
+  }
+
+  .composer-profile-trigger > svg:last-child {
+    display: none;
   }
 
   .composer-meta__control--effort {
@@ -6436,6 +6764,27 @@ body > .mermaid-diagram--fullscreen {
   background: var(--bg-elev);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
+
+.composer-content-menu {
+  width: min(292px, calc(100vw - 16px));
+}
+
+.composer-content-menu__item {
+  height: 56px;
+  min-height: 56px;
+}
+
+.composer-content-menu__trigger-icon {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 18px;
+  line-height: 16px;
+}
+
 .composer-access-menu__section {
   display: flex;
   flex-direction: column;
@@ -6499,19 +6848,62 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
   font-size: 11.5px;
   line-height: 1.35;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.composer-intent-menu,
+.composer-profile-menu {
+  width: min(284px, calc(100vw - 16px));
+}
+
+.composer-profile-menu .composer-access-menu__desc {
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer-intent-menu {
-  width: min(258px, calc(100vw - 16px));
+.composer-intent-menu__item,
+.composer-profile-menu__item {
+  height: auto;
+  min-height: 58px;
+  padding-block: 8px;
+  padding-right: 10px;
 }
 
-.composer-intent-menu__item {
-  height: 54px;
-  min-height: 54px;
-  padding-right: 10px;
+.composer-intent-menu__check {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.composer-intent-menu__stop {
+  --wails-draggable: no-drag;
+  align-self: flex-end;
+  margin: 2px 6px 0;
+  padding: 5px 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--err);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 620;
+}
+
+.composer-intent-menu__stop:hover:not(:disabled),
+.composer-intent-menu__stop:focus-visible {
+  outline: none;
+  background: color-mix(in srgb, var(--err) 10%, transparent);
+}
+
+.composer-intent-menu__stop:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .composer-more-menu {
@@ -6567,40 +6959,6 @@ body > .mermaid-diagram--fullscreen {
 .composer-more-menu__item--active {
   color: var(--fg);
   background: var(--bg-elev-2);
-}
-
-.composer-intent-switch {
-  position: relative;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 20px;
-  border-radius: 999px;
-  background: var(--surface-3);
-  box-shadow: inset 0 0 0 1px var(--border);
-  transition: background 0.14s, box-shadow 0.14s;
-}
-
-.composer-intent-switch::before {
-  content: "";
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
-  background: var(--bg-elev);
-  box-shadow: 0 1px 3px color-mix(in srgb, #000 28%, transparent);
-  transition: transform 0.16s var(--ease-out), background 0.14s;
-}
-
-.composer-intent-switch--on {
-  background: var(--mode-auto-bg);
-  box-shadow: inset 0 0 0 1px var(--mode-auto-border);
-}
-
-.composer-intent-switch--on::before {
-  transform: translateX(14px);
-  background: #fff;
 }
 
 .statusbar {
@@ -7087,6 +7445,15 @@ body > .mermaid-diagram--fullscreen {
     transform: translateY(10px);
   }
 }
+/* Composer host under a decision surface: stays mounted for draft caches. */
+.composer-decision-host {
+  display: block;
+  min-width: 0;
+}
+.composer-decision-host--hidden,
+.composer-decision-host[hidden] {
+  display: none !important;
+}
 .prompt-shelf__card {
   display: grid;
   gap: 8px;
@@ -7144,6 +7511,16 @@ body > .mermaid-diagram--fullscreen {
   font-size: 11px;
   font-weight: 600;
   line-height: 1.2;
+}
+.prompt-shelf__badge--amber {
+  border-color: color-mix(in srgb, var(--warn, #f59e0b) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--warn, #f59e0b) 14%, var(--bg-soft));
+  color: color-mix(in srgb, var(--warn, #f59e0b) 72%, var(--fg));
+}
+.prompt-shelf__badge--danger {
+  border-color: color-mix(in srgb, var(--err) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--err) 10%, var(--bg-soft));
+  color: color-mix(in srgb, var(--err) 70%, var(--fg));
 }
 .prompt-shelf__meta {
   color: var(--fg-dim);
@@ -7241,6 +7618,96 @@ body > .mermaid-diagram--fullscreen {
 .prompt-action--selected:hover {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
+}
+/* Keyboard cursor only — not a committed multi-select answer. */
+.prompt-action--active:not(.prompt-action--selected) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.prompt-action--active.prompt-action--selected {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.prompt-action--danger:not(.prompt-action--selected) {
+  border-color: color-mix(in srgb, var(--err) 22%, var(--border-soft));
+}
+.prompt-action--danger.prompt-action--selected {
+  border-color: color-mix(in srgb, var(--err) 50%, var(--border));
+  background: color-mix(in srgb, var(--err) 12%, var(--bg-elev));
+}
+.prompt-action--danger.prompt-action--selected .prompt-action__key {
+  border-color: var(--err);
+  background: var(--err);
+  color: #fff;
+}
+.prompt-shelf__footer {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 8px;
+  margin-top: 2px;
+}
+.decision-confirm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.decision-confirm-bar__hint {
+  min-width: 0;
+  flex: 1;
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.decision-confirm-bar__confirm {
+  flex: 0 0 auto;
+  min-width: 88px;
+}
+/* Unified decision surface: vertical full-width options, sticky footer,
+   content scrolls within 55vh. Never collapses to horizontal pills. */
+.prompt-shelf--decision .prompt-shelf__card {
+  gap: 8px;
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.prompt-shelf--decision .prompt-shelf__header {
+  align-items: flex-start;
+}
+.prompt-shelf--decision .prompt-shelf__meta {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.prompt-shelf--decision .prompt-shelf__body {
+  max-height: min(55vh, 420px);
+  overflow: auto;
+  padding-right: 2px;
+}
+.prompt-shelf--decision .prompt-shelf__actions {
+  display: grid !important;
+  grid-template-columns: 1fr !important;
+  gap: 6px;
+  max-height: min(40vh, 320px);
+  overflow: auto;
+  padding-right: 2px;
+}
+.prompt-shelf--decision .prompt-action {
+  width: 100% !important;
+  min-height: 40px;
+  align-items: flex-start;
+  border-radius: 8px !important;
+  padding: 8px 10px;
+  white-space: normal !important;
+}
+.prompt-shelf--decision .prompt-action__copy {
+  display: grid !important;
+  gap: 2px;
+}
+.prompt-shelf--decision .prompt-action__label,
+.prompt-shelf--decision .prompt-action__desc {
+  white-space: normal !important;
+  overflow: visible;
+  text-overflow: clip;
 }
 .prompt-action--quiet {
   width: auto;
@@ -11537,6 +12004,315 @@ body > .mermaid-diagram--fullscreen {
 }
 .cap-skill-card__more:hover {
   color: var(--accent-strong);
+}
+.subagents-inherit-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 54%, transparent);
+  color: var(--fg-dim);
+  font-size: 10px;
+  font-weight: 550;
+  line-height: 1.3;
+  cursor: default;
+}
+.subagents-color-dot {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--project-accent, var(--accent));
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--bg-elev) 72%, transparent);
+}
+.subagents-color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 0 4px;
+}
+.subagents-color-swatch {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--project-accent, var(--accent));
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.subagents-color-swatch:hover {
+  transform: scale(1.08);
+}
+.subagents-color-swatch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  outline-offset: 2px;
+}
+.subagents-color-swatch--selected {
+  box-shadow: 0 0 0 2px var(--bg-soft), 0 0 0 4px var(--project-accent, var(--accent));
+}
+.subagents-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-soft) 72%, transparent);
+}
+.subagents-tool-grid__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+.subagents-tool-grid__actions button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.subagents-tool-grid__actions button:hover:not(:disabled) {
+  color: var(--fg);
+}
+.subagents-tool-grid__actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.subagents-tool-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.subagents-tool-option:hover {
+  background: var(--list-row-hover-bg);
+  color: var(--fg);
+}
+.subagents-tool-scope-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.subagents-tool-scope-row .mem-select {
+  flex: 0 1 220px;
+}
+.subagents-tool-scope-row span {
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.subagents-form-back {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-faint);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.subagents-form-back:hover {
+  color: var(--fg);
+}
+.subagents-form-back:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.subagents-form-back:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.subagents-field-error {
+  margin-top: -4px;
+  color: var(--err);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.subagents-hint {
+  color: var(--fg-faint);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.subagents-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+}
+.subagents-toolbar .mem-input {
+  min-width: 0;
+}
+.subagents-profile-group {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: transparent;
+}
+.subagents-profile-group .cap-skills-head {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.subagents-profile-group .cap-skills-head__title {
+  margin: 0;
+}
+.subagents-builtin-card {
+  background: color-mix(in srgb, var(--bg-soft) 38%, transparent);
+}
+.subagents-builtin-overrides {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(200px, 1fr)) 152px;
+  align-items: end;
+  gap: 8px;
+  margin: 8px 0 0 33px;
+}
+.subagents-builtin-overrides__field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.subagents-builtin-overrides__field-label {
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.subagents-builtin-overrides__field .settings-model-picker,
+.subagents-builtin-overrides__field .mem-select {
+  width: 100%;
+}
+.subagents-builtin-overrides__status {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.subagents-reset-override {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.subagents-reset-override__state {
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 700;
+}
+.subagents-row-actions {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.subagents-invocation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 0 33px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev) 48%, transparent);
+}
+.subagents-invocation__command {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+.subagents-invocation__command code {
+  overflow: hidden;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.subagents-invocation__copy {
+  flex: 0 0 auto;
+  min-height: 24px;
+  background: transparent;
+}
+.subagents-invocation__copy .copybtn__label-inline {
+  max-width: 80px;
+}
+.subagents-tryit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.subagents-tryit-row .mem-input {
+  flex: 1 1 auto;
+}
+.subagents-tryit-result {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-soft) 76%, transparent);
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
+@media (max-width: 760px) {
+  .subagents-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .subagents-toolbar .mem-input {
+    grid-column: 1 / -1;
+  }
+  .subagents-builtin-overrides {
+    grid-template-columns: 1fr;
+  }
+  .subagents-invocation {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .subagents-invocation > .btn {
+    align-self: flex-start;
+  }
+  .subagents-builtin-overrides__status {
+    min-height: 0;
+    justify-content: flex-start;
+  }
+  .subagents-tool-scope-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .subagents-tool-scope-row .mem-select {
+    flex-basis: auto;
+    width: 100%;
+  }
 }
 .cap-dot {
   flex-shrink: 0;
@@ -24402,8 +25178,9 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .composer-modebar,
-:root[data-theme-style] .composer-mode-chip,
 :root[data-theme-style] .meta-chip,
+:root[data-theme-style] .composer-task-mode-trigger,
+:root[data-theme-style] .composer-profile-trigger,
 :root[data-theme-style] .composer-more-trigger,
 :root[data-theme-style] .composer-meta .modelsw__trigger,
 :root[data-theme-style] .composer-context__item {
@@ -24414,11 +25191,12 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .meta-chip:hover,
-:root[data-theme-style] .composer-mode-chip:hover:not(:disabled),
-:root[data-theme-style] .composer-mode-chip:focus-visible,
-:root[data-theme-style] .composer-mode-chip:active:not(:disabled),
-:root[data-theme-style] .tooltip-trigger:hover > .composer-mode-chip:not(:disabled),
-:root[data-theme-style] .tooltip-trigger:focus-within > .composer-mode-chip:not(:disabled),
+:root[data-theme-style] .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-style] .composer-task-mode-trigger:focus-visible,
+:root[data-theme-style] .composer-task-mode-trigger--open,
+:root[data-theme-style] .composer-profile-trigger:hover:not(:disabled),
+:root[data-theme-style] .composer-profile-trigger:focus-visible,
+:root[data-theme-style] .composer-profile-trigger--open,
 :root[data-theme-style] .composer-more-trigger:hover:not(:disabled),
 :root[data-theme-style] .composer-more-trigger:focus-visible,
 :root[data-theme-style] .composer-more-trigger--open,
@@ -24429,30 +25207,12 @@ body > .mermaid-diagram--fullscreen {
   transform: translateY(-1px);
 }
 
-:root[data-theme-style] .composer-action-trigger {
-  border-radius: 999px;
-  border-color: transparent;
-  background: transparent;
-  box-shadow: none;
-}
-
-:root[data-theme-style] .composer-action-trigger:hover:not(:disabled),
-:root[data-theme-style] .composer-action-trigger:focus-visible,
-:root[data-theme-style] .composer-action-trigger--open {
-  color: var(--fg);
-  border-color: transparent;
-  background: color-mix(in srgb, var(--fg-faint) 12%, var(--surface-3));
+:root[data-theme-style] .composer-task-mode-trigger:focus-visible,
+:root[data-theme-style] .composer-profile-trigger:focus-visible,
+:root[data-theme-style] .composer-more-trigger:focus-visible,
+:root[data-theme-style] .composer-meta .modelsw__trigger:focus-visible {
+  box-shadow: var(--focus-ring);
   transform: none;
-}
-
-:root[data-theme-style] .composer-mode-chip {
-  border-radius: 999px;
-  box-shadow: none;
-}
-
-:root[data-theme-style] .composer-mode-chip--token {
-  border-color: color-mix(in srgb, #10b981 32%, var(--border));
-  background: color-mix(in srgb, var(--bg-elev-2) 82%, #10b981 10%);
 }
 
 :root[data-theme-style] .composer-modebar__thumb,
@@ -24490,12 +25250,18 @@ body > .mermaid-diagram--fullscreen {
 }
 
 :root[data-theme-style] .composer-modebar__item--active,
-:root[data-theme-style] .composer-modebar__item--active:hover:not(:disabled),
-:root[data-theme-style] .composer-modebar__item--active:focus-visible {
+:root[data-theme-style] .composer-modebar__item--active:hover:not(:disabled) {
   color: var(--composer-modebar-active-fg);
   background: transparent;
   border-color: transparent;
   box-shadow: none;
+}
+
+:root[data-theme-style] .composer-modebar__item--active:focus-visible {
+  color: var(--composer-modebar-active-fg);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: var(--focus-ring);
 }
 
 :root[data-theme-style] .statusbar {
@@ -26081,6 +26847,28 @@ body > .mermaid-diagram--fullscreen {
 
 .sidebar--workbench .project-tree__topic-state--waiting_confirmation {
   background: var(--warn);
+  /* Waiting is paused-for-user: never spin like thinking/streaming. */
+  animation: none;
+}
+.project-tree__topic-waiting-pill,
+.sidebar--workbench .project-tree__topic-waiting-pill,
+.app--creation .project-tree__topic-waiting-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  max-width: 7.5em;
+  min-height: 18px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--warn, #f59e0b) 46%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--warn, #f59e0b) 16%, var(--bg-soft));
+  color: color-mix(in srgb, var(--warn, #f59e0b) 78%, var(--fg));
+  font-size: calc(10.5px * var(--font-scale));
+  font-weight: 650;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar--workbench .project-tree__topic-state--paused {
@@ -26400,7 +27188,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .settings-modal__title,
 :root[data-theme-style] .app--creation .settings-modal__title {
-  font-size: 15px;
+  font-size: calc(15px * var(--font-scale));
   font-weight: 640;
 }
 
@@ -26487,14 +27275,14 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .settings-center__navitem span,
 :root[data-theme-style] .app--creation .settings-center__navitem span {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 600;
 }
 
 .app--creation .settings-center__navitem small,
 :root[data-theme-style] .app--creation .settings-center__navitem small {
   color: color-mix(in srgb, var(--fg-dim) 76%, transparent);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   line-height: 1.25;
 }
 
@@ -26523,7 +27311,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .settings-page__title,
 :root[data-theme-style] .app--creation .settings-page__title {
-  font-size: 24px;
+  font-size: calc(24px * var(--font-scale));
   font-weight: 760;
   letter-spacing: -0.02em;
 }
@@ -26531,7 +27319,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .settings-page__desc,
 :root[data-theme-style] .app--creation .settings-page__desc {
   color: color-mix(in srgb, var(--fg-dim) 84%, transparent);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
 }
 
 .app--creation .settings-section,
@@ -26560,13 +27348,13 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .settings-page--manager .mem-section__title,
 :root[data-theme-style] .app--creation .settings-section__title,
 :root[data-theme-style] .app--creation .settings-page--manager .mem-section__title {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 620;
 }
 
 .app--creation .settings-section__desc,
 :root[data-theme-style] .app--creation .settings-section__desc {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   line-height: 1.35;
 }
 
@@ -26600,14 +27388,14 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .settings-field__label,
 :root[data-theme-style] .app--creation .settings-field__label {
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 600;
 }
 
 .app--creation .settings-field__hint,
 :root[data-theme-style] .app--creation .settings-field__hint {
   color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   line-height: 1.35;
 }
 
@@ -26624,7 +27412,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 5px 13px;
   border-radius: 9px;
   color: color-mix(in srgb, var(--fg-dim) 86%, transparent);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 .app--creation .set-seg__btn--on,
@@ -26694,13 +27482,13 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .theme-card__name,
 :root[data-theme-style] .app--creation .theme-card__name {
   flex: 0 1 auto;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 600;
 }
 
 .app--creation .theme-card__zh,
 :root[data-theme-style] .app--creation .theme-card__zh {
-  font-size: 9.5px;
+  font-size: calc(9.5px * var(--font-scale));
   font-weight: 480;
 }
 
@@ -26893,7 +27681,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .topicbar__title-row h1,
 .app--creation .topicbar__title-input {
-  font-size: 10px;
+  font-size: calc(10px * var(--font-scale));
   font-weight: 500;
 }
 
@@ -26964,6 +27752,35 @@ body > .mermaid-diagram--fullscreen {
   background: transparent;
 }
 
+/* Creation topicbar: quiet utility chrome (copy/export/help/command). */
+.app--creation .topicbar__actions .topicbar__action-btn--utility,
+:root[data-theme-style] .app--creation .topicbar__actions .topicbar__action-btn--utility {
+  color: color-mix(in srgb, var(--fg-faint) 58%, transparent);
+  opacity: 0.72;
+}
+
+.app--creation .topicbar:hover .topicbar__actions .topicbar__action-btn--utility,
+.app--creation .topicbar__actions .topicbar__action-btn--utility:hover:not(:disabled),
+.app--creation .topicbar__actions .topicbar__action-btn--utility:focus-visible:not(:disabled),
+.app--creation .topicbar__export--open .topicbar__action-btn--utility,
+:root[data-theme-style] .app--creation .topicbar:hover .topicbar__actions .topicbar__action-btn--utility,
+:root[data-theme-style] .app--creation .topicbar__actions .topicbar__action-btn--utility:hover:not(:disabled),
+:root[data-theme-style] .app--creation .topicbar__actions .topicbar__action-btn--utility:focus-visible:not(:disabled),
+:root[data-theme-style] .app--creation .topicbar__export--open .topicbar__action-btn--utility {
+  color: color-mix(in srgb, var(--fg-dim) 88%, transparent);
+  opacity: 1;
+}
+
+.app--creation .topicbar__actions .topicbar__chrome-btn--workspace,
+:root[data-theme-style] .app--creation .topicbar__actions .topicbar__chrome-btn--workspace {
+  color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
+}
+
+.app--creation .topicbar__actions .topicbar__chrome-btn--workspace.topicbar__chrome-btn--active,
+:root[data-theme-style] .app--creation .topicbar__actions .topicbar__chrome-btn--workspace.topicbar__chrome-btn--active {
+  color: var(--fg);
+}
+
 .app--creation .footer,
 :root[data-theme-style] .app--creation .footer {
   border-top: 0;
@@ -26981,7 +27798,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .composer-run-strip,
 :root[data-theme-style] .app--creation .composer-run-strip {
   color: color-mix(in srgb, var(--accent) 88%, var(--fg-muted));
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 .app--creation .composer-run-strip__dot,
@@ -27261,7 +28078,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .composer__input,
 :root[data-theme-style] .app--creation .composer__input {
   color: var(--fg);
-  font-size: 14.5px;
+  font-size: calc(14.5px * var(--font-scale));
   line-height: 1.55;
 }
 
@@ -27379,6 +28196,24 @@ body > .mermaid-diagram--fullscreen {
   max-width: none;
 }
 
+.app--creation .composer-meta__control--content,
+:root[data-theme-style] .app--creation .composer-meta__control--content {
+  flex-basis: 34px;
+  width: 34px;
+}
+
+.app--creation .composer-content-trigger,
+:root[data-theme-style] .app--creation .composer-content-trigger {
+  width: 28px;
+  height: 28px;
+}
+
+.app--creation .composer-meta__control--profile,
+:root[data-theme-style] .app--creation .composer-meta__control--profile {
+  flex: 0 0 auto;
+  max-width: 88px;
+}
+
 .app--creation .composer-meta__control--approval,
 :root[data-theme-style] .app--creation .composer-meta__control--approval {
   flex: 0 0 auto;
@@ -27394,6 +28229,11 @@ body > .mermaid-diagram--fullscreen {
   max-width: min(280px, 34vw);
 }
 
+.app--creation .composer-meta__divider,
+:root[data-theme-style] .app--creation .composer-meta__divider {
+  display: none;
+}
+
 .app--creation .composer-meta__control--effort,
 :root[data-theme-style] .app--creation .composer-meta__control--effort {
   flex: 0 0 auto;
@@ -27402,12 +28242,16 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--creation .composer-modebar,
-.app--creation .composer-mode-chip,
+.app--creation .composer-content-trigger,
+.app--creation .composer-task-mode-trigger,
+.app--creation .composer-profile-trigger,
 .app--creation .composer-more-trigger,
 .app--creation .composer-meta .modelsw__trigger,
 .app--creation .composer-context__item,
 :root[data-theme-style] .app--creation .composer-modebar,
-:root[data-theme-style] .app--creation .composer-mode-chip,
+:root[data-theme-style] .app--creation .composer-content-trigger,
+:root[data-theme-style] .app--creation .composer-task-mode-trigger,
+:root[data-theme-style] .app--creation .composer-profile-trigger,
 :root[data-theme-style] .app--creation .composer-more-trigger,
 :root[data-theme-style] .app--creation .composer-meta .modelsw__trigger,
 :root[data-theme-style] .app--creation .composer-context__item {
@@ -27418,24 +28262,21 @@ body > .mermaid-diagram--fullscreen {
   -webkit-backdrop-filter: none;
 }
 
-.app--creation .composer-action-trigger:hover:not(:disabled),
-.app--creation .composer-action-trigger:focus-visible,
-.app--creation .composer-action-trigger--open,
-:root[data-theme-style] .app--creation .composer-action-trigger:hover:not(:disabled),
-:root[data-theme-style] .app--creation .composer-action-trigger:focus-visible,
-:root[data-theme-style] .app--creation .composer-action-trigger--open {
-  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
-}
-
-.app--creation .composer-action-trigger,
-:root[data-theme-style] .app--creation .composer-action-trigger {
-  flex-basis: 28px;
-  width: 28px;
+.app--creation .composer-profile-trigger,
+:root[data-theme-style] .app--creation .composer-profile-trigger {
   height: 28px;
+  padding-inline: 7px;
+  box-shadow: none;
 }
 
-.app--creation .composer-action-trigger svg,
-:root[data-theme-style] .app--creation .composer-action-trigger svg {
+.app--creation .composer-task-mode-trigger,
+:root[data-theme-style] .app--creation .composer-task-mode-trigger {
+  height: 28px;
+  padding-inline: 7px;
+}
+
+.app--creation .composer-task-mode-trigger svg,
+:root[data-theme-style] .app--creation .composer-task-mode-trigger svg {
   width: 15px;
   height: 15px;
 }
@@ -27517,7 +28358,7 @@ body > .mermaid-diagram--fullscreen {
   height: 28px;
   gap: 5px;
   padding: 0 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .app--creation .composer-meta .modelsw,
@@ -27598,6 +28439,16 @@ body > .mermaid-diagram--fullscreen {
 }
 
 /* popover 卡片 —— 对齐 context-panel__capacity-card 风格（portal 到 body，无 .app--creation 前缀） */
+/*
+ * NOTE (font-scale): this popover is portaled to <body>, so it has no
+ * .app--creation prefix, yet it is ONLY rendered in creation layout
+ * (Composer gates it behind showContextWindowRing = sidebarCreation =
+ * desktopLayoutStyle === "creation"). Font sizes here intentionally use
+ * calc(<px> * var(--font-scale)) to match the rest of creation and follow
+ * the interface text-size setting. Keep the calc(); do NOT revert to bare px.
+ * The typography-overflow-contract test asserts no bare-px font-size remains
+ * in .context-ring-popover rules, so a plain "12px" here will fail CI.
+ */
 .context-ring-popover,
 :root[data-theme-style] .context-ring-popover {
   min-width: 220px;
@@ -27608,7 +28459,7 @@ body > .mermaid-diagram--fullscreen {
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, var(--bg)) 0%, var(--bg) 100%);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   line-height: 1.5;
 }
 /* 警告/注意态 tinted border + gradient */
@@ -27643,7 +28494,7 @@ body > .mermaid-diagram--fullscreen {
   border-radius: 5px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-weight: 650;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -27702,7 +28553,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale));
   font-weight: 620;
   line-height: 1.15;
   text-overflow: ellipsis;
@@ -27722,12 +28573,12 @@ body > .mermaid-diagram--fullscreen {
 }
 .context-ring-popover__label {
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   white-space: nowrap;
 }
 .context-ring-popover__value {
   color: var(--fg-dim);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
@@ -27772,6 +28623,10 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .sidebar,
 :root[data-theme-style] .app--creation .sidebar {
   --project-tree-row-radius: 9px;
+  --sidebar-content-inset: 10px;
+  --sidebar-topic-indent: 14px;
+  --sidebar-topic-marker-gutter: 10px;
+  --sidebar-topic-time-col: 42px;
   padding: 38px 12px 14px;
   border-right: 0;
   background: color-mix(in srgb, var(--sidebar-bg) 88%, transparent);
@@ -27781,14 +28636,20 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .sidebar__brand {
   min-height: 30px;
   margin-bottom: 18px;
-  padding-inline: 8px;
+  /* Same content inset as 新对话 / 功能 items — no extra horizontal drift. */
+  padding-inline: var(--sidebar-content-inset);
+  justify-content: flex-start;
 }
 
 .app--creation .sidebar__brand-logo,
 :root[data-theme-style] .app--creation .sidebar__brand-logo {
   width: 118px;
   height: 28px;
-  margin-left: -15px;
+  /* Wordmark SVG has left transparent padding (~15% of viewBox). Pull the
+     glyph left so the R mark lines up with the 新建对话 icon edge
+     (same content inset). Scale of base -21px @ 136px → ~-18px @ 118px. */
+  margin-left: -18px;
+  object-position: left center;
 }
 
 .app--creation .sidebar__new,
@@ -27797,14 +28658,14 @@ body > .mermaid-diagram--fullscreen {
   height: 38px;
   min-height: 38px;
   margin-bottom: 12px;
-  padding-inline: 12px;
+  padding-inline: var(--sidebar-content-inset);
   border: 0;
   border-radius: 12px;
   background:
-    radial-gradient(120% 95% at 12% 0%, color-mix(in srgb, var(--accent) 11%, transparent) 0%, color-mix(in srgb, var(--accent) 5%, transparent) 38%, transparent 72%),
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, color-mix(in srgb, var(--bg-elev) 30%, transparent)) 0%, color-mix(in srgb, var(--bg-elev) 18%, transparent) 48%, color-mix(in srgb, var(--bg) 10%, transparent) 100%);
+    radial-gradient(120% 95% at 12% 0%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, color-mix(in srgb, var(--accent) 4%, transparent) 38%, transparent 72%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 4%, color-mix(in srgb, var(--bg-elev) 28%, transparent)) 0%, color-mix(in srgb, var(--bg-elev) 16%, transparent) 48%, color-mix(in srgb, var(--bg) 10%, transparent) 100%);
   color: var(--fg);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale));
   font-weight: 650;
   box-shadow: none;
 }
@@ -27817,11 +28678,11 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .sidebar__new:hover,
 :root[data-theme-style] .app--creation .sidebar__new:hover {
   background:
-    radial-gradient(120% 95% at 12% 0%, color-mix(in srgb, var(--accent) 14%, transparent) 0%, color-mix(in srgb, var(--accent) 7%, transparent) 38%, transparent 72%),
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, color-mix(in srgb, var(--bg-elev) 34%, transparent)) 0%, color-mix(in srgb, var(--bg-elev) 22%, transparent) 48%, color-mix(in srgb, var(--bg) 12%, transparent) 100%);
+    radial-gradient(120% 95% at 12% 0%, color-mix(in srgb, var(--accent) 13%, transparent) 0%, color-mix(in srgb, var(--accent) 6%, transparent) 38%, transparent 72%),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 6%, color-mix(in srgb, var(--bg-elev) 32%, transparent)) 0%, color-mix(in srgb, var(--bg-elev) 20%, transparent) 48%, color-mix(in srgb, var(--bg) 12%, transparent) 100%);
   color: var(--fg);
   filter: none;
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .app--creation .sidebar-feature-zone,
@@ -27829,8 +28690,9 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   display: grid;
   gap: 6px;
-  margin: 2px 0 16px;
-  padding: 0 0 2px;
+  margin: 2px 0 18px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--fg-faint) 8%, transparent);
 }
 
 .app--creation .sidebar-feature-zone__title,
@@ -27838,9 +28700,9 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .sidebar-feature-zone__title,
 :root[data-theme-style] .app--creation .project-tree__header-title {
   min-height: 24px;
-  padding: 2px 6px 0;
+  padding: 2px var(--sidebar-content-inset) 0;
   color: color-mix(in srgb, var(--fg-faint) 78%, transparent);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 640;
   line-height: 1.3;
 }
@@ -27859,13 +28721,13 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   width: 100%;
   height: 30px;
-  padding: 0 9px;
+  padding: 0 var(--sidebar-content-inset);
   border: 1px solid transparent;
   border-radius: 9px;
   background: transparent;
   color: color-mix(in srgb, var(--fg-dim) 86%, transparent);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 540;
   text-align: left;
 }
@@ -27873,7 +28735,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .sidebar-feature-zone__item svg,
 :root[data-theme-style] .app--creation .sidebar-feature-zone__item svg {
   flex: 0 0 auto;
-  color: color-mix(in srgb, var(--accent) 72%, var(--fg-faint));
+  color: color-mix(in srgb, var(--accent) 58%, var(--fg-faint));
 }
 
 .app--creation .sidebar-feature-zone__item:hover,
@@ -27887,7 +28749,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .project-tree,
 :root[data-theme-style] .app--creation .project-tree {
-  gap: 13px;
+  gap: 14px;
 }
 
 .app--creation .project-tree__search,
@@ -27897,7 +28759,7 @@ body > .mermaid-diagram--fullscreen {
   height: 36px;
   min-height: 36px;
   margin: 0;
-  padding-inline: 11px;
+  padding-inline: var(--sidebar-content-inset);
   border-color: color-mix(in srgb, var(--fg-faint) 9%, transparent);
   border-radius: 11px;
   background: color-mix(in srgb, var(--bg-elev) 12%, transparent);
@@ -27913,9 +28775,9 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .project-tree__header {
   order: 2;
   min-height: 24px;
-  padding: 2px 6px 0;
+  padding: 2px var(--sidebar-content-inset) 0;
   color: color-mix(in srgb, var(--fg-faint) 78%, transparent);
-  font-size: 11px;
+  font-size: calc(11px * var(--font-scale));
   font-weight: 560;
 }
 
@@ -27927,6 +28789,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .project-tree__list,
 :root[data-theme-style] .app--creation .project-tree__list {
   order: 3;
+  padding-bottom: 6px;
 }
 
 .app--creation .project-tree__header-icon,
@@ -27972,13 +28835,13 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .project-tree__folder {
   height: 32px;
   min-height: 32px;
-  padding-inline: 2px;
+  padding-inline: 0;
 }
 
 .app--creation .project-tree__folder-main,
 :root[data-theme-style] .app--creation .project-tree__folder-main {
   gap: 8px;
-  padding-left: 9px !important;
+  padding-left: var(--sidebar-content-inset) !important;
 }
 
 .app--creation .project-tree__icon-stack,
@@ -27988,13 +28851,14 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .project-tree__folder-label,
 :root[data-theme-style] .app--creation .project-tree__folder-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 540;
 }
 
 .app--creation .project-tree__folder--active .project-tree__folder-label,
 :root[data-theme-style] .app--creation .project-tree__folder--active .project-tree__folder-label {
   color: var(--fg);
+  font-weight: 560;
 }
 
 .app--creation .project-tree__action-slot,
@@ -28046,12 +28910,12 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .project-tree__topic,
 :root[data-theme-style] .app--creation .project-tree__topic {
-  min-height: 23px;
-  margin-left: 17px;
-  margin-right: 2px;
-  margin-bottom: 0;
+  min-height: 26px;
+  margin-left: var(--sidebar-topic-indent);
+  margin-right: 0;
+  margin-bottom: 1px;
   border: 1px solid transparent;
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
 }
 
 .app--creation .project-tree__topic--active,
@@ -28059,42 +28923,44 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .project-tree__topic--active,
 :root[data-theme-style] .app--creation .project-tree__topic--active:hover {
   border-color: transparent;
-  background: transparent;
+  background: color-mix(in srgb, var(--accent) 3.5%, transparent);
 }
 
 .app--creation .project-tree__topic--active::before,
 :root[data-theme-style] .app--creation .project-tree__topic--active::before {
-  left: 6px;
-  top: 5px;
-  bottom: 5px;
+  left: 3px;
+  top: 7px;
+  bottom: 7px;
   width: 2px;
   border-radius: 999px;
-  background: var(--tree-row-marker);
+  background: color-mix(in srgb, var(--accent) 62%, var(--fg-faint));
 }
 
 .app--creation .project-tree__topic-main,
 :root[data-theme-style] .app--creation .project-tree__topic-main {
-  min-height: 23px;
-  padding-left: 12px;
+  min-height: 26px;
+  padding-left: var(--sidebar-topic-marker-gutter);
 }
 
 .app--creation .project-tree__topic--with-side,
 :root[data-theme-style] .app--creation .project-tree__topic--with-side {
-  min-height: 23px;
+  min-height: 26px;
 }
 
 .app--creation .project-tree__topic--with-side .project-tree__topic-main,
 :root[data-theme-style] .app--creation .project-tree__topic--with-side .project-tree__topic-main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  min-height: 23px;
+  grid-template-columns: minmax(0, 1fr) var(--sidebar-topic-time-col);
+  column-gap: 6px;
+  align-items: center;
+  min-height: 26px;
+  padding-right: 4px;
 }
 
 .app--creation .project-tree__topic-label,
 :root[data-theme-style] .app--creation .project-tree__topic-label {
   color: color-mix(in srgb, var(--fg-dim) 72%, var(--fg-faint));
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 500;
   line-height: 1.35;
 }
@@ -28102,6 +28968,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .project-tree__topic--active .project-tree__topic-label,
 :root[data-theme-style] .app--creation .project-tree__topic--active .project-tree__topic-label {
   color: var(--fg);
+  font-weight: 560;
 }
 
 .app--creation .project-tree__topic-status,
@@ -28122,16 +28989,27 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .project-tree__topic-side,
 :root[data-theme-style] .app--creation .project-tree__topic-side {
-  flex: 0 0 auto;
+  flex: 0 0 var(--sidebar-topic-time-col);
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  min-width: 38px;
-  color: color-mix(in srgb, var(--fg-faint) 76%, transparent);
-  font-size: 11px;
+  gap: 4px;
+  width: var(--sidebar-topic-time-col);
+  min-width: var(--sidebar-topic-time-col);
+  color: color-mix(in srgb, var(--fg-faint) 62%, transparent);
+  font-size: calc(10.5px * var(--font-scale));
   line-height: 1;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.app--creation .project-tree__topic:hover .project-tree__topic-side,
+.app--creation .project-tree__topic:focus-within .project-tree__topic-side,
+.app--creation .project-tree__topic--active .project-tree__topic-side,
+:root[data-theme-style] .app--creation .project-tree__topic:hover .project-tree__topic-side,
+:root[data-theme-style] .app--creation .project-tree__topic:focus-within .project-tree__topic-side,
+:root[data-theme-style] .app--creation .project-tree__topic--active .project-tree__topic-side {
+  color: color-mix(in srgb, var(--fg-faint) 84%, transparent);
 }
 
 .app--creation .sidebar__nav,
@@ -28272,45 +29150,62 @@ body > .mermaid-diagram--fullscreen {
   box-shadow: none;
 }
 
-.app--creation .transcript,
-:root[data-theme-style] .app--creation .transcript {
-  scrollbar-width: auto;
-  scrollbar-color: auto;
+/* Creation: hide native chat scrollbar and use a controllable custom rail.
+   Native WebView2 thumb hover-size is unreliable; custom thumb can snap thick/thin.
+   Keep this scrolling layer opaque too: transparent transcript backgrounds can
+   leave stale turn-action pixels behind when message nodes are removed (#6359). */
+.app--creation .transcript.transcript--creation-scrollbar,
+:root[data-theme-style] .app--creation .transcript.transcript--creation-scrollbar {
+  background-color: var(--bg);
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
 }
 
-.app--creation .transcript::-webkit-scrollbar,
-:root[data-theme-style] .app--creation .transcript::-webkit-scrollbar {
-  width: 6px !important;
-  height: 6px !important;
-  background: transparent !important;
-}
-
-.app--creation .transcript::-webkit-scrollbar-track,
-.app--creation .transcript::-webkit-scrollbar-track-piece,
-.app--creation .transcript::-webkit-scrollbar-corner,
-:root[data-theme-style] .app--creation .transcript::-webkit-scrollbar-track,
-:root[data-theme-style] .app--creation .transcript::-webkit-scrollbar-track-piece,
-:root[data-theme-style] .app--creation .transcript::-webkit-scrollbar-corner {
-  background: transparent !important;
-  border: 0 !important;
-  box-shadow: none !important;
-}
-
-.app--creation .transcript::-webkit-scrollbar-button,
-:root[data-theme-style] .app--creation .transcript::-webkit-scrollbar-button {
-  display: none !important;
+.app--creation .transcript.transcript--creation-scrollbar::-webkit-scrollbar,
+:root[data-theme-style] .app--creation .transcript.transcript--creation-scrollbar::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;
+  display: none !important;
   background: transparent !important;
 }
 
-.app--creation .transcript::-webkit-scrollbar-thumb,
-:root[data-theme-style] .app--creation .transcript::-webkit-scrollbar-thumb {
-  min-height: 24px;
-  border: 0 !important;
+.app--creation .transcript__scrollbar,
+:root[data-theme-style] .app--creation .transcript__scrollbar {
+  --wails-draggable: no-drag;
+  position: absolute;
+  top: 0;
+  /* Hug the chat/right-dock seam; keep only a tiny air gap. */
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-inline-sticky);
+  /* Narrow rail: still easy to hit, without a wide empty track. */
+  width: 10px;
+  pointer-events: auto;
+}
+
+.app--creation .transcript__scrollbar-thumb,
+:root[data-theme-style] .app--creation .transcript__scrollbar-thumb {
+  position: absolute;
+  /* Pin to the right edge of the rail so it sits next to the dock border. */
+  right: 1px;
+  left: auto;
+  width: 3px;
   border-radius: 999px;
-  background: var(--scrollbar-thumb) !important;
-  background-clip: border-box !important;
+  background: color-mix(in srgb, var(--fg-faint) 42%, transparent);
+  cursor: grab;
+  transition: none;
+  touch-action: none;
+}
+
+.app--creation .transcript__scrollbar--hot .transcript__scrollbar-thumb,
+.app--creation .transcript__scrollbar-thumb:active,
+:root[data-theme-style] .app--creation .transcript__scrollbar--hot .transcript__scrollbar-thumb,
+:root[data-theme-style] .app--creation .transcript__scrollbar-thumb:active {
+  /* Mild thicken only: 3 → 5. */
+  width: 5px;
+  right: 0;
+  background: color-mix(in srgb, var(--fg-dim) 64%, transparent);
+  cursor: grabbing;
 }
 
 .app--creation .transcript--empty {
@@ -28393,7 +29288,7 @@ body > .mermaid-diagram--fullscreen {
   font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
     "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;
-  font-size: 14px;
+  font-size: calc(14px * var(--font-scale));
   line-height: 1.74;
   letter-spacing: 0.005em;
 }
@@ -28465,7 +29360,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .msg--assistant .md .md-plain-block__diagram .code:not([data-lang]),
 :root[data-theme-style] .app--creation .msg--assistant .md .md-plain-block__diagram .code:not([data-lang]) {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale));
   letter-spacing: 0;
   line-height: 1.58;
   white-space: pre;
@@ -28490,7 +29385,7 @@ body > .mermaid-diagram--fullscreen {
   font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
     "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;
-  font-size: 13.25px;
+  font-size: calc(13.25px * var(--font-scale));
   font-weight: 500;
   letter-spacing: 0.006em;
   line-height: 1.58;
@@ -28530,7 +29425,7 @@ body > .mermaid-diagram--fullscreen {
   font-family: "Source Han Sans CN", "Source Han Sans SC", "Noto Sans CJK SC",
     "Source Han Sans", "思源黑体", "Source Han Sans HC", "Microsoft YaHei UI",
     "Microsoft YaHei", sans-serif;
-  font-size: 12.75px;
+  font-size: calc(12.75px * var(--font-scale));
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   letter-spacing: 0.01em;
@@ -28579,7 +29474,7 @@ body > .mermaid-diagram--fullscreen {
     color-mix(in srgb, var(--bg-elev) 52%, var(--bg))
   );
   color: color-mix(in srgb, var(--fg) 89%, var(--bg));
-  font-size: 12.5px;
+  font-size: calc(12.5px * var(--font-scale));
   line-height: 1.6;
   box-shadow: none;
 }
@@ -28647,7 +29542,7 @@ body > .mermaid-diagram--fullscreen {
   border-collapse: separate;
   overflow-x: auto;
   background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg));
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   line-height: 1.5;
 }
 
@@ -28707,7 +29602,7 @@ body > .mermaid-diagram--fullscreen {
   gap: 4px;
   padding: 0;
   color: color-mix(in srgb, var(--fg-dim) 72%, transparent);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   line-height: 1.4;
 }
 
@@ -28734,7 +29629,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .turn-collapse[data-kind="reasoning"] > .reasoning__head > .turn-collapse__label::before,
 :root[data-theme-style] .app--creation .turn-collapse[data-kind="reasoning"] > .reasoning__head > .turn-collapse__label::before {
   content: attr(data-creation-label);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .app--creation .readonly-batch > .reasoning__head > .readonly-batch__label::before,
@@ -28742,7 +29637,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .turn-collapse[data-kind="tool"] > .reasoning__head > .turn-collapse__label::before,
 :root[data-theme-style] .app--creation .turn-collapse[data-kind="tool"] > .reasoning__head > .turn-collapse__label::before {
   content: attr(data-creation-label);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
 }
 
 .app--creation .readonly-batch > .reasoning__head > .readonly-batch__label,
@@ -28790,7 +29685,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .tool-group__title {
   flex: 0 0 auto;
   color: color-mix(in srgb, var(--fg) 82%, transparent);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 650;
   line-height: 1.4;
   white-space: nowrap;
@@ -28800,7 +29695,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .tool-group__summary {
   min-width: 0;
   color: color-mix(in srgb, var(--fg-faint) 86%, transparent);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 500;
   line-height: 1.4;
   overflow: hidden;
@@ -28846,7 +29741,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .tool-group__body .tool__name,
 :root[data-theme-style] .app--creation .tool-group__body .tool__name {
   color: color-mix(in srgb, var(--fg) 82%, transparent);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 650;
 }
 
@@ -29205,7 +30100,7 @@ body > .mermaid-diagram--fullscreen {
   margin: 0;
   width: min(100%, 580px);
   color: var(--fg-faint);
-  font-size: clamp(34px, 4.2vw, 48px);
+  font-size: clamp(calc(34px * var(--font-scale)), 4.2vw, calc(48px * var(--font-scale)));
   font-weight: 760;
   letter-spacing: -0.055em;
   line-height: 1.06;
@@ -29280,21 +30175,21 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 650;
   line-height: 1;
 }
 
 .app--creation .welcome-creation__card strong {
   color: var(--fg);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 650;
   line-height: 1.25;
 }
 
 .app--creation .welcome-creation__card > span:last-child {
   color: color-mix(in srgb, var(--fg-dim) 72%, transparent);
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--font-scale));
   line-height: 1.35;
   white-space: nowrap;
 }
@@ -29344,39 +30239,68 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .workbench-dock__tools,
 :root[data-theme-style] .app--creation .workbench-dock__tools {
   height: 40px;
-  padding: 0 12px;
+  padding: 0 10px;
+  /* Tabs fill the free strip; each tab centers its own content. */
+  justify-content: flex-start;
 }
 
 .app--creation .workbench-dock__tabs,
 :root[data-theme-style] .app--creation .workbench-dock__tabs {
-  width: auto;
-  flex: 0 0 auto;
+  /* Full free strip so each tab can take an equal share and self-center. */
+  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
   display: flex;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 2px;
+  gap: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
+  overflow: hidden;
 }
 
 .app--creation .workbench-dock__tab,
 :root[data-theme-style] .app--creation .workbench-dock__tab {
-  flex: 0 0 auto;
+  /* Equal columns: 文件 / 改动 each center in their half as dock width changes. */
+  flex: 1 1 0;
   width: auto;
+  min-width: 0;
   max-width: none;
   height: 40px;
-  padding: 0 12px 1px;
-  gap: 6px;
+  /* Compact icon+label so default Creation dock (~252) shows text on Windows */
+  padding: 0 4px 1px;
+  gap: 4px;
   justify-content: center;
   color: color-mix(in srgb, var(--fg-dim) 72%, transparent);
-  font-size: 12px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 560;
   letter-spacing: 0.01em;
   border: 0;
   border-radius: 0;
   background: transparent;
+}
+
+/* Emergency only: when the dock is forced below the Creation default (viewport
+   squeeze), drop labels. Equal columns remain so icons stay self-centered. */
+@container (max-width: 250px) {
+  .app--creation .workbench-dock__tab,
+  :root[data-theme-style] .app--creation .workbench-dock__tab {
+    padding: 0;
+    gap: 0;
+  }
+
+  .app--creation .workbench-dock__tab-label,
+  :root[data-theme-style] .app--creation .workbench-dock__tab-label {
+    display: none;
+  }
+
+  .app--creation .workbench-dock__tab--active::after,
+  :root[data-theme-style] .app--creation .workbench-dock__tab--active::after {
+    width: 18px;
+  }
 }
 
 .app--creation .workbench-dock__tab--active,
@@ -29387,10 +30311,460 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .workbench-dock__tab--active::after,
 :root[data-theme-style] .app--creation .workbench-dock__tab--active::after {
-  left: 28%;
-  right: 28%;
+  /* Center a short underline under the icon+label cluster, not the full half. */
+  left: 50%;
+  right: auto;
+  width: 36px;
+  transform: translateX(-50%);
   bottom: 0;
   height: 1px;
+}
+
+/* Creation workspace tree — align with left project-tree language.
+   Virtualized rows estimate 24px (WorkspacePanel useVirtualizer); keep row
+   height at/near that value so scroll math does not drift. */
+.app--creation .workbench-dock .workspace-search,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-search {
+  height: 32px;
+  margin: 6px 10px 8px;
+  padding: 0 10px;
+  gap: 8px;
+  border-color: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elev) 14%, transparent);
+  color: color-mix(in srgb, var(--fg-faint) 82%, transparent);
+  box-shadow: none;
+}
+
+.app--creation .workbench-dock .workspace-search:focus-within,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--bg-elev) 20%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-search input,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-search input {
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 500;
+}
+
+.app--creation .workbench-dock .workspace-search input::placeholder,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-search input::placeholder {
+  color: color-mix(in srgb, var(--fg-faint) 78%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-files__scope,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-files__scope {
+  margin: 0 10px 8px;
+  padding: 5px 6px 5px 9px;
+  border-color: color-mix(in srgb, var(--fg-faint) 8%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-elev) 10%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-tree,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree {
+  padding: 0 6px 10px;
+}
+
+.app--creation .workbench-dock .workspace-tree__row,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row {
+  height: 24px;
+  min-height: 24px;
+  gap: 5px;
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--fg-dim) 78%, var(--fg-faint));
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 500;
+  background: transparent;
+}
+
+.app--creation .workbench-dock .workspace-tree__row:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row:hover {
+  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-tree__row--active,
+.app--creation .workbench-dock .workspace-tree__row--active:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--active,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--active:hover {
+  background: transparent;
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-tree__row--active::before,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--active::before {
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--tree-row-marker, var(--accent));
+}
+
+.app--creation .workbench-dock .workspace-tree__row--search,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--search {
+  height: auto;
+  min-height: 34px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.app--creation .workbench-dock .workspace-tree__chev,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__chev {
+  color: color-mix(in srgb, var(--fg-faint) 70%, transparent);
+  opacity: 0.78;
+}
+
+.app--creation .workbench-dock .workspace-tree__icon,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__icon {
+  color: color-mix(in srgb, var(--fg-faint) 76%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-tree__icon--dir,
+.app--creation .workbench-dock .workspace-tree__row--active .workspace-tree__icon--dir,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__icon--dir,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--active .workspace-tree__icon--dir {
+  color: color-mix(in srgb, var(--accent) 86%, var(--fg-dim));
+}
+
+.app--creation .workbench-dock .workspace-tree__row--active .workspace-tree__icon,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--active .workspace-tree__icon {
+  color: color-mix(in srgb, var(--fg-dim) 80%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-tree__name,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__name {
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 500;
+  letter-spacing: 0.005em;
+}
+
+.app--creation .workbench-dock .workspace-tree__result-name,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__result-name {
+  color: color-mix(in srgb, var(--fg-dim) 88%, var(--fg));
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 520;
+}
+
+.app--creation .workbench-dock .workspace-tree__result-dir,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__result-dir {
+  color: color-mix(in srgb, var(--fg-faint) 82%, transparent);
+  font-size: calc(10.5px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-tree__row--search:hover .workspace-tree__result-name,
+.app--creation .workbench-dock .workspace-tree__row--search.workspace-tree__row--active .workspace-tree__result-name,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--search:hover .workspace-tree__result-name,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-tree__row--search.workspace-tree__row--active .workspace-tree__result-name {
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-change,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change {
+  min-height: 42px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--fg-dim) 82%, transparent);
+  background: transparent;
+}
+
+.app--creation .workbench-dock .workspace-change:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change:hover {
+  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-change--active,
+.app--creation .workbench-dock .workspace-change--active:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change--active,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change--active:hover {
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-change__name,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__name {
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 540;
+}
+
+.app--creation .workbench-dock .workspace-change__path,
+.app--creation .workbench-dock .workspace-change__detail,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__path,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__detail {
+  color: color-mix(in srgb, var(--fg-faint) 84%, transparent);
+  font-size: calc(11px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-change__badge,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__badge {
+  height: 17px;
+  padding: 0 5px;
+  border-color: color-mix(in srgb, var(--fg-faint) 12%, transparent);
+  border-radius: 5px;
+  color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
+  font-size: calc(10px * var(--font-scale));
+  background: transparent;
+}
+
+.app--creation .workbench-dock .workspace-change__badge--git,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change__badge--git {
+  color: color-mix(in srgb, var(--accent) 82%, var(--fg-dim));
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-change-scope__head,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-change-scope__head {
+  border-color: color-mix(in srgb, var(--fg-faint) 8%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-elev) 10%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-iconbtn,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-iconbtn {
+  border-color: transparent;
+  background: transparent;
+  color: color-mix(in srgb, var(--fg-faint) 78%, transparent);
+  box-shadow: none;
+}
+
+.app--creation .workbench-dock .workspace-iconbtn:hover,
+.app--creation .workbench-dock .workspace-iconbtn--on,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-iconbtn:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-iconbtn--on {
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  color: var(--fg);
+}
+
+/* Creation "Changes" overview: keep the first-line path context, drop the
+   second-line breadcrumb meta (duplicate path). Only when no file selected
+   (.workspace-panel--changed-overview). File preview keeps normal head/meta. */
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__head,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__head {
+  height: 40px;
+  min-height: 40px;
+  padding: 0 8px 0 10px;
+  border-bottom-color: color-mix(in srgb, var(--fg-faint) 7%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file {
+  gap: 7px;
+}
+
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__icon,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__icon {
+  color: color-mix(in srgb, var(--accent) 78%, var(--fg-faint));
+}
+
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__text,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__text {
+  gap: 1px;
+}
+
+/* First layer: path under the panel title (keep). */
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__name,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__name {
+  color: color-mix(in srgb, var(--fg-dim) 88%, transparent);
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 560;
+  letter-spacing: 0.005em;
+}
+
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__path,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__path {
+  color: color-mix(in srgb, var(--fg-faint) 80%, transparent);
+  font-size: calc(11px * var(--font-scale));
+}
+
+/* Recent-files dropdown is not useful on Changes overview. */
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__recent,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-current-file__recent {
+  display: none;
+}
+
+/* Second layer: breadcrumb path row (hide — duplicates the first path). */
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__meta,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__meta {
+  display: none;
+}
+
+.app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__body,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-panel--changed-overview .workspace-preview__body {
+  padding: 8px 10px 14px;
+}
+
+/* Commit history is available for audit, but secondary to live file changes. */
+.app--creation .workbench-dock .workspace-commit-history,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history {
+  margin-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--fg-faint) 7%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-commit-history__toggle,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history__toggle {
+  --wails-draggable: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--fg-faint) 86%, transparent);
+  font: inherit;
+  font-size: calc(11.5px * var(--font-scale));
+  font-weight: 540;
+  text-align: left;
+}
+
+.app--creation .workbench-dock .workspace-commit-history__toggle:hover,
+.app--creation .workbench-dock .workspace-commit-history__toggle:focus-visible,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history__toggle:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history__toggle:focus-visible {
+  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+  color: color-mix(in srgb, var(--fg-dim) 90%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-commit-history__toggle svg,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history__toggle svg {
+  flex: 0 0 auto;
+}
+
+.app--creation .workbench-dock .workspace-commit-history__toggle small,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history__toggle small {
+  margin-left: auto;
+  color: color-mix(in srgb, var(--fg-faint) 64%, transparent);
+  font-size: calc(10.5px * var(--font-scale));
+  font-weight: 500;
+}
+
+.app--creation .workbench-dock .workspace-commit-history--open .workspace-git-history__list,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-commit-history--open .workspace-git-history__list {
+  padding: 0 0 4px;
+}
+
+.app--creation .workbench-dock .workspace-git-history,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history {
+  gap: 8px;
+}
+
+.app--creation .workbench-dock .workspace-git-history__list,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__list {
+  gap: 2px;
+}
+
+.app--creation .workbench-dock .workspace-git-history__item,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__item {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.app--creation .workbench-dock .workspace-git-history__item--expanded,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__item--expanded {
+  background: color-mix(in srgb, var(--fg-faint) 4%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-git-history__head,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__head {
+  padding: 8px 9px 7px;
+  border-radius: 8px;
+  color: color-mix(in srgb, var(--fg-dim) 90%, var(--fg));
+  font-size: calc(12px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-git-history__head:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__head:hover {
+  background: color-mix(in srgb, var(--fg-faint) 5%, transparent);
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-git-history__head-top,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__head-top {
+  gap: 6px;
+}
+
+.app--creation .workbench-dock .workspace-git-history__head-top svg,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__head-top svg {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--fg-faint) 72%, transparent);
+}
+
+.app--creation .workbench-dock .workspace-git-history__message,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__message {
+  color: inherit;
+  font-size: calc(12px * var(--font-scale));
+  font-weight: 540;
+}
+
+.app--creation .workbench-dock .workspace-git-history__head-bottom,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__head-bottom {
+  gap: 6px;
+  margin-top: 2px;
+  padding-left: 20px;
+}
+
+.app--creation .workbench-dock .workspace-git-history__author,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__author {
+  color: color-mix(in srgb, var(--fg-faint) 88%, transparent);
+  font-size: calc(11px * var(--font-scale));
+  font-weight: 500;
+}
+
+.app--creation .workbench-dock .workspace-git-history__date,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__date {
+  color: color-mix(in srgb, var(--fg-faint) 72%, transparent);
+  font-size: calc(10.5px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-git-history__hash,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__hash {
+  margin-left: 4px;
+  color: color-mix(in srgb, var(--fg-faint) 64%, transparent);
+  opacity: 1;
+  font-size: calc(10.5px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-git-history__detail,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__detail {
+  padding: 6px 8px 10px 20px;
+  border-top: 0;
+  background: transparent;
+}
+
+.app--creation .workbench-dock .workspace-git-history__file,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__file {
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  color: color-mix(in srgb, var(--fg-dim) 84%, transparent);
+  font-size: calc(11.5px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-git-history__file:hover,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-git-history__file:hover {
+  background: color-mix(in srgb, var(--fg-faint) 6%, transparent);
+  color: var(--fg);
+}
+
+.app--creation .workbench-dock .workspace-empty,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-empty {
+  color: color-mix(in srgb, var(--fg-faint) 82%, transparent);
+  font-size: calc(12px * var(--font-scale));
+}
+
+.app--creation .workbench-dock .workspace-note,
+:root[data-theme-style] .app--creation .workbench-dock .workspace-note {
+  border-color: color-mix(in srgb, var(--fg-faint) 10%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elev) 10%, transparent);
+  color: color-mix(in srgb, var(--fg-dim) 88%, transparent);
+  font-size: calc(11.5px * var(--font-scale));
 }
 
 .app--creation .context-panel {
@@ -29431,7 +30805,7 @@ body > .mermaid-diagram--fullscreen {
 
 .app--creation .context-panel__section-head h3,
 :root[data-theme-style] .app--creation .context-panel__section-head h3 {
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 600;
   letter-spacing: 0.01em;
 }
@@ -29439,7 +30813,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .context-panel__section-head span,
 :root[data-theme-style] .app--creation .context-panel__section-head span {
   color: color-mix(in srgb, var(--fg-faint) 86%, transparent);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 420;
 }
 
@@ -29474,7 +30848,7 @@ body > .mermaid-diagram--fullscreen {
   min-width: 0;
   overflow: hidden;
   color: var(--fg);
-  font-size: 13px;
+  font-size: calc(13px * var(--font-scale));
   font-weight: 600;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -29484,7 +30858,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .context-panel__progress-head span {
   flex: 0 0 auto;
   color: var(--accent);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 660;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -29542,7 +30916,7 @@ body > .mermaid-diagram--fullscreen {
   padding: 7px 0;
   border-top: 1px solid color-mix(in srgb, var(--creation-panel-border) 72%, transparent);
   color: color-mix(in srgb, var(--fg-dim) 84%, transparent);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   line-height: 1.2;
 }
 
@@ -29563,7 +30937,7 @@ body > .mermaid-diagram--fullscreen {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 430;
 }
 
@@ -29576,7 +30950,7 @@ body > .mermaid-diagram--fullscreen {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
   font-weight: 680;
   line-height: 1.18;
   font-variant-numeric: tabular-nums;
@@ -29602,7 +30976,7 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .context-panel__mini-stat--wide strong {
   order: 2;
   flex: 0 1 auto;
-  font-size: 16px;
+  font-size: calc(16px * var(--font-scale));
 }
 
 .app--creation .context-panel__breakdown {
@@ -29615,7 +30989,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .context-panel__legend-row,
 :root[data-theme-style] .app--creation .context-panel__total {
   color: color-mix(in srgb, var(--fg-dim) 86%, transparent);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 430;
 }
 
@@ -29624,7 +30998,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .app--creation .context-panel__legend-row strong,
 :root[data-theme-style] .app--creation .context-panel__total strong {
   color: var(--fg);
-  font-size: 12px;
+  font-size: calc(12px * var(--font-scale));
   font-weight: 560;
 }
 
@@ -29648,13 +31022,13 @@ body > .mermaid-diagram--fullscreen {
 .app--creation .context-panel__metric span,
 :root[data-theme-style] .app--creation .context-panel__metric span {
   color: color-mix(in srgb, var(--fg-dim) 84%, transparent);
-  font-size: 11.5px;
+  font-size: calc(11.5px * var(--font-scale));
   font-weight: 430;
 }
 
 .app--creation .context-panel__metric strong,
 :root[data-theme-style] .app--creation .context-panel__metric strong {
-  font-size: 17px;
+  font-size: calc(17px * var(--font-scale));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -29748,6 +31122,12 @@ body > .mermaid-diagram--fullscreen {
 
 .app--windows-frameless.app--creation {
   --windows-window-controls-height: 56px;
+  /* Tighter caption buttons free horizontal room for dock tabs at narrow widths.
+     classic/workbench keep the standard 46×3 = 138 strip. */
+  --windows-window-control-width: 36px;
+  --windows-window-controls-width: 108px;
+  --windows-window-controls-gap: 8px;
+  --windows-window-controls-safe: calc(var(--windows-window-controls-width) + var(--windows-window-controls-gap));
 }
 
 /* When workspace panel is open in creation mode, match the dock tools height
@@ -29792,6 +31172,26 @@ body > .mermaid-diagram--fullscreen {
 .app--windows-frameless .workbench-dock__tools,
 :root[data-theme-style] .app--windows-frameless .workbench-dock__tools {
   padding-right: var(--windows-window-controls-safe);
+}
+
+/* Creation sets tools padding via shorthand; re-assert the Windows safe
+   inset with higher specificity so 「文件 / 改动」 cannot sit under min/max/close.
+   Tabs fill this free strip; each tab is an equal column that self-centers. */
+.app--windows-frameless.app--creation .workbench-dock__tools,
+:root[data-theme-style] .app--windows-frameless.app--creation .workbench-dock__tools {
+  padding-left: 8px;
+  padding-right: calc(var(--windows-window-controls-width) + 6px);
+  justify-content: flex-start;
+}
+
+.app--windows-frameless.app--creation .workbench-dock__tabs,
+:root[data-theme-style] .app--windows-frameless.app--creation .workbench-dock__tabs {
+  width: 100%;
+  flex: 1 1 auto;
+  max-width: none;
+  min-width: 0;
+  overflow: hidden;
+  justify-content: flex-start;
 }
 
 .app--windows-frameless .workbench-dock__tabs,
@@ -29858,7 +31258,7 @@ body > .mermaid-diagram--fullscreen {
    entering rename mode visibly jumps back to the 10px Creation default. */
 .app--windows.app--creation .topicbar__title-row h1,
 .app--windows.app--creation .topicbar__title-input {
-  font-size: 13.5px !important;
+  font-size: calc(13.5px * var(--font-scale)) !important;
   font-weight: 520 !important;
 }
 
@@ -30044,4 +31444,145 @@ body > .mermaid-diagram--fullscreen {
 
 .phantom-entry:hover .phantom-jump-arrow {
   opacity: 1;
+}
+
+/* Capability diagnostics settings page */
+.diag-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.diag-page__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.diag-page__runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
+}
+.diag-page__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.diag-page__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.diag-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.diag-summary__item {
+  border: 1px solid var(--border, rgba(127,127,127,.25));
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.diag-summary__item strong {
+  font-size: 20px;
+  line-height: 1.1;
+}
+.diag-summary__item--error strong { color: var(--danger, #e35); }
+.diag-summary__item--warning strong { color: var(--warn, #d90); }
+.diag-summary__item--info strong { color: var(--accent, #4af); }
+.diag-summary__meta {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted, #888);
+  min-width: 0;
+}
+.diag-section {
+  border: 1px solid var(--border, rgba(127,127,127,.25));
+  border-radius: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+.diag-section__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.diag-section__body {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.diag-issue-group h4 {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-muted, #888);
+}
+.diag-issue {
+  border: 1px solid var(--border, rgba(127,127,127,.2));
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.diag-issue header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+.diag-issue__name {
+  font-weight: 600;
+}
+.diag-issue__msg,
+.diag-issue__fix {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.diag-issue__fix {
+  color: var(--text-muted, #888);
+}
+.diag-path {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+.diag-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  min-width: 0;
 }

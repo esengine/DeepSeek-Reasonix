@@ -280,14 +280,16 @@ type chatTUI struct {
 	// skillPick is the interactive skill picker overlay for /skills. nil when closed.
 	skillPick *skillPicker
 
-	// buildController builds a fresh controller on a model ref, carrying prior
+	// buildController builds a fresh controller for a model/profile pair, carrying prior
 	// history across and pinning auto-save to resumePath so the continued
 	// conversation stays in one file (set by chatREPL; it must NOT touch this
-	// model — the swap happens in runModelSubcommand on the running copy). nil
-	// disables /model. modelRef is the active "provider/model" ref, marked
-	// current in the picker.
-	buildController func(ref string, carry []provider.Message, resumePath string) (*control.Controller, error)
+	// model — the swap happens on the running copy). nil disables runtime
+	// rebuild commands. modelRef is the active "provider/model" ref, marked
+	// current in the picker. runtimeProfile stores boot's normalized token mode:
+	// full (displayed as balanced), economy, or delivery.
+	buildController func(spec controllerBuildSpec, carry []provider.Message, resumePath string) (*control.Controller, error)
 	modelRef        string
+	runtimeProfile  string
 	effortLevel     string // "" when the current provider/model has no configurable effort
 
 	// leases owns the session lease guarding the TUI's active session file (set
@@ -318,11 +320,13 @@ type chatTUI struct {
 	// height; starts at 2 (unwrapped) until first render.
 	statusLineCount int
 
-	// modelSwitchPending is true while an async /model build is in flight.
+	// modelSwitchPending is true while any async controller rebuild is in flight.
 	modelSwitchPending bool
-	// pendingModelSwitch holds the tea.Cmd that triggers the async build.
+	// pendingModelSwitch holds the tea.Cmd that triggers the async build. The
+	// historical field name is retained because model, effort, skill refresh,
+	// and work-mode changes all share the same atomic swap path.
 	pendingModelSwitch tea.Cmd
-	// oldControllers accumulates controllers retired by /model switches.
+	// oldControllers accumulates controllers retired by runtime switches.
 	// They cannot be closed during the switch (Close runs SessionEnd hooks
 	// and kills plugin subprocesses, both of which corrupt the terminal's
 	// raw mode). Instead they are closed at process exit when the terminal
@@ -342,6 +346,13 @@ const (
 	tuiIdle tuiState = iota
 	tuiRunning
 )
+
+type controllerBuildSpec struct {
+	ModelRef         string
+	RuntimeProfile   string
+	ToolApprovalMode string
+	PlanMode         bool
+}
 
 // agentEventMsg is one typed event from the agent's run loop.
 type agentEventMsg event.Event
@@ -443,14 +454,17 @@ func (m chatTUI) refreshGitStatus() tea.Cmd {
 // runs after the render completes, avoiding corruption of the terminal's raw
 // mode that would occur if Close() were called from the build goroutine.
 type modelSwitchMsg struct {
-	ref      string
-	ctrl     control.SessionAPI
-	oldCtrl  control.SessionAPI
-	label    string
-	commands []command.Command
-	skills   []skill.Skill
-	host     *plugin.Host
-	err      error
+	ref           string
+	profile       string
+	ctrl          control.SessionAPI
+	oldCtrl       control.SessionAPI
+	label         string
+	commands      []command.Command
+	skills        []skill.Skill
+	host          *plugin.Host
+	failurePrefix string
+	successNotice string
+	err           error
 }
 
 // fetchBalance queries the provider's wallet balance off the event loop. It's a
@@ -540,7 +554,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		history:              ctrl.History(),
 		host:                 ctrl.Host(),
 		commands:             ctrl.Commands(),
-		skills:               ctrl.Skills(),
+		skills:               ctrl.SlashSkills(),
 		viewport:             viewport.New(viewport.WithWidth(termW)),
 		statusLineCount:      2,
 	}
@@ -1383,7 +1397,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.modelSwitchPending = false
 		m.pendingModelSwitch = nil
 		if msg.err != nil {
-			m.notice("model: " + msg.err.Error())
+			prefix := msg.failurePrefix
+			if prefix == "" {
+				prefix = "model"
+			}
+			m.notice(prefix + ": " + msg.err.Error())
 			// Build failed — no old controller to retire. The kept controller
 			// may still have been retargeted to a recovery branch by the
 			// pre-switch snapshot, so the lease must follow it.
@@ -1395,6 +1413,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.skills = msg.skills
 			m.host = msg.host
 			m.modelRef = msg.ref
+			if msg.profile != "" {
+				m.runtimeProfile = msg.profile
+			}
 			m.refreshEffortStatus()
 			// Stash the old controller for cleanup at exit. It cannot be
 			// closed here or in the build goroutine — Close() runs
@@ -1408,7 +1429,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the pre-switch snapshot recovered onto a recovery branch — a
 			// fresh file created by this process, so failure is theoretical.
 			m.followSessionLease()
-			m.notice(fmt.Sprintf(i18n.M.ModelSwitchedFmt, m.label))
+			if msg.successNotice != "" {
+				m.notice(msg.successNotice)
+			} else {
+				m.notice(fmt.Sprintf(i18n.M.ModelSwitchedFmt, m.label))
+			}
 			cmds = append(cmds, fetchBalance(m.ctrl))
 			if c := m.runStatusline(); c != nil {
 				cmds = append(cmds, c)
@@ -2496,6 +2521,9 @@ func (m chatTUI) View() tea.View {
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
 	}
+	if wt := m.workModeTag(); wt != "" {
+		data = append(data, wt)
+	}
 	if cache := m.cacheTag(); cache != "" {
 		data = append(data, cache)
 	}
@@ -2736,6 +2764,13 @@ func (m chatTUI) modelTag() string {
 		return ""
 	}
 	return dim(m.label)
+}
+
+func (m chatTUI) workModeTag() string {
+	if m.runtimeProfile == "" {
+		return ""
+	}
+	return dim(fmt.Sprintf(i18n.M.WorkModeStatusFmt, runtimeProfileDisplay(m.runtimeProfile)))
 }
 
 func (m chatTUI) effortTag() string {
@@ -3037,6 +3072,9 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
 	}
+	if wt := m.workModeTag(); wt != "" {
+		data = append(data, wt)
+	}
 	if cache := m.cacheTag(); cache != "" {
 		data = append(data, cache)
 	}
@@ -3230,6 +3268,14 @@ func (m *chatTUI) startTurn(sent, displayed, restore string) tea.Cmd {
 // prompt) used only for the controller's auto-plan scoring, so resolved
 // @-reference payloads can't inflate the complexity signal.
 func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd {
+	return m.startControllerTurn(displayed, restore, func() { m.ctrl.SendWithRaw(sent, raw) })
+}
+
+// startControllerTurn owns the TUI-side turn setup for controller entry points.
+// Most prompts use SendWithRaw; slash-invoked skills use SubmitDisplay so the
+// controller can choose inline vs isolated subagent execution from the live
+// skill's RunAs metadata without the TUI reimplementing that policy.
+func (m *chatTUI) startControllerTurn(displayed, restore string, start func()) tea.Cmd {
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()
@@ -3252,7 +3298,7 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 	m.turnTokens = 0
 	// The controller owns the run goroutine, its context, and cancellation; it
 	// streams events to eventCh and emits TurnDone when the turn settles.
-	m.ctrl.SendWithRaw(sent, raw)
+	start()
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
 
@@ -3568,6 +3614,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.showSandboxStatus()
 	case "/effort":
 		return m.runEffortCommand(input)
+	case "/work-mode", "/profile":
+		m.echoLocalCommand(input)
+		return m.runWorkModeCommand(input)
 	case "/auto-plan":
 		m.echoLocalCommand(input)
 		m.runAutoPlanCommand(input)
@@ -3698,8 +3747,17 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if sent, ok := m.ctrl.CustomCommand(input); ok {
 			return m.startTurn(sent, input, input)
 		}
-		if sent, ok := m.ctrl.RunSkill(input); ok {
-			return m.startTurn(sent, input, input)
+		if _, ok := m.ctrl.RunSkill(input); ok {
+			fields := strings.Fields(input)
+			name := strings.TrimPrefix(fields[0], "/")
+			for _, sk := range m.ctrl.Skills() {
+				if sk.Name == name && sk.RunAs == skill.RunSubagent && len(fields) == 1 {
+					m.echoLocalCommand(input)
+					m.notice("usage: /" + name + " <task>")
+					return nil
+				}
+			}
+			return m.startControllerTurn(input, input, func() { m.ctrl.SubmitDisplay(input, input) })
 		}
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
@@ -3899,12 +3957,11 @@ func (m *chatTUI) echoLocalCommand(input string) {
 
 // commandNames renders the custom command list for /help, "" when there are none.
 func (m *chatTUI) commandNames() string {
-	if len(m.commands) == 0 {
-		return ""
-	}
-	names := make([]string, len(m.commands))
-	for i, c := range m.commands {
-		names[i] = "/" + c.Name
+	names := make([]string, 0, len(m.commands))
+	for _, c := range m.commands {
+		if !c.Hidden {
+			names = append(names, "/"+c.Name)
+		}
 	}
 	return strings.Join(names, " · ")
 }

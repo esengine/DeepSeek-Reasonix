@@ -1,22 +1,25 @@
-import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
+import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
-import { AssistantMessage, TurnActions, UserMessage } from "./Message";
+import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
 import { ProcessBrainIcon, ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { ArrowDown, ChevronRight } from "lucide-react";
+import { ArrowDown, ChevronRight, CirclePlay, Info, TriangleAlert } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { ToolGroup, isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "./ToolGroup";
 import { getDisplayMode, onDisplayModeChange, type DisplayMode } from "../lib/displayMode";
-import { isReadOnlyTool } from "../lib/useController";
+import { getProcessFoldPreference, onProcessFoldPreferenceChange, type ProcessFoldPreference } from "../lib/processFoldPreference";
+import { STEER_NOTICE_PREFIX, isReadOnlyTool, isSteerNoticeText } from "../lib/useController";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { useEntranceAnimation } from "../lib/useEntranceAnimation";
 import { useScrollManager } from "../lib/useScrollManager";
 import { buildTurnGroups, compactQuestionText, createWarmLayerState, lastQuestionTurn, questionAnchorId, questionTurnsById, scrollVersion, warmColdPageForTurn, warmLayerWithColdPageAtLeast, warmLayerWithExpandedTurn, warmLayerWithNextColdPage, warmPagination, warmUserPreview, type QuestionAnchor, type TurnGroup, type WarmLayerState } from "../lib/transcriptGrouping";
 import { appendTurnActionCopyText } from "../lib/turnActionCopy";
 import { displayReasoningText } from "../lib/reasoningDisplay";
+import { observeScrollContentSize } from "../lib/scrollContentObserver";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
@@ -80,6 +83,9 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
 function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
   const t = useT();
   const live = useContext(LiveStreamContext);
+  const [open, setOpen] = useState(true);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useGSAPCollapse(bodyRef, open);
   const shown = live && live.id === item.id
     ? {
         reasoning: live.reasoning,
@@ -95,13 +101,19 @@ function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
   });
   const running = shown.streaming && !shown.reasoningComplete;
   return (
-    <div className="turn-collapse__reasoning-phase">
-      <div className="turn-collapse__reasoning-head" data-running={running ? "" : undefined}>
+    <div className={`turn-collapse__reasoning-phase${open ? " turn-collapse__reasoning-phase--open" : ""}`}>
+      <button
+        type="button"
+        className="turn-collapse__reasoning-head"
+        data-running={running ? "" : undefined}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
         <ProcessBrainIcon size={12} />
         <span>{running ? t("msg.thinkingRunning") : t("msg.thinking")}</span>
-        <ChevronRight className="reasoning__chevron reasoning__chevron--open" size={12} />
-      </div>
-      <div className="turn-collapse__inline-reasoning">{visibleReasoning}</div>
+        <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
+      </button>
+      <div ref={bodyRef} className="turn-collapse__inline-reasoning">{visibleReasoning}</div>
     </div>
   );
 }
@@ -184,46 +196,66 @@ type TurnDisplayParts = {
   outsideItems: Array<NoticeItem | AssistantItem>;
 };
 
+// Splits a turn by channel, not by position: reasoning, tools, phases, info
+// notices, and compaction cards are process material and fold; every assistant
+// message with answer text is model output addressed to the user and stays
+// outside the fold. Warnings must survive the fold auto-closing on completion,
+// and steers are the user's own words — neither belongs to the model's work
+// process.
+//
+// The turn is returned as ordered segments so the conversation keeps its real
+// timeline: process that ran after an answer or steer opens a new segment
+// (and thus a new fold) instead of being pulled ahead of it. Warn notices and
+// delivery status cards stay visible but do not split the fold — a mid-turn
+// warning is not a conversational boundary, and a delivery pause must keep its
+// continue action reachable instead of collapsing with the process items.
 function partitionTurnItems(
   items: readonly Item[],
   liveId?: string,
   liveHasAnswerText = false,
   liveHasReasoning = false,
-): TurnDisplayParts {
-  let finalAssistantIndex = -1;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.kind === "assistant" && assistantHasVisibleAnswer(item, liveId, liveHasAnswerText)) {
-      finalAssistantIndex = i;
-      break;
-    }
-  }
-
-  const processItems: Item[] = [];
-  const outsideItems: Array<NoticeItem | AssistantItem> = [];
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i];
+): TurnDisplayParts[] {
+  const segments: TurnDisplayParts[] = [];
+  let current: TurnDisplayParts = { processItems: [], outsideItems: [] };
+  let currentHasConversation = false;
+  const flushSegment = () => {
+    if (current.processItems.length === 0 && current.outsideItems.length === 0) return;
+    segments.push(current);
+    current = { processItems: [], outsideItems: [] };
+    currentHasConversation = false;
+  };
+  const pushProcess = (item: Item) => {
+    if (currentHasConversation) flushSegment();
+    current.processItems.push(item);
+  };
+  for (const item of items) {
     if (item.kind === "user") continue;
-    if (item.kind === "notice" && item.level === "warn") {
-      outsideItems.push(item);
-      continue;
-    }
-    if (item.kind !== "assistant") {
-      processItems.push(item);
-      continue;
-    }
-    if (i === finalAssistantIndex) {
-      outsideItems.push(item);
-      if (item.reasoning || (liveId === item.id && liveHasReasoning)) {
-        processItems.push(assistantReasoningOnly(item));
+    if (item.kind === "notice") {
+      if (isSteerNoticeText(item.text)) {
+        current.outsideItems.push(item);
+        currentHasConversation = true;
+      } else if (item.level === "warn" || item.variant === "delivery") {
+        current.outsideItems.push(item);
+      } else {
+        pushProcess(item);
       }
       continue;
     }
-    if (item.text.trim() || item.reasoning || (liveId === item.id && liveHasReasoning)) {
-      processItems.push(item);
+    if (item.kind !== "assistant") {
+      pushProcess(item);
+      continue;
     }
+    const hasReasoning = Boolean(item.reasoning || (liveId === item.id && liveHasReasoning));
+    if (assistantHasVisibleAnswer(item, liveId, liveHasAnswerText)) {
+      if (hasReasoning) pushProcess(assistantReasoningOnly(item));
+      current.outsideItems.push(item);
+      currentHasConversation = true;
+      continue;
+    }
+    if (hasReasoning) pushProcess(item);
   }
-  return { processItems, outsideItems };
+  flushSegment();
+  return segments;
 }
 
 // ── Transcript component ──────────────────────────────────────────────────────
@@ -252,6 +284,7 @@ export function Transcript({
   loadingOlderHistory = false,
   onLoadOlderHistory,
   turnStartAt,
+  invocationMetadata = {},
 }: {
   items: Item[];
   live?: LiveStream;
@@ -276,6 +309,7 @@ export function Transcript({
   loadingOlderHistory?: boolean;
   onLoadOlderHistory?: () => void;
   turnStartAt?: number;
+  invocationMetadata?: InvocationMetadataMap;
 }) {
   const t = useT();
   const {
@@ -297,6 +331,176 @@ export function Transcript({
   } = useScrollManager();
   const autoScrollFrame = useRef<number | null>(null);
   const pendingRevealBottomScroll = useRef(false);
+  // Creation uses a custom scrollbar (native WebView2 thumb size is unreliable).
+  // Thin by default; only thickens when pointer is near the right rail / dragging.
+  const [creationScrollbar, setCreationScrollbar] = useState({
+    visible: false,
+    hot: false,
+    thumbTop: 0,
+    thumbHeight: 0,
+  });
+  const creationScrollbarHotRef = useRef(false);
+  const creationScrollbarDragRef = useRef<{ pointerId: number; startY: number; startScrollTop: number } | null>(null);
+  const SCROLLBAR_HOT_ZONE_PX = 18;
+  const SCROLLBAR_MIN_THUMB_PX = 28;
+
+  const syncCreationScrollbarMetrics = useCallback(() => {
+    if (!creationMode) return;
+    const el = scrollRef.current;
+    if (!el) {
+      setCreationScrollbar((prev) => (prev.visible || prev.hot ? { visible: false, hot: false, thumbTop: 0, thumbHeight: 0 } : prev));
+      return;
+    }
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const overflow = scrollHeight - clientHeight;
+    if (overflow <= 1 || clientHeight <= 0) {
+      setCreationScrollbar((prev) => (prev.visible || prev.hot ? { visible: false, hot: false, thumbTop: 0, thumbHeight: 0 } : prev));
+      return;
+    }
+    const thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_PX, Math.round((clientHeight / scrollHeight) * clientHeight));
+    const maxThumbTop = Math.max(0, clientHeight - thumbHeight);
+    const thumbTop = Math.round((scrollTop / overflow) * maxThumbTop);
+    setCreationScrollbar((prev) => {
+      if (
+        prev.visible &&
+        prev.thumbTop === thumbTop &&
+        prev.thumbHeight === thumbHeight &&
+        prev.hot === creationScrollbarHotRef.current
+      ) {
+        return prev;
+      }
+      return {
+        visible: true,
+        hot: creationScrollbarHotRef.current,
+        thumbTop,
+        thumbHeight,
+      };
+    });
+  }, [SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef]);
+
+  const setCreationScrollbarHot = useCallback((next: boolean) => {
+    if (creationScrollbarHotRef.current === next) return;
+    creationScrollbarHotRef.current = next;
+    setCreationScrollbar((prev) => (prev.hot === next ? prev : { ...prev, hot: next }));
+  }, []);
+
+  useEffect(() => {
+    if (!creationMode) {
+      creationScrollbarHotRef.current = false;
+      creationScrollbarDragRef.current = null;
+      setCreationScrollbar({ visible: false, hot: false, thumbTop: 0, thumbHeight: 0 });
+      return;
+    }
+
+    const onPointerMove = (event: PointerEvent) => {
+      const drag = creationScrollbarDragRef.current;
+      const el = scrollRef.current;
+      if (drag && el) {
+        const overflow = el.scrollHeight - el.clientHeight;
+        if (overflow > 0) {
+          const thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_PX, Math.round((el.clientHeight / el.scrollHeight) * el.clientHeight));
+          const maxThumbTop = Math.max(0, el.clientHeight - thumbHeight);
+          const startThumbTop = (drag.startScrollTop / overflow) * maxThumbTop;
+          const nextThumbTop = Math.min(maxThumbTop, Math.max(0, startThumbTop + (event.clientY - drag.startY)));
+          el.scrollTop = maxThumbTop > 0 ? (nextThumbTop / maxThumbTop) * overflow : 0;
+          syncCreationScrollbarMetrics();
+        }
+        setCreationScrollbarHot(true);
+        return;
+      }
+
+      if (!el || el.scrollHeight <= el.clientHeight + 1) {
+        setCreationScrollbarHot(false);
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const inY = event.clientY >= rect.top && event.clientY <= rect.bottom;
+      const fromRight = rect.right - event.clientX;
+      setCreationScrollbarHot(inY && fromRight >= -2 && fromRight <= SCROLLBAR_HOT_ZONE_PX);
+    };
+
+    const endDrag = (event?: PointerEvent) => {
+      if (!creationScrollbarDragRef.current) return;
+      creationScrollbarDragRef.current = null;
+      const el = scrollRef.current;
+      if (!el || !event) {
+        setCreationScrollbarHot(false);
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const inY = event.clientY >= rect.top && event.clientY <= rect.bottom;
+      const fromRight = rect.right - event.clientX;
+      setCreationScrollbarHot(inY && fromRight >= -2 && fromRight <= SCROLLBAR_HOT_ZONE_PX);
+    };
+
+    const onPointerUp = (event: PointerEvent) => endDrag(event);
+    const onBlur = () => endDrag();
+
+    syncCreationScrollbarMetrics();
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, { passive: true });
+    window.addEventListener("pointercancel", onPointerUp, { passive: true });
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("resize", syncCreationScrollbarMetrics);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("resize", syncCreationScrollbarMetrics);
+      creationScrollbarHotRef.current = false;
+      creationScrollbarDragRef.current = null;
+      setCreationScrollbar({ visible: false, hot: false, thumbTop: 0, thumbHeight: 0 });
+    };
+  }, [SCROLLBAR_HOT_ZONE_PX, SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef, setCreationScrollbarHot, syncCreationScrollbarMetrics]);
+
+  const handleCreationScroll = useCallback(() => {
+    onScroll();
+    if (creationMode) syncCreationScrollbarMetrics();
+  }, [creationMode, onScroll, syncCreationScrollbarMetrics]);
+
+  useLayoutEffect(() => {
+    if (!creationMode) return;
+    syncCreationScrollbarMetrics();
+  }, [creationMode, items.length, syncCreationScrollbarMetrics]);
+
+  useEffect(() => {
+    if (!creationMode || !scrollRef.current) return;
+    return observeScrollContentSize(scrollRef.current, syncCreationScrollbarMetrics);
+  }, [creationMode, scrollRef, syncCreationScrollbarMetrics]);
+
+  const handleCreationScrollbarThumbPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!creationMode) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    event.preventDefault();
+    event.stopPropagation();
+    creationScrollbarDragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startScrollTop: el.scrollTop,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setCreationScrollbarHot(true);
+  }, [creationMode, scrollRef, setCreationScrollbarHot]);
+
+  const handleCreationScrollbarRailPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!creationMode) return;
+    if ((event.target as HTMLElement | null)?.closest?.(".transcript__scrollbar-thumb")) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const overflow = el.scrollHeight - el.clientHeight;
+    if (overflow <= 1) return;
+    const thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_PX, Math.round((el.clientHeight / el.scrollHeight) * el.clientHeight));
+    const maxThumbTop = Math.max(0, el.clientHeight - thumbHeight);
+    const y = event.clientY - rect.top - thumbHeight / 2;
+    const nextThumbTop = Math.min(maxThumbTop, Math.max(0, y));
+    el.scrollTop = maxThumbTop > 0 ? (nextThumbTop / maxThumbTop) * overflow : 0;
+    syncCreationScrollbarMetrics();
+    setCreationScrollbarHot(true);
+  }, [SCROLLBAR_MIN_THUMB_PX, creationMode, scrollRef, setCreationScrollbarHot, syncCreationScrollbarMetrics]);
+
   const pendingQuestionJump = useRef<QuestionAnchor | null>(null);
   const sessionKey = useMemo(() => `${items[0]?.id ?? ""}|${items[items.length - 1]?.id ?? ""}`, [items]);
   const warmLayerSessionKey = useMemo(() => `${tabId ?? ""}|${revealSignal}|${items[0]?.id ?? ""}`, [items, revealSignal, tabId]);
@@ -580,40 +784,57 @@ export function Transcript({
     };
 
     const pushTurnBody = (key: string, turnItems: readonly Item[], turnIsActive: boolean) => {
-      const parts = partitionTurnItems(turnItems, liveId, liveHasAnswerText, liveHasReasoning);
-      if (parts.processItems.length > 0) {
-        out.push(
-          <TurnCollapse
-            key={`turn-process-${key}`}
-            items={parts.processItems}
-            durationMs={turnWorkDurationMs(turnItems)}
-            mode={displayMode}
-            subcalls={subcallsByParent}
-            tabId={tabId}
-            creationMode={creationMode}
-            turnStartAt={turnIsActive ? turnStartAt : undefined}
-            turnActive={turnIsActive}
-            preferredKind="reasoning"
-          />,
-        );
-      }
-      for (const item of parts.outsideItems) {
-        if (item.kind === "notice") {
-          out.push(<NoticeCard key={item.id} level={item.level} text={item.text} detail={item.detail} />);
-        } else {
+      const segments = partitionTurnItems(turnItems, liveId, liveHasAnswerText, liveHasReasoning);
+      const turnHasOutsideContent = segments.some((segment) => segment.outsideItems.length > 0);
+      segments.forEach((segment, segmentIndex) => {
+        const isLastSegment = segmentIndex === segments.length - 1;
+        if (segment.processItems.length > 0) {
           out.push(
-            <LiveAssistantMessage
-              key={item.id}
-              item={assistantAnswerOnly(item)}
-              defaultExpanded={false}
-              expandWhileStreaming={false}
-              truncateStreamingReasoning={true}
+            <TurnCollapse
+              key={`turn-process-${key}-${segment.processItems[0].id}`}
+              items={segment.processItems}
+              durationMs={isLastSegment ? turnWorkDurationMs(turnItems) : 0}
+              mode={displayMode}
+              subcalls={subcallsByParent}
+              tabId={tabId}
               creationMode={creationMode}
-              reasoningDisplay="hide"
+              turnStartAt={turnIsActive && isLastSegment ? turnStartAt : undefined}
+              turnActive={turnIsActive && isLastSegment}
+              preferredKind="reasoning"
+              labelStyle={isLastSegment ? "full" : "counts"}
+              hasOutsideContent={turnHasOutsideContent}
             />,
           );
         }
-      }
+        for (const item of segment.outsideItems) {
+          if (item.kind === "notice") {
+            if (isSteerNoticeText(item.text)) {
+              out.push(<SteerCard key={item.id} text={item.text} />);
+              continue;
+            }
+            out.push(
+              <NoticeCard
+                key={item.id}
+                item={item}
+                actionDisabled={running}
+                onAction={item.action === "continue_delivery" ? () => onPrompt(t("notice.deliveryIncompleteContinuePrompt")) : undefined}
+              />,
+            );
+          } else {
+            out.push(
+              <LiveAssistantMessage
+                key={item.id}
+                item={assistantAnswerOnly(item)}
+                defaultExpanded={false}
+                expandWhileStreaming={false}
+                truncateStreamingReasoning={true}
+                creationMode={creationMode}
+                reasoningDisplay="hide"
+              />,
+            );
+          }
+        }
+      });
     };
 
     const hotGroups = turnGroups.filter((group) => group.startIdx >= hotStartIdx);
@@ -648,18 +869,19 @@ export function Transcript({
       if (!turnIsActive) pushTurnActions(turn, turnItems);
     }
     return out;
-  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, turnGroups, tabId, actionHoverMenus, creationMode, lastTurn, turnStartAt, liveId, liveHasAnswerText, liveHasReasoning]);
+  }, [hotStartIdx, items, openAction, actionPending, rewindDisabled, running, onEditPrompt, onPrompt, onRewind, subcallsByParent, userTurn, checkpointsByTurn, displayMode, turnGroups, tabId, actionHoverMenus, creationMode, lastTurn, turnStartAt, liveId, liveHasAnswerText, liveHasReasoning, t]);
 
   // ── Assemble rendered output ──────────────────────────────────────────────
   // Warm/cold zone is a separate memo'd WarmZone component so streaming tokens
   // don't rebuild it. The hot zone uses LiveAssistantMessage (reads live from
   // LiveStreamContext) so streaming updates are captured immediately.
   return (
+    <InvocationMetadataContext.Provider value={invocationMetadata}>
     <div className="transcript-shell">
       <div
-        className={`transcript${empty ? " transcript--empty" : ""}`}
+        className={`transcript${empty ? " transcript--empty" : ""}${creationMode ? " transcript--creation-scrollbar" : ""}${creationMode && creationScrollbar.hot ? " transcript--scrollbar-hot" : ""}`}
         ref={scrollRef}
-        onScroll={onScroll}
+        onScroll={creationMode ? handleCreationScroll : onScroll}
         onWheelCapture={handleWheelIntent}
         onTouchStartCapture={onTouchStartIntent}
         onTouchMoveCapture={handleTouchMoveIntent}
@@ -699,6 +921,8 @@ export function Transcript({
               warmOnRewind={onRewind}
               warmSetOpenAction={setOpenAction}
               warmOnEdit={onEditPrompt}
+              warmOnPrompt={onPrompt}
+              warmRunning={running}
               tabId={tabId}
               creationMode={creationMode}
               onToggleColdPage={() => setWarmLayerState((prev) => warmLayerWithNextColdPage(prev, warmLayerSessionKey))}
@@ -712,6 +936,20 @@ export function Transcript({
           </div>
         </LiveStreamContext.Provider>
       </div>
+
+      {creationMode && creationScrollbar.visible && (
+        <div
+          className={`transcript__scrollbar${creationScrollbar.hot ? " transcript__scrollbar--hot" : ""}`}
+          onPointerDown={handleCreationScrollbarRailPointerDown}
+          aria-hidden="true"
+        >
+          <div
+            className="transcript__scrollbar-thumb"
+            style={{ top: creationScrollbar.thumbTop, height: creationScrollbar.thumbHeight } as CSSProperties}
+            onPointerDown={handleCreationScrollbarThumbPointerDown}
+          />
+        </div>
+      )}
 
       {!empty && showQuestionNav && (
         <QuestionJumpBar questions={questions} onJump={handleJumpToQuestion} />
@@ -729,6 +967,7 @@ export function Transcript({
         </button>
       )}
     </div>
+    </InvocationMetadataContext.Provider>
   );
 }
 
@@ -756,6 +995,8 @@ const WarmZone = memo(function WarmZone({
   warmOnRewind,
   warmSetOpenAction,
   warmOnEdit,
+  warmOnPrompt,
+  warmRunning,
   tabId,
   creationMode,
   onToggleColdPage,
@@ -780,6 +1021,8 @@ const WarmZone = memo(function WarmZone({
   warmOnRewind: ((turn: number, scope: string) => void) | undefined;
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
   warmOnEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
+  warmOnPrompt: (text: string) => void;
+  warmRunning: boolean;
   tabId?: string;
   creationMode?: boolean;
   onToggleColdPage: () => void;
@@ -836,6 +1079,8 @@ const WarmZone = memo(function WarmZone({
               onRewind={warmOnRewind}
               setOpenAction={warmSetOpenAction}
               onEdit={warmOnEdit}
+              onPrompt={warmOnPrompt}
+              running={warmRunning}
               tabId={tabId}
               creationMode={creationMode}
               lastTurn={warmLastTurn}
@@ -885,6 +1130,8 @@ function WarmTurnItems({
   onRewind,
   setOpenAction,
   onEdit,
+  onPrompt,
+  running,
   tabId,
   creationMode = false,
   lastTurn,
@@ -903,11 +1150,14 @@ function WarmTurnItems({
   onRewind: ((turn: number, scope: string) => void) | undefined;
   setOpenAction: (action: OpenTurnAction | null) => void;
   onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
+  onPrompt: (text: string) => void;
+  running: boolean;
   tabId?: string;
   creationMode?: boolean;
   lastTurn?: number;
   mode: DisplayMode;
 }) {
+  const t = useT();
   const nodes: React.ReactNode[] = [];
   const user = items[startIdx];
   if (!user || user.kind !== "user") return nodes;
@@ -915,7 +1165,8 @@ function WarmTurnItems({
   const turn = userTurnMap.get(user.id);
   const checkpoint = turn == null ? undefined : checkpoints.get(turn);
   const turnItems = items.slice(startIdx + 1, Math.min(endIdx, items.length));
-  const parts = partitionTurnItems(turnItems);
+  const segments = partitionTurnItems(turnItems);
+  const turnHasOutsideContent = segments.some((segment) => segment.outsideItems.length > 0);
   nodes.push(
     <UserMessage
       key={user.id}
@@ -930,34 +1181,50 @@ function WarmTurnItems({
       editDisabled={rewindDisabled || !checkpoint?.canConversation}
     />,
   );
-  if (parts.processItems.length > 0) {
-    nodes.push(
-      <TurnCollapse
-        key={`warm-process-${user.id}`}
-        items={parts.processItems}
-        durationMs={turnWorkDurationMs(turnItems)}
-        mode={mode}
-        subcalls={subcalls}
-        tabId={tabId}
-        creationMode={creationMode}
-        preferredKind="reasoning"
-      />,
-    );
-  }
-  for (const item of parts.outsideItems) {
-    if (item.kind === "notice") {
-      nodes.push(<NoticeCard key={item.id} level={item.level} text={item.text} detail={item.detail} />);
-    } else {
+  segments.forEach((segment, segmentIndex) => {
+    const isLastSegment = segmentIndex === segments.length - 1;
+    if (segment.processItems.length > 0) {
       nodes.push(
-        <AssistantMessage
-          key={item.id}
-          item={assistantAnswerOnly(item)}
-          defaultExpanded={false}
+        <TurnCollapse
+          key={`warm-process-${user.id}-${segment.processItems[0].id}`}
+          items={segment.processItems}
+          durationMs={isLastSegment ? turnWorkDurationMs(turnItems) : 0}
+          mode={mode}
+          subcalls={subcalls}
+          tabId={tabId}
           creationMode={creationMode}
+          preferredKind="reasoning"
+          labelStyle={isLastSegment ? "full" : "counts"}
+          hasOutsideContent={turnHasOutsideContent}
         />,
       );
     }
-  }
+    for (const item of segment.outsideItems) {
+      if (item.kind === "notice") {
+        if (isSteerNoticeText(item.text)) {
+          nodes.push(<SteerCard key={item.id} text={item.text} />);
+          continue;
+        }
+        nodes.push(
+          <NoticeCard
+            key={item.id}
+            item={item}
+            actionDisabled={running}
+            onAction={item.action === "continue_delivery" ? () => onPrompt(t("notice.deliveryIncompleteContinuePrompt")) : undefined}
+          />,
+        );
+      } else {
+        nodes.push(
+          <AssistantMessage
+            key={item.id}
+            item={assistantAnswerOnly(item)}
+            defaultExpanded={false}
+            creationMode={creationMode}
+          />,
+        );
+      }
+    }
+  });
 
   let actionText = "";
   for (const item of turnItems) {
@@ -1058,22 +1325,33 @@ type TurnCollapseProps = {
   turnStartAt?: number;
   turnActive?: boolean;
   preferredKind?: "tool" | "reasoning" | "process";
+  // "full" carries the turn's work-duration label; "counts" is for earlier
+  // segments of a multi-fold turn, which only list what they contain — the
+  // turn's wall-clock belongs to the segment where the turn ends.
+  labelStyle?: "full" | "counts";
+  // Whether the turn renders anything outside this fold (answer text, warning,
+  // steer). When nothing is outside, the fold is the turn's only content and
+  // must not collapse it away.
+  hasOutsideContent?: boolean;
 };
 
-function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode = false, turnStartAt, turnActive = false, preferredKind }: TurnCollapseProps) {
+function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode = false, turnStartAt, turnActive = false, preferredKind, labelStyle = "full", hasOutsideContent = true }: TurnCollapseProps) {
   const t = useT();
   const live = useContext(LiveStreamContext);
-  const [open, setOpen] = useState(false);
+  const [foldPreference, setFoldPreference] = useState<ProcessFoldPreference>(getProcessFoldPreference);
+  const [open, setOpen] = useState(() => getProcessFoldPreference() === "expanded" || !hasOutsideContent);
   const userOverriddenOpen = useRef(false);
   const prevRunningRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  useEffect(() => onProcessFoldPreferenceChange(setFoldPreference), []);
 
   // Keep only items the body will actually render — an expandable fold over
-  // nothing is worse than no fold.
+  // nothing is worse than no fold. Assistant items reach the fold stripped to
+  // their reasoning (answer text renders outside), so reasoning presence is
+  // the only thing that keeps them.
   const displayItems = useMemo(() => {
     return items.filter((it) => {
       if (it.kind === "assistant") {
-        if (it.text.trim() !== "") return true;
         return Boolean(it.reasoning || (live?.id === it.id && live.reasoning));
       }
       if (it.kind === "phase") return true;
@@ -1112,10 +1390,24 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
     if (hasRunningWork) {
       if (!wasRunning) userOverriddenOpen.current = false;
       if (!userOverriddenOpen.current) setOpen(true);
-    } else if (wasRunning && !userOverriddenOpen.current) {
+    } else if (wasRunning && !userOverriddenOpen.current && hasOutsideContent && foldPreference !== "expanded") {
       setOpen(false);
     }
-  }, [hasRunningWork]);
+  }, [hasRunningWork, hasOutsideContent, foldPreference]);
+  // Switching the preference is an explicit act that also applies to folds
+  // already on screen, not only future ones; it clears per-fold manual
+  // overrides so the whole transcript lands in one consistent state.
+  const prevFoldPreference = useRef(foldPreference);
+  useEffect(() => {
+    if (prevFoldPreference.current === foldPreference) return;
+    prevFoldPreference.current = foldPreference;
+    userOverriddenOpen.current = false;
+    if (foldPreference === "expanded") {
+      setOpen(true);
+    } else if (!hasRunningWork && hasOutsideContent) {
+      setOpen(false);
+    }
+  }, [foldPreference, hasRunningWork, hasOutsideContent]);
 
   if (displayItems.length === 0) return null;
 
@@ -1124,11 +1416,23 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
     : displayItems.some((it) => it.kind === "assistant" && Boolean(it.reasoning))
       ? "reasoning"
       : "process");
-  const label = collapseKind === "reasoning"
+  const baseLabel = collapseKind === "reasoning"
     ? workStatusLabel(effectiveDurationMs, hasRunningWork, t)
     : seconds > 0
       ? t("transcript.processedDuration", { s: seconds })
       : t("transcript.processed");
+  // Surface what the closed fold hides — a bare duration reads as pure timing
+  // and users have no way to know process detail sits behind it.
+  const toolCount = displayItems.reduce((n, it) => n + (it.kind === "tool" ? 1 : 0), 0);
+  const thoughtCount = displayItems.reduce((n, it) => n + (it.kind === "assistant" ? 1 : 0), 0);
+  const countParts: string[] = [];
+  if (toolCount > 0) countParts.push(t("transcript.toolCount", { n: toolCount }));
+  if (thoughtCount > 0) countParts.push(t("transcript.thoughtCount", { n: thoughtCount }));
+  const label = labelStyle === "counts"
+    ? (countParts.length > 0 ? countParts.join(" · ") : t("transcript.processed"))
+    : countParts.length > 0
+      ? `${baseLabel} · ${countParts.join(" · ")}`
+      : baseLabel;
   const creationLabel = collapseKind === "tool"
     ? t("creation.toolCallsLabel")
     : collapseKind === "reasoning"
@@ -1181,25 +1485,13 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
         body.push(<ToolCard key={it.id} item={it as ToolItem} subcalls={subcalls.get(it.id)} tabId={tabId} />);
         break;
       case "phase": body.push(<PhaseCard key={it.id} text={it.text} />); break;
-      case "notice": body.push(<NoticeCard key={it.id} level={it.level} text={it.text} detail={it.detail} />); break;
+      case "notice": body.push(<NoticeCard key={it.id} item={it} />); break;
       case "compaction": body.push(<CompactionCard key={it.id} item={it} />); break;
-      case "assistant": {
-        const assistant = it as AssistantItem;
-        if (assistant.reasoning || (live?.id === assistant.id && live.reasoning)) {
-          body.push(<InlineAssistantReasoning key={`${it.id}-reasoning`} item={assistant} />);
-        }
-        if (assistant.text.trim()) {
-          body.push(
-            <AssistantMessage
-              key={`${it.id}-text`}
-              item={assistantAnswerOnly(assistant)}
-              defaultExpanded={false}
-              creationMode={creationMode}
-            />,
-          );
-        }
+      case "assistant":
+        // Answer text renders outside the fold (partitionTurnItems strips it),
+        // so the fold only ever shows the reasoning segment.
+        body.push(<InlineAssistantReasoning key={`${it.id}-reasoning`} item={it as AssistantItem} />);
         break;
-      }
     }
   }
   flushToolBatch();
@@ -1360,17 +1652,42 @@ function PhaseCard({ text }: { text: string }) {
   return <div className="phase" data-entrance="true"><ProcessPhaseIcon size={12} /><span>{text}</span></div>;
 }
 
-function NoticeCard({ level, text, detail }: { level: NoticeItem["level"]; text: string; detail?: string }) {
+// A mid-turn steer is the user's own message, so it renders on the user side
+// of the transcript instead of disappearing into the work fold.
+function SteerCard({ text }: { text: string }) {
   const t = useT();
+  const body = text.startsWith(STEER_NOTICE_PREFIX) ? text.slice(STEER_NOTICE_PREFIX.length) : text;
   return (
-    <div className={`notice-line notice-line--${level}`} data-entrance="true">
-      <span className="notice-line__icon">{level === "warn" ? "⚠ " : "ℹ "}</span>
+    <div className="steer-line" data-entrance="true">
+      <div className="steer-line__bubble" title={t("transcript.steer")}>
+        <span className="steer-line__icon" aria-hidden="true">↪</span>
+        <span className="steer-line__text">{body}</span>
+      </div>
+    </div>
+  );
+}
+
+export function NoticeCard({ item, onAction, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; actionDisabled?: boolean }) {
+  const t = useT();
+  const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
+  return (
+    <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance="true">
+      <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
       <div className="notice-line__text">
-        {text}
-        {detail ? (
+        {item.title ? <div className="notice-line__title">{item.title}</div> : null}
+        <div className="notice-line__body">{item.text}</div>
+        {item.action && onAction ? (
+          <div className="notice-line__actions">
+            <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
+              <CirclePlay size={13} aria-hidden="true" />
+              <span>{t("notice.deliveryIncompleteContinue")}</span>
+            </button>
+          </div>
+        ) : null}
+        {item.detail ? (
           <details className="notice-line__details">
             <summary>{t("notice.details")}</summary>
-            <div>{detail}</div>
+            <div>{item.detail}</div>
           </details>
         ) : null}
       </div>

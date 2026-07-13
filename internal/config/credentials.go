@@ -250,6 +250,12 @@ func SetCredential(key, value string) (string, error) {
 	return StoreCredentialLines([]string{key + "=" + value})
 }
 
+// IsValidCredentialKey reports whether key can be stored in Reasonix's dotenv
+// credential file and exposed as an environment variable.
+func IsValidCredentialKey(key string) bool {
+	return isCredentialKey(strings.TrimSpace(key))
+}
+
 func RemoveCredential(key string) error {
 	key = strings.TrimSpace(key)
 	if key == "" || !isCredentialKey(key) {

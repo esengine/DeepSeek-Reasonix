@@ -60,6 +60,35 @@ func TestDoctorSessionCommandWritesBundle(t *testing.T) {
 	}
 }
 
+func TestDoctorQualityCommandPrintsPublicSafeJSON(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	sessionDir := filepath.Join(home, "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(sessionDir, "abc.jsonl")
+	const secret = "quality-command-secret"
+	if err := os.WriteFile(path, []byte(`{"role":"user","content":"`+secret+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := captureStdout(t, func() {
+		if rc := doctorCommand([]string{"quality", "abc", "--json"}, "test-version"); rc != 0 {
+			t.Fatalf("doctor quality rc = %d, want 0", rc)
+		}
+	})
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("doctor quality output is not JSON: %v\n%s", err, out)
+	}
+	if decoded["version"] != "test-version" {
+		t.Fatalf("version = %v", decoded["version"])
+	}
+	if strings.Contains(out, secret) || strings.Contains(out, home) || strings.Contains(out, "abc.jsonl") {
+		t.Fatalf("doctor quality leaked session data:\n%s", out)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stdout
@@ -107,7 +136,7 @@ func TestDoctorSessionCommandOutEqualsForm(t *testing.T) {
 
 func TestDoctorRedactSessionsCommand(t *testing.T) {
 	dir := t.TempDir()
-	const secret = "sk-real-secret-value-123456"
+	const secret = "sensitive-value-that-must-not-leak"
 	path := filepath.Join(dir, "abc.jsonl")
 	if err := os.WriteFile(path, []byte(`{"role":"tool","content":"DEEPSEEK_API_KEY=`+secret+`"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)

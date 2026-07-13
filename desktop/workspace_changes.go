@@ -336,7 +336,7 @@ func (a *App) GitBranches() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	branches := strings.FieldsFunc(strings.TrimSpace(string(raw)), func(r rune) bool { return r == '\n' })
+	branches := append([]string{}, strings.FieldsFunc(strings.TrimSpace(string(raw)), func(r rune) bool { return r == '\n' })...)
 	return branches, nil
 }
 
@@ -388,7 +388,7 @@ func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, e
 	}
 
 	parts := bytes.Split(raw, []byte{0})
-	var out []GitCommitView
+	out := []GitCommitView{}
 	// 4 parts per commit: hash, author, date, message
 	for i := 0; i+3 < len(parts); i += 4 {
 		out = append(out, GitCommitView{

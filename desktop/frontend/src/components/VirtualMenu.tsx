@@ -11,17 +11,19 @@ export function VirtualMenu<T>({
   activeIndex,
   itemKey,
   renderItem,
+  estimateSize,
 }: {
   items: T[];
   activeIndex: number;
   itemKey: (item: T, index: number) => string;
   renderItem: (item: T, index: number) => ReactNode;
+  estimateSize?: (item: T, index: number) => number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 34,
+    estimateSize: (index) => estimateSize?.(items[index], index) ?? 34,
     overscan: 10,
   });
 

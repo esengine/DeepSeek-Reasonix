@@ -182,8 +182,13 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			}
 
 			sess := NewSession(DefaultReadOnlyTaskSystemPrompt)
+			opts := p.taskTool.subagentOptions(ctx, max, pricing, ctxWin, childDepth)
+			// Same contract as runSubSession: capture the pristine task before
+			// host framing is prepended so delivery intent classification judges
+			// the task, not the wrapper.
+			opts.ClassifierTaskText = t.Prompt
 			output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, p.taskTool.withWorkspaceContext(t.Prompt),
-				p.taskTool.subagentOptions(ctx, max, pricing, ctxWin, childDepth), nested)
+				opts, nested)
 
 			if ctx.Err() != nil && runErr == nil {
 				runErr = ctx.Err()

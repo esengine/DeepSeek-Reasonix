@@ -96,6 +96,13 @@ eq(
   "active topic without runtime session rows expands only parent folders",
 );
 
+// Waiting confirmation copy is stable for both compact and expanded sidebars.
+eq(
+  testT("projectTree.status.waitingConfirmation"),
+  "projectTree.status.waitingConfirmation",
+  "waiting confirmation key stays available for side-bar pill and badge",
+);
+
 eq(
   projectTreeTopicOpenRequest(tree[0].children?.[0].children?.[1] as ProjectNode),
   { scope: "global", workspaceRoot: "", topicId: "topic-a", sessionPath: "/tmp/b.jsonl" },

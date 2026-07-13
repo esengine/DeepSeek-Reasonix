@@ -7,7 +7,7 @@ import (
 )
 
 func TestChatCommandNames(t *testing.T) {
-	m := chatTUI{commands: []command.Command{{Name: "review"}, {Name: "git:commit"}}}
+	m := chatTUI{commands: []command.Command{{Name: "review"}, {Name: "git:commit"}, {Name: "plan", Hidden: true}}}
 	if got := m.commandNames(); got != "/review · /git:commit" {
 		t.Errorf("commandNames = %q", got)
 	}

@@ -67,6 +67,12 @@ type installSourceTool struct {
 	connectMCP   MCPConnector
 	onDisconnect OnDisconnectFunc
 	approval     ApprovalFunc
+	// preparePlugin overrides plugin source preparation in tests. nil uses
+	// preparePluginSource. Plan and apply both resolve the source through the
+	// same function, and git sources additionally report the resolved commit,
+	// so the capability set the approval covers is by construction the one
+	// that gets installed (apply pins the approved commit on divergence).
+	preparePlugin func(ctx context.Context, source, mode string) (root, commit string, cleanup func(), err error)
 }
 
 // NewTool returns a tool.Tool that callers register with the agent's
@@ -184,6 +190,10 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 	if err != nil {
 		return "", err
 	}
+	// Marketplace planning may keep one temporary clone alive so apply can
+	// reuse the exact approved snapshot. Clean it on every exit path, including
+	// plan-ID mismatch or host approval denial before executeApply runs.
+	defer cleanupActionResources(actions)
 	planID := computePlanID(req, actions)
 	if len(actions) == 0 {
 		out := response{
@@ -297,6 +307,15 @@ func (t *installSourceTool) executeApply(ctx context.Context, req request, actio
 		Warnings: warnings,
 		Next:     next,
 	})
+}
+
+func cleanupActionResources(actions []action) {
+	for i := range actions {
+		if actions[i].cleanup != nil {
+			actions[i].cleanup()
+			actions[i].cleanup = nil
+		}
+	}
 }
 
 // executeUninstall handles op=uninstall. It locates the named entry in the

@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
+	"reasonix/internal/skill"
 )
 
 // --- fakes: a Factory wrapping a behavior-driven runner in a real Controller ---
@@ -47,6 +48,7 @@ func (f *fakeFactory) NewSession(_ context.Context, p SessionParams) (*control.C
 
 type commandFactory struct {
 	commands []command.Command
+	skills   []skill.Skill
 	seen     chan string
 }
 
@@ -59,7 +61,7 @@ func (f *commandFactory) NewSession(_ context.Context, p SessionParams) (*contro
 			return nil
 		},
 	}
-	return control.New(control.Options{Runner: runner, Sink: p.Sink, Commands: f.commands}), nil
+	return control.New(control.Options{Runner: runner, Sink: p.Sink, Commands: f.commands, Skills: f.skills}), nil
 }
 
 type configurableFactory struct {
@@ -511,12 +513,22 @@ func TestServeLifecycle(t *testing.T) {
 func TestServeAdvertisesAndExpandsCustomCommands(t *testing.T) {
 	factory := &commandFactory{
 		seen: make(chan string, 1),
-		commands: []command.Command{{
-			Name:        "review",
-			Description: "Review the target",
-			ArgHint:     "path",
-			Body:        "Review $1",
+		skills: []skill.Skill{{
+			Name: "writing-plans", Plugin: "superpowers", Description: "Write a plan", Body: "Plan $ARGUMENTS",
 		}},
+		commands: []command.Command{
+			{
+				Name:        "review",
+				Description: "Review the target",
+				ArgHint:     "path",
+				Body:        "Review $1",
+			},
+			{
+				Name:   "plan",
+				Body:   "Plan $ARGUMENTS",
+				Hidden: true,
+			},
+		},
 	}
 	client, stop := startServer(t, factory)
 	defer stop()
@@ -529,6 +541,8 @@ func TestServeAdvertisesAndExpandsCustomCommands(t *testing.T) {
 	}
 
 	var advertised bool
+	var hiddenAdvertised bool
+	var pluginSkillAdvertised bool
 	select {
 	case n := <-client.notifs:
 		var p struct {
@@ -541,6 +555,15 @@ func TestServeAdvertisesAndExpandsCustomCommands(t *testing.T) {
 			t.Fatalf("available commands update: %v", err)
 		}
 		for _, cmd := range p.Update.AvailableCommands {
+			if cmd.Name == "superpowers:writing-plans" {
+				pluginSkillAdvertised = true
+			}
+			if cmd.Name == "writing-plans" {
+				hiddenAdvertised = true
+			}
+			if cmd.Name == "plan" {
+				hiddenAdvertised = true
+			}
 			if p.Update.SessionUpdate == "available_commands_update" &&
 				cmd.Name == "review" &&
 				cmd.Description == "Review the target" &&
@@ -554,6 +577,12 @@ func TestServeAdvertisesAndExpandsCustomCommands(t *testing.T) {
 	}
 	if !advertised {
 		t.Fatal("review command was not advertised")
+	}
+	if hiddenAdvertised {
+		t.Fatal("hidden compatibility command was advertised")
+	}
+	if !pluginSkillAdvertised {
+		t.Fatal("qualified plugin skill was not advertised")
 	}
 
 	promptCh := client.callAsync("session/prompt", SessionPromptParams{

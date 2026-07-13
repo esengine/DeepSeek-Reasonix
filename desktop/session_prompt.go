@@ -8,6 +8,9 @@ import (
 	"reasonix/internal/provider"
 )
 
+// globalCacheGuardian 全局缓存守护者（在 startup 中设置）
+var globalCacheGuardian *CachePrefixGuardian
+
 func systemPromptFrom(messages []provider.Message) string {
 	for _, m := range messages {
 		if m.Role == provider.RoleSystem {
@@ -60,7 +63,16 @@ func sessionWithFreshSystemPrompt(session *agent.Session, system string) *agent.
 	if persisted == "" {
 		return session
 	}
-	logSystemPromptSwap(persisted, system, "")
+	// OPT-12+: 使用缓存守护者检查是否可以避免 swap
+	// 如果差异只是空白符或行尾格式，使用 persisted 保持缓存命中
+	if globalCacheGuardian != nil && !globalCacheGuardian.GuardSystemPromptSwap("", persisted, system) {
+		logSystemPromptSwap(persisted, system, "")
+	} else if persisted != system {
+		// 守护者认为可以避免，但仍记录 info 级日志
+		slog.Info("cache guardian: preserving persisted system prompt to maintain cache hit",
+			"persisted_len", len(persisted), "fresh_len", len(system))
+		return session // 保持 persisted，不 swap
+	}
 	return session.CloneWithMessages(withFreshSystemPrompt(messages, system))
 }
 

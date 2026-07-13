@@ -214,7 +214,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 	if dest == "" {
 		return nil, nil
 	}
-	userCfg, err := loadForEditStrict(dest, true)
+	userCfg, err := loadForEditStrict(dest, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +272,15 @@ func mcpGlobalMigrationMarkerPath() string {
 		return ""
 	}
 	return filepath.Join(dir, "mcp-global-migration-v1")
+}
+
+func mcpGlobalMigrationComplete() bool {
+	marker := mcpGlobalMigrationMarkerPath()
+	if marker == "" {
+		return false
+	}
+	_, err := os.Stat(marker)
+	return err == nil
 }
 
 func mcpMigrationLegacyTOMLPaths(dest, home string) []string {

@@ -14,10 +14,16 @@ func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	s := &metricsSink{inner: event.Discard}
 
 	s.RecordReadinessAudit(evidence.ReadinessAudit{
-		Result:                 evidence.ReadinessBlocked,
-		MissingProjectChecks:   2,
-		IncompleteTodos:        3,
-		CommandMismatchMissing: 2,
+		Result:                    evidence.ReadinessBlocked,
+		MissingProjectChecks:      2,
+		IncompleteTodos:           3,
+		CommandMismatchMissing:    2,
+		MissingAcceptanceCriteria: 1,
+		MissingVerification:       1,
+		MissingReview:             1,
+		MissingSignoff:            1,
+		MissingActionEvidence:     1,
+		MissingMutation:           1,
 	})
 	s.RecordReadinessAudit(evidence.ReadinessAudit{
 		Result:    evidence.ReadinessAllowed,
@@ -50,6 +56,13 @@ func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	}
 	if s.m.ReadinessCommandMismatches != 2 {
 		t.Fatalf("command mismatches = %d, want 2", s.m.ReadinessCommandMismatches)
+	}
+	if s.m.ReadinessMissingAcceptance != 1 || s.m.ReadinessMissingVerification != 1 || s.m.ReadinessMissingReview != 1 || s.m.ReadinessMissingSignoff != 1 {
+		t.Fatalf("delivery readiness misses = acceptance %d verification %d review %d signoff %d, want 1/1/1/1",
+			s.m.ReadinessMissingAcceptance, s.m.ReadinessMissingVerification, s.m.ReadinessMissingReview, s.m.ReadinessMissingSignoff)
+	}
+	if s.m.ReadinessMissingActionEvidence != 1 || s.m.ReadinessMissingMutation != 1 {
+		t.Fatalf("delivery work misses = action evidence %d mutation %d, want 1/1", s.m.ReadinessMissingActionEvidence, s.m.ReadinessMissingMutation)
 	}
 }
 
@@ -125,23 +138,29 @@ func TestMetricsSinkAccumulatesMemoryCompilerStats(t *testing.T) {
 func TestWriteMetricsIncludesReadinessFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metrics.json")
 	if err := writeMetrics(path, RunMetrics{
-		PromptTokens:                  10,
-		CompletionTokens:              3,
-		CacheHitTokens:                7,
-		CacheMissTokens:               3,
-		Steps:                         2,
-		ReadinessChecks:               1,
-		ReadinessAllowed:              1,
-		ReadinessBlocks:               0,
-		ReadinessRecoveries:           1,
-		ReadinessErrors:               0,
-		ReadinessMissingProjectChecks: 0,
-		ReadinessIncompleteTodos:      0,
-		ReadinessCommandMismatches:    0,
-		MemoryCompilerTurns:           1,
-		MemoryCompilerInjectedTurns:   1,
-		MemoryCompilerCompiledTokens:  42,
-		MemoryCompilerTotalNodes:      9,
+		PromptTokens:                   10,
+		CompletionTokens:               3,
+		CacheHitTokens:                 7,
+		CacheMissTokens:                3,
+		Steps:                          2,
+		ReadinessChecks:                1,
+		ReadinessAllowed:               1,
+		ReadinessBlocks:                0,
+		ReadinessRecoveries:            1,
+		ReadinessErrors:                0,
+		ReadinessMissingProjectChecks:  0,
+		ReadinessIncompleteTodos:       0,
+		ReadinessCommandMismatches:     0,
+		ReadinessMissingAcceptance:     0,
+		ReadinessMissingVerification:   0,
+		ReadinessMissingReview:         0,
+		ReadinessMissingSignoff:        0,
+		ReadinessMissingActionEvidence: 0,
+		ReadinessMissingMutation:       0,
+		MemoryCompilerTurns:            1,
+		MemoryCompilerInjectedTurns:    1,
+		MemoryCompilerCompiledTokens:   42,
+		MemoryCompilerTotalNodes:       9,
 		MemoryCompilerTurnDetails: []RunMemoryCompilerMetrics{{
 			Injected:         true,
 			CompiledTokens:   42,
@@ -169,6 +188,12 @@ func TestWriteMetricsIncludesReadinessFields(t *testing.T) {
 		"readiness_missing_project_checks",
 		"readiness_incomplete_todos",
 		"readiness_command_mismatches",
+		"readiness_missing_acceptance_criteria",
+		"readiness_missing_verification",
+		"readiness_missing_review",
+		"readiness_missing_signoff",
+		"readiness_missing_action_evidence",
+		"readiness_missing_mutation",
 		"memory_compiler_turns",
 		"memory_compiler_injected_turns",
 		"memory_compiler_useful_ir_turns",

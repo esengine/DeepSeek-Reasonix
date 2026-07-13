@@ -45,6 +45,10 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("finish or cancel the current turn before changing effort")
 		return nil
 	}
+	if m.modelSwitchPending {
+		m.notice("wait for the current runtime switch to finish")
+		return nil
+	}
 
 	path := config.UserConfigPath()
 	if path == "" {
@@ -102,7 +106,12 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 	build := m.buildController
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried, prevPath)
+		c, err := build(controllerBuildSpec{
+			ModelRef:         ref,
+			RuntimeProfile:   m.runtimeProfile,
+			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
+			PlanMode:         oldCtrl.PlanMode(),
+		}, carried, prevPath)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
@@ -112,7 +121,7 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 			oldCtrl:  oldCtrl,
 			label:    c.Label(),
 			commands: c.Commands(),
-			skills:   c.Skills(),
+			skills:   c.SlashSkills(),
 			host:     c.Host(),
 		}
 	}

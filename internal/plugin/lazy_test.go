@@ -845,3 +845,38 @@ func TestLazyEmptyCachedToolsFallsBackToConnectStub(t *testing.T) {
 		t.Fatalf("empty-cache toolset = %v, want single connect stub", tools)
 	}
 }
+
+// TestAddWithLifecycleSurvivesHandshakeCtxCancel proves the on-demand proxy
+// pattern: connect with a short handshake budget, cancel it immediately after
+// connect, and the stdio child must stay alive (its lifetime is lifeCtx) so
+// the tool call that triggered the connect can still execute.
+func TestAddWithLifecycleSurvivesHandshakeCtxCancel(t *testing.T) {
+	spec := helperSpec()
+	host := NewHost()
+	defer host.Close()
+
+	lifeCtx, cancelLife := context.WithCancel(context.Background())
+	defer cancelLife()
+	handshakeCtx, cancelHandshake := context.WithTimeout(context.Background(), 5*time.Second)
+	tools, err := host.AddWithLifecycle(lifeCtx, handshakeCtx, spec)
+	cancelHandshake() // the proxy's deferred cancel fires right after connect
+	if err != nil {
+		t.Fatalf("AddWithLifecycle: %v", err)
+	}
+	var echo tool.Tool
+	for _, tl := range tools {
+		if strings.HasSuffix(tl.Name(), "__echo") {
+			echo = tl
+		}
+	}
+	if echo == nil {
+		t.Fatalf("no echo tool in %d tools", len(tools))
+	}
+	out, err := echo.Execute(context.Background(), json.RawMessage(`{"msg":"hi"}`))
+	if err != nil {
+		t.Fatalf("Execute after handshake ctx cancel: %v — the child died with the handshake context", err)
+	}
+	if out != "echo: hi" {
+		t.Fatalf("Execute result = %q, want %q", out, "echo: hi")
+	}
+}

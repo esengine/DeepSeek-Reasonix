@@ -60,7 +60,7 @@ export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery"; action?: "continue_delivery" }
   | {
       kind: "compaction";
       id: string;
@@ -88,9 +88,20 @@ export type Item =
       isShell?: boolean; // true for !-prefix shell commands (controls default expand)
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
+      argChars?: number; // args still streaming from the model: cumulative chars received
     };
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
+
+// Mid-turn steer messages are recorded as info notices carrying this prefix —
+// both live (the "steer" event below) and in replayed history (desktop/app.go
+// prefixes persisted steers the same way). The prefix is the only durable
+// marker, so display code identifies steers by it.
+export const STEER_NOTICE_PREFIX = "↪ ";
+
+export function isSteerNoticeText(text: string): boolean {
+  return text.startsWith(STEER_NOTICE_PREFIX);
+}
 
 interface State {
   items: Item[];
@@ -125,15 +136,29 @@ interface State {
   pendingUser?: string;
   discardTurn?: boolean;
   turnStartAt: number;
+  // Time spent waiting on the user (approval/ask) within the current turn.
+  // Closed intervals accumulate here; an open interval uses promptWaitStartedAt
+  // so background tabs keep counting while not rendered by Composer.
+  turnWaitAccumMs: number;
+  promptWaitStartedAt?: number;
   turnTokens: number;
   turnTotalTokens: number;
   turnCost: number;
+  // Cumulative argument characters of the tool call currently streaming its
+  // args (partial dispatch progress). Folded into the composer pill as an
+  // estimated-token tail; cleared when the round's usage arrives (which then
+  // includes those tokens for real) and on turn start.
+  turnArgChars: number;
   sessionTokens: number;
   sessionCost: number;
   sessionCurrency: string;
   retry?: { attempt: number; max: number };
   seq: number;
   sessionGen: number;
+  // Monotonic count of usage events from ANY source (executor, subagent,
+  // title…). Drives right-panel snapshot refreshes so sub-agent activity keeps
+  // the session metrics live; state.usage stays executor-gated for the gauge.
+  usageSeq: number;
 }
 
 export const initialState: State = {
@@ -154,14 +179,17 @@ export const initialState: State = {
   historyOlderLoading: false,
   backendActivationPending: false,
   turnStartAt: 0,
+  turnWaitAccumMs: 0,
   turnTokens: 0,
   turnTotalTokens: 0,
   turnCost: 0,
+  turnArgChars: 0,
   sessionTokens: 0,
   sessionCost: 0,
   sessionCurrency: "¥",
   seq: 0,
   sessionGen: 0,
+  usageSeq: 0,
 };
 
 function usageTotalTokens(usage?: WireUsage): number {
@@ -403,7 +431,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "notice") {
       if (m.content.trim() !== "") {
-        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content, m.detail);
+        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content, m.detail, m.code);
         items = next.items;
         seq = next.seq;
       }
@@ -588,9 +616,58 @@ function completeLiveReasoning(live: LiveStream, now = Date.now()): LiveStream {
   };
 }
 
-function currentTurnDurationMs(s: Pick<State, "turnStartAt">, now = Date.now()): number | undefined {
+/** Closed + open user-wait ms for the active turn (approval/ask). */
+export function currentTurnWaitMs(
+  s: Pick<State, "turnWaitAccumMs" | "promptWaitStartedAt">,
+  now = Date.now(),
+): number {
+  const closed = Math.max(0, s.turnWaitAccumMs || 0);
+  const open = s.promptWaitStartedAt && s.promptWaitStartedAt > 0
+    ? Math.max(0, now - s.promptWaitStartedAt)
+    : 0;
+  return closed + open;
+}
+
+function currentTurnDurationMs(
+  s: Pick<State, "turnStartAt" | "turnWaitAccumMs" | "promptWaitStartedAt">,
+  now = Date.now(),
+): number | undefined {
   if (!Number.isFinite(s.turnStartAt) || s.turnStartAt <= 0 || now < s.turnStartAt) return undefined;
-  return Math.max(1, now - s.turnStartAt);
+  return Math.max(1, now - s.turnStartAt - currentTurnWaitMs(s, now));
+}
+
+function beginPromptWait(s: State, now = Date.now()): State {
+  if (s.promptWaitStartedAt && s.promptWaitStartedAt > 0) return s;
+  return { ...s, promptWaitStartedAt: now };
+}
+
+function endPromptWait(s: State, now = Date.now()): State {
+  if (!s.promptWaitStartedAt || s.promptWaitStartedAt <= 0) {
+    return s.promptWaitStartedAt === undefined ? s : { ...s, promptWaitStartedAt: undefined };
+  }
+  const delta = Math.max(0, now - s.promptWaitStartedAt);
+  return {
+    ...s,
+    turnWaitAccumMs: Math.max(0, s.turnWaitAccumMs || 0) + delta,
+    promptWaitStartedAt: undefined,
+  };
+}
+
+function endPromptWaitIfIdle(s: State, now = Date.now()): State {
+  if (s.approval || s.ask) return s;
+  return endPromptWait(s, now);
+}
+
+function resetTurnTiming(now = Date.now()): Pick<State, "turnStartAt" | "turnWaitAccumMs" | "promptWaitStartedAt" | "turnTokens" | "turnTotalTokens" | "turnCost" | "turnArgChars"> {
+  return {
+    turnStartAt: now,
+    turnWaitAccumMs: 0,
+    promptWaitStartedAt: undefined,
+    turnTokens: 0,
+    turnTotalTokens: 0,
+    turnCost: 0,
+    turnArgChars: 0,
+  };
 }
 
 function flushPendingUser(s: State): State {
@@ -632,7 +709,19 @@ function applyEvent(s: State, e: WireEvent): State {
       let cur: State = s;
       if (cur.pendingUser !== undefined) cur = flushPendingUser(cur);
       const { items, id, seq } = ensureAssistant(cur);
-      return { ...cur, items, currentAssistant: id, seq, live: { id, text: "", reasoning: "", reasoningComplete: false }, running: true, turnActive: true, pendingPrompt: false, cancelRequested: false, cancellable: true, turnStartAt: Date.now(), turnTokens: 0, turnTotalTokens: 0, turnCost: 0 };
+      return {
+        ...cur,
+        items,
+        currentAssistant: id,
+        seq,
+        live: { id, text: "", reasoning: "", reasoningComplete: false },
+        running: true,
+        turnActive: true,
+        pendingPrompt: false,
+        cancelRequested: false,
+        cancellable: true,
+        ...resetTurnTiming(),
+      };
     }
     case "text":
     case "reasoning": {
@@ -693,11 +782,37 @@ function applyEvent(s: State, e: WireEvent): State {
     case "tool_dispatch": {
       const t = e.tool;
       if (!t) return s;
-      // Skip partial dispatches (name-only, no args yet) — the full dispatch
-      // with complete args follows from executeBatch. Waiting for the full
-      // dispatch means the tool card appears with name + subject at once,
-      // avoiding a "name → command" visual jump.
-      if (t.partial) return s;
+      // A partial dispatch (args still streaming from the model) upserts a
+      // lightweight "receiving" card immediately. Dropping it entirely — the
+      // old behavior — left a 30KB write_file body streaming for a minute with
+      // zero visible activity, indistinguishable from a hang. The full
+      // dispatch that follows merges by ID and fills in args/summary.
+      if (t.partial) {
+        const turnArgChars = t.argChars && t.argChars > 0 ? t.argChars : s.turnArgChars;
+        // Some OpenAI-compatible streams surface the call name before its ID.
+        // Without a stable ID the card could never be merged with the full
+        // dispatch (a synthetic `tool${seq}` id would orphan it as a forever-
+        // running duplicate), so count the progress but wait for the ID before
+        // creating the card.
+        if (!t.id) return { ...s, turnArgChars };
+        const id = t.id;
+        const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === id);
+        if (idx >= 0) {
+          const next = [...s.items];
+          const it = next[idx];
+          if (it.kind === "tool" && it.status === "running" && !it.args) {
+            next[idx] = { ...it, argChars: t.argChars || it.argChars };
+            return { ...s, items: next, turnArgChars };
+          }
+          return { ...s, turnArgChars };
+        }
+        return {
+          ...s,
+          turnArgChars,
+          seq: s.seq + 1,
+          items: [...s.items, { kind: "tool", id, name: t.name, args: "", readOnly: t.readOnly, status: "running", argChars: t.argChars || undefined, parentId: t.parentId }],
+        };
+      }
       const id = t.id || `tool${s.seq}`;
       const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === id);
       if (idx >= 0) {
@@ -707,7 +822,7 @@ function applyEvent(s: State, e: WireEvent): State {
           const args = t.args ? t.args : it.args;
           const fileDiff = fileDiffFromWire(t);
           const summary = summarizeFileDiff(fileDiff) || summarize(t.name, args) || (t.name === it.name && args === it.args ? it.summary : undefined);
-          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, profile: t.profile ?? it.profile, summary, fileDiff };
+          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, profile: t.profile ?? it.profile, summary, fileDiff, argChars: undefined };
         }
         return { ...s, items: next };
       }
@@ -770,10 +885,12 @@ function applyEvent(s: State, e: WireEvent): State {
       const sessionCost = s.sessionCost + usageCost;
       const sessionCurrency = e.usage?.currency || s.sessionCurrency || "¥";
       const usage = updateContextGauge ? e.usage : s.usage;
-      return { ...s, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, sessionTokens, sessionCost, sessionCurrency };
+      // The completed round's usage now accounts for the streamed tool-call
+      // arguments, so drop the live estimate rather than double-count it.
+      return { ...s, usage, context: { ...s.context, used, sessionTokens }, turnTokens, turnTotalTokens, turnCost, turnArgChars: 0, sessionTokens, sessionCost, sessionCurrency, usageSeq: s.usageSeq + 1 };
     }
     case "notice":
-      return appendNoticeToState(s, e.level ?? "info", e.text ?? "", e.detail);
+      return appendNoticeToState(s, e.level ?? "info", e.text ?? "", e.detail, e.code);
     case "phase":
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "phase", id: `p${s.seq}`, text: e.text ?? "" }] };
     case "compaction_started":
@@ -791,14 +908,28 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items };
     }
     case "steer":
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `↪ ${e.text ?? ""}` }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}` }] };
     case "approval_request": {
       if (s.cancelRequested) return s;
-      return { ...s, approval: e.approval, pendingPrompt: true, running: true, turnActive: true, cancellable: true };
+      return beginPromptWait({
+        ...s,
+        approval: e.approval,
+        pendingPrompt: true,
+        running: true,
+        turnActive: true,
+        cancellable: true,
+      });
     }
     case "ask_request": {
       if (s.cancelRequested) return s;
-      return { ...s, ask: e.ask, pendingPrompt: true, running: true, turnActive: true, cancellable: true };
+      return beginPromptWait({
+        ...s,
+        ask: e.ask,
+        pendingPrompt: true,
+        running: true,
+        turnActive: true,
+        cancellable: true,
+      });
     }
     case "guardian_assessment": {
       if (!e.guardian) return s;
@@ -846,11 +977,25 @@ function applyEvent(s: State, e: WireEvent): State {
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      let items: Item[] = e.err ? [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }] : finalized;
+      let items: Item[] = finalized;
+      if (e.outcome === "final_readiness") {
+        items = [...finalized, {
+          kind: "notice",
+          id: `e${s.seq}`,
+          level: "info",
+          variant: "delivery",
+          title: t("notice.deliveryIncompleteTitle"),
+          text: t("notice.deliveryIncompleteBody"),
+          detail: e.err,
+          action: "continue_delivery",
+        }];
+      } else if (e.err) {
+        items = [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }];
+      }
       // Plan approval can arrive before turn_done on some Wails event paths.
       // Keep that gate visible instead of clearing the only UI that can answer it.
       const keepPlanApproval = s.approval?.tool === "exit_plan_mode";
-      return {
+      let next: State = {
         ...s,
         items,
         live: undefined,
@@ -864,6 +1009,9 @@ function applyEvent(s: State, e: WireEvent): State {
         ask: undefined,
         seq: s.seq + 1,
       };
+      // Close user-wait unless the plan approval gate remains open.
+      if (!keepPlanApproval) next = endPromptWait(next, now);
+      return next;
     }
     default: return s;
   }
@@ -881,16 +1029,36 @@ export function reducer(s: State, a: Action): State {
         pendingPrompt: false,
         cancelRequested: false,
         cancellable: true,
-        turnStartAt: Date.now(),
-        turnTokens: 0,
-        turnTotalTokens: 0,
-        turnCost: 0,
+        ...resetTurnTiming(),
         pendingUser: a.text,
         discardTurn: false,
       };
     }
-    case "unsend": return { ...s, pendingUser: undefined, discardTurn: true, running: false, pendingPrompt: false, cancelRequested: true, cancellable: false, approval: undefined, ask: undefined, live: undefined };
-    case "cancel_requested": return { ...s, pendingPrompt: false, cancelRequested: true, approval: undefined, ask: undefined, cancellable: s.running || s.turnActive };
+    case "unsend": {
+      const cleared = endPromptWait({
+        ...s,
+        pendingUser: undefined,
+        discardTurn: true,
+        running: false,
+        pendingPrompt: false,
+        cancelRequested: true,
+        cancellable: false,
+        approval: undefined,
+        ask: undefined,
+        live: undefined,
+      });
+      return cleared;
+    }
+    case "cancel_requested": {
+      return endPromptWait({
+        ...s,
+        pendingPrompt: false,
+        cancelRequested: true,
+        approval: undefined,
+        ask: undefined,
+        cancellable: s.running || s.turnActive,
+      });
+    }
     case "send_failed": {
       if (s.pendingUser === undefined) return s;
       let idx = -1;
@@ -933,7 +1101,20 @@ export function reducer(s: State, a: Action): State {
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      return { ...s, items: finalized, running: false, turnActive: false, pendingPrompt, backgroundJobs, cancelRequested, cancellable, live: undefined, currentAssistant: undefined, approval: undefined, ask: undefined };
+      return endPromptWait({
+        ...s,
+        items: finalized,
+        running: false,
+        turnActive: false,
+        pendingPrompt,
+        backgroundJobs,
+        cancelRequested,
+        cancellable,
+        live: undefined,
+        currentAssistant: undefined,
+        approval: undefined,
+        ask: undefined,
+      });
     }
     case "meta": {
       const meta = a.meta.sessionPath === undefined && s.meta?.sessionPath !== undefined ? { ...a.meta, sessionPath: s.meta.sessionPath } : a.meta;
@@ -948,7 +1129,17 @@ export function reducer(s: State, a: Action): State {
         ? a.context.sessionCost
         : s.sessionCost;
       const sessionCurrency = a.context.sessionCurrency || s.sessionCurrency;
-      return { ...s, context: a.context, sessionTokens, sessionCost, sessionCurrency };
+      // Mid-turn snapshot refreshes can race a rebuilt executor whose
+      // LastUsage is still nil: the backend then reports used=0 for a session
+      // that visibly holds tokens, and the gauge collapses to "0/1M" until the
+      // next executor usage arrives. Keep the last known fill while a turn is
+      // live; genuine resets flow through the "reset" action or land when the
+      // session is idle.
+      const context =
+        a.context.used === 0 && s.context.used > 0 && (s.running || s.turnActive) && a.context.window === s.context.window
+          ? { ...a.context, used: s.context.used }
+          : a.context;
+      return { ...s, context, sessionTokens, sessionCost, sessionCurrency };
     }
     case "balance": return { ...s, balance: a.balance };
     case "effort": return { ...s, effort: a.effort };
@@ -966,7 +1157,20 @@ export function reducer(s: State, a: Action): State {
       ? { ...s, hydrating: false, hydrateReason: undefined, hydrateError: undefined, hydrateHistoryLoaded: undefined, hydratePlaceholderItems: undefined }
       : s;
     case "hydrate_error": return { ...s, hydrating: false, hydrateReason: a.reason, hydrateError: a.error, hydrateHistoryLoaded: undefined, hydratePlaceholderItems: undefined };
-    case "backend_activation_start": return s.backendActivationPending ? s : { ...s, backendActivationPending: true };
+    case "backend_activation_start": return {
+      ...s,
+      // The target tab may contain a prompt event that was routed there while
+      // frontend selection was ahead of backend activation. Reset that
+      // uncertain lifecycle first; optimistic backend metadata is applied
+      // immediately afterwards and restores a genuinely running target.
+      backendActivationPending: true,
+      pendingPrompt: false,
+      approval: undefined,
+      ask: undefined,
+      running: false,
+      turnActive: false,
+      cancellable: false,
+    };
     case "backend_activation_done": return s.backendActivationPending ? { ...s, backendActivationPending: false } : s;
     case "message_action_start": return { ...s, messageAction: a.action };
     case "message_action_done": return { ...s, messageAction: undefined };
@@ -994,8 +1198,14 @@ export function reducer(s: State, a: Action): State {
     case "history_checkpoint_turns":
       return { ...s, items: mergeHistoryCheckpointTurns(s.items, a.turns, s.historyStartTurn) };
     case "local_notice": return { ...s, running: false, turnActive: false, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `n${s.seq}`, level: a.level, text: a.text }] };
-    case "clearApproval": return { ...s, approval: undefined, pendingPrompt: false };
-    case "clearAsk": return { ...s, ask: undefined, pendingPrompt: false };
+    case "clearApproval": {
+      const next = { ...s, approval: undefined, pendingPrompt: Boolean(s.ask) };
+      return endPromptWaitIfIdle(next);
+    }
+    case "clearAsk": {
+      const next = { ...s, ask: undefined, pendingPrompt: Boolean(s.approval) };
+      return endPromptWaitIfIdle(next);
+    }
     case "reset": return { ...initialState, meta: s.meta, context: { used: 0, window: s.context.window, sessionTokens: 0, compactRatio: s.context.compactRatio }, balance: s.balance, effort: s.effort, jobs: s.jobs, hydrating: s.hydrating, hydrateReason: s.hydrateReason, hydrateError: s.hydrateError, hydrateHistoryLoaded: s.hydrateHistoryLoaded, hydratePlaceholderItems: s.hydratePlaceholderItems, backendActivationPending: s.backendActivationPending, sessionGen: s.sessionGen + 1 };
     case "event": return applyEvent(s, a.e);
     default: return s;
@@ -1074,6 +1284,26 @@ export function tokenModeSwitchNoticeText(err: unknown): string {
     retry: "status.tokenModeSwitchRetry",
     failed: "status.tokenModeSwitchFailed",
   });
+}
+
+// noticeCodeKeys maps the backend's stable notice codes (event.NoticeCode*) to
+// dictionary keys. Codes survive backend copy edits, unlike the exact-text
+// matching in backendNoticeKey, which stays only as the fallback for events
+// and replayed histories that carry no code.
+const noticeCodeKeys: Record<string, DictKey> = {
+  final_readiness: "notice.finalReadiness",
+  empty_final: "notice.emptyFinal",
+  executor_handoff: "notice.executorHandoff",
+  tool_budget: "notice.toolBudget",
+  loop_guard: "notice.loopGuard",
+};
+
+// localizedNoticeText localizes a notice's main copy by its stable code first,
+// then falls back to English-text matching for codeless payloads.
+export function localizedNoticeText(text: string, code?: string): string {
+  const key = code ? noticeCodeKeys[code] : undefined;
+  if (key) return t(key);
+  return localizedBackendNoticeText(text);
 }
 
 export function localizedBackendNoticeText(text: string): string {
@@ -1236,11 +1466,11 @@ function quietTranscriptNoticeKey(text: string): string {
   return "";
 }
 
-function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string): { items: Item[]; seq: number } {
+function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string, code?: string): { items: Item[]; seq: number } {
   if (quietTranscriptNoticeKey(rawText)) {
     return { items, seq };
   }
-  const text = localizedBackendNoticeText(rawText);
+  const text = localizedNoticeText(rawText, code);
   if (quietTranscriptNoticeKey(text)) {
     return { items, seq };
   }
@@ -1248,8 +1478,8 @@ function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" 
   return { items: [...items, { kind: "notice", id, level, text, ...(trimmedDetail ? { detail: trimmedDetail } : {}) }], seq: seq + 1 };
 }
 
-function appendNoticeToState(s: State, level: "info" | "warn", text: string, detail?: string): State {
-  const next = appendNoticeItem(s.items, s.seq, `n${s.seq}`, level, text, detail);
+function appendNoticeToState(s: State, level: "info" | "warn", text: string, detail?: string, code?: string): State {
+  const next = appendNoticeItem(s.items, s.seq, `n${s.seq}`, level, text, detail, code);
   return { ...s, running: s.turnActive ? s.running : false, seq: next.seq, items: next.items };
 }
 
@@ -1337,10 +1567,17 @@ export function useController() {
   const cancelReconcileTimers = useRef(new Map<string, number>());
   const [activeTabId, setActiveTabId] = useState<string | undefined>();
   const activeTabIdRef = useRef<string | undefined>(undefined);
+  // Invalidates async navigation completions even for ABA switches where the
+  // visible tab ID eventually returns to the original value.
+  const activeNavigationSeqRef = useRef(0);
   // A render-triggering counter so that mutations to a non-active tab's state still
   // cause a re-render when that tab becomes active.
   const [, setVersion] = useState(0);
   const bump = useCallback(() => setVersion((v) => v + 1), []);
+  const beginActiveNavigation = useCallback(() => {
+    activeNavigationSeqRef.current += 1;
+    return activeNavigationSeqRef.current;
+  }, []);
 
   // The active tab's current state, with a stable identity for cancel().
   const activeState = activeTabId ? getOrCreateState(statesRef.current, activeTabId) : initialState;
@@ -1620,6 +1857,7 @@ export function useController() {
     if (guard && activeTabIdRef.current && activeTabIdRef.current !== active.id) {
       return active.id;
     }
+    if (activeTabIdRef.current !== active.id) beginActiveNavigation();
     setActiveTabId(active.id);
     activeTabIdRef.current = active.id;
     confirmBackendActiveTab(active.id);
@@ -1632,7 +1870,7 @@ export function useController() {
     });
     if (reset) dispatchRuntimeStatusForTab(active.id, active);
     return active.id;
-  }, [activeTabFromBackend, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
+  }, [activeTabFromBackend, beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
 
   const reconcileTabRuntime = useCallback(async (
     tabId: string,
@@ -1690,7 +1928,11 @@ export function useController() {
       for (const { tabId, e } of batch) dispatchTo(tabId, { type: "event", e });
     });
     const off = onEvent((e) => {
-      const targetTabId = e.tabId || activeTabIdRef.current;
+      // Untagged compatibility events belong to the tab that the backend has
+      // actually activated, not the frontend's optimistic selection. During a
+      // slow SetActiveTab these can differ, and routing to the optimistic tab
+      // leaks the previous session's approval/ask gate into the new composer.
+      const targetTabId = e.tabId || backendActiveTabIdRef.current || activeTabIdRef.current;
       if (!targetTabId) return;
       if (
         e.kind === "turn_started" ||
@@ -1757,6 +1999,30 @@ export function useController() {
       offReady();
     };
   }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+
+  // Keep shared all-source telemetry live between turn boundaries. Delivery
+  // mode can complete dozens of provider requests inside one UI turn, while
+  // the status bar reads state.context and would otherwise stay pinned to the
+  // previous turn_done snapshot. A usage event is emitted after the backend
+  // has recorded that request, so refresh the authoritative tab aggregate here.
+  // The usage sequence and active-tab checks make this latest-request-wins:
+  // slower snapshots cannot overwrite a newer usage event or a tab switch.
+  useEffect(() => {
+    const tabId = activeTabId;
+    const usageSeq = activeState.usageSeq;
+    if (!tabId || usageSeq <= 0 || !activeState.turnActive) return;
+
+    let cancelled = false;
+    void app.ContextUsageForTab(tabId).then((context) => {
+      if (cancelled || activeTabIdRef.current !== tabId) return;
+      if (statesRef.current.get(tabId)?.usageSeq !== usageSeq) return;
+      dispatchTo(tabId, { type: "context", context });
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTabId, activeState.turnActive, activeState.usageSeq, dispatchTo]);
 
   // If the startup ready event is missed, keep the composer lock in sync with
   // the active tab's backend metadata without kicking off tab activation work.
@@ -1834,7 +2100,7 @@ export function useController() {
     replayPendingPromptsForActiveTab(activeTabId);
   }, [activeTabId]);
 
-  const sendToTab = useCallback(async (tabId: string, displayText: string, submitText = displayText, originalText?: string) => {
+  const sendToTab = useCallback(async (tabId: string, displayText: string, submitText = displayText, originalText?: string, structured?: import("./invocationDisplay").StructuredInvocationSubmit) => {
     if (!tabId) throw new Error(t("composer.workspaceStarting"));
     const seq = getOrCreateState(statesRef.current, tabId).seq;
     const display = displayText.trim();
@@ -1843,7 +2109,9 @@ export function useController() {
     dispatchTo(tabId, { type: "user", text: displayText, submitText: display !== submit ? submit : undefined, seq });
     invalidateCache();
     try {
-      const submitPromise = original
+      const submitPromise = structured
+        ? app.SubmitInvocationsToTab(tabId, structured.display.trim(), structured.input.trim(), structured.invocations)
+        : original
         ? app.SubmitEditedDisplayToTab(tabId, display, submit, original)
         : display !== submit ? app.SubmitDisplayToTab(tabId, display, submit) : app.SubmitToTab(tabId, submit);
       void submitPromise.catch((error) => {
@@ -1870,29 +2138,39 @@ export function useController() {
     });
   }, [activeTabFromBackend, activeTabId, confirmBackendActiveTab, dispatchRuntimeStatusForTab, sendToTab]);
 
-  const runShell = useCallback(async (command: string) => {
-    if (!activeTabId) throw new Error(t("composer.workspaceStarting"));
-    dispatchTo(activeTabId, { type: "user", text: `!${command}`, seq: getOrCreateState(statesRef.current, activeTabId).seq });
+  const runShellForTab = useCallback(async (tabId: string, command: string) => {
+    if (!tabId) throw new Error(t("composer.workspaceStarting"));
+    dispatchTo(tabId, { type: "user", text: `!${command}`, seq: getOrCreateState(statesRef.current, tabId).seq });
     try {
-      await app.RunShellForTab(activeTabId, command);
+      await app.RunShellForTab(tabId, command);
     } catch (error) {
-      dispatchTo(activeTabId, { type: "send_failed", error: `Command failed: ${error instanceof Error ? error.message : String(error)}` });
+      dispatchTo(tabId, { type: "send_failed", error: `Command failed: ${error instanceof Error ? error.message : String(error)}` });
       throw error;
     }
-  }, [activeTabId, dispatchTo]);
+  }, [dispatchTo]);
 
-  const steer = useCallback(async (text: string) => {
+  const runShell = useCallback(async (command: string) => {
     if (!activeTabId) throw new Error(t("composer.workspaceStarting"));
+    await runShellForTab(activeTabId, command);
+  }, [activeTabId, runShellForTab]);
+
+  const steerForTab = useCallback(async (tabId: string, text: string) => {
+    if (!tabId) throw new Error(t("composer.workspaceStarting"));
     // No optimistic user bubble: rewind/fork map turns by counting user items,
     // and a steer is not a backend turn — the Steer event's ↪ notice is the
     // visible confirmation (#3660).
     try {
-      await app.SteerForTab(activeTabId, text);
+      await app.SteerForTab(tabId, text);
     } catch (error) {
-      dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: `Steer failed: ${error instanceof Error ? error.message : String(error)}` });
+      dispatchTo(tabId, { type: "local_notice", level: "warn", text: `Steer failed: ${error instanceof Error ? error.message : String(error)}` });
       throw error;
     }
-  }, [activeTabId, dispatchTo]);
+  }, [dispatchTo]);
+
+  const steer = useCallback(async (text: string) => {
+    if (!activeTabId) throw new Error(t("composer.workspaceStarting"));
+    await steerForTab(activeTabId, text);
+  }, [activeTabId, steerForTab]);
 
   const notice = useCallback((text: string, level: "info" | "warn" = "info") => {
     if (!activeTabId) return;
@@ -1944,34 +2222,54 @@ export function useController() {
     }).catch(() => {});
   }, [activeTabId, dispatchTo]);
 
+  const setCollaborationModeForTab = useCallback(async (tabId: string, mode: CollaborationMode): Promise<void> => {
+    if (!tabId) return;
+    await app.SetCollaborationModeForTab(tabId, mode).catch(() => {});
+    await refreshMetaForTab(tabId, dispatchTo);
+  }, [dispatchTo]);
+
   const setCollaborationMode = useCallback(async (mode: CollaborationMode): Promise<void> => {
     if (!activeTabId) return;
-    await app.SetCollaborationModeForTab(activeTabId, mode).catch(() => {});
-    await refreshMetaForTab(activeTabId, dispatchTo);
-  }, [activeTabId, dispatchTo]);
+    await setCollaborationModeForTab(activeTabId, mode);
+  }, [activeTabId, setCollaborationModeForTab]);
+
+  const setToolApprovalModeForTab = useCallback(async (tabId: string, mode: ToolApprovalMode): Promise<void> => {
+    if (!tabId) return;
+    await app.SetToolApprovalModeForTab(tabId, mode).catch(() => {});
+    if (mode === "auto" || mode === "yolo") dispatchTo(tabId, { type: "clearApproval" });
+    await refreshMetaForTab(tabId, dispatchTo);
+  }, [dispatchTo]);
 
   const setToolApprovalMode = useCallback(async (mode: ToolApprovalMode): Promise<void> => {
     if (!activeTabId) return;
-    await app.SetToolApprovalModeForTab(activeTabId, mode).catch(() => {});
-    if (mode === "auto" || mode === "yolo") dispatchTo(activeTabId, { type: "clearApproval" });
-    await refreshMetaForTab(activeTabId, dispatchTo);
-  }, [activeTabId, dispatchTo]);
+    await setToolApprovalModeForTab(activeTabId, mode);
+  }, [activeTabId, setToolApprovalModeForTab]);
+
+  const setGoalForTab = useCallback(async (tabId: string, goal: string): Promise<void> => {
+    if (!tabId) return;
+    await app.SetGoalForTab(tabId, goal).catch(() => {});
+    await refreshMetaForTab(tabId, dispatchTo);
+  }, [dispatchTo]);
 
   const setGoal = useCallback(async (goal: string): Promise<void> => {
     if (!activeTabId) return;
-    await app.SetGoalForTab(activeTabId, goal).catch(() => {});
-    await refreshMetaForTab(activeTabId, dispatchTo);
-  }, [activeTabId, dispatchTo]);
+    await setGoalForTab(activeTabId, goal);
+  }, [activeTabId, setGoalForTab]);
+
+  const clearGoalForTab = useCallback(async (tabId: string): Promise<void> => {
+    if (!tabId) return;
+    await app.ClearGoalForTab(tabId).catch(() => {});
+    await refreshMetaForTab(tabId, dispatchTo);
+  }, [dispatchTo]);
 
   const clearGoal = useCallback(async (): Promise<void> => {
     if (!activeTabId) return;
-    await app.ClearGoalForTab(activeTabId).catch(() => {});
-    await refreshMetaForTab(activeTabId, dispatchTo);
-  }, [activeTabId, dispatchTo]);
+    await clearGoalForTab(activeTabId);
+  }, [activeTabId, clearGoalForTab]);
 
   const newSession = useCallback(async () => {
     const tabId = activeTabId;
-    if (tabId && !(await waitForBackendActiveTab(tabId))) return;
+    if (tabId) await waitForTabReady(tabId);
     if (tabId) {
       addBreadcrumb("session.new", `click ${tabId}`);
       bumpCheckpointRefreshSeq(tabId);
@@ -1981,7 +2279,8 @@ export function useController() {
       addBreadcrumb("session.new", `visible-reset ${tabId}`);
     }
     try {
-      await app.NewSession();
+      if (tabId) await app.NewSessionForTab(tabId);
+      else await app.NewSession();
       addBreadcrumb("session.new", `backend-done ${tabId ?? ""}`);
     } catch (err) {
       if (tabId) {
@@ -2000,19 +2299,18 @@ export function useController() {
       app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
       void refreshCheckpoints(tabId);
     }
-  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, waitForBackendActiveTab]);
+  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, waitForTabReady]);
 
   const clearSession = useCallback(async () => {
     const tabId = activeTabId;
-    if (tabId && !(await waitForBackendActiveTab(tabId))) {
-      throw new Error("Tab activation has not completed");
-    }
+    if (tabId) await waitForTabReady(tabId);
     if (tabId) {
       bumpCheckpointRefreshSeq(tabId);
       bumpSessionLoadSeq(tabId);
     }
     try {
-      await app.ClearSession();
+      if (tabId) await app.ClearSessionForTab(tabId);
+      else await app.ClearSession();
     } catch {
       if (tabId) void loadSessionDataForTab(tabId);
       return;
@@ -2024,13 +2322,14 @@ export function useController() {
       // Clear placeholder items since no history action follows.
       dispatchTo(tabId, { type: "history", messages: [] });
     }
-  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, waitForBackendActiveTab]);
+  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, waitForTabReady]);
 
   const listSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListSessions().catch(() => [])), []);
   const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])), []);
   const resumeSession = useCallback(async (path: string, tabId?: string) => {
     const targetTabId = tabId || activeTabId;
     if (!targetTabId) return;
+    beginActiveNavigation();
     if (tabId) await waitForTabReady(tabId);
     else if (!(await waitForBackendActiveTab(targetTabId))) return;
     const seq = bumpSessionLoadSeq(targetTabId);
@@ -2053,10 +2352,11 @@ export function useController() {
     dispatchTo(targetTabId, { type: "hydrate_done" });
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
-  }, [activeTabId, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
+  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string) => {
     if (!tabId) return;
+    beginActiveNavigation();
     await waitForTabReady(tabId);
     const seq = bumpSessionLoadSeq(tabId);
     dispatchTo(tabId, { type: "hydrate_start", reason: "resume-session" });
@@ -2076,7 +2376,7 @@ export function useController() {
     dispatchTo(tabId, { type: "hydrate_done" });
     app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(tabId);
-  }, [bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForTabReady]);
+  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
   const deleteSession = useCallback((path: string) => app.DeleteSession(path).finally(() => invalidateCache()), []);
@@ -2099,21 +2399,21 @@ export function useController() {
   }, [syncActiveTabFromBackend]);
 
   const pickWorkspace = useCallback(async (): Promise<string> => {
+    beginActiveNavigation();
     const path = await app.PickWorkspace().catch(() => "");
     return refreshWorkspaceState(path);
-  }, [refreshWorkspaceState]);
+  }, [beginActiveNavigation, refreshWorkspaceState]);
   const switchWorkspace = useCallback(async (path: string): Promise<string> => {
+    beginActiveNavigation();
     const next = await app.SwitchWorkspace(path).catch(() => "");
     return refreshWorkspaceState(next);
-  }, [refreshWorkspaceState]);
+  }, [beginActiveNavigation, refreshWorkspaceState]);
 
   const compact = useCallback(() => {
     const tabId = activeTabIdRef.current;
     if (!tabId) return;
-    void waitForBackendActiveTab(tabId).then((active) => {
-      if (active) app.Compact().catch(() => {});
-    });
-  }, [waitForBackendActiveTab]);
+    void waitForTabReady(tabId).then(() => app.CompactForTab(tabId).catch(() => {}));
+  }, [waitForTabReady]);
 
   const setModel = useCallback(async (name: string) => {
     if (!activeTabId) return;
@@ -2166,17 +2466,36 @@ export function useController() {
   const forget = useCallback(async (name: string) => { await app.Forget(name).catch(() => {}); }, []);
   const saveDoc = useCallback(async (path: string, body: string) => { await app.SaveDoc(path, body).catch(() => {}); }, []);
 
-  const rewind = useCallback(async (turn: number, scope: string): Promise<boolean> => {
-    const sourceTabId = activeTabId;
+  const rewindForTab = useCallback(async (sourceTabId: string, turn: number, scope: string): Promise<boolean> => {
     if (!sourceTabId) return false;
-    if (!(await waitForBackendActiveTab(sourceTabId))) return false;
+    const forkNavigationSeq = activeNavigationSeqRef.current;
+    await waitForTabReady(sourceTabId);
     const actionScope = (["fork", "summ-from", "summ-upto", "conversation", "code", "both"].includes(scope) ? scope : "both") as MessageActionScope;
     dispatchTo(sourceTabId, { type: "message_action_start", action: { turn, scope: actionScope } });
     dispatchTo(sourceTabId, { type: "local_notice", level: "info", text: messageActionBusyText(actionScope) });
     try {
       if (actionScope === "fork") {
-        const tab = await app.Fork(turn);
+        const tab = await app.ForkForTab(sourceTabId, turn);
         if (tab?.id) {
+          const navigationUnchanged = activeNavigationSeqRef.current === forkNavigationSeq;
+          const activateFork = tab.active && navigationUnchanged && activeTabIdRef.current === sourceTabId;
+          if (!activateFork) {
+            dispatchTo(tab.id, { type: "optimistic_meta", meta: metaFromTab(tab, statesRef.current.get(tab.id)?.meta) });
+            dispatchRuntimeStatusForTab(tab.id, tab);
+            const currentTabId = activeTabIdRef.current;
+            if (tab.active && currentTabId) {
+              await app.SetActiveTab(currentTabId).then(() => {
+                if (activeTabIdRef.current === currentTabId) confirmBackendActiveTab(currentTabId);
+              }).catch((err) => {
+                addBreadcrumb("tab.fork", `stale reassert failed ${currentTabId}: ${errorMessage(err)}`);
+              });
+            } else if (!tab.active && navigationUnchanged && currentTabId === sourceTabId) {
+              await syncActiveTabFromBackend(false, true);
+            }
+            addBreadcrumb("tab.fork", `stale completion ${tab.id} current=${currentTabId ?? ""}`);
+            return true;
+          }
+          beginActiveNavigation();
           setActiveTabId(tab.id);
           activeTabIdRef.current = tab.id;
           confirmBackendActiveTab(tab.id);
@@ -2193,9 +2512,9 @@ export function useController() {
         return true;
       }
 
-      if (actionScope === "summ-from") await app.SummarizeFrom(turn);
-      else if (actionScope === "summ-upto") await app.SummarizeUpTo(turn);
-      else await app.Rewind(turn, actionScope);
+      if (actionScope === "summ-from") await app.SummarizeFromForTab(sourceTabId, turn);
+      else if (actionScope === "summ-upto") await app.SummarizeUpToForTab(sourceTabId, turn);
+      else await app.RewindForTab(sourceTabId, turn, actionScope);
 
       const messages = asArray(await app.HistoryForTab(sourceTabId).catch(() => [] as HistoryMessage[]));
       dispatchTo(sourceTabId, { type: "reset" });
@@ -2209,10 +2528,16 @@ export function useController() {
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });
     }
-  }, [activeTabId, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, syncActiveTabFromBackend, waitForBackendActiveTab, waitForTabReady]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, syncActiveTabFromBackend, waitForTabReady]);
+
+  const rewind = useCallback(async (turn: number, scope: string): Promise<boolean> => {
+    if (!activeTabId) return false;
+    return rewindForTab(activeTabId, turn, scope);
+  }, [activeTabId, rewindForTab]);
 
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string, optimisticTab?: TabMeta): Promise<TabMeta[] | undefined> => {
+    beginActiveNavigation();
     const startedAt = Date.now();
     const previousTabId = activeTabIdRef.current;
     const targetSessionPath = optimisticTab?.sessionPath ?? statesRef.current.get(tabId)?.meta?.sessionPath;
@@ -2273,9 +2598,10 @@ export function useController() {
         return undefined;
       });
     return backendSwitch;
-  }, [confirmBackendActiveTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, trackBackendActivation]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, trackBackendActivation]);
 
   const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
+    beginActiveNavigation();
     const meta = await app.OpenProjectTab(workspaceRoot, topicId);
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
@@ -2294,9 +2620,10 @@ export function useController() {
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
     else void load;
     return meta;
-  }, [confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta> => {
+    beginActiveNavigation();
     const meta = await app.OpenGlobalTab(topicId);
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
@@ -2315,9 +2642,10 @@ export function useController() {
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
     else void load;
     return meta;
-  }, [confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const openTopicSession = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath: string): Promise<TabMeta> => {
+    beginActiveNavigation();
     const meta = await app.OpenTopicSession(scope, workspaceRoot, topicId, sessionPath);
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
@@ -2336,9 +2664,10 @@ export function useController() {
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
     else void load;
     return meta;
-  }, [confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const activateTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath = ""): Promise<TabMeta> => {
+    beginActiveNavigation();
     const meta = await app.ActivateTopic(scope, workspaceRoot, topicId, sessionPath);
     // Save previous tab's items so the new tab can use them as a placeholder
     // during loading, avoiding a blank/Welcome flash before history arrives.
@@ -2355,11 +2684,12 @@ export function useController() {
       .then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false }))
       .catch(() => {});
     return meta;
-  }, [confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   // Ensure a blank tab exists for the given scope — reuses an existing one
   // or creates a new tab, then loads its session data.
   const ensureBlankTab = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
+    beginActiveNavigation();
     const meta = await app.EnsureBlankTab(scope, workspaceRoot);
     const isNewTab = !statesRef.current.has(meta.id);
     setActiveTabId(meta.id);
@@ -2371,9 +2701,10 @@ export function useController() {
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
     else void load;
     return meta;
-  }, [confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const ensureBlankSurface = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
+    beginActiveNavigation();
     const meta = await app.EnsureBlankSurface(scope, workspaceRoot);
     for (const id of Array.from(statesRef.current.keys())) {
       if (id !== meta.id) statesRef.current.delete(id);
@@ -2387,16 +2718,17 @@ export function useController() {
       .then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false }))
       .catch(() => {});
     return meta;
-  }, [confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const closeTab = useCallback(async (tabId: string) => {
+    if (tabId === activeTabIdRef.current) beginActiveNavigation();
     try {
       await app.CloseTab(tabId);
       statesRef.current.delete(tabId);
       bump();
       if (tabId === activeTabId) await syncActiveTabFromBackend(false);
     } catch { /* ignore */ }
-  }, [activeTabId, bump, syncActiveTabFromBackend]);
+  }, [activeTabId, beginActiveNavigation, bump, syncActiveTabFromBackend]);
 
   const reorderTabs = useCallback(async (tabIds: string[]) => {
     try {
@@ -2407,10 +2739,11 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, sendToTab, runShell, steer, notice, cancel, approve, answerQuestion, setControllerMode, setCollaborationMode, setToolApprovalMode, setGoal, clearGoal,
+    send, sendToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, answerQuestion, setControllerMode,
+    setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
-    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, setModel, setEffort, setTokenMode,
+    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, setModel, setEffort, setTokenMode,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, closeTab, reorderTabs,
     syncActiveTab: syncActiveTabFromBackend,

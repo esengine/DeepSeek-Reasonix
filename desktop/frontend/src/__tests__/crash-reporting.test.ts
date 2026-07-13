@@ -1,8 +1,10 @@
 // Run: tsx src/__tests__/crash-reporting.test.ts
 
 import {
+  aggregateLongTaskProfile,
   buildCrashPayload,
   buildPerformancePayload,
+  formatLongTaskAttribution,
   formatPerformanceContext,
   globalCrashReportReason,
   installPerformancePressureMonitor,
@@ -10,12 +12,14 @@ import {
   parseReportedPerf,
   performanceLabelForReason,
   serializeReportedPerf,
+  shouldPromptForLongTasks,
   shouldRecordEventLoopLagSample,
   shouldPromptForPerformanceLabel,
   shouldReportGlobalCrashEvent,
   shouldRecordLongTaskSample,
   topFrameFromStack,
   type PerformanceSnapshot,
+  type ProfilerTrace,
 } from "../lib/crash";
 
 let passed = 0;
@@ -141,6 +145,82 @@ eq(shouldRecordLongTaskSample(60_000, 900, 15_000, true, 20_000), false, "ignore
 eq(shouldRecordLongTaskSample(23_000, 900, 15_000, false, 20_000), false, "ignores long tasks immediately after visibility resumes");
 eq(shouldRecordLongTaskSample(26_000, 900, 15_000, false, 20_000), true, "records long tasks after the visibility resume grace period");
 eq(shouldRecordLongTaskSample(570_000, 92, 15_000, false, 20_000, false), false, "ignores long tasks while unfocused");
+eq(shouldPromptForLongTasks({ count: 1, totalMs: 850, maxMs: 850 }), true, "prompts on a single 800ms+ long task");
+eq(
+  shouldPromptForLongTasks({ count: 16, totalMs: 1_584, maxMs: 237 }),
+  false,
+  "tolerates streaming-render bursts below the 3s cumulative budget",
+);
+eq(shouldPromptForLongTasks({ count: 16, totalMs: 3_100, maxMs: 237 }), true, "prompts past the 3s cumulative budget");
+eq(shouldPromptForLongTasks({ count: 2, totalMs: 3_100, maxMs: 790 }), false, "cumulative path needs at least 3 tasks");
+
+eq(formatLongTaskAttribution("self", [{ containerType: "window" }]), "", "hides the no-signal self/window attribution");
+eq(formatLongTaskAttribution("unknown", undefined), "", "hides unknown attribution");
+eq(
+  formatLongTaskAttribution("cross-origin-descendant", [{ containerType: "iframe", containerSrc: "https://embed.example" }]),
+  "cross-origin-descendant iframe:https://embed.example",
+  "surfaces cross-context culprits with their container",
+);
+
+const trace: ProfilerTrace = {
+  resources: ["wails://wails/assets/vendor-markdown.js"],
+  frames: [
+    { name: "post", resourceId: 0, line: 1, column: 130216 },
+    { name: "tick", resourceId: 0, line: 9 },
+    { name: "" },
+  ],
+  stacks: [{ frameId: 0 }, { frameId: 1, parentId: 0 }, { frameId: 2 }],
+  samples: [
+    { timestamp: 1_000, stackId: 0 },
+    { timestamp: 1_010, stackId: 0 },
+    { timestamp: 1_020, stackId: 1 },
+    { timestamp: 5_000, stackId: 0 }, // outside every long-task window
+    { timestamp: 1_030 }, // idle sample without a stack
+    { timestamp: 1_040, stackId: 2 },
+  ],
+};
+eq(
+  aggregateLongTaskProfile(trace, [{ startMs: 990, durationMs: 100 }]),
+  [
+    { label: "post (wails://wails/assets/vendor-markdown.js:1:130216)", samples: 2 },
+    { label: "tick (wails://wails/assets/vendor-markdown.js:9)", samples: 1 },
+    { label: "(anonymous)", samples: 1 },
+  ],
+  "counts leaf frames for samples inside long-task windows",
+);
+eq(aggregateLongTaskProfile(trace, []), [], "returns nothing without long-task windows");
+eq(
+  aggregateLongTaskProfile(trace, [{ startMs: 990, durationMs: 100 }], 1),
+  [{ label: "post (wails://wails/assets/vendor-markdown.js:1:130216)", samples: 2 }],
+  "caps the frame list at maxFrames",
+);
+
+const framesSnapshot: PerformanceSnapshot = {
+  ...perf,
+  longTasks: {
+    count: 1,
+    totalMs: 900,
+    maxMs: 900,
+    recent: [{ startMs: 40_000, durationMs: 900, attribution: "cross-origin-descendant" }],
+  },
+  longTaskFrames: [{ label: "post (vendor-markdown.js:1)", samples: 42 }],
+};
+eq(
+  formatPerformanceContext(framesSnapshot).includes("900ms @ 40.0s (cross-origin-descendant)"),
+  true,
+  "recent long tasks carry their attribution",
+);
+eq(
+  formatPerformanceContext(framesSnapshot).includes("long task top frames (sampled):\n  42x post (vendor-markdown.js:1)"),
+  true,
+  "formats sampled top frames into the report context",
+);
+eq(
+  formatPerformanceContext(perf).includes("long task top frames"),
+  false,
+  "omits the frames section when no profile was captured",
+);
+
 eq(shouldRecordEventLoopLagSample(true, 60_000), false, "ignores event-loop lag while the window is hidden");
 eq(shouldRecordEventLoopLagSample(false, 3_000), false, "ignores event-loop lag immediately after visibility resumes");
 eq(shouldRecordEventLoopLagSample(false, 6_000), true, "records event-loop lag after the visibility resume grace period");

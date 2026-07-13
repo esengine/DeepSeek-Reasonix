@@ -28,6 +28,10 @@ func (m *chatTUI) runModelSubcommand(input string) {
 		m.notice(i18n.M.ModelSwitchBusy)
 		return
 	}
+	if m.modelSwitchPending {
+		m.notice(i18n.M.RuntimeSwitchPending)
+		return
+	}
 	if ref == m.modelRef {
 		m.notice(fmt.Sprintf(i18n.M.ModelAlreadyOnFmt, ref))
 		return
@@ -68,7 +72,12 @@ func (m *chatTUI) runModelSubcommand(input string) {
 	// must happen here, before we hand the new controller back.
 	m.modelSwitchPending = true
 	m.pendingModelSwitch = func() tea.Msg {
-		c, err := build(ref, carried, prevPath)
+		c, err := build(controllerBuildSpec{
+			ModelRef:         ref,
+			RuntimeProfile:   m.runtimeProfile,
+			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
+			PlanMode:         oldCtrl.PlanMode(),
+		}, carried, prevPath)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
@@ -84,7 +93,7 @@ func (m *chatTUI) runModelSubcommand(input string) {
 			oldCtrl:  oldCtrl,
 			label:    c.Label(),
 			commands: c.Commands(),
-			skills:   c.Skills(),
+			skills:   c.SlashSkills(),
 			host:     c.Host(),
 		}
 	}

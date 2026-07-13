@@ -82,6 +82,33 @@ eq(notice.kind === "notice" && notice.level, "warn", "the notice is a warning");
 eq(failedState.running, false, "send_failed stops the running indicator");
 eq(failedState.pendingUser, undefined, "send_failed clears the pending marker");
 
+const readinessStarted = reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent });
+const readinessState = reducer(readinessStarted, {
+  type: "event",
+  e: {
+    kind: "turn_done",
+    outcome: "final_readiness",
+    err: "final-answer readiness failed 3 times: missing verification",
+  } as WireEvent,
+});
+const readinessNotice = readinessState.items[readinessState.items.length - 1];
+eq(readinessNotice.kind, "notice", "final readiness appends a notice");
+eq(readinessNotice.kind === "notice" && readinessNotice.level, "info", "final readiness uses informational severity");
+eq(readinessNotice.kind === "notice" && readinessNotice.variant, "delivery", "final readiness uses the delivery status treatment");
+eq(readinessNotice.kind === "notice" && readinessNotice.title, "Delivery checks are not complete", "final readiness uses localized product copy");
+eq(readinessNotice.kind === "notice" && readinessNotice.detail?.includes("final-answer readiness failed"), true, "raw diagnostics stay in collapsed detail");
+eq(readinessNotice.kind === "notice" && readinessNotice.action, "continue_delivery", "final readiness offers a recovery action");
+const readinessUser = readinessState.items.find((it) => it.kind === "user");
+eq(readinessUser?.kind === "user" && Boolean(readinessUser.failed), false, "final readiness does not mark the delivered user message as failed");
+
+const ordinaryTurnError = reducer(readinessStarted, {
+  type: "event",
+  e: { kind: "turn_done", err: "provider failed" } as WireEvent,
+});
+const ordinaryTurnNotice = ordinaryTurnError.items[ordinaryTurnError.items.length - 1];
+eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.level, "warn", "ordinary turn errors remain warnings");
+eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.text, "provider failed", "ordinary turn errors keep their diagnostic text");
+
 const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0 });
 const shellFailed = reducer(shellSent, { type: "send_failed", error: "Command failed: workspace is still starting" });
 const shellNotice = shellFailed.items[shellFailed.items.length - 1];

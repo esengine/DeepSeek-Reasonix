@@ -328,6 +328,57 @@ command = "late-bin"
 	}
 }
 
+func TestMCPMigrationMarkerMakesCurrentConfigAuthoritativeAfterRemoval(t *testing.T) {
+	src, dest, _ := legacyHome(t)
+	writeLegacy(t, src, `{
+		"mcpServers": {
+			"legacy-only": {"command": "legacy-mcp-bin"}
+		}
+	}`)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("config_version = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := MigrateMCPToUserConfigOnUpgrade(nil)
+	if err != nil {
+		t.Fatalf("MigrateMCPToUserConfigOnUpgrade: %v", err)
+	}
+	if res == nil || res.Added != 1 {
+		t.Fatalf("migration result = %+v, want one imported MCP", res)
+	}
+
+	removed, err := RemovePluginFromSourcesForRoot(t.TempDir(), "legacy-only")
+	if err != nil {
+		t.Fatalf("RemovePluginFromSourcesForRoot: %v", err)
+	}
+	if !removed {
+		t.Fatal("RemovePluginFromSourcesForRoot reported no removal")
+	}
+
+	loaded, err := Load()
+	if err != nil {
+		t.Fatalf("Load after removal: %v", err)
+	}
+	for _, p := range loaded.Plugins {
+		if p.Name == "legacy-only" {
+			t.Fatalf("removed MCP was resurrected from legacy config: %+v", loaded.Plugins)
+		}
+	}
+	if got := loadLegacyMCP(src); len(got) != 0 {
+		t.Fatalf("an older runtime would resurrect the removed legacy MCP: %+v", got)
+	}
+	legacyRaw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatalf("read legacy source: %v", err)
+	}
+	if !strings.Contains(string(legacyRaw), `"legacy-only"`) || !strings.Contains(string(legacyRaw), `"mcpDisabled"`) {
+		t.Fatalf("legacy source should retain the server and add a compatibility disable marker:\n%s", legacyRaw)
+	}
+}
+
 func TestMigrateMCPToUserConfigOnUpgradeDoesNotMarkEmptyScan(t *testing.T) {
 	_, _, _ = legacyHome(t)
 	res, err := MigrateMCPToUserConfigOnUpgrade(nil)

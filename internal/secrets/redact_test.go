@@ -33,6 +33,40 @@ func TestRedactMasksCommonSecretShapes(t *testing.T) {
 	}
 }
 
+func TestRedactMasksJSONQuotedKeys(t *testing.T) {
+	in := `http 401: {"access_token":"sk-live-secret","x-api-key":"header-secret","password":"pw-secret"}`
+	got := Redact(in)
+	for _, leaked := range []string{"sk-live-secret", "header-secret", "pw-secret"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("JSON credential leaked %q in:\n%s", leaked, got)
+		}
+	}
+	if !strings.Contains(got, `"access_token":"`) || !strings.Contains(got, "http 401") {
+		t.Fatalf("non-secret structure mangled:\n%s", got)
+	}
+	if again := Redact(got); again != got {
+		t.Fatalf("JSON redaction not idempotent:\nonce:  %q\ntwice: %q", got, again)
+	}
+}
+
+func TestRedactMasksCookieHeaderValues(t *testing.T) {
+	in := "Cookie: session=cookie-secret\nSet-Cookie: sid=abc123def456; Path=/; HttpOnly"
+	got := Redact(in)
+	for _, leaked := range []string{"cookie-secret", "abc123def456"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("cookie value leaked %q in:\n%s", leaked, got)
+		}
+	}
+	for _, want := range []string{"Cookie: session=[redacted]", "Set-Cookie: sid=[redacted]", "HttpOnly"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("redacted output missing %q:\n%s", want, got)
+		}
+	}
+	if again := Redact(got); again != got {
+		t.Fatalf("cookie redaction not idempotent:\nonce:  %q\ntwice: %q", got, again)
+	}
+}
+
 func TestRedactMasksNonBearerAuthorizationSchemes(t *testing.T) {
 	in := strings.Join([]string{
 		"Authorization: Basic dXNlcjpwYXNzd29yZA==",

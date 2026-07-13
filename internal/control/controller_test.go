@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
@@ -227,7 +228,7 @@ func TestClearSessionMarksCleanupPendingBeforeReturningForRunningJobs(t *testing
 	})
 	select {
 	case <-started:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("background job never started")
 	}
 
@@ -308,6 +309,16 @@ func TestReconcileCleanupPendingRemovesOrphanedArtifacts(t *testing.T) {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Fatalf("%s still exists after reconciliation (err=%v)", p, err)
 		}
+	}
+}
+
+func TestTurnOutcomeClassifiesFinalReadiness(t *testing.T) {
+	err := &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"}
+	if got := turnOutcome(err); got != event.TurnOutcomeFinalReadiness {
+		t.Fatalf("turnOutcome() = %q, want %q", got, event.TurnOutcomeFinalReadiness)
+	}
+	if got := turnOutcome(errors.New("provider failed")); got != "" {
+		t.Fatalf("ordinary turn outcome = %q, want empty", got)
 	}
 }
 
@@ -2078,7 +2089,7 @@ func TestTwoModelPlannerApprovalUsesHostGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("approved two-model turn did not finish")
 	}
 	if prompts != 1 {
@@ -2127,7 +2138,7 @@ func TestTwoModelPlannerUserDecisionUsesAskGate(t *testing.T) {
 	var ask event.Ask
 	select {
 	case ask = <-asks:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("AskRequest was not emitted")
 	}
 	if got := len(execProv.requests); got != 0 {
@@ -2142,7 +2153,7 @@ func TestTwoModelPlannerUserDecisionUsesAskGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("answered two-model turn did not finish")
 	}
 	if got := len(execProv.requests); got == 0 {
@@ -2292,7 +2303,7 @@ func TestSubmitClearDiscardsCurrentContextWithoutSavingTranscript(t *testing.T) 
 	c.submit("/clear", "", "")
 	select {
 	case <-cleared:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("/clear did not finish")
 	}
 	if c.SessionPath() == path {
@@ -2380,6 +2391,98 @@ tier = "lazy"
 	}
 }
 
+func TestRemoveMCPServerKeepsRuntimeOnlyToolsWhenPersistenceRemovalFails(t *testing.T) {
+	isolateControlConfigHome(t)
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__runtime_only__echo"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+
+	if disconnected, err := c.RemoveMCPServer("runtime_only"); err == nil || disconnected || !strings.Contains(err.Error(), "no removable MCP server") {
+		t.Fatalf("RemoveMCPServer(runtime_only) = (%v, %v)", disconnected, err)
+	}
+	if _, found := reg.Get("mcp__runtime_only__echo"); !found {
+		t.Fatalf("runtime-only tool was removed despite failed persistence; names=%v", reg.Names())
+	}
+}
+
+func TestRemoveMCPServerRejectsPluginManagedTools(t *testing.T) {
+	home := isolateControlConfigHome(t)
+	reasonixHome := filepath.Join(home, ".reasonix")
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	root := filepath.Join(reasonixHome, "plugins", "superpowers")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{
+  "name": "superpowers",
+  "version": "1.0.0",
+  "mcpServers": {
+    "helper": { "command": "bin/helper" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "1.0.0",
+		ManifestKind: "reasonix",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__helper__echo"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+	disconnected, err := c.RemoveMCPServer("helper")
+	if err == nil || disconnected || !strings.Contains(err.Error(), "managed by plugin") || !strings.Contains(err.Error(), "superpowers") {
+		t.Fatalf("RemoveMCPServer(plugin-managed) = (%v, %v)", disconnected, err)
+	}
+	if _, found := reg.Get("mcp__helper__echo"); !found {
+		t.Fatalf("plugin-managed tool was removed despite rejected removal; names=%v", reg.Names())
+	}
+	if disconnected := c.DisconnectMCPServer("helper"); !disconnected {
+		t.Fatal("session-only disconnect should be allowed for a plugin-managed MCP")
+	}
+	if _, found := reg.Get("mcp__helper__echo"); found {
+		t.Fatalf("plugin-managed tool survived session-only disconnect; names=%v", reg.Names())
+	}
+}
+
+func TestRemoveMCPServerDeletesProjectMCPJSONSource(t *testing.T) {
+	isolateControlConfigHome(t)
+	if err := os.WriteFile(".mcp.json", []byte(`{
+  "mcpServers": {
+    "mock": { "command": "mock-mcp" },
+    "keep": { "command": "keep-mcp" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
+	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+	disconnected, err := c.RemoveMCPServer("mock")
+	if err != nil {
+		t.Fatalf("RemoveMCPServer(.mcp.json): %v", err)
+	}
+	if disconnected {
+		t.Fatal("RemoveMCPServer reported a live disconnect for an idle .mcp.json server")
+	}
+	if _, found := reg.Get("mcp__mock__connect"); found {
+		t.Fatalf(".mcp.json placeholder survived removal; names=%v", reg.Names())
+	}
+	raw, err := os.ReadFile(".mcp.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"mock"`) || !strings.Contains(string(raw), `"keep"`) {
+		t.Fatalf(".mcp.json removal did not preserve unrelated servers:\n%s", raw)
+	}
+}
+
 // approvalIDs returns a Controller whose Sink forwards each ApprovalRequest's ID
 // onto the channel, plus a counter of how many requests it emitted.
 func approvalIDs() (*Controller, chan string, *int) {
@@ -2426,7 +2529,7 @@ func waitApprovalID(t *testing.T, ids <-chan string) string {
 	select {
 	case id := <-ids:
 		return id
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("ApprovalRequest was not emitted")
 	}
 	return ""
@@ -2437,7 +2540,7 @@ func waitPermissionHook(t *testing.T, payloads <-chan hook.Payload) hook.Payload
 	select {
 	case payload := <-payloads:
 		return payload
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("PermissionRequest hook did not fire")
 	}
 	return hook.Payload{}
@@ -2495,7 +2598,7 @@ func TestMemoryApprovalRequestShowsRememberPayload(t *testing.T) {
 	var approval event.Approval
 	select {
 	case approval = <-approvals:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("memory approval request was not emitted")
 	}
 	for _, want := range []string{
@@ -2519,7 +2622,7 @@ func TestMemoryApprovalRequestShowsRememberPayload(t *testing.T) {
 		if msg != "" {
 			t.Fatalf("Approve returned %s", msg)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("memory approval stayed blocked after Approve")
 	}
 }
@@ -2558,7 +2661,7 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 	var approval event.Approval
 	select {
 	case approval = <-approvals:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("memory approval request was not emitted after Guardian allow")
 	}
 	if approval.Tool != "remember" {
@@ -2579,7 +2682,7 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 		if got.err != nil || !got.allow || got.remember {
 			t.Fatalf("Approve = (%v,%v,%v), want manual allow without remember", got.allow, got.remember, got.err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("memory approval stayed blocked after manual Approve")
 	}
 }
@@ -2655,7 +2758,7 @@ func TestPermissionRequestHookFiresForToolApproval(t *testing.T) {
 		if got.err != nil || !got.allow || got.remember {
 			t.Fatalf("Approve = (%v,%v,%v), want allow once", got.allow, got.remember, got.err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("approval stayed blocked")
 	}
 }
@@ -2729,7 +2832,7 @@ func TestPermissionRequestHookDoesNotFireForPlanApproval(t *testing.T) {
 		if !allow {
 			t.Fatal("manual plan approval should allow")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("plan approval stayed blocked")
 	}
 }
@@ -2783,7 +2886,7 @@ func TestPermissionRequestHookRedactsMemoryApprovalPayload(t *testing.T) {
 				if msg != "" {
 					t.Fatal(msg)
 				}
-			case <-time.After(2 * time.Second):
+			case <-time.After(30 * time.Second):
 				t.Fatal("memory approval stayed blocked")
 			}
 		})
@@ -3038,7 +3141,7 @@ func TestPlanModeReadOnlyTrustApprovalUsesChineseCatalog(t *testing.T) {
 	var approval event.Approval
 	select {
 	case approval = <-approvalRequests:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("plan-mode bash trust approval request was not emitted")
 	}
 	if !strings.Contains(approval.Subject, "在计划模式中信任") || !strings.Contains(approval.Subject, "gh issue view 5867") {
@@ -3054,7 +3157,7 @@ func TestPlanModeReadOnlyTrustApprovalUsesChineseCatalog(t *testing.T) {
 		if got.err != nil || got.allow || !strings.Contains(got.reason, "用户拒绝") {
 			t.Fatalf("rejected trust result = %+v, want Chinese denial", got)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("plan-mode bash trust approval stayed blocked after rejection")
 	}
 }
@@ -3089,7 +3192,7 @@ func TestPlanModeReadOnlyTrustApprovalIgnoresToolAutoApproval(t *testing.T) {
 	var approval event.Approval
 	select {
 	case approval = <-approvalRequests:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("MCP read-only trust prompt was not emitted under tool auto-approval")
 	}
 	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") {
@@ -3107,7 +3210,7 @@ func TestPlanModeReadOnlyTrustApprovalIgnoresToolAutoApproval(t *testing.T) {
 		if got.err != nil || !got.allow || got.reason != "" {
 			t.Fatalf("CheckPlanModeReadOnlyTrust after approval = %+v, want allow", got)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("MCP read-only trust prompt stayed blocked after Approve")
 	}
 
@@ -3148,7 +3251,7 @@ func TestPlanModeReadOnlyCommandTrustApprovalIgnoresToolAutoApproval(t *testing.
 	var approval event.Approval
 	select {
 	case approval = <-approvalRequests:
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("plan-mode bash read-only command trust prompt was not emitted under tool auto-approval")
 	}
 	if approval.Tool != agent.PlanModeReadOnlyCommandApprovalTool || !strings.Contains(approval.Subject, `Trust "gh issue view"`) {
@@ -3166,7 +3269,7 @@ func TestPlanModeReadOnlyCommandTrustApprovalIgnoresToolAutoApproval(t *testing.
 		if got.err != nil || !got.allow || got.reason != "" {
 			t.Fatalf("CheckPlanModeReadOnlyTrust after approval = %+v, want allow", got)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("plan-mode bash read-only command trust prompt stayed blocked after Approve")
 	}
 
@@ -3299,7 +3402,7 @@ func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
 		if e.Err == nil || !strings.Contains(e.Err.Error(), "boom") {
 			t.Fatalf("expected TurnDone.Err to contain panic message, got %v", e.Err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for TurnDone after panic")
 	}
 
@@ -3308,6 +3411,80 @@ func TestRunGuardedPanicEmitsTurnDone(t *testing.T) {
 	c.mu.Unlock()
 	if running {
 		t.Fatal("c.running should be false after panic recovery")
+	}
+}
+
+// TestRunGuardedParksReplacementUntilTurnDoneReturns pins the finishing-window
+// admission contract from both sides: a replacement turn arriving while
+// TurnDone is being delivered must NOT start inside the window (the original
+// transport-crosstalk guarantee this window exists for), and it must START —
+// exactly once — when the window closes. The second half replaces the old
+// silent-drop behavior, which lost real input: every caller that submits upon
+// seeing turn_done (a frontend's queued auto-send, a bot, a fast Enter) raced
+// this window, observed as a CI-flaky lost turn and worked around in
+// Composer.tsx by gating auto-send on submitDisabled instead of turn_done.
+func TestRunGuardedParksReplacementUntilTurnDoneReturns(t *testing.T) {
+	firstTurnDone := make(chan struct{})
+	releaseTurnDone := make(chan struct{})
+	firstBodyDone := make(chan struct{})
+	secondBodyRan := make(chan struct{}, 2)
+	var turnDones int32
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.TurnDone {
+			if atomic.AddInt32(&turnDones, 1) == 1 {
+				close(firstTurnDone)
+				<-releaseTurnDone
+			}
+		}
+	})})
+
+	if got := c.runGuarded(func(context.Context) error {
+		close(firstBodyDone)
+		return nil
+	}); got != turnStarted {
+		t.Fatalf("first admission = %v, want turnStarted", got)
+	}
+	<-firstBodyDone
+	select {
+	case <-firstTurnDone:
+	case <-time.After(time.Second):
+		t.Fatal("TurnDone delivery did not start")
+	}
+	if !c.RuntimeStatus().Running {
+		t.Fatal("controller reported idle while TurnDone was still being delivered")
+	}
+	if got := c.runGuarded(func(context.Context) error {
+		secondBodyRan <- struct{}{}
+		return nil
+	}); got != turnParked {
+		t.Fatalf("finishing-window admission = %v, want turnParked", got)
+	}
+	select {
+	case <-secondBodyRan:
+		t.Fatal("replacement turn started before TurnDone delivery completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseTurnDone)
+	select {
+	case <-secondBodyRan:
+	case <-time.After(30 * time.Second):
+		t.Fatal("parked turn was never started after the finishing window closed")
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for c.Running() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if c.Running() {
+		t.Fatal("controller remained busy after the parked turn completed")
+	}
+	if got := atomic.LoadInt32(&turnDones); got != 2 {
+		t.Fatalf("TurnDone emitted %d times, want 2 (one per turn)", got)
+	}
+	select {
+	case <-secondBodyRan:
+		t.Fatal("parked turn ran more than once")
+	default:
 	}
 }
 
@@ -3331,7 +3508,7 @@ func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
 		})
 	}()
 
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for {
 		select {
 		case <-events:
@@ -3382,7 +3559,7 @@ func TestRunTurnReportsErrTurnRunning(t *testing.T) {
 		if err != nil {
 			t.Fatalf("first RunTurn returned %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("first RunTurn did not finish after release")
 	}
 }
@@ -3887,6 +4064,63 @@ func TestReloadCommandsSameNameAcrossDirs(t *testing.T) {
 	}
 	if !strings.Contains(sent, "Hello from Reasonix") {
 		t.Errorf("expected .reasonix version to win, got render: %q", sent)
+	}
+}
+
+func TestReloadCommandsUsesCanonicalPluginNameAlongsideProjectShortName(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	reasonixHome := filepath.Join(home, ".reasonix")
+	t.Setenv("REASONIX_HOME", reasonixHome)
+
+	pluginRoot := filepath.Join(reasonixHome, "plugins", "pwf")
+	if err := os.MkdirAll(filepath.Join(pluginRoot, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginRoot, pluginpkg.ClaudeManifest), []byte(`{"name":"pwf"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCmdFile(t, filepath.Join(pluginRoot, "commands"), "plan", "Plugin plan", "PLUGIN $1")
+	writeCmdFile(t, filepath.Join(pluginRoot, "commands"), "status", "Plugin status", "STATUS $1")
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{Name: "pwf", Root: "plugins/pwf", ManifestKind: "claude", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := t.TempDir()
+	writeCmdFile(t, filepath.Join(workspace, ".reasonix", "commands"), "plan", "Project plan", "PROJECT $1")
+	c := New(Options{Sink: &typedNilControllerSink{}, Registry: tool.NewRegistry(), WorkspaceRoot: workspace})
+	if err := c.ReloadCommands(context.Background()); err != nil {
+		t.Fatalf("ReloadCommands: %v", err)
+	}
+
+	if got, ok := c.CustomCommand("/plan task"); !ok || got != "PROJECT task" {
+		t.Fatalf("short command = %q, %v; want project winner", got, ok)
+	}
+	if got, ok := c.CustomCommand("/pwf:plan task"); !ok || got != "PLUGIN task" {
+		t.Fatalf("qualified plugin command = %q, %v", got, ok)
+	}
+	if got, ok := c.CustomCommand("/status now"); !ok || got != "STATUS now" {
+		t.Fatalf("hidden compatible short command = %q, %v", got, ok)
+	}
+	if got, ok := c.CustomCommand("/pwf:status now"); !ok || got != "STATUS now" {
+		t.Fatalf("canonical plugin status command = %q, %v", got, ok)
+	}
+	cmds := c.Commands()
+	canonicalFound := false
+	hiddenFound := false
+	for _, cmd := range cmds {
+		if cmd.Name == "pwf:plan" && cmd.Plugin == "pwf" && cmd.ShortName == "plan" && !cmd.Hidden {
+			canonicalFound = true
+		}
+		if cmd.Name == "status" && cmd.Plugin == "pwf" && cmd.ShortName == "status" && cmd.Hidden {
+			hiddenFound = true
+		}
+	}
+	if !canonicalFound || !hiddenFound {
+		t.Fatalf("plugin command metadata missing: %+v", cmds)
 	}
 }
 

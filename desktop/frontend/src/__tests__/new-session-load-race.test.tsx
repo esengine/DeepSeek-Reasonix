@@ -170,6 +170,10 @@ window.go = {
       NewSession: async () => {
         newSessionCalls += 1;
       },
+      NewSessionForTab: async (tabID: string) => {
+        if (tabID !== "tab-a") throw new Error(`unexpected new-session target ${tabID}`);
+        newSessionCalls += 1;
+      },
     } as Partial<AppBindings> as AppBindings,
   },
 };
@@ -196,7 +200,7 @@ await act(async () => {
   await controller?.newSession();
   await flushPromises();
 });
-eq(newSessionCalls, 1, "NewSession is called once");
+eq(newSessionCalls, 1, "tab-scoped NewSession is called once");
 eq(controller?.state.items.length, 0, "new session clears the visible transcript");
 
 await act(async () => {

@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { TranscriptSelectionMenu } from "./components/TranscriptSelectionMenu";
 import { installGlobalCrashHandlers, installPerformancePressureMonitor } from "./lib/crash";
 import { installWailsNonFileDragErrorSuppression } from "./lib/bridge";
 import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
@@ -83,6 +84,7 @@ createRoot(root).render(
       <LocaleProvider>
         <ToastProvider>
           <App />
+          <TranscriptSelectionMenu />
         </ToastProvider>
       </LocaleProvider>
     </ErrorBoundary>

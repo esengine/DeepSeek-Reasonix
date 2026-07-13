@@ -123,6 +123,35 @@ func TestParallelTasksInjectsWorkspaceContextIntoChildren(t *testing.T) {
 	}
 }
 
+// TestParallelTasksDeliveryClassifiesPristinePrompt pins the trusted
+// classifier channel on the parallel_tasks path: delivery intent must be
+// judged from the child's pristine prompt, not the workspace-wrapped text.
+// The wrapper is long enough that the IsTask length fallback classifies it as
+// a task; without ClassifierTaskText a plain conversational child ("Who are
+// you?") would be required to produce work receipts it has no reason to earn
+// and would exhaust final-answer readiness instead of answering.
+func TestParallelTasksDeliveryClassifiesPristinePrompt(t *testing.T) {
+	workspace := t.TempDir()
+	task := NewTaskTool(promptRoutingProvider{}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort").
+		WithDeliveryProfile(true)
+	parallel := NewParallelTasksTool(task, tool.NewRegistry())
+	ctx := withCallContext(context.Background(), "parallel-call", event.Discard, nil, false)
+
+	out, err := parallel.Execute(ctx, json.RawMessage(`{"tasks":[{"prompt":"Who are you?"},{"prompt":"Nice to meet you"}]}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out, "readiness") {
+		t.Fatalf("delivery readiness leaked into a conversational parallel child: %q", out)
+	}
+	// The echo provider replays the child's full user turn; both children must
+	// have answered (their prompts echo back with the trailing " ok").
+	if !strings.Contains(out, "Who are you?") || !strings.Contains(out, "Nice to meet you") || strings.Count(out, " ok") < 2 {
+		t.Fatalf("parallel output = %q, want both children's answers", out)
+	}
+}
+
 // TestParallelTasksInheritLanguagePreferencesFromContext pins parallel children
 // to the same transient language injection the task tool applies: both the
 // response- and reasoning-language blocks must reach each child's user turn.
@@ -293,5 +322,13 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 				t.Fatalf("childMaxSteps(parent=%d, requested=%d) = %d, want %d", tc.parent, tc.requested, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
+	task := (&TaskTool{}).WithDeliveryProfile(true)
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1)
+	if !opts.DeliveryProfile {
+		t.Fatal("sub-agent options did not inherit delivery profile")
 	}
 }

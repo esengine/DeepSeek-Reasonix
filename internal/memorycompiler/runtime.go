@@ -1845,10 +1845,17 @@ var verificationCommandMarkers = []string{
 }
 
 func isVerificationToolRecord(rec ToolRecord) bool {
-	if rec.Blocked || !strings.EqualFold(strings.TrimSpace(rec.Name), "bash") {
+	return !rec.Blocked && IsVerificationToolCall(rec.Name, rec.Args)
+}
+
+// IsVerificationToolCall reports whether a persisted tool call is a shell
+// command whose exit status provides implementation evidence. It intentionally
+// returns only a boolean so diagnostic callers never need to expose arguments.
+func IsVerificationToolCall(name, args string) bool {
+	if !strings.EqualFold(strings.TrimSpace(name), "bash") {
 		return false
 	}
-	args := strings.ToLower(rec.Args)
+	args = strings.ToLower(args)
 	if args == "" {
 		return false
 	}

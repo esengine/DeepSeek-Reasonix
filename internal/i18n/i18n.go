@@ -208,6 +208,7 @@ type Messages struct {
 	CmdResume           string // /resume
 	CmdRename           string // /rename
 	CmdModel            string // /model
+	CmdWorkMode         string // /work-mode
 	CmdMemory           string // /memory
 	CmdMigrate          string // /migrate
 	CmdGoal             string // /goal
@@ -277,37 +278,50 @@ type Messages struct {
 	ListMcpNone         string // no mcp servers
 
 	// in-chat memory/model/rewind notices.
-	MemoryNone             string
-	MemoryLoaded           string
-	MemorySavedHeader      string
-	MemoryStoredUnderFmt   string
-	MemoryEditHint         string
-	ForgetUsage            string
-	ForgetDoneFmt          string
-	QuickRememberEmpty     string
-	QuickRememberDoneFmt   string
-	GoalEmpty              string
-	GoalCurrentFmt         string
-	GoalSetFmt             string
-	GoalCleared            string
-	ModelSwitchUnavailable string
-	ModelSwitchBusy        string
-	ModelAlreadyOnFmt      string
-	ModelSwitchingFmt      string
-	ModelSwitchedFmt       string
-	ModelListHeader        string
-	RewindNone             string
-	RewindCodeConversation string
-	RewindConversationOnly string
-	RewindCodeOnly         string
-	RewindFork             string
-	RewindSummarizeFrom    string
-	RewindSummarizeUpto    string
-	RewindPickTitle        string
-	RewindPickHint         string
-	RewindRestoreTitleFmt  string
-	RewindApplyHint        string
-	RewindEmpty            string
+	MemoryNone                string
+	MemoryLoaded              string
+	MemorySavedHeader         string
+	MemoryStoredUnderFmt      string
+	MemoryEditHint            string
+	ForgetUsage               string
+	ForgetDoneFmt             string
+	QuickRememberEmpty        string
+	QuickRememberDoneFmt      string
+	GoalEmpty                 string
+	GoalCurrentFmt            string
+	GoalSetFmt                string
+	GoalCleared               string
+	ModelSwitchUnavailable    string
+	ModelSwitchBusy           string
+	ModelAlreadyOnFmt         string
+	ModelSwitchingFmt         string
+	ModelSwitchedFmt          string
+	ModelListHeader           string
+	RuntimeSwitchPending      string
+	WorkModeStatusFmt         string
+	WorkModeListHeaderFmt     string
+	WorkModeListHint          string
+	WorkModeEconomyDesc       string
+	WorkModeBalancedDesc      string
+	WorkModeDeliveryDesc      string
+	WorkModeUsage             string
+	WorkModeSwitchUnavailable string
+	WorkModeSwitchBusy        string
+	WorkModeAlreadyOnFmt      string
+	WorkModeSwitchingFmt      string
+	WorkModeSwitchedFmt       string
+	RewindNone                string
+	RewindCodeConversation    string
+	RewindConversationOnly    string
+	RewindCodeOnly            string
+	RewindFork                string
+	RewindSummarizeFrom       string
+	RewindSummarizeUpto       string
+	RewindPickTitle           string
+	RewindPickHint            string
+	RewindRestoreTitleFmt     string
+	RewindApplyHint           string
+	RewindEmpty               string
 
 	// skill picker overlay (/skills interactive panel in CLI TUI)
 	SkillPickerTitle             string
@@ -356,17 +370,50 @@ type Messages struct {
 	SkillPickerStatusUnreadable  string // "unreadable" path status label
 
 	// init wizard
-	SelectProvidersLabel  string // multi-select label
-	EnterAPIKeysHeader    string // header before the per-env-var prompts
-	MissingKeyIntro       string // shown when re-running the key step on a configured setup
-	WroteFileFmt          string // "Wrote %s" — used for reasonix.toml and .env both
-	SetupComplete         string // success line at end of init
-	SetupCancelled        string // shown when the user aborts the wizard
-	TryHintFmt            string // "Try: %s" — %s = command to try (styled)
-	NextHint              string // non-interactive post-write hint
-	ConfirmReconfigureFmt string // "%s already exists. Reconfigure and overwrite?"
-	KeepingExisting       string // when the user declines to overwrite
-	NotOverwritingFmt     string // non-interactive overwrite refusal
+	SelectProvidersLabel     string // multi-select label
+	EnterAPIKeysHeader       string // header before the per-env-var prompts
+	MissingKeyIntro          string // shown when re-running the key step on a configured setup
+	WroteFileFmt             string // "Wrote %s" — used for reasonix.toml and .env both
+	SetupComplete            string // success line at end of init
+	SetupCancelled           string // shown when the user aborts the wizard
+	TryHintFmt               string // "Try: %s" — %s = command to try (styled)
+	NextHint                 string // non-interactive post-write hint
+	ConfirmReconfigureFmt    string // "%s already exists. Reconfigure and overwrite?"
+	KeepingExisting          string // when the user declines to overwrite
+	NotOverwritingFmt        string // non-interactive overwrite refusal
+	SetupManagerTitle        string
+	SetupAddOpenAI           string
+	SetupAddAnthropic        string
+	SetupProviderExistsFmt   string
+	SetupSaveExit            string
+	SetupSaveExitDesc        string
+	SetupCancel              string
+	SetupCancelDesc          string
+	SetupModelsUnit          string
+	SetupKeySet              string
+	SetupKeyMissing          string
+	SetupDefaultBadge        string
+	SetupProviderActionsFmt  string
+	SetupEditProvider        string
+	SetupUpdateKey           string
+	SetupTestRefresh         string
+	SetupSetDefault          string
+	SetupRemoveProvider      string
+	SetupBack                string
+	SetupPromptModels        string
+	SetupSharedKeyWarningFmt string
+	SetupPromptAPIKeyFmt     string
+	SetupSelectDefaultModel  string
+	SetupConfirmRemoveFmt    string
+	SetupSummaryTitle        string
+	SetupSummaryAddedFmt     string
+	SetupSummaryEditedFmt    string
+	SetupSummaryRemovedFmt   string
+	SetupSummaryDefaultFmt   string
+	SetupSummaryKeysFmt      string
+	SetupSummaryNoChanges    string
+	SetupConfirmSave         string
+	SetupConcurrentChangeFmt string
 
 	// model fetching
 	FetchingModelsFmt          string // "Fetching models for %s..."
@@ -381,6 +428,8 @@ type Messages struct {
 	SkipStaleCustomEntryFmt    string // "skipping stale %q entry from reasonix.toml (pointing at %s) — please remove it"
 	APIKeyAlreadySetFmt        string // "reusing existing value for %s"
 	APIKeyResetPromptFmt       string // "Re-enter %s?"
+	InvalidAPIKeyEnvFmt        string // "%q is not a valid API Key variable name..."
+	RepairedAPIKeyEnvFmt       string // "provider %s: replaced invalid api_key_env %q with %q"
 
 	// custom provider
 	CustomProviderLabel  string // "Custom Model"

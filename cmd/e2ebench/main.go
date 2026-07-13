@@ -37,11 +37,28 @@ type runMetrics struct {
 	Cost             float64 `json:"cost"`
 	Currency         string  `json:"currency"`
 	Compactions      int     `json:"compactions"`
+
+	// Optional Delivery capability counters (omitempty for baseline/old metrics).
+	ReadinessChecks            int     `json:"readiness_checks,omitempty"`
+	ReadinessRecoveries        int     `json:"readiness_recoveries,omitempty"`
+	CapabilityRoutes           int     `json:"capability_routes,omitempty"`
+	CapabilityRoutedCandidates int     `json:"capability_routed_candidates,omitempty"`
+	CapabilityRoutedRequire    int     `json:"capability_routed_require,omitempty"`
+	CapabilityRoutedPrefer     int     `json:"capability_routed_prefer,omitempty"`
+	CapabilityRoutedSuggest    int     `json:"capability_routed_suggest,omitempty"`
+	CapabilityDeclines         int     `json:"capability_declines,omitempty"`
+	CapabilitySemanticRoutes   int     `json:"capability_semantic_routes,omitempty"`
+	CapabilitySkillInvocations int     `json:"capability_skill_invocations,omitempty"`
+	CapabilityMCPCall          int     `json:"capability_mcp_call,omitempty"`
+	CapabilityReviewBlocks     int     `json:"capability_review_blocks,omitempty"`
+	CapabilityRouterCost       float64 `json:"capability_router_cost,omitempty"`
+	CapabilityRouterLatencyMs  int64   `json:"capability_router_latency_ms,omitempty"`
 }
 
 type result struct {
 	task
 	runMetrics
+	Profile string `json:"profile"`
 	Passed  bool
 	Skipped bool
 	Note    string
@@ -57,12 +74,15 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s\n\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 		fmt.Fprintf(flag.CommandLine.Output(), "  # Grade a PR's diff with a retry budget:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode diff -base origin/main -repo . -attempts 3 -timeout 1800\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
+		fmt.Fprintf(flag.CommandLine.Output(), "\n  # Run the same suite with the delivery contract:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 	}
 
 	mode := flag.String("mode", "suite", "suite | diff (diff = generate tests for the PR diff and grade with the repo's tests)")
 	suite := flag.String("suite", "benchmarks/e2e", "suite root (contains tasks/<id>/)")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
+	profileFlag := flag.String("profile", benchmarkProfileBaseline, "prompt profile: baseline | delivery")
 	outMD := flag.String("out", "", "write the markdown report here (default: stdout)")
 	outJSON := flag.String("json", "", "write the JSON report here (optional)")
 	budget := flag.Int("budget", 400_000, "abort once total tokens cross this (0 = no cap)")
@@ -74,11 +94,16 @@ func main() {
 	timeoutSec := flag.Int("timeout", 1200, "agent timeout in seconds (diff mode)")
 	attempts := flag.Int("attempts", 1, "diff mode: retry up to N times until a run passes (stochastic agent)")
 	flag.Parse()
+	profile, err := normalizeBenchmarkProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	if *mode == "diff" {
 		report := runDiff(diffOpts{
 			bin: *bin, model: *model, repo: *repo, base: *base,
-			testCmd: *testCmd, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
+			testCmd: *testCmd, profile: profile, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
 		})
 		emit(report, *outMD, "")
 		return
@@ -103,10 +128,10 @@ func main() {
 	total := 0
 	for _, t := range tasks {
 		if *budget > 0 && total >= *budget {
-			results = append(results, result{task: t, Skipped: true, Note: "skipped: token budget reached"})
+			results = append(results, result{task: t, Profile: profile, Skipped: true, Note: "skipped: token budget reached"})
 			continue
 		}
-		r := runTask(*bin, *model, t)
+		r := runTask(*bin, *model, profile, t)
 		total += r.PromptTokens + r.CompletionTokens
 		results = append(results, r)
 	}
@@ -178,8 +203,8 @@ func loadTasks(suite string) ([]task, error) {
 // runTask copies the task's seed workdir into a temp dir, runs the agent there,
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
-func runTask(bin, model string, t task) result {
-	r := result{task: t}
+func runTask(bin, model, profile string, t task) result {
+	r := result{task: t, Profile: profile}
 
 	work, err := os.MkdirTemp("", "e2ebench-"+t.ID+"-")
 	if err != nil {
@@ -206,6 +231,7 @@ func runTask(bin, model string, t task) result {
 	if t.MaxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprint(t.MaxSteps))
 	}
+	args = appendBenchmarkProfileArgs(args, profile)
 	args = append(args, t.Prompt)
 
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -268,7 +294,11 @@ func render(results []result) string {
 		}
 	}
 
-	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark\n\n")
+	profile := benchmarkProfileBaseline
+	if len(results) > 0 && results[0].Profile != "" {
+		profile = results[0].Profile
+	}
+	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark (%s)\n\n", profile)
 	fmt.Fprintf(&b, "**Accuracy:** %d/%d (%s) · **Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Compactions:** %d · **Cost:** %s%.4f\n\n",
 		passed, ran, pct(passed, ran), pct(hit, hit+miss),
 		comma(pTok+cTok), comma(pTok), comma(cTok), compacts, currencySym(currency), cost)

@@ -41,11 +41,40 @@ The test checks that every registered built-in tool has a documented name, read-
 In a default full-token boot, Reasonix sends the built-in tools above plus the
 session, memory, skill, subagent, LSP, install, and slash-command tools below:
 
+The Balanced runtime profile uses this exact tool surface. Delivery keeps every
+Balanced tool and adds one stable proxy, `use_capability`, so optional MCP
+servers (including `auto_start=false`) can be inspected and called without
+changing provider-visible schemas mid-session. Delivery also adds a stable
+execution contract enforced by the host: state-changing and verification
+commands need acceptance criteria; changed work cannot finalize without
+post-change review, verification, and an evidence-backed `complete_step`
+sign-off; Skill/MCP `require`/`prefer` routes are gated with host-proven
+evidence (including read-only answers — ordinary reads never skip a required
+capability); and medium/high-risk mutations force structured `review` /
+`security_review` results via the review-only `review_report` tool, whose
+`reviewed_paths` must be backed by host-observed read/diff receipts.
+
+`use_capability` resolution is side-effect free: `action=call` on a
+not-yet-connected server resolves to a deferred target, plan mode re-checks
+the real target's read-only classification, and the server process starts only
+after the permission gate and PreToolUse hooks approve the call. On-demand
+children share the session lifetime (they outlive the starting call and exit
+with the session); `action=inspect` lists live tools for connected servers and
+cached schemas otherwise, never starting a process. First discovery of a
+server with no schema cache goes through `action=call` on the `mcp-server:`
+id itself: it resolves to a gated connect (permission name = the server's
+dedicated `mcp_connect__<server>` identity, so an exact rule such as
+`deny = ["mcp_connect__github"]` blocks process startup) that connects after
+approval and returns the live tool directory. MCP tool rules remain exact;
+`mcp__github__*` is not a tool-name glob.
+
 `ask`, `explore`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+Delivery only: `use_capability` (`action` = `inspect` | `call` | `decline`).
 
 `internal/boot.TestBootToolContractMatchesProviderVisibleSurface` verifies the
 actual boot registry contract against the provider request, including read-only

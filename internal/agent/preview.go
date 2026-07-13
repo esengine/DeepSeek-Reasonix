@@ -8,6 +8,23 @@ import (
 
 var reTransientUserBlock = regexp.MustCompile(`(?s)^\s*<(?:response-language|reasoning-language|memory-update|background-jobs|active-goal|hook-context|capability-route)(?:\s+[^>]*)?>.*?</(?:response-language|reasoning-language|memory-update|background-jobs|active-goal|hook-context|capability-route)>\s*\n?`)
 
+// stripTrailingDeliveryRuntime removes the exact delivery-runtime marker the
+// agent appends to user turns in delivery mode (agent.go DeliveryRuntimeMarker).
+// Unlike the prefix blocks it trails the user text, so preview/title derivation
+// needs a suffix cut — leaving it produced session titles like
+// "你是谁？ <delivery-run…". The cut is byte-exact rather than a regex: a lazy
+// pattern anchored at $ would swallow user prose between a literal
+// "<delivery-runtime>" mention in the text and the real marker at the end.
+// (The agent never appends the marker when the input already mentions the tag,
+// so user messages discussing it carry no host suffix at all.)
+func stripTrailingDeliveryRuntime(s string) string {
+	trimmed := strings.TrimRight(s, " \t\r\n")
+	if cut, ok := strings.CutSuffix(trimmed, DeliveryRuntimeMarker); ok {
+		return strings.TrimRight(cut, " \t\r\n")
+	}
+	return s
+}
+
 const memoryCompilerExecutionOpen = "<memory-compiler-execution>"
 
 var reMemoryCompilerExecution = regexp.MustCompile(`(?s)<memory-compiler-execution>\s*(.*?)\s*</memory-compiler-execution>`)
@@ -42,6 +59,7 @@ func StripTransientUserBlocks(content string) string {
 		}
 		s = next
 	}
+	s = stripTrailingDeliveryRuntime(s)
 	return strings.TrimLeft(s, " \t\r\n")
 }
 
@@ -109,4 +127,54 @@ func UserPreviewText(content string) string {
 	s = HandoffTask(s)
 	s = StripTransientUserBlocks(s)
 	return strings.TrimSpace(s)
+}
+
+// SyntheticUserPrefixes lists the openings of host-injected user-role messages
+// (readiness retries, stream recovery, goal-loop nudges, compaction folds).
+// They are persisted with role "user" for provider-contract reasons but are not
+// user-authored: previews, titles, and user-turn counts must skip them, and the
+// chat UI never renders them as user bubbles. Keep in sync with the injection
+// sites in internal/agent/agent.go, internal/agent/compact.go, and
+// internal/control (plan approval, goal loop).
+var SyntheticUserPrefixes = []string{
+	"Plan approved — plan mode is off",
+	"Host final-answer readiness check failed",
+	"You are already in the executor phase",
+	"The previous assistant response was interrupted while a tool call",
+	"The previous assistant response was interrupted during streaming",
+	"The previous assistant response was interrupted before visible",
+	"The previous assistant response finished without any visible answer",
+	"<compaction-summary>",
+	"Summary of the later conversation (compacted from here on):",
+	"Summary of earlier conversation (compacted up to here):",
+	"Continue pursuing the active goal",
+	"The agent signaled goal completion and all tasks are marked done.",
+	"Goal signaled complete but issues remain:",
+	"No tool calls in recent turns.",
+}
+
+// IsSyntheticUserText reports whether a persisted user-role message is a
+// host-injected synthetic turn rather than user-authored input.
+func IsSyntheticUserText(content string) bool {
+	trimmed := strings.TrimSpace(StripTransientUserBlocks(content))
+	for _, prefix := range SyntheticUserPrefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsUserAuthoredTurn reports whether a persisted user-role message counts as a
+// visible user turn: not a host-injected synthetic message and not a mid-turn
+// steer. Preview/title/turn-count derivations share this so a delivery
+// readiness nudge can never become a session title or inflate turn counts.
+func IsUserAuthoredTurn(content string) bool {
+	if IsSyntheticUserText(content) {
+		return false
+	}
+	if _, isSteer := SteerText(content); isSteer {
+		return false
+	}
+	return true
 }

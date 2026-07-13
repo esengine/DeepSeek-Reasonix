@@ -180,7 +180,11 @@ func (a *App) AcceptSkillSuggestionForTab(tabID string, in SkillSuggestion) (str
 	if strings.TrimSpace(in.Scope) == "global" || !st.HasProjectScope() {
 		scope = skill.ScopeGlobal
 	}
-	content := renderSkillSuggestionFile(name, desc, body)
+	// skill.RenderSkillFile yaml-escapes the free-text description; the old
+	// local string-concatenation helper produced unparseable frontmatter for a
+	// description containing ": ", which loads back as an EMPTY field map (the
+	// skill then surfaces with no description and default run semantics).
+	content := skill.RenderSkillFile(skill.SkillFileOptions{Name: name, Description: desc, Body: body})
 	return st.CreateWithContent(name, scope, content)
 }
 
@@ -477,22 +481,21 @@ func skillCandidateBody(cat workflowCategory, evidence []string) string {
 func skillStoreForWorkspace(workspaceRoot string) *skill.Store {
 	cfg, err := config.LoadForRoot(workspaceRoot)
 	var custom, excluded []string
+	var pluginPaths map[string][]string
 	maxDepth := 3
 	if err == nil && cfg != nil {
 		custom = cfg.SkillCustomPaths()
 		excluded = cfg.SkillExcludedPaths()
+		pluginPaths = cfg.PluginPackageSkillOwners()
 		maxDepth = cfg.SkillMaxDepth()
 	}
 	return skill.New(skill.Options{
 		ProjectRoot:   strings.TrimSpace(workspaceRoot),
 		CustomPaths:   custom,
+		PluginPaths:   pluginPaths,
 		ExcludedPaths: excluded,
 		MaxDepth:      maxDepth,
 	})
-}
-
-func renderSkillSuggestionFile(name, desc, body string) string {
-	return "---\nname: " + name + "\ndescription: " + desc + "\n---\n\n" + strings.TrimSpace(body) + "\n"
 }
 
 func suggestionName(given, source, fallback string) string {

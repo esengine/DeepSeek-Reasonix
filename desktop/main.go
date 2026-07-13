@@ -140,8 +140,11 @@ func main() {
 		MinHeight: 480,
 		// Match the dark UI shell so the initial webview background doesn't flash
 		// white before CSS loads — particularly visible on WebKitGTK.
-		BackgroundColour:   &options.RGBA{R: 26, G: 26, B: 46, A: 255},
-		AssetServer:        &assetserver.Options{Assets: assets, Middleware: app.workspaceMediaMiddleware()},
+		BackgroundColour: &options.RGBA{R: 26, G: 26, B: 46, A: 255},
+		AssetServer: &assetserver.Options{
+			Assets:     assets,
+			Middleware: assetserver.ChainMiddleware(app.jsProfilingMiddleware(), app.workspaceMediaMiddleware()),
+		},
 		OnStartup:          app.startup,
 		OnDomReady:         app.domReady,
 		OnBeforeClose:      app.beforeClose,

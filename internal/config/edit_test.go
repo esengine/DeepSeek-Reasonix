@@ -344,6 +344,9 @@ func TestSetAutoPlan(t *testing.T) {
 
 func TestSetDesktopDefaultToolApprovalMode(t *testing.T) {
 	c := Default()
+	if got := c.DesktopDefaultToolApprovalMode(); got != "auto" {
+		t.Fatalf("desktop default tool approval mode = %q, want built-in auto", got)
+	}
 	for _, mode := range []string{"ask", "auto", "yolo"} {
 		if err := c.SetDesktopDefaultToolApprovalMode(mode); err != nil {
 			t.Fatalf("SetDesktopDefaultToolApprovalMode(%q): %v", mode, err)
@@ -360,6 +363,16 @@ func TestSetDesktopDefaultToolApprovalMode(t *testing.T) {
 	}
 	if err := c.SetDesktopDefaultToolApprovalMode("maybe"); err == nil {
 		t.Fatal("expected error for invalid desktop default tool approval mode")
+	}
+}
+
+func TestLoadForEditMissingDesktopApprovalDefaultsAuto(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("config_version = 4\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if got := LoadForEdit(path).DesktopDefaultToolApprovalMode(); got != "auto" {
+		t.Fatalf("missing desktop default tool approval mode = %q, want auto", got)
 	}
 }
 
@@ -469,10 +482,11 @@ func TestUpsertProvider(t *testing.T) {
 
 	// Missing required fields error.
 	for _, bad := range []ProviderEntry{
-		{Kind: "openai", BaseURL: "u", Model: "m"}, // no name
-		{Name: "a", BaseURL: "u", Model: "m"},      // no kind
-		{Name: "a", Kind: "openai", Model: "m"},    // no base_url
-		{Name: "a", Kind: "openai", BaseURL: "u"},  // no model
+		{Kind: "openai", BaseURL: "u", Model: "m"},                                   // no name
+		{Name: "a", BaseURL: "u", Model: "m"},                                        // no kind
+		{Name: "a", Kind: "openai", Model: "m"},                                      // no base_url
+		{Name: "a", Kind: "openai", BaseURL: "u"},                                    // no model
+		{Name: "a", Kind: "openai", BaseURL: "u", Model: "m", APIKeyEnv: "grok-4.5"}, // invalid credential variable name
 	} {
 		if err := c.UpsertProvider(bad); err == nil {
 			t.Errorf("expected validation error for %+v", bad)
@@ -1423,6 +1437,79 @@ func TestSaveToExistingProjectPersistsTopLevelDelta(t *testing.T) {
 	}
 	if got.ConfigVersion != 2 {
 		t.Fatalf("config_version = %d, want 2", got.ConfigVersion)
+	}
+}
+
+func TestSaveToExistingProjectPersistsProviderAccessWithoutReplacingDesktopSection(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[desktop]\nlegacy_preference = \"keep\"\n\n[permissions]\nallow = [\"Bash(go test:*)\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := LoadForEditWithoutCredentials(projectPath)
+	cfg.Desktop.ProviderAccess = []string{"project-relay"}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{`provider_access = ["project-relay"]`, `legacy_preference = "keep"`, `[permissions]`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("existing project config missing %q after provider access update:\n%s", want, text)
+		}
+	}
+	cfg.Desktop.ProviderAccess = []string{}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo explicit empty access: %v", err)
+	}
+	body, err = os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "provider_access = []") {
+		t.Fatalf("explicit empty project provider access was not persisted:\n%s", body)
+	}
+}
+
+func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) {
+	a := ProviderEntry{Name: "relay", Kind: "openai", BaseURL: "https://relay.example/v1", Model: "m", APIKeyEnv: "RELAY_API_KEY"}
+	b := a
+	a.resolvedAPIKey = "old-secret"
+	a.resolvedSource = CredentialSource{Kind: CredentialSourceCredentials, Label: "old"}
+	b.resolvedAPIKey = "new-secret"
+	b.resolvedSource = CredentialSource{Kind: CredentialSourceEnvironment, Label: "new"}
+	if !ProviderEntriesConfigEqual(a, b) {
+		t.Fatal("runtime-only credential state caused a persisted provider conflict")
+	}
+	b.Headers = map[string]string{"X-External": "changed"}
+	if ProviderEntriesConfigEqual(a, b) {
+		t.Fatal("persisted provider field change was ignored")
+	}
+	snapshot := ProviderEntryConfigSnapshot(a)
+	if snapshot.resolvedAPIKey != "" || snapshot.resolvedSource != (CredentialSource{}) {
+		t.Fatal("provider config snapshot retained runtime credential state")
+	}
+	cfg := &Config{Providers: []ProviderEntry{a}}
+	updated := a
+	updated.resolvedAPIKey = ""
+	updated.resolvedSource = CredentialSource{}
+	updated.Headers = map[string]string{"X-Replayed": "yes"}
+	if err := cfg.UpsertProviderPreservingRuntime(updated); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := cfg.Provider("relay")
+	if got.APIKey() != "old-secret" || got.Headers["X-Replayed"] != "yes" {
+		t.Fatalf("runtime-preserving upsert = %+v", got)
+	}
+	updated.APIKeyEnv = "NEW_RELAY_API_KEY"
+	if err := cfg.UpsertProviderPreservingRuntime(updated); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = cfg.Provider("relay")
+	if got.resolvedAPIKey != "" || got.resolvedSource != (CredentialSource{}) {
+		t.Fatal("runtime credential survived an api_key_env change")
 	}
 }
 

@@ -13,8 +13,10 @@ export function PromptShelf({
   note,
   quickActions,
   headerActions,
+  footer,
   barRef,
   role = "dialog",
+  decision = false,
 }: {
   className?: string;
   cardClassName?: string;
@@ -30,11 +32,25 @@ export function PromptShelf({
   note?: ReactNode;
   quickActions?: ReactNode;
   headerActions?: ReactNode;
+  // Sticky confirm bar for select-then-confirm decision surfaces.
+  footer?: ReactNode;
   barRef?: RefObject<HTMLDivElement | null>;
   role?: "dialog" | "region";
+  // Decision surfaces keep a vertical full-width option list and a fixed
+  // confirm footer; content scrolls within 55vh.
+  decision?: boolean;
 }) {
   return (
-    <div className={["prompt-shelf", className ?? ""].filter(Boolean).join(" ")} aria-live="polite">
+    <div
+      className={[
+        "prompt-shelf",
+        decision ? "prompt-shelf--decision" : "",
+        className ?? "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-live="polite"
+    >
       <div
         ref={barRef}
         className={["prompt-shelf__card", cardClassName ?? ""].filter(Boolean).join(" ")}
@@ -55,16 +71,27 @@ export function PromptShelf({
         </div>
         {crumbs}
         {children && <div className="prompt-shelf__body">{children}</div>}
-        {actions && <div className="prompt-shelf__actions">{actions}</div>}
+        {actions && <div className="prompt-shelf__actions" role="listbox">{actions}</div>}
         {note && <div className="prompt-shelf__footnote">{note}</div>}
         {quickActions && <div className="prompt-shelf__quick-actions">{quickActions}</div>}
+        {footer && <div className="prompt-shelf__footer">{footer}</div>}
       </div>
     </div>
   );
 }
 
-export function PromptBadge({ children }: { children: ReactNode }) {
-  return <span className="prompt-shelf__badge">{children}</span>;
+export function PromptBadge({ children, tone }: { children: ReactNode; tone?: "default" | "amber" | "danger" }) {
+  return (
+    <span
+      className={[
+        "prompt-shelf__badge",
+        tone === "amber" ? " prompt-shelf__badge--amber" : "",
+        tone === "danger" ? " prompt-shelf__badge--danger" : "",
+      ].join("")}
+    >
+      {children}
+    </span>
+  );
 }
 
 export function PromptHeaderAction({
@@ -101,8 +128,12 @@ export function PromptAction({
   onHoverChange,
   primary = false,
   selected = false,
+  // Keyboard cursor without implying a committed answer (multi-select).
+  active = false,
   quiet = false,
   disabled = false,
+  tone = "default",
+  role = "option",
 }: {
   keyLabel: string;
   label?: ReactNode;
@@ -116,19 +147,28 @@ export function PromptAction({
   onHoverChange?: (hovering: boolean) => void;
   primary?: boolean;
   selected?: boolean;
+  active?: boolean;
   quiet?: boolean;
   disabled?: boolean;
+  // Danger options (deny / clear) use semantic color but are never default-selected.
+  tone?: "default" | "danger";
+  role?: "option" | "button";
 }) {
   const hasCopy = description != null || (label != null && label !== "");
   return (
     <button
       type="button"
+      role={role}
+      aria-selected={role === "option" ? selected : undefined}
+      data-active={active ? "true" : undefined}
       className={[
         "prompt-action",
         primary || selected ? " prompt-action--selected" : "",
+        active ? " prompt-action--active" : "",
         quiet ? " prompt-action--quiet" : "",
         description ? " prompt-action--descriptive" : "",
         !hasCopy ? " prompt-action--key-only" : "",
+        tone === "danger" ? " prompt-action--danger" : "",
       ].join("")}
       onClick={onClick}
       disabled={disabled}
@@ -147,5 +187,38 @@ export function PromptAction({
         </span>
       )}
     </button>
+  );
+}
+
+export function DecisionConfirmBar({
+  hint,
+  confirmLabel,
+  onConfirm,
+  disabled = false,
+  confirmDisabled = false,
+  danger = false,
+}: {
+  hint: ReactNode;
+  confirmLabel: ReactNode;
+  onConfirm: () => void;
+  disabled?: boolean;
+  confirmDisabled?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div className="decision-confirm-bar">
+      <div className="decision-confirm-bar__hint">{hint}</div>
+      <button
+        type="button"
+        className={[
+          "btn btn--small decision-confirm-bar__confirm",
+          danger ? "btn--danger" : "btn--primary",
+        ].join(" ")}
+        onClick={onConfirm}
+        disabled={disabled || confirmDisabled}
+      >
+        {confirmLabel}
+      </button>
+    </div>
   );
 }

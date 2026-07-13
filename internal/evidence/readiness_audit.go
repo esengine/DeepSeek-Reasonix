@@ -13,9 +13,15 @@ const (
 // readiness gate. It lets metrics sinks count why the host blocked a final
 // answer without scraping Notice text or adding model-visible state.
 type ReadinessAudit struct {
-	Result                 ReadinessAuditResult
-	Recovered              bool
-	MissingProjectChecks   int
-	IncompleteTodos        int
-	CommandMismatchMissing int
+	Result                    ReadinessAuditResult
+	Recovered                 bool
+	MissingProjectChecks      int
+	IncompleteTodos           int
+	CommandMismatchMissing    int
+	MissingAcceptanceCriteria int
+	MissingVerification       int
+	MissingReview             int
+	MissingSignoff            int
+	MissingActionEvidence     int
+	MissingMutation           int
 }

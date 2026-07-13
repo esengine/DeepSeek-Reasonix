@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/installsource"
 	"reasonix/internal/pluginpkg"
@@ -21,9 +22,11 @@ type PluginView struct {
 	ManifestKind     string                `json:"manifestKind,omitempty"`
 	Enabled          bool                  `json:"enabled"`
 	Skills           int                   `json:"skills"`
+	Commands         int                   `json:"commands"`
 	Hooks            int                   `json:"hooks"`
 	MCPServers       int                   `json:"mcpServers"`
 	SkillDetails     []PluginSkillView     `json:"skillDetails,omitempty"`
+	CommandDetails   []PluginCommandView   `json:"commandDetails,omitempty"`
 	HookDetails      []PluginHookView      `json:"hookDetails,omitempty"`
 	MCPServerDetails []PluginMCPServerView `json:"mcpServerDetails,omitempty"`
 	Warnings         []string              `json:"warnings,omitempty"`
@@ -43,6 +46,16 @@ type PluginSkillView struct {
 	Path        string `json:"path,omitempty"`
 	Invocation  string `json:"invocation,omitempty"`
 	RunAs       string `json:"runAs,omitempty"`
+}
+
+type PluginCommandView struct {
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	ArgHint          string `json:"argHint,omitempty"`
+	Path             string `json:"path,omitempty"`
+	Invocation       string `json:"invocation,omitempty"`
+	Shadowed         bool   `json:"shadowed,omitempty"`
+	ShadowedByPlugin string `json:"shadowedByPlugin,omitempty"`
 }
 
 type PluginHookView struct {
@@ -65,6 +78,13 @@ func (a *App) Plugins() []PluginView {
 	if err != nil {
 		return []PluginView{{Error: err.Error()}}
 	}
+	a.mu.RLock()
+	ctrl := a.activeCtrlLocked()
+	a.mu.RUnlock()
+	var activeCommands []command.Command
+	if ctrl != nil {
+		activeCommands = ctrl.Commands()
+	}
 	out := make([]PluginView, 0, len(st.Plugins))
 	for _, p := range st.Plugins {
 		view := PluginView{
@@ -78,6 +98,7 @@ func (a *App) Plugins() []PluginView {
 		}
 		if pkg, warnings, err := pluginpkg.ParseDir(view.Root); err == nil {
 			applyPluginPackageDetails(&view, pkg, warnings)
+			decoratePluginCommandConflicts(&view, activeCommands)
 		} else {
 			view.Error = err.Error()
 		}
@@ -86,17 +107,47 @@ func (a *App) Plugins() []PluginView {
 	return out
 }
 
+func decoratePluginCommandConflicts(view *PluginView, commands []command.Command) {
+	if view == nil || !view.Enabled || len(view.CommandDetails) == 0 || len(commands) == 0 {
+		return
+	}
+	byName := make(map[string]command.Command, len(commands))
+	for _, cmd := range commands {
+		byName[cmd.Name] = cmd
+	}
+	for i := range view.CommandDetails {
+		detail := &view.CommandDetails[i]
+		qualified := view.Name + ":" + detail.Name
+		winner, ok := byName[qualified]
+		if !ok || winner.Plugin == view.Name && winner.ShortName == detail.Name && !winner.Hidden {
+			continue
+		}
+		detail.Shadowed = true
+		detail.ShadowedByPlugin = winner.Plugin
+	}
+}
+
 func applyPluginPackageDetails(view *PluginView, pkg pluginpkg.Package, warnings []string) {
-	view.Skills, view.Hooks, view.MCPServers = pkg.CapabilityCounts()
+	view.Skills, view.Commands, view.Hooks, view.MCPServers = pkg.CapabilityCounts()
 	view.Warnings = warnings
 	inv := pkg.Inventory()
+	view.CommandDetails = make([]PluginCommandView, 0, len(inv.Commands))
+	for _, cmd := range inv.Commands {
+		view.CommandDetails = append(view.CommandDetails, PluginCommandView{
+			Name:        cmd.Name,
+			Description: cmd.Description,
+			ArgHint:     cmd.ArgHint,
+			Path:        cmd.Path,
+			Invocation:  "/" + view.Name + ":" + cmd.Name,
+		})
+	}
 	view.SkillDetails = make([]PluginSkillView, 0, len(inv.Skills))
 	for _, sk := range inv.Skills {
 		view.SkillDetails = append(view.SkillDetails, PluginSkillView{
 			Name:        sk.Name,
 			Description: sk.Description,
 			Path:        sk.Path,
-			Invocation:  sk.Invocation,
+			Invocation:  "/" + view.Name + ":" + sk.Name,
 			RunAs:       sk.RunAs,
 		})
 	}
@@ -156,8 +207,7 @@ func (a *App) RemovePlugin(name string) error {
 			if tab == nil || tab.Ctrl == nil {
 				return false
 			}
-			removed, _ := tab.Ctrl.RemoveMCPServer(serverName)
-			return removed
+			return tab.Ctrl.DisconnectMCPServer(serverName)
 		},
 	})
 	if _, err := tl.Execute(context.Background(), raw); err != nil {

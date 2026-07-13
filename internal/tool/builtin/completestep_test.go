@@ -181,6 +181,55 @@ func TestCompleteStepAllowsManualAsUnverified(t *testing.T) {
 	}
 }
 
+func TestCompleteStepDeliveryRejectsOpaqueEvalVerification(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"node -e 'console.log(1)'"}`), true, false))
+	ctx := evidence.WithDeliveryProfile(evidence.WithLedger(context.Background(), ledger))
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Check JavaScript",
+		"result":"syntax valid",
+		"evidence":[{"kind":"verification","summary":"syntax valid","command":"node -e 'console.log(1)'"}]
+	}`))
+	if err == nil {
+		t.Fatal("delivery complete_step should reject a command the final gate cannot recognize")
+	}
+	for _, want := range []string{"not a recognized delivery verification", "node --check"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing recovery hint %q", err, want)
+		}
+	}
+}
+
+func TestCompleteStepDeliveryAcceptsNodeSyntaxCheck(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"app.js"}`), true, false))
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"node --check app.js"}`), true, false))
+	ctx := evidence.WithDeliveryProfile(evidence.WithLedger(context.Background(), ledger))
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Check JavaScript",
+		"result":"syntax valid",
+		"evidence":[{"kind":"verification","summary":"syntax valid","command":"node --check app.js"}]
+	}`)); err != nil {
+		t.Fatalf("delivery complete_step rejected node --check: %v", err)
+	}
+}
+
+func TestCompleteStepDeliveryKeepsReadOnlyEvidenceCompatibility(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"grep -n TODO app.js"}`), true, false))
+	ctx := evidence.WithDeliveryProfile(evidence.WithLedger(context.Background(), ledger))
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Inspect JavaScript",
+		"result":"TODOs inspected",
+		"evidence":[{"kind":"verification","summary":"inspection completed","command":"grep -n TODO app.js"}]
+	}`)); err != nil {
+		t.Fatalf("read-only delivery evidence regressed: %v", err)
+	}
+}
+
 func TestCompleteStepRejectsMissingProjectCheckAfterWrite(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})

@@ -40,11 +40,30 @@ go test ./internal/tool -run TestBuiltinToolContractDocumentation
 
 默认 full-token boot 会发送上面的内置工具，并额外发送 session、memory、skill、subagent、LSP、install 和 slash-command 工具：
 
+均衡（Balanced）使用这套工具面。交付优先（Delivery）保留全部 Balanced 工具，并额外增加稳定代理工具
+`use_capability`（inspect/call/decline），用于在不改变 provider 可见 Schema 的前提下发现和调用
+按需 MCP（含 `auto_start=false`）。Delivery 还会增加稳定执行合约，并由宿主运行时强制执行：变更和
+验证命令必须先建立验收标准；变更后的工作必须完成复查、验证并通过带证据的 `complete_step` 签收；
+Skill/MCP 的 require/prefer 路由受门禁约束（只读回答同样不能跳过 require 能力）；中/高风险改动
+强制结构化 review/security_review，且 `review_report` 的 `reviewed_paths` 必须有宿主观测到的
+read/diff 证据。
+
+`use_capability` 的解析阶段无副作用：对未连接服务器的 `action=call` 只生成惰性目标，plan mode 会
+对真实目标重新执行只读校验，服务器进程只在权限门禁与 PreToolUse Hook 放行之后才启动。按需启动的
+子进程随会话存活（不会随单次调用结束而退出）；`action=inspect` 对已连接服务器列出实时工具，未连接
+时只读取缓存 schema，绝不启动进程。无 schema 缓存的服务器首次发现走 `mcp-server:` id 的
+`action=call`：解析为受门禁保护的连接目标（权限名为独立的
+`mcp_connect__<server>`；例如精确拒绝规则 `deny = ["mcp_connect__github"]`
+会在进程启动前拦截），放行后连接并返回实时工具目录。MCP 工具名规则仍为精确匹配，
+`mcp__github__*` 不是工具名通配规则。
+
 `ask`, `explore`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+仅 Delivery：`use_capability`（`action` = `inspect` | `call` | `decline`）。
 
 `internal/boot.TestBootToolContractMatchesProviderVisibleSurface` 会校验真实 boot registry 合约和 provider request 一致，包括 read-only 标记和 canonical schema。
 

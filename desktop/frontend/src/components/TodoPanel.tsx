@@ -41,9 +41,9 @@ function saveOpenState(stateKey: string, open: boolean): void {
 
 // TodoPanel is the live task list pinned just above the composer — the kernel's
 // latest todo_write call drives it, and it updates in place as the agent flips
-// items to in_progress / completed. Open state follows the current todo batch:
-// new incomplete work opens by default, finished work collapses to a reviewable
-// summary, and manual expand/collapse is restored only for the same batch.
+// items to in_progress / completed. Each new todo batch starts collapsed so the
+// header can show live progress and the current task without occupying extra
+// space. Manual expand/collapse is restored only for the same batch.
 export function TodoPanel({
   stateKey,
   todos,
@@ -60,7 +60,7 @@ export function TodoPanel({
   const current = todos.find((t) => t.status === "in_progress");
   const allDone = todos.length > 0 && done === todos.length;
   const summary = current?.activeForm || current?.content || todos[todos.length - 1]?.content || "";
-  const [open, setOpen] = useState(() => loadOpenState(stateKey, shouldOpenTodoPanelByDefault(todos)));
+  const [open, setOpen] = useState(() => loadOpenState(stateKey, shouldOpenTodoPanelByDefault()));
   const wasAllDoneRef = useRef(allDone);
 
   useEffect(() => {

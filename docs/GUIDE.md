@@ -21,6 +21,7 @@
 - [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
+- [Capability diagnostics](#capability-diagnostics)
 - [Plugins (MCP)](#plugins-mcp)
 - [Slash commands](#slash-commands)
 - [@ references](#-references)
@@ -432,6 +433,7 @@ Mode and display shortcuts:
 | `Shift+Tab` | Toggles Plan on/off | Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
+| `/work-mode [economy|balanced|delivery]` | Shows or switches the current session's work mode | `/profile` is a compatibility alias. Switching rebuilds the runtime atomically, preserves the conversation and approval posture, and is blocked while work is active. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
 | Ask / Auto | No keyboard cycle | Ask is the default interactive base. Auto is not entered through `Shift+Tab`; use clients or APIs that expose the tool approval posture directly. |
@@ -533,6 +535,48 @@ a project `reasonix.toml` pins `[sandbox]` (a project file overrides
 Settings/user-config edits, and sandbox changes take effect after a session
 config reload or a new session).
 
+For coding-quality reports, run `reasonix doctor quality <branch-id-or-path>`
+(add `--json` for structured output). This reads the selected session but emits
+only content-free counts and profile categories: model family, runtime profile,
+collaboration / approval modes, message and tool-call counts, verification and persisted
+compaction-summary counts, plus desktop token/cache telemetry when available.
+It omits transcript text, paths, session identifiers, tool arguments and output,
+endpoints, and custom model names, so the result is suitable for a public issue
+or Discussion. This differs from `reasonix doctor session`, whose support zip
+contains the complete unredacted transcript and must remain in a trusted support
+channel.
+
+## Capability diagnostics
+
+Use this when a skill, slash command, hook, plugin package, MCP server, or
+`AGENTS.md` is missing, shadowed, untrusted, or fails to start. Full flag
+reference, JSON schema, and issue codes:
+**[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)**.
+
+```bash
+# Static (default): no network, no MCP child processes
+reasonix doctor capabilities
+
+# Machine-readable (stdout is pure JSON)
+reasonix doctor capabilities --json
+
+# Another workspace root
+reasonix doctor capabilities --root /path/to/project
+
+# Live MCP probe — only when you explicitly allow starting third-party servers
+reasonix doctor capabilities --live --timeout 5s
+```
+
+| Surface | How |
+| --- | --- |
+| CLI | `reasonix doctor capabilities` (above) |
+| Desktop | **Settings → Diagnostics** — refresh, copy redacted JSON, optional “include current session runtime” (reads the active tab Host only; does **not** start MCP) |
+| Agent | `/reasonix-guide` (built-in inline skill) or ask naturally; it prefers static doctor JSON before `--live` |
+
+Exit code `0` allows warnings/info; `1` means at least one `error` (or a live
+start failure); `2` is bad flags. This is separate from `reasonix doctor`
+(providers/sandbox) and `reasonix plugin doctor <name>` (one package).
+
 ## Plugins (MCP)
 
 Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
@@ -590,7 +634,10 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 Enabled MCP servers start connecting automatically in the background after a
 session begins, so chat stays usable while tools come online. Use `/mcp` or the
 desktop MCP panel to refresh status, reconnect a server, inspect failures, or
-disable a server for the current session.
+disable a server for the current session. For a read-only config/runtime health
+report across skills, hooks, packages, and MCP (without changing settings), see
+[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)
+(`reasonix doctor capabilities` or **Settings → Diagnostics**).
 
 **Already have an `.mcp.json`?** Drop it in the project root and Reasonix
 reads it as-is — the `mcpServers` spec (`command`/`args`/`env`, `type`/`url`/
@@ -614,18 +661,58 @@ convenient.
 ## Slash commands
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
-`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
+`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
 `/memory`, `/memory-v5`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/auto-plan`, `/reasoning-language`, `/help`) run
-locally — `/help` lists them all. `/new` starts a new session while saving the
-previous transcript for history/resume; `/clear` asks for confirmation, then
-discards the current context without saving it. `/tree` shows saved conversation
-branches, `/branch [name]` forks the current conversation tip, `/branch <turn>
-[name]` forks from an earlier checkpointed turn, and `/switch <id|name>` loads
-another branch. **Custom commands** are Markdown files under `.reasonix/commands/`
-(project) or `~/.reasonix/commands/` (user) — `review.md` becomes
-`/review`, a subdirectory namespaces it (`git/commit.md` → `/git:commit`). The
-body is a prompt template; invoking the command sends it as a turn.
+locally — `/help` lists them all. Built-in **skills** such as `/init`,
+`/explore`, `/test`, and `/reasonix-guide` also appear in the slash menu and via
+`run_skill` (bodies load on demand; only the index line is cache-stable). Use
+`/reasonix-guide` when you need config or capability troubleshooting; it points
+at `reasonix doctor capabilities` (see
+[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)). `/new` starts a new
+session while saving the previous transcript for history/resume; `/clear` asks
+for confirmation, then discards the current context without saving it. `/tree`
+shows saved conversation branches, `/branch [name]` forks the current
+conversation tip, `/branch <turn> [name]` forks from an earlier checkpointed
+turn, and `/switch <id|name>` loads another branch. **Custom commands** are
+Markdown files under `.reasonix/commands/` (project) or `~/.reasonix/commands/`
+(user) — `review.md` becomes `/review`, a subdirectory namespaces it
+(`git/commit.md` → `/git:commit`). The body is a prompt template; invoking the
+command sends it as a turn.
+
+### Subagent profiles
+
+Subagent profiles are manual Skills with `runAs: subagent` and
+`invocation: manual`. They are stored in the same project/global Skill roots as
+the desktop settings page, so profiles created on either surface are immediately
+available to the other after the session refreshes. In interactive chat, invoke
+one with `/<name> <task>`; Reasonix runs an isolated child loop and keeps only
+the task and final answer in the parent conversation.
+
+The headless CLI provides explicit management and execution commands without
+changing the ordinary `reasonix run` task semantics:
+
+```bash
+reasonix subagent list
+reasonix subagent create reviewer --description "Review changes" --prompt-file reviewer.md --tools read_file,grep,bash
+reasonix subagent edit reviewer --effort high --model deepseek-pro
+reasonix subagent try reviewer "review the current diff"   # always read-only
+reasonix subagent run reviewer "review and fix the current diff"
+reasonix subagent delete reviewer --yes
+```
+
+`create` defaults to project scope when a workspace is available and to global
+scope otherwise; pass `--scope project|global` to choose explicitly. `edit`
+changes only explicitly supplied fields, and an empty value such
+as `--model=` or `--tools=` clears that field. The profile editors deliberately
+refuse custom-path or richer hand-authored Skills so they cannot discard
+frontmatter, references, or scripts; manage those files through the Skills
+workflow instead. Built-in profiles have no editable file, so `edit` accepts
+only `--model` and `--effort` for them and stores the same per-name overrides as
+the desktop settings page.
+
+See [Subagent profiles](./SUBAGENT_PROFILES.md) for the complete CLI reference,
+Skill file format, model precedence, safety behavior, and troubleshooting.
 
 `/memory` lists both memory documents (`REASONIX.md` / `AGENTS.md`) and saved
 auto-memory facts. During agent turns, the read-only `history` and `memory`
@@ -801,6 +888,36 @@ reached, but writer-capable `task` / `run_skill` remain unavailable. In
 token economy mode, connect only this narrow surface with
 `connect_tool_source(source="read_only_skill")`; the full `skills` source still
 enables writer-capable skill tools and remains blocked in plan mode.
+
+Choose the startup runtime profile with
+`--profile economy|balanced|delivery` (for example, `reasonix run --profile
+delivery "fix and verify this bug"`). Economy keeps the initial tool surface
+lean and connects optional sources on demand. Balanced is the byte-compatible
+default with the complete tool surface. Delivery keeps that complete surface,
+adds one stable proxy tool (`use_capability`) for on-demand MCP inspect/call
+without schema churn, and adds a stable contract to establish acceptance
+criteria, fix root causes, verify the result, and review the final diff. The
+host enforces that contract: mutations and verification commands are blocked
+until a concrete `todo_write` acceptance list exists; a changed result cannot
+finalize until it has been reviewed, verified after the latest mutation, and
+signed off with `complete_step`; Skill/MCP `require`/`prefer` routes must be
+invoked or declined with host-proven reasons; and medium/high-risk changes
+require structured review (and security review when high). Meta tools such as
+`task`, `run_skill`, and `review` are not counted as mutations by themselves —
+only real child writes are. Read-only analysis remains available without
+forcing a write.
+Inside an interactive TUI session, use `/work-mode` to inspect the current
+choice or `/work-mode economy|balanced|delivery` to switch it. `/profile` is a
+compatibility alias. The switch atomically rebuilds the controller while
+preserving history, the session path, leases, and the Ask/Auto/YOLO posture; it
+is rejected while a turn, approval/question, background job, or another runtime
+switch is active. A failed build leaves the previous controller usable. This
+command changes only the current session and does not persist a new global
+default. Crossing profiles creates one new provider cache prefix; requests
+within the selected profile keep a stable system contract and tool schema.
+
+Desktop tabs expose the same three choices and persist Economy or Delivery;
+legacy empty/`full` values remain Balanced.
 
 For interactive frontends, plan mode is manual by default. Set
 `agent.auto_plan = "on"` to make complex-looking tasks enter plan mode

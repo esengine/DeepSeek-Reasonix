@@ -76,8 +76,8 @@ export function shouldShowTodoPanel(
   return todoKey !== dismissedTodoKey;
 }
 
-export function shouldOpenTodoPanelByDefault(todos: Todo[]): boolean {
-  return hasIncompleteTodos(todos);
+export function shouldOpenTodoPanelByDefault(): boolean {
+  return false;
 }
 
 function todoStatus(status: unknown): string {

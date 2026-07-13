@@ -28,6 +28,16 @@ func writeAt(t *testing.T, dir, rel, content string) {
 	}
 }
 
+func TestCustomCommandHintIdentifiesPluginSource(t *testing.T) {
+	got := customCommandHint(command.Command{Description: "Create a plan", Plugin: "pwf", ShortName: "plan"})
+	if got != "plugin pwf · Create a plan" {
+		t.Fatalf("customCommandHint = %q", got)
+	}
+	if got := customCommandHint(command.Command{Description: "Project plan"}); got != "Project plan" {
+		t.Fatalf("project hint changed = %q", got)
+	}
+}
+
 func TestSlashCompletionFilterAndAccept(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/co")

@@ -87,6 +87,9 @@ type action struct {
 	Headers       map[string]string `json:"headers,omitempty"`
 	Skills        []string          `json:"skills,omitempty"`
 	SkillCount    int               `json:"skillCount,omitempty"`
+	Commands      []string          `json:"commands,omitempty"`
+	CommandCount  int               `json:"commandCount,omitempty"`
+	Commit        string            `json:"commit,omitempty"`        // resolved git snapshot the plan describes; apply pins to it
 	Layout        string            `json:"layout,omitempty"`        // canonical_dir|flat_compat|registered_root
 	InstallRoot   string            `json:"installRoot,omitempty"`   // skills root or registered custom root
 	CanonicalPath string            `json:"canonicalPath,omitempty"` // <skill-name>/SKILL.md when applicable
@@ -105,6 +108,12 @@ type action struct {
 	entry      config.PluginEntry
 	skill      skillCandidate
 	disconnect func() // optional MCP rollback; nil when not connected
+	// preparedRoot lets a multi-plugin marketplace apply reuse the exact clone
+	// that produced its approved plan instead of cloning the same repository
+	// once per plugin. cleanup is attached to one action and runs after all
+	// actions finish.
+	preparedRoot string
+	cleanup      func()
 }
 
 func actionPlanKey(a action) string {
@@ -147,6 +156,8 @@ func publicActions(in []action) []action {
 		out[i] = in[i]
 		out[i].entry = config.PluginEntry{}
 		out[i].skill = skillCandidate{}
+		out[i].preparedRoot = ""
+		out[i].cleanup = nil
 	}
 	return out
 }

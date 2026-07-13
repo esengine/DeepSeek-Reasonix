@@ -11,6 +11,7 @@ type Event struct {
 	Kind            string           `json:"kind"`
 	Text            string           `json:"text,omitempty"`
 	Detail          string           `json:"detail,omitempty"`
+	Code            string           `json:"code,omitempty"`
 	Reasoning       string           `json:"reasoning,omitempty"`
 	MemoryCitations []MemoryCitation `json:"memoryCitations,omitempty"`
 	MemoryCompiler  *MemoryCompiler  `json:"memoryCompiler,omitempty"`
@@ -22,6 +23,7 @@ type Event struct {
 	Compaction      *Compaction      `json:"compaction,omitempty"`
 	Guardian        *Guardian        `json:"guardian,omitempty"`
 	Err             string           `json:"err,omitempty"`
+	Outcome         string           `json:"outcome,omitempty"`
 	RetryAttempt    int              `json:"retryAttempt,omitempty"`
 	RetryMax        int              `json:"retryMax,omitempty"`
 }
@@ -34,6 +36,7 @@ func ToWire(e event.Event) Event {
 	}
 	switch e.Kind {
 	case event.Notice:
+		w.Code = e.Code
 		if e.Level == event.LevelWarn {
 			w.Level = "warn"
 		} else {
@@ -45,6 +48,7 @@ func ToWire(e event.Event) Event {
 			Output: e.Tool.Output, Err: e.Tool.Err,
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
+			ArgChars: e.Tool.ArgChars,
 			ParentID: e.Tool.ParentID,
 			Diff:     e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
 		}
@@ -102,6 +106,7 @@ func ToWire(e event.Event) Event {
 	case event.GuardianAssessment:
 		w.Guardian = ToWireGuardian(e.Guardian)
 	case event.TurnDone:
+		w.Outcome = e.Outcome
 		if e.Err != nil {
 			w.Err = e.Err.Error()
 		}
@@ -205,6 +210,7 @@ type Tool struct {
 	Truncated  bool     `json:"truncated,omitempty"`
 	DurationMs int64    `json:"durationMs,omitempty"`
 	Partial    bool     `json:"partial,omitempty"`
+	ArgChars   int      `json:"argChars,omitempty"`
 	ParentID   string   `json:"parentId,omitempty"`
 	Diff       string   `json:"diff,omitempty"`
 	Added      int      `json:"added,omitempty"`

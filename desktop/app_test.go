@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
@@ -220,6 +221,43 @@ func TestCommandsIncludesEffortNotThinking(t *testing.T) {
 	}
 	if hasCommand(cmds, "thinking") {
 		t.Fatalf("Commands() should not include thinking: %+v", cmds)
+	}
+}
+
+func TestCommandsClassifiesSubagentSkills(t *testing.T) {
+	ctrl := control.New(control.Options{Skills: []skill.Skill{
+		{Name: "init", Description: "inline skill", RunAs: skill.RunInline},
+		{Name: "explore", Description: "isolated skill", RunAs: skill.RunSubagent, Color: "amber"},
+	}})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	kinds := map[string]string{}
+	groups := map[string]string{}
+	colors := map[string]string{}
+	for _, cmd := range app.Commands() {
+		kinds[cmd.Name] = cmd.Kind
+		groups[cmd.Name] = cmd.Group
+		colors[cmd.Name] = cmd.Color
+	}
+	if kinds["init"] != "skill" {
+		t.Fatalf("inline skill kind = %q, want skill", kinds["init"])
+	}
+	if kinds["explore"] != "subagent" {
+		t.Fatalf("subagent skill kind = %q, want subagent", kinds["explore"])
+	}
+	if colors["explore"] != "amber" {
+		t.Fatalf("subagent skill color = %q, want amber", colors["explore"])
+	}
+	if groups["new"] != "actions" {
+		t.Fatalf("new command group = %q, want actions", groups["new"])
+	}
+	if groups["mcp"] != "integrations" || groups["plugins"] != "integrations" {
+		t.Fatalf("integration command groups = mcp:%q plugins:%q", groups["mcp"], groups["plugins"])
+	}
+	if groups["skill"] != "skills" {
+		t.Fatalf("skill command group = %q, want skills", groups["skill"])
 	}
 }
 
@@ -3370,11 +3408,22 @@ func newStaleWorkspaceBindingFixtureWithLayout(t *testing.T, suffix, layoutStyle
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "TEST_MODEL_KEY", "sk-test")
 
+	// Steers and idle-steer fallbacks start real provider turns (they are no
+	// longer command-interpreted), so the fixture's provider must complete
+	// instantly instead of pointing at an unreachable host — otherwise every
+	// steer leaves the controller running for the rest of the test.
+	providerStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(providerStub.Close)
+
 	cfg := config.Default()
 	cfg.DefaultModel = "test/test-model"
 	cfg.Desktop.ProviderAccess = []string{"test"}
 	cfg.Providers = []config.ProviderEntry{
-		{Name: "test", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "test-model", APIKeyEnv: "TEST_MODEL_KEY"},
+		{Name: "test", Kind: "openai", BaseURL: providerStub.URL, Model: "test-model", APIKeyEnv: "TEST_MODEL_KEY"},
 	}
 	if strings.TrimSpace(layoutStyle) != "" {
 		if err := cfg.SetDesktopLayoutStyle(layoutStyle); err != nil {
@@ -3566,7 +3615,10 @@ func TestEnsureTabControllerWorkspaceWarnsWhenPinnedSessionSwitchesWorkspace(t *
 func TestSteerForTabReconcilesStaleWorkspaceBeforeIdleFallback(t *testing.T) {
 	f := newStaleWorkspaceBindingFixture(t, "steer_idle_fallback")
 
-	if err := f.app.SteerForTab(f.tab.ID, "/unknown-command"); err != nil {
+	// The idle fallback submits the steer text verbatim as a provider turn
+	// (steers are never command-interpreted); the fixture's provider stub
+	// completes it instantly.
+	if err := f.app.SteerForTab(f.tab.ID, "steer guidance"); err != nil {
 		t.Fatalf("SteerForTab: %v", err)
 	}
 	waitNotRunning(t, f.tab.Ctrl)
@@ -3703,7 +3755,7 @@ func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
 	}
 	actions := []quickAction{
 		{name: "submit", run: func() error { return f.app.SubmitToTab(f.tab.ID, "/unknown-command") }},
-		{name: "steer", run: func() error { return f.app.SteerForTab(f.tab.ID, "/unknown-command") }},
+		{name: "steer", run: func() error { return f.app.SteerForTab(f.tab.ID, "steer guidance") }},
 		{name: "compact", run: func() error { return f.app.Compact() }},
 		{name: "submit-display", run: func() error { return f.app.SubmitDisplayToTab(f.tab.ID, "/unknown display", "/unknown-command") }},
 	}
@@ -3743,6 +3795,14 @@ func runQuickClickWorkspaceReconcileTest(t *testing.T, layoutStyle string) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
+		// The steer action holds a real provider turn now, so racing quick
+		// clicks may legitimately observe a busy controller. This test
+		// asserts workspace-rebuild serialization, not that every
+		// concurrent action wins the turn.
+		if strings.Contains(err.Error(), "turn already running") ||
+			strings.Contains(err.Error(), "cannot compact while a turn is running") {
+			continue
+		}
 		t.Error(err)
 	}
 	if t.Failed() {
@@ -4530,6 +4590,39 @@ func TestSetTokenModeRebuildsController(t *testing.T) {
 	}
 }
 
+func TestSetTokenModeDeliveryRebuildsAndPersistsProfile(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	old := control.New(control.Options{Label: "old-controller"})
+	app.setTestCtrl(old, "deepseek-flash/deepseek-v4-flash")
+	defer func() {
+		if c := app.activeCtrl(); c != nil {
+			c.Close()
+		}
+	}()
+
+	if err := app.SetTokenMode(boot.TokenModeDelivery); err != nil {
+		t.Fatalf("SetTokenMode(delivery): %v", err)
+	}
+	if c := app.activeCtrl(); c == nil || c == old {
+		t.Fatal("delivery profile should rebuild the active controller")
+	}
+	tab := app.activeTab()
+	if got := currentTabTokenMode(tab); got != boot.TokenModeDelivery {
+		t.Fatalf("token mode = %q, want delivery", got)
+	}
+	if got := app.Meta().TokenMode; got != boot.TokenModeDelivery {
+		t.Fatalf("Meta token mode = %q, want delivery", got)
+	}
+	saved := loadTabsFile()
+	if len(saved.Tabs) != 1 || saved.Tabs[0].TokenMode != boot.TokenModeDelivery {
+		t.Fatalf("saved tabs = %+v, want delivery profile", saved.Tabs)
+	}
+}
+
 func TestSetTokenModeReusesCurrentSessionLease(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
@@ -5136,6 +5229,56 @@ func TestFileRefsUseActiveTabWorkspaceRoot(t *testing.T) {
 	}
 }
 
+func TestFileRefsForTabIgnoreActiveParentWorkspace(t *testing.T) {
+	parentRoot := robustTempDir(t)
+	childRoot := filepath.Join(parentRoot, "child")
+	if err := os.MkdirAll(childRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentRoot, "parent-only.txt"), []byte("parent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parentRoot, "shared.txt"), []byte("parent shared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childRoot, "child-only.txt"), []byte("child"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(childRoot, "shared.txt"), []byte("child shared"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"parent": {ID: "parent", Scope: "project", WorkspaceRoot: parentRoot},
+			"child":  {ID: "child", Scope: "project", WorkspaceRoot: childRoot},
+		},
+		activeTabID: "parent",
+	}
+
+	listed := app.ListDirForTab("child", "")
+	if !hasDirEntry(listed, "child-only.txt") || hasDirEntry(listed, "parent-only.txt") {
+		t.Fatalf("ListDirForTab(child) = %+v, want only child workspace entries", listed)
+	}
+	found := app.SearchFileRefsForTab("child", "child-only")
+	if !hasDirEntry(found, "child-only.txt") {
+		t.Fatalf("SearchFileRefsForTab(child) = %+v, want child-only.txt", found)
+	}
+	preview := app.ReadFileForTab("child", "shared.txt")
+	if preview.Err != "" || preview.Body != "child shared" {
+		t.Fatalf("ReadFileForTab(child) = %+v, want child workspace file", preview)
+	}
+	path, ok, err := app.workspaceOrExternalPathForTab("child", "shared.txt")
+	if err != nil || !ok || path != filepath.Join(childRoot, "shared.txt") {
+		t.Fatalf("workspaceOrExternalPathForTab(child) = (%q, %v, %v)", path, ok, err)
+	}
+
+	legacy := app.ReadFile("shared.txt")
+	if legacy.Err != "" || legacy.Body != "parent shared" {
+		t.Fatalf("ReadFile legacy active-tab behavior = %+v, want parent workspace file", legacy)
+	}
+}
+
 func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 	workspace := robustTempDir(t)
 	external := filepath.Join(robustTempDir(t), "Folder With Spaces")
@@ -5159,11 +5302,12 @@ func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 	app := &App{
 		tabs: map[string]*WorkspaceTab{
 			"project": {ID: "project", WorkspaceRoot: workspace, Ctrl: ctrl},
+			"other":   {ID: "other", WorkspaceRoot: robustTempDir(t)},
 		},
-		activeTabID: "project",
+		activeTabID: "other",
 	}
 
-	listed := app.ListDir(token + "/src/")
+	listed := app.ListDirForTab("project", token+"/src/")
 	if len(listed) != 1 ||
 		listed[0].Name != "outside.txt" ||
 		listed[0].Path != token+"/src/outside.txt" ||
@@ -5171,7 +5315,7 @@ func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 		t.Fatalf("ListDir external src = %+v, want outside token/display path", listed)
 	}
 
-	found := app.SearchFileRefs("outside")
+	found := app.SearchFileRefsForTab("project", "outside")
 	var externalHit *DirEntry
 	for i := range found {
 		if found[i].Path == token+"/src/outside.txt" {
@@ -5183,7 +5327,7 @@ func TestFileRefsIncludeRegisteredExternalFolderChildren(t *testing.T) {
 		t.Fatalf("SearchFileRefs external hit = %+v, all results %+v", externalHit, found)
 	}
 
-	preview := app.ReadFile(token + "/src/outside.txt")
+	preview := app.ReadFileForTab("project", token+"/src/outside.txt")
 	if preview.Err != "" || preview.Body != "outside" {
 		t.Fatalf("ReadFile external token preview = %+v, want outside file body", preview)
 	}
@@ -6448,7 +6592,7 @@ func TestCapabilitiesIncludesInstalledPlugins(t *testing.T) {
 	if len(plugins) != 1 || plugins[0].Name != "superpowers" || plugins[0].Skills != 1 {
 		t.Fatalf("Capabilities().Plugins = %+v", plugins)
 	}
-	if len(plugins[0].SkillDetails) != 1 || plugins[0].SkillDetails[0].Invocation != "/plan" {
+	if len(plugins[0].SkillDetails) != 1 || plugins[0].SkillDetails[0].Invocation != "/superpowers:plan" {
 		t.Fatalf("Capabilities().Plugins skill details = %+v", plugins[0].SkillDetails)
 	}
 }
@@ -6800,6 +6944,104 @@ func TestRemoveMCPServerDeletesProjectMCPJSONEntry(t *testing.T) {
 	}
 	if _, ok := findPluginEntry(cfg.Plugins, "keep"); !ok {
 		t.Fatalf("unrelated .mcp.json server should be preserved: %+v", cfg.Plugins)
+	}
+}
+
+func TestRemoveMCPServerRejectsPluginManagedServerWithoutDisconnecting(t *testing.T) {
+	home := isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	srv := desktopMCPHTTPServer(t)
+	defer srv.Close()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	root := filepath.Join(reasonixHome, "plugins", "superpowers")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(fmt.Sprintf(`{
+  "name": "superpowers",
+  "version": "1.0.0",
+  "mcpServers": {
+    "helper": { "type": "http", "url": %q }
+  }
+}`, srv.URL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "1.0.0",
+		ManifestKind: "reasonix",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadForRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := findPluginEntry(cfg.Plugins, "helper")
+	if !ok {
+		t.Fatalf("plugin-managed MCP missing from config: %+v", cfg.Plugins)
+	}
+	ctrl := control.New(control.Options{Host: plugin.NewHost()})
+	defer ctrl.Close()
+	if _, err := ctrl.ConnectMCPServer(entry); err != nil {
+		t.Fatalf("connect plugin-managed MCP: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	app.activeTab().WorkspaceRoot = dir
+	err = app.RemoveMCPServer("helper")
+	if err == nil || !strings.Contains(err.Error(), "managed by plugin") || !strings.Contains(err.Error(), "superpowers") {
+		t.Fatalf("RemoveMCPServer(plugin-managed) error = %v", err)
+	}
+	if !mcpConnected(ctrl, "helper") {
+		t.Fatal("plugin-managed MCP was disconnected despite rejected removal")
+	}
+	for action, actionErr := range map[string]error{
+		"trust tool": app.TrustMCPServerTool("helper", "echo"),
+		"clear auth": app.ClearMCPServerAuthentication("helper"),
+		"update":     app.UpdateMCPServer("helper", MCPServerInput{Name: "helper", Transport: "http", URL: srv.URL}),
+	} {
+		if actionErr == nil || !strings.Contains(actionErr.Error(), "managed by plugin") {
+			t.Fatalf("%s plugin-managed MCP error = %v", action, actionErr)
+		}
+	}
+	if _, found := findPluginEntry(config.LoadForEdit(config.UserConfigPath()).Plugins, "helper"); found {
+		t.Fatal("plugin-managed MCP mutation created a user-config shadow")
+	}
+	servers := app.MCPServers()
+	if len(servers) != 1 || servers[0].Name != "helper" || servers[0].ManagedByPlugin != "superpowers" {
+		t.Fatalf("MCPServers() = %+v, want helper managed by superpowers", servers)
+	}
+}
+
+func TestRemoveMCPServerRejectsRuntimeOnlyServerWithoutDisconnecting(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+
+	srv := desktopMCPHTTPServer(t)
+	defer srv.Close()
+	ctrl := control.New(control.Options{Host: plugin.NewHost()})
+	defer ctrl.Close()
+	if _, err := ctrl.ConnectMCPServer(config.PluginEntry{Name: "runtime-only", Type: "http", URL: srv.URL}); err != nil {
+		t.Fatalf("connect runtime-only MCP: %v", err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	app.activeTab().WorkspaceRoot = dir
+	err := app.RemoveMCPServer("runtime-only")
+	if err == nil || !strings.Contains(err.Error(), "no removable MCP server") {
+		t.Fatalf("RemoveMCPServer(runtime-only) error = %v", err)
+	}
+	if !mcpConnected(ctrl, "runtime-only") {
+		t.Fatal("runtime-only MCP was disconnected despite failed persistence removal")
 	}
 }
 

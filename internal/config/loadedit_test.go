@@ -100,6 +100,33 @@ model = "m"
 	}
 }
 
+func TestLoadForEditReadOnlyStrictDoesNotMigrateDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	body := []byte(`
+[[plugins]]
+name = "playwright"
+command = "npx"
+tier = "lazy"
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Tier != "" {
+		t.Fatalf("read-only normalized plugins = %+v", cfg.Plugins)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(body) {
+		t.Fatalf("read-only load changed config on disk:\n%s", after)
+	}
+}
+
 func TestLoadForEditIgnoresProjectDotEnvForProviderCredentials(t *testing.T) {
 	project := t.TempDir()
 	launch := t.TempDir()

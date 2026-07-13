@@ -255,3 +255,20 @@ func waitNoJobs(t *testing.T, ctrl control.SessionAPI) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
+	readiness := event.Event{
+		Kind:    event.TurnDone,
+		Err:     &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"},
+		Outcome: event.TurnOutcomeFinalReadiness,
+	}
+	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusPaused {
+		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusPaused)
+	}
+	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone, Err: io.EOF}); !ok || status != topicStatusError {
+		t.Fatalf("ordinary turn error = (%q, %v), want (%q, true)", status, ok, topicStatusError)
+	}
+	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone}); !ok || status != "" {
+		t.Fatalf("clean turn end = (%q, %v), want cleared status", status, ok)
+	}
+}

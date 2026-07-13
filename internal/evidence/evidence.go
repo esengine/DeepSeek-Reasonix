@@ -10,7 +10,11 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"mvdan.cc/sh/v3/syntax"
+
 	"reasonix/internal/provider"
+	"reasonix/internal/shellparse"
+	"reasonix/internal/shellsafe"
 )
 
 // TodoItem mirrors the todo_write item shape the host needs for step matching.
@@ -44,7 +48,12 @@ type Receipt struct {
 	Paths     []string        `json:"paths,omitempty"`
 	Read      bool            `json:"read,omitempty"`
 	Write     bool            `json:"write,omitempty"`
+	Mutation  bool            `json:"mutation,omitempty"`
 	Todos     []TodoItem      `json:"todos,omitempty"`
+	// OutputBytes is the host-observed length of the tool's (redacted, trimmed)
+	// output. Content-evidence checks require it to be non-zero so a command
+	// that printed nothing (head -n 0, >/dev/null) can never count as reading.
+	OutputBytes int `json:"output_bytes,omitempty"`
 }
 
 // Ledger stores the receipts available to complete_step for the current turn.
@@ -117,7 +126,7 @@ func (l *Ledger) HasWriteOrCommandSince(index int) bool {
 	defer l.mu.Unlock()
 	for i := index; i < len(l.receipts); i++ {
 		r := l.receipts[i]
-		if r.Success && (r.Write || r.Command != "") {
+		if r.Success && (r.Mutation || r.Write || r.Command != "") {
 			return true
 		}
 	}
@@ -271,6 +280,99 @@ func (l *Ledger) HasSuccessfulCompleteStepAfter(after int) bool {
 	return false
 }
 
+// HasSuccessfulDeliverySignoffAfter reports whether a successful complete_step
+// after the latest mutation cites a verification command that also succeeded
+// after that mutation. complete_step already validates the cited command against
+// host receipts; the additional ordering check prevents a pre-change test from
+// signing off changed code in the delivery profile.
+func (l *Ledger) HasSuccessfulDeliverySignoffAfter(after int) bool {
+	if l == nil {
+		return false
+	}
+	start := after + 1
+	if start < 0 {
+		start = 0
+	}
+
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+	for i := start; i < len(receipts); i++ {
+		r := receipts[i]
+		if !r.Success || r.ToolName != "complete_step" {
+			continue
+		}
+		if after >= 0 && !receiptsReviewChanges(receipts, start, i, after) {
+			continue
+		}
+		for _, command := range completeStepVerificationCommands(r.Args) {
+			if !bashCommandIsVerification(command) {
+				continue
+			}
+			for j := start; j < i; j++ {
+				candidate := receipts[j]
+				if candidate.Success && candidate.ToolName == "bash" && CommandMatches(command, candidate.Command) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// HasSuccessfulReviewAfter reports whether the changed result was inspected
+// after the latest mutation. A read of a touched path is sufficient; git/diff
+// inspection commands cover shell-driven or delegated mutations whose paths are
+// not knowable to the host.
+func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
+	if l == nil {
+		return false
+	}
+	start := after + 1
+	if start < 0 {
+		start = 0
+	}
+
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+	if after < 0 || after >= len(receipts) {
+		return false
+	}
+	return receiptsReviewChanges(receipts, start, len(receipts), after)
+}
+
+func receiptsReviewChanges(receipts []Receipt, start, end, mutationIndex int) bool {
+	if mutationIndex < 0 || mutationIndex >= len(receipts) {
+		return false
+	}
+	wanted := pathSet(receipts[mutationIndex].Paths)
+	for i := start; i < end && i < len(receipts); i++ {
+		r := receipts[i]
+		if !r.Success {
+			continue
+		}
+		if r.ToolName == "bash" && commandReviewsChanges(r.Command) {
+			return true
+		}
+		if r.ToolName == "bash" && len(wanted) > 0 && !bashMayMutate(r.Command) && commandMentionsPaths(r.Command, wanted) {
+			return true
+		}
+		if !r.Read {
+			continue
+		}
+		if len(wanted) == 0 {
+			return true
+		}
+		for _, p := range r.Paths {
+			if wanted[p] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (l *Ledger) HasSuccessfulTodoWrite() bool {
 	if l == nil {
 		return false
@@ -279,6 +381,23 @@ func (l *Ledger) HasSuccessfulTodoWrite() bool {
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
 		if r.Success && r.ToolName == "todo_write" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulAcceptanceCriteria reports whether the current turn established
+// a non-empty task list. Delivery mode uses that list as its host-observable
+// acceptance contract before permitting state-changing work.
+func (l *Ledger) HasSuccessfulAcceptanceCriteria() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == "todo_write" && len(r.Todos) > 0 {
 			return true
 		}
 	}
@@ -355,6 +474,45 @@ func (l *Ledger) HasAnySuccessfulReceipt() bool {
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
 		if r.Success {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulWorkReceipt excludes workflow bookkeeping and reports whether
+// the assistant actually inspected, executed, or changed something this turn.
+// Delivery mode uses it to reject text-only claims for technical tasks while
+// still allowing ordinary conversation to finish without tools.
+func (l *Ledger) HasSuccessfulWorkReceipt() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if !r.Success {
+			continue
+		}
+		switch r.ToolName {
+		case "ask", "todo_write", "complete_step":
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// HasSuccessfulVerificationCommand reports whether the turn ran at least one
+// command classified as verification rather than inspection or mutation.
+func (l *Ledger) HasSuccessfulVerificationCommand() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == "bash" && bashCommandIsVerification(r.Command) {
 			return true
 		}
 	}
@@ -449,6 +607,25 @@ func (l *Ledger) LatestSuccessfulWriterIndex() (int, bool) {
 	defer l.mu.Unlock()
 	for i, r := range l.receipts {
 		if r.Success && r.Write {
+			latest = i
+		}
+	}
+	return latest, latest >= 0
+}
+
+// LatestSuccessfulMutationIndex returns the most recent host-observed
+// state-changing call. It includes known file writers, writer-capable delegated
+// or external tools, and bash commands that are not demonstrably observational
+// or verification-only.
+func (l *Ledger) LatestSuccessfulMutationIndex() (int, bool) {
+	if l == nil {
+		return 0, false
+	}
+	latest := -1
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, r := range l.receipts {
+		if r.Success && r.Mutation {
 			latest = i
 		}
 	}
@@ -613,6 +790,7 @@ func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) b
 
 type contextKey struct{}
 type sessionMessagesKey struct{}
+type deliveryProfileKey struct{}
 
 func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
 	if ledger == nil {
@@ -624,6 +802,20 @@ func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
 func FromContext(ctx context.Context) (*Ledger, bool) {
 	ledger, ok := ctx.Value(contextKey{}).(*Ledger)
 	return ledger, ok && ledger != nil
+}
+
+// WithDeliveryProfile marks tool execution as subject to the delivery-first
+// final-readiness contract. Tools use this only for stricter evidence validation;
+// it is ephemeral host state and is never serialized into sessions or prompts.
+func WithDeliveryProfile(ctx context.Context) context.Context {
+	return context.WithValue(ctx, deliveryProfileKey{}, true)
+}
+
+// DeliveryProfileFromContext reports whether the current tool call must produce
+// evidence that the delivery final-readiness gate can accept.
+func DeliveryProfileFromContext(ctx context.Context) bool {
+	enabled, _ := ctx.Value(deliveryProfileKey{}).(bool)
+	return enabled
 }
 
 // WithSessionMessages attaches the full conversation history so verifyStepEvidence
@@ -692,6 +884,7 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 		ToolName: toolName,
 		Args:     args,
 		Success:  success,
+		Mutation: ToolCallMutates(toolName, args, readOnly),
 	}
 
 	var fields map[string]json.RawMessage
@@ -715,6 +908,535 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 		r.Read = true
 	}
 	return r
+}
+
+// ToolCallMutates is the delivery profile's conservative state-change
+// classifier. Trusted read-only tools never mutate. Meta tools that only
+// delegate (task, run_skill, review, …) never mutate by themselves — real
+// writes arrive via child evidence merge. Writer-capable tools do mutate,
+// except for bash commands that the host can prove are inspection or
+// verification commands.
+func ToolCallMutates(toolName string, args json.RawMessage, readOnly bool) bool {
+	if readOnly {
+		return false
+	}
+	if IsNonMutationMetaTool(toolName) {
+		return false
+	}
+	switch toolName {
+	case "ask", "todo_write", "complete_step", "bash_output", "wait":
+		return false
+	case "bash":
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(args, &fields); err != nil {
+			return true
+		}
+		return bashMayMutate(stringField(fields, "command"))
+	default:
+		return true
+	}
+}
+
+// ToolCallRequiresDeliveryCriteria reports whether a call begins execution
+// work that needs an acceptance contract. Mutations always qualify; verification
+// commands also qualify even though they are intentionally not mutations.
+func ToolCallRequiresDeliveryCriteria(toolName string, args json.RawMessage, readOnly bool) bool {
+	if ToolCallMutates(toolName, args, readOnly) {
+		return true
+	}
+	if toolName != "bash" {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return true
+	}
+	return bashCommandIsVerification(stringField(fields, "command"))
+}
+
+func bashMayMutate(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return true
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok || len(segments) == 0 {
+		return true
+	}
+	for _, segment := range segments {
+		normalized, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		if !safeRedirects || shellsafe.ContainsShellSyntax(normalized) {
+			return true
+		}
+		fields, malformed := shellparse.StaticFields(normalized)
+		if malformed != "" || len(fields) == 0 {
+			return true
+		}
+		if bashSegmentIsVerification(fields) {
+			continue
+		}
+		base, sub, readOnly := shellsafe.CommandIsReadOnly(normalized)
+		if !readOnly || bashReadOnlyCommandWrites(base, sub, fields) {
+			return true
+		}
+	}
+	return false
+}
+
+func bashCommandIsVerification(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok || len(segments) == 0 {
+		return false
+	}
+	found := false
+	for _, segment := range segments {
+		normalized, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		if !safeRedirects {
+			return false
+		}
+		fields, malformed := shellparse.StaticFields(normalized)
+		if malformed != "" || len(fields) == 0 {
+			return false
+		}
+		if bashSegmentIsVerification(fields) {
+			found = true
+			continue
+		}
+		if _, _, readOnly := shellsafe.CommandIsReadOnly(normalized); !readOnly {
+			return false
+		}
+	}
+	return found
+}
+
+// IsDeliveryVerificationCommand reports whether command is a host-recognized
+// verification command for delivery finalization. Keep complete_step and the
+// final-readiness gate on this single classifier so a sign-off cannot claim a
+// command that the final gate will immediately reject.
+func IsDeliveryVerificationCommand(command string) bool {
+	return bashCommandIsVerification(command)
+}
+
+func bashSegmentIsVerification(fields []string) bool {
+	if len(fields) == 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(fields[0]))
+	args := fields[1:]
+	if hasCommandArg(args, "--fix", "--write", "-w", "--update", "-u") {
+		return false
+	}
+	if hasWriteOutputFlag(args) {
+		return false
+	}
+	switch base {
+	case "go":
+		if len(args) == 0 {
+			return false
+		}
+		if args[0] == "vet" {
+			return true
+		}
+		if args[0] == "test" {
+			for _, arg := range args[1:] {
+				if goTestFlagWritesFile(arg) {
+					return false
+				}
+			}
+			return true
+		}
+		return args[0] == "build" && !hasCommandArg(args, "-o")
+	case "git":
+		return len(args) > 1 && args[0] == "diff" && hasCommandArg(args[1:], "--check")
+	case "pytest", "py.test", "gotestsum", "staticcheck", "golangci-lint", "tsc":
+		return true
+	case "mypy":
+		for _, arg := range args {
+			if mypyFlagWritesReport(arg) {
+				return false
+			}
+		}
+		return true
+	case "npm", "pnpm", "yarn", "bun", "cargo":
+		if len(args) > 0 && hasCommandArg(args[:1], "test", "check", "lint", "clippy") {
+			return true
+		}
+		return len(args) > 1 && args[0] == "run" && hasCommandArg(args[1:2], "test", "check", "lint", "typecheck")
+	case "node":
+		return nodeSegmentIsVerification(args)
+	case "make", "just":
+		return len(args) > 0 && hasCommandArg(args[:1], "test", "check", "lint", "verify", "ci")
+	case "python", "python3":
+		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest", "compileall")
+	case "dotnet":
+		return len(args) > 0 && args[0] == "test"
+	case "mvn", "mvnw", "gradle", "gradlew":
+		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
+	}
+	return false
+}
+
+func nodeSegmentIsVerification(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	// Node CLI flags are case-sensitive: -c/--check is the syntax-only mode,
+	// while -C/--conditions executes the target with custom export conditions.
+	switch args[0] {
+	case "--check", "-c":
+		// Syntax-check mode does not execute the target. Fail closed on any
+		// additional option: preload/eval/import flags could execute code before
+		// the check and turn a purported verifier into an opaque mutation.
+		for _, arg := range args[1:] {
+			if arg != "-" && strings.HasPrefix(arg, "-") {
+				return false
+			}
+		}
+		return true
+	case "--test":
+		// Match the repository's treatment of other conventional test runners,
+		// but fail closed on test-runner and Node runtime flags that write files.
+		for _, arg := range args[1:] {
+			if nodeTestFlagWritesFile(arg) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func nodeTestFlagWritesFile(arg string) bool {
+	name := strings.ToLower(arg)
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "--cpu-prof", "--heap-prof", "--heapsnapshot-near-heap-limit", "--heapsnapshot-signal",
+		"--localstorage-file", "--perf-basic-prof", "--perf-basic-prof-only-functions", "--perf-prof",
+		"--prof", "--redirect-warnings", "--report-on-fatalerror", "--report-on-signal",
+		"--report-uncaught-exception", "--test-reporter-destination", "--test-rerun-failures",
+		"--test-update-snapshots", "--tls-keylog", "--trace-events-enabled":
+		return true
+	default:
+		return false
+	}
+}
+
+func bashReadOnlyCommandWrites(base, sub string, fields []string) bool {
+	args := fields[1:]
+	if sub != "" && len(args) > 0 {
+		args = args[1:]
+	}
+	switch base {
+	case "find":
+		return hasCommandArg(args, "-exec", "-execdir", "-delete", "-ok", "-okdir", "-fls", "-fprint", "-fprint0", "-fprintf")
+	case "sort":
+		for _, arg := range args {
+			if arg == "-o" || arg == "--output" || strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "-o") {
+				return true
+			}
+		}
+	case "git":
+		if sub == "diff" || sub == "show" || sub == "log" {
+			for _, arg := range args {
+				if arg == "--output" || strings.HasPrefix(arg, "--output=") {
+					return true
+				}
+			}
+		}
+	case "go":
+		return sub == "env" && hasCommandArg(args, "-w", "-u")
+	}
+	return false
+}
+
+func hasCommandArg(args []string, candidates ...string) bool {
+	for _, arg := range args {
+		for _, candidate := range candidates {
+			if strings.EqualFold(arg, candidate) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writeOutputFlags are test-runner and linter flags that write snapshot,
+// report, or profile files. Snapshot flags rewrite checked-in fixtures (the
+// --update/-u class rejected above); the others write explicit output paths.
+// A runner invoked with one of them changes workspace state, so the segment
+// must not count as read-only verification.
+var writeOutputFlags = map[string]bool{
+	"snapshot-update": true, // pytest-snapshot / syrupy
+	"updatesnapshot":  true, // jest --updateSnapshot via npm/yarn wrappers
+	"junitxml":        true, // pytest
+	"junit-xml":       true, // pytest / mypy
+	"junitfile":       true, // gotestsum
+	"jsonfile":        true, // gotestsum
+	"coverprofile":    true, // go test
+	"cpuprofile":      true, // go test
+	"memprofile":      true, // go test
+	"blockprofile":    true, // go test
+	"mutexprofile":    true, // go test
+	"testlogfile":     true, // go test binary
+	"gocoverdir":      true, // go test binary
+	"outputfile":      true, // jest/vitest --outputFile (with --json)
+	"report-log":      true, // pytest-reportlog
+}
+
+func hasWriteOutputFlag(args []string) bool {
+	for _, arg := range args {
+		name := strings.TrimLeft(arg, "-")
+		if len(name) == len(arg) || name == "" {
+			continue // not a flag
+		}
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		// go test flags accept an optional test. prefix (-test.coverprofile)
+		// that the go tool passes through to the test binary.
+		name = strings.TrimPrefix(strings.ToLower(name), "test.")
+		if writeOutputFlags[name] {
+			return true
+		}
+		// Vitest exposes dotted per-reporter forms (--outputFile.json=path).
+		if i := strings.IndexByte(name, '.'); i > 0 && writeOutputFlags[name[:i]] {
+			return true
+		}
+	}
+	return false
+}
+
+// mypyFlagWritesReport reports whether a mypy flag writes a report directory:
+// every mypy report option follows the --<type>-report DIR shape (txt, html,
+// xml, cobertura-xml, any-exprs, linecount, linecoverage, lineprecision), and
+// mypy has no read-only flag with that suffix. --junit-xml is covered by the
+// global write-output flags.
+func mypyFlagWritesReport(arg string) bool {
+	name := strings.ToLower(arg)
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	return strings.HasPrefix(name, "--") && strings.HasSuffix(name, "-report")
+}
+
+// goTestFlagWritesFile reports whether a go test flag writes a workspace
+// artifact: -c/-o emit the test binary, -trace and the profile flags write
+// profiles, and -artifacts/-testlogfile/-gocoverdir write test outputs. The
+// short and ambiguous names stay out of writeOutputFlags because the
+// dash-stripped global match would also hit node -c (a syntax-only check)
+// and pytest --trace (a read-only debugger flag). go test flags accept
+// single- and double-dash forms and an optional test. prefix that the go
+// tool passes through to the test binary.
+func goTestFlagWritesFile(arg string) bool {
+	name := strings.ToLower(arg)
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	trimmed := strings.TrimLeft(name, "-")
+	if len(trimmed) == len(name) || trimmed == "" {
+		return false // not a flag
+	}
+	trimmed = strings.TrimPrefix(trimmed, "test.")
+	switch trimmed {
+	case "c", "o", "trace", "artifacts", "testlogfile", "gocoverdir",
+		"coverprofile", "cpuprofile", "memprofile", "blockprofile", "mutexprofile":
+		return true
+	default:
+		return false
+	}
+}
+
+func completeStepVerificationCommands(args json.RawMessage) []string {
+	var p struct {
+		Evidence []struct {
+			Kind    string `json:"kind"`
+			Command string `json:"command"`
+		} `json:"evidence"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return nil
+	}
+	var out []string
+	for _, item := range p.Evidence {
+		if item.Kind == "verification" && strings.TrimSpace(item.Command) != "" {
+			out = append(out, strings.TrimSpace(item.Command))
+		}
+	}
+	return out
+}
+
+// commandShowsContentForPath reports whether a bash command demonstrably
+// printed the content of the (normalized, slash-lowered) claimed path: a
+// content-printing program — cat/head/tail/diff/cmp or git diff/git show —
+// whose statically parsed argv names the path exactly or by trailing path
+// components. The receipt must contain exactly one simple statement; compound
+// statements and pipelines are rejected because unrelated output can satisfy
+// the aggregate OutputBytes receipt. Redirected, negated, background, or
+// dynamically expanded commands and summary/quiet flags that suppress the
+// patch body (--stat, --name-only, -q, …) are rejected too. Matching is
+// per-argument and exact, so reading path.bak never satisfies path.
+func commandShowsContentForPath(command, needle string) bool {
+	file, err := shellparse.ParseBash(command)
+	if err != nil || shellparse.HasHereDoc(file) || len(file.Stmts) != 1 {
+		return false
+	}
+	return contentStatementShowsPath(file.Stmts[0], needle)
+}
+
+func contentStatementShowsPath(stmt *syntax.Stmt, needle string) bool {
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess {
+		return false
+	}
+	if len(stmt.Redirs) > 0 {
+		// Any redirect can divert the content away from the transcript.
+		return false
+	}
+	switch cmd := stmt.Cmd.(type) {
+	case *syntax.BinaryCmd:
+		// Pipelines transform or swallow content; AND/OR lists can contribute
+		// unrelated bytes to the aggregate receipt. Neither proves file output.
+		return false
+	case *syntax.CallExpr:
+		argv := make([]string, 0, len(cmd.Args))
+		for _, w := range cmd.Args {
+			f, ok := shellparse.StaticWord(w)
+			if !ok {
+				return false
+			}
+			argv = append(argv, f)
+		}
+		return contentArgvShowsPath(argv, needle)
+	default:
+		return false
+	}
+}
+
+// contentSuppressingFlags turn a content command into a summary that never
+// shows the patch body; their presence disqualifies the receipt as evidence.
+var contentSuppressingFlags = map[string]bool{
+	"-q": true, "--quiet": true, "-s": true, "--silent": true,
+	"--brief": true, "--no-patch": true, "--name-only": true,
+	"--name-status": true, "--numstat": true, "--shortstat": true,
+	"--summary": true, "--check": true,
+}
+
+func contentArgvShowsPath(argv []string, needle string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	rest := argv[1:]
+	gitShow := false
+	switch strings.ToLower(filepath.Base(argv[0])) {
+	case "cat", "head", "tail", "diff", "cmp":
+	case "git":
+		if len(rest) == 0 {
+			return false
+		}
+		sub := strings.ToLower(rest[0])
+		if sub != "diff" && sub != "show" {
+			return false
+		}
+		gitShow = sub == "show"
+		rest = rest[1:]
+	default:
+		return false
+	}
+	named := false
+	for _, a := range rest {
+		lower := strings.ToLower(a)
+		if contentSuppressingFlags[lower] || strings.HasPrefix(lower, "--stat") || strings.HasPrefix(lower, "--dirstat") {
+			return false
+		}
+		if gitShow {
+			if argNamesGitRevisionPath(a, needle) {
+				named = true
+			}
+		} else if argNamesPath(a, needle) {
+			named = true
+		}
+	}
+	return named
+}
+
+// argNamesGitRevisionPath accepts only git show's REV:path form. The ordinary
+// `git show REV -- path` form can print commit metadata with no file body while
+// still producing a non-empty aggregate receipt.
+func argNamesGitRevisionPath(arg, needle string) bool {
+	tok := strings.ToLower(filepath.ToSlash(normalizePath(arg)))
+	if tok == "" || strings.HasPrefix(tok, "-") {
+		return false
+	}
+	i := strings.Index(tok, ":")
+	if i <= 0 || i == len(tok)-1 {
+		return false
+	}
+	path := tok[i+1:]
+	return path == needle || strings.HasSuffix(path, "/"+needle)
+}
+
+// argNamesPath reports whether one static argv token names the claimed path:
+// exact after normalization, a trailing-components match of a fuller token,
+// or the path part of a git REV:path spec.
+func argNamesPath(arg, needle string) bool {
+	tok := strings.ToLower(filepath.ToSlash(normalizePath(arg)))
+	if tok == "" || strings.HasPrefix(tok, "-") {
+		return false
+	}
+	if tok == needle || strings.HasSuffix(tok, "/"+needle) {
+		return true
+	}
+	if i := strings.Index(tok, ":"); i >= 0 {
+		rest := tok[i+1:]
+		if rest == needle || strings.HasSuffix(rest, "/"+needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandReviewsChanges(command string) bool {
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok {
+		return false
+	}
+	for _, segment := range segments {
+		normalized, safe := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		if !safe {
+			continue
+		}
+		fields, malformed := shellparse.StaticFields(normalized)
+		if malformed != "" || len(fields) == 0 {
+			continue
+		}
+		base := strings.ToLower(filepath.Base(fields[0]))
+		if base == "diff" || base == "cmp" {
+			return true
+		}
+		if base == "git" && len(fields) > 1 {
+			sub := strings.ToLower(fields[1])
+			if sub == "diff" || sub == "status" || sub == "show" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func commandMentionsPaths(command string, wanted map[string]bool) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(command, `\`, "/"))
+	for path := range wanted {
+		if strings.Contains(normalized, strings.ToLower(filepath.ToSlash(path))) {
+			return true
+		}
+	}
+	return false
 }
 
 func isReadReceipt(name string, readOnly bool) bool {

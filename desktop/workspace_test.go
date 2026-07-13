@@ -1455,6 +1455,45 @@ func TestWorkspaceGitHistory(t *testing.T) {
 	}
 }
 
+func TestEmptyGitArrayResultsAreNonNil(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	orig, _ := os.Getwd()
+	defer os.Chdir(orig)
+
+	dir := t.TempDir()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "init")
+	runGit(t, "config", "user.email", "test@example.com")
+	runGit(t, "config", "user.name", "Test User")
+
+	app := &App{}
+	branches, err := app.GitBranches()
+	if err != nil {
+		t.Fatalf("GitBranches err = %v", err)
+	}
+	if branches == nil {
+		t.Fatal("GitBranches returned nil for an unborn repository; frontend expects []")
+	}
+
+	if err := os.WriteFile("tracked.txt", []byte("content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, "add", "tracked.txt")
+	runGit(t, "commit", "-m", "initial")
+
+	history, err := app.WorkspaceGitHistory("", "never-existed.txt")
+	if err != nil {
+		t.Fatalf("WorkspaceGitHistory empty path err = %v", err)
+	}
+	if history == nil {
+		t.Fatal("WorkspaceGitHistory returned nil for a path without commits; frontend expects []")
+	}
+}
+
 func TestWorkspaceGitHistoryUsesRequestedTabWorkspace(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")

@@ -86,3 +86,79 @@ func TestCanonicalizeSchemaPreservesDependentRequiredPropertyName(t *testing.T) 
 		t.Fatalf("CanonicalizeSchema() = %s, want %s", got, want)
 	}
 }
+
+func TestNormalizeLegacyTupleItemsForDraft202012(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type":"object",
+		"properties":{
+			"pair":{
+				"type":"array",
+				"items":[{"type":"string"},{"type":"number"}],
+				"additionalItems":false
+			}
+		}
+	}`)
+
+	got := string(NormalizeLegacyTupleItemsForDraft202012(raw))
+	want := `{"properties":{"pair":{"items":false,"prefixItems":[{"type":"string"},{"type":"number"}],"type":"array"}},"type":"object"}`
+	if got != want {
+		t.Fatalf("NormalizeLegacyTupleItemsForDraft202012() = %s, want %s", got, want)
+	}
+	if again := string(NormalizeLegacyTupleItemsForDraft202012(json.RawMessage(got))); again != got {
+		t.Fatalf("tuple migration is not idempotent:\n first: %s\nsecond: %s", got, again)
+	}
+}
+
+func TestNormalizeLegacyTupleItemsForDraft202012Nested(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type":"object",
+		"$defs":{
+			"value":{
+				"anyOf":[
+					{"type":"string"},
+					{"type":"array","items":[{"type":"string"},{"type":"number"}]}
+				]
+			}
+		},
+		"properties":{"value":{"$ref":"#/$defs/value"}}
+	}`)
+
+	got := string(NormalizeLegacyTupleItemsForDraft202012(raw))
+	want := `{"$defs":{"value":{"anyOf":[{"type":"string"},{"prefixItems":[{"type":"string"},{"type":"number"}],"type":"array"}]}},"properties":{"value":{"$ref":"#/$defs/value"}},"type":"object"}`
+	if got != want {
+		t.Fatalf("NormalizeLegacyTupleItemsForDraft202012() = %s, want %s", got, want)
+	}
+}
+
+func TestNormalizeLegacyTupleItemsPreservesExistingPrefixItems(t *testing.T) {
+	raw := json.RawMessage(`{
+		"type":"array",
+		"prefixItems":[{"type":"boolean"}],
+		"items":[{"type":"string"}],
+		"additionalItems":{"type":"number"}
+	}`)
+
+	got := string(NormalizeLegacyTupleItemsForDraft202012(raw))
+	want := `{"items":{"type":"number"},"prefixItems":[{"type":"boolean"}],"type":"array"}`
+	if got != want {
+		t.Fatalf("NormalizeLegacyTupleItemsForDraft202012() = %s, want %s", got, want)
+	}
+}
+
+func TestNormalizeLegacyTupleItemsPreservesModernArrayItems(t *testing.T) {
+	// Modern object-form items need no rewrite, so the input bytes come back
+	// exactly — not a reserialized (key-sorted) copy, which would perturb the
+	// canonical bytes the registry produced once.
+	raw := json.RawMessage(`{"type":"array","items":{"anyOf":[{"type":"string"},{"type":"number"}]}}`)
+	if got := string(NormalizeLegacyTupleItemsForDraft202012(raw)); got != string(raw) {
+		t.Fatalf("NormalizeLegacyTupleItemsForDraft202012() = %s, want the input bytes unchanged %s", got, raw)
+	}
+}
+
+func TestCanonicalizeSchemaPreservesLegacyTupleItems(t *testing.T) {
+	raw := json.RawMessage(`{"type":"object","properties":{"pair":{"type":"array","items":[{"type":"string"},{"type":"number"}],"additionalItems":false}}}`)
+	want := `{"properties":{"pair":{"additionalItems":false,"items":[{"type":"string"},{"type":"number"}],"type":"array"}},"type":"object"}`
+	if got := string(CanonicalizeSchema(raw)); got != want {
+		t.Fatalf("CanonicalizeSchema() = %s, want provider-neutral bytes %s", got, want)
+	}
+}
