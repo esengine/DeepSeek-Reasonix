@@ -104,9 +104,14 @@ type Controller struct {
 	// memory owns the loaded memory snapshot, the pending turn-tail notes queue,
 	// and write serialization behind its own locks, off c.mu — so a memory-panel
 	// save never stalls an approval or status poll. See memory.go.
-	memory            memoryManager
-	cleanup           func()
-	autoPlan          string
+	memory   memoryManager
+	cleanup  func()
+	autoPlan string
+	// suppressAutoPlan is set when the user manually exits plan mode (by
+	// denying the plan approval without approving it). It prevents maybeAutoPlan
+	// from re-entering plan mode on the next user turn, breaking the cycle where
+	// auto-plan immediately re-enables mode the user just exited.
+	suppressAutoPlan  bool
 	responseLanguage  string
 	reasoningLanguage string
 	// disableColdResumePrune skips stale-tool-result elision on cold resume.

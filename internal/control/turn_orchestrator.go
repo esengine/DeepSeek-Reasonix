@@ -249,6 +249,15 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return err
 	}
 	if !allow {
+		// If plan mode is now off, the front-end has already switched to
+		// normal mode — the user explicitly exited plan mode. Suppress
+		// auto-plan for the next turn so it does not immediately re-enter
+		// the mode the user just left, creating an infinite loop (#5419).
+		c.mu.Lock()
+		if !c.planMode {
+			c.suppressAutoPlan = true
+		}
+		c.mu.Unlock()
 		return nil // keep planning; plan mode stays on
 	}
 	c.SetPlanMode(false)
