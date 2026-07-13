@@ -29988,10 +29988,14 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .app--creation .msg--assistant:hover + .turn-actions,
+.app--creation .steer-line:hover + .turn-actions,
+.app--creation .notice-line--delivery:hover + .turn-actions,
 .app--creation .turn-actions:hover,
 .app--creation .turn-actions:focus-within,
 .app--creation .turn-actions--open,
 :root[data-theme-style] .app--creation .msg--assistant:hover + .turn-actions,
+:root[data-theme-style] .app--creation .steer-line:hover + .turn-actions,
+:root[data-theme-style] .app--creation .notice-line--delivery:hover + .turn-actions,
 :root[data-theme-style] .app--creation .turn-actions:hover,
 :root[data-theme-style] .app--creation .turn-actions:focus-within,
 :root[data-theme-style] .app--creation .turn-actions--open {

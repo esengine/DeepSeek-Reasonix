@@ -222,6 +222,25 @@ try {
   const segmentHeads = segmentDoc.querySelectorAll("button.turn-collapse__reasoning-head");
   ok(segmentHeads.length === 3, "every reasoning segment gets its own toggle");
   ok(Array.from(segmentHeads).every((head) => head.getAttribute("aria-expanded") === "true"), "reasoning segments default to expanded");
+
+  // #6393: a steer notice between the last assistant answer and TurnActions
+  // breaks the CSS sibling chain (.msg--assistant:hover + .turn-actions),
+  // hiding the copy button in creation mode because TurnActions starts with
+  // opacity:0; pointer-events:none and requires the sibling hover to reveal.
+  const steerBetweenDoc = render([
+    { kind: "user", id: "u-steer-bug", text: "do it" },
+    { kind: "assistant", id: "a-steer-bug", text: "here is the answer", reasoning: "", streaming: false, workDurationMs: 1_000 },
+    { kind: "notice", id: "n-steer-bug", level: "info", text: "↪ mid-turn steer between answer and actions" },
+  ]);
+  const turnActions = steerBetweenDoc.querySelector(".turn-actions");
+  ok(turnActions !== null, "#6393: TurnActions exists in DOM after steer");
+  ok(turnActions?.querySelector(".copybtn") !== null, "#6393: copy button exists inside TurnActions");
+  // The critical sibling-chain assertion: .turn-actions' previous sibling
+  // should be .msg--assistant for creation-mode CSS to reveal it on hover.
+  // With a steer in between, it's .steer-line instead → permanently hidden.
+  const prevSibling = turnActions?.previousElementSibling;
+  ok(prevSibling?.classList.contains("steer-line") === true, "#6393: TurnActions previous sibling is steer-line, NOT msg--assistant — CSS hover chain broken");
+  ok(prevSibling?.classList.contains("msg--assistant") === false, "#6393: CSS .msg--assistant:hover + .turn-actions will NOT match (steer-line sits between)");
 } finally {
   await server?.close();
   delete (globalThis as { localStorage?: Storage }).localStorage;
