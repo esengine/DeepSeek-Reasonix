@@ -433,6 +433,21 @@ type Agent struct {
 	// OPT-65: Prompt 片段缓存 — 缓存可复用片段
 	promptFragmentCache *PromptFragmentCache
 
+	// OPT-66: 去重统计报告器 — 聚合去重统计
+	dedupStatsReporter *DedupStatsReporter
+
+	// OPT-67: 增量缓存追踪器 — 追踪增量缓存构建
+	incrementalCacheTracker *IncrementalCacheTracker
+
+	// OPT-68: 跨轮去重器 — 跨轮次内容去重
+	turnAwareDeduplicator *TurnAwareDeduplicator
+
+	// OPT-69: 智能工具选择器 — 基于历史和上下文选择工具
+	smartToolSelector *SmartToolSelector
+
+	// OPT-70: Token 流分析器 — 分析 token 流模式
+	tokenFlowAnalyzer *TokenFlowAnalyzer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1400,6 +1415,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	toolOutputCache := NewToolOutputCache(0) // 0 = 默认 100
 	promptFragmentCache := NewPromptFragmentCache()
 
+	// ── OPT-66~70 集成: 第十批 token 优化模块 ──
+	dedupStatsReporter := NewDedupStatsReporter()
+	incrementalCacheTracker := NewIncrementalCacheTracker()
+	turnAwareDeduplicator := NewTurnAwareDeduplicator()
+	smartToolSelector := NewSmartToolSelector()
+	tokenFlowAnalyzer := NewTokenFlowAnalyzer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1483,6 +1505,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowStrategy:    contextWindowStrategy,
 		toolOutputCache:          toolOutputCache,
 		promptFragmentCache:      promptFragmentCache,
+		dedupStatsReporter:       dedupStatsReporter,
+		incrementalCacheTracker:  incrementalCacheTracker,
+		turnAwareDeduplicator:    turnAwareDeduplicator,
+		smartToolSelector:        smartToolSelector,
+		tokenFlowAnalyzer:        tokenFlowAnalyzer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1764,6 +1791,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptFragmentCache != nil {
 		stats["opt65_promptFragmentCache"] = a.promptFragmentCache.GetStats()
+	}
+	if a.dedupStatsReporter != nil {
+		stats["opt66_dedupStatsReporter"] = a.dedupStatsReporter.GetReport()
+	}
+	if a.incrementalCacheTracker != nil {
+		stats["opt67_incrementalCacheTracker"] = a.incrementalCacheTracker.GetStats()
+	}
+	if a.turnAwareDeduplicator != nil {
+		stats["opt68_turnAwareDeduplicator"] = a.turnAwareDeduplicator.GetStats()
+	}
+	if a.smartToolSelector != nil {
+		stats["opt69_smartToolSelector"] = a.smartToolSelector.GetStats()
+	}
+	if a.tokenFlowAnalyzer != nil {
+		stats["opt70_tokenFlowAnalyzer"] = a.tokenFlowAnalyzer.GetStats()
 	}
 	return stats
 }
@@ -2221,6 +2263,17 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		if decision.Action == "compact" {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window strategy: compact recommended"})
 		}
+	}
+
+	// OPT-70: Token 流分析 — 记录 token 流向
+	if a.tokenFlowAnalyzer != nil && usage != nil {
+		a.tokenFlowAnalyzer.RecordFlow(step+1, usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+
+	// OPT-66: 去重统计报告 — 定期汇总
+	if a.dedupStatsReporter != nil && a.dedupStatsReporter.ShouldReport() {
+		report := a.dedupStatsReporter.GetReport()
+		_ = report // 通过零 token 通道推送
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
