@@ -350,6 +350,10 @@ input,textarea{font:inherit;color:inherit}
 .model-item__meta{font-size:11px;color:var(--muted);margin-top:2px}
 .model-item__status{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--border);color:var(--muted);font-size:11px;white-space:nowrap}
 .model-item__status--active{border-color:transparent;background:var(--success-soft);color:var(--success)}
+.model-search{padding:0 0 8px}
+.model-search__input{width:100%;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);padding:0 9px;font-size:13px;outline:none}
+.model-search__input::placeholder{color:var(--muted-2)}
+.model-search__input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .dialog-btn{height:30px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--fg-2);font-size:12px}
 .dialog-btn:hover{border-color:var(--border-strong);color:var(--fg)}
@@ -565,6 +569,7 @@ input,textarea{font:inherit;color:inherit}
       <span class="modal__close" id="models-modal-close">&times;</span>
     </div>
     <div class="modal__body">
+      <div class="model-search"><input class="model-search__input" id="models-search" type="search" placeholder="__('search_models')" aria-label="__('search_models')"></div>
       <div class="model-list" id="models-list"></div>
     </div>
   </div>
@@ -689,6 +694,7 @@ const __T = {
     'delete': 'Delete',
     'delete_session': 'Delete Session',
     'search_sessions': 'Search sessions',
+    'search_models': 'Search models',
     'active': 'Active',
     'use_model': 'Use',
     'no_sessions': 'No sessions',
@@ -823,6 +829,7 @@ const __T = {
     'delete': '删除',
     'delete_session': '删除会话',
     'search_sessions': '搜索会话',
+    'search_models': '搜索模型',
     'active': '当前',
     'use_model': '使用',
     'no_sessions': '暂无会话',
@@ -1515,13 +1522,22 @@ function openBranches() {
 function closeBranches(){const m=$('#branches-modal');if(m)m.style.display='none';}
 
 // ── models panel ──
+let _modelsCache=null;
+let _modelsFilter='';
 function renderModelsPanel(data) {
+  if(data)_modelsCache=data;
   const list=$('#models-list');
   if(!list)return;
-  const models=Array.isArray(data?.models)?data.models:[];
+  const models=_modelsCache?Array.isArray(_modelsCache.models)?_modelsCache.models:[]:[];
+  const filtered=models.filter(m=>{
+    if(!_modelsFilter)return true;
+    const q=_modelsFilter.toLowerCase();
+    return (m.ref||'').toLowerCase().includes(q)||(m.kind||'').toLowerCase().includes(q);
+  });
   if(models.length===0){list.innerHTML='<div class="empty-note">'+escHtml(__('error_loading'))+'</div>';return;}
+  if(filtered.length===0){list.innerHTML='<div class="empty-note">'+escHtml(__('no_sessions'))+'</div>';return;}
   list.innerHTML='';
-  models.forEach(m=>{
+  filtered.forEach(m=>{
     const active=!!m.active;
     const item=el('div','model-item'+(active?' model-item--active':''));
     item.innerHTML='<div><div class="model-item__title">'+escHtml(m.ref||'')+'</div><div class="model-item__meta">'+escHtml([m.kind,m.default?'default':''].filter(Boolean).join(' · '))+'</div></div>';
@@ -1534,11 +1550,14 @@ function renderModelsPanel(data) {
   });
 }
 function openModels() {
+  _modelsFilter='';
+  const search=$('#models-search');
+  if(search)search.value='';
   const modal=$('#models-modal');
   if(!modal)return;
   $('#models-list').innerHTML='<div class="empty-note">'+escHtml(__('loading'))+'</div>';
   modal.style.display='flex';
-  fetch('/models').then(r=>r.json()).then(renderModelsPanel).catch(()=>{
+  fetch('/models').then(r=>r.json()).then(data=>{renderModelsPanel(data);}).catch(()=>{
     $('#models-list').innerHTML='<div class="empty-note">'+escHtml(__('error_loading'))+'</div>';
   });
 }
@@ -1732,6 +1751,7 @@ $('#models-list').onclick=e=>{
   post('/submit',{input:'/model '+ref}).then(()=>setTimeout(fetchStatus,300));
 };
 $('#session-search').addEventListener('input',e=>{sessionFilter=e.target.value;renderSessions();});
+$('#models-search').addEventListener('input',e=>{_modelsFilter=e.target.value;renderModelsPanel();});
 
 // ── mobile sidebar toggle ──
 const sidebar=$('.sidebar'), overlay=$('#sidebar-overlay'), menuBtn=$('#menu-btn');
