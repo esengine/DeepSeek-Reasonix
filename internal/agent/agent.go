@@ -403,6 +403,21 @@ type Agent struct {
 	// OPT-55: 对话流优化器 — 检测冗余查询
 	flowOptimizer *ConversationFlowOptimizer
 
+	// OPT-56: 推理 token 优化器 — 截断过长推理内容
+	reasoningOptimizer *ReasoningTokenOptimizer
+
+	// OPT-57: 上下文优先级排序器 — 重排消息提高缓存命中
+	contextPrioritizer *ContextPrioritizer
+
+	// OPT-58: Token 感知监控器 — 实时监控 token 使用率
+	tokenAwarenessMonitor *TokenAwarenessMonitor
+
+	// OPT-59: 错误上下文优化器 — 提取错误相关上下文
+	errorContextOptimizer *ErrorContextOptimizer
+
+	// OPT-60: 自适应缓存管理器 — 动态调整缓存策略
+	adaptiveCacheManager *AdaptiveCacheManager
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1356,6 +1371,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	tokenSerializer := NewTokenEfficientSerializer()
 	flowOptimizer := NewConversationFlowOptimizer()
 
+	// ── OPT-56~60 集成: 第八批 token 优化模块 ──
+	reasoningOptimizer := NewReasoningTokenOptimizer()
+	contextPrioritizer := NewContextPrioritizer()
+	tokenAwarenessMonitor := NewTokenAwarenessMonitor()
+	errorContextOptimizer := NewErrorContextOptimizer()
+	adaptiveCacheManager := NewAdaptiveCacheManager()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1429,6 +1451,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		multiTurnCacheTracker:    multiTurnCacheTracker,
 		tokenSerializer:          tokenSerializer,
 		flowOptimizer:            flowOptimizer,
+		reasoningOptimizer:       reasoningOptimizer,
+		contextPrioritizer:       contextPrioritizer,
+		tokenAwarenessMonitor:    tokenAwarenessMonitor,
+		errorContextOptimizer:    errorContextOptimizer,
+		adaptiveCacheManager:     adaptiveCacheManager,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1680,6 +1707,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.flowOptimizer != nil {
 		stats["opt55_flowOptimizer"] = a.flowOptimizer.GetStats()
+	}
+	if a.reasoningOptimizer != nil {
+		stats["opt56_reasoningOptimizer"] = a.reasoningOptimizer.GetStats()
+	}
+	if a.contextPrioritizer != nil {
+		stats["opt57_contextPrioritizer"] = a.contextPrioritizer.GetStats()
+	}
+	if a.tokenAwarenessMonitor != nil {
+		stats["opt58_tokenAwarenessMonitor"] = a.tokenAwarenessMonitor.GetStats()
+	}
+	if a.errorContextOptimizer != nil {
+		stats["opt59_errorContextOptimizer"] = a.errorContextOptimizer.GetStats()
+	}
+	if a.adaptiveCacheManager != nil {
+		stats["opt60_adaptiveCacheManager"] = a.adaptiveCacheManager.GetStats()
 	}
 	return stats
 }
@@ -2094,6 +2136,27 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		if analysis.IsRedundant {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "redundant query detected — consider using cached response"})
 		}
+	}
+
+	// OPT-58: Token 感知监控 — 检查 token 使用率
+	if a.tokenAwarenessMonitor != nil && usage != nil {
+		report := a.tokenAwarenessMonitor.CheckAwareness(usage.PromptTokens, usage.CompletionTokens, a.contextWindow)
+		if report.Status == "critical" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token usage critical — approaching context window limit"})
+		}
+		a.tokenAwarenessMonitor.TrackTurn(usage.PromptTokens, usage.CompletionTokens)
+	}
+
+	// OPT-59: 错误上下文优化 — 提取错误相关上下文
+	if a.errorContextOptimizer != nil && err != nil && !interrupted {
+		a.errorContextOptimizer.OptimizeErrorContext(err.Error(), input)
+	}
+
+	// OPT-60: 自适应缓存管理 — 根据命中率调整缓存策略
+	if a.adaptiveCacheManager != nil && usage != nil {
+		a.adaptiveCacheManager.RecordCachePerformance(usage.CacheHitTokens, usage.CacheMissTokens)
+		newStrategy := a.adaptiveCacheManager.AdaptStrategy(a.adaptiveCacheManager.GetStats().CurrentHitRate, usage.CacheMissTokens)
+		_ = newStrategy // 可用于调整其他 OPT 模块的缓存行为
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
