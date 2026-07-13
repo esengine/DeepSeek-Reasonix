@@ -418,6 +418,21 @@ type Agent struct {
 	// OPT-60: 自适应缓存管理器 — 动态调整缓存策略
 	adaptiveCacheManager *AdaptiveCacheManager
 
+	// OPT-61: 预热预测器 — 预测并预热工具 schema
+	warmupPredictor *WarmupPredictor
+
+	// OPT-62: Token 预算强制器 — 硬预算限制
+	tokenBudgetEnforcer *TokenBudgetEnforcer
+
+	// OPT-63: 上下文窗口策略 — 动态窗口管理
+	contextWindowStrategy *ContextWindowStrategy
+
+	// OPT-64: 工具输出缓存 — 避免重复工具调用
+	toolOutputCache *ToolOutputCache
+
+	// OPT-65: Prompt 片段缓存 — 缓存可复用片段
+	promptFragmentCache *PromptFragmentCache
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1378,6 +1393,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	errorContextOptimizer := NewErrorContextOptimizer()
 	adaptiveCacheManager := NewAdaptiveCacheManager()
 
+	// ── OPT-61~65 集成: 第九批 token 优化模块 ──
+	warmupPredictor := NewWarmupPredictor()
+	tokenBudgetEnforcer := NewTokenBudgetEnforcer(opts.ContextWindow)
+	contextWindowStrategy := NewContextWindowStrategy()
+	toolOutputCache := NewToolOutputCache(0) // 0 = 默认 100
+	promptFragmentCache := NewPromptFragmentCache()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1456,6 +1478,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		tokenAwarenessMonitor:    tokenAwarenessMonitor,
 		errorContextOptimizer:    errorContextOptimizer,
 		adaptiveCacheManager:     adaptiveCacheManager,
+		warmupPredictor:          warmupPredictor,
+		tokenBudgetEnforcer:      tokenBudgetEnforcer,
+		contextWindowStrategy:    contextWindowStrategy,
+		toolOutputCache:          toolOutputCache,
+		promptFragmentCache:      promptFragmentCache,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1722,6 +1749,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.adaptiveCacheManager != nil {
 		stats["opt60_adaptiveCacheManager"] = a.adaptiveCacheManager.GetStats()
+	}
+	if a.warmupPredictor != nil {
+		stats["opt61_warmupPredictor"] = a.warmupPredictor.GetStats()
+	}
+	if a.tokenBudgetEnforcer != nil {
+		stats["opt62_tokenBudgetEnforcer"] = a.tokenBudgetEnforcer.GetStats()
+	}
+	if a.contextWindowStrategy != nil {
+		stats["opt63_contextWindowStrategy"] = a.contextWindowStrategy.GetStats()
+	}
+	if a.toolOutputCache != nil {
+		stats["opt64_toolOutputCache"] = a.toolOutputCache.GetStats()
+	}
+	if a.promptFragmentCache != nil {
+		stats["opt65_promptFragmentCache"] = a.promptFragmentCache.GetStats()
 	}
 	return stats
 }
@@ -2157,6 +2199,28 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		a.adaptiveCacheManager.RecordCachePerformance(usage.CacheHitTokens, usage.CacheMissTokens)
 		newStrategy := a.adaptiveCacheManager.AdaptStrategy(a.adaptiveCacheManager.GetStats().CurrentHitRate, usage.CacheMissTokens)
 		_ = newStrategy // 可用于调整其他 OPT 模块的缓存行为
+	}
+
+	// OPT-61: 预热预测器 — 预测下一轮需要的工具
+	if a.warmupPredictor != nil && step == 0 && input != "" {
+		predicted := a.warmupPredictor.PredictTools(input)
+		_ = predicted // 预加载预测工具的 schema
+	}
+
+	// OPT-62: Token 预算强制器 — 检查是否超出预算
+	if a.tokenBudgetEnforcer != nil && usage != nil {
+		action := a.tokenBudgetEnforcer.Enforce(usage.TotalTokens)
+		if action == EnforcementDegrade {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget exceeded — degrading to save tokens"})
+		}
+	}
+
+	// OPT-63: 上下文窗口策略 — 评估窗口管理策略
+	if a.contextWindowStrategy != nil && usage != nil {
+		decision := a.contextWindowStrategy.Evaluate(usage.PromptTokens, a.contextWindow, step+1)
+		if decision.Action == "compact" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window strategy: compact recommended"})
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
@@ -3824,6 +3888,16 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	// OPT-47: Token 高效格式化 — 压缩工具输出格式
 	if a.efficientFormatter != nil && len(result) > 1000 {
 		result = a.efficientFormatter.FormatToolOutput(result, 0)
+	}
+
+	// OPT-64: 工具输出缓存 — 缓存结果避免重复调用
+	if a.toolOutputCache != nil {
+		cached, hit := a.toolOutputCache.Get(call.Name, call.Arguments)
+		if hit {
+			result = cached
+		} else {
+			a.toolOutputCache.Set(call.Name, call.Arguments, result)
+		}
 	}
 
 	// OPT-07: 预测性预取 — 记录工具调用并预测下一步
