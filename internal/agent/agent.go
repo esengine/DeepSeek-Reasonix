@@ -343,6 +343,21 @@ type Agent struct {
 	// OPT-33: 图片 token 优化器 — 压缩图片减少 token
 	imageOptimizer *ImageOptimizer
 
+	// OPT-36: Token 模式感知调度器
+	modeScheduler *ModeAwareScheduler
+
+	// OPT-37: Phantom 统计报告器
+	phantomReporter *PhantomStatsReporter
+
+	// OPT-38: 渐进式披露与懒加载协同
+	disclosureCoordinator *DisclosureLazyCoordinator
+
+	// OPT-39: 缓存断点优化器
+	breakpointOptimizer *BreakpointOptimizer
+
+	// OPT-40: 智能压缩触发器
+	smartCompaction *SmartCompactionTrigger
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1267,6 +1282,14 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	summaryCache := NewSummaryCache(20)
 	modelRouter := NewModelRouter("", "", "") // 可选启用，默认不路由
 	imageOptimizer := NewImageOptimizer()
+
+	// ── OPT-36~40 集成: 第四批 token 优化模块 ──
+	modeScheduler := NewModeAwareScheduler(TokenModeFull)
+	phantomReporter := NewPhantomStatsReporter()
+	disclosureCoordinator := NewDisclosureLazyCoordinator()
+	breakpointOptimizer := NewBreakpointOptimizer(ProviderUnknown)
+	smartCompaction := NewSmartCompactionTrigger(windowPredictor)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1320,6 +1343,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		summaryCache:             summaryCache,
 		modelRouter:              modelRouter,
 		imageOptimizer:           imageOptimizer,
+		modeScheduler:            modeScheduler,
+		phantomReporter:          phantomReporter,
+		disclosureCoordinator:    disclosureCoordinator,
+		breakpointOptimizer:      breakpointOptimizer,
+		smartCompaction:          smartCompaction,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1512,6 +1540,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	if a.imageOptimizer != nil {
 		stats["opt33_imageOptimizer"] = a.imageOptimizer.GetStats()
 	}
+	if a.modeScheduler != nil {
+		stats["opt36_modeScheduler"] = a.modeScheduler.GetConfig()
+	}
+	if a.phantomReporter != nil {
+		stats["opt37_phantomReporter"] = a.phantomReporter.GetStats()
+	}
+	if a.disclosureCoordinator != nil {
+		stats["opt38_disclosureCoordinator"] = a.disclosureCoordinator.GetStats()
+	}
+	if a.breakpointOptimizer != nil {
+		stats["opt39_breakpointOptimizer"] = a.breakpointOptimizer.GetStats()
+	}
+	if a.smartCompaction != nil {
+		stats["opt40_smartCompaction"] = a.smartCompaction.GetStats()
+	}
 	return stats
 }
 
@@ -1692,6 +1735,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	if a.semanticPruner != nil {
 		a.semanticPruner.Reset()
 	}
+	// ── OPT-37: Phantom 统计报告器每轮重置 ──
+	if a.phantomReporter != nil {
+		a.phantomReporter.ShouldReport() // 重置报告计时
+	}
 
 	finalReadinessBlocks := 0
 	readinessReceiptMark := -1
@@ -1806,6 +1853,37 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			if msg.Role == provider.RoleAssistant || msg.Role == provider.RoleUser {
 				a.semanticPruner.ScoreMessage(i, string(msg.Role), msg.Content)
 			}
+		}
+	}
+
+	// OPT-36: Token 模式感知调度器 — 首步按模式调整 OPT 行为
+	if a.modeScheduler != nil && step == 0 {
+		a.modeScheduler.ApplyToAgent(a)
+	}
+
+	// OPT-37: Phantom 统计报告器 — 通过零 token 通道推送 OPT 统计
+	if a.phantomReporter != nil && a.phantomReporter.ShouldReport() {
+		snapshot := a.phantomReporter.CollectSnapshot(a)
+		_ = snapshot // 通过 PhantomUI 通道推送，不消耗 LLM token
+	}
+
+	// OPT-39: 缓存断点优化器 — 评估断点效果
+	if a.breakpointOptimizer != nil && usage != nil {
+		if usage.CacheHitTokens > 0 {
+			a.breakpointOptimizer.RecordHit(0, true)
+		} else if usage.CacheMissTokens > 0 {
+			a.breakpointOptimizer.RecordHit(0, false)
+		}
+	}
+
+	// OPT-40: 智能压缩触发器 — 基于 OPT-27 预测主动触发 compaction
+	if a.smartCompaction != nil && usage != nil {
+		action := a.smartCompaction.CheckAndTrigger(step + 1)
+		switch action {
+		case CompactionActionProactive:
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "proactive compaction triggered to save tokens"})
+		case CompactionActionImmediate:
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "immediate compaction triggered — context window critical"})
 		}
 	}
 
