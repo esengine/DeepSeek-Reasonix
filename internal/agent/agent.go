@@ -388,6 +388,21 @@ type Agent struct {
 	// OPT-50: 上下文工具过滤器 — 按对话上下文过滤可用工具
 	contextualToolFilter *ContextualToolFilter
 
+	// OPT-51: 会话归档优化器 — 归档旧会话保留缓存前缀
+	sessionArchiveOptimizer *SessionArchiveOptimizer
+
+	// OPT-52: Provider 专属缓存优化器
+	providerSpecOptimizer *ProviderSpecificOptimizer
+
+	// OPT-53: 多轮缓存追踪器
+	multiTurnCacheTracker *MultiTurnCacheTracker
+
+	// OPT-54: Token 高效序列化器
+	tokenSerializer *TokenEfficientSerializer
+
+	// OPT-55: 对话流优化器 — 检测冗余查询
+	flowOptimizer *ConversationFlowOptimizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1334,6 +1349,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	retryOptimizer := NewProviderRetryOptimizer()
 	contextualToolFilter := NewContextualToolFilter()
 
+	// ── OPT-51~55 集成: 第七批 token 优化模块 ──
+	sessionArchiveOptimizer := NewSessionArchiveOptimizer()
+	providerSpecOptimizer := NewProviderSpecificOptimizer(ProviderDeepSeek)
+	multiTurnCacheTracker := NewMultiTurnCacheTracker()
+	tokenSerializer := NewTokenEfficientSerializer()
+	flowOptimizer := NewConversationFlowOptimizer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1402,6 +1424,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		cacheWarmingScheduler:    cacheWarmingScheduler,
 		retryOptimizer:           retryOptimizer,
 		contextualToolFilter:     contextualToolFilter,
+		sessionArchiveOptimizer:  sessionArchiveOptimizer,
+		providerSpecOptimizer:    providerSpecOptimizer,
+		multiTurnCacheTracker:    multiTurnCacheTracker,
+		tokenSerializer:          tokenSerializer,
+		flowOptimizer:            flowOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1638,6 +1665,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.contextualToolFilter != nil {
 		stats["opt50_contextualToolFilter"] = a.contextualToolFilter.GetStats()
+	}
+	if a.sessionArchiveOptimizer != nil {
+		stats["opt51_sessionArchive"] = a.sessionArchiveOptimizer.GetStats()
+	}
+	if a.providerSpecOptimizer != nil {
+		stats["opt52_providerSpecOptimizer"] = a.providerSpecOptimizer.GetStats()
+	}
+	if a.multiTurnCacheTracker != nil {
+		stats["opt53_multiTurnCacheTracker"] = a.multiTurnCacheTracker.GetStats()
+	}
+	if a.tokenSerializer != nil {
+		stats["opt54_tokenSerializer"] = a.tokenSerializer.GetStats()
+	}
+	if a.flowOptimizer != nil {
+		stats["opt55_flowOptimizer"] = a.flowOptimizer.GetStats()
 	}
 	return stats
 }
@@ -2031,6 +2073,27 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	// OPT-49: Provider 重试优化器 — 错误时记录重试
 	if a.retryOptimizer != nil && err != nil && !interrupted {
 		a.retryOptimizer.RecordRetry("server_error", 0)
+	}
+
+	// OPT-52: Provider 专属缓存优化 — 计算缓存节省
+	if a.providerSpecOptimizer != nil && usage != nil {
+		a.providerSpecOptimizer.OptimizeForProvider(usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+
+	// OPT-53: 多轮缓存追踪 — 记录每轮缓存命中情况
+	if a.multiTurnCacheTracker != nil && usage != nil {
+		a.multiTurnCacheTracker.RecordTurn(step+1, usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens, cacheDiagnostics.PrefixHash)
+		if a.multiTurnCacheTracker.ShouldAlert() {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache miss detected — prefix may have changed"})
+		}
+	}
+
+	// OPT-55: 对话流优化 — 检测冗余查询
+	if a.flowOptimizer != nil && step == 0 && input != "" {
+		analysis := a.flowOptimizer.AnalyzeTurn(input, "", calls != nil)
+		if analysis.IsRedundant {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "redundant query detected — consider using cached response"})
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
