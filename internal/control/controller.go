@@ -4519,10 +4519,13 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 
 func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, string, error) {
 	subject = approvalDisplaySubject(tool, subject, args)
-	// requestApproval short-circuits the YOLO / just-approved-plan window and any
-	// session grant before it emits a prompt, so the auto-allow paths need no
-	// special-casing here. Deny rules already bit before this point.
-	if g.c.guardianSess != nil && !g.c.approval.preApproved(tool, subject) {
+	// Check pre-approval first — YOLO mode, plan-execution window, and session
+	// grants all short-circuit here, before any prompt or guardian review.
+	// Deny rules already bit at the policy level before this point.
+	if g.c.approval.preApproved(tool, subject) {
+		return true, false, "", nil
+	}
+	if g.c.guardianSess != nil {
 		allow, reason, reviewErr := g.c.guardianSess.Review(ctx, tool, args, g.c.executor.Session())
 		if reviewErr != nil {
 			return false, false, "", reviewErr
