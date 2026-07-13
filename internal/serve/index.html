@@ -354,6 +354,22 @@ input,textarea{font:inherit;color:inherit}
 .model-search__input{width:100%;height:30px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);padding:0 9px;font-size:13px;outline:none}
 .model-search__input::placeholder{color:var(--muted-2)}
 .model-search__input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.provider-group{margin-bottom:10px}
+.provider-header{display:flex;align-items:center;gap:8px;padding:6px 8px 4px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;font-family:var(--heading);color:var(--fg)}
+.provider-header__kind{font-weight:400;color:var(--muted);font-family:var(--sans);font-size:11px}
+.provider-header__actions{margin-left:auto;display:flex;gap:4px}
+.provider-header__btn{height:22px;padding:0 7px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--muted);font-size:10.5px;cursor:pointer;transition:all .15s ease}
+.provider-header__btn:hover{border-color:var(--border-strong);color:var(--fg)}
+.provider-header__btn--danger{border-color:transparent;background:var(--danger-soft);color:var(--danger)}
+.provider-header__btn--danger:hover{background:oklch(66% .18 25/.25)}
+.pf-field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}
+.pf-field--inline{flex-direction:row;align-items:center;gap:6px}
+.pf-label{font-size:12px;color:var(--muted);font-weight:500}
+.pf-input{height:32px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);padding:0 9px;font-size:13px;outline:none}
+.pf-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.pf-textarea{height:auto;padding:6px 9px;resize:vertical;font-family:var(--mono);font-size:12px;min-height:60px;line-height:1.5}
+.dialog-btn--primary{background:var(--accent);border-color:transparent;color:oklch(99% 0 0);font-weight:600}
+.dialog-btn--primary:hover{background:var(--accent-strong)}
 .dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .dialog-btn{height:30px;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--fg-2);font-size:12px}
 .dialog-btn:hover{border-color:var(--border-strong);color:var(--fg)}
@@ -570,7 +586,35 @@ input,textarea{font:inherit;color:inherit}
     </div>
     <div class="modal__body">
       <div class="model-search"><input class="model-search__input" id="models-search" type="search" placeholder="__('search_models')" aria-label="__('search_models')"></div>
+      <button class="dialog-btn" id="btn-add-provider" type="button" style="width:100%;margin-bottom:8px;font-weight:500">+ __('add_provider')</button>
       <div class="model-list" id="models-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- provider form modal -->
+<div class="modal-overlay" id="provider-form-modal" style="display:none">
+  <div class="modal">
+    <div class="modal__head">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+      <span id="provider-form-title">__('add_provider')</span>
+      <span class="modal__close" id="provider-form-close">&times;</span>
+    </div>
+    <div class="modal__body">
+      <div class="provider-form">
+        <label class="pf-field"><span class="pf-label">__('provider_name')</span><input id="pf-name" type="text" class="pf-input" placeholder="my-provider"></label>
+        <label class="pf-field"><span class="pf-label">__('provider_kind')</span><input id="pf-kind" type="text" class="pf-input" value="openai" placeholder="openai"></label>
+        <label class="pf-field"><span class="pf-label">__('provider_base_url')</span><input id="pf-base-url" type="url" class="pf-input" placeholder="https://api.example.com/v1"></label>
+        <label class="pf-field"><span class="pf-label">__('provider_models')</span><textarea id="pf-models" class="pf-input pf-textarea" rows="3" placeholder="__('models_placeholder')"></textarea></label>
+        <label class="pf-field"><span class="pf-label">__('api_key')</span><input id="pf-api-key-value" type="password" class="pf-input" placeholder="sk-..."></label>
+        <label class="pf-field"><span class="pf-label">__('context_window')</span><input id="pf-context-window" type="number" class="pf-input" value="128000"></label>
+        <label class="pf-field pf-field--inline"><input id="pf-vision" type="checkbox"> <span>__('vision')</span></label>
+        <label class="pf-field pf-field--inline"><input id="pf-set-default" type="checkbox"> <span>__('set_default')</span></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="dialog-btn" id="pf-cancel" type="button">__('cancel_plain')</button>
+        <button class="dialog-btn dialog-btn--primary" id="pf-save" type="button">__('save')</button>
+      </div>
     </div>
   </div>
 </div>
@@ -695,6 +739,21 @@ const __T = {
     'delete_session': 'Delete Session',
     'search_sessions': 'Search sessions',
     'search_models': 'Search models',
+    'add_provider': 'Add Provider',
+    'edit': 'Edit',
+    'edit_provider': 'Edit Provider',
+    'provider_name': 'Name',
+    'provider_kind': 'Kind',
+    'provider_base_url': 'Base URL',
+    'provider_models': 'Models',
+    'models_placeholder': 'one per line',
+    'api_key_env': 'API Key Env',
+    'api_key': 'API Key',
+    'context_window': 'Context Window',
+    'vision': 'Vision support',
+    'set_default': 'Set as default model',
+    'save': 'Save',
+    'confirm_delete_provider': 'Delete provider {name}? This cannot be undone.',
     'active': 'Active',
     'use_model': 'Use',
     'no_sessions': 'No sessions',
@@ -830,6 +889,21 @@ const __T = {
     'delete_session': '删除会话',
     'search_sessions': '搜索会话',
     'search_models': '搜索模型',
+    'add_provider': '添加提供商',
+    'edit': '编辑',
+    'edit_provider': '编辑提供商',
+    'provider_name': '名称',
+    'provider_kind': '类型',
+    'provider_base_url': '基础URL',
+    'provider_models': '模型',
+    'models_placeholder': '每行一个',
+    'api_key_env': 'API密钥环境变量',
+    'api_key': 'API密钥',
+    'context_window': '上下文窗口',
+    'vision': '视觉支持',
+    'set_default': '设为默认模型',
+    'save': '保存',
+    'confirm_delete_provider': '确定要删除提供商 {name} 吗？此操作不可撤销。',
     'active': '当前',
     'use_model': '使用',
     'no_sessions': '暂无会话',
@@ -1524,6 +1598,7 @@ function closeBranches(){const m=$('#branches-modal');if(m)m.style.display='none
 // ── models panel ──
 let _modelsCache=null;
 let _modelsFilter='';
+let _providersCache=null;
 function renderModelsPanel(data) {
   if(data)_modelsCache=data;
   const list=$('#models-list');
@@ -1532,21 +1607,42 @@ function renderModelsPanel(data) {
   const filtered=models.filter(m=>{
     if(!_modelsFilter)return true;
     const q=_modelsFilter.toLowerCase();
-    return (m.ref||'').toLowerCase().includes(q)||(m.kind||'').toLowerCase().includes(q);
+    return (m.ref||'').toLowerCase().includes(q)||(m.kind||'').toLowerCase().includes(q)||(m.provider||'').toLowerCase().includes(q);
   });
   if(models.length===0){list.innerHTML='<div class="empty-note">'+escHtml(__('error_loading'))+'</div>';return;}
   if(filtered.length===0){list.innerHTML='<div class="empty-note">'+escHtml(__('no_sessions'))+'</div>';return;}
   list.innerHTML='';
+  // group by provider
+  const byProvider={};
   filtered.forEach(m=>{
-    const active=!!m.active;
-    const item=el('div','model-item'+(active?' model-item--active':''));
-    item.innerHTML='<div><div class="model-item__title">'+escHtml(m.ref||'')+'</div><div class="model-item__meta">'+escHtml([m.kind,m.default?'default':''].filter(Boolean).join(' · '))+'</div></div>';
-    if(active){
-      item.innerHTML+='<span class="model-item__status model-item__status--active">'+escHtml(__('active'))+'</span>';
-    }else{
-      item.innerHTML+='<button class="branch-item__btn" data-model-ref="'+escAttr(m.ref||'')+'">'+escHtml(__('use_model'))+'</button>';
-    }
-    list.appendChild(item);
+    const p=m.provider||'?';
+    if(!byProvider[p])byProvider[p]=[];
+    byProvider[p].push(m);
+  });
+  const providerMeta={};
+  if(_providersCache&&Array.isArray(_providersCache)){
+    _providersCache.forEach(p=>{providerMeta[p.name]=p;});
+  }
+  Object.keys(byProvider).sort().forEach(pName=>{
+    const items=byProvider[pName];
+    const meta=providerMeta[pName];
+    // provider header
+    const group=el('div','provider-group');
+    const header=el('div','provider-header');
+    header.innerHTML='<span>'+escHtml(pName)+'</span>'+(meta?' <span class="provider-header__kind">'+escHtml(meta.kind)+'</span>':'')+'<div class="provider-header__actions"><button class="provider-header__btn" data-provider="'+escAttr(pName)+'" data-action="edit">'+escHtml(__('edit'))+'</button><button class="provider-header__btn provider-header__btn--danger" data-provider="'+escAttr(pName)+'" data-action="delete">'+escHtml(__('delete'))+'</button></div>';
+    group.appendChild(header);
+    items.forEach(m=>{
+      const active=!!m.active;
+      const item=el('div','model-item'+(active?' model-item--active':''));
+      item.innerHTML='<div><div class="model-item__title">'+escHtml(m.model||m.ref||'')+'</div><div class="model-item__meta">'+escHtml(m.default?'default':'')+'</div></div>';
+      if(active){
+        item.innerHTML+='<span class="model-item__status model-item__status--active">'+escHtml(__('active'))+'</span>';
+      }else{
+        item.innerHTML+='<button class="branch-item__btn" data-model-ref="'+escAttr(m.ref||'')+'">'+escHtml(__('use_model'))+'</button>';
+      }
+      group.appendChild(item);
+    });
+    list.appendChild(group);
   });
 }
 function openModels() {
@@ -1557,11 +1653,112 @@ function openModels() {
   if(!modal)return;
   $('#models-list').innerHTML='<div class="empty-note">'+escHtml(__('loading'))+'</div>';
   modal.style.display='flex';
-  fetch('/models').then(r=>r.json()).then(data=>{renderModelsPanel(data);}).catch(()=>{
+  Promise.all([
+    fetch('/models').then(r=>r.json()),
+    fetch('/providers').then(r=>r.json()).then(d=>{_providersCache=d;}).catch(()=>{_providersCache=null;})
+  ]).then(([modelsData])=>{
+    renderModelsPanel(modelsData);
+  }).catch(()=>{
     $('#models-list').innerHTML='<div class="empty-note">'+escHtml(__('error_loading'))+'</div>';
   });
 }
 function closeModels(){const m=$('#models-modal');if(m)m.style.display='none';}
+
+// ── provider CRUD ──
+let _editingProvider=null;
+function openProviderForm(providerName){
+  _editingProvider=providerName||null;
+  const title=$('#provider-form-title');
+  if(title)title.textContent=_editingProvider?__('edit_provider')+' &mdash; '+escHtml(_editingProvider):__('add_provider');
+  // populate fields from cached provider data
+  const nameInput=$('#pf-name');
+  const kindInput=$('#pf-kind');
+  const urlInput=$('#pf-base-url');
+  const modelsInput=$('#pf-models');
+  const ctxInput=$('#pf-context-window');
+  const visionInput=$('#pf-vision');
+  const setDefaultInput=$('#pf-set-default');
+  if(_editingProvider&&_providersCache){
+    const p=_providersCache.find(x=>x.name===_editingProvider);
+    if(p){
+      if(nameInput)nameInput.value=p.name;
+      if(kindInput)kindInput.value=p.kind||'openai';
+      if(urlInput)urlInput.value=p.base_url||'';
+      if(modelsInput)modelsInput.value=(p.models||[]).join('\n');
+      if(apiKeyInput)apiKeyInput.value=p.api_key_env||'';
+      if(ctxInput)ctxInput.value=String(p.context_window||128000);
+      if(visionInput)visionInput.checked=!!p.vision;
+      if(setDefaultInput)setDefaultInput.checked=false;
+    }
+  }else{
+    // clear form for new provider
+    if(nameInput)nameInput.value='';
+    if(kindInput)kindInput.value='openai';
+    if(urlInput)urlInput.value='';
+    if(modelsInput)modelsInput.value='';
+    if(apiKeyInput)apiKeyInput.value='';
+    if(ctxInput)ctxInput.value='128000';
+    if(visionInput)visionInput.checked=false;
+    if(setDefaultInput)setDefaultInput.checked=false;
+  }
+  const modal=$('#provider-form-modal');
+  if(modal)modal.style.display='flex';
+}
+function closeProviderForm(){const m=$('#provider-form-modal');if(m)m.style.display='none';}
+function saveProvider(){
+  const name=$('#pf-name');
+  const kind=$('#pf-kind');
+  const url=$('#pf-base-url');
+  const models=$('#pf-models');
+  const apiKeyValue=$('#pf-api-key-value');
+  const ctx=$('#pf-context-window');
+  const vision=$('#pf-vision');
+  const setDefault=$('#pf-set-default');
+  if(!name||!name.value.trim()){alert('Name is required');name&&name.focus();return;}
+  if(!kind||!kind.value.trim()){alert('Kind is required');kind&&kind.focus();return;}
+  if(!url||!url.value.trim()){alert('Base URL is required');url&&url.focus();return;}
+  const modelList= models?models.value.split('\n').map(s=>s.trim()).filter(Boolean):[];
+  if(modelList.length===0){alert('At least one model is required');models&&models.focus();return;}
+  const body={
+    name: name.value.trim(),
+    kind: kind.value.trim(),
+    base_url: url.value.trim(),
+    models: modelList,
+    api_key_value: apiKeyValue?apiKeyValue.value.trim():'',
+    context_window: ctx?parseInt(ctx.value)||128000:128000,
+    vision: vision?vision.checked:false,
+    set_default: setDefault?setDefault.checked:false
+  };
+  const saveBtn=$('#pf-save');
+  if(saveBtn){saveBtn.disabled=true;saveBtn.textContent=__('save')+'...';}
+  post('/providers',body).then(r=>{
+    if(!r.ok)return r.text().then(t=>{alert(t||'Failed to save provider');});
+    closeProviderForm();
+    // refresh both views
+    Promise.all([
+      fetch('/models').then(r=>r.json()),
+      fetch('/providers').then(r=>r.json()).then(d=>{_providersCache=d;}).catch(()=>{})
+    ]).then(([modelsData])=>{
+      renderModelsPanel(modelsData);
+      fetchStatus();
+    }).catch(()=>{});
+  }).catch(()=>{alert('Network error');}).finally(()=>{if(saveBtn){saveBtn.disabled=false;saveBtn.textContent=__('save');}});
+}
+function deleteProvider(providerName){
+  if(!providerName)return;
+  if(!confirm(__('confirm_delete_provider').replace('{name}',providerName)))return;
+  fetch('/providers?name='+encodeURIComponent(providerName),{method:'DELETE'}).then(r=>{
+    if(!r.ok)return r.text().then(t=>{alert(t||'Failed to delete provider');});
+    // refresh
+    Promise.all([
+      fetch('/models').then(r=>r.json()),
+      fetch('/providers').then(r=>r.json()).then(d=>{_providersCache=d;}).catch(()=>{})
+    ]).then(([modelsData])=>{
+      renderModelsPanel(modelsData);
+      fetchStatus();
+    }).catch(()=>{});
+  }).catch(()=>{alert('Network error');});
+}
 
 // ── delete confirmation ──
 function openDeleteSession(name) {
@@ -1743,15 +1940,26 @@ $('#branches-list').onclick=e=>{
 $('#models-modal-close').onclick=()=>closeModels();
 $('#models-modal').onclick=e=>{if(e.target===e.currentTarget)closeModels();};
 $('#models-list').onclick=e=>{
-  const btn=e.target.closest('[data-model-ref]');
-  if(!btn||running)return;
-  const ref=btn.dataset.modelRef;
-  if(!ref)return;
-  closeModels();
-  post('/submit',{input:'/model '+ref}).then(()=>setTimeout(fetchStatus,300));
+  const modelBtn=e.target.closest('[data-model-ref]');
+  if(modelBtn&&!running){
+    const ref=modelBtn.dataset.modelRef;
+    if(ref){closeModels();post('/submit',{input:'/model '+ref}).then(()=>setTimeout(fetchStatus,300));}
+    return;
+  }
+  const actionBtn=e.target.closest('[data-action]');
+  if(!actionBtn)return;
+  const provider=actionBtn.dataset.provider;
+  const action=actionBtn.dataset.action;
+  if(action==='edit'&&provider)openProviderForm(provider);
+  if(action==='delete'&&provider)deleteProvider(provider);
 };
 $('#session-search').addEventListener('input',e=>{sessionFilter=e.target.value;renderSessions();});
 $('#models-search').addEventListener('input',e=>{_modelsFilter=e.target.value;renderModelsPanel();});
+$('#btn-add-provider').onclick=()=>openProviderForm('');
+$('#provider-form-close').onclick=()=>closeProviderForm();
+$('#provider-form-modal').onclick=e=>{if(e.target===e.currentTarget)closeProviderForm();};
+$('#pf-cancel').onclick=()=>closeProviderForm();
+$('#pf-save').onclick=()=>saveProvider();
 
 // ── mobile sidebar toggle ──
 const sidebar=$('.sidebar'), overlay=$('#sidebar-overlay'), menuBtn=$('#menu-btn');

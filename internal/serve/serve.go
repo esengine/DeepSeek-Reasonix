@@ -12,11 +12,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf16"
 	"sync"
 	"time"
 
@@ -345,6 +347,9 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /checkpoints", s.checkpoints)
 	mux.HandleFunc("GET /branches", s.branches)
 	mux.HandleFunc("GET /models", s.models)
+	mux.HandleFunc("GET /providers", s.providersList)
+	mux.HandleFunc("POST /providers", s.providersUpsert)
+	mux.HandleFunc("DELETE /providers", s.providersDelete)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
@@ -1080,6 +1085,143 @@ func currentModelRef(c control.SessionAPI) string {
 	return strings.TrimSpace(c.Label())
 }
 
+// providerJSON is the JSON shape returned by GET /providers.
+type providerJSON struct {
+	Name          string   `json:"name"`
+	Kind          string   `json:"kind"`
+	BaseURL       string   `json:"base_url"`
+	Models        []string `json:"models"`
+	Default       string   `json:"default,omitempty"`
+	APIKeyEnv     string   `json:"api_key_env,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"`
+	Vision        bool     `json:"vision,omitempty"`
+}
+
+// providersList returns all configured providers (without resolved credentials).
+func (s *Server) providersList(w http.ResponseWriter, _ *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var out []providerJSON
+	for _, p := range cfg.Providers {
+		if !p.Configured() {
+			continue
+		}
+		out = append(out, providerJSON{
+			Name:          p.Name,
+			Kind:          p.Kind,
+			BaseURL:       p.BaseURL,
+			Models:        p.ModelList(),
+			Default:       p.Default,
+			APIKeyEnv:     p.APIKeyEnv,
+			ContextWindow: p.ContextWindow,
+			Vision:        p.Vision,
+		})
+	}
+	if out == nil {
+		out = []providerJSON{}
+	}
+	writeJSON(w, out)
+}
+
+// providerUpsertRequest is the JSON body for POST /providers.
+type providerUpsertRequest struct {
+	Name          string   `json:"name"`
+	Kind          string   `json:"kind"`
+	BaseURL       string   `json:"base_url"`
+	Models        []string `json:"models"`
+	Default       string   `json:"default,omitempty"`
+	APIKeyEnv     string   `json:"api_key_env,omitempty"`
+	APIKeyValue   string   `json:"api_key_value,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"`
+	Vision        bool     `json:"vision,omitempty"`
+	SetDefault    bool     `json:"set_default,omitempty"`
+}
+
+// providersUpsert creates or updates a provider.
+func (s *Server) providersUpsert(w http.ResponseWriter, r *http.Request) {
+	var req providerUpsertRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	entry := config.ProviderEntry{
+		Name:          req.Name,
+		Kind:          req.Kind,
+		BaseURL:       req.BaseURL,
+		Models:        req.Models,
+		Default:       req.Default,
+		APIKeyEnv:     req.APIKeyEnv,
+		ContextWindow: req.ContextWindow,
+		Vision:        req.Vision,
+	}
+	if entry.APIKeyEnv == "" {
+		entry.APIKeyEnv = apiKeyEnvFromProviderName(entry.Name)
+	}
+	editPath := config.UserConfigPath()
+	if editPath == "" {
+		http.Error(w, "no config file found", http.StatusInternalServerError)
+		return
+	}
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(editPath)
+		if err := edit.UpsertProvider(entry); err != nil {
+			return err
+		}
+		if req.SetDefault {
+			ref := req.Name
+			if req.Default != "" {
+				ref = req.Name + "/" + req.Default
+			}
+			if err := edit.SetDefaultModel(ref); err != nil {
+				return err
+			}
+		}
+		return edit.SaveTo(editPath)
+	}(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Store the raw API key when provided (outside the edit lock).
+	if req.APIKeyValue != "" && req.APIKeyEnv != "" {
+		if _, err := config.SetCredential(req.APIKeyEnv, req.APIKeyValue); err != nil {
+			slog.Warn("serve: store credential", "env", req.APIKeyEnv, "err", err)
+		}
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// providersDelete removes a provider by name. Query param "name" is required.
+func (s *Server) providersDelete(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	editPath := config.UserConfigPath()
+	if editPath == "" {
+		http.Error(w, "no config file found", http.StatusInternalServerError)
+		return
+	}
+	if err := func() error {
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		edit := config.LoadForEdit(editPath)
+		if err := edit.RemoveProvider(name); err != nil {
+			return err
+		}
+		return edit.SaveTo(editPath)
+	}(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ok"})
+}
+
 // status returns a combined status snapshot.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	used, window := s.ctl().ContextSnapshot()
@@ -1369,4 +1511,27 @@ func (s *Server) todos(w http.ResponseWriter, _ *http.Request) {
 		out[i] = todoItem{Content: t.Content, Status: t.Status, ActiveForm: t.ActiveForm, Level: t.Level}
 	}
 	writeJSON(w, out)
+}
+
+// apiKeyEnvFromProviderName derives a credentials-store key from a provider
+// name, matching the desktop/CLI pattern: MY_PROVIDER_API_KEY.
+func apiKeyEnvFromProviderName(name string) string {
+	stem := strings.ToUpper(strings.TrimSpace(name))
+	stem = strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, stem)
+	stem = strings.Trim(stem, "_")
+	if stem == "" {
+		h := fnv.New32a()
+		for _, unit := range utf16.Encode([]rune(strings.TrimSpace(name))) {
+			h.Write([]byte{byte(unit), byte(unit >> 8)})
+		}
+		return fmt.Sprintf("CUSTOM_%08x_API_KEY", h.Sum32())
+	}
+	return stem + "_API_KEY"
 }
