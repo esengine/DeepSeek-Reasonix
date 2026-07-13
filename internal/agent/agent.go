@@ -316,6 +316,33 @@ type Agent struct {
 	// OPT-22: Prompt 前缀钉扎 — 防止稳定段被意外修改
 	prefixPinner *PrefixPinner
 
+	// OPT-03: 语义上下文裁剪 — 按重要性评分智能裁剪对话历史
+	semanticPruner *SemanticPruner
+
+	// OPT-07: 预测性 token 预取 — 提前加载可能需要的上下文
+	prefetchPredictor *PrefetchPredictor
+
+	// OPT-27: 上下文窗口预测器 — 预测剩余可用 token
+	windowPredictor *ContextWindowPredictor
+
+	// OPT-28: Token 成本估算器 — 实时估算请求成本
+	costEstimator *CostEstimator
+
+	// OPT-29: Prompt 压缩引擎 — 压缩系统提示文本
+	promptCompressor *PromptCompressor
+
+	// OPT-30: 动态工具描述轮换 — 首次后切换为精简描述
+	toolDescRotator *ToolDescriptionRotator
+
+	// OPT-31: 对话摘要缓存 — 跨 turn 缓存对话摘要
+	summaryCache *SummaryCache
+
+	// OPT-32: 多模型路由 — 简单任务路由到便宜模型
+	modelRouter *ModelRouter
+
+	// OPT-33: 图片 token 优化器 — 压缩图片减少 token
+	imageOptimizer *ImageOptimizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1229,6 +1256,17 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	cacheHealthMonitor := NewCacheHealthMonitor()
 	toolBatcher := NewToolCallBatcher()
 	prefixPinner := NewPrefixPinner()
+
+	// ── OPT-03/07/27-33 集成: 第三批 token 优化模块 ──
+	semanticPruner := NewSemanticPruner()
+	prefetchPredictor := NewPrefetchPredictor()
+	windowPredictor := NewContextWindowPredictor(opts.ContextWindow)
+	costEstimator := NewCostEstimator("deepseek") // 默认 DeepSeek 定价，首次请求后更新
+	promptCompressor := NewPromptCompressor(CompressMedium)
+	toolDescRotator := NewToolDescriptionRotator()
+	summaryCache := NewSummaryCache(20)
+	modelRouter := NewModelRouter("", "", "") // 可选启用，默认不路由
+	imageOptimizer := NewImageOptimizer()
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1273,6 +1311,15 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		cacheHealthMonitor:       cacheHealthMonitor,
 		toolBatcher:              toolBatcher,
 		prefixPinner:             prefixPinner,
+		semanticPruner:           semanticPruner,
+		prefetchPredictor:        prefetchPredictor,
+		windowPredictor:          windowPredictor,
+		costEstimator:            costEstimator,
+		promptCompressor:         promptCompressor,
+		toolDescRotator:          toolDescRotator,
+		summaryCache:             summaryCache,
+		modelRouter:              modelRouter,
+		imageOptimizer:           imageOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1437,6 +1484,33 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if s := a.GetPrefixPinnerStats(); s != nil {
 		stats["opt22_prefixPinner"] = s
+	}
+	if a.semanticPruner != nil {
+		stats["opt03_semanticPruner"] = a.semanticPruner.GetStats()
+	}
+	if a.prefetchPredictor != nil {
+		stats["opt07_prefetch"] = a.prefetchPredictor.GetStats()
+	}
+	if a.windowPredictor != nil {
+		stats["opt27_windowPredictor"] = a.windowPredictor.GetStats()
+	}
+	if a.costEstimator != nil {
+		stats["opt28_costEstimator"] = a.costEstimator.GetStats()
+	}
+	if a.promptCompressor != nil {
+		stats["opt29_promptCompressor"] = a.promptCompressor.GetStats()
+	}
+	if a.toolDescRotator != nil {
+		stats["opt30_toolDescRotator"] = a.toolDescRotator.GetStats()
+	}
+	if a.summaryCache != nil {
+		stats["opt31_summaryCache"] = a.summaryCache.GetStats()
+	}
+	if a.modelRouter != nil {
+		stats["opt32_modelRouter"] = a.modelRouter.GetStats()
+	}
+	if a.imageOptimizer != nil {
+		stats["opt33_imageOptimizer"] = a.imageOptimizer.GetStats()
 	}
 	return stats
 }
@@ -1614,6 +1688,10 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	if a.toolBatcher != nil {
 		a.toolBatcher.Reset()
 	}
+	// ── OPT-03: 语义裁剪器每轮重置 ──
+	if a.semanticPruner != nil {
+		a.semanticPruner.Reset()
+	}
 
 	finalReadinessBlocks := 0
 	readinessReceiptMark := -1
@@ -1691,6 +1769,43 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		sp := a.systemPrompt()
 		if sp != "" {
 			a.prefixPinner.Pin("L1_base_prompt", sp)
+		}
+	}
+
+	// OPT-19: Provider 感知缓存策略 — 首次请求时根据模型名检测 provider
+	if a.providerCacheStrategy != nil && step == 0 && a.prov != nil {
+		if modelName, ok := a.prov.(interface{ Model() string }); ok {
+			detected := DetectProviderType(modelName.Model())
+			a.providerCacheStrategy.SetProvider(detected)
+		}
+	}
+
+	// OPT-27: 上下文窗口预测器 — 记录消耗并预测
+	if a.windowPredictor != nil && usage != nil {
+		a.windowPredictor.RecordConsumption(step, usage.PromptTokens, usage.CompletionTokens)
+		prediction := a.windowPredictor.Predict()
+		if prediction != nil && prediction.ShouldHardCompact {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window approaching limit — consider compacting"})
+		}
+	}
+
+	// OPT-28: Token 成本估算器 — 记录成本
+	if a.costEstimator != nil && usage != nil {
+		a.costEstimator.EstimateCost(
+			usage.PromptTokens,
+			usage.CompletionTokens,
+			usage.CacheHitTokens,
+			usage.CacheMissTokens,
+		)
+	}
+
+	// OPT-03: 语义上下文裁剪 — 为对话历史中的消息评分
+	if a.semanticPruner != nil && usage != nil {
+		messages := a.session.Snapshot()
+		for i, msg := range messages {
+			if msg.Role == provider.RoleAssistant || msg.Role == provider.RoleUser {
+				a.semanticPruner.ScoreMessage(i, string(msg.Role), msg.Content)
+			}
 		}
 	}
 
@@ -3349,6 +3464,22 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	// OPT-17: 对话历史去重 — 记录工具结果指纹
 	if a.conversationDedup != nil {
 		a.conversationDedup.Record(result, len(a.session.Snapshot()))
+	}
+
+	// OPT-07: 预测性预取 — 记录工具调用并预测下一步
+	if a.prefetchPredictor != nil {
+		a.prefetchPredictor.CheckPrefetchHit(call.Name)
+		a.prefetchPredictor.Predict(call.Name, call.Arguments)
+	}
+
+	// OPT-30: 工具描述轮换 — 记录工具使用
+	if a.toolDescRotator != nil {
+		a.toolDescRotator.RecordUsage(call.Name)
+		if err != nil {
+			a.toolDescRotator.RecordError(call.Name)
+		} else {
+			a.toolDescRotator.RecordSuccess(call.Name)
+		}
 	}
 
 	// ── 副作用追踪：执行出错时生成恢复报告 ──
