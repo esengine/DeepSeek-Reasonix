@@ -45,9 +45,13 @@ func TestBuildRequest(t *testing.T) {
 	if r.System[0].CacheControl == nil {
 		t.Fatal("system block should carry cache_control")
 	}
-	// System present ⇒ the tool does NOT also get a breakpoint (system caches tools).
-	if r.Tools[0].CacheControl != nil {
-		t.Fatal("tool should not carry cache_control when system does")
+	// System present ⇒ both system and tools carry cache_control (OPT-11 four-tier strategy).
+	if r.System[0].CacheControl == nil {
+		t.Fatal("system block should carry cache_control")
+	}
+	// OPT-11: tools also get their own breakpoint (tier 1) for independent caching.
+	if r.Tools[0].CacheControl == nil {
+		t.Fatal("tool should carry cache_control (OPT-11 tier 1)")
 	}
 	// user, assistant(tool_use ×2), user(tool_result ×2 coalesced) = 3 messages.
 	if len(r.Messages) != 3 {

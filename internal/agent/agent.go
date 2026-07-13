@@ -260,6 +260,10 @@ type Agent struct {
 	lastPrefixShape     PrefixShape
 	haveLastPrefixShape bool
 
+	// OPT-12: cache prefix stability enforcer — detects and warns when
+	// changes to system prompt or tools invalidate the cache prefix.
+	cacheEnforcer *CachePrefixEnforcer
+
 	// planMode, when true, refuses any tool call whose ReadOnly() is false.
 	// The system prompt and tool list never change with the toggle so the
 	// prompt-cache prefix stays valid; the gating happens at execute time
@@ -1032,6 +1036,9 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if opts.EnableDedup {
 		prov = provider.NewDeduplicatingProvider(prov)
 	}
+
+	// ── OPT-12 集成: 缓存前缀稳定性强制器 ──
+	cacheEnforcer := NewCachePrefixEnforcer()
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1064,6 +1071,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxSubagentDepth:         maxSubagentDepth,
 		memoryCompiler:           opts.MemoryCompiler,
 		memoryCompilerVerbosity:  normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
+		cacheEnforcer:            cacheEnforcer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1132,6 +1140,23 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 // GetPhantomUI 返回虚空UI面板实例（供桌面层使用）
 func (a *Agent) GetPhantomUI() *PhantomUI {
 	return a.phantomUI
+}
+
+// GetCacheEnforcerStats 返回缓存前缀稳定性统计（OPT-12）
+func (a *Agent) GetCacheEnforcerStats() *CachePrefixStats {
+	if a.cacheEnforcer == nil {
+		return nil
+	}
+	stats := a.cacheEnforcer.GetStats()
+	return &stats
+}
+
+// GetCacheEnforcerChangeHistory 返回缓存前缀变化历史（OPT-12）
+func (a *Agent) GetCacheEnforcerChangeHistory() []PrefixChange {
+	if a.cacheEnforcer == nil {
+		return nil
+	}
+	return a.cacheEnforcer.GetChangeHistory()
 }
 
 // GetEyeTracker 返回眼动追踪器实例（供桌面层使用）
@@ -1331,10 +1356,18 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			return err
 		}
 		streamRecoveries = 0
-		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
-		a.lastPrefixShape = prefixShape
-		a.haveLastPrefixShape = true
-		if usage != nil && usage.TotalTokens > 0 {
+	cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
+	a.lastPrefixShape = prefixShape
+	a.haveLastPrefixShape = true
+
+	// OPT-12: 记录缓存使用情况并检查前缀稳定性
+	if a.cacheEnforcer != nil {
+		fp := a.cacheEnforcer.CaptureFingerprint(a.systemPrompt(), schemas)
+		a.cacheEnforcer.CheckPrefixStability(fp, step+1)
+		a.cacheEnforcer.RecordCacheUsage(usage)
+	}
+
+	if usage != nil && usage.TotalTokens > 0 {
 			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
 				UsageSource:      a.usageSource,
 				CacheDiagnostics: &cacheDiagnostics,
