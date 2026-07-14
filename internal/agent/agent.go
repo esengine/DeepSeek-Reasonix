@@ -553,6 +553,21 @@ type Agent struct {
 	// OPT-105: Token 流量调节器
 	tokenFlowRegulator *TokenFlowRegulator
 
+	// OPT-106: 语义缓存路由器
+	semanticCacheRouter *SemanticCacheRouter
+
+	// OPT-107: Token 感知调度器
+	tokenAwareScheduler *TokenAwareScheduler
+
+	// OPT-108: 上下文快照管理器
+	contextSnapshotManager *ContextSnapshotManager
+
+	// OPT-109: Token 浪费检测器
+	tokenWasteDetector *TokenWasteDetector
+
+	// OPT-110: 自适应批处理优化器
+	adaptiveBatchOptimizer *AdaptiveBatchOptimizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1576,6 +1591,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	cachePressureMonitor := NewCachePressureMonitor(1000)
 	tokenFlowRegulator := NewTokenFlowRegulator(opts.ContextWindow, opts.ContextWindow/4)
 
+	// ── OPT-106~110 集成 ──
+	semanticCacheRouter := NewSemanticCacheRouter()
+	tokenAwareScheduler := NewTokenAwareScheduler(opts.ContextWindow / 2)
+	contextSnapshotManager := NewContextSnapshotManager(10)
+	tokenWasteDetector := NewTokenWasteDetector()
+	adaptiveBatchOptimizer := NewAdaptiveBatchOptimizer(8)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1699,6 +1721,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		promptTokenAnalyzer:      promptTokenAnalyzer,
 		cachePressureMonitor:     cachePressureMonitor,
 		tokenFlowRegulator:       tokenFlowRegulator,
+		semanticCacheRouter:      semanticCacheRouter,
+		tokenAwareScheduler:      tokenAwareScheduler,
+		contextSnapshotManager:   contextSnapshotManager,
+		tokenWasteDetector:       tokenWasteDetector,
+		adaptiveBatchOptimizer:   adaptiveBatchOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2100,6 +2127,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenFlowRegulator != nil {
 		stats["opt105_tokenFlowRegulator"] = a.tokenFlowRegulator.GetStats()
+	}
+	if a.semanticCacheRouter != nil {
+		stats["opt106_semanticCacheRouter"] = a.semanticCacheRouter.GetStats()
+	}
+	if a.tokenAwareScheduler != nil {
+		stats["opt107_tokenAwareScheduler"] = a.tokenAwareScheduler.GetStats()
+	}
+	if a.contextSnapshotManager != nil {
+		stats["opt108_contextSnapshotManager"] = a.contextSnapshotManager.GetStats()
+	}
+	if a.tokenWasteDetector != nil {
+		stats["opt109_tokenWasteDetector"] = a.tokenWasteDetector.GetStats()
+	}
+	if a.adaptiveBatchOptimizer != nil {
+		stats["opt110_adaptiveBatchOptimizer"] = a.adaptiveBatchOptimizer.GetStats()
 	}
 	return stats
 }
@@ -2680,6 +2722,19 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			complexity := a.adaptiveContextSelector.AnalyzeQueryComplexity(snap[0].Content)
 			a.adaptiveContextSelector.SelectWindow(complexity)
 		}
+	}
+
+	// OPT-106~110: 语义缓存路由 / 调度 / 快照 / 浪费检测 / 批处理
+	if a.tokenWasteDetector != nil && step > 0 && step%5 == 0 {
+		snap := a.session.Snapshot()
+		msgs := make([]string, len(snap))
+		for i, m := range snap {
+			msgs[i] = m.Content
+		}
+		a.tokenWasteDetector.Detect(msgs)
+	}
+	if a.contextSnapshotManager != nil && step > 0 && step%3 == 0 {
+		a.contextSnapshotManager.TakeSnapshot(step, a.session.Snapshot())
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
