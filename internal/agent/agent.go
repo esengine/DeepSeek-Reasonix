@@ -628,6 +628,21 @@ type Agent struct {
 	// OPT-130: Token 预算协商器
 	tokenBudgetNegotiator *TokenBudgetNegotiator
 
+	// OPT-131: 缓存效率评分器
+	cacheEfficiencyScorer *CacheEfficiencyScorer
+
+	// OPT-132: Token 感知修剪器
+	tokenAwarePruner *TokenAwarePruner
+
+	// OPT-133: 对话话题追踪器
+	conversationTopicTracker *ConversationTopicTracker
+
+	// OPT-134: Token 成本投影器
+	tokenCostProjector *TokenCostProjector
+
+	// OPT-135: 上下文组装优化器
+	contextAssemblyOptimizer *ContextAssemblyOptimizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1686,6 +1701,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	promptTemplateOptimizer := NewPromptTemplateOptimizer()
 	tokenBudgetNegotiator := NewTokenBudgetNegotiator(opts.ContextWindow)
 
+	// ── OPT-131~135 集成 ──
+	cacheEfficiencyScorer := NewCacheEfficiencyScorer()
+	tokenAwarePruner := NewTokenAwarePruner("lowest-value")
+	conversationTopicTracker := NewConversationTopicTracker(20)
+	tokenCostProjector := NewTokenCostProjector(0.0001)
+	contextAssemblyOptimizer := NewContextAssemblyOptimizer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1834,6 +1856,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		cacheWarmingSchedulerV2:  cacheWarmingSchedulerV2,
 		promptTemplateOptimizer:  promptTemplateOptimizer,
 		tokenBudgetNegotiator:    tokenBudgetNegotiator,
+		cacheEfficiencyScorer:    cacheEfficiencyScorer,
+		tokenAwarePruner:         tokenAwarePruner,
+		conversationTopicTracker: conversationTopicTracker,
+		tokenCostProjector:       tokenCostProjector,
+		contextAssemblyOptimizer: contextAssemblyOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2310,6 +2337,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenBudgetNegotiator != nil {
 		stats["opt130_tokenBudgetNegotiator"] = a.tokenBudgetNegotiator.GetStats()
+	}
+	if a.cacheEfficiencyScorer != nil {
+		stats["opt131_cacheEfficiencyScorer"] = a.cacheEfficiencyScorer.GetStats()
+	}
+	if a.tokenAwarePruner != nil {
+		stats["opt132_tokenAwarePruner"] = a.tokenAwarePruner.GetStats()
+	}
+	if a.conversationTopicTracker != nil {
+		stats["opt133_conversationTopicTracker"] = a.conversationTopicTracker.GetStats()
+	}
+	if a.tokenCostProjector != nil {
+		stats["opt134_tokenCostProjector"] = a.tokenCostProjector.GetStats()
+	}
+	if a.contextAssemblyOptimizer != nil {
+		stats["opt135_contextAssemblyOptimizer"] = a.contextAssemblyOptimizer.GetStats()
 	}
 	return stats
 }
@@ -2945,6 +2987,17 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.contextFreshnessTracker != nil {
 		a.contextFreshnessTracker.UpdateTurn(step + 1)
+	}
+
+	// OPT-131~135: 效率评分 / 修剪 / 话题追踪 / 成本投影 / 组装优化
+	if a.conversationTopicTracker != nil {
+		snap := a.session.Snapshot()
+		if len(snap) > 0 {
+			a.conversationTopicTracker.UpdateTopic(snap[len(snap)-1].Content)
+		}
+	}
+	if a.tokenCostProjector != nil && usage != nil {
+		a.tokenCostProjector.RecordActual(usage.TotalTokens)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
