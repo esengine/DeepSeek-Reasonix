@@ -726,6 +726,16 @@ type Agent struct {
 	tokenAwareRouter *TokenAwareRouter
 	// OPT-170: 提示缓存预热器
 	promptCacheWarmer *PromptCacheWarmer
+	// OPT-171: Token 感知缓冲区
+	tokenAwareBuffer *TokenAwareBuffer
+	// OPT-172: 缓存版本管理器
+	cacheVersionManager *CacheVersionManager
+	// OPT-173: 上下文溢出处理器
+	contextOverflowHandler *ContextOverflowHandler
+	// OPT-174: Token 感知压缩器V2
+	tokenAwareCompressorV2 *TokenAwareCompressorV2
+	// OPT-175: 提示Token计算器
+	promptTokenCalculator *PromptTokenCalculator
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1831,6 +1841,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextMergeOptimizer := NewContextMergeOptimizer(50)
 	tokenAwareRouter := NewTokenAwareRouter()
 	promptCacheWarmer := NewPromptCacheWarmer(64)
+	tokenAwareBuffer := NewTokenAwareBuffer(8192)
+	cacheVersionManager := NewCacheVersionManager()
+	contextOverflowHandler := NewContextOverflowHandler(32768)
+	tokenAwareCompressorV2 := NewTokenAwareCompressorV2()
+	promptTokenCalculator := NewPromptTokenCalculator()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2019,6 +2034,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextMergeOptimizer:    contextMergeOptimizer,
 		tokenAwareRouter:         tokenAwareRouter,
 		promptCacheWarmer:        promptCacheWarmer,
+		tokenAwareBuffer:         tokenAwareBuffer,
+		cacheVersionManager:      cacheVersionManager,
+		contextOverflowHandler:   contextOverflowHandler,
+		tokenAwareCompressorV2:   tokenAwareCompressorV2,
+		promptTokenCalculator:    promptTokenCalculator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2613,6 +2633,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheWarmer != nil {
 		stats["opt170_promptCacheWarmer"] = a.promptCacheWarmer.GetStats()
+	}
+	if a.tokenAwareBuffer != nil {
+		stats["opt171_tokenAwareBuffer"] = a.tokenAwareBuffer.GetStats()
+	}
+	if a.cacheVersionManager != nil {
+		stats["opt172_cacheVersionManager"] = a.cacheVersionManager.GetStats()
+	}
+	if a.contextOverflowHandler != nil {
+		stats["opt173_contextOverflowHandler"] = a.contextOverflowHandler.GetStats()
+	}
+	if a.tokenAwareCompressorV2 != nil {
+		stats["opt174_tokenAwareCompressorV2"] = a.tokenAwareCompressorV2.GetStats()
+	}
+	if a.promptTokenCalculator != nil {
+		stats["opt175_promptTokenCalculator"] = a.promptTokenCalculator.GetStats()
 	}
 	return stats
 }
@@ -3321,6 +3356,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.tokenAwareAggregator != nil && usage != nil {
 		a.tokenAwareAggregator.Add(AggregationItem{ID: "usage", Content: "token_usage", EstimatedTokens: usage.TotalTokens})
+	}
+
+	// OPT-171~175: 缓冲 / 版本 / 溢出 / 压缩 / 计算
+	if a.promptTokenCalculator != nil && usage != nil {
+		a.promptTokenCalculator.Calculate("usage", "token report")
+	}
+	if a.tokenAwareBuffer != nil && usage != nil {
+		a.tokenAwareBuffer.Write("token usage data")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
