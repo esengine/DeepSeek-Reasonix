@@ -598,6 +598,21 @@ type Agent struct {
 	// OPT-120: Token 感知压缩器
 	tokenAwareCompressor *TokenAwareCompressor
 
+	// OPT-121: 上下文权重计算器
+	contextWeightCalculator *ContextWeightCalculator
+
+	// OPT-122: Token 感知驱逐器
+	tokenAwareEvictor *TokenAwareEvictor
+
+	// OPT-123: Prompt 冗余检查器
+	promptRedundancyChecker *PromptRedundancyChecker
+
+	// OPT-124: 缓存命中分析器
+	cacheHitAnalyzer *CacheHitAnalyzer
+
+	// OPT-125: 上下文边界检测器
+	contextBoundaryDetector *ContextBoundaryDetector
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1642,6 +1657,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	promptSegmentCacheV2 := NewPromptSegmentCacheV2(500)
 	tokenAwareCompressor := NewTokenAwareCompressor(opts.ContextWindow)
 
+	// ── OPT-121~125 集成 ──
+	contextWeightCalculator := NewContextWeightCalculator()
+	tokenAwareEvictor := NewTokenAwareEvictor("lru")
+	promptRedundancyChecker := NewPromptRedundancyChecker()
+	cacheHitAnalyzer := NewCacheHitAnalyzer()
+	contextBoundaryDetector := NewContextBoundaryDetector()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1780,6 +1802,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		cacheLifecycleManager:    cacheLifecycleManager,
 		promptSegmentCacheV2:     promptSegmentCacheV2,
 		tokenAwareCompressor:     tokenAwareCompressor,
+		contextWeightCalculator:  contextWeightCalculator,
+		tokenAwareEvictor:        tokenAwareEvictor,
+		promptRedundancyChecker:  promptRedundancyChecker,
+		cacheHitAnalyzer:         cacheHitAnalyzer,
+		contextBoundaryDetector:  contextBoundaryDetector,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2226,6 +2253,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenAwareCompressor != nil {
 		stats["opt120_tokenAwareCompressor"] = a.tokenAwareCompressor.GetStats()
+	}
+	if a.contextWeightCalculator != nil {
+		stats["opt121_contextWeightCalculator"] = a.contextWeightCalculator.GetStats()
+	}
+	if a.tokenAwareEvictor != nil {
+		stats["opt122_tokenAwareEvictor"] = a.tokenAwareEvictor.GetStats()
+	}
+	if a.promptRedundancyChecker != nil {
+		stats["opt123_promptRedundancyChecker"] = a.promptRedundancyChecker.GetStats()
+	}
+	if a.cacheHitAnalyzer != nil {
+		stats["opt124_cacheHitAnalyzer"] = a.cacheHitAnalyzer.GetStats()
+	}
+	if a.contextBoundaryDetector != nil {
+		stats["opt125_contextBoundaryDetector"] = a.contextBoundaryDetector.GetStats()
 	}
 	return stats
 }
@@ -2839,6 +2881,15 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		evicted := a.cacheLifecycleManager.EvictExpired(step)
 		if evicted > 0 {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache lifecycle: evicted expired entries"})
+		}
+	}
+
+	// OPT-121~125: 权重计算 / 驱逐 / 冗余检查 / 命中分析 / 边界检测
+	if a.cacheHitAnalyzer != nil && usage != nil {
+		if usage.CacheHitTokens > 0 {
+			a.cacheHitAnalyzer.RecordHit("prompt")
+		} else {
+			a.cacheHitAnalyzer.RecordMiss("prompt")
 		}
 	}
 
