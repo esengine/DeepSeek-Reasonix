@@ -658,6 +658,21 @@ type Agent struct {
 	// OPT-140: 缓存键哈希器
 	cacheKeyHasher *CacheKeyHasher
 
+	// OPT-141: Token 感知分组器
+	tokenAwareGrouper *TokenAwareGrouper
+
+	// OPT-142: 上下文优先级队列
+	contextPriorityQueue *ContextPriorityQueue
+
+	// OPT-143: Token 节省计算器
+	tokenSavingsCalculator *TokenSavingsCalculator
+
+	// OPT-144: 缓存准入控制器
+	cacheAdmissionController *CacheAdmissionController
+
+	// OPT-145: 上下文窗口校准器
+	contextWindowCalibrator *ContextWindowCalibrator
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1730,6 +1745,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	promptInflationDetector := NewPromptInflationDetector(200)
 	cacheKeyHasher := NewCacheKeyHasher()
 
+	// ── OPT-141~145 集成 ──
+	tokenAwareGrouper := NewTokenAwareGrouper(opts.ContextWindow / 4)
+	contextPriorityQueue := NewContextPriorityQueue(100)
+	tokenSavingsCalculator := NewTokenSavingsCalculator()
+	cacheAdmissionController := NewCacheAdmissionController(50)
+	contextWindowCalibrator := NewContextWindowCalibrator(opts.ContextWindow/4, opts.ContextWindow, 1000)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1888,6 +1910,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		conversationFlowAnalyzer: conversationFlowAnalyzer,
 		promptInflationDetector:  promptInflationDetector,
 		cacheKeyHasher:           cacheKeyHasher,
+		tokenAwareGrouper:        tokenAwareGrouper,
+		contextPriorityQueue:     contextPriorityQueue,
+		tokenSavingsCalculator:   tokenSavingsCalculator,
+		cacheAdmissionController: cacheAdmissionController,
+		contextWindowCalibrator:  contextWindowCalibrator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2394,6 +2421,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.cacheKeyHasher != nil {
 		stats["opt140_cacheKeyHasher"] = a.cacheKeyHasher.GetStats()
+	}
+	if a.tokenAwareGrouper != nil {
+		stats["opt141_tokenAwareGrouper"] = a.tokenAwareGrouper.GetStats()
+	}
+	if a.contextPriorityQueue != nil {
+		stats["opt142_contextPriorityQueue"] = a.contextPriorityQueue.GetStats()
+	}
+	if a.tokenSavingsCalculator != nil {
+		stats["opt143_tokenSavingsCalculator"] = a.tokenSavingsCalculator.GetStats()
+	}
+	if a.cacheAdmissionController != nil {
+		stats["opt144_cacheAdmissionController"] = a.cacheAdmissionController.GetStats()
+	}
+	if a.contextWindowCalibrator != nil {
+		stats["opt145_contextWindowCalibrator"] = a.contextWindowCalibrator.GetStats()
 	}
 	return stats
 }
@@ -3048,6 +3090,18 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		if len(stale) > 0 {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache staleness: detected stale entries"})
 		}
+	}
+
+	// OPT-141~145: 分组 / 优先级队列 / 节省计算 / 准入控制 / 窗口校准
+	if a.tokenSavingsCalculator != nil && usage != nil && usage.CacheHitTokens > 0 {
+		a.tokenSavingsCalculator.RecordSavings("cache_hit", usage.PromptTokens, usage.CacheHitTokens)
+	}
+	if a.contextWindowCalibrator != nil && usage != nil {
+		hitRate := 0.0
+		if usage.PromptTokens > 0 {
+			hitRate = float64(usage.CacheHitTokens) / float64(usage.PromptTokens)
+		}
+		a.contextWindowCalibrator.RecordPerformance(hitRate, 0.5)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
