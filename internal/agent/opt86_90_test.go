@@ -6,30 +6,31 @@ import (
 	"reasonix/internal/provider"
 )
 
-// ── OPT-86: CacheInvalidationTracker ──
+// ── OPT-167: CacheInvalidationTracker (原 OPT-86，已升级) ──
 
 func TestCacheInvalidationTracker_Record(t *testing.T) {
 	tr := NewCacheInvalidationTracker()
-	tr.RecordInvalidation(5, "prefix_changed", 5000, "hash1")
-	tr.RecordInvalidation(10, "prefix_changed", 3000, "hash2")
-	tr.RecordInvalidation(15, "system_prompt_edited", 2000, "hash3")
+	tr.Record("hash1", "prefix_changed")
+	tr.Record("hash2", "prefix_changed")
+	tr.Record("hash3", "system_prompt_edited")
 	stats := tr.GetStats()
-	if stats.TotalInvalidations != 3 {
-		t.Fatalf("expected 3 invalidations, got %d", stats.TotalInvalidations)
+	total := stats["totalInvalidations"].(int)
+	if total != 3 {
+		t.Fatalf("expected 3 invalidations, got %d", total)
 	}
 }
 
-func TestCacheInvalidationTracker_GetTopCauses(t *testing.T) {
+func TestCacheInvalidationTracker_GetTopReasons(t *testing.T) {
 	tr := NewCacheInvalidationTracker()
-	tr.RecordInvalidation(1, "prefix_changed", 1000, "h1")
-	tr.RecordInvalidation(2, "prefix_changed", 2000, "h2")
-	tr.RecordInvalidation(3, "tools_modified", 3000, "h3")
-	top := tr.GetTopCauses(2)
+	tr.Record("h1", "prefix_changed")
+	tr.Record("h2", "prefix_changed")
+	tr.Record("h3", "tools_modified")
+	top := tr.GetTopReasons(2)
 	if len(top) != 2 {
-		t.Fatalf("expected 2 causes, got %d", len(top))
+		t.Fatalf("expected 2 reasons, got %d", len(top))
 	}
-	if top[0].Cause != "prefix_changed" {
-		t.Fatalf("expected prefix_changed first, got %s", top[0].Cause)
+	if top[0] != "prefix_changed" {
+		t.Fatalf("expected prefix_changed first, got %s", top[0])
 	}
 }
 

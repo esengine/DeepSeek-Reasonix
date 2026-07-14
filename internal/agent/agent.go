@@ -718,6 +718,14 @@ type Agent struct {
 	tokenAwareDeduplicator *TokenAwareDeduplicator
 	// OPT-165: 提示组装优化器
 	promptAssemblyOptimizer *PromptAssemblyOptimizer
+	// OPT-166: Token 感知聚合器
+	tokenAwareAggregator *TokenAwareAggregator
+	// OPT-168: 上下文合并优化器
+	contextMergeOptimizer *ContextMergeOptimizer
+	// OPT-169: Token 感知路由器
+	tokenAwareRouter *TokenAwareRouter
+	// OPT-170: 提示缓存预热器
+	promptCacheWarmer *PromptCacheWarmer
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1819,6 +1827,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowMonitor := NewContextWindowMonitor(32768)
 	tokenAwareDeduplicator := NewTokenAwareDeduplicator(0.85)
 	promptAssemblyOptimizer := NewPromptAssemblyOptimizer()
+	tokenAwareAggregator := NewTokenAwareAggregator(10, 4096)
+	contextMergeOptimizer := NewContextMergeOptimizer(50)
+	tokenAwareRouter := NewTokenAwareRouter()
+	promptCacheWarmer := NewPromptCacheWarmer(64)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2003,6 +2015,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowMonitor:     contextWindowMonitor,
 		tokenAwareDeduplicator:   tokenAwareDeduplicator,
 		promptAssemblyOptimizer:  promptAssemblyOptimizer,
+		tokenAwareAggregator:     tokenAwareAggregator,
+		contextMergeOptimizer:    contextMergeOptimizer,
+		tokenAwareRouter:         tokenAwareRouter,
+		promptCacheWarmer:        promptCacheWarmer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2347,6 +2363,7 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.cacheInvalidationTracker != nil {
 		stats["opt86_cacheInvalidationTracker"] = a.cacheInvalidationTracker.GetStats()
+		stats["opt167_cacheInvalidationTracker"] = a.cacheInvalidationTracker.GetStats()
 	}
 	if a.tokenCostAnalyzer != nil {
 		stats["opt87_tokenCostAnalyzer"] = a.tokenCostAnalyzer.GetStats()
@@ -2584,6 +2601,18 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptAssemblyOptimizer != nil {
 		stats["opt165_promptAssemblyOptimizer"] = a.promptAssemblyOptimizer.GetStats()
+	}
+	if a.tokenAwareAggregator != nil {
+		stats["opt166_tokenAwareAggregator"] = a.tokenAwareAggregator.GetStats()
+	}
+	if a.contextMergeOptimizer != nil {
+		stats["opt168_contextMergeOptimizer"] = a.contextMergeOptimizer.GetStats()
+	}
+	if a.tokenAwareRouter != nil {
+		stats["opt169_tokenAwareRouter"] = a.tokenAwareRouter.GetStats()
+	}
+	if a.promptCacheWarmer != nil {
+		stats["opt170_promptCacheWarmer"] = a.promptCacheWarmer.GetStats()
 	}
 	return stats
 }
@@ -3284,6 +3313,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.cachePrefetchScheduler != nil && usage != nil && usage.PromptTokens > 0 {
 		a.cachePrefetchScheduler.Schedule("next_prompt", 1, usage.PromptTokens)
+	}
+
+	// OPT-166~170: 聚合 / 合并 / 路由 / 预热
+	if a.tokenAwareRouter != nil && usage != nil {
+		a.tokenAwareRouter.Route(usage.TotalTokens)
+	}
+	if a.tokenAwareAggregator != nil && usage != nil {
+		a.tokenAwareAggregator.Add(AggregationItem{ID: "usage", Content: "token_usage", EstimatedTokens: usage.TotalTokens})
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
