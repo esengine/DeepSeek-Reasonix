@@ -673,6 +673,21 @@ type Agent struct {
 	// OPT-145: 上下文窗口校准器
 	contextWindowCalibrator *ContextWindowCalibrator
 
+	// OPT-146: Token 感知分发器
+	tokenAwareDispatcher *TokenAwareDispatcher
+
+	// OPT-147: 缓存填充预测器
+	cachePopulationPredictor *CachePopulationPredictor
+
+	// OPT-148: 上下文片段组装器
+	contextSegmentAssembler *ContextSegmentAssembler
+
+	// OPT-149: Token 感知合并器
+	tokenAwareMerger *TokenAwareMerger
+
+	// OPT-150: 缓存利用率追踪器
+	cacheUtilizationTracker *CacheUtilizationTracker
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1752,6 +1767,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	cacheAdmissionController := NewCacheAdmissionController(50)
 	contextWindowCalibrator := NewContextWindowCalibrator(opts.ContextWindow/4, opts.ContextWindow, 1000)
 
+	// ── OPT-146~150 集成 ──
+	tokenAwareDispatcher := NewTokenAwareDispatcher(opts.ContextWindow / 4)
+	cachePopulationPredictor := NewCachePopulationPredictor()
+	contextSegmentAssembler := NewContextSegmentAssembler()
+	tokenAwareMerger := NewTokenAwareMerger(0.7)
+	cacheUtilizationTracker := NewCacheUtilizationTracker(1000)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1915,6 +1937,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		tokenSavingsCalculator:   tokenSavingsCalculator,
 		cacheAdmissionController: cacheAdmissionController,
 		contextWindowCalibrator:  contextWindowCalibrator,
+		tokenAwareDispatcher:     tokenAwareDispatcher,
+		cachePopulationPredictor: cachePopulationPredictor,
+		contextSegmentAssembler:  contextSegmentAssembler,
+		tokenAwareMerger:         tokenAwareMerger,
+		cacheUtilizationTracker:  cacheUtilizationTracker,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2436,6 +2463,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.contextWindowCalibrator != nil {
 		stats["opt145_contextWindowCalibrator"] = a.contextWindowCalibrator.GetStats()
+	}
+	if a.tokenAwareDispatcher != nil {
+		stats["opt146_tokenAwareDispatcher"] = a.tokenAwareDispatcher.GetStats()
+	}
+	if a.cachePopulationPredictor != nil {
+		stats["opt147_cachePopulationPredictor"] = a.cachePopulationPredictor.GetStats()
+	}
+	if a.contextSegmentAssembler != nil {
+		stats["opt148_contextSegmentAssembler"] = a.contextSegmentAssembler.GetStats()
+	}
+	if a.tokenAwareMerger != nil {
+		stats["opt149_tokenAwareMerger"] = a.tokenAwareMerger.GetStats()
+	}
+	if a.cacheUtilizationTracker != nil {
+		stats["opt150_cacheUtilizationTracker"] = a.cacheUtilizationTracker.GetStats()
 	}
 	return stats
 }
@@ -3102,6 +3144,13 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			hitRate = float64(usage.CacheHitTokens) / float64(usage.PromptTokens)
 		}
 		a.contextWindowCalibrator.RecordPerformance(hitRate, 0.5)
+	}
+
+	// OPT-146~150: 分发 / 填充预测 / 片段组装 / 合并 / 利用率追踪
+	if a.cacheUtilizationTracker != nil && usage != nil {
+		if usage.CacheHitTokens > 0 {
+			a.cacheUtilizationTracker.RecordInsert()
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
