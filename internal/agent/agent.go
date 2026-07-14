@@ -786,6 +786,16 @@ type Agent struct {
 	tokenAwareCircuitBreaker *TokenAwareCircuitBreaker
 	// OPT-200: 提示Token分配器
 	promptTokenDistributor *PromptTokenDistributor
+	// OPT-201: Token 感知背压控制器
+	tokenAwareBackpressure *TokenAwareBackpressure
+	// OPT-202: 缓存失效策略器
+	cacheInvalidationStrategy *CacheInvalidationStrategy
+	// OPT-203: 上下文修剪策略器
+	contextPruningStrategy *ContextPruningStrategy
+	// OPT-204: Token 感知限流器V2
+	tokenAwareThrottleV2 *TokenAwareThrottleV2
+	// OPT-205: 提示缓存重新验证器
+	promptCacheRevalidator *PromptCacheRevalidator
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1921,6 +1931,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowPredictorV2 := NewContextWindowPredictorV2(32768, 50)
 	tokenAwareCircuitBreaker := NewTokenAwareCircuitBreaker(5, 60)
 	promptTokenDistributor := NewPromptTokenDistributor(100000)
+	tokenAwareBackpressure := NewTokenAwareBackpressure(50000)
+	cacheInvalidationStrategy := NewCacheInvalidationStrategy("immediate")
+	contextPruningStrategy := NewContextPruningStrategy("moderate", 8192)
+	tokenAwareThrottleV2 := NewTokenAwareThrottleV2(10000, 1000)
+	promptCacheRevalidator := NewPromptCacheRevalidator(3600)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2139,6 +2154,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowPredictorV2:  contextWindowPredictorV2,
 		tokenAwareCircuitBreaker:  tokenAwareCircuitBreaker,
 		promptTokenDistributor:    promptTokenDistributor,
+		tokenAwareBackpressure:    tokenAwareBackpressure,
+		cacheInvalidationStrategy: cacheInvalidationStrategy,
+		contextPruningStrategy:    contextPruningStrategy,
+		tokenAwareThrottleV2:      tokenAwareThrottleV2,
+		promptCacheRevalidator:    promptCacheRevalidator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2823,6 +2843,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptTokenDistributor != nil {
 		stats["opt200_promptTokenDistributor"] = a.promptTokenDistributor.GetStats()
+	}
+	if a.tokenAwareBackpressure != nil {
+		stats["opt201_tokenAwareBackpressure"] = a.tokenAwareBackpressure.GetStats()
+	}
+	if a.cacheInvalidationStrategy != nil {
+		stats["opt202_cacheInvalidationStrategy"] = a.cacheInvalidationStrategy.GetStats()
+	}
+	if a.contextPruningStrategy != nil {
+		stats["opt203_contextPruningStrategy"] = a.contextPruningStrategy.GetStats()
+	}
+	if a.tokenAwareThrottleV2 != nil {
+		stats["opt204_tokenAwareThrottleV2"] = a.tokenAwareThrottleV2.GetStats()
+	}
+	if a.promptCacheRevalidator != nil {
+		stats["opt205_promptCacheRevalidator"] = a.promptCacheRevalidator.GetStats()
 	}
 	return stats
 }
@@ -3587,6 +3622,17 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.tokenAwareCircuitBreaker != nil {
 		a.tokenAwareCircuitBreaker.RecordSuccess()
+	}
+
+	// OPT-201~205: 背压 / 失效策略 / 修剪策略 / 限流V2 / 重新验证
+	if a.tokenAwareThrottleV2 != nil && usage != nil {
+		a.tokenAwareThrottleV2.TryConsume(usage.TotalTokens, 1)
+	}
+	if a.tokenAwareBackpressure != nil && usage != nil {
+		a.tokenAwareBackpressure.CheckRate(usage.TotalTokens)
+	}
+	if a.promptCacheRevalidator != nil {
+		a.promptCacheRevalidator.Register("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
