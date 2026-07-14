@@ -478,6 +478,21 @@ type Agent struct {
 	// OPT-80: 对话压缩摘要 — 生成紧凑历史摘要
 	compactSummary *ConversationCompactSummary
 
+	// OPT-81: 历史窗口管理器 — 滑动窗口控制上下文
+	historyWindowManager *HistoryWindowManager
+
+	// OPT-82: Token 感知重试 — 最小化重试 token 浪费
+	tokenAwareRetry *TokenAwareRetry
+
+	// OPT-83: 多信号压缩触发器 V2
+	compactionTriggerV2 *CompactionTriggerV2
+
+	// OPT-84: 模型感知优化器 — 按模型能力优化
+	modelAwareOptimizer *ModelAwareOptimizer
+
+	// OPT-85: Token 用量预测器 — 预测未来用量
+	tokenUsagePredictor *TokenUsagePredictor
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1466,6 +1481,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	toolSchemaOptimizer := NewToolSchemaOptimizer()
 	compactSummary := NewConversationCompactSummary()
 
+	// ── OPT-81~85 集成: 第十三批 token 优化模块 ──
+	historyWindowManager := NewHistoryWindowManager(0)
+	tokenAwareRetry := NewTokenAwareRetry(3)
+	compactionTriggerV2 := NewCompactionTriggerV2()
+	modelAwareOptimizer := NewModelAwareOptimizer("deepseek-chat")
+	tokenUsagePredictor := NewTokenUsagePredictor()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1564,6 +1586,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextSummaryCache:      contextSummaryCache,
 		toolSchemaOptimizer:      toolSchemaOptimizer,
 		compactSummary:           compactSummary,
+		historyWindowManager:     historyWindowManager,
+		tokenAwareRetry:          tokenAwareRetry,
+		compactionTriggerV2:      compactionTriggerV2,
+		modelAwareOptimizer:      modelAwareOptimizer,
+		tokenUsagePredictor:      tokenUsagePredictor,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1890,6 +1917,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.compactSummary != nil {
 		stats["opt80_compactSummary"] = a.compactSummary.GetStats()
+	}
+	if a.historyWindowManager != nil {
+		stats["opt81_historyWindowManager"] = a.historyWindowManager.GetStats()
+	}
+	if a.tokenAwareRetry != nil {
+		stats["opt82_tokenAwareRetry"] = a.tokenAwareRetry.GetStats()
+	}
+	if a.compactionTriggerV2 != nil {
+		stats["opt83_compactionTriggerV2"] = a.compactionTriggerV2.GetStats()
+	}
+	if a.modelAwareOptimizer != nil {
+		stats["opt84_modelAwareOptimizer"] = a.modelAwareOptimizer.GetStats()
+	}
+	if a.tokenUsagePredictor != nil {
+		stats["opt85_tokenUsagePredictor"] = a.tokenUsagePredictor.GetStats()
 	}
 	return stats
 }
@@ -2389,6 +2431,21 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	if a.compactSummary != nil && step > 0 && step%5 == 0 {
 		msgs := a.session.Snapshot()
 		a.compactSummary.Summarize(msgs, step+1)
+	}
+
+	// OPT-83: 多信号压缩触发器 V2 — 评估多信号
+	if a.compactionTriggerV2 != nil && usage != nil {
+		decision := a.compactionTriggerV2.Evaluate(usage.PromptTokens, a.contextWindow, len(a.session.Snapshot()), 0, 0)
+		if decision.ShouldCompact && decision.Priority == "high" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "multi-signal compaction triggered: " + decision.Reason})
+		}
+	}
+
+	// OPT-85: Token 用量预测器 — 记录并预测
+	if a.tokenUsagePredictor != nil && usage != nil {
+		a.tokenUsagePredictor.RecordUsage(step+1, usage.TotalTokens)
+		predicted := a.tokenUsagePredictor.PredictNextTurn(step+1, usage.TotalTokens)
+		_ = predicted
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
