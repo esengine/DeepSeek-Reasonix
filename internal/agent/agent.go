@@ -508,6 +508,21 @@ type Agent struct {
 	// OPT-90: 自适应消息选择器 — 按预算选择消息
 	adaptiveMessageSelector *AdaptiveMessageSelector
 
+	// OPT-91: 缓存命中预测器 — 预测下一轮是否命中
+	cacheHitPredictor *CacheHitPredictor
+
+	// OPT-92: 上下文预算协商器 — 协商组件间预算分配
+	contextBudgetNegotiator *ContextBudgetNegotiator
+
+	// OPT-93: 工具结果摘要器 — 摘要冗长工具输出
+	toolResultSummarizer *ToolResultSummarizer
+
+	// OPT-94: Prompt 分段管理器 — 粒度缓存控制
+	promptSegmentManager *PromptSegmentManager
+
+	// OPT-95: 零开销统计收集器 — 惰性收集模块统计
+	zeroTokenStatsCollector *ZeroTokenStatsCollector
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1510,6 +1525,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextCoherenceChecker := NewContextCoherenceChecker()
 	adaptiveMessageSelector := NewAdaptiveMessageSelector()
 
+	// ── OPT-91~95 集成: 第十五批 token 优化模块 ──
+	cacheHitPredictor := NewCacheHitPredictor()
+	contextBudgetNegotiator := NewContextBudgetNegotiator()
+	toolResultSummarizer := NewToolResultSummarizer()
+	promptSegmentManager := NewPromptSegmentManager()
+	zeroTokenStatsCollector := NewZeroTokenStatsCollector()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1618,6 +1640,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		messageImportanceScorer:  messageImportanceScorer,
 		contextCoherenceChecker:  contextCoherenceChecker,
 		adaptiveMessageSelector:  adaptiveMessageSelector,
+		cacheHitPredictor:        cacheHitPredictor,
+		contextBudgetNegotiator:  contextBudgetNegotiator,
+		toolResultSummarizer:     toolResultSummarizer,
+		promptSegmentManager:     promptSegmentManager,
+		zeroTokenStatsCollector:  zeroTokenStatsCollector,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1974,6 +2001,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.adaptiveMessageSelector != nil {
 		stats["opt90_adaptiveMessageSelector"] = a.adaptiveMessageSelector.GetStats()
+	}
+	if a.cacheHitPredictor != nil {
+		stats["opt91_cacheHitPredictor"] = a.cacheHitPredictor.GetStats()
+	}
+	if a.contextBudgetNegotiator != nil {
+		stats["opt92_contextBudgetNegotiator"] = a.contextBudgetNegotiator.GetStats()
+	}
+	if a.toolResultSummarizer != nil {
+		stats["opt93_toolResultSummarizer"] = a.toolResultSummarizer.GetStats()
+	}
+	if a.promptSegmentManager != nil {
+		stats["opt94_promptSegmentManager"] = a.promptSegmentManager.GetStats()
+	}
+	if a.zeroTokenStatsCollector != nil {
+		stats["opt95_zeroTokenStatsCollector"] = a.zeroTokenStatsCollector.GetStats()
 	}
 	return stats
 }
