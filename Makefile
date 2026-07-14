@@ -1,5 +1,22 @@
-VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+VERSION := $(shell \
+	tag=$$(git tag --merged HEAD --list 'desktop-v[0-9]*' --sort=-v:refname 2>/dev/null | head -n 1); \
+	if [ -n "$$tag" ]; then \
+		git describe --tags --dirty --match "$$tag" 2>/dev/null; \
+	else \
+		git describe --tags --always --dirty 2>/dev/null || echo dev; \
+	fi)
+BUILD_NUMBER := $(shell date -u +%Y%m%d%H%M%S)
+BUILD_TIME_UTC := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_DIRTY := $(shell test -z "$$(git status --porcelain --untracked-files=no 2>/dev/null)" && echo clean || echo dirty)
+BUILD_PROFILE ?= release
+LDFLAGS := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.buildNumber=$(BUILD_NUMBER) \
+	-X main.buildTimeUTC=$(BUILD_TIME_UTC) \
+	-X main.gitCommit=$(GIT_COMMIT) \
+	-X main.gitDirty=$(GIT_DIRTY) \
+	-X main.buildProfile=$(BUILD_PROFILE)
 GOEXE := $(shell go env GOEXE)
 
 .PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times hooks cross clean

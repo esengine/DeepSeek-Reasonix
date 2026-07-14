@@ -12,9 +12,25 @@ import (
 	_ "reasonix/internal/tool/builtin"
 )
 
-// version is injected at build time via -ldflags "-X main.version=...".
-var version = "dev"
+// Build identity is injected at build time via -ldflags.
+var (
+	version      = "dev"
+	buildNumber  = ""
+	buildTimeUTC = ""
+	gitCommit    = ""
+	gitDirty     = ""
+	buildProfile = ""
+	buildTarget  = ""
+)
 
 func main() {
-	os.Exit(cli.Run(os.Args[1:], version))
+	os.Exit(cli.RunWithBuildInfo(os.Args[1:], cli.BuildInfo{
+		Version:      version,
+		BuildNumber:  buildNumber,
+		BuildTimeUTC: buildTimeUTC,
+		GitCommit:    gitCommit,
+		GitDirty:     gitDirty,
+		BuildProfile: buildProfile,
+		BuildTarget:  buildTarget,
+	}))
 }

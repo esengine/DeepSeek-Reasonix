@@ -47,6 +47,17 @@ var (
 
 // Run is the CLI entry point; it returns a process exit code.
 func Run(args []string, version string) int {
+	return RunWithBuildInfo(args, BuildInfo{Version: version})
+}
+
+// RunWithBuildInfo is the CLI entry point with full build metadata. Tests and
+// embedders that only have a semantic version can keep using Run.
+func RunWithBuildInfo(args []string, build BuildInfo) int {
+	version := strings.TrimSpace(build.Version)
+	if version == "" {
+		version = "dev"
+	}
+
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
@@ -140,7 +151,8 @@ func Run(args []string, version string) int {
 		configureCLIThemeFromConfigNoProbe()
 		return upgradeCommand(rest, version)
 	case "version", "--version", "-v":
-		fmt.Println("reasonix", version)
+		build.Version = version
+		fmt.Println(build.VersionText())
 		return 0
 	case "help", "--help", "-h":
 		usage()
