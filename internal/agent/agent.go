@@ -493,6 +493,21 @@ type Agent struct {
 	// OPT-85: Token 用量预测器 — 预测未来用量
 	tokenUsagePredictor *TokenUsagePredictor
 
+	// OPT-86: 缓存失效追踪器 — 追踪缓存失效原因
+	cacheInvalidationTracker *CacheInvalidationTracker
+
+	// OPT-87: Token 成本分析器 — 分析成本和节省机会
+	tokenCostAnalyzer *TokenCostAnalyzer
+
+	// OPT-88: 消息重要性评分器 — 评分决定压缩保留
+	messageImportanceScorer *MessageImportanceScorer
+
+	// OPT-89: 上下文一致性检查器 — 确保压缩后逻辑连贯
+	contextCoherenceChecker *ContextCoherenceChecker
+
+	// OPT-90: 自适应消息选择器 — 按预算选择消息
+	adaptiveMessageSelector *AdaptiveMessageSelector
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1488,6 +1503,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	modelAwareOptimizer := NewModelAwareOptimizer("deepseek-chat")
 	tokenUsagePredictor := NewTokenUsagePredictor()
 
+	// ── OPT-86~90 集成: 第十四批 token 优化模块 ──
+	cacheInvalidationTracker := NewCacheInvalidationTracker()
+	tokenCostAnalyzer := NewTokenCostAnalyzer(1.0)
+	messageImportanceScorer := NewMessageImportanceScorer()
+	contextCoherenceChecker := NewContextCoherenceChecker()
+	adaptiveMessageSelector := NewAdaptiveMessageSelector()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1591,6 +1613,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		compactionTriggerV2:      compactionTriggerV2,
 		modelAwareOptimizer:      modelAwareOptimizer,
 		tokenUsagePredictor:      tokenUsagePredictor,
+		cacheInvalidationTracker: cacheInvalidationTracker,
+		tokenCostAnalyzer:        tokenCostAnalyzer,
+		messageImportanceScorer:  messageImportanceScorer,
+		contextCoherenceChecker:  contextCoherenceChecker,
+		adaptiveMessageSelector:  adaptiveMessageSelector,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1932,6 +1959,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenUsagePredictor != nil {
 		stats["opt85_tokenUsagePredictor"] = a.tokenUsagePredictor.GetStats()
+	}
+	if a.cacheInvalidationTracker != nil {
+		stats["opt86_cacheInvalidationTracker"] = a.cacheInvalidationTracker.GetStats()
+	}
+	if a.tokenCostAnalyzer != nil {
+		stats["opt87_tokenCostAnalyzer"] = a.tokenCostAnalyzer.GetStats()
+	}
+	if a.messageImportanceScorer != nil {
+		stats["opt88_messageImportanceScorer"] = a.messageImportanceScorer.GetStats()
+	}
+	if a.contextCoherenceChecker != nil {
+		stats["opt89_contextCoherenceChecker"] = a.contextCoherenceChecker.GetStats()
+	}
+	if a.adaptiveMessageSelector != nil {
+		stats["opt90_adaptiveMessageSelector"] = a.adaptiveMessageSelector.GetStats()
 	}
 	return stats
 }
@@ -2446,6 +2488,20 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		a.tokenUsagePredictor.RecordUsage(step+1, usage.TotalTokens)
 		predicted := a.tokenUsagePredictor.PredictNextTurn(step+1, usage.TotalTokens)
 		_ = predicted
+	}
+
+	// OPT-87: Token 成本分析 — 记录用量分析成本
+	if a.tokenCostAnalyzer != nil && usage != nil {
+		a.tokenCostAnalyzer.RecordUsage(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens)
+	}
+
+	// OPT-89: 上下文一致性检查 — 压缩后检查连贯性
+	if a.contextCoherenceChecker != nil && step > 0 && step%3 == 0 {
+		msgs := a.session.Snapshot()
+		report := a.contextCoherenceChecker.CheckCoherence(msgs)
+		if !report.IsCoherent {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context coherence issue detected after compaction"})
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
