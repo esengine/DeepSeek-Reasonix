@@ -766,6 +766,16 @@ type Agent struct {
 	tokenAwareLoadBalancer *TokenAwareLoadBalancer
 	// OPT-190: 提示分段缓存V3
 	promptSegmentCacheV3 *PromptSegmentCacheV3
+	// OPT-191: Token 感知配额管理器
+	tokenAwareQuotaManager *TokenAwareQuotaManager
+	// OPT-192: 缓存新鲜度保证器
+	cacheFreshnessGuarantor *CacheFreshnessGuarantor
+	// OPT-193: 上下文相似度检测器
+	contextSimilarityDetector *ContextSimilarityDetector
+	// OPT-194: Token 感知速率限制器
+	tokenAwareRateLimiter *TokenAwareRateLimiter
+	// OPT-195: 提示驱逐策略器
+	promptEvictionPolicy *PromptEvictionPolicy
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1891,6 +1901,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextBoundaryOptimizer := NewContextBoundaryOptimizer(100)
 	tokenAwareLoadBalancer := NewTokenAwareLoadBalancer()
 	promptSegmentCacheV3 := NewPromptSegmentCacheV3(512)
+	tokenAwareQuotaManager := NewTokenAwareQuotaManager()
+	cacheFreshnessGuarantor := NewCacheFreshnessGuarantor(3600)
+	contextSimilarityDetector := NewContextSimilarityDetector(0.85)
+	tokenAwareRateLimiter := NewTokenAwareRateLimiter(100000, 60)
+	promptEvictionPolicy := NewPromptEvictionPolicy(1024, "lru")
 
 	a := &Agent{
 		prov:                     prov,
@@ -2099,6 +2114,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextBoundaryOptimizer:   contextBoundaryOptimizer,
 		tokenAwareLoadBalancer:     tokenAwareLoadBalancer,
 		promptSegmentCacheV3:       promptSegmentCacheV3,
+		tokenAwareQuotaManager:     tokenAwareQuotaManager,
+		cacheFreshnessGuarantor:    cacheFreshnessGuarantor,
+		contextSimilarityDetector:  contextSimilarityDetector,
+		tokenAwareRateLimiter:      tokenAwareRateLimiter,
+		promptEvictionPolicy:       promptEvictionPolicy,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2753,6 +2773,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptSegmentCacheV3 != nil {
 		stats["opt190_promptSegmentCacheV3"] = a.promptSegmentCacheV3.GetStats()
+	}
+	if a.tokenAwareQuotaManager != nil {
+		stats["opt191_tokenAwareQuotaManager"] = a.tokenAwareQuotaManager.GetStats()
+	}
+	if a.cacheFreshnessGuarantor != nil {
+		stats["opt192_cacheFreshnessGuarantor"] = a.cacheFreshnessGuarantor.GetStats()
+	}
+	if a.contextSimilarityDetector != nil {
+		stats["opt193_contextSimilarityDetector"] = a.contextSimilarityDetector.GetStats()
+	}
+	if a.tokenAwareRateLimiter != nil {
+		stats["opt194_tokenAwareRateLimiter"] = a.tokenAwareRateLimiter.GetStats()
+	}
+	if a.promptEvictionPolicy != nil {
+		stats["opt195_promptEvictionPolicy"] = a.promptEvictionPolicy.GetStats()
 	}
 	return stats
 }
@@ -3498,6 +3533,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptSegmentCacheV3 != nil && usage != nil && usage.PromptTokens > 0 {
 		a.promptSegmentCacheV3.Get("prompt")
+	}
+
+	// OPT-191~195: 配额 / 新鲜度 / 相似度 / 速率限制 / 驱逐策略
+	if a.tokenAwareRateLimiter != nil && usage != nil {
+		a.tokenAwareRateLimiter.TryAcquire(usage.TotalTokens, 1)
+	}
+	if a.cacheFreshnessGuarantor != nil {
+		a.cacheFreshnessGuarantor.Put("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
