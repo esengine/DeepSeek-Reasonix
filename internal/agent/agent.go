@@ -746,6 +746,16 @@ type Agent struct {
 	tokenAwareValidator *TokenAwareValidator
 	// OPT-180: 提示冗余消除器
 	promptRedundancyEliminator *PromptRedundancyEliminator
+	// OPT-181: Token 感知调度器V2
+	tokenAwareSchedulerV2 *TokenAwareSchedulerV2
+	// OPT-182: 缓存命中预测器V2
+	cacheHitPredictorV2 *CacheHitPredictorV2
+	// OPT-183: 上下文衰减管理器V2
+	contextDecayManagerV2 *ContextDecayManagerV2
+	// OPT-184: Token 感知守门员
+	tokenAwareGatekeeper *TokenAwareGatekeeper
+	// OPT-185: 提示上下文桥接器
+	promptContextBridge *PromptContextBridge
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1861,6 +1871,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextSnapshotFreezer := NewContextSnapshotFreezer(50)
 	tokenAwareValidator := NewTokenAwareValidator(32768, 1)
 	promptRedundancyEliminator := NewPromptRedundancyEliminator(3)
+	tokenAwareSchedulerV2 := NewTokenAwareSchedulerV2()
+	cacheHitPredictorV2 := NewCacheHitPredictorV2()
+	contextDecayManagerV2 := NewContextDecayManagerV2(0.1, 100)
+	tokenAwareGatekeeper := NewTokenAwareGatekeeper(1000000, 0.85)
+	promptContextBridge := NewPromptContextBridge()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2059,6 +2074,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextSnapshotFreezer:   contextSnapshotFreezer,
 		tokenAwareValidator:      tokenAwareValidator,
 		promptRedundancyEliminator: promptRedundancyEliminator,
+		tokenAwareSchedulerV2:      tokenAwareSchedulerV2,
+		cacheHitPredictorV2:        cacheHitPredictorV2,
+		contextDecayManagerV2:      contextDecayManagerV2,
+		tokenAwareGatekeeper:       tokenAwareGatekeeper,
+		promptContextBridge:        promptContextBridge,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2683,6 +2703,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptRedundancyEliminator != nil {
 		stats["opt180_promptRedundancyEliminator"] = a.promptRedundancyEliminator.GetStats()
+	}
+	if a.tokenAwareSchedulerV2 != nil {
+		stats["opt181_tokenAwareSchedulerV2"] = a.tokenAwareSchedulerV2.GetStats()
+	}
+	if a.cacheHitPredictorV2 != nil {
+		stats["opt182_cacheHitPredictorV2"] = a.cacheHitPredictorV2.GetStats()
+	}
+	if a.contextDecayManagerV2 != nil {
+		stats["opt183_contextDecayManagerV2"] = a.contextDecayManagerV2.GetStats()
+	}
+	if a.tokenAwareGatekeeper != nil {
+		stats["opt184_tokenAwareGatekeeper"] = a.tokenAwareGatekeeper.GetStats()
+	}
+	if a.promptContextBridge != nil {
+		stats["opt185_promptContextBridge"] = a.promptContextBridge.GetStats()
 	}
 	return stats
 }
@@ -3407,6 +3442,19 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.cachePressureReliever != nil && usage != nil {
 		a.cachePressureReliever.RecordInsert()
+	}
+
+	// OPT-181~185: 调度V2 / 命中预测V2 / 衰减V2 / 守门 / 桥接
+	if a.tokenAwareGatekeeper != nil && usage != nil {
+		if !a.tokenAwareGatekeeper.Allow(usage.TotalTokens) {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token gatekeeper blocked request"})
+		}
+	}
+	if a.cacheHitPredictorV2 != nil && usage != nil {
+		a.cacheHitPredictorV2.RecordHit("usage", usage.CacheHitTokens > 0)
+	}
+	if a.contextDecayManagerV2 != nil {
+		a.contextDecayManagerV2.Tick()
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
