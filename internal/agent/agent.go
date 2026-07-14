@@ -463,6 +463,21 @@ type Agent struct {
 	// OPT-75: Token 效率评分器 — 评分并提供优化建议
 	tokenEfficiencyScorer *TokenEfficiencyScorer
 
+	// OPT-76: 语义相似度去重 — 检测语义重复内容
+	semanticDedup *SemanticSimilarityDedup
+
+	// OPT-77: Prompt 缓存优化器 — 结构化 prompt 提高缓存复用
+	promptCacheOptimizer *PromptCacheOptimizer
+
+	// OPT-78: 上下文摘要缓存 — 缓存摘要避免重复摘要
+	contextSummaryCache *ContextSummaryCache
+
+	// OPT-79: 工具 schema 优化器 — 精简工具 schema
+	toolSchemaOptimizer *ToolSchemaOptimizer
+
+	// OPT-80: 对话压缩摘要 — 生成紧凑历史摘要
+	compactSummary *ConversationCompactSummary
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1444,6 +1459,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	toolCallOptimizer := NewToolCallOptimizer()
 	tokenEfficiencyScorer := NewTokenEfficiencyScorer()
 
+	// ── OPT-76~80 集成: 第十二批 token 优化模块 ──
+	semanticDedup := NewSemanticSimilarityDedup()
+	promptCacheOptimizer := NewPromptCacheOptimizer()
+	contextSummaryCache := NewContextSummaryCache(0)
+	toolSchemaOptimizer := NewToolSchemaOptimizer()
+	compactSummary := NewConversationCompactSummary()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1537,6 +1559,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextDecayManager:      contextDecayManager,
 		toolCallOptimizer:        toolCallOptimizer,
 		tokenEfficiencyScorer:    tokenEfficiencyScorer,
+		semanticDedup:            semanticDedup,
+		promptCacheOptimizer:     promptCacheOptimizer,
+		contextSummaryCache:      contextSummaryCache,
+		toolSchemaOptimizer:      toolSchemaOptimizer,
+		compactSummary:           compactSummary,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1848,6 +1875,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenEfficiencyScorer != nil {
 		stats["opt75_tokenEfficiencyScorer"] = a.tokenEfficiencyScorer.GetOverallStats()
+	}
+	if a.semanticDedup != nil {
+		stats["opt76_semanticDedup"] = a.semanticDedup.GetStats()
+	}
+	if a.promptCacheOptimizer != nil {
+		stats["opt77_promptCacheOptimizer"] = a.promptCacheOptimizer.GetStats()
+	}
+	if a.contextSummaryCache != nil {
+		stats["opt78_contextSummaryCache"] = a.contextSummaryCache.GetStats()
+	}
+	if a.toolSchemaOptimizer != nil {
+		stats["opt79_toolSchemaOptimizer"] = a.toolSchemaOptimizer.GetStats()
+	}
+	if a.compactSummary != nil {
+		stats["opt80_compactSummary"] = a.compactSummary.GetStats()
 	}
 	return stats
 }
@@ -2332,6 +2374,21 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			usage.CacheMissTokens,
 			func() int { if calls != nil { return len(calls) }; return 0 }(),
 		)
+	}
+
+	// OPT-76: 语义相似度去重 — 检查重复内容
+	if a.semanticDedup != nil && step == 0 && input != "" {
+		isDup, _ := a.semanticDedup.CheckSimilarity(input)
+		if isDup {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "semantically similar query detected"})
+		}
+		a.semanticDedup.RecordContent(input, "")
+	}
+
+	// OPT-80: 对话压缩摘要 — 定期生成历史摘要
+	if a.compactSummary != nil && step > 0 && step%5 == 0 {
+		msgs := a.session.Snapshot()
+		a.compactSummary.Summarize(msgs, step+1)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
