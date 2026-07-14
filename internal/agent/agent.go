@@ -568,6 +568,21 @@ type Agent struct {
 	// OPT-110: 自适应批处理优化器
 	adaptiveBatchOptimizer *AdaptiveBatchOptimizer
 
+	// OPT-111: 上下文差异压缩器
+	contextDiffCompressor *ContextDiffCompressor
+
+	// OPT-112: Token 预算预测器
+	tokenBudgetPredictor *TokenBudgetPredictor
+
+	// OPT-113: 缓存键优化器
+	cacheKeyOptimizer *CacheKeyOptimizer
+
+	// OPT-114: 响应长度优化器
+	responseLengthOptimizer *ResponseLengthOptimizer
+
+	// OPT-115: Token 感知优先级排序器
+	tokenAwarePrioritizer *TokenAwarePrioritizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1598,6 +1613,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	tokenWasteDetector := NewTokenWasteDetector()
 	adaptiveBatchOptimizer := NewAdaptiveBatchOptimizer(8)
 
+	// ── OPT-111~115 集成 ──
+	contextDiffCompressor := NewContextDiffCompressor()
+	tokenBudgetPredictor := NewTokenBudgetPredictor(100)
+	cacheKeyOptimizer := NewCacheKeyOptimizer()
+	responseLengthOptimizer := NewResponseLengthOptimizer(opts.ContextWindow / 4)
+	tokenAwarePrioritizer := NewTokenAwarePrioritizer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1726,6 +1748,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextSnapshotManager:   contextSnapshotManager,
 		tokenWasteDetector:       tokenWasteDetector,
 		adaptiveBatchOptimizer:   adaptiveBatchOptimizer,
+		contextDiffCompressor:    contextDiffCompressor,
+		tokenBudgetPredictor:     tokenBudgetPredictor,
+		cacheKeyOptimizer:        cacheKeyOptimizer,
+		responseLengthOptimizer:  responseLengthOptimizer,
+		tokenAwarePrioritizer:    tokenAwarePrioritizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2142,6 +2169,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.adaptiveBatchOptimizer != nil {
 		stats["opt110_adaptiveBatchOptimizer"] = a.adaptiveBatchOptimizer.GetStats()
+	}
+	if a.contextDiffCompressor != nil {
+		stats["opt111_contextDiffCompressor"] = a.contextDiffCompressor.GetStats()
+	}
+	if a.tokenBudgetPredictor != nil {
+		stats["opt112_tokenBudgetPredictor"] = a.tokenBudgetPredictor.GetStats()
+	}
+	if a.cacheKeyOptimizer != nil {
+		stats["opt113_cacheKeyOptimizer"] = a.cacheKeyOptimizer.GetStats()
+	}
+	if a.responseLengthOptimizer != nil {
+		stats["opt114_responseLengthOptimizer"] = a.responseLengthOptimizer.GetStats()
+	}
+	if a.tokenAwarePrioritizer != nil {
+		stats["opt115_tokenAwarePrioritizer"] = a.tokenAwarePrioritizer.GetStats()
 	}
 	return stats
 }
@@ -2735,6 +2777,16 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.contextSnapshotManager != nil && step > 0 && step%3 == 0 {
 		a.contextSnapshotManager.TakeSnapshot(step, a.session.Snapshot())
+	}
+
+	// OPT-111~115: 差异压缩 / 预算预测 / 缓存键 / 响应长度 / 优先级排序
+	if a.tokenBudgetPredictor != nil && usage != nil {
+		a.tokenBudgetPredictor.RecordUsage(usage.TotalTokens)
+		pred := a.tokenBudgetPredictor.PredictNext()
+		a.tokenBudgetPredictor.RecordAccuracy(usage.TotalTokens)
+		if pred > 0 && usage.TotalTokens > pred*2 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token usage exceeded prediction by 2x"})
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
