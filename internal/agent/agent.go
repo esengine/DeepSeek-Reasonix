@@ -796,6 +796,16 @@ type Agent struct {
 	tokenAwareThrottleV2 *TokenAwareThrottleV2
 	// OPT-205: 提示缓存重新验证器
 	promptCacheRevalidator *PromptCacheRevalidator
+	// OPT-206: Token 感知资源池
+	tokenAwareResourcePool *TokenAwareResourcePool
+	// OPT-207: 缓存失效批处理器
+	cacheInvalidationBatcher *CacheInvalidationBatcher
+	// OPT-208: 上下文保真度监控器
+	contextFidelityMonitor *ContextFidelityMonitor
+	// OPT-209: Token 感知并发限制器
+	tokenAwareConcurrencyLimiter *TokenAwareConcurrencyLimiter
+	// OPT-210: 提示缓存预热调度器
+	promptCacheWarmingScheduler *PromptCacheWarmingScheduler
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1936,6 +1946,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextPruningStrategy := NewContextPruningStrategy("moderate", 8192)
 	tokenAwareThrottleV2 := NewTokenAwareThrottleV2(10000, 1000)
 	promptCacheRevalidator := NewPromptCacheRevalidator(3600)
+	tokenAwareResourcePool := NewTokenAwareResourcePool(256)
+	cacheInvalidationBatcher := NewCacheInvalidationBatcher(32)
+	contextFidelityMonitor := NewContextFidelityMonitor()
+	tokenAwareConcurrencyLimiter := NewTokenAwareConcurrencyLimiter(50)
+	promptCacheWarmingScheduler := NewPromptCacheWarmingScheduler()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2159,6 +2174,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextPruningStrategy:    contextPruningStrategy,
 		tokenAwareThrottleV2:      tokenAwareThrottleV2,
 		promptCacheRevalidator:    promptCacheRevalidator,
+		tokenAwareResourcePool:    tokenAwareResourcePool,
+		cacheInvalidationBatcher:  cacheInvalidationBatcher,
+		contextFidelityMonitor:    contextFidelityMonitor,
+		tokenAwareConcurrencyLimiter: tokenAwareConcurrencyLimiter,
+		promptCacheWarmingScheduler: promptCacheWarmingScheduler,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2858,6 +2878,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheRevalidator != nil {
 		stats["opt205_promptCacheRevalidator"] = a.promptCacheRevalidator.GetStats()
+	}
+	if a.tokenAwareResourcePool != nil {
+		stats["opt206_tokenAwareResourcePool"] = a.tokenAwareResourcePool.GetStats()
+	}
+	if a.cacheInvalidationBatcher != nil {
+		stats["opt207_cacheInvalidationBatcher"] = a.cacheInvalidationBatcher.GetStats()
+	}
+	if a.contextFidelityMonitor != nil {
+		stats["opt208_contextFidelityMonitor"] = a.contextFidelityMonitor.GetStats()
+	}
+	if a.tokenAwareConcurrencyLimiter != nil {
+		stats["opt209_tokenAwareConcurrencyLimiter"] = a.tokenAwareConcurrencyLimiter.GetStats()
+	}
+	if a.promptCacheWarmingScheduler != nil {
+		stats["opt210_promptCacheWarmingScheduler"] = a.promptCacheWarmingScheduler.GetStats()
 	}
 	return stats
 }
@@ -3633,6 +3668,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptCacheRevalidator != nil {
 		a.promptCacheRevalidator.Register("usage")
+	}
+
+	// OPT-206~210: 资源池 / 失效批处理 / 保真度 / 并发限制 / 预热调度
+	if a.tokenAwareConcurrencyLimiter != nil && usage != nil {
+		a.tokenAwareConcurrencyLimiter.Acquire(usage.TotalTokens)
+	}
+	if a.cacheInvalidationBatcher != nil && usage != nil {
+		a.cacheInvalidationBatcher.Add("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
