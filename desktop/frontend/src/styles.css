@@ -4672,6 +4672,10 @@ a[href] {
   white-space: pre;
   color: var(--fg);
 }
+.code code {
+  font-family: inherit;
+}
+
 .code--loading {
   opacity: 0.55;
 }
