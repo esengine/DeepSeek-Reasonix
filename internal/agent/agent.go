@@ -736,6 +736,16 @@ type Agent struct {
 	tokenAwareCompressorV2 *TokenAwareCompressorV2
 	// OPT-175: 提示Token计算器
 	promptTokenCalculator *PromptTokenCalculator
+	// OPT-176: Token 感知序列化器
+	tokenAwareSerializer *TokenAwareSerializer
+	// OPT-177: 缓存压力缓解器
+	cachePressureReliever *CachePressureReliever
+	// OPT-178: 上下文快照冻结器
+	contextSnapshotFreezer *ContextSnapshotFreezer
+	// OPT-179: Token 感知验证器
+	tokenAwareValidator *TokenAwareValidator
+	// OPT-180: 提示冗余消除器
+	promptRedundancyEliminator *PromptRedundancyEliminator
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1846,6 +1856,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextOverflowHandler := NewContextOverflowHandler(32768)
 	tokenAwareCompressorV2 := NewTokenAwareCompressorV2()
 	promptTokenCalculator := NewPromptTokenCalculator()
+	tokenAwareSerializer := NewTokenAwareSerializer("compact")
+	cachePressureReliever := NewCachePressureReliever(10000, 0.85)
+	contextSnapshotFreezer := NewContextSnapshotFreezer(50)
+	tokenAwareValidator := NewTokenAwareValidator(32768, 1)
+	promptRedundancyEliminator := NewPromptRedundancyEliminator(3)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2039,6 +2054,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextOverflowHandler:   contextOverflowHandler,
 		tokenAwareCompressorV2:   tokenAwareCompressorV2,
 		promptTokenCalculator:    promptTokenCalculator,
+		tokenAwareSerializer:     tokenAwareSerializer,
+		cachePressureReliever:    cachePressureReliever,
+		contextSnapshotFreezer:   contextSnapshotFreezer,
+		tokenAwareValidator:      tokenAwareValidator,
+		promptRedundancyEliminator: promptRedundancyEliminator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2648,6 +2668,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptTokenCalculator != nil {
 		stats["opt175_promptTokenCalculator"] = a.promptTokenCalculator.GetStats()
+	}
+	if a.tokenAwareSerializer != nil {
+		stats["opt176_tokenAwareSerializer"] = a.tokenAwareSerializer.GetStats()
+	}
+	if a.cachePressureReliever != nil {
+		stats["opt177_cachePressureReliever"] = a.cachePressureReliever.GetStats()
+	}
+	if a.contextSnapshotFreezer != nil {
+		stats["opt178_contextSnapshotFreezer"] = a.contextSnapshotFreezer.GetStats()
+	}
+	if a.tokenAwareValidator != nil {
+		stats["opt179_tokenAwareValidator"] = a.tokenAwareValidator.GetStats()
+	}
+	if a.promptRedundancyEliminator != nil {
+		stats["opt180_promptRedundancyEliminator"] = a.promptRedundancyEliminator.GetStats()
 	}
 	return stats
 }
@@ -3364,6 +3399,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.tokenAwareBuffer != nil && usage != nil {
 		a.tokenAwareBuffer.Write("token usage data")
+	}
+
+	// OPT-176~180: 序列化 / 压力缓解 / 快照冻结 / 验证 / 冗余消除
+	if a.tokenAwareValidator != nil && usage != nil {
+		a.tokenAwareValidator.Validate(usage.TotalTokens)
+	}
+	if a.cachePressureReliever != nil && usage != nil {
+		a.cachePressureReliever.RecordInsert()
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
