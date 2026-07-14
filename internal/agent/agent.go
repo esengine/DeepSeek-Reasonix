@@ -643,6 +643,21 @@ type Agent struct {
 	// OPT-135: 上下文组装优化器
 	contextAssemblyOptimizer *ContextAssemblyOptimizer
 
+	// OPT-136: 缓存过期检测器
+	cacheStalenessDetector *CacheStalenessDetector
+
+	// OPT-137: Token 感知批处理器
+	tokenAwareBatcher *TokenAwareBatcher
+
+	// OPT-138: 对话流分析器
+	conversationFlowAnalyzer *ConversationFlowAnalyzer
+
+	// OPT-139: Prompt 膨胀检测器
+	promptInflationDetector *PromptInflationDetector
+
+	// OPT-140: 缓存键哈希器
+	cacheKeyHasher *CacheKeyHasher
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1708,6 +1723,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	tokenCostProjector := NewTokenCostProjector(0.0001)
 	contextAssemblyOptimizer := NewContextAssemblyOptimizer()
 
+	// ── OPT-136~140 集成 ──
+	cacheStalenessDetector := NewCacheStalenessDetector(5, 10)
+	tokenAwareBatcher := NewTokenAwareBatcher(opts.ContextWindow / 2)
+	conversationFlowAnalyzer := NewConversationFlowAnalyzer()
+	promptInflationDetector := NewPromptInflationDetector(200)
+	cacheKeyHasher := NewCacheKeyHasher()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1861,6 +1883,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		conversationTopicTracker: conversationTopicTracker,
 		tokenCostProjector:       tokenCostProjector,
 		contextAssemblyOptimizer: contextAssemblyOptimizer,
+		cacheStalenessDetector:   cacheStalenessDetector,
+		tokenAwareBatcher:        tokenAwareBatcher,
+		conversationFlowAnalyzer: conversationFlowAnalyzer,
+		promptInflationDetector:  promptInflationDetector,
+		cacheKeyHasher:           cacheKeyHasher,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2352,6 +2379,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.contextAssemblyOptimizer != nil {
 		stats["opt135_contextAssemblyOptimizer"] = a.contextAssemblyOptimizer.GetStats()
+	}
+	if a.cacheStalenessDetector != nil {
+		stats["opt136_cacheStalenessDetector"] = a.cacheStalenessDetector.GetStats()
+	}
+	if a.tokenAwareBatcher != nil {
+		stats["opt137_tokenAwareBatcher"] = a.tokenAwareBatcher.GetStats()
+	}
+	if a.conversationFlowAnalyzer != nil {
+		stats["opt138_conversationFlowAnalyzer"] = a.conversationFlowAnalyzer.GetStats()
+	}
+	if a.promptInflationDetector != nil {
+		stats["opt139_promptInflationDetector"] = a.promptInflationDetector.GetStats()
+	}
+	if a.cacheKeyHasher != nil {
+		stats["opt140_cacheKeyHasher"] = a.cacheKeyHasher.GetStats()
 	}
 	return stats
 }
@@ -2998,6 +3040,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.tokenCostProjector != nil && usage != nil {
 		a.tokenCostProjector.RecordActual(usage.TotalTokens)
+	}
+
+	// OPT-136~140: 过期检测 / 批处理 / 流分析 / 膨胀检测 / 哈希
+	if a.cacheStalenessDetector != nil && step > 0 {
+		stale := a.cacheStalenessDetector.GetStaleEntries(step)
+		if len(stale) > 0 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache staleness: detected stale entries"})
+		}
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
