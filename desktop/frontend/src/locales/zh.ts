@@ -156,6 +156,8 @@ export const zh: Record<DictKey, string> = {
   "topicBar.exportJson": "导出 JSON",
   "topicBar.exportPdf": "导出 PDF",
   "topicBar.exportImage": "导出图片",
+  "topicBar.exportSuccess": "导出成功",
+  "topicBar.exportFailed": "导出失败",
 
   // 范围标签
   "scope.global": "范围：全局",

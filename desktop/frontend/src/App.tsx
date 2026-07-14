@@ -1777,31 +1777,45 @@ export default function App() {
     async (format: "markdown" | "json" | "pdf" | "image") => {
       const base = safeFilename(sessionTitle);
       setTopicExportOpen(false);
+      const pickAndSave = async (
+        ext: string,
+        mime: string,
+        payload: string | Promise<string>,
+        base64Encoded: boolean,
+      ) => {
+        const path = await app.PickExportFile(`${base}.${ext}`, mime);
+        if (!path) return;
+        await app.SaveExportFile(path, await payload, base64Encoded);
+        showToast(t("topicBar.exportSuccess"), "info");
+      };
       try {
         if (format === "json") {
-          const path = await app.PickExportFile(`${base}.json`, "application/json");
-          if (path) await app.SaveExportFile(path, getSessionJson(), false);
+          await pickAndSave("json", "application/json", getSessionJson(), false);
         } else if (format === "pdf") {
-          const path = await app.PickExportFile(`${base}.pdf`, "application/pdf");
-          if (!path) return;
           const { blobToBase64, renderSessionPdfBlob } = await import("./lib/sessionExport");
-          const blob = await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle);
-          await app.SaveExportFile(path, await blobToBase64(blob), true);
+          await pickAndSave(
+            "pdf",
+            "application/pdf",
+            blobToBase64(await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle)),
+            true,
+          );
         } else if (format === "image") {
-          const path = await app.PickExportFile(`${base}.png`, "image/png");
-          if (!path) return;
           const { blobToBase64, renderSessionImageBlob } = await import("./lib/sessionExport");
-          const blob = await renderSessionImageBlob(getSessionMarkdown());
-          await app.SaveExportFile(path, await blobToBase64(blob), true);
+          await pickAndSave(
+            "png",
+            "image/png",
+            blobToBase64(await renderSessionImageBlob(getSessionMarkdown())),
+            true,
+          );
         } else {
-          const path = await app.PickExportFile(`${base}.md`, "text/markdown");
-          if (path) await app.SaveExportFile(path, getSessionMarkdown(), false);
+          await pickAndSave("md", "text/markdown", getSessionMarkdown(), false);
         }
       } catch (err) {
         console.error("Failed to export session", err);
+        showToast(t("topicBar.exportFailed"), "error");
       }
     },
-    [getSessionJson, getSessionMarkdown, sessionTitle],
+    [getSessionJson, getSessionMarkdown, sessionTitle, showToast, t],
   );
 
   useEffect(() => {

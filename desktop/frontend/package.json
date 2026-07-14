@@ -19,6 +19,7 @@
     "@tanstack/react-virtual": "^3.14.3",
     "gsap": "^3.15.0",
     "highlight.js": "^11.10.0",
+    "html2canvas": "^1.4.1",
     "katex": "^0.17.0",
     "lucide-react": "^1.21.0",
     "mermaid": "^11.16.0",

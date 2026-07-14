@@ -284,52 +284,22 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number)
   });
 }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Could not render export image"));
-    img.src = url;
-  });
-}
-
-function serializeSurface(surface: HTMLElement, width: number, height: number): string {
-  const clone = surface.cloneNode(true) as HTMLElement;
-  clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
-  clone.style.width = `${width}px`;
-  clone.style.minHeight = `${height}px`;
-  const style = document.createElement("style");
-  style.textContent = EXPORT_STYLES;
-  clone.insertBefore(style, clone.firstChild);
-  return new XMLSerializer().serializeToString(clone);
-}
-
 async function renderSurfaceToCanvas(surface: HTMLElement): Promise<HTMLCanvasElement> {
   const width = Math.max(1, Math.ceil(surface.scrollWidth || surface.getBoundingClientRect().width || EXPORT_WIDTH));
   const height = Math.max(1, Math.ceil(surface.scrollHeight || surface.getBoundingClientRect().height || 1));
   const preferredScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
   const scale = Math.min(preferredScale, MAX_CANVAS_SIDE / width, MAX_CANVAS_SIDE / height);
-  const canvasWidth = Math.max(1, Math.floor(width * scale));
-  const canvasHeight = Math.max(1, Math.floor(height * scale));
-  const serialized = serializeSurface(surface, width, height);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
-  const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
 
-  try {
-    const image = await loadImage(svgUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas is not available");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    ctx.scale(scale, scale);
-    ctx.drawImage(image, 0, 0, width, height);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(svgUrl);
-  }
+  const { default: html2canvas } = await import("html2canvas");
+  return html2canvas(surface, {
+    backgroundColor: "#ffffff",
+    scale,
+    useCORS: true,
+    logging: false,
+    width,
+    height,
+    windowWidth: EXPORT_WIDTH,
+  });
 }
 
 function bytesFromString(value: string): Uint8Array {
@@ -463,6 +433,7 @@ export async function renderSessionPdfBlob(markdown: string, title: string): Pro
     const jpegBlob = await canvasToBlob(canvas, "image/jpeg", 0.92);
     const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
     const pdfBytes = createRasterPdf(jpegBytes, canvas.width, canvas.height, title);
+    canvas.width = canvas.height = 0;
     return new Blob([arrayBufferFromBytes(pdfBytes)], { type: "application/pdf" });
   } finally {
     disposeExport(rendered);
