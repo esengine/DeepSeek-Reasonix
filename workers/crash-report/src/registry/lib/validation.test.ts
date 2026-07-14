@@ -40,4 +40,11 @@ describe("PublishSchema source", () => {
   it("allows a whole-repo GitHub source for kind=mcp (a repo root is a valid plugin/MCP source)", () => {
     expect(parse({ kind: "mcp", source: "https://github.com/o/r" }).success).toBe(true);
   });
+
+  it("rejects a bare package name for kind=skill (it would resolve as an MCP, not a skill)", () => {
+    for (const source of ["123", "my-skill", "@scope/pkg"]) {
+      expect(parse({ kind: "skill", source }).success, source).toBe(false);
+      expect(parse({ kind: "mcp", source }).success, source).toBe(true);
+    }
+  });
 });

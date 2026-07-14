@@ -107,6 +107,17 @@ export const PublishSchema = z
           "source points at a whole GitHub repo, which installs every skill in it. Point it at one skill — e.g. https://github.com/<owner>/<repo>/tree/<branch>/skills/<name> or a raw SKILL.md URL.",
       });
     }
+    // A skill lives in a SKILL.md file/dir; install_source only reaches the
+    // npx-package branch for kind auto/mcp, so a bare package-name source
+    // (e.g. "123") resolves as an MCP server, never a skill.
+    if (val.kind === "skill" && looksLikePackage(val.source)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source"],
+        message:
+          "a skill source must be a SKILL.md URL or a GitHub repo path, not a bare package name.",
+      });
+    }
   });
 
 export type PublishInput = z.infer<typeof PublishSchema>;
