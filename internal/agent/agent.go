@@ -583,6 +583,21 @@ type Agent struct {
 	// OPT-115: Token 感知优先级排序器
 	tokenAwarePrioritizer *TokenAwarePrioritizer
 
+	// OPT-116: 对话深度分析器
+	conversationDepthAnalyzer *ConversationDepthAnalyzer
+
+	// OPT-117: Token 效率监控器
+	tokenEfficiencyMonitor *TokenEfficiencyMonitor
+
+	// OPT-118: 缓存生命周期管理器
+	cacheLifecycleManager *CacheLifecycleManager
+
+	// OPT-119: Prompt 片段缓存 V2
+	promptSegmentCacheV2 *PromptSegmentCacheV2
+
+	// OPT-120: Token 感知压缩器
+	tokenAwareCompressor *TokenAwareCompressor
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1620,6 +1635,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	responseLengthOptimizer := NewResponseLengthOptimizer(opts.ContextWindow / 4)
 	tokenAwarePrioritizer := NewTokenAwarePrioritizer()
 
+	// ── OPT-116~120 集成 ──
+	conversationDepthAnalyzer := NewConversationDepthAnalyzer()
+	tokenEfficiencyMonitor := NewTokenEfficiencyMonitor()
+	cacheLifecycleManager := NewCacheLifecycleManager(20)
+	promptSegmentCacheV2 := NewPromptSegmentCacheV2(500)
+	tokenAwareCompressor := NewTokenAwareCompressor(opts.ContextWindow)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1753,6 +1775,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		cacheKeyOptimizer:        cacheKeyOptimizer,
 		responseLengthOptimizer:  responseLengthOptimizer,
 		tokenAwarePrioritizer:    tokenAwarePrioritizer,
+		conversationDepthAnalyzer: conversationDepthAnalyzer,
+		tokenEfficiencyMonitor:   tokenEfficiencyMonitor,
+		cacheLifecycleManager:    cacheLifecycleManager,
+		promptSegmentCacheV2:     promptSegmentCacheV2,
+		tokenAwareCompressor:     tokenAwareCompressor,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2184,6 +2211,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.tokenAwarePrioritizer != nil {
 		stats["opt115_tokenAwarePrioritizer"] = a.tokenAwarePrioritizer.GetStats()
+	}
+	if a.conversationDepthAnalyzer != nil {
+		stats["opt116_conversationDepthAnalyzer"] = a.conversationDepthAnalyzer.GetStats()
+	}
+	if a.tokenEfficiencyMonitor != nil {
+		stats["opt117_tokenEfficiencyMonitor"] = a.tokenEfficiencyMonitor.GetStats()
+	}
+	if a.cacheLifecycleManager != nil {
+		stats["opt118_cacheLifecycleManager"] = a.cacheLifecycleManager.GetStats()
+	}
+	if a.promptSegmentCacheV2 != nil {
+		stats["opt119_promptSegmentCacheV2"] = a.promptSegmentCacheV2.GetStats()
+	}
+	if a.tokenAwareCompressor != nil {
+		stats["opt120_tokenAwareCompressor"] = a.tokenAwareCompressor.GetStats()
 	}
 	return stats
 }
@@ -2786,6 +2828,17 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		a.tokenBudgetPredictor.RecordAccuracy(usage.TotalTokens)
 		if pred > 0 && usage.TotalTokens > pred*2 {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token usage exceeded prediction by 2x"})
+		}
+	}
+
+	// OPT-116~120: 深度分析 / 效率监控 / 生命周期 / 片段缓存 / 感知压缩
+	if a.tokenEfficiencyMonitor != nil && usage != nil {
+		a.tokenEfficiencyMonitor.RecordPoint(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, 0)
+	}
+	if a.cacheLifecycleManager != nil && step > 0 {
+		evicted := a.cacheLifecycleManager.EvictExpired(step)
+		if evicted > 0 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache lifecycle: evicted expired entries"})
 		}
 	}
 
