@@ -613,6 +613,21 @@ type Agent struct {
 	// OPT-125: 上下文边界检测器
 	contextBoundaryDetector *ContextBoundaryDetector
 
+	// OPT-126: Token 使用量预测器
+	tokenUsageForecaster *TokenUsageForecaster
+
+	// OPT-127: 上下文新鲜度追踪器
+	contextFreshnessTracker *ContextFreshnessTracker
+
+	// OPT-128: 缓存预热调度器 V2
+	cacheWarmingSchedulerV2 *CacheWarmingSchedulerV2
+
+	// OPT-129: Prompt 模板优化器
+	promptTemplateOptimizer *PromptTemplateOptimizer
+
+	// OPT-130: Token 预算协商器
+	tokenBudgetNegotiator *TokenBudgetNegotiator
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1664,6 +1679,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	cacheHitAnalyzer := NewCacheHitAnalyzer()
 	contextBoundaryDetector := NewContextBoundaryDetector()
 
+	// ── OPT-126~130 集成 ──
+	tokenUsageForecaster := NewTokenUsageForecaster(50, 5)
+	contextFreshnessTracker := NewContextFreshnessTracker(10)
+	cacheWarmingSchedulerV2 := NewCacheWarmingSchedulerV2(20)
+	promptTemplateOptimizer := NewPromptTemplateOptimizer()
+	tokenBudgetNegotiator := NewTokenBudgetNegotiator(opts.ContextWindow)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1807,6 +1829,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		promptRedundancyChecker:  promptRedundancyChecker,
 		cacheHitAnalyzer:         cacheHitAnalyzer,
 		contextBoundaryDetector:  contextBoundaryDetector,
+		tokenUsageForecaster:     tokenUsageForecaster,
+		contextFreshnessTracker:  contextFreshnessTracker,
+		cacheWarmingSchedulerV2:  cacheWarmingSchedulerV2,
+		promptTemplateOptimizer:  promptTemplateOptimizer,
+		tokenBudgetNegotiator:    tokenBudgetNegotiator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2268,6 +2295,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.contextBoundaryDetector != nil {
 		stats["opt125_contextBoundaryDetector"] = a.contextBoundaryDetector.GetStats()
+	}
+	if a.tokenUsageForecaster != nil {
+		stats["opt126_tokenUsageForecaster"] = a.tokenUsageForecaster.GetStats()
+	}
+	if a.contextFreshnessTracker != nil {
+		stats["opt127_contextFreshnessTracker"] = a.contextFreshnessTracker.GetStats()
+	}
+	if a.cacheWarmingSchedulerV2 != nil {
+		stats["opt128_cacheWarmingSchedulerV2"] = a.cacheWarmingSchedulerV2.GetStats()
+	}
+	if a.promptTemplateOptimizer != nil {
+		stats["opt129_promptTemplateOptimizer"] = a.promptTemplateOptimizer.GetStats()
+	}
+	if a.tokenBudgetNegotiator != nil {
+		stats["opt130_tokenBudgetNegotiator"] = a.tokenBudgetNegotiator.GetStats()
 	}
 	return stats
 }
@@ -2891,6 +2933,18 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		} else {
 			a.cacheHitAnalyzer.RecordMiss("prompt")
 		}
+	}
+
+	// OPT-126~130: 预测 / 新鲜度 / 预热 / 模板 / 预算协商
+	if a.tokenUsageForecaster != nil && usage != nil {
+		a.tokenUsageForecaster.RecordUsage(usage.TotalTokens)
+		forecasts := a.tokenUsageForecaster.Forecast(3)
+		if len(forecasts) > 0 && forecasts[0] > 0 {
+			a.tokenUsageForecaster.EvaluateForecast(usage.TotalTokens)
+		}
+	}
+	if a.contextFreshnessTracker != nil {
+		a.contextFreshnessTracker.UpdateTurn(step + 1)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
