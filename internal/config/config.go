@@ -1376,6 +1376,7 @@ func clonePricing(p *provider.Pricing) *provider.Pricing {
 type ToolsConfig struct {
 	Enabled               []string             `toml:"enabled"`
 	BashTimeoutSeconds    *int                 `toml:"bash_timeout_seconds"`
+	CommandTimeoutSeconds int                  `toml:"command_timeout_seconds"`
 	MCPCallTimeoutSeconds *int                 `toml:"mcp_call_timeout_seconds"`
 	BackgroundJobs        BackgroundJobsConfig `toml:"background_jobs"`
 	Search                SearchConfig         `toml:"search"`
@@ -1384,20 +1385,40 @@ type ToolsConfig struct {
 
 const (
 	defaultBashTimeoutSeconds             = 120
+	defaultCommandTimeoutSeconds          = 120
 	defaultMCPCallTimeoutSeconds          = 300
 	defaultBackgroundJobStalledWarningSec = 900
 	maxBackgroundJobStalledWarningSec     = 86400
 )
 
-// BashTimeoutSeconds returns the foreground bash timeout in seconds. An omitted
-// config keeps the historical 120s safety cap, explicit 0 disables the
-// tool-local cap, and positive values set a custom cap. Negative values fall
-// back to the default so a typo cannot silently remove the safety net.
-func (c *Config) BashTimeoutSeconds() int {
-	if c.Tools.BashTimeoutSeconds == nil || *c.Tools.BashTimeoutSeconds < 0 {
-		return defaultBashTimeoutSeconds
+// CommandTimeoutSeconds returns the configurable foreground command timeout in
+// seconds. A positive value overrides the default safety cap; zero (the unset
+// zero value) and negative values fall back to the default so a typo or an
+// omitted config cannot silently remove the safety net. This is the preferred
+// config key for customizing the bash tool's foreground timeout; the legacy
+// bash_timeout_seconds (*int) still works and additionally supports an explicit
+// 0 to disable the tool-local cap entirely.
+func (c *Config) CommandTimeoutSeconds() int {
+	if c.Tools.CommandTimeoutSeconds <= 0 {
+		return defaultCommandTimeoutSeconds
 	}
-	return *c.Tools.BashTimeoutSeconds
+	return c.Tools.CommandTimeoutSeconds
+}
+
+// BashTimeoutSeconds returns the foreground bash timeout in seconds. The legacy
+// bash_timeout_seconds (*int) takes precedence when explicitly set, preserving
+// its 0 = no-cap semantics for existing configs; otherwise the preferred
+// command_timeout_seconds (int) applies, defaulting to 120s. Negative legacy
+// values fall back to the default so a typo cannot silently remove the safety
+// net.
+func (c *Config) BashTimeoutSeconds() int {
+	if c.Tools.BashTimeoutSeconds != nil {
+		if *c.Tools.BashTimeoutSeconds < 0 {
+			return defaultBashTimeoutSeconds
+		}
+		return *c.Tools.BashTimeoutSeconds
+	}
+	return c.CommandTimeoutSeconds()
 }
 
 // MCPCallTimeoutSeconds returns the default MCP JSON-RPC call timeout in

@@ -122,3 +122,66 @@ func TestBackgroundJobStalledWarningSecondsBounds(t *testing.T) {
 		t.Fatalf("oversized BackgroundJobStalledWarningSeconds() = %d, want 86400", got)
 	}
 }
+
+func TestCommandTimeoutSecondsDefaultsToSafetyCap(t *testing.T) {
+	cfg := Default()
+	if cfg.Tools.CommandTimeoutSeconds != 0 {
+		t.Fatalf("default raw command timeout = %d, want 0 (unset)", cfg.Tools.CommandTimeoutSeconds)
+	}
+	if got := cfg.CommandTimeoutSeconds(); got != 120 {
+		t.Fatalf("CommandTimeoutSeconds() = %d, want 120", got)
+	}
+}
+
+func TestCommandTimeoutSecondsCustomValue(t *testing.T) {
+	cfg := Default()
+	cfg.Tools.CommandTimeoutSeconds = 600
+	if got := cfg.CommandTimeoutSeconds(); got != 600 {
+		t.Fatalf("CommandTimeoutSeconds() = %d, want 600", got)
+	}
+}
+
+func TestCommandTimeoutSecondsFallsBackForZeroOrNegative(t *testing.T) {
+	cfg := Default()
+	cfg.Tools.CommandTimeoutSeconds = 0
+	if got := cfg.CommandTimeoutSeconds(); got != 120 {
+		t.Fatalf("zero CommandTimeoutSeconds() = %d, want 120", got)
+	}
+	cfg.Tools.CommandTimeoutSeconds = -5
+	if got := cfg.CommandTimeoutSeconds(); got != 120 {
+		t.Fatalf("negative CommandTimeoutSeconds() = %d, want 120", got)
+	}
+}
+
+func TestCommandTimeoutSecondsParsesFromTOML(t *testing.T) {
+	cfg := Default()
+	if _, err := toml.Decode("[tools]\ncommand_timeout_seconds = 300\n", cfg); err != nil {
+		t.Fatalf("decode command timeout: %v", err)
+	}
+	if cfg.Tools.CommandTimeoutSeconds != 300 {
+		t.Fatalf("decoded command_timeout_seconds = %d, want 300", cfg.Tools.CommandTimeoutSeconds)
+	}
+	if got := cfg.CommandTimeoutSeconds(); got != 300 {
+		t.Fatalf("CommandTimeoutSeconds() = %d, want 300", got)
+	}
+}
+
+func TestBashTimeoutSecondsPrefersLegacyWhenExplicitlySet(t *testing.T) {
+	cfg := Default()
+	cfg.Tools.CommandTimeoutSeconds = 600
+	cfg.Tools.BashTimeoutSeconds = intPtr(30)
+	if got := cfg.BashTimeoutSeconds(); got != 30 {
+		t.Fatalf("legacy bash_timeout should win: BashTimeoutSeconds() = %d, want 30", got)
+	}
+}
+
+func TestBashTimeoutSecondsUsesCommandTimeoutWhenLegacyAbsent(t *testing.T) {
+	cfg := Default()
+	cfg.Tools.CommandTimeoutSeconds = 600
+	if cfg.Tools.BashTimeoutSeconds != nil {
+		t.Fatal("legacy bash_timeout should be nil")
+	}
+	if got := cfg.BashTimeoutSeconds(); got != 600 {
+		t.Fatalf("BashTimeoutSeconds() = %d, want 600 (from command_timeout_seconds)", got)
+	}
+}
