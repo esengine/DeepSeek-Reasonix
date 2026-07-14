@@ -776,6 +776,16 @@ type Agent struct {
 	tokenAwareRateLimiter *TokenAwareRateLimiter
 	// OPT-195: 提示驱逐策略器
 	promptEvictionPolicy *PromptEvictionPolicy
+	// OPT-196: Token 感知准入控制器
+	tokenAwareAdmissionController *TokenAwareAdmissionController
+	// OPT-197: 缓存一致性管理器
+	cacheCoherenceManager *CacheCoherenceManager
+	// OPT-198: 上下文窗口预测器V2
+	contextWindowPredictorV2 *ContextWindowPredictorV2
+	// OPT-199: Token 感知熔断器
+	tokenAwareCircuitBreaker *TokenAwareCircuitBreaker
+	// OPT-200: 提示Token分配器
+	promptTokenDistributor *PromptTokenDistributor
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1906,6 +1916,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextSimilarityDetector := NewContextSimilarityDetector(0.85)
 	tokenAwareRateLimiter := NewTokenAwareRateLimiter(100000, 60)
 	promptEvictionPolicy := NewPromptEvictionPolicy(1024, "lru")
+	tokenAwareAdmissionController := NewTokenAwareAdmissionController(100)
+	cacheCoherenceManager := NewCacheCoherenceManager()
+	contextWindowPredictorV2 := NewContextWindowPredictorV2(32768, 50)
+	tokenAwareCircuitBreaker := NewTokenAwareCircuitBreaker(5, 60)
+	promptTokenDistributor := NewPromptTokenDistributor(100000)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2119,6 +2134,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextSimilarityDetector:  contextSimilarityDetector,
 		tokenAwareRateLimiter:      tokenAwareRateLimiter,
 		promptEvictionPolicy:       promptEvictionPolicy,
+		tokenAwareAdmissionController: tokenAwareAdmissionController,
+		cacheCoherenceManager:     cacheCoherenceManager,
+		contextWindowPredictorV2:  contextWindowPredictorV2,
+		tokenAwareCircuitBreaker:  tokenAwareCircuitBreaker,
+		promptTokenDistributor:    promptTokenDistributor,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2788,6 +2808,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptEvictionPolicy != nil {
 		stats["opt195_promptEvictionPolicy"] = a.promptEvictionPolicy.GetStats()
+	}
+	if a.tokenAwareAdmissionController != nil {
+		stats["opt196_tokenAwareAdmissionController"] = a.tokenAwareAdmissionController.GetStats()
+	}
+	if a.cacheCoherenceManager != nil {
+		stats["opt197_cacheCoherenceManager"] = a.cacheCoherenceManager.GetStats()
+	}
+	if a.contextWindowPredictorV2 != nil {
+		stats["opt198_contextWindowPredictorV2"] = a.contextWindowPredictorV2.GetStats()
+	}
+	if a.tokenAwareCircuitBreaker != nil {
+		stats["opt199_tokenAwareCircuitBreaker"] = a.tokenAwareCircuitBreaker.GetStats()
+	}
+	if a.promptTokenDistributor != nil {
+		stats["opt200_promptTokenDistributor"] = a.promptTokenDistributor.GetStats()
 	}
 	return stats
 }
@@ -3541,6 +3576,17 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.cacheFreshnessGuarantor != nil {
 		a.cacheFreshnessGuarantor.Put("usage")
+	}
+
+	// OPT-196~200: 准入 / 一致性 / 窗口预测 / 熔断 / 分配
+	if a.tokenAwareAdmissionController != nil {
+		a.tokenAwareAdmissionController.TryAdmit()
+	}
+	if a.contextWindowPredictorV2 != nil && usage != nil {
+		a.contextWindowPredictorV2.Record(usage.TotalTokens)
+	}
+	if a.tokenAwareCircuitBreaker != nil {
+		a.tokenAwareCircuitBreaker.RecordSuccess()
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
