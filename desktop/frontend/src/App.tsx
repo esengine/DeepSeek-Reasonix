@@ -1724,7 +1724,7 @@ export default function App() {
       }
     }
     return null;
-  }, [state.items]);
+  }, [state.items, state.items.length]);
   const todoItem = todoEntry?.item ?? null;
   const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
   const [dismissedTodoKeys, setDismissedTodoKeys] = useState<Set<string>>(loadDismissedTodoKeys);
