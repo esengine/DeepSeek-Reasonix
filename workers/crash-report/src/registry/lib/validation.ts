@@ -14,6 +14,47 @@ const slug = z
 
 const httpUrl = z.string().trim().url().max(500);
 
+// A publishable install source. The registry stores only a pointer; the real
+// install runs client-side through install_source, so a source it cannot
+// classify is dead on arrival. These mirror internal/installsource/names.go
+// (isURL || git: shorthand || looksLikePackage); a bare local path is refused
+// because it resolves on the publisher's machine, never the installer's.
+const pkgSegment = /^[a-zA-Z0-9._-]+$/;
+
+function looksLikePackage(source: string): boolean {
+  if (/[\s\\]/.test(source) || source.startsWith(".") || source.startsWith("/")) return false;
+  if (source.startsWith("@")) {
+    const parts = source.split("/");
+    return parts.length === 2 && pkgSegment.test(parts[0].slice(1)) && pkgSegment.test(parts[1]);
+  }
+  return pkgSegment.test(source);
+}
+
+function isHttpUrl(source: string): boolean {
+  try {
+    const u = new URL(source);
+    return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
+function isInstallableSource(source: string): boolean {
+  const raw = source.trim();
+  if (raw.startsWith("git:github.com/") && raw.length > "git:github.com/".length) return true;
+  return isHttpUrl(raw) || looksLikePackage(raw);
+}
+
+const sourcePointer = z
+  .string()
+  .trim()
+  .min(1)
+  .max(500)
+  .refine(isInstallableSource, {
+    message:
+      "source must be an http(s) URL (SKILL.md, .mcp.json, a repo, or a repo path), a git:github.com/… shorthand, or a package name — not free text or a local path.",
+  });
+
 // A GitHub source that points at a whole repo — a bare owner/repo root, or a
 // branch root with no sub-path — rather than one skill. The installsource
 // planner scans such a source recursively and pulls EVERY SKILL.md it finds, so
@@ -46,7 +87,7 @@ export const PublishSchema = z
     name: slug,
     summary: z.string().trim().max(200).default(""),
     description: z.string().trim().max(8000).default(""),
-    source: z.string().trim().min(1).max(500),
+    source: sourcePointer,
     installKind: z.enum(["auto", "skill", "mcp"]).default("auto"),
     version: z.string().trim().max(40).default(""),
     homepage: z.union([httpUrl, z.literal("")]).default(""),

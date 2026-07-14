@@ -31,6 +31,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           npm ci
+          npm run typecheck
+          npm test
           npx wrangler deploy
       # Mirrors the ALERT_WEBHOOK repo secret into the worker so the ingest
       # sentinel can push alerts (see runIngestSentinel). Managed here so

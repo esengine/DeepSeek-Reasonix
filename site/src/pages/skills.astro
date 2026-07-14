@@ -122,7 +122,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
             <input name="summary" maxlength="200" placeholder="What does it do?" />
           </label>
           <label><span class="l-en">Source</span><span class="l-zh">来源</span>
-            <input name="source" required placeholder="https://… SKILL.md · .mcp.json · repo · package name" />
+            <input name="source" required pattern="(https?://\S+|git:github\.com/\S+|@?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?)" title="A URL (SKILL.md, .mcp.json, repo, or repo path), a git:github.com/… shorthand, or a package name — not free text or a local path." placeholder="https://… SKILL.md · .mcp.json · repo · package name" />
           </label>
           <div class="pub-row">
             <label><span class="l-en">Repo (optional)</span><span class="l-zh">仓库(可选)</span>
