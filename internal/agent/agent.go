@@ -523,6 +523,21 @@ type Agent struct {
 	// OPT-95: 零开销统计收集器 — 惰性收集模块统计
 	zeroTokenStatsCollector *ZeroTokenStatsCollector
 
+	// OPT-96: 高级缓存预热 V2 — 模式学习
+	cacheWarmingV2 *CacheWarmingV2
+
+	// OPT-97: Token 效率仪表盘 — 统一视图
+	tokenEfficiencyDashboard *TokenEfficiencyDashboard
+
+	// OPT-98: 对话级 token 预算 — 跨轮次预算管理
+	conversationTokenBudget *ConversationTokenBudget
+
+	// OPT-99: 智能上下文裁剪器 — 多信号裁剪
+	smartContextPruner *SmartContextPruner
+
+	// OPT-100: 统一 token 编排器 — 编排所有 OPT 模块
+	unifiedTokenOrchestrator *UnifiedTokenOrchestrator
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1532,6 +1547,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	promptSegmentManager := NewPromptSegmentManager()
 	zeroTokenStatsCollector := NewZeroTokenStatsCollector()
 
+	// ── OPT-96~100 集成: 里程碑批次 — 第100个模块 ──
+	cacheWarmingV2 := NewCacheWarmingV2()
+	tokenEfficiencyDashboard := NewTokenEfficiencyDashboard()
+	conversationTokenBudget := NewConversationTokenBudget(opts.ContextWindow)
+	smartContextPruner := NewSmartContextPruner()
+	unifiedTokenOrchestrator := NewUnifiedTokenOrchestrator()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1645,6 +1667,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		toolResultSummarizer:     toolResultSummarizer,
 		promptSegmentManager:     promptSegmentManager,
 		zeroTokenStatsCollector:  zeroTokenStatsCollector,
+		cacheWarmingV2:           cacheWarmingV2,
+		tokenEfficiencyDashboard: tokenEfficiencyDashboard,
+		conversationTokenBudget:  conversationTokenBudget,
+		smartContextPruner:       smartContextPruner,
+		unifiedTokenOrchestrator: unifiedTokenOrchestrator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2016,6 +2043,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.zeroTokenStatsCollector != nil {
 		stats["opt95_zeroTokenStatsCollector"] = a.zeroTokenStatsCollector.GetStats()
+	}
+	if a.cacheWarmingV2 != nil {
+		stats["opt96_cacheWarmingV2"] = a.cacheWarmingV2.GetStats()
+	}
+	if a.tokenEfficiencyDashboard != nil {
+		stats["opt97_tokenEfficiencyDashboard"] = a.tokenEfficiencyDashboard.GetStats()
+	}
+	if a.conversationTokenBudget != nil {
+		stats["opt98_conversationTokenBudget"] = a.conversationTokenBudget.GetStats()
+	}
+	if a.smartContextPruner != nil {
+		stats["opt99_smartContextPruner"] = a.smartContextPruner.GetStats()
+	}
+	if a.unifiedTokenOrchestrator != nil {
+		stats["opt100_unifiedTokenOrchestrator"] = a.unifiedTokenOrchestrator.GetStats()
 	}
 	return stats
 }
@@ -2543,6 +2585,31 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		report := a.contextCoherenceChecker.CheckCoherence(msgs)
 		if !report.IsCoherent {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context coherence issue detected after compaction"})
+		}
+	}
+
+	// OPT-98: 对话级 token 预算 — 追踪预算消耗
+	if a.conversationTokenBudget != nil && usage != nil {
+		a.conversationTokenBudget.Allocate(step+1, usage.TotalTokens)
+		if a.conversationTokenBudget.ShouldEndConversation() {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "conversation token budget nearly exhausted"})
+		}
+	}
+
+	// OPT-100: 统一 token 编排器 — 综合编排优化
+	if a.unifiedTokenOrchestrator != nil && usage != nil {
+		ctx := OrchestrationContext{
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+			CacheHitTokens:   usage.CacheHitTokens,
+			CacheMissTokens:  usage.CacheMissTokens,
+			MessageCount:     len(a.session.Snapshot()),
+			Turn:             step + 1,
+			ContextWindow:    a.contextWindow,
+		}
+		result := a.unifiedTokenOrchestrator.Orchestrate(ctx)
+		if result.Priority == "high" && len(result.RecommendedActions) > 0 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "orchestrator: " + result.RecommendedActions[0]})
 		}
 	}
 
