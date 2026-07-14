@@ -1850,6 +1850,7 @@ export const en = {
   "settings.addProvider.preset.nvidiaDesc": "NVIDIA NIM accelerated inference endpoint with Nemotron defaults.",
   "settings.addProvider.preset.kilocodeDesc": "Kilo Code gateway with kilo/auto routing defaults.",
   "settings.addProvider.preset.ollamaCloudDesc": "Hosted Ollama Cloud endpoint with none-to-max reasoning effort.",
+  "settings.addProvider.preset.aionlyDesc": "AiOnly multi-model relay gateway aggregating DeepSeek/Claude/GPT/Gemini/Qwen/GLM.",
   "settings.addProvider.addedBadge": "Added",
   "settings.addProvider.modifiedBadge": "Modified",
   "settings.addProvider.nameConflictBadge": "Name taken",

@@ -45,6 +45,7 @@ func TestCuratedProviderPresetsCoverRequestedProviders(t *testing.T) {
 		"nvidia",
 		"kilocode",
 		"ollama-cloud",
+		"aionly",
 	}
 	got := map[string]ProviderPreset{}
 	for _, preset := range CuratedProviderPresets() {
@@ -475,5 +476,44 @@ func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
 				t.Fatalf("ReasoningProtocolForEntry(%q) = %q, want %q", tc.ref, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCuratedProviderPresetAiOnly(t *testing.T) {
+	var cfg Config
+	for _, preset := range CuratedProviderPresets() {
+		for _, entry := range preset.Entries {
+			if err := cfg.UpsertProvider(entry); err != nil {
+				t.Fatalf("upsert preset %q: %v", preset.ID, err)
+			}
+		}
+	}
+
+	entry, ok := cfg.Provider("aionly")
+	if !ok {
+		t.Fatal("aionly provider missing")
+	}
+	if entry.Kind != "openai" || entry.BaseURL != "https://api.aionly.com/v1" || entry.DefaultModel() != "deepseek-v4-pro" || entry.APIKeyEnv != "AIONLY_API_KEY" {
+		t.Fatalf("aionly capability mismatch: %+v", entry)
+	}
+
+	// DeepSeek-family ids need the explicit DeepSeek reasoning protocol: the
+	// auto detector keys off the endpoint domain and cannot recognize them
+	// behind this relay.
+	ds, ok := cfg.ResolveModel("aionly/deepseek-v4-pro")
+	if !ok {
+		t.Fatal("aionly/deepseek-v4-pro did not resolve")
+	}
+	if got := ReasoningProtocolForEntry(ds); got != ReasoningProtocolDeepSeek {
+		t.Fatalf("aionly deepseek-v4-pro protocol = %q, want deepseek", got)
+	}
+
+	// Non-DeepSeek ids run on the ordinary OpenAI shape (no override).
+	claude, ok := cfg.ResolveModel("aionly/claude-opus-4-8")
+	if !ok {
+		t.Fatal("aionly/claude-opus-4-8 did not resolve")
+	}
+	if got := ReasoningProtocolForEntry(claude); got == ReasoningProtocolDeepSeek {
+		t.Fatalf("aionly claude-opus-4-8 protocol = deepseek, want non-deepseek")
 	}
 }
