@@ -756,6 +756,16 @@ type Agent struct {
 	tokenAwareGatekeeper *TokenAwareGatekeeper
 	// OPT-185: 提示上下文桥接器
 	promptContextBridge *PromptContextBridge
+	// OPT-186: Token 感知流水线
+	tokenAwarePipeline *TokenAwarePipeline
+	// OPT-187: 缓存预热优化器
+	cacheWarmingOptimizer *CacheWarmingOptimizer
+	// OPT-188: 上下文边界优化器
+	contextBoundaryOptimizer *ContextBoundaryOptimizer
+	// OPT-189: Token 感知负载均衡器
+	tokenAwareLoadBalancer *TokenAwareLoadBalancer
+	// OPT-190: 提示分段缓存V3
+	promptSegmentCacheV3 *PromptSegmentCacheV3
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1876,6 +1886,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextDecayManagerV2 := NewContextDecayManagerV2(0.1, 100)
 	tokenAwareGatekeeper := NewTokenAwareGatekeeper(1000000, 0.85)
 	promptContextBridge := NewPromptContextBridge()
+	tokenAwarePipeline := NewTokenAwarePipeline()
+	cacheWarmingOptimizer := NewCacheWarmingOptimizer()
+	contextBoundaryOptimizer := NewContextBoundaryOptimizer(100)
+	tokenAwareLoadBalancer := NewTokenAwareLoadBalancer()
+	promptSegmentCacheV3 := NewPromptSegmentCacheV3(512)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2079,6 +2094,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextDecayManagerV2:      contextDecayManagerV2,
 		tokenAwareGatekeeper:       tokenAwareGatekeeper,
 		promptContextBridge:        promptContextBridge,
+		tokenAwarePipeline:         tokenAwarePipeline,
+		cacheWarmingOptimizer:      cacheWarmingOptimizer,
+		contextBoundaryOptimizer:   contextBoundaryOptimizer,
+		tokenAwareLoadBalancer:     tokenAwareLoadBalancer,
+		promptSegmentCacheV3:       promptSegmentCacheV3,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2718,6 +2738,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptContextBridge != nil {
 		stats["opt185_promptContextBridge"] = a.promptContextBridge.GetStats()
+	}
+	if a.tokenAwarePipeline != nil {
+		stats["opt186_tokenAwarePipeline"] = a.tokenAwarePipeline.GetStats()
+	}
+	if a.cacheWarmingOptimizer != nil {
+		stats["opt187_cacheWarmingOptimizer"] = a.cacheWarmingOptimizer.GetStats()
+	}
+	if a.contextBoundaryOptimizer != nil {
+		stats["opt188_contextBoundaryOptimizer"] = a.contextBoundaryOptimizer.GetStats()
+	}
+	if a.tokenAwareLoadBalancer != nil {
+		stats["opt189_tokenAwareLoadBalancer"] = a.tokenAwareLoadBalancer.GetStats()
+	}
+	if a.promptSegmentCacheV3 != nil {
+		stats["opt190_promptSegmentCacheV3"] = a.promptSegmentCacheV3.GetStats()
 	}
 	return stats
 }
@@ -3455,6 +3490,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.contextDecayManagerV2 != nil {
 		a.contextDecayManagerV2.Tick()
+	}
+
+	// OPT-186~190: 流水线 / 预热优化 / 边界 / 负载均衡 / 分段缓存V3
+	if a.tokenAwareLoadBalancer != nil && usage != nil {
+		a.tokenAwareLoadBalancer.Distribute(usage.TotalTokens)
+	}
+	if a.promptSegmentCacheV3 != nil && usage != nil && usage.PromptTokens > 0 {
+		a.promptSegmentCacheV3.Get("prompt")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
