@@ -1173,14 +1173,18 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 		if c.spec.StripRawPrefix != "" {
 			visibleName = strings.TrimPrefix(visibleName, c.spec.StripRawPrefix)
 		}
-		toolInfos = append(toolInfos, ToolInfo{Name: t.Name, Description: t.Description, ReadOnlyHint: hinted})
+		// OPT-08: 工具描述沙箱化 — 过滤潜在指令注入
+		sanitizedDesc := SanitizeToolDescription(t.Description)
+		// OPT-05: 工具 Schema 压缩 — 减少工具定义的 token 占用
+		compactedSchema := CompactToolSchema(canonicalizeSchema(t.InputSchema))
+		toolInfos = append(toolInfos, ToolInfo{Name: t.Name, Description: sanitizedDesc, ReadOnlyHint: hinted})
 		trusted := c.spec.toolReadOnlyTrusted(t.Name, visibleName)
 		tools = append(tools, &remoteTool{
 			client:          c,
 			name:            toolName(c.name, visibleName),
 			rawName:         t.Name,
-			desc:            t.Description,
-			schema:          canonicalizeSchema(t.InputSchema),
+			desc:            sanitizedDesc,
+			schema:          compactedSchema,
 			readOnly:        c.spec.toolReadOnly(t.Name, visibleName, hinted),
 			readOnlyTrusted: trusted,
 		})

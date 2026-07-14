@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -135,7 +136,65 @@ func backoffDelay(attempt int, retryAfter time.Duration) time.Duration {
 	if d > maxBackoff {
 		d = maxBackoff
 	}
-	return d + time.Duration(rand.Intn(250))*time.Millisecond
+	// OPT-06: 增大 jitter 范围到 ±50%，避免多客户端同步重试加剧拥塞
+	jitter := time.Duration(rand.Int63n(int64(d) / 2))
+	return d + jitter
+}
+
+// ── OPT-06: 熔断器 ──
+// 连续失败时暂时停止重试，避免对过载的 API 造成压力。
+// 熔断器按 provider 维度独立工作，一个 provider 熔断不影响其他 provider。
+
+// CircuitBreaker 是一个简单的熔断器，按 provider 维度管理
+type CircuitBreaker struct {
+	failures  map[string]int       // provider → 连续失败次数
+	openUntil map[string]time.Time // provider → 熔断恢复时间
+	mu        sync.Mutex
+	threshold int           // 连续失败多少次后熔断（默认 5）
+	cooldown  time.Duration // 熔断持续时间（默认 30s）
+}
+
+// DefaultCircuitBreaker 全局默认熔断器
+var DefaultCircuitBreaker = &CircuitBreaker{
+	failures:  make(map[string]int),
+	openUntil: make(map[string]time.Time),
+	threshold: 5,
+	cooldown:  30 * time.Second,
+}
+
+// Allow 检查指定 provider 是否被允许发送请求
+func (cb *CircuitBreaker) Allow(provider string) bool {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	until, ok := cb.openUntil[provider]
+	if !ok {
+		return true
+	}
+	if time.Now().Before(until) {
+		return false // 熔断中
+	}
+	// 熔断恢复，重置计数
+	delete(cb.openUntil, provider)
+	delete(cb.failures, provider)
+	return true
+}
+
+// RecordFailure 记录一次失败
+func (cb *CircuitBreaker) RecordFailure(provider string) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	cb.failures[provider]++
+	if cb.failures[provider] >= cb.threshold {
+		cb.openUntil[provider] = time.Now().Add(cb.cooldown)
+	}
+}
+
+// RecordSuccess 记录一次成功，重置失败计数
+func (cb *CircuitBreaker) RecordSuccess(provider string) {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+	delete(cb.failures, provider)
+	delete(cb.openUntil, provider)
 }
 
 func parseRetryAfter(resp *http.Response) time.Duration {
@@ -161,6 +220,12 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 // failures are not retried (the model has already emitted tokens).
 func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOptions, newReq func(context.Context) (*http.Request, error)) (*http.Response, error) {
 	notify := retryNotifyFromContext(ctx)
+
+	// OPT-06: 熔断器检查 — 如果 provider 连续失败被熔断，直接返回错误
+	if !DefaultCircuitBreaker.Allow(opts.Provider) {
+		return nil, fmt.Errorf("%s: circuit breaker open (too many consecutive failures, retry later)", opts.Provider)
+	}
+
 	var lastErr error
 	var retryAfter time.Duration
 	authRetries := 0
@@ -189,9 +254,11 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 				return nil, fmt.Errorf("%s: request failed: %w", opts.Provider, err)
 			}
 			lastErr = fmt.Errorf("%s: request failed: %w", opts.Provider, err)
+			DefaultCircuitBreaker.RecordFailure(opts.Provider)
 			continue
 		}
 		if resp.StatusCode == http.StatusOK {
+			DefaultCircuitBreaker.RecordSuccess(opts.Provider)
 			return resp, nil
 		}
 
@@ -207,6 +274,7 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 				lastErr = authErr
 				continue
 			}
+			DefaultCircuitBreaker.RecordFailure(opts.Provider)
 			return nil, authErr
 		}
 		apiErr := &APIError{Provider: opts.Provider, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
@@ -214,6 +282,7 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			return nil, apiErr
 		}
 		lastErr = apiErr
+		DefaultCircuitBreaker.RecordFailure(opts.Provider)
 	}
 	return nil, lastErr
 }

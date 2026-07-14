@@ -335,3 +335,169 @@ func normalizeInputForCache(input string) string {
 	hash := sha256.Sum256([]byte(normalized))
 	return hex.EncodeToString(hash[:])
 }
+
+// ── OPT-02: 场景识别器 ──
+// 将二分类（task/chat）升级为多场景识别，驱动后续优化：
+// - Scene → B3 场景化策略（Think On/Off, Pride 容忍度）
+// - Complexity → E3 模型路由（简单用 Flash，复杂用 Pro）
+// - NeedsThink → reasoning_effort 控制
+// - NeedsTools → token economy（不需要工具时不加载工具 schema）
+
+// Scene 表示任务场景类型
+type Scene string
+
+const (
+	SceneCode     Scene = "code"     // 代码生成/审查/重构
+	SceneResearch Scene = "research" // 研究分析/代码库探索
+	SceneWriting  Scene = "writing"  // 文档/创意写作
+	SceneMath     Scene = "math"     // 数学推理
+	SceneFactQA   Scene = "fact_qa"  // 事实问答
+	SceneChat     Scene = "chat"     // 闲聊
+	SceneGeneral  Scene = "general"  // 通用
+)
+
+// SceneResult 场景识别结果
+type SceneResult struct {
+	Scene      Scene
+	Complexity int     // 0-100
+	Confidence float64 // 0-1
+	NeedsTools bool
+	NeedsThink bool
+}
+
+// SceneClassifier 场景识别器接口
+type SceneClassifier interface {
+	Classify(ctx context.Context, input string) (SceneResult, error)
+}
+
+// sceneClassificationPrompt 场景分类 system prompt
+const sceneClassificationPrompt = `You are a task scene classifier. Given user input, classify it into one of:
+- code: writing/reviewing/refactoring code, fixing bugs, running commands
+- research: analyzing codebase, comparing approaches, investigating issues
+- writing: documentation, creative writing, content generation
+- math: mathematical reasoning, calculations, proofs
+- fact_qa: factual questions requiring precise answers
+- chat: greetings, acknowledgments, conversational
+
+Respond in JSON only: {"scene":"code","complexity":75,"needs_tools":true,"needs_think":false}
+complexity: 0-100 (higher = more reasoning needed)
+needs_tools: true if the task requires tool calls (file ops, commands, search)
+needs_think: true if the task benefits from chain-of-thought reasoning`
+
+// heuristicSceneClassifier 启发式场景识别器（不调用 LLM，零延迟）
+type heuristicSceneClassifier struct{}
+
+// NewHeuristicSceneClassifier 创建启发式场景识别器
+func NewHeuristicSceneClassifier() SceneClassifier {
+	return &heuristicSceneClassifier{}
+}
+
+// Classify 使用启发式规则识别场景
+func (h *heuristicSceneClassifier) Classify(ctx context.Context, input string) (SceneResult, error) {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return SceneResult{Scene: SceneChat, Complexity: 0, Confidence: 1.0}, nil
+	}
+
+	normalized := strings.ToLower(trimmed)
+
+	// 1. 闲聊检测（复用已有规则）
+	if isChatInput(normalized) {
+		return SceneResult{Scene: SceneChat, Complexity: 5, Confidence: 0.9, NeedsTools: false, NeedsThink: false}, nil
+	}
+
+	// 2. 代码场景检测
+	codeSignals := []string{".go", ".rs", ".ts", ".js", ".py", ".java", ".c", ".cpp", ".h",
+		"func ", "func(", "import ", "package ", "class ", "def ", "fn ", "pub fn",
+		"compile", "build", "lint", "test", "debug", "refactor", "bug", "stack trace",
+		"panic:", "error:", "nil pointer", "segmentation fault",
+		"修复", "调试", "编译", "构建", "重构", "报错", "异常"}
+	for _, sig := range codeSignals {
+		if strings.Contains(normalized, sig) {
+			complexity := 60
+			needsThink := false
+			if strings.Contains(normalized, "debug") || strings.Contains(normalized, "调试") ||
+				strings.Contains(normalized, "bug") || strings.Contains(normalized, "报错") {
+				complexity = 75 // 调试更复杂
+				needsThink = true
+			}
+			return SceneResult{Scene: SceneCode, Complexity: complexity, Confidence: 0.85, NeedsTools: true, NeedsThink: needsThink}, nil
+		}
+	}
+
+	// 3. 数学场景检测
+	mathSignals := []string{"calculate", "compute", "solve", "equation", "matrix", "integral",
+		"derivative", "probability", "theorem", "proof", "algorithm complexity",
+		"计算", "求解", "方程", "矩阵", "积分", "导数", "概率", "证明"}
+	for _, sig := range mathSignals {
+		if strings.Contains(normalized, sig) {
+			return SceneResult{Scene: SceneMath, Complexity: 80, Confidence: 0.85, NeedsTools: false, NeedsThink: true}, nil
+		}
+	}
+
+	// 4. 研究场景检测
+	researchSignals := []string{"analyze", "compare", "investigate", "explore", "understand",
+		"architecture", "design pattern", "trade-off", "evaluate",
+		"分析", "对比", "调查", "探索", "理解", "架构", "评估"}
+	for _, sig := range researchSignals {
+		if strings.Contains(normalized, sig) {
+			return SceneResult{Scene: SceneResearch, Complexity: 70, Confidence: 0.75, NeedsTools: true, NeedsThink: true}, nil
+		}
+	}
+
+	// 5. 写作场景检测
+	writingSignals := []string{"write", "document", "draft", "compose", "article", "blog",
+		"readme", "changelog", "documentation",
+		"写", "文档", "起草", "撰写", "文章"}
+	for _, sig := range writingSignals {
+		if strings.Contains(normalized, sig) {
+			return SceneResult{Scene: SceneWriting, Complexity: 40, Confidence: 0.7, NeedsTools: false, NeedsThink: false}, nil
+		}
+	}
+
+	// 6. 事实问答检测
+	factSignals := []string{"what is", "what are", "how does", "why does", "when did",
+		"who is", "where is", "explain",
+		"什么是", "什么是", "为什么", "什么时候", "解释"}
+	for _, sig := range factSignals {
+		if strings.Contains(normalized, sig) {
+			return SceneResult{Scene: SceneFactQA, Complexity: 30, Confidence: 0.65, NeedsTools: false, NeedsThink: false}, nil
+		}
+	}
+
+	// 7. 默认通用
+	wordCount := len(strings.Fields(trimmed))
+	complexity := 50
+	if wordCount > 20 {
+		complexity = 65
+	}
+	return SceneResult{Scene: SceneGeneral, Complexity: complexity, Confidence: 0.5, NeedsTools: true, NeedsThink: complexity > 60}, nil
+}
+
+// isChatInput 检测是否为闲聊输入
+func isChatInput(normalized string) bool {
+	shortGreetings := []string{
+		"hello", "hi", "hey", "你好", "您好", "nihao",
+		"thanks", "thank you", "谢谢", "谢了",
+		"ok", "okay", "好的", "嗯", "行",
+		"got it", "i see", "明白", "了解", "收到", "我知道了",
+	}
+	words := strings.Fields(normalized)
+	if len(words) <= 3 {
+		for _, g := range shortGreetings {
+			if normalized == g {
+				return true
+			}
+		}
+	}
+	chatPhrases := []string{
+		"thanks for", "thank you for", "i'll check later",
+		"谢谢你", "辛苦了",
+	}
+	for _, p := range chatPhrases {
+		if strings.Contains(normalized, p) {
+			return true
+		}
+	}
+	return false
+}

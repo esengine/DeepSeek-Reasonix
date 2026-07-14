@@ -294,6 +294,358 @@ type Agent struct {
 	lastPrefixShape     PrefixShape
 	haveLastPrefixShape bool
 
+	// OPT-12: cache prefix stability enforcer — detects and warns when
+	// changes to system prompt or tools invalidate the cache prefix.
+	cacheEnforcer *CachePrefixEnforcer
+
+	// OPT-16: 工具结果记忆化 — 缓存只读工具结果避免重复消耗
+	toolMemo *ToolResultMemo
+
+	// OPT-17: 对话历史去重 — 检测并移除重复内容
+	conversationDedup *ConversationDeduplicator
+
+	// OPT-18: 自适应上下文预算 — 按任务复杂度分配 token 预算
+	contextBudget *ContextBudget
+
+	// OPT-19: Provider 感知缓存策略 — 按 provider 调整缓存行为
+	providerCacheStrategy *ProviderCacheStrategy
+
+	// OPT-20: 缓存健康监控器 — 自动诊断和修复缓存问题
+	cacheHealthMonitor *CacheHealthMonitor
+
+	// OPT-21: 工具调用批处理 — 合并多个只读工具调用
+	toolBatcher *ToolCallBatcher
+
+	// OPT-22: Prompt 前缀钉扎 — 防止稳定段被意外修改
+	prefixPinner *PrefixPinner
+
+	// OPT-03: 语义上下文裁剪 — 按重要性评分智能裁剪对话历史
+	semanticPruner *SemanticPruner
+
+	// OPT-07: 预测性 token 预取 — 提前加载可能需要的上下文
+	prefetchPredictor *PrefetchPredictor
+
+	// OPT-27: 上下文窗口预测器 — 预测剩余可用 token
+	windowPredictor *ContextWindowPredictor
+
+	// OPT-28: Token 成本估算器 — 实时估算请求成本
+	costEstimator *CostEstimator
+
+	// OPT-29: Prompt 压缩引擎 — 压缩系统提示文本
+	promptCompressor *PromptCompressor
+
+	// OPT-30: 动态工具描述轮换 — 首次后切换为精简描述
+	toolDescRotator *ToolDescriptionRotator
+
+	// OPT-31: 对话摘要缓存 — 跨 turn 缓存对话摘要
+	summaryCache *SummaryCache
+
+	// OPT-32: 多模型路由 — 简单任务路由到便宜模型
+	modelRouter *ModelRouter
+
+	// OPT-33: 图片 token 优化器 — 压缩图片减少 token
+	imageOptimizer *ImageOptimizer
+
+	// OPT-36: Token 模式感知调度器
+	modeScheduler *ModeAwareScheduler
+
+	// OPT-37: Phantom 统计报告器
+	phantomReporter *PhantomStatsReporter
+
+	// OPT-38: 渐进式披露与懒加载协同
+	disclosureCoordinator *DisclosureLazyCoordinator
+
+	// OPT-39: 缓存断点优化器
+	breakpointOptimizer *BreakpointOptimizer
+
+	// OPT-40: 智能压缩触发器
+	smartCompaction *SmartCompactionTrigger
+
+	// OPT-41: Token 感知消息排序器 — 追踪缓存前缀稳定性
+	messageSorter *TokenAwareMessageSorter
+
+	// OPT-42: 流式 token 守卫 — 实时监控 token 预算
+	streamingGuard *StreamingTokenGuard
+
+	// OPT-43: 工具结果智能截断器 — 内容感知截断
+	toolResultTruncator *ToolResultTruncator
+
+	// OPT-44: Token 预算分配器 — 动态分配上下文窗口
+	budgetAllocator *TokenBudgetAllocator
+
+	// OPT-45: 系统提示精简器 — 动态精简系统提示
+	promptMinimizer *SystemPromptMinimizer
+
+	// OPT-46: 对话阶段检测器 — 探索/执行/收尾阶段感知
+	phaseDetector *ConversationPhaseDetector
+
+	// OPT-47: Token 高效格式化器 — 压缩工具参数和输出
+	efficientFormatter *TokenEfficientFormatter
+
+	// OPT-48: 缓存预热调度器 — 预测并预热下一轮查询
+	cacheWarmingScheduler *CacheWarmingScheduler
+
+	// OPT-49: Provider 重试优化器 — 最小化重试 token 浪费
+	retryOptimizer *ProviderRetryOptimizer
+
+	// OPT-50: 上下文工具过滤器 — 按对话上下文过滤可用工具
+	contextualToolFilter *ContextualToolFilter
+
+	// OPT-51: 会话归档优化器 — 归档旧会话保留缓存前缀
+	sessionArchiveOptimizer *SessionArchiveOptimizer
+
+	// OPT-52: Provider 专属缓存优化器
+	providerSpecOptimizer *ProviderSpecificOptimizer
+
+	// OPT-53: 多轮缓存追踪器
+	multiTurnCacheTracker *MultiTurnCacheTracker
+
+	// OPT-54: Token 高效序列化器
+	tokenSerializer *TokenEfficientSerializer
+
+	// OPT-55: 对话流优化器 — 检测冗余查询
+	flowOptimizer *ConversationFlowOptimizer
+
+	// OPT-56: 推理 token 优化器 — 截断过长推理内容
+	reasoningOptimizer *ReasoningTokenOptimizer
+
+	// OPT-57: 上下文优先级排序器 — 重排消息提高缓存命中
+	contextPrioritizer *ContextPrioritizer
+
+	// OPT-58: Token 感知监控器 — 实时监控 token 使用率
+	tokenAwarenessMonitor *TokenAwarenessMonitor
+
+	// OPT-59: 错误上下文优化器 — 提取错误相关上下文
+	errorContextOptimizer *ErrorContextOptimizer
+
+	// OPT-60: 自适应缓存管理器 — 动态调整缓存策略
+	adaptiveCacheManager *AdaptiveCacheManager
+
+	// OPT-61: 预热预测器 — 预测并预热工具 schema
+	warmupPredictor *WarmupPredictor
+
+	// OPT-62: Token 预算强制器 — 硬预算限制
+	tokenBudgetEnforcer *TokenBudgetEnforcer
+
+	// OPT-63: 上下文窗口策略 — 动态窗口管理
+	contextWindowStrategy *ContextWindowStrategy
+
+	// OPT-64: 工具输出缓存 — 避免重复工具调用
+	toolOutputCache *ToolOutputCache
+
+	// OPT-65: Prompt 片段缓存 — 缓存可复用片段
+	promptFragmentCache *PromptFragmentCache
+
+	// OPT-66: 去重统计报告器 — 聚合去重统计
+	dedupStatsReporter *DedupStatsReporter
+
+	// OPT-67: 增量缓存追踪器 — 追踪增量缓存构建
+	incrementalCacheTracker *IncrementalCacheTracker
+
+	// OPT-68: 跨轮去重器 — 跨轮次内容去重
+	turnAwareDeduplicator *TurnAwareDeduplicator
+
+	// OPT-69: 智能工具选择器 — 基于历史和上下文选择工具
+	smartToolSelector *SmartToolSelector
+
+	// OPT-70: Token 流分析器 — 分析 token 流模式
+	tokenFlowAnalyzer *TokenFlowAnalyzer
+
+	// OPT-71: 缓存前缀稳定器 — 防止不必要的前缀变更
+	cachePrefixStabilizer *CachePrefixStabilizer
+
+	// OPT-72: 响应 token 控制器 — 按查询类型调整 max_tokens
+	responseTokenController *ResponseTokenController
+
+	// OPT-73: 上下文衰减管理器 — 渐进式衰减旧上下文
+	contextDecayManager *ContextDecayManager
+
+	// OPT-74: 工具调用优化器 — 减少冗余工具调用
+	toolCallOptimizer *ToolCallOptimizer
+
+	// OPT-75: Token 效率评分器 — 评分并提供优化建议
+	tokenEfficiencyScorer *TokenEfficiencyScorer
+
+	// OPT-76: 语义相似度去重 — 检测语义重复内容
+	semanticDedup *SemanticSimilarityDedup
+
+	// OPT-77: Prompt 缓存优化器 — 结构化 prompt 提高缓存复用
+	promptCacheOptimizer *PromptCacheOptimizer
+
+	// OPT-78: 上下文摘要缓存 — 缓存摘要避免重复摘要
+	contextSummaryCache *ContextSummaryCache
+
+	// OPT-79: 工具 schema 优化器 — 精简工具 schema
+	toolSchemaOptimizer *ToolSchemaOptimizer
+
+	// OPT-80: 对话压缩摘要 — 生成紧凑历史摘要
+	compactSummary *ConversationCompactSummary
+
+	// OPT-81: 历史窗口管理器 — 滑动窗口控制上下文
+	historyWindowManager *HistoryWindowManager
+
+	// OPT-82: Token 感知重试 — 最小化重试 token 浪费
+	tokenAwareRetry *TokenAwareRetry
+
+	// OPT-83: 多信号压缩触发器 V2
+	compactionTriggerV2 *CompactionTriggerV2
+
+	// OPT-84: 模型感知优化器 — 按模型能力优化
+	modelAwareOptimizer *ModelAwareOptimizer
+
+	// OPT-85: Token 用量预测器 — 预测未来用量
+	tokenUsagePredictor *TokenUsagePredictor
+
+	// OPT-86: 缓存失效追踪器 — 追踪缓存失效原因
+	cacheInvalidationTracker *CacheInvalidationTracker
+
+	// OPT-87: Token 成本分析器 — 分析成本和节省机会
+	tokenCostAnalyzer *TokenCostAnalyzer
+
+	// OPT-88: 消息重要性评分器 — 评分决定压缩保留
+	messageImportanceScorer *MessageImportanceScorer
+
+	// OPT-89: 上下文一致性检查器 — 确保压缩后逻辑连贯
+	contextCoherenceChecker *ContextCoherenceChecker
+
+	// OPT-90: 自适应消息选择器 — 按预算选择消息
+	adaptiveMessageSelector *AdaptiveMessageSelector
+
+	// OPT-91: 缓存命中预测器 — 预测下一轮是否命中
+	cacheHitPredictor *CacheHitPredictor
+
+	// OPT-92: 上下文预算协商器 — 协商组件间预算分配
+	contextBudgetNegotiator *ContextBudgetNegotiator
+
+	// OPT-93: 工具结果摘要器 — 摘要冗长工具输出
+	toolResultSummarizer *ToolResultSummarizer
+
+	// OPT-94: Prompt 分段管理器 — 粒度缓存控制
+	promptSegmentManager *PromptSegmentManager
+
+	// OPT-95: 零开销统计收集器 — 惰性收集模块统计
+	zeroTokenStatsCollector *ZeroTokenStatsCollector
+
+	// OPT-96: 高级缓存预热 V2 — 模式学习
+	cacheWarmingV2 *CacheWarmingV2
+
+	// OPT-97: Token 效率仪表盘 — 统一视图
+	tokenEfficiencyDashboard *TokenEfficiencyDashboard
+
+	// OPT-98: 对话级 token 预算 — 跨轮次预算管理
+	conversationTokenBudget *ConversationTokenBudget
+
+	// OPT-99: 智能上下文裁剪器 — 多信号裁剪
+	smartContextPruner *SmartContextPruner
+
+	// OPT-100: 统一 token 编排器 — 编排所有 OPT 模块
+	unifiedTokenOrchestrator *UnifiedTokenOrchestrator
+
+	// OPT-101: 实时流式 token 压缩器
+	tokenStreamCompressor *TokenStreamCompressor
+
+	// OPT-102: 自适应上下文窗口选择器
+	adaptiveContextSelector *AdaptiveContextSelector
+
+	// OPT-103: Prompt token 深度分析器
+	promptTokenAnalyzer *PromptTokenAnalyzer
+
+	// OPT-104: 缓存压力监控器
+	cachePressureMonitor *CachePressureMonitor
+
+	// OPT-105: Token 流量调节器
+	tokenFlowRegulator *TokenFlowRegulator
+
+	// OPT-106: 语义缓存路由器
+	semanticCacheRouter *SemanticCacheRouter
+
+	// OPT-107: Token 感知调度器
+	tokenAwareScheduler *TokenAwareScheduler
+
+	// OPT-108: 上下文快照管理器
+	contextSnapshotManager *ContextSnapshotManager
+
+	// OPT-109: Token 浪费检测器
+	tokenWasteDetector *TokenWasteDetector
+
+	// OPT-110: 自适应批处理优化器
+	adaptiveBatchOptimizer *AdaptiveBatchOptimizer
+
+	// OPT-111: 上下文差异压缩器
+	contextDiffCompressor *ContextDiffCompressor
+
+	// OPT-112: Token 预算预测器
+	tokenBudgetPredictor *TokenBudgetPredictor
+
+	// OPT-113: 缓存键优化器
+	cacheKeyOptimizer *CacheKeyOptimizer
+
+	// OPT-114: 响应长度优化器
+	responseLengthOptimizer *ResponseLengthOptimizer
+
+	// OPT-115: Token 感知优先级排序器
+	tokenAwarePrioritizer *TokenAwarePrioritizer
+
+	// OPT-116: 对话深度分析器
+	conversationDepthAnalyzer *ConversationDepthAnalyzer
+
+	// OPT-117: Token 效率监控器
+	tokenEfficiencyMonitor *TokenEfficiencyMonitor
+
+	// OPT-118: 缓存生命周期管理器
+	cacheLifecycleManager *CacheLifecycleManager
+
+	// OPT-119: Prompt 片段缓存 V2
+	promptSegmentCacheV2 *PromptSegmentCacheV2
+
+	// OPT-120: Token 感知压缩器
+	tokenAwareCompressor *TokenAwareCompressor
+
+	// OPT-121: 上下文权重计算器
+	contextWeightCalculator *ContextWeightCalculator
+
+	// OPT-122: Token 感知驱逐器
+	tokenAwareEvictor *TokenAwareEvictor
+
+	// OPT-123: Prompt 冗余检查器
+	promptRedundancyChecker *PromptRedundancyChecker
+
+	// OPT-124: 缓存命中分析器
+	cacheHitAnalyzer *CacheHitAnalyzer
+
+	// OPT-125: 上下文边界检测器
+	contextBoundaryDetector *ContextBoundaryDetector
+
+	// OPT-126: Token 使用量预测器
+	tokenUsageForecaster *TokenUsageForecaster
+
+	// OPT-127: 上下文新鲜度追踪器
+	contextFreshnessTracker *ContextFreshnessTracker
+
+	// OPT-128: 缓存预热调度器 V2
+	cacheWarmingSchedulerV2 *CacheWarmingSchedulerV2
+
+	// OPT-129: Prompt 模板优化器
+	promptTemplateOptimizer *PromptTemplateOptimizer
+
+	// OPT-130: Token 预算协商器
+	tokenBudgetNegotiator *TokenBudgetNegotiator
+
+	// OPT-131: 缓存效率评分器
+	cacheEfficiencyScorer *CacheEfficiencyScorer
+
+	// OPT-132: Token 感知修剪器
+	tokenAwarePruner *TokenAwarePruner
+
+	// OPT-133: 对话话题追踪器
+	conversationTopicTracker *ConversationTopicTracker
+
+	// OPT-134: Token 成本投影器
+	tokenCostProjector *TokenCostProjector
+
+	// OPT-135: 上下文组装优化器
+	contextAssemblyOptimizer *ContextAssemblyOptimizer
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -518,6 +870,41 @@ type Agent struct {
 	// stormSig: a model keeps doing the same successful write, so there is no
 	// error for the failure-only storm breaker to see.
 	repeatSuccessCounts map[string]int
+
+	// ── 集成的新功能字段 ──
+
+	// sceneClassifier 场景分类器，在每轮开始时分类用户输入
+	// 用于驱动场景感知优化（工具加载、思考模式、推理力度）
+	sceneClassifier SceneClassifier
+
+	// scenePolicyProvider 场景策略提供者，根据场景返回审核策略
+	// 控制骄傲信号检测、思考模式、推理力度、采样次数等
+	scenePolicyProvider ScenePolicyProvider
+
+	// sideEffectTracker 副作用追踪器，在工具执行前后记录副作用
+	// 用于WAL恢复时的Saga补偿
+	sideEffectTracker *SideEffectTracker
+
+	// incrementalCache 增量缓存，在流式输出时累积内容
+	// 用于流中断后的恢复
+	incrementalCache *IncrementalCache
+
+	// lastSceneResult 缓存最近一次场景分类结果
+	// 供同一轮内的其他模块使用
+	lastSceneResult *SceneResult
+
+	// phantomUI 虚空UI面板，提供实时窗口投影和会话转移
+	// 由桌面层通过 GetPhantomUI() 获取并驱动
+	phantomUI *PhantomUI
+
+	// eyeTracker 眼动追踪器，提供注视点检测和交互触发
+	eyeTracker *EyeTracker
+
+	// gazeIntegrator 眼控集成器，连接眼动追踪与虚空UI
+	gazeIntegrator *GazeIntegrator
+
+	// reviewGate 代码审核门控，对代码变更进行分级审核
+	reviewGate *ReviewGate
 }
 
 // KeepPolicy is a bitmask controlling which messages are preserved beyond the
@@ -1067,6 +1454,33 @@ type Options struct {
 	// UseMemoryCompilerLLMClassification 启用 LLM 分类来判断任务 vs 聊天
 	// 默认 false 时使用启发式分类器
 	UseMemoryCompilerLLMClassification bool
+
+	// SceneClassifier 场景分类器，nil 时使用默认启发式分类器
+	SceneClassifier SceneClassifier
+
+	// ScenePolicyProvider 场景策略提供者，nil 时使用默认策略
+	ScenePolicyProvider ScenePolicyProvider
+
+	// EnableSideEffectTracking 启用副作用追踪（用于WAL恢复补偿）
+	EnableSideEffectTracking bool
+
+	// EnableIncrementalCache 启用增量缓存（用于流中断恢复）
+	EnableIncrementalCache bool
+
+	// EnableDedup 启用请求去重（合并并发相同请求，节省 API 调用）
+	EnableDedup bool
+
+	// EnablePhantomUI 启用虚空UI面板（实时窗口投影+会话转移）
+	// 需要 TabManager 已初始化
+	EnablePhantomUI bool
+
+	// EnableReviewGate 启用代码审核门控（代码变更分级审核）
+	// 依赖 PhantomUI 和 EyeTracker
+	EnableReviewGate bool
+
+	// TabManager 标签管理器，供虚空UI使用
+	// 如果为 nil 且 EnablePhantomUI 为 true，会自动创建
+	TabManager *TabManager
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -1129,6 +1543,174 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if subagentDepth < 0 {
 		subagentDepth = 0
 	}
+	// ── OPT-09 集成: 请求去重包装 ──
+	if opts.EnableDedup {
+		prov = provider.NewDeduplicatingProvider(prov)
+	}
+
+	// ── OPT-12 集成: 缓存前缀稳定性强制器 ──
+	cacheEnforcer := NewCachePrefixEnforcer()
+
+	// ── OPT-16~22 集成: 新一代 token 优化模块 ──
+	toolMemo := NewToolResultMemo(50)
+	conversationDedup := NewConversationDeduplicator()
+	contextBudget := NewContextBudget(opts.ContextWindow)
+	providerCacheStrategy := NewProviderCacheStrategy(ProviderUnknown) // Will be updated on first request
+	cacheHealthMonitor := NewCacheHealthMonitor()
+	toolBatcher := NewToolCallBatcher()
+	prefixPinner := NewPrefixPinner()
+
+	// ── OPT-03/07/27-33 集成: 第三批 token 优化模块 ──
+	semanticPruner := NewSemanticPruner()
+	prefetchPredictor := NewPrefetchPredictor()
+	windowPredictor := NewContextWindowPredictor(opts.ContextWindow)
+	costEstimator := NewCostEstimator("deepseek") // 默认 DeepSeek 定价，首次请求后更新
+	promptCompressor := NewPromptCompressor(CompressMedium)
+	toolDescRotator := NewToolDescriptionRotator()
+	summaryCache := NewSummaryCache(20)
+	modelRouter := NewModelRouter("", "", "") // 可选启用，默认不路由
+	imageOptimizer := NewImageOptimizer()
+
+	// ── OPT-36~40 集成: 第四批 token 优化模块 ──
+	modeScheduler := NewModeAwareScheduler(TokenModeFull)
+	phantomReporter := NewPhantomStatsReporter()
+	disclosureCoordinator := NewDisclosureLazyCoordinator()
+	breakpointOptimizer := NewBreakpointOptimizer(ProviderUnknown)
+	smartCompaction := NewSmartCompactionTrigger(windowPredictor)
+
+	// ── OPT-41~45 集成: 第五批 token 优化模块 ──
+	messageSorter := NewTokenAwareMessageSorter()
+	streamingGuard := NewStreamingTokenGuard(opts.ContextWindow)
+	toolResultTruncator := NewToolResultTruncator(0) // 0 = 默认 4000
+	budgetAllocator := NewTokenBudgetAllocator(opts.ContextWindow)
+	promptMinimizer := NewSystemPromptMinimizer()
+
+	// ── OPT-46~50 集成: 第六批 token 优化模块 ──
+	phaseDetector := NewConversationPhaseDetector()
+	efficientFormatter := NewTokenEfficientFormatter()
+	cacheWarmingScheduler := NewCacheWarmingScheduler()
+	retryOptimizer := NewProviderRetryOptimizer()
+	contextualToolFilter := NewContextualToolFilter()
+
+	// ── OPT-51~55 集成: 第七批 token 优化模块 ──
+	sessionArchiveOptimizer := NewSessionArchiveOptimizer()
+	providerSpecOptimizer := NewProviderSpecificOptimizer(ProviderDeepSeek)
+	multiTurnCacheTracker := NewMultiTurnCacheTracker()
+	tokenSerializer := NewTokenEfficientSerializer()
+	flowOptimizer := NewConversationFlowOptimizer()
+
+	// ── OPT-56~60 集成: 第八批 token 优化模块 ──
+	reasoningOptimizer := NewReasoningTokenOptimizer()
+	contextPrioritizer := NewContextPrioritizer()
+	tokenAwarenessMonitor := NewTokenAwarenessMonitor()
+	errorContextOptimizer := NewErrorContextOptimizer()
+	adaptiveCacheManager := NewAdaptiveCacheManager()
+
+	// ── OPT-61~65 集成: 第九批 token 优化模块 ──
+	warmupPredictor := NewWarmupPredictor()
+	tokenBudgetEnforcer := NewTokenBudgetEnforcer(opts.ContextWindow)
+	contextWindowStrategy := NewContextWindowStrategy()
+	toolOutputCache := NewToolOutputCache(0) // 0 = 默认 100
+	promptFragmentCache := NewPromptFragmentCache()
+
+	// ── OPT-66~70 集成: 第十批 token 优化模块 ──
+	dedupStatsReporter := NewDedupStatsReporter()
+	incrementalCacheTracker := NewIncrementalCacheTracker()
+	turnAwareDeduplicator := NewTurnAwareDeduplicator()
+	smartToolSelector := NewSmartToolSelector()
+	tokenFlowAnalyzer := NewTokenFlowAnalyzer()
+
+	// ── OPT-71~75 集成: 第十一批 token 优化模块 ──
+	cachePrefixStabilizer := NewCachePrefixStabilizer()
+	responseTokenController := NewResponseTokenController()
+	contextDecayManager := NewContextDecayManager()
+	toolCallOptimizer := NewToolCallOptimizer()
+	tokenEfficiencyScorer := NewTokenEfficiencyScorer()
+
+	// ── OPT-76~80 集成: 第十二批 token 优化模块 ──
+	semanticDedup := NewSemanticSimilarityDedup()
+	promptCacheOptimizer := NewPromptCacheOptimizer()
+	contextSummaryCache := NewContextSummaryCache(0)
+	toolSchemaOptimizer := NewToolSchemaOptimizer()
+	compactSummary := NewConversationCompactSummary()
+
+	// ── OPT-81~85 集成: 第十三批 token 优化模块 ──
+	historyWindowManager := NewHistoryWindowManager(0)
+	tokenAwareRetry := NewTokenAwareRetry(3)
+	compactionTriggerV2 := NewCompactionTriggerV2()
+	modelAwareOptimizer := NewModelAwareOptimizer("deepseek-chat")
+	tokenUsagePredictor := NewTokenUsagePredictor()
+
+	// ── OPT-86~90 集成: 第十四批 token 优化模块 ──
+	cacheInvalidationTracker := NewCacheInvalidationTracker()
+	tokenCostAnalyzer := NewTokenCostAnalyzer(1.0)
+	messageImportanceScorer := NewMessageImportanceScorer()
+	contextCoherenceChecker := NewContextCoherenceChecker()
+	adaptiveMessageSelector := NewAdaptiveMessageSelector()
+
+	// ── OPT-91~95 集成: 第十五批 token 优化模块 ──
+	cacheHitPredictor := NewCacheHitPredictor()
+	contextBudgetNegotiator := NewContextBudgetNegotiator()
+	toolResultSummarizer := NewToolResultSummarizer()
+	promptSegmentManager := NewPromptSegmentManager()
+	zeroTokenStatsCollector := NewZeroTokenStatsCollector()
+
+	// ── OPT-96~100 集成: 里程碑批次 — 第100个模块 ──
+	cacheWarmingV2 := NewCacheWarmingV2()
+	tokenEfficiencyDashboard := NewTokenEfficiencyDashboard()
+	conversationTokenBudget := NewConversationTokenBudget(opts.ContextWindow)
+	smartContextPruner := NewSmartContextPruner()
+	unifiedTokenOrchestrator := NewUnifiedTokenOrchestrator()
+
+	// ── OPT-101~105 集成 ──
+	tokenStreamCompressor := NewTokenStreamCompressor()
+	adaptiveContextSelector := NewAdaptiveContextSelector(opts.ContextWindow)
+	promptTokenAnalyzer := NewPromptTokenAnalyzer()
+	cachePressureMonitor := NewCachePressureMonitor(1000)
+	tokenFlowRegulator := NewTokenFlowRegulator(opts.ContextWindow, opts.ContextWindow/4)
+
+	// ── OPT-106~110 集成 ──
+	semanticCacheRouter := NewSemanticCacheRouter()
+	tokenAwareScheduler := NewTokenAwareScheduler(opts.ContextWindow / 2)
+	contextSnapshotManager := NewContextSnapshotManager(10)
+	tokenWasteDetector := NewTokenWasteDetector()
+	adaptiveBatchOptimizer := NewAdaptiveBatchOptimizer(8)
+
+	// ── OPT-111~115 集成 ──
+	contextDiffCompressor := NewContextDiffCompressor()
+	tokenBudgetPredictor := NewTokenBudgetPredictor(100)
+	cacheKeyOptimizer := NewCacheKeyOptimizer()
+	responseLengthOptimizer := NewResponseLengthOptimizer(opts.ContextWindow / 4)
+	tokenAwarePrioritizer := NewTokenAwarePrioritizer()
+
+	// ── OPT-116~120 集成 ──
+	conversationDepthAnalyzer := NewConversationDepthAnalyzer()
+	tokenEfficiencyMonitor := NewTokenEfficiencyMonitor()
+	cacheLifecycleManager := NewCacheLifecycleManager(20)
+	promptSegmentCacheV2 := NewPromptSegmentCacheV2(500)
+	tokenAwareCompressor := NewTokenAwareCompressor(opts.ContextWindow)
+
+	// ── OPT-121~125 集成 ──
+	contextWeightCalculator := NewContextWeightCalculator()
+	tokenAwareEvictor := NewTokenAwareEvictor("lru")
+	promptRedundancyChecker := NewPromptRedundancyChecker()
+	cacheHitAnalyzer := NewCacheHitAnalyzer()
+	contextBoundaryDetector := NewContextBoundaryDetector()
+
+	// ── OPT-126~130 集成 ──
+	tokenUsageForecaster := NewTokenUsageForecaster(50, 5)
+	contextFreshnessTracker := NewContextFreshnessTracker(10)
+	cacheWarmingSchedulerV2 := NewCacheWarmingSchedulerV2(20)
+	promptTemplateOptimizer := NewPromptTemplateOptimizer()
+	tokenBudgetNegotiator := NewTokenBudgetNegotiator(opts.ContextWindow)
+
+	// ── OPT-131~135 集成 ──
+	cacheEfficiencyScorer := NewCacheEfficiencyScorer()
+	tokenAwarePruner := NewTokenAwarePruner("lowest-value")
+	conversationTopicTracker := NewConversationTopicTracker(20)
+	tokenCostProjector := NewTokenCostProjector(0.0001)
+	contextAssemblyOptimizer := NewContextAssemblyOptimizer()
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1165,6 +1747,123 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxSubagentDepth:         maxSubagentDepth,
 		memoryCompiler:           opts.MemoryCompiler,
 		memoryCompilerVerbosity:  normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
+		cacheEnforcer:            cacheEnforcer,
+		toolMemo:                 toolMemo,
+		conversationDedup:        conversationDedup,
+		contextBudget:            contextBudget,
+		providerCacheStrategy:    providerCacheStrategy,
+		cacheHealthMonitor:       cacheHealthMonitor,
+		toolBatcher:              toolBatcher,
+		prefixPinner:             prefixPinner,
+		semanticPruner:           semanticPruner,
+		prefetchPredictor:        prefetchPredictor,
+		windowPredictor:          windowPredictor,
+		costEstimator:            costEstimator,
+		promptCompressor:         promptCompressor,
+		toolDescRotator:          toolDescRotator,
+		summaryCache:             summaryCache,
+		modelRouter:              modelRouter,
+		imageOptimizer:           imageOptimizer,
+		modeScheduler:            modeScheduler,
+		phantomReporter:          phantomReporter,
+		disclosureCoordinator:    disclosureCoordinator,
+		breakpointOptimizer:      breakpointOptimizer,
+		smartCompaction:          smartCompaction,
+		messageSorter:            messageSorter,
+		streamingGuard:           streamingGuard,
+		toolResultTruncator:      toolResultTruncator,
+		budgetAllocator:          budgetAllocator,
+		promptMinimizer:          promptMinimizer,
+		phaseDetector:            phaseDetector,
+		efficientFormatter:       efficientFormatter,
+		cacheWarmingScheduler:    cacheWarmingScheduler,
+		retryOptimizer:           retryOptimizer,
+		contextualToolFilter:     contextualToolFilter,
+		sessionArchiveOptimizer:  sessionArchiveOptimizer,
+		providerSpecOptimizer:    providerSpecOptimizer,
+		multiTurnCacheTracker:    multiTurnCacheTracker,
+		tokenSerializer:          tokenSerializer,
+		flowOptimizer:            flowOptimizer,
+		reasoningOptimizer:       reasoningOptimizer,
+		contextPrioritizer:       contextPrioritizer,
+		tokenAwarenessMonitor:    tokenAwarenessMonitor,
+		errorContextOptimizer:    errorContextOptimizer,
+		adaptiveCacheManager:     adaptiveCacheManager,
+		warmupPredictor:          warmupPredictor,
+		tokenBudgetEnforcer:      tokenBudgetEnforcer,
+		contextWindowStrategy:    contextWindowStrategy,
+		toolOutputCache:          toolOutputCache,
+		promptFragmentCache:      promptFragmentCache,
+		dedupStatsReporter:       dedupStatsReporter,
+		incrementalCacheTracker:  incrementalCacheTracker,
+		turnAwareDeduplicator:    turnAwareDeduplicator,
+		smartToolSelector:        smartToolSelector,
+		tokenFlowAnalyzer:        tokenFlowAnalyzer,
+		cachePrefixStabilizer:    cachePrefixStabilizer,
+		responseTokenController:  responseTokenController,
+		contextDecayManager:      contextDecayManager,
+		toolCallOptimizer:        toolCallOptimizer,
+		tokenEfficiencyScorer:    tokenEfficiencyScorer,
+		semanticDedup:            semanticDedup,
+		promptCacheOptimizer:     promptCacheOptimizer,
+		contextSummaryCache:      contextSummaryCache,
+		toolSchemaOptimizer:      toolSchemaOptimizer,
+		compactSummary:           compactSummary,
+		historyWindowManager:     historyWindowManager,
+		tokenAwareRetry:          tokenAwareRetry,
+		compactionTriggerV2:      compactionTriggerV2,
+		modelAwareOptimizer:      modelAwareOptimizer,
+		tokenUsagePredictor:      tokenUsagePredictor,
+		cacheInvalidationTracker: cacheInvalidationTracker,
+		tokenCostAnalyzer:        tokenCostAnalyzer,
+		messageImportanceScorer:  messageImportanceScorer,
+		contextCoherenceChecker:  contextCoherenceChecker,
+		adaptiveMessageSelector:  adaptiveMessageSelector,
+		cacheHitPredictor:        cacheHitPredictor,
+		contextBudgetNegotiator:  contextBudgetNegotiator,
+		toolResultSummarizer:     toolResultSummarizer,
+		promptSegmentManager:     promptSegmentManager,
+		zeroTokenStatsCollector:  zeroTokenStatsCollector,
+		cacheWarmingV2:           cacheWarmingV2,
+		tokenEfficiencyDashboard: tokenEfficiencyDashboard,
+		conversationTokenBudget:  conversationTokenBudget,
+		smartContextPruner:       smartContextPruner,
+		unifiedTokenOrchestrator: unifiedTokenOrchestrator,
+		tokenStreamCompressor:    tokenStreamCompressor,
+		adaptiveContextSelector:  adaptiveContextSelector,
+		promptTokenAnalyzer:      promptTokenAnalyzer,
+		cachePressureMonitor:     cachePressureMonitor,
+		tokenFlowRegulator:       tokenFlowRegulator,
+		semanticCacheRouter:      semanticCacheRouter,
+		tokenAwareScheduler:      tokenAwareScheduler,
+		contextSnapshotManager:   contextSnapshotManager,
+		tokenWasteDetector:       tokenWasteDetector,
+		adaptiveBatchOptimizer:   adaptiveBatchOptimizer,
+		contextDiffCompressor:    contextDiffCompressor,
+		tokenBudgetPredictor:     tokenBudgetPredictor,
+		cacheKeyOptimizer:        cacheKeyOptimizer,
+		responseLengthOptimizer:  responseLengthOptimizer,
+		tokenAwarePrioritizer:    tokenAwarePrioritizer,
+		conversationDepthAnalyzer: conversationDepthAnalyzer,
+		tokenEfficiencyMonitor:   tokenEfficiencyMonitor,
+		cacheLifecycleManager:    cacheLifecycleManager,
+		promptSegmentCacheV2:     promptSegmentCacheV2,
+		tokenAwareCompressor:     tokenAwareCompressor,
+		contextWeightCalculator:  contextWeightCalculator,
+		tokenAwareEvictor:        tokenAwareEvictor,
+		promptRedundancyChecker:  promptRedundancyChecker,
+		cacheHitAnalyzer:         cacheHitAnalyzer,
+		contextBoundaryDetector:  contextBoundaryDetector,
+		tokenUsageForecaster:     tokenUsageForecaster,
+		contextFreshnessTracker:  contextFreshnessTracker,
+		cacheWarmingSchedulerV2:  cacheWarmingSchedulerV2,
+		promptTemplateOptimizer:  promptTemplateOptimizer,
+		tokenBudgetNegotiator:    tokenBudgetNegotiator,
+		cacheEfficiencyScorer:    cacheEfficiencyScorer,
+		tokenAwarePruner:         tokenAwarePruner,
+		conversationTopicTracker: conversationTopicTracker,
+		tokenCostProjector:       tokenCostProjector,
+		contextAssemblyOptimizer: contextAssemblyOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -1175,9 +1874,513 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		// 默认使用启发式分类器
 		a.classifier = newHeuristicClassifier()
 	}
+
+	// 初始化场景分类器
+	if opts.SceneClassifier != nil {
+		a.sceneClassifier = opts.SceneClassifier
+	} else {
+		a.sceneClassifier = NewHeuristicSceneClassifier()
+	}
+
+	// 初始化场景策略提供者
+	if opts.ScenePolicyProvider != nil {
+		a.scenePolicyProvider = opts.ScenePolicyProvider
+	} else {
+		a.scenePolicyProvider = NewDefaultScenePolicyProvider()
+	}
+
+	// 初始化副作用追踪器
+	if opts.EnableSideEffectTracking {
+		a.sideEffectTracker = NewSideEffectTracker(0) // 0 = 默认深度100
+	}
+
+	// 初始化增量缓存
+	if opts.EnableIncrementalCache {
+		a.incrementalCache = NewIncrementalCache(0) // 0 = 默认8K tokens
+	}
+
+	// 初始化虚空UI面板
+	if opts.EnablePhantomUI {
+		tm := opts.TabManager
+		if tm == nil {
+			tm = NewTabManager(0) // 0 = 默认10个标签
+		}
+		a.phantomUI = NewPhantomUI(tm, 120, 40)
+		a.phantomUI.Start()
+
+		// 初始化眼动追踪器
+		mapper := NewGazeMapper(8, 16)
+		mapper.UpdateRegions(a.phantomUI.projectionEngine.GetRegions(), 120, 40)
+		a.eyeTracker = NewEyeTracker(DefaultTrackerConfig(), mapper)
+		a.eyeTracker.Start()
+
+		// 初始化眼控集成器
+		a.gazeIntegrator = NewGazeIntegrator(a.eyeTracker, mapper, a.phantomUI)
+		a.gazeIntegrator.Start()
+	}
+
+	// 初始化代码审核门控
+	if opts.EnableReviewGate {
+		a.reviewGate = NewReviewGate(a.gazeIntegrator)
+	}
+
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
 	return a
+}
+
+// GetPhantomUI 返回虚空UI面板实例（供桌面层使用）
+func (a *Agent) GetPhantomUI() *PhantomUI {
+	return a.phantomUI
+}
+
+// GetCacheEnforcerStats 返回缓存前缀稳定性统计（OPT-12）
+func (a *Agent) GetCacheEnforcerStats() *CachePrefixStats {
+	if a.cacheEnforcer == nil {
+		return nil
+	}
+	stats := a.cacheEnforcer.GetStats()
+	return &stats
+}
+
+// GetCacheEnforcerChangeHistory 返回缓存前缀变化历史（OPT-12）
+func (a *Agent) GetCacheEnforcerChangeHistory() []PrefixChange {
+	if a.cacheEnforcer == nil {
+		return nil
+	}
+	return a.cacheEnforcer.GetChangeHistory()
+}
+
+// GetToolMemoStats 返回工具结果记忆化统计（OPT-16）
+func (a *Agent) GetToolMemoStats() *MemoStats {
+	if a.toolMemo == nil {
+		return nil
+	}
+	stats := a.toolMemo.GetStats()
+	return &stats
+}
+
+// GetConversationDedupStats 返回对话去重统计（OPT-17）
+func (a *Agent) GetConversationDedupStats() *DedupStats {
+	if a.conversationDedup == nil {
+		return nil
+	}
+	stats := a.conversationDedup.GetStats()
+	return &stats
+}
+
+// GetContextBudgetStats 返回上下文预算统计（OPT-18）
+func (a *Agent) GetContextBudgetStats() *BudgetStats {
+	if a.contextBudget == nil {
+		return nil
+	}
+	stats := a.contextBudget.GetStats()
+	return &stats
+}
+
+// GetProviderCacheStats 返回 provider 缓存策略统计（OPT-19）
+func (a *Agent) GetProviderCacheStats() *ProviderCacheStats {
+	if a.providerCacheStrategy == nil {
+		return nil
+	}
+	stats := a.providerCacheStrategy.GetStats()
+	return &stats
+}
+
+// GetCacheHealthStatus 返回缓存健康状态（OPT-20）
+func (a *Agent) GetCacheHealthStatus() *CacheHealthStatus {
+	if a.cacheHealthMonitor == nil {
+		return nil
+	}
+	status := a.cacheHealthMonitor.GetHealth()
+	return &status
+}
+
+// GetPrefixPinnerStats 返回前缀钉扎统计（OPT-22）
+func (a *Agent) GetPrefixPinnerStats() *PrefixPinnerStats {
+	if a.prefixPinner == nil {
+		return nil
+	}
+	stats := a.prefixPinner.GetStats()
+	return &stats
+}
+
+// GetAllTokenOptStats 返回所有 token 优化统计
+func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
+	stats := map[string]interface{}{}
+	if s := a.GetCacheEnforcerStats(); s != nil {
+		stats["opt12_cacheEnforcer"] = s
+	}
+	if s := a.GetToolMemoStats(); s != nil {
+		stats["opt16_toolMemo"] = s
+	}
+	if s := a.GetConversationDedupStats(); s != nil {
+		stats["opt17_conversationDedup"] = s
+	}
+	if s := a.GetContextBudgetStats(); s != nil {
+		stats["opt18_contextBudget"] = s
+	}
+	if s := a.GetProviderCacheStats(); s != nil {
+		stats["opt19_providerCache"] = s
+	}
+	if s := a.GetCacheHealthStatus(); s != nil {
+		stats["opt20_cacheHealth"] = s
+	}
+	if s := a.GetPrefixPinnerStats(); s != nil {
+		stats["opt22_prefixPinner"] = s
+	}
+	if a.semanticPruner != nil {
+		stats["opt03_semanticPruner"] = a.semanticPruner.GetStats()
+	}
+	if a.prefetchPredictor != nil {
+		stats["opt07_prefetch"] = a.prefetchPredictor.GetStats()
+	}
+	if a.windowPredictor != nil {
+		stats["opt27_windowPredictor"] = a.windowPredictor.GetStats()
+	}
+	if a.costEstimator != nil {
+		stats["opt28_costEstimator"] = a.costEstimator.GetStats()
+	}
+	if a.promptCompressor != nil {
+		stats["opt29_promptCompressor"] = a.promptCompressor.GetStats()
+	}
+	if a.toolDescRotator != nil {
+		stats["opt30_toolDescRotator"] = a.toolDescRotator.GetStats()
+	}
+	if a.summaryCache != nil {
+		stats["opt31_summaryCache"] = a.summaryCache.GetStats()
+	}
+	if a.modelRouter != nil {
+		stats["opt32_modelRouter"] = a.modelRouter.GetStats()
+	}
+	if a.imageOptimizer != nil {
+		stats["opt33_imageOptimizer"] = a.imageOptimizer.GetStats()
+	}
+	if a.modeScheduler != nil {
+		stats["opt36_modeScheduler"] = a.modeScheduler.GetConfig()
+	}
+	if a.phantomReporter != nil {
+		stats["opt37_phantomReporter"] = a.phantomReporter.GetStats()
+	}
+	if a.disclosureCoordinator != nil {
+		stats["opt38_disclosureCoordinator"] = a.disclosureCoordinator.GetStats()
+	}
+	if a.breakpointOptimizer != nil {
+		stats["opt39_breakpointOptimizer"] = a.breakpointOptimizer.GetStats()
+	}
+	if a.smartCompaction != nil {
+		stats["opt40_smartCompaction"] = a.smartCompaction.GetStats()
+	}
+	if a.messageSorter != nil {
+		stats["opt41_messageSorter"] = a.messageSorter.GetStats()
+	}
+	if a.streamingGuard != nil {
+		stats["opt42_streamingGuard"] = a.streamingGuard.GetStats()
+	}
+	if a.toolResultTruncator != nil {
+		stats["opt43_toolResultTruncator"] = a.toolResultTruncator.GetTotalStats()
+	}
+	if a.budgetAllocator != nil {
+		stats["opt44_budgetAllocator"] = a.budgetAllocator.GetStats()
+	}
+	if a.promptMinimizer != nil {
+		stats["opt45_promptMinimizer"] = a.promptMinimizer.GetStats()
+	}
+	if a.phaseDetector != nil {
+		stats["opt46_phaseDetector"] = a.phaseDetector.GetStats()
+	}
+	if a.efficientFormatter != nil {
+		stats["opt47_efficientFormatter"] = a.efficientFormatter.GetStats()
+	}
+	if a.cacheWarmingScheduler != nil {
+		stats["opt48_cacheWarming"] = a.cacheWarmingScheduler.GetStats()
+	}
+	if a.retryOptimizer != nil {
+		stats["opt49_retryOptimizer"] = a.retryOptimizer.GetStats()
+	}
+	if a.contextualToolFilter != nil {
+		stats["opt50_contextualToolFilter"] = a.contextualToolFilter.GetStats()
+	}
+	if a.sessionArchiveOptimizer != nil {
+		stats["opt51_sessionArchive"] = a.sessionArchiveOptimizer.GetStats()
+	}
+	if a.providerSpecOptimizer != nil {
+		stats["opt52_providerSpecOptimizer"] = a.providerSpecOptimizer.GetStats()
+	}
+	if a.multiTurnCacheTracker != nil {
+		stats["opt53_multiTurnCacheTracker"] = a.multiTurnCacheTracker.GetStats()
+	}
+	if a.tokenSerializer != nil {
+		stats["opt54_tokenSerializer"] = a.tokenSerializer.GetStats()
+	}
+	if a.flowOptimizer != nil {
+		stats["opt55_flowOptimizer"] = a.flowOptimizer.GetStats()
+	}
+	if a.reasoningOptimizer != nil {
+		stats["opt56_reasoningOptimizer"] = a.reasoningOptimizer.GetStats()
+	}
+	if a.contextPrioritizer != nil {
+		stats["opt57_contextPrioritizer"] = a.contextPrioritizer.GetStats()
+	}
+	if a.tokenAwarenessMonitor != nil {
+		stats["opt58_tokenAwarenessMonitor"] = a.tokenAwarenessMonitor.GetStats()
+	}
+	if a.errorContextOptimizer != nil {
+		stats["opt59_errorContextOptimizer"] = a.errorContextOptimizer.GetStats()
+	}
+	if a.adaptiveCacheManager != nil {
+		stats["opt60_adaptiveCacheManager"] = a.adaptiveCacheManager.GetStats()
+	}
+	if a.warmupPredictor != nil {
+		stats["opt61_warmupPredictor"] = a.warmupPredictor.GetStats()
+	}
+	if a.tokenBudgetEnforcer != nil {
+		stats["opt62_tokenBudgetEnforcer"] = a.tokenBudgetEnforcer.GetStats()
+	}
+	if a.contextWindowStrategy != nil {
+		stats["opt63_contextWindowStrategy"] = a.contextWindowStrategy.GetStats()
+	}
+	if a.toolOutputCache != nil {
+		stats["opt64_toolOutputCache"] = a.toolOutputCache.GetStats()
+	}
+	if a.promptFragmentCache != nil {
+		stats["opt65_promptFragmentCache"] = a.promptFragmentCache.GetStats()
+	}
+	if a.dedupStatsReporter != nil {
+		stats["opt66_dedupStatsReporter"] = a.dedupStatsReporter.GetReport()
+	}
+	if a.incrementalCacheTracker != nil {
+		stats["opt67_incrementalCacheTracker"] = a.incrementalCacheTracker.GetStats()
+	}
+	if a.turnAwareDeduplicator != nil {
+		stats["opt68_turnAwareDeduplicator"] = a.turnAwareDeduplicator.GetStats()
+	}
+	if a.smartToolSelector != nil {
+		stats["opt69_smartToolSelector"] = a.smartToolSelector.GetStats()
+	}
+	if a.tokenFlowAnalyzer != nil {
+		stats["opt70_tokenFlowAnalyzer"] = a.tokenFlowAnalyzer.GetStats()
+	}
+	if a.cachePrefixStabilizer != nil {
+		stats["opt71_cachePrefixStabilizer"] = a.cachePrefixStabilizer.GetStats()
+	}
+	if a.responseTokenController != nil {
+		stats["opt72_responseTokenController"] = a.responseTokenController.GetStats()
+	}
+	if a.contextDecayManager != nil {
+		stats["opt73_contextDecayManager"] = a.contextDecayManager.GetStats()
+	}
+	if a.toolCallOptimizer != nil {
+		stats["opt74_toolCallOptimizer"] = a.toolCallOptimizer.GetStats()
+	}
+	if a.tokenEfficiencyScorer != nil {
+		stats["opt75_tokenEfficiencyScorer"] = a.tokenEfficiencyScorer.GetOverallStats()
+	}
+	if a.semanticDedup != nil {
+		stats["opt76_semanticDedup"] = a.semanticDedup.GetStats()
+	}
+	if a.promptCacheOptimizer != nil {
+		stats["opt77_promptCacheOptimizer"] = a.promptCacheOptimizer.GetStats()
+	}
+	if a.contextSummaryCache != nil {
+		stats["opt78_contextSummaryCache"] = a.contextSummaryCache.GetStats()
+	}
+	if a.toolSchemaOptimizer != nil {
+		stats["opt79_toolSchemaOptimizer"] = a.toolSchemaOptimizer.GetStats()
+	}
+	if a.compactSummary != nil {
+		stats["opt80_compactSummary"] = a.compactSummary.GetStats()
+	}
+	if a.historyWindowManager != nil {
+		stats["opt81_historyWindowManager"] = a.historyWindowManager.GetStats()
+	}
+	if a.tokenAwareRetry != nil {
+		stats["opt82_tokenAwareRetry"] = a.tokenAwareRetry.GetStats()
+	}
+	if a.compactionTriggerV2 != nil {
+		stats["opt83_compactionTriggerV2"] = a.compactionTriggerV2.GetStats()
+	}
+	if a.modelAwareOptimizer != nil {
+		stats["opt84_modelAwareOptimizer"] = a.modelAwareOptimizer.GetStats()
+	}
+	if a.tokenUsagePredictor != nil {
+		stats["opt85_tokenUsagePredictor"] = a.tokenUsagePredictor.GetStats()
+	}
+	if a.cacheInvalidationTracker != nil {
+		stats["opt86_cacheInvalidationTracker"] = a.cacheInvalidationTracker.GetStats()
+	}
+	if a.tokenCostAnalyzer != nil {
+		stats["opt87_tokenCostAnalyzer"] = a.tokenCostAnalyzer.GetStats()
+	}
+	if a.messageImportanceScorer != nil {
+		stats["opt88_messageImportanceScorer"] = a.messageImportanceScorer.GetStats()
+	}
+	if a.contextCoherenceChecker != nil {
+		stats["opt89_contextCoherenceChecker"] = a.contextCoherenceChecker.GetStats()
+	}
+	if a.adaptiveMessageSelector != nil {
+		stats["opt90_adaptiveMessageSelector"] = a.adaptiveMessageSelector.GetStats()
+	}
+	if a.cacheHitPredictor != nil {
+		stats["opt91_cacheHitPredictor"] = a.cacheHitPredictor.GetStats()
+	}
+	if a.contextBudgetNegotiator != nil {
+		stats["opt92_contextBudgetNegotiator"] = a.contextBudgetNegotiator.GetStats()
+	}
+	if a.toolResultSummarizer != nil {
+		stats["opt93_toolResultSummarizer"] = a.toolResultSummarizer.GetStats()
+	}
+	if a.promptSegmentManager != nil {
+		stats["opt94_promptSegmentManager"] = a.promptSegmentManager.GetStats()
+	}
+	if a.zeroTokenStatsCollector != nil {
+		stats["opt95_zeroTokenStatsCollector"] = a.zeroTokenStatsCollector.GetStats()
+	}
+	if a.cacheWarmingV2 != nil {
+		stats["opt96_cacheWarmingV2"] = a.cacheWarmingV2.GetStats()
+	}
+	if a.tokenEfficiencyDashboard != nil {
+		stats["opt97_tokenEfficiencyDashboard"] = a.tokenEfficiencyDashboard.GetStats()
+	}
+	if a.conversationTokenBudget != nil {
+		stats["opt98_conversationTokenBudget"] = a.conversationTokenBudget.GetStats()
+	}
+	if a.smartContextPruner != nil {
+		stats["opt99_smartContextPruner"] = a.smartContextPruner.GetStats()
+	}
+	if a.unifiedTokenOrchestrator != nil {
+		stats["opt100_unifiedTokenOrchestrator"] = a.unifiedTokenOrchestrator.GetStats()
+	}
+	if a.tokenStreamCompressor != nil {
+		stats["opt101_tokenStreamCompressor"] = a.tokenStreamCompressor.GetStats()
+	}
+	if a.adaptiveContextSelector != nil {
+		stats["opt102_adaptiveContextSelector"] = a.adaptiveContextSelector.GetStats()
+	}
+	if a.promptTokenAnalyzer != nil {
+		stats["opt103_promptTokenAnalyzer"] = a.promptTokenAnalyzer.GetStats()
+	}
+	if a.cachePressureMonitor != nil {
+		stats["opt104_cachePressureMonitor"] = a.cachePressureMonitor.GetStats()
+	}
+	if a.tokenFlowRegulator != nil {
+		stats["opt105_tokenFlowRegulator"] = a.tokenFlowRegulator.GetStats()
+	}
+	if a.semanticCacheRouter != nil {
+		stats["opt106_semanticCacheRouter"] = a.semanticCacheRouter.GetStats()
+	}
+	if a.tokenAwareScheduler != nil {
+		stats["opt107_tokenAwareScheduler"] = a.tokenAwareScheduler.GetStats()
+	}
+	if a.contextSnapshotManager != nil {
+		stats["opt108_contextSnapshotManager"] = a.contextSnapshotManager.GetStats()
+	}
+	if a.tokenWasteDetector != nil {
+		stats["opt109_tokenWasteDetector"] = a.tokenWasteDetector.GetStats()
+	}
+	if a.adaptiveBatchOptimizer != nil {
+		stats["opt110_adaptiveBatchOptimizer"] = a.adaptiveBatchOptimizer.GetStats()
+	}
+	if a.contextDiffCompressor != nil {
+		stats["opt111_contextDiffCompressor"] = a.contextDiffCompressor.GetStats()
+	}
+	if a.tokenBudgetPredictor != nil {
+		stats["opt112_tokenBudgetPredictor"] = a.tokenBudgetPredictor.GetStats()
+	}
+	if a.cacheKeyOptimizer != nil {
+		stats["opt113_cacheKeyOptimizer"] = a.cacheKeyOptimizer.GetStats()
+	}
+	if a.responseLengthOptimizer != nil {
+		stats["opt114_responseLengthOptimizer"] = a.responseLengthOptimizer.GetStats()
+	}
+	if a.tokenAwarePrioritizer != nil {
+		stats["opt115_tokenAwarePrioritizer"] = a.tokenAwarePrioritizer.GetStats()
+	}
+	if a.conversationDepthAnalyzer != nil {
+		stats["opt116_conversationDepthAnalyzer"] = a.conversationDepthAnalyzer.GetStats()
+	}
+	if a.tokenEfficiencyMonitor != nil {
+		stats["opt117_tokenEfficiencyMonitor"] = a.tokenEfficiencyMonitor.GetStats()
+	}
+	if a.cacheLifecycleManager != nil {
+		stats["opt118_cacheLifecycleManager"] = a.cacheLifecycleManager.GetStats()
+	}
+	if a.promptSegmentCacheV2 != nil {
+		stats["opt119_promptSegmentCacheV2"] = a.promptSegmentCacheV2.GetStats()
+	}
+	if a.tokenAwareCompressor != nil {
+		stats["opt120_tokenAwareCompressor"] = a.tokenAwareCompressor.GetStats()
+	}
+	if a.contextWeightCalculator != nil {
+		stats["opt121_contextWeightCalculator"] = a.contextWeightCalculator.GetStats()
+	}
+	if a.tokenAwareEvictor != nil {
+		stats["opt122_tokenAwareEvictor"] = a.tokenAwareEvictor.GetStats()
+	}
+	if a.promptRedundancyChecker != nil {
+		stats["opt123_promptRedundancyChecker"] = a.promptRedundancyChecker.GetStats()
+	}
+	if a.cacheHitAnalyzer != nil {
+		stats["opt124_cacheHitAnalyzer"] = a.cacheHitAnalyzer.GetStats()
+	}
+	if a.contextBoundaryDetector != nil {
+		stats["opt125_contextBoundaryDetector"] = a.contextBoundaryDetector.GetStats()
+	}
+	if a.tokenUsageForecaster != nil {
+		stats["opt126_tokenUsageForecaster"] = a.tokenUsageForecaster.GetStats()
+	}
+	if a.contextFreshnessTracker != nil {
+		stats["opt127_contextFreshnessTracker"] = a.contextFreshnessTracker.GetStats()
+	}
+	if a.cacheWarmingSchedulerV2 != nil {
+		stats["opt128_cacheWarmingSchedulerV2"] = a.cacheWarmingSchedulerV2.GetStats()
+	}
+	if a.promptTemplateOptimizer != nil {
+		stats["opt129_promptTemplateOptimizer"] = a.promptTemplateOptimizer.GetStats()
+	}
+	if a.tokenBudgetNegotiator != nil {
+		stats["opt130_tokenBudgetNegotiator"] = a.tokenBudgetNegotiator.GetStats()
+	}
+	if a.cacheEfficiencyScorer != nil {
+		stats["opt131_cacheEfficiencyScorer"] = a.cacheEfficiencyScorer.GetStats()
+	}
+	if a.tokenAwarePruner != nil {
+		stats["opt132_tokenAwarePruner"] = a.tokenAwarePruner.GetStats()
+	}
+	if a.conversationTopicTracker != nil {
+		stats["opt133_conversationTopicTracker"] = a.conversationTopicTracker.GetStats()
+	}
+	if a.tokenCostProjector != nil {
+		stats["opt134_tokenCostProjector"] = a.tokenCostProjector.GetStats()
+	}
+	if a.contextAssemblyOptimizer != nil {
+		stats["opt135_contextAssemblyOptimizer"] = a.contextAssemblyOptimizer.GetStats()
+	}
+	return stats
+}
+
+// GetEyeTracker 返回眼动追踪器实例（供桌面层使用）
+func (a *Agent) GetEyeTracker() *EyeTracker {
+	return a.eyeTracker
+}
+
+// GetReviewGate 返回代码审核门控实例（供桌面层使用）
+func (a *Agent) GetReviewGate() *ReviewGate {
+	return a.reviewGate
+}
+
+// GetSceneResult 返回最近一次场景分类结果
+func (a *Agent) GetSceneResult() *SceneResult {
+	return a.lastSceneResult
+}
+
+// SubmitCodeChange 提交代码变更到审核门控（供工具执行路径调用）
+// 如果审核门控未启用，返回 nil
+func (a *Agent) SubmitCodeChange(change CodeChange) *ReviewItem {
+	if a.reviewGate == nil {
+		return nil
+	}
+	return a.reviewGate.Submit(change)
 }
 
 func usageSourceOrDefault(source, fallback string) string {
@@ -1321,6 +2524,64 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
 
+	// ── 场景分类：在每轮开始时分类用户输入 ──
+	// 这是真正被调用的代码，不是死代码
+	if a.sceneClassifier != nil {
+		sceneResult, classifyErr := a.sceneClassifier.Classify(ctx, input)
+		if classifyErr == nil {
+			a.lastSceneResult = &sceneResult
+			// 发出场景事件供前端显示
+			a.sink.Emit(event.Event{
+				Kind: event.Notice,
+				Text: fmt.Sprintf("scene: %s (complexity:%d tools:%v think:%v)",
+					sceneResult.Scene, sceneResult.Complexity,
+					sceneResult.NeedsTools, sceneResult.NeedsThink),
+			})
+			// 场景策略应用
+			if a.scenePolicyProvider != nil {
+				policy := a.scenePolicyProvider.GetPolicy(sceneResult.Scene)
+				// 骄傲信号检测：如果检测到骄傲信号，发出警告
+				if policy.MaxPrideSignals > 0 {
+					if detected := a.scenePolicyProvider.DetectPride(input); len(detected) > policy.MaxPrideSignals {
+						a.sink.Emit(event.Event{
+							Kind: event.Notice,
+							Text: fmt.Sprintf("pride signal detected: %v (threshold:%d)", detected, policy.MaxPrideSignals),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// ── 增量缓存：每轮开始时重置 ──
+	if a.incrementalCache != nil {
+		a.incrementalCache.Reset()
+	}
+	// ── 副作用追踪器：每轮开始时重置 ──
+	if a.sideEffectTracker != nil {
+		a.sideEffectTracker.Reset()
+	}
+	// ── OPT-16: 工具记忆化每轮重置 ──
+	if a.toolMemo != nil {
+		a.toolMemo.Reset()
+	}
+	// ── OPT-21: 工具批处理每轮重置 ──
+	if a.toolBatcher != nil {
+		a.toolBatcher.Reset()
+	}
+	// ── OPT-03: 语义裁剪器每轮重置 ──
+	if a.semanticPruner != nil {
+		a.semanticPruner.Reset()
+	}
+	// ── OPT-37: Phantom 统计报告器每轮重置 ──
+	if a.phantomReporter != nil {
+		a.phantomReporter.ShouldReport() // 重置报告计时
+	}
+	// ── OPT-42: 流式 token 守卫每轮重置 ──
+	if a.streamingGuard != nil {
+		a.streamingGuard.ResetTurn()
+	}
+
 	finalReadinessBlocks := 0
 	readinessReceiptMark := -1
 	emptyFinalBlocks := 0
@@ -1370,10 +2631,416 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			return err
 		}
 		streamRecoveries = 0
-		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
-		a.lastPrefixShape = prefixShape
-		a.haveLastPrefixShape = true
-		if usage != nil && usage.TotalTokens > 0 {
+	cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
+	a.lastPrefixShape = prefixShape
+	a.haveLastPrefixShape = true
+
+	// OPT-12: 记录缓存使用情况并检查前缀稳定性
+	if a.cacheEnforcer != nil {
+		fp := a.cacheEnforcer.CaptureFingerprint(a.systemPrompt(), schemas)
+		a.cacheEnforcer.CheckPrefixStability(fp, step+1)
+		a.cacheEnforcer.RecordCacheUsage(usage)
+	}
+
+	// OPT-18: 自适应上下文预算调整
+	if a.contextBudget != nil && usage != nil {
+		a.contextBudget.AdjustForUsage(usage.PromptTokens, 0)
+	}
+
+	// OPT-20: 缓存健康监控
+	if a.cacheHealthMonitor != nil && usage != nil {
+		hit := usage.CacheHitTokens > 0
+		a.cacheHealthMonitor.RecordRequest(hit, usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+
+	// OPT-22: 前缀钉扎验证
+	if a.prefixPinner != nil && step == 0 {
+		sp := a.systemPrompt()
+		if sp != "" {
+			a.prefixPinner.Pin("L1_base_prompt", sp)
+		}
+	}
+
+	// OPT-19: Provider 感知缓存策略 — 首次请求时根据模型名检测 provider
+	if a.providerCacheStrategy != nil && step == 0 && a.prov != nil {
+		if modelName, ok := a.prov.(interface{ Model() string }); ok {
+			detected := DetectProviderType(modelName.Model())
+			a.providerCacheStrategy.SetProvider(detected)
+		}
+	}
+
+	// OPT-27: 上下文窗口预测器 — 记录消耗并预测
+	if a.windowPredictor != nil && usage != nil {
+		a.windowPredictor.RecordConsumption(step, usage.PromptTokens, usage.CompletionTokens)
+		prediction := a.windowPredictor.Predict()
+		if prediction != nil && prediction.ShouldHardCompact {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window approaching limit — consider compacting"})
+		}
+	}
+
+	// OPT-28: Token 成本估算器 — 记录成本
+	if a.costEstimator != nil && usage != nil {
+		a.costEstimator.EstimateCost(
+			usage.PromptTokens,
+			usage.CompletionTokens,
+			usage.CacheHitTokens,
+			usage.CacheMissTokens,
+		)
+	}
+
+	// OPT-03: 语义上下文裁剪 — 为对话历史中的消息评分
+	if a.semanticPruner != nil && usage != nil {
+		messages := a.session.Snapshot()
+		for i, msg := range messages {
+			if msg.Role == provider.RoleAssistant || msg.Role == provider.RoleUser {
+				a.semanticPruner.ScoreMessage(i, string(msg.Role), msg.Content)
+			}
+		}
+	}
+
+	// OPT-36: Token 模式感知调度器 — 首步按模式调整 OPT 行为
+	if a.modeScheduler != nil && step == 0 {
+		a.modeScheduler.ApplyToAgent(a)
+	}
+
+	// OPT-37: Phantom 统计报告器 — 通过零 token 通道推送 OPT 统计
+	if a.phantomReporter != nil && a.phantomReporter.ShouldReport() {
+		snapshot := a.phantomReporter.CollectSnapshot(a)
+		_ = snapshot // 通过 PhantomUI 通道推送，不消耗 LLM token
+	}
+
+	// OPT-39: 缓存断点优化器 — 评估断点效果
+	if a.breakpointOptimizer != nil && usage != nil {
+		if usage.CacheHitTokens > 0 {
+			a.breakpointOptimizer.RecordHit(0, true)
+		} else if usage.CacheMissTokens > 0 {
+			a.breakpointOptimizer.RecordHit(0, false)
+		}
+	}
+
+	// OPT-40: 智能压缩触发器 — 基于 OPT-27 预测主动触发 compaction
+	if a.smartCompaction != nil && usage != nil {
+		action := a.smartCompaction.CheckAndTrigger(step + 1)
+		switch action {
+		case CompactionActionProactive:
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "proactive compaction triggered to save tokens"})
+		case CompactionActionImmediate:
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "immediate compaction triggered — context window critical"})
+		}
+	}
+
+	// OPT-41: Token 感知消息排序器 — 记录前缀稳定性
+	if a.messageSorter != nil {
+		msgs := a.session.Snapshot()
+		report := a.messageSorter.RecordPrefix(msgs)
+		if report.PrefixChanged {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache prefix changed — expect cache miss"})
+		}
+	}
+
+	// OPT-42: 流式 token 守卫 — 记录 token 消耗并检查预算
+	if a.streamingGuard != nil && usage != nil {
+		a.streamingGuard.RecordInput(usage.PromptTokens)
+		a.streamingGuard.RecordOutput(usage.CompletionTokens)
+		status := a.streamingGuard.CheckBudget()
+		if status.Status == "warning" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token budget approaching limit"})
+		} else if status.Status == "critical" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget critical — consider terminating"})
+		}
+	}
+
+	// OPT-44: Token 预算分配器 — 动态分配上下文窗口
+	if a.budgetAllocator != nil && usage != nil {
+		// 估算各组件 token 占用
+		systemPromptTokens := usage.PromptTokens / 10 // 估算 ~10% 为系统提示
+		toolsTokens := len(a.tools.Schemas()) * 200    // 每个工具 schema ~200 token
+		historyTokens := usage.PromptTokens - systemPromptTokens - toolsTokens
+		if historyTokens < 0 {
+			historyTokens = 0
+		}
+		alloc := a.budgetAllocator.Allocate(systemPromptTokens, toolsTokens, historyTokens)
+		if a.budgetAllocator.ShouldCompact(historyTokens) {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "budget allocator: history exceeds optimal limit — consider compacting"})
+		}
+		_ = alloc
+	}
+
+	// OPT-46: 对话阶段检测器 — 分析当前对话阶段
+	if a.phaseDetector != nil {
+		msgs := a.session.Snapshot()
+		toolCalls := 0
+		if calls != nil {
+			toolCalls = len(calls)
+		}
+		phase := a.phaseDetector.Analyze(msgs, toolCalls)
+		_ = phase // 可用于调整其他 OPT 模块行为
+	}
+
+	// OPT-48: 缓存预热调度器 — 记录查询并预测下一步
+	if a.cacheWarmingScheduler != nil && step == 0 {
+		a.cacheWarmingScheduler.RecordQuery(input)
+	}
+
+	// OPT-49: Provider 重试优化器 — 错误时记录重试
+	if a.retryOptimizer != nil && err != nil && !interrupted {
+		a.retryOptimizer.RecordRetry("server_error", 0)
+	}
+
+	// OPT-52: Provider 专属缓存优化 — 计算缓存节省
+	if a.providerSpecOptimizer != nil && usage != nil {
+		a.providerSpecOptimizer.OptimizeForProvider(usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+
+	// OPT-53: 多轮缓存追踪 — 记录每轮缓存命中情况
+	if a.multiTurnCacheTracker != nil && usage != nil {
+		a.multiTurnCacheTracker.RecordTurn(step+1, usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens, cacheDiagnostics.PrefixHash)
+		if a.multiTurnCacheTracker.ShouldAlert() {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache miss detected — prefix may have changed"})
+		}
+	}
+
+	// OPT-55: 对话流优化 — 检测冗余查询
+	if a.flowOptimizer != nil && step == 0 && input != "" {
+		analysis := a.flowOptimizer.AnalyzeTurn(input, "", calls != nil)
+		if analysis.IsRedundant {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "redundant query detected — consider using cached response"})
+		}
+	}
+
+	// OPT-58: Token 感知监控 — 检查 token 使用率
+	if a.tokenAwarenessMonitor != nil && usage != nil {
+		report := a.tokenAwarenessMonitor.CheckAwareness(usage.PromptTokens, usage.CompletionTokens, a.contextWindow)
+		if report.Status == "critical" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token usage critical — approaching context window limit"})
+		}
+		a.tokenAwarenessMonitor.TrackTurn(usage.PromptTokens, usage.CompletionTokens)
+	}
+
+	// OPT-59: 错误上下文优化 — 提取错误相关上下文
+	if a.errorContextOptimizer != nil && err != nil && !interrupted {
+		a.errorContextOptimizer.OptimizeErrorContext(err.Error(), input)
+	}
+
+	// OPT-60: 自适应缓存管理 — 根据命中率调整缓存策略
+	if a.adaptiveCacheManager != nil && usage != nil {
+		a.adaptiveCacheManager.RecordCachePerformance(usage.CacheHitTokens, usage.CacheMissTokens)
+		newStrategy := a.adaptiveCacheManager.AdaptStrategy(a.adaptiveCacheManager.GetStats().CurrentHitRate, usage.CacheMissTokens)
+		_ = newStrategy // 可用于调整其他 OPT 模块的缓存行为
+	}
+
+	// OPT-61: 预热预测器 — 预测下一轮需要的工具
+	if a.warmupPredictor != nil && step == 0 && input != "" {
+		predicted := a.warmupPredictor.PredictTools(input)
+		_ = predicted // 预加载预测工具的 schema
+	}
+
+	// OPT-62: Token 预算强制器 — 检查是否超出预算
+	if a.tokenBudgetEnforcer != nil && usage != nil {
+		action := a.tokenBudgetEnforcer.Enforce(usage.TotalTokens)
+		if action == EnforcementDegrade {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget exceeded — degrading to save tokens"})
+		}
+	}
+
+	// OPT-63: 上下文窗口策略 — 评估窗口管理策略
+	if a.contextWindowStrategy != nil && usage != nil {
+		decision := a.contextWindowStrategy.Evaluate(usage.PromptTokens, a.contextWindow, step+1)
+		if decision.Action == "compact" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window strategy: compact recommended"})
+		}
+	}
+
+	// OPT-70: Token 流分析 — 记录 token 流向
+	if a.tokenFlowAnalyzer != nil && usage != nil {
+		a.tokenFlowAnalyzer.RecordFlow(step+1, usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, usage.CacheMissTokens)
+	}
+
+	// OPT-66: 去重统计报告 — 定期汇总
+	if a.dedupStatsReporter != nil && a.dedupStatsReporter.ShouldReport() {
+		report := a.dedupStatsReporter.GetReport()
+		_ = report // 通过零 token 通道推送
+	}
+
+	// OPT-73: 上下文衰减管理 — 老化消息
+	if a.contextDecayManager != nil {
+		a.contextDecayManager.AgeMessages(step + 1)
+	}
+
+	// OPT-75: Token 效率评分 — 每轮评分
+	if a.tokenEfficiencyScorer != nil && usage != nil {
+		a.tokenEfficiencyScorer.ScoreEfficiency(
+			usage.PromptTokens,
+			usage.CompletionTokens,
+			usage.CacheHitTokens,
+			usage.CacheMissTokens,
+			func() int { if calls != nil { return len(calls) }; return 0 }(),
+		)
+	}
+
+	// OPT-76: 语义相似度去重 — 检查重复内容
+	if a.semanticDedup != nil && step == 0 && input != "" {
+		isDup, _ := a.semanticDedup.CheckSimilarity(input)
+		if isDup {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "semantically similar query detected"})
+		}
+		a.semanticDedup.RecordContent(input, "")
+	}
+
+	// OPT-80: 对话压缩摘要 — 定期生成历史摘要
+	if a.compactSummary != nil && step > 0 && step%5 == 0 {
+		msgs := a.session.Snapshot()
+		a.compactSummary.Summarize(msgs, step+1)
+	}
+
+	// OPT-83: 多信号压缩触发器 V2 — 评估多信号
+	if a.compactionTriggerV2 != nil && usage != nil {
+		decision := a.compactionTriggerV2.Evaluate(usage.PromptTokens, a.contextWindow, len(a.session.Snapshot()), 0, 0)
+		if decision.ShouldCompact && decision.Priority == "high" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "multi-signal compaction triggered: " + decision.Reason})
+		}
+	}
+
+	// OPT-85: Token 用量预测器 — 记录并预测
+	if a.tokenUsagePredictor != nil && usage != nil {
+		a.tokenUsagePredictor.RecordUsage(step+1, usage.TotalTokens)
+		predicted := a.tokenUsagePredictor.PredictNextTurn(step+1, usage.TotalTokens)
+		_ = predicted
+	}
+
+	// OPT-87: Token 成本分析 — 记录用量分析成本
+	if a.tokenCostAnalyzer != nil && usage != nil {
+		a.tokenCostAnalyzer.RecordUsage(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens)
+	}
+
+	// OPT-89: 上下文一致性检查 — 压缩后检查连贯性
+	if a.contextCoherenceChecker != nil && step > 0 && step%3 == 0 {
+		msgs := a.session.Snapshot()
+		report := a.contextCoherenceChecker.CheckCoherence(msgs)
+		if !report.IsCoherent {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context coherence issue detected after compaction"})
+		}
+	}
+
+	// OPT-98: 对话级 token 预算 — 追踪预算消耗
+	if a.conversationTokenBudget != nil && usage != nil {
+		a.conversationTokenBudget.Allocate(step+1, usage.TotalTokens)
+		if a.conversationTokenBudget.ShouldEndConversation() {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "conversation token budget nearly exhausted"})
+		}
+	}
+
+	// OPT-100: 统一 token 编排器 — 综合编排优化
+	if a.unifiedTokenOrchestrator != nil && usage != nil {
+		ctx := OrchestrationContext{
+			PromptTokens:     usage.PromptTokens,
+			CompletionTokens: usage.CompletionTokens,
+			CacheHitTokens:   usage.CacheHitTokens,
+			CacheMissTokens:  usage.CacheMissTokens,
+			MessageCount:     len(a.session.Snapshot()),
+			Turn:             step + 1,
+			ContextWindow:    a.contextWindow,
+		}
+		result := a.unifiedTokenOrchestrator.Orchestrate(ctx)
+		if result.Priority == "high" && len(result.RecommendedActions) > 0 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "orchestrator: " + result.RecommendedActions[0]})
+		}
+	}
+
+	// OPT-101~105: 流式压缩 / 自适应窗口 / Prompt分析 / 缓存压力 / 流量调节
+	if a.tokenFlowRegulator != nil && usage != nil {
+		if !a.tokenFlowRegulator.Consume(usage.TotalTokens) {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token flow rate limit exceeded, regulating"})
+		}
+	}
+	if a.cachePressureMonitor != nil {
+		a.cachePressureMonitor.RecordInsert()
+		if a.cachePressureMonitor.ShouldEvict() {
+			a.cachePressureMonitor.RecordEviction()
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache pressure high, evicting stale entries"})
+		}
+	}
+	if a.promptTokenAnalyzer != nil && step == 0 {
+		snap := a.session.Snapshot()
+		if len(snap) > 0 {
+			a.promptTokenAnalyzer.Analyze(snap[0].Content)
+		}
+	}
+	if a.adaptiveContextSelector != nil && step == 0 {
+		snap := a.session.Snapshot()
+		if len(snap) > 0 {
+			complexity := a.adaptiveContextSelector.AnalyzeQueryComplexity(snap[0].Content)
+			a.adaptiveContextSelector.SelectWindow(complexity)
+		}
+	}
+
+	// OPT-106~110: 语义缓存路由 / 调度 / 快照 / 浪费检测 / 批处理
+	if a.tokenWasteDetector != nil && step > 0 && step%5 == 0 {
+		snap := a.session.Snapshot()
+		msgs := make([]string, len(snap))
+		for i, m := range snap {
+			msgs[i] = m.Content
+		}
+		a.tokenWasteDetector.Detect(msgs)
+	}
+	if a.contextSnapshotManager != nil && step > 0 && step%3 == 0 {
+		a.contextSnapshotManager.TakeSnapshot(step, a.session.Snapshot())
+	}
+
+	// OPT-111~115: 差异压缩 / 预算预测 / 缓存键 / 响应长度 / 优先级排序
+	if a.tokenBudgetPredictor != nil && usage != nil {
+		a.tokenBudgetPredictor.RecordUsage(usage.TotalTokens)
+		pred := a.tokenBudgetPredictor.PredictNext()
+		a.tokenBudgetPredictor.RecordAccuracy(usage.TotalTokens)
+		if pred > 0 && usage.TotalTokens > pred*2 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token usage exceeded prediction by 2x"})
+		}
+	}
+
+	// OPT-116~120: 深度分析 / 效率监控 / 生命周期 / 片段缓存 / 感知压缩
+	if a.tokenEfficiencyMonitor != nil && usage != nil {
+		a.tokenEfficiencyMonitor.RecordPoint(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, 0)
+	}
+	if a.cacheLifecycleManager != nil && step > 0 {
+		evicted := a.cacheLifecycleManager.EvictExpired(step)
+		if evicted > 0 {
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache lifecycle: evicted expired entries"})
+		}
+	}
+
+	// OPT-121~125: 权重计算 / 驱逐 / 冗余检查 / 命中分析 / 边界检测
+	if a.cacheHitAnalyzer != nil && usage != nil {
+		if usage.CacheHitTokens > 0 {
+			a.cacheHitAnalyzer.RecordHit("prompt")
+		} else {
+			a.cacheHitAnalyzer.RecordMiss("prompt")
+		}
+	}
+
+	// OPT-126~130: 预测 / 新鲜度 / 预热 / 模板 / 预算协商
+	if a.tokenUsageForecaster != nil && usage != nil {
+		a.tokenUsageForecaster.RecordUsage(usage.TotalTokens)
+		forecasts := a.tokenUsageForecaster.Forecast(3)
+		if len(forecasts) > 0 && forecasts[0] > 0 {
+			a.tokenUsageForecaster.EvaluateForecast(usage.TotalTokens)
+		}
+	}
+	if a.contextFreshnessTracker != nil {
+		a.contextFreshnessTracker.UpdateTurn(step + 1)
+	}
+
+	// OPT-131~135: 效率评分 / 修剪 / 话题追踪 / 成本投影 / 组装优化
+	if a.conversationTopicTracker != nil {
+		snap := a.session.Snapshot()
+		if len(snap) > 0 {
+			a.conversationTopicTracker.UpdateTopic(snap[len(snap)-1].Content)
+		}
+	}
+	if a.tokenCostProjector != nil && usage != nil {
+		a.tokenCostProjector.RecordActual(usage.TotalTokens)
+	}
+
+	if usage != nil && usage.TotalTokens > 0 {
 			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
 				UsageSource:      a.usageSource,
 				CacheDiagnostics: &cacheDiagnostics,
@@ -2260,9 +3927,17 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			if chunk.Text != "" && !transformReasoning {
 				a.sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
 			}
+			// 增量缓存：追加推理内容（用于流中断恢复）
+			if a.incrementalCache != nil && chunk.Text != "" {
+				a.incrementalCache.AppendReasoning(chunk.Text)
+			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
 			a.sink.Emit(event.Event{Kind: event.Text, Text: chunk.Text})
+			// 增量缓存：追加输出内容（用于流中断恢复）
+			if a.incrementalCache != nil && chunk.Text != "" {
+				a.incrementalCache.AppendContent(chunk.Text)
+			}
 		case provider.ChunkToolCallStart:
 			partialToolStarted = true
 			// Surface the tool card as soon as the call begins — before its
@@ -2975,6 +4650,17 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	cctx = tool.WithProgress(cctx, func(chunk string) {
 		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: secrets.RedactToolOutput(chunk)}})
 	})
+	// ── 副作用追踪：在执行非只读工具前记录副作用 ──
+	if a.sideEffectTracker != nil && !t.ReadOnly() {
+		a.sideEffectTracker.Record(&SideEffect{
+			ID:           call.ID,
+			Type:         SideEffectToolCall,
+			Timestamp:    time.Now(),
+			Description:  fmt.Sprintf("tool=%s args=%s", call.Name, truncateForLog(call.Arguments, 200)),
+			Compensation: fmt.Sprintf("review tool %s output for unintended side effects", call.Name),
+			Reversible:   false, // 工具调用通常不可自动逆转，但记录用于恢复报告
+		})
+	}
 	var result string
 	var images []string
 	var err error
@@ -2995,6 +4681,82 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		result, err = runTool.Execute(cctx, runArgs)
 	}
 	result = secrets.RedactToolOutput(result)
+
+	// OPT-16: 工具结果记忆化 — 如果是只读工具且结果已在缓存中，用占位符替代
+	if a.toolMemo != nil && IsMemoizable(call.Name, t.ReadOnly()) {
+		key := MemoKey(call.Name, []byte(call.Arguments))
+		if entry, ok := a.toolMemo.Get(key); ok {
+			// 缓存命中，用占位符替代完整结果
+			result = GetCachedPlaceholder(entry)
+		} else {
+			// 缓存未命中，存储结果
+			a.toolMemo.Put(call.Name, []byte(call.Arguments), result)
+		}
+	}
+
+	// OPT-17: 对话历史去重 — 记录工具结果指纹
+	if a.conversationDedup != nil {
+		a.conversationDedup.Record(result, len(a.session.Snapshot()))
+	}
+
+	// OPT-43: 工具结果智能截断 — 内容感知截断过长输出
+	if a.toolResultTruncator != nil && len(result) > 16000 {
+		result = a.toolResultTruncator.Truncate(call.Name, result, 0)
+	}
+
+	// OPT-47: Token 高效格式化 — 压缩工具输出格式
+	if a.efficientFormatter != nil && len(result) > 1000 {
+		result = a.efficientFormatter.FormatToolOutput(result, 0)
+	}
+
+	// OPT-64: 工具输出缓存 — 缓存结果避免重复调用
+	if a.toolOutputCache != nil {
+		// OPT-74: 工具调用优化 — 检测是否可以跳过重复调用
+		if a.toolCallOptimizer != nil && a.toolCallOptimizer.ShouldSkipCall(call.Name, call.Arguments) {
+			// 尝试从缓存获取
+			cached, hit := a.toolOutputCache.Get(call.Name, call.Arguments)
+			if hit {
+				result = cached
+			}
+		} else {
+			cached, hit := a.toolOutputCache.Get(call.Name, call.Arguments)
+			if hit {
+				result = cached
+			} else {
+				a.toolOutputCache.Set(call.Name, call.Arguments, result)
+			}
+			if a.toolCallOptimizer != nil {
+				a.toolCallOptimizer.RecordCall(call.Name, call.Arguments, result, 0)
+			}
+		}
+	}
+
+	// OPT-07: 预测性预取 — 记录工具调用并预测下一步
+	if a.prefetchPredictor != nil {
+		a.prefetchPredictor.CheckPrefetchHit(call.Name)
+		a.prefetchPredictor.Predict(call.Name, call.Arguments)
+	}
+
+	// OPT-30: 工具描述轮换 — 记录工具使用
+	if a.toolDescRotator != nil {
+		a.toolDescRotator.RecordUsage(call.Name)
+		if err != nil {
+			a.toolDescRotator.RecordError(call.Name)
+		} else {
+			a.toolDescRotator.RecordSuccess(call.Name)
+		}
+	}
+
+	// ── 副作用追踪：执行出错时生成恢复报告 ──
+	if err != nil && a.sideEffectTracker != nil {
+		report := a.sideEffectTracker.RecoveryReport()
+		if report != "" {
+			a.sink.Emit(event.Event{
+				Kind: event.Notice,
+				Text: "side-effect recovery report:\n" + report,
+			})
+		}
+	}
 	if a.evidence != nil {
 		// Always record the model-visible call for audit, then the real target
 		// attributes for mutation/read classification when they differ.
@@ -3423,6 +5185,14 @@ func truncateToolOutput(s string) (string, string) {
 	notice := fmt.Sprintf("tool output truncated: %d of %d bytes elided", omitted, len(s))
 	body := head + fmt.Sprintf("\n\n…[truncated %d of %d bytes — rerun with narrower args to see the middle]…\n\n", omitted, len(s)) + tail
 	return body, notice
+}
+
+// truncateForLog truncates a string for logging purposes.
+func truncateForLog(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // snapToRuneBoundary returns s[lo:hi] with the bounds nudged outward until

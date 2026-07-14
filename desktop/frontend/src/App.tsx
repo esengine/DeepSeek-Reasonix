@@ -53,6 +53,7 @@ import { ClearContextCard } from "./components/ClearContextCard";
 /** Footer decision surface kinds. Priority: tool/plan approval > ask > clear context. */
 type DecisionSurfaceKind = "tool_approval" | "plan_approval" | "ask" | "clear_context";
 import { StatusBar } from "./components/StatusBar";
+import { PhantomPanel } from "./components/PhantomPanel";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
@@ -3924,6 +3925,8 @@ export default function App() {
             />
           </footer>
           )}
+          {/* 虚空 UI 面板 — 嵌入主窗口底部，零 token 更新 */}
+          <PhantomPanel />
           </>
         </section>
 

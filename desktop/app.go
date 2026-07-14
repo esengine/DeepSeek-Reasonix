@@ -202,6 +202,22 @@ type App struct {
 	skillRootsCache skillRootsCache
 
 	heartbeat *HeartbeatEngine // scheduled heartbeat tasks; nil until startup
+
+	// phantomRegistry 管理虚空 UI 条目（零 token 更新中心）
+	// 每个 WorkspaceTab 的状态变更通过 Go channel 异步推送到前端
+	phantomRegistry *PhantomRegistry
+
+	// cacheGuardian 守护缓存前缀稳定性，减少 system prompt swap 导致的缓存失效
+	cacheGuardian *CachePrefixGuardian
+
+	// prefixFingerprintRegistry 跨 Tab 共享 system prompt 指纹
+	prefixFingerprintRegistry *PrefixFingerprintRegistry
+
+	// leaseRecovery 自动恢复崩溃残留的 session lease
+	leaseRecovery *SessionLeaseRecovery
+
+	// cacheWarmup OPT-15 跨会话缓存预热
+	cacheWarmup *CacheWarmupManager
 }
 
 type skillRootsCache struct {
@@ -389,12 +405,19 @@ func (a *App) workspaceMediaMiddleware() func(http.Handler) http.Handler {
 // NewApp constructs the bound object. Tabs are restored in startup from the
 // last session's desktop-tabs.json.
 func NewApp() *App {
+	prefixRegistry := NewPrefixFingerprintRegistry()
+	phantomReg := NewPhantomRegistry()
 	a := &App{
-		tabs:             map[string]*WorkspaceTab{},
-		detachedSessions: map[string]*WorkspaceTab{},
-		mediaTokens:      newMediaTokenStore(),
-		botInstalls:      map[string]*botInstallSession{},
-		botRuntime:       newDesktopBotRuntime(),
+		tabs:                      map[string]*WorkspaceTab{},
+		detachedSessions:          map[string]*WorkspaceTab{},
+		mediaTokens:               newMediaTokenStore(),
+		botInstalls:               map[string]*botInstallSession{},
+		botRuntime:                newDesktopBotRuntime(),
+		phantomRegistry:           phantomReg,
+		prefixFingerprintRegistry: prefixRegistry,
+		cacheGuardian:             NewCachePrefixGuardian(prefixRegistry),
+		leaseRecovery:             NewSessionLeaseRecovery(),
+		cacheWarmup:               NewCacheWarmupManager(phantomReg),
 	}
 	a.botBridge = a.newBotBridge()
 	return a
@@ -421,6 +444,18 @@ func (a *App) startup(ctx context.Context) {
 	installSystemQuitHook()
 	a.startTray()
 	a.enableDeferredRebuildRetry()
+
+	// 启动虚空 UI 事件推送
+	a.startPhantomPanel(ctx)
+
+	// 设置全局缓存守护者
+	globalCacheGuardian = a.cacheGuardian
+	globalPrefixRegistry = a.prefixFingerprintRegistry
+
+	// OPT-15: 启动缓存预热清理循环
+	if a.cacheWarmup != nil {
+		a.cacheWarmup.StartCleanupLoop(ctx)
+	}
 
 	if cfg, err := config.Load(); err == nil && cfg.DesktopMetrics() && version != "dev" {
 		a.metrics.Store(newMetricsAggregator(config.MemoryUserDir()))

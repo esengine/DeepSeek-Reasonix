@@ -286,6 +286,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
 
+	// ── 分层缓存优化 ──
+	// 将 System Prompt 按稳定性分层：稳定层在前，易变层在后。
+	// Provider 的 prompt cache 按 prefix 匹配，稳定层始终命中，易变层 miss 只损失最后一段。
+	//
+	// L1 绝对稳定: base_prompt + output_style + user_decision_policy + language_policy
+	// L2 会话稳定: memory + skills_index
+	// L3 可能变化: workspace_line + token_economy + environment_probes
 	sysPrompt, err := cfg.ResolveSystemPromptForRoot(root)
 	if err != nil {
 		return nil, err
@@ -296,8 +303,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if st, ok := outputstyle.Resolve(cfg.Agent.OutputStyle, outputstyle.Dirs()); ok {
 		sysPrompt = outputstyle.Apply(sysPrompt, st)
 	}
+
+	// L1: 绝对稳定层 — 跨 session 不变
 	sysPrompt += "\n\n" + config.UserDecisionPolicy
 	sysPrompt += "\n\n" + config.LanguagePolicy
+
+	// L3: 可能变化层 — 放在最后，miss 只损失这段
 	if workspaceLine := currentWorkspacePromptLine(root); workspaceLine != "" {
 		sysPrompt += "\n\n" + workspaceLine
 	}
@@ -330,6 +341,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 
+	// L2: 会话稳定层 — 同一 session 内不变
 	// Persistent memory (REASONIX.md / AGENTS.md hierarchy + auto-memory index)
 	// folds into the system prompt exactly here, once: it becomes part of the
 	// durable, cache-stable prefix every turn reuses, so memory costs nothing per
@@ -361,6 +373,33 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	allSkills := allSkillStore.List()
 	if !tokenEconomy {
 		sysPrompt = skill.ApplyIndex(sysPrompt, skills)
+	}
+
+	// L3: 可能变化层 — 放在最后，miss 只损失这段
+	if workspaceLine := currentWorkspacePromptLine(root); workspaceLine != "" {
+		sysPrompt += "\n\n" + workspaceLine
+	}
+	if tokenEconomy {
+		sysPrompt += "\n\n" + tokenEconomyPrompt
+	}
+	if cfg.EnvironmentEnabled() {
+		shellLabel := shell.Kind.String()
+		if strings.TrimSpace(cfg.Tools.Shell.Path) != "" {
+			shellLabel = shell.Path
+		}
+		envSection := environment.FormatSection(
+			environment.RunProbesWithOptions(ctx, environment.DefaultProbes(), environment.ProbeOptions{
+				Overrides:   cfg.Environment.Tools,
+				DenyRoots:   []string{root},
+				SnapshotDir: config.CacheDir(),
+			}),
+			runtime.GOOS+"/"+runtime.GOARCH,
+			shellLabel,
+			cfg.Environment.Tools,
+		)
+		if envSection != "" {
+			sysPrompt += "\n\n" + envSection
+		}
 	}
 
 	reg := tool.NewRegistry()

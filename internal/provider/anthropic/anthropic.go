@@ -314,19 +314,71 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		tools = append(tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: schema})
 	}
 
-	// Prompt-cache breakpoints (ephemeral, prefix-match). Render order is
-	// tools → system → messages, so a marker on the last system block caches
-	// tools+system together; with no system, mark the last tool. A marker on the
-	// last block of the last message caches the conversation prefix, accruing hits
-	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2.
-	if n := len(system); n > 0 {
-		system[n-1].CacheControl = ephemeral()
-	} else if n := len(tools); n > 0 {
-		tools[n-1].CacheControl = ephemeral()
+	// OPT-11: Four-tier cache breakpoint strategy (max 4 allowed by API).
+	// Render order is tools → system → messages, so breakpoints must follow
+	// this order to maintain prefix causality.
+	//
+	// Tier 1: Last tool definition — caches the tool catalog (stable across turns)
+	// Tier 2: Last system block — caches system+tools (stable within a session)
+	// Tier 3: Second-to-last user message — caches early conversation (grows slowly)
+	// Tier 4: Last message block — caches the latest turn (accrues hits per turn)
+	//
+	// This gives ~90% cache read discount on tiers 1-2 (rarely change) and
+	// incremental hits on tiers 3-4 (grow per turn), versus the old 2-tier
+	// approach that only cached system+last-message.
+	breakpointsUsed := 0
+	maxBreakpoints := 4
+
+	// Tier 1: Tool catalog breakpoint (if tools exist and we have room)
+	if breakpointsUsed < maxBreakpoints {
+		if n := len(tools); n > 0 {
+			tools[n-1].CacheControl = ephemeral()
+			breakpointsUsed++
+		}
 	}
-	if n := len(msgs); n > 0 {
-		if k := len(msgs[n-1].Content); k > 0 {
-			msgs[n-1].Content[k-1].CacheControl = ephemeral()
+
+	// Tier 2: System prompt breakpoint (if system exists and we have room)
+	if breakpointsUsed < maxBreakpoints {
+		if n := len(system); n > 0 {
+			system[n-1].CacheControl = ephemeral()
+			breakpointsUsed++
+		}
+	}
+
+	// Tier 3: Early conversation breakpoint — place on the second-to-last
+	// user turn to cache the stable conversation prefix. This breakpoint
+	// accrues cache hits as the conversation grows, because the prefix up
+	// to this point rarely changes.
+	if breakpointsUsed < maxBreakpoints && len(msgs) >= 4 {
+		// Find the second-to-last user message (at least 2 turns back)
+		userMsgIndices := make([]int, 0, len(msgs))
+		for i, m := range msgs {
+			if m.Role == "user" {
+				userMsgIndices = append(userMsgIndices, i)
+			}
+		}
+		if len(userMsgIndices) >= 2 {
+			// Pick the second-to-last user message, but not too early
+			// (want at least 2 messages before it for a meaningful prefix)
+			idx := userMsgIndices[len(userMsgIndices)-2]
+			if idx >= 1 {
+				if k := len(msgs[idx].Content); k > 0 {
+					msgs[idx].Content[k-1].CacheControl = ephemeral()
+					breakpointsUsed++
+				}
+			}
+		}
+	}
+
+	// Tier 4: Last message breakpoint — caches the full conversation prefix
+	// up to the current turn. This is the highest-value breakpoint because
+	// it captures the entire conversation history.
+	if breakpointsUsed < maxBreakpoints {
+		if n := len(msgs); n > 0 {
+			if k := len(msgs[n-1].Content); k > 0 {
+				msgs[n-1].Content[k-1].CacheControl = ephemeral()
+				breakpointsUsed++
+			}
 		}
 	}
 
