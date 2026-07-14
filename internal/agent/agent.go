@@ -708,6 +708,16 @@ type Agent struct {
 	tokenAwareThrottler *TokenAwareThrottler
 	// OPT-160: 提示分段索引器
 	promptSegmentIndexer *PromptSegmentIndexer
+	// OPT-161: Token 感知优先级器V2
+	tokenAwarePrioritizerV2 *TokenAwarePrioritizerV2
+	// OPT-162: 缓存预取调度器
+	cachePrefetchScheduler *CachePrefetchScheduler
+	// OPT-163: 上下文窗口监控器
+	contextWindowMonitor *ContextWindowMonitor
+	// OPT-164: Token 感知去重器
+	tokenAwareDeduplicator *TokenAwareDeduplicator
+	// OPT-165: 提示组装优化器
+	promptAssemblyOptimizer *PromptAssemblyOptimizer
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1804,6 +1814,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextPruningEngine := NewContextPruningEngine(32768)
 	tokenAwareThrottler := NewTokenAwareThrottler(100000, 60)
 	promptSegmentIndexer := NewPromptSegmentIndexer()
+	tokenAwarePrioritizerV2 := NewTokenAwarePrioritizerV2()
+	cachePrefetchScheduler := NewCachePrefetchScheduler(4)
+	contextWindowMonitor := NewContextWindowMonitor(32768)
+	tokenAwareDeduplicator := NewTokenAwareDeduplicator(0.85)
+	promptAssemblyOptimizer := NewPromptAssemblyOptimizer()
 
 	a := &Agent{
 		prov:                     prov,
@@ -1983,6 +1998,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextPruningEngine:     contextPruningEngine,
 		tokenAwareThrottler:      tokenAwareThrottler,
 		promptSegmentIndexer:     promptSegmentIndexer,
+		tokenAwarePrioritizerV2:  tokenAwarePrioritizerV2,
+		cachePrefetchScheduler:   cachePrefetchScheduler,
+		contextWindowMonitor:     contextWindowMonitor,
+		tokenAwareDeduplicator:   tokenAwareDeduplicator,
+		promptAssemblyOptimizer:  promptAssemblyOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2549,6 +2569,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptSegmentIndexer != nil {
 		stats["opt160_promptSegmentIndexer"] = a.promptSegmentIndexer.GetStats()
+	}
+	if a.tokenAwarePrioritizerV2 != nil {
+		stats["opt161_tokenAwarePrioritizerV2"] = a.tokenAwarePrioritizerV2.GetStats()
+	}
+	if a.cachePrefetchScheduler != nil {
+		stats["opt162_cachePrefetchScheduler"] = a.cachePrefetchScheduler.GetStats()
+	}
+	if a.contextWindowMonitor != nil {
+		stats["opt163_contextWindowMonitor"] = a.contextWindowMonitor.GetStats()
+	}
+	if a.tokenAwareDeduplicator != nil {
+		stats["opt164_tokenAwareDeduplicator"] = a.tokenAwareDeduplicator.GetStats()
+	}
+	if a.promptAssemblyOptimizer != nil {
+		stats["opt165_promptAssemblyOptimizer"] = a.promptAssemblyOptimizer.GetStats()
 	}
 	return stats
 }
@@ -3241,6 +3276,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.cacheWarmingStrategy != nil && usage != nil && usage.PromptTokens > 0 {
 		a.cacheWarmingStrategy.RecordAccess("prompt")
+	}
+
+	// OPT-161~165: 优先级 / 预取 / 窗口监控 / 去重 / 组装优化
+	if a.contextWindowMonitor != nil && usage != nil {
+		a.contextWindowMonitor.Record(usage.TotalTokens)
+	}
+	if a.cachePrefetchScheduler != nil && usage != nil && usage.PromptTokens > 0 {
+		a.cachePrefetchScheduler.Schedule("next_prompt", 1, usage.PromptTokens)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
