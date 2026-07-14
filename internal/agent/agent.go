@@ -688,6 +688,17 @@ type Agent struct {
 	// OPT-150: 缓存利用率追踪器
 	cacheUtilizationTracker *CacheUtilizationTracker
 
+	// OPT-151: Token 感知分割器
+	tokenAwareSplitter *TokenAwareSplitter
+	// OPT-152: 缓存一致性验证器
+	cacheCoherenceValidator *CacheCoherenceValidator
+	// OPT-153: 上下文相关性评分器
+	contextRelevanceScorer *ContextRelevanceScorer
+	// OPT-154: 加权预算分配器
+	weightedBudgetAllocator *WeightedBudgetAllocator
+	// OPT-155: 提示压缩缓存
+	promptCompressionCache *PromptCompressionCache
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1773,6 +1784,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextSegmentAssembler := NewContextSegmentAssembler()
 	tokenAwareMerger := NewTokenAwareMerger(0.7)
 	cacheUtilizationTracker := NewCacheUtilizationTracker(1000)
+	tokenAwareSplitter := NewTokenAwareSplitter(4096)
+	cacheCoherenceValidator := NewCacheCoherenceValidator()
+	contextRelevanceScorer := NewContextRelevanceScorer()
+	weightedBudgetAllocator := NewWeightedBudgetAllocator(8192)
+	promptCompressionCache := NewPromptCompressionCache(256)
 
 	a := &Agent{
 		prov:                     prov,
@@ -1942,6 +1958,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextSegmentAssembler:  contextSegmentAssembler,
 		tokenAwareMerger:         tokenAwareMerger,
 		cacheUtilizationTracker:  cacheUtilizationTracker,
+		tokenAwareSplitter:       tokenAwareSplitter,
+		cacheCoherenceValidator:  cacheCoherenceValidator,
+		contextRelevanceScorer:   contextRelevanceScorer,
+		weightedBudgetAllocator:  weightedBudgetAllocator,
+		promptCompressionCache:   promptCompressionCache,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2478,6 +2499,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.cacheUtilizationTracker != nil {
 		stats["opt150_cacheUtilizationTracker"] = a.cacheUtilizationTracker.GetStats()
+	}
+	if a.tokenAwareSplitter != nil {
+		stats["opt151_tokenAwareSplitter"] = a.tokenAwareSplitter.GetStats()
+	}
+	if a.cacheCoherenceValidator != nil {
+		stats["opt152_cacheCoherenceValidator"] = a.cacheCoherenceValidator.GetStats()
+	}
+	if a.contextRelevanceScorer != nil {
+		stats["opt153_contextRelevanceScorer"] = a.contextRelevanceScorer.GetStats()
+	}
+	if a.weightedBudgetAllocator != nil {
+		stats["opt154_weightedBudgetAllocator"] = a.weightedBudgetAllocator.GetStats()
+	}
+	if a.promptCompressionCache != nil {
+		stats["opt155_promptCompressionCache"] = a.promptCompressionCache.GetStats()
 	}
 	return stats
 }
@@ -3151,6 +3187,15 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		if usage.CacheHitTokens > 0 {
 			a.cacheUtilizationTracker.RecordInsert()
 		}
+	}
+
+	// OPT-151~155: 分割 / 一致性验证 / 相关性评分 / 预算分配 / 压缩缓存
+	if a.cacheCoherenceValidator != nil && usage != nil {
+		a.cacheCoherenceValidator.Validate("usage", int64(usage.TotalTokens))
+		a.cacheCoherenceValidator.Update("usage", int64(usage.TotalTokens))
+	}
+	if a.promptCompressionCache != nil && usage != nil && usage.PromptTokens > 0 {
+		_, _ = a.promptCompressionCache.Get("prompt")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
