@@ -698,6 +698,16 @@ type Agent struct {
 	weightedBudgetAllocator *WeightedBudgetAllocator
 	// OPT-155: 提示压缩缓存
 	promptCompressionCache *PromptCompressionCache
+	// OPT-156: Token 感知分片器
+	tokenAwareFragmenter *TokenAwareFragmenter
+	// OPT-157: 缓存预热策略器
+	cacheWarmingStrategy *CacheWarmingStrategy
+	// OPT-158: 上下文修剪引擎
+	contextPruningEngine *ContextPruningEngine
+	// OPT-159: Token 感知限流器
+	tokenAwareThrottler *TokenAwareThrottler
+	// OPT-160: 提示分段索引器
+	promptSegmentIndexer *PromptSegmentIndexer
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1789,6 +1799,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextRelevanceScorer := NewContextRelevanceScorer()
 	weightedBudgetAllocator := NewWeightedBudgetAllocator(8192)
 	promptCompressionCache := NewPromptCompressionCache(256)
+	tokenAwareFragmenter := NewTokenAwareFragmenter(512)
+	cacheWarmingStrategy := NewCacheWarmingStrategy(3)
+	contextPruningEngine := NewContextPruningEngine(32768)
+	tokenAwareThrottler := NewTokenAwareThrottler(100000, 60)
+	promptSegmentIndexer := NewPromptSegmentIndexer()
 
 	a := &Agent{
 		prov:                     prov,
@@ -1963,6 +1978,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextRelevanceScorer:   contextRelevanceScorer,
 		weightedBudgetAllocator:  weightedBudgetAllocator,
 		promptCompressionCache:   promptCompressionCache,
+		tokenAwareFragmenter:     tokenAwareFragmenter,
+		cacheWarmingStrategy:     cacheWarmingStrategy,
+		contextPruningEngine:     contextPruningEngine,
+		tokenAwareThrottler:      tokenAwareThrottler,
+		promptSegmentIndexer:     promptSegmentIndexer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2514,6 +2534,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCompressionCache != nil {
 		stats["opt155_promptCompressionCache"] = a.promptCompressionCache.GetStats()
+	}
+	if a.tokenAwareFragmenter != nil {
+		stats["opt156_tokenAwareFragmenter"] = a.tokenAwareFragmenter.GetStats()
+	}
+	if a.cacheWarmingStrategy != nil {
+		stats["opt157_cacheWarmingStrategy"] = a.cacheWarmingStrategy.GetStats()
+	}
+	if a.contextPruningEngine != nil {
+		stats["opt158_contextPruningEngine"] = a.contextPruningEngine.GetStats()
+	}
+	if a.tokenAwareThrottler != nil {
+		stats["opt159_tokenAwareThrottler"] = a.tokenAwareThrottler.GetStats()
+	}
+	if a.promptSegmentIndexer != nil {
+		stats["opt160_promptSegmentIndexer"] = a.promptSegmentIndexer.GetStats()
 	}
 	return stats
 }
@@ -3196,6 +3231,16 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptCompressionCache != nil && usage != nil && usage.PromptTokens > 0 {
 		_, _ = a.promptCompressionCache.Get("prompt")
+	}
+
+	// OPT-156~160: 分片 / 预热策略 / 修剪 / 限流 / 分段索引
+	if a.tokenAwareThrottler != nil && usage != nil {
+		if !a.tokenAwareThrottler.Allow(usage.TotalTokens) {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token throttle triggered"})
+		}
+	}
+	if a.cacheWarmingStrategy != nil && usage != nil && usage.PromptTokens > 0 {
+		a.cacheWarmingStrategy.RecordAccess("prompt")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
