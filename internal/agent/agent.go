@@ -538,6 +538,21 @@ type Agent struct {
 	// OPT-100: 统一 token 编排器 — 编排所有 OPT 模块
 	unifiedTokenOrchestrator *UnifiedTokenOrchestrator
 
+	// OPT-101: 实时流式 token 压缩器
+	tokenStreamCompressor *TokenStreamCompressor
+
+	// OPT-102: 自适应上下文窗口选择器
+	adaptiveContextSelector *AdaptiveContextSelector
+
+	// OPT-103: Prompt token 深度分析器
+	promptTokenAnalyzer *PromptTokenAnalyzer
+
+	// OPT-104: 缓存压力监控器
+	cachePressureMonitor *CachePressureMonitor
+
+	// OPT-105: Token 流量调节器
+	tokenFlowRegulator *TokenFlowRegulator
+
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
 	// every following round, so the first notice carries the signal and
@@ -1554,6 +1569,13 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	smartContextPruner := NewSmartContextPruner()
 	unifiedTokenOrchestrator := NewUnifiedTokenOrchestrator()
 
+	// ── OPT-101~105 集成 ──
+	tokenStreamCompressor := NewTokenStreamCompressor()
+	adaptiveContextSelector := NewAdaptiveContextSelector(opts.ContextWindow)
+	promptTokenAnalyzer := NewPromptTokenAnalyzer()
+	cachePressureMonitor := NewCachePressureMonitor(1000)
+	tokenFlowRegulator := NewTokenFlowRegulator(opts.ContextWindow, opts.ContextWindow/4)
+
 	a := &Agent{
 		prov:                     prov,
 		tools:                    tools,
@@ -1672,6 +1694,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		conversationTokenBudget:  conversationTokenBudget,
 		smartContextPruner:       smartContextPruner,
 		unifiedTokenOrchestrator: unifiedTokenOrchestrator,
+		tokenStreamCompressor:    tokenStreamCompressor,
+		adaptiveContextSelector:  adaptiveContextSelector,
+		promptTokenAnalyzer:      promptTokenAnalyzer,
+		cachePressureMonitor:     cachePressureMonitor,
+		tokenFlowRegulator:       tokenFlowRegulator,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2058,6 +2085,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.unifiedTokenOrchestrator != nil {
 		stats["opt100_unifiedTokenOrchestrator"] = a.unifiedTokenOrchestrator.GetStats()
+	}
+	if a.tokenStreamCompressor != nil {
+		stats["opt101_tokenStreamCompressor"] = a.tokenStreamCompressor.GetStats()
+	}
+	if a.adaptiveContextSelector != nil {
+		stats["opt102_adaptiveContextSelector"] = a.adaptiveContextSelector.GetStats()
+	}
+	if a.promptTokenAnalyzer != nil {
+		stats["opt103_promptTokenAnalyzer"] = a.promptTokenAnalyzer.GetStats()
+	}
+	if a.cachePressureMonitor != nil {
+		stats["opt104_cachePressureMonitor"] = a.cachePressureMonitor.GetStats()
+	}
+	if a.tokenFlowRegulator != nil {
+		stats["opt105_tokenFlowRegulator"] = a.tokenFlowRegulator.GetStats()
 	}
 	return stats
 }
@@ -2610,6 +2652,33 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		result := a.unifiedTokenOrchestrator.Orchestrate(ctx)
 		if result.Priority == "high" && len(result.RecommendedActions) > 0 {
 			a.sink.Emit(event.Event{Kind: event.Notice, Text: "orchestrator: " + result.RecommendedActions[0]})
+		}
+	}
+
+	// OPT-101~105: 流式压缩 / 自适应窗口 / Prompt分析 / 缓存压力 / 流量调节
+	if a.tokenFlowRegulator != nil && usage != nil {
+		if !a.tokenFlowRegulator.Consume(usage.TotalTokens) {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token flow rate limit exceeded, regulating"})
+		}
+	}
+	if a.cachePressureMonitor != nil {
+		a.cachePressureMonitor.RecordInsert()
+		if a.cachePressureMonitor.ShouldEvict() {
+			a.cachePressureMonitor.RecordEviction()
+			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache pressure high, evicting stale entries"})
+		}
+	}
+	if a.promptTokenAnalyzer != nil && step == 0 {
+		snap := a.session.Snapshot()
+		if len(snap) > 0 {
+			a.promptTokenAnalyzer.Analyze(snap[0].Content)
+		}
+	}
+	if a.adaptiveContextSelector != nil && step == 0 {
+		snap := a.session.Snapshot()
+		if len(snap) > 0 {
+			complexity := a.adaptiveContextSelector.AnalyzeQueryComplexity(snap[0].Content)
+			a.adaptiveContextSelector.SelectWindow(complexity)
 		}
 	}
 
