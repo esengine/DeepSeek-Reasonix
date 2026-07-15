@@ -856,6 +856,16 @@ type Agent struct {
 	tokenAwareLeakDetector *TokenAwareLeakDetector
 	// OPT-235: 提示缓存温度追踪器
 	promptCacheWarmthTracker *PromptCacheWarmthTracker
+	// OPT-236: Token 感知压力阀
+	tokenAwarePressureValve *TokenAwarePressureValve
+	// OPT-237: 缓存失效聚合器
+	cacheInvalidationAggregator *CacheInvalidationAggregator
+	// OPT-238: 上下文窗口快照管理器
+	contextWindowSnapshotManager *ContextWindowSnapshotManager
+	// OPT-239: Token 感知瓶颈检测器
+	tokenAwareBottleneckDetector *TokenAwareBottleneckDetector
+	// OPT-240: 提示缓存效率监控器
+	promptCacheEfficiencyMonitor *PromptCacheEfficiencyMonitor
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -2026,6 +2036,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowCalibratorV3 := NewContextWindowCalibratorV3(32768, 4096)
 	tokenAwareLeakDetector := NewTokenAwareLeakDetector()
 	promptCacheWarmthTracker := NewPromptCacheWarmthTracker(5)
+	tokenAwarePressureValve := NewTokenAwarePressureValve(50000)
+	cacheInvalidationAggregator := NewCacheInvalidationAggregator(32)
+	contextWindowSnapshotManager := NewContextWindowSnapshotManager(10)
+	tokenAwareBottleneckDetector := NewTokenAwareBottleneckDetector()
+	promptCacheEfficiencyMonitor := NewPromptCacheEfficiencyMonitor()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2279,6 +2294,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowCalibratorV3:     contextWindowCalibratorV3,
 		tokenAwareLeakDetector:        tokenAwareLeakDetector,
 		promptCacheWarmthTracker:      promptCacheWarmthTracker,
+		tokenAwarePressureValve:       tokenAwarePressureValve,
+		cacheInvalidationAggregator:   cacheInvalidationAggregator,
+		contextWindowSnapshotManager:  contextWindowSnapshotManager,
+		tokenAwareBottleneckDetector: tokenAwareBottleneckDetector,
+		promptCacheEfficiencyMonitor:  promptCacheEfficiencyMonitor,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -3068,6 +3088,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheWarmthTracker != nil {
 		stats["opt235_promptCacheWarmthTracker"] = a.promptCacheWarmthTracker.GetStats()
+	}
+	if a.tokenAwarePressureValve != nil {
+		stats["opt236_tokenAwarePressureValve"] = a.tokenAwarePressureValve.GetStats()
+	}
+	if a.cacheInvalidationAggregator != nil {
+		stats["opt237_cacheInvalidationAggregator"] = a.cacheInvalidationAggregator.GetStats()
+	}
+	if a.contextWindowSnapshotManager != nil {
+		stats["opt238_contextWindowSnapshotManager"] = a.contextWindowSnapshotManager.GetStats()
+	}
+	if a.tokenAwareBottleneckDetector != nil {
+		stats["opt239_tokenAwareBottleneckDetector"] = a.tokenAwareBottleneckDetector.GetStats()
+	}
+	if a.promptCacheEfficiencyMonitor != nil {
+		stats["opt240_promptCacheEfficiencyMonitor"] = a.promptCacheEfficiencyMonitor.GetStats()
 	}
 	return stats
 }
@@ -3891,6 +3926,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptCacheWarmthTracker != nil {
 		a.promptCacheWarmthTracker.Warm("usage")
+	}
+
+	// OPT-236~240: 压力阀 / 聚合 / 快照 / 瓶颈 / 效率
+	if a.tokenAwarePressureValve != nil && usage != nil {
+		a.tokenAwarePressureValve.AddPressure(usage.TotalTokens)
+	}
+	if a.promptCacheEfficiencyMonitor != nil && usage != nil {
+		a.promptCacheEfficiencyMonitor.RecordRequest(usage.CacheHitTokens, usage.TotalTokens, usage.CacheHitTokens > 0)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
