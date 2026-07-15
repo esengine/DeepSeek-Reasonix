@@ -816,6 +816,16 @@ type Agent struct {
 	tokenAwarePartitioner *TokenAwarePartitioner
 	// OPT-215: 提示缓存命中分析器
 	promptCacheHitAnalyzer *PromptCacheHitAnalyzer
+	// OPT-216: Token 感知分片管理器
+	tokenAwareShardManager *TokenAwareShardManager
+	// OPT-217: 缓存失效调度器
+	cacheInvalidationScheduler *CacheInvalidationScheduler
+	// OPT-218: 上下文密度分析器
+	contextDensityAnalyzer *ContextDensityAnalyzer
+	// OPT-219: Token 感知重试策略器
+	tokenAwareRetryStrategy *TokenAwareRetryStrategy
+	// OPT-220: 提示缓存优化顾问
+	promptCacheOptimizationAdvisor *PromptCacheOptimizationAdvisor
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1966,6 +1976,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextBudgetAllocator := NewContextBudgetAllocator(32768)
 	tokenAwarePartitioner := NewTokenAwarePartitioner(8, 4096)
 	promptCacheHitAnalyzer := NewPromptCacheHitAnalyzer()
+	tokenAwareShardManager := NewTokenAwareShardManager(16)
+	cacheInvalidationScheduler := NewCacheInvalidationScheduler(300)
+	contextDensityAnalyzer := NewContextDensityAnalyzer()
+	tokenAwareRetryStrategy := NewTokenAwareRetryStrategy(3, 100)
+	promptCacheOptimizationAdvisor := NewPromptCacheOptimizationAdvisor()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2199,6 +2214,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextBudgetAllocator:    contextBudgetAllocator,
 		tokenAwarePartitioner:     tokenAwarePartitioner,
 		promptCacheHitAnalyzer:    promptCacheHitAnalyzer,
+		tokenAwareShardManager:    tokenAwareShardManager,
+		cacheInvalidationScheduler: cacheInvalidationScheduler,
+		contextDensityAnalyzer:    contextDensityAnalyzer,
+		tokenAwareRetryStrategy:   tokenAwareRetryStrategy,
+		promptCacheOptimizationAdvisor: promptCacheOptimizationAdvisor,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2928,6 +2948,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheHitAnalyzer != nil {
 		stats["opt215_promptCacheHitAnalyzer"] = a.promptCacheHitAnalyzer.GetStats()
+	}
+	if a.tokenAwareShardManager != nil {
+		stats["opt216_tokenAwareShardManager"] = a.tokenAwareShardManager.GetStats()
+	}
+	if a.cacheInvalidationScheduler != nil {
+		stats["opt217_cacheInvalidationScheduler"] = a.cacheInvalidationScheduler.GetStats()
+	}
+	if a.contextDensityAnalyzer != nil {
+		stats["opt218_contextDensityAnalyzer"] = a.contextDensityAnalyzer.GetStats()
+	}
+	if a.tokenAwareRetryStrategy != nil {
+		stats["opt219_tokenAwareRetryStrategy"] = a.tokenAwareRetryStrategy.GetStats()
+	}
+	if a.promptCacheOptimizationAdvisor != nil {
+		stats["opt220_promptCacheOptimizationAdvisor"] = a.promptCacheOptimizationAdvisor.GetStats()
 	}
 	return stats
 }
@@ -3719,6 +3754,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptCacheHitAnalyzer != nil && usage != nil {
 		a.promptCacheHitAnalyzer.RecordHit("usage", usage.CacheHitTokens > 0)
+	}
+
+	// OPT-216~220: 分片 / 失效调度 / 密度 / 重试 / 优化顾问
+	if a.tokenAwareShardManager != nil && usage != nil {
+		a.tokenAwareShardManager.Assign("usage")
+	}
+	if a.contextDensityAnalyzer != nil && usage != nil {
+		a.contextDensityAnalyzer.Analyze("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
