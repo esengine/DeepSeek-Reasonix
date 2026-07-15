@@ -101,5 +101,17 @@ eq(topicShortcutIndexFromEvent(event("1", { metaKey: true, defaultPrevented: tru
 eq(topicShortcutLabel(1, "darwin"), "⌘1", "topic badge uses the macOS command glyph");
 eq(topicShortcutLabel(1, "windows"), "Ctrl+1", "topic badge uses the Windows control modifier");
 
+for (const platform of ["darwin", "windows", "linux"] satisfies ShortcutPlatform[]) {
+  eq(matchesShortcut(event("Enter", { shiftKey: true }), "composer.newline", platform), true, `${platform} newline chord defaults to Shift+Enter`);
+  eq(matchesShortcut(event("Enter"), "composer.newline", platform), false, `${platform} plain Enter is not the default newline chord`);
+  eq(matchesShortcut(event("Enter", { ctrlKey: true }), "composer.newline", platform), false, `${platform} Ctrl+Enter is not the default newline chord`);
+  eq(matchesShortcut(event("Enter"), "composer.send", platform), true, `${platform} send chord defaults to plain Enter`);
+  eq(matchesShortcut(event("Enter", { shiftKey: true }), "composer.send", platform), false, `${platform} Shift+Enter is not the default send chord`);
+}
+eq(shortcutConflict("app.newSession", { key: "Enter", shift: true }, "darwin")?.action, "composer.newline", "rebinding another action onto Shift+Enter conflicts with the newline chord");
+eq(shortcutConflict("composer.newline", { key: "Enter" }, "darwin")?.action, "composer.send", "rebinding the newline chord onto plain Enter conflicts with the send chord");
+eq(formatShortcutCombo(defaultShortcutCombo("composer.newline", "darwin"), "darwin"), "⇧Enter", "formats the mac newline chord");
+eq(formatShortcutCombo(defaultShortcutCombo("composer.newline", "windows"), "windows"), "Shift+Enter", "formats the Windows newline chord");
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

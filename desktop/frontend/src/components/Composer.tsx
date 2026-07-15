@@ -5,10 +5,10 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
-import { canUsePromptHistory, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
+import { canUsePromptHistory, composerEnterAction, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
-import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut } from "../lib/keyboardShortcuts";
+import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
   commandUsesStructuredInvocation,
@@ -619,6 +619,7 @@ export function Composer({
   const { t, locale } = useI18n();
   const { showToast } = useToast();
   const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
+  const sendComboLabel = useShortcutComboLabel("composer.send");
   const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
   const now = useTick(running);
   const [text, setText] = useState("");
@@ -1323,6 +1324,16 @@ export function Composer({
     const ta = taRef.current;
     if (!ta) return;
     lastSelectionRef.current = { start: ta.selectionStart ?? text.length, end: ta.selectionEnd ?? text.length };
+  };
+
+  const insertNewlineAtCaret = () => {
+    const selection = getComposerSelection();
+    const updated = replaceInvocationTextRange(textRef.current, invocationsRef.current, selection.start, selection.end, "\n");
+    textRef.current = updated.text;
+    invocationsRef.current = updated.invocations;
+    setText(updated.text);
+    setInvocations(updated.invocations);
+    setComposerSelection(selection.start + 1);
   };
 
   const insertTextAtCaret = (snippet: string) => {
@@ -2726,10 +2737,26 @@ export function Composer({
       }
     }
 
-    // Enter sends; Shift+Enter newline. `composing` guards IME confirms.
-    if (e.key === "Enter" && !e.shiftKey && !composing) {
-      e.preventDefault();
-      submit();
+    // The send chord (default Enter) sends and the newline chord (default
+    // Shift+Enter) breaks the line — both configurable in Settings →
+    // Shortcuts; other Enter combos do nothing. `composing` guards IME confirms.
+    if (e.key === "Enter" && !composing) {
+      const enterAction = composerEnterAction(e.nativeEvent, shortcutPlatform);
+      if (enterAction === "newline-insert") {
+        e.preventDefault();
+        insertNewlineAtCaret();
+        return;
+      }
+      if (enterAction === "send") {
+        e.preventDefault();
+        submit();
+        return;
+      }
+      if (enterAction !== "newline-native") {
+        e.preventDefault();
+        return;
+      }
+      // "newline-native" falls through so the input inserts the break itself.
     }
     // Esc interrupts the in-flight turn (matches the Stop button's hint), and
     // restores the text if the server hadn't replied yet.
@@ -2930,13 +2957,15 @@ export function Composer({
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0 &&
     !invocations.some((invocation) => invocation.command.kind === "skill");
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
-  const submitTooltip = running ? t("composer.queueGuidance") : t("composer.send");
+  const submitTooltip = running
+    ? t("composer.queueGuidance", { combo: sendComboLabel })
+    : t("composer.send", { combo: sendComboLabel });
   const composerPlaceholder = readOnly
     ? t("composer.readOnlyChannel")
     : disabled
       ? t("common.loading")
       : running
-        ? t("composer.steerPlaceholder")
+        ? t("composer.steerPlaceholder", { combo: sendComboLabel })
         : goalModeOn && !activeGoal
           ? t("composer.goalInputPlaceholder")
           : t("composer.placeholder");

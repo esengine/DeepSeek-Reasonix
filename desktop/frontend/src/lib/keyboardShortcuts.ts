@@ -1,4 +1,4 @@
-import { useEffect, type DependencyList } from "react";
+import { useEffect, useState, type DependencyList } from "react";
 import type { DictKey } from "./i18n";
 
 export type ShortcutPlatform = "darwin" | "windows" | "linux";
@@ -6,6 +6,8 @@ export type ShortcutPlatform = "darwin" | "windows" | "linux";
 export type ShortcutAction =
   | "app.newSession"
   | "commandPalette.open"
+  | "composer.newline"
+  | "composer.send"
   | "selection.addToChat"
   | "settings.open"
   | "tab.close"
@@ -87,6 +89,25 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.closeTab",
     defaults: modCombo("w"),
     preventDefault: true,
+  },
+  // composer.send / composer.newline are handled inside the composer's own
+  // keydown path (see composerKeyboard.ts), not via useGlobalShortcut. An
+  // Enter chord matching neither combo does nothing.
+  {
+    action: "composer.send",
+    section: "session",
+    labelKey: "shortcuts.action.composerSend",
+    descriptionKey: "shortcuts.desc.composerSend",
+    defaults: allPlatforms({ key: "Enter" }),
+    allowInEditable: true,
+  },
+  {
+    action: "composer.newline",
+    section: "session",
+    labelKey: "shortcuts.action.composerNewline",
+    descriptionKey: "shortcuts.desc.composerNewline",
+    defaults: allPlatforms({ key: "Enter", shift: true }),
+    allowInEditable: true,
   },
   {
     action: "selection.addToChat",
@@ -436,6 +457,16 @@ export function useGlobalShortcut(
     return () => document.removeEventListener("keydown", onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action, enabled, handler, ...deps]);
+}
+
+// useShortcutComboLabel resolves an action's current combo as display text
+// (e.g. "Enter", "⌃Enter") and re-renders when the user rebinds shortcuts, so
+// tooltips and hints never show a stale key.
+export function useShortcutComboLabel(action: ShortcutAction): string {
+  const [, setRevision] = useState(0);
+  useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+  const platform = detectShortcutPlatform();
+  return formatShortcutCombo(resolvedShortcutCombo(action, platform), platform);
 }
 
 export function isCloseTabShortcut(event: KeyboardShortcutEvent, platform: ShortcutPlatform): boolean {

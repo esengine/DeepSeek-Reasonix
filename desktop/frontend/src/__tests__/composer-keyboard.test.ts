@@ -4,10 +4,12 @@
 
 import {
   canUsePromptHistory,
+  composerEnterAction,
   isFnKeyEvent,
   promptHistoryDirectionFromEvent,
   type PromptHistoryDirection,
 } from "../lib/composerKeyboard";
+import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcuts";
 
 let passed = 0;
 let failed = 0;
@@ -64,6 +66,30 @@ eq(eligible("up", { value: "line1\nline2", selectionStart: 7, selectionEnd: 7 })
 eq(eligible("up", { value: "history", selectionStart: 7, selectionEnd: 7, historyIndex: 0 }), true, "history mode allows repeated ArrowUp");
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0, fnKey: true }), false, "Fn-modified arrows are not history shortcuts");
 eq(eligible("up", { value: "", selectionStart: 0, selectionEnd: 0, shiftKey: true }), false, "Shift+Arrow preserves selection behavior");
+
+console.log("\ncomposerEnterAction");
+
+resetCustomShortcuts();
+eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "plain Enter sends by default");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "darwin"), "newline-native", "Shift+Enter keeps the native line break by default");
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "windows"), "none", "Ctrl+Enter matches neither chord and does nothing");
+eq(composerEnterAction({ key: "Enter", metaKey: true }, "darwin"), "none", "Cmd+Enter matches neither chord and does nothing");
+eq(composerEnterAction({ key: "a" }, "darwin"), null, "non-Enter keys are ignored");
+
+saveCustomShortcut("composer.newline", { key: "Enter", ctrl: true });
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "windows"), "newline-insert", "custom Ctrl+Enter inserts a newline manually");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "windows"), "none", "Shift+Enter does nothing once the newline chord moved to Ctrl+Enter");
+eq(composerEnterAction({ key: "Enter" }, "windows"), "send", "plain Enter still sends with a custom newline chord");
+resetCustomShortcuts();
+
+saveCustomShortcut("composer.send", { key: "Enter", ctrl: true });
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "linux"), "send", "custom Ctrl+Enter sends (WeChat-style layout)");
+eq(composerEnterAction({ key: "Enter" }, "linux"), "newline-insert", "plain Enter breaks the line when the send chord moved to Ctrl+Enter");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "linux"), "newline-native", "Shift+Enter still breaks the line in the WeChat-style layout");
+
+resetCustomShortcuts();
+eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "reset restores plain-Enter send");
+eq(composerEnterAction({ key: "Enter", shiftKey: true }, "darwin"), "newline-native", "reset restores the Shift+Enter default");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
