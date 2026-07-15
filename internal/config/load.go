@@ -27,15 +27,15 @@ func Load() (*Config, error) {
 // each project's reasonix.toml + .mcp.json are resolved independently without
 // changing the process cwd, while provider keys stay rooted in Reasonix home.
 //
-// Legacy MCP `tier` lines are normalized in memory. Loading never rewrites
-// config files; explicit Save/SaveTo calls are the only persistence boundary.
+// Legacy MCP `tier` lines are normalized in memory. Normal runtime loading also
+// removes those retired keys on disk, but only after the TOML parsed
+// successfully; edit/read-only paths never rewrite a failed or inspected file.
 func LoadForRoot(root string) (*Config, error) {
 	return loadForRoot(root, true)
 }
 
-// LoadForRootReadOnly is like LoadForRoot but never writes config files: it skips
-// on-disk legacy MCP tier migration. Prefer this for diagnostics, doctor, and
-// other read-only inspection paths.
+// LoadForRootReadOnly is like LoadForRoot but skips runtime-only on-disk
+// cleanup. Prefer this for diagnostics, doctor, and other inspection paths.
 func LoadForRootReadOnly(root string) (*Config, error) {
 	return loadForRoot(root, false)
 }
@@ -640,7 +640,13 @@ func mergeFile(cfg *Config, path string) error {
 }
 
 func mergeRuntimeTOMLFile(cfg *Config, path string) error {
-	return mergeFile(cfg, path)
+	if err := mergeFile(cfg, path); err != nil {
+		return err
+	}
+	if err := migrateLegacyMCPTiersFile(path); err != nil {
+		return fmt.Errorf("migrate legacy MCP tiers in %s: %w", path, err)
+	}
+	return nil
 }
 
 // normalizeLegacyMCPTiers keeps loaded legacy config files on the new product
@@ -752,6 +758,9 @@ func stripLegacyAgentStepLimitLines(raw string) (string, bool) {
 func migrateLegacyMCPTiersFile(path string) error {
 	info, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
 		return err
 	}
 	raw, err := fileencoding.ReadFileUTF8(path)
@@ -762,7 +771,7 @@ func migrateLegacyMCPTiersFile(path string) error {
 	if !changed {
 		return nil
 	}
-	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+	return fileutil.AtomicWriteFile(path, []byte(next), info.Mode().Perm())
 }
 
 func stripLegacyMCPTierLines(raw string) (string, bool) {
