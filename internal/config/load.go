@@ -1075,6 +1075,7 @@ func legacyMimoConfigRefs(c *Config) []string {
 		c.Agent.PlannerModel,
 		c.Agent.SubagentModel,
 		c.Agent.AutoPlanClassifier,
+		c.Agent.ImageUnderstandingModel,
 		c.Bot.Model,
 	}
 	for _, ref := range c.Agent.SubagentModels {
@@ -1217,6 +1218,7 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 	addRef(c.Agent.PlannerModel)
 	addRef(c.Agent.SubagentModel)
 	addRef(c.Agent.AutoPlanClassifier)
+	addRef(c.Agent.ImageUnderstandingModel)
 	for _, ref := range c.Agent.SubagentModels {
 		addRef(ref)
 	}
@@ -1405,6 +1407,7 @@ func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
 	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
 	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
 	c.Agent.AutoPlanClassifier = retargetDesktopOfficialRef(c.Agent.AutoPlanClassifier, access)
+	c.Agent.ImageUnderstandingModel = retargetDesktopOfficialRef(c.Agent.ImageUnderstandingModel, access)
 	for skill, ref := range c.Agent.SubagentModels {
 		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)
 	}

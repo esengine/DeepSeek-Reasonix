@@ -1378,6 +1378,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	var runner agent.Runner = executor
 	label := entry.Model
 	var classifier *control.ProviderAutoPlanClassifier
+	var imageUnderstanding control.ImageUnderstanding
 
 	if !tokenEconomy && !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") && cfg.Agent.AutoPlanClassifier != "" {
 		cm := cfg.Agent.AutoPlanClassifier
@@ -1390,6 +1391,30 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return nil, fmt.Errorf("auto_plan_classifier %q: %w", cm, err)
 		}
 		classifier = control.NewBillableProviderAutoPlanClassifier(classifierProv, ce.Price, sink)
+	}
+
+	if cmd := strings.TrimSpace(cfg.Agent.ImageUnderstandingCommand); cmd != "" {
+		iu, err := control.NewCommandImageUnderstandingForRoot(cmd, root)
+		if err != nil {
+			slog.Warn("image understanding command disabled", "command", cmd, "err", err)
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("image_understanding_command disabled: %v", err)})
+		} else {
+			imageUnderstanding = iu
+		}
+	} else if im := strings.TrimSpace(cfg.Agent.ImageUnderstandingModel); im != "" && !tokenEconomy {
+		ie, ok := cfg.ResolveModel(im)
+		switch {
+		case !ok:
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("image_understanding_model %q not found — image understanding disabled", im)})
+		case !config.EffectiveVision(ie):
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf("image_understanding_model %q is not marked vision-capable — image understanding disabled", im)})
+		default:
+			visionProv, err := NewProviderWithProxy(ie, proxySpec)
+			if err != nil {
+				return nil, fmt.Errorf("image_understanding_model %q: %w", im, err)
+			}
+			imageUnderstanding = control.NewBillableProviderImageUnderstanding(visionProv, ie.Price, sink)
+		}
 	}
 
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
@@ -1456,6 +1481,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		PluginCtx:              ctx,
 		WorkspaceRoot:          root,
 		ExternalFolderToolRefs: readPathResolver,
+		ImageUnderstanding:     imageUnderstanding,
+		ImageUnderstandingLog:  cfg.UIImageUnderstandingLog(),
 		AutoPlan:               cfg.Agent.AutoPlan,
 		ResponseLanguage:       cfg.ResponseLanguage(),
 		ReasoningLanguage:      cfg.ReasoningLanguage(),

@@ -1912,6 +1912,7 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") {
 		refs = append(refs, cfg.Agent.AutoPlanClassifier)
 	}
+	refs = append(refs, cfg.Agent.ImageUnderstandingModel)
 	if len(cfg.Agent.SubagentModels) > 0 {
 		keys := make([]string, 0, len(cfg.Agent.SubagentModels))
 		for key := range cfg.Agent.SubagentModels {
@@ -2085,6 +2086,8 @@ func configCommand(args []string) int {
 		return configMemoryV5Command(args[1:])
 	case "reasoning-language":
 		return configReasoningLanguageCommand(args[1:])
+	case "image-understanding-log":
+		return configImageUnderstandingLogCommand(args[1:])
 	default:
 		configUsage()
 		return 2
@@ -2265,11 +2268,69 @@ func configReasoningLanguageCommand(args []string) int {
 	return 0
 }
 
+func configImageUnderstandingLogCommand(args []string) int {
+	fs := flag.NewFlagSet("config image-understanding-log", flag.ContinueOnError)
+	local := fs.Bool("local", false, "unsupported; image-understanding-log is user-level only")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *local {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "image-understanding-log is user-level only; --local is not supported")
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configImageUnderstandingLogUsage()
+		return 2
+	}
+	if len(rest) == 0 || strings.EqualFold(rest[0], "status") {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("ui.image_understanding_log = %q\n", cfg.UIImageUnderstandingLog())
+		cmd := strings.TrimSpace(cfg.Agent.ImageUnderstandingCommand)
+		model := strings.TrimSpace(cfg.Agent.ImageUnderstandingModel)
+		switch {
+		case cmd != "":
+			fmt.Println("image_understanding_backend = \"command\"")
+			fmt.Printf("agent.image_understanding_command = %q\n", cmd)
+			fmt.Printf("image_understanding_cache = %q\n", control.ImageUnderstandingCachePathForRoot(""))
+		case model != "":
+			fmt.Println("image_understanding_backend = \"model\"")
+			fmt.Printf("agent.image_understanding_model = %q\n", model)
+		default:
+			fmt.Println("image_understanding_backend = \"disabled\"")
+		}
+		return 0
+	}
+	path := config.UserConfigPath()
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetImageUnderstandingLog(rest[0]); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	fmt.Printf("ui.image_understanding_log = %q (%s)\n", cfg.UIImageUnderstandingLog(), displayPath(path))
+	return 0
+}
+
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config auto-plan [off|on]
   reasonix config memory-v5 [off|observe|compact|on|status]
   reasonix config reasoning-language [--local] [auto|zh|en]
+  reasonix config image-understanding-log [off|summary|detail|status]
 `)
 }
 
@@ -2288,5 +2349,11 @@ func configMemoryV5Usage() {
 func configReasoningLanguageUsage() {
 	fmt.Print(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
+`)
+}
+
+func configImageUnderstandingLogUsage() {
+	fmt.Print(`Usage:
+  reasonix config image-understanding-log [off|summary|detail|status]
 `)
 }
