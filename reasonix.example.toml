@@ -115,7 +115,8 @@ enabled = true   # inject a stable startup summary of OS, shell, and common tool
 
 [tools]
 enabled = []   # empty = all built-in tools
-bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+command_timeout_seconds = 120   # foreground command timeout in seconds; 0/negative falls back to default
+bash_timeout_seconds = 120   # legacy foreground safety cap; set 0 for no tool-local cap (prefer command_timeout_seconds)
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]

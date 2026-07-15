@@ -392,7 +392,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		b.WriteString("]\n")
 	}
-	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n", c.BashTimeoutSeconds())
+	fmt.Fprintf(&b, "command_timeout_seconds = %d   # foreground command timeout in seconds; 0/negative falls back to default\n", c.CommandTimeoutSeconds())
+	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # legacy foreground safety cap; set 0 for no tool-local cap (prefer command_timeout_seconds)\n", c.BashTimeoutSeconds())
 	fmt.Fprintf(&b, "mcp_call_timeout_seconds = %d   # default MCP call safety cap; per-plugin/tool overrides may raise it\n\n", c.MCPCallTimeoutSeconds())
 
 	b.WriteString("[tools.background_jobs]\n")
@@ -991,11 +992,15 @@ func RenderTOMLProjectDelta(c *Config) string {
 
 	// [tools]
 	if len(c.Tools.Enabled) > 0 ||
+		c.Tools.CommandTimeoutSeconds > 0 ||
 		(c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0) ||
 		(c.Tools.MCPCallTimeoutSeconds != nil && *c.Tools.MCPCallTimeoutSeconds > 0) {
 		b.WriteString("[tools]\n")
 		if len(c.Tools.Enabled) > 0 {
 			fmt.Fprintf(&b, "enabled = %s\n", renderStringArray(c.Tools.Enabled))
+		}
+		if c.Tools.CommandTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "command_timeout_seconds = %d\n", c.Tools.CommandTimeoutSeconds)
 		}
 		if c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0 {
 			fmt.Fprintf(&b, "bash_timeout_seconds = %d\n", *c.Tools.BashTimeoutSeconds)
