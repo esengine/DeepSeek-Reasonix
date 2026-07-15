@@ -3386,6 +3386,10 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 			return recoverErr
 		}
 		if outcome == conflictDropped {
+			slog.Warn("controller: snapshot dropped after conflict recovery failed",
+				"path", path, "mode", map[bool]string{true: "rewrite", false: "snapshot"}[forceRewrite])
+			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+				Text: "session snapshot was not saved — your most recent turn may be lost. Try saving manually or restarting the conversation."})
 			return nil
 		}
 		// Whatever recovery did — adopted the disk transcript, force-saved

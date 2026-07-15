@@ -1151,6 +1151,16 @@ func loadSessionUnlocked(path string) (*Session, error) {
 			// branch. Anchor the baseline on digest+version only until a
 			// successful save re-learns the revision.
 			s.markPersistedRevisionUnknown(path, digest, s.version, s.rewriteVersion)
+		} else if ok && meta.WriterID != "" && meta.WriterID != SessionWriterID() {
+			// The session was last written by a different process (stale
+			// writer_id). The current process legitimately owns the session —
+			// the lease check at open time already confirmed no other runtime
+			// holds it. Disarm the revision-based CAS check so the first save
+			// proceeds without a spurious conflict against the old writer's
+			// ledger. Digest + version matching still anchor ownership;
+			// revision equality is re-established on the next successful save
+			// when recordSessionContentRevision stamps the current WriterID.
+			s.markPersistedRevisionUnknown(path, digest, s.version, s.rewriteVersion)
 		} else {
 			revision := int64(0)
 			if ok {
