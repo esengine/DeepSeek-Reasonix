@@ -806,6 +806,16 @@ type Agent struct {
 	tokenAwareConcurrencyLimiter *TokenAwareConcurrencyLimiter
 	// OPT-210: 提示缓存预热调度器
 	promptCacheWarmingScheduler *PromptCacheWarmingScheduler
+	// OPT-211: Token 感知优先级队列V3
+	tokenAwarePriorityQueueV3 *TokenAwarePriorityQueueV3
+	// OPT-212: 缓存失效级联器
+	cacheInvalidationCascade *CacheInvalidationCascade
+	// OPT-213: 上下文预算分配器
+	contextBudgetAllocator *ContextBudgetAllocator
+	// OPT-214: Token 感知分区器
+	tokenAwarePartitioner *TokenAwarePartitioner
+	// OPT-215: 提示缓存命中分析器
+	promptCacheHitAnalyzer *PromptCacheHitAnalyzer
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1951,6 +1961,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextFidelityMonitor := NewContextFidelityMonitor()
 	tokenAwareConcurrencyLimiter := NewTokenAwareConcurrencyLimiter(50)
 	promptCacheWarmingScheduler := NewPromptCacheWarmingScheduler()
+	tokenAwarePriorityQueueV3 := NewTokenAwarePriorityQueueV3(256)
+	cacheInvalidationCascade := NewCacheInvalidationCascade(10)
+	contextBudgetAllocator := NewContextBudgetAllocator(32768)
+	tokenAwarePartitioner := NewTokenAwarePartitioner(8, 4096)
+	promptCacheHitAnalyzer := NewPromptCacheHitAnalyzer()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2179,6 +2194,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextFidelityMonitor:    contextFidelityMonitor,
 		tokenAwareConcurrencyLimiter: tokenAwareConcurrencyLimiter,
 		promptCacheWarmingScheduler: promptCacheWarmingScheduler,
+		tokenAwarePriorityQueueV3:  tokenAwarePriorityQueueV3,
+		cacheInvalidationCascade:  cacheInvalidationCascade,
+		contextBudgetAllocator:    contextBudgetAllocator,
+		tokenAwarePartitioner:     tokenAwarePartitioner,
+		promptCacheHitAnalyzer:    promptCacheHitAnalyzer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2893,6 +2913,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheWarmingScheduler != nil {
 		stats["opt210_promptCacheWarmingScheduler"] = a.promptCacheWarmingScheduler.GetStats()
+	}
+	if a.tokenAwarePriorityQueueV3 != nil {
+		stats["opt211_tokenAwarePriorityQueueV3"] = a.tokenAwarePriorityQueueV3.GetStats()
+	}
+	if a.cacheInvalidationCascade != nil {
+		stats["opt212_cacheInvalidationCascade"] = a.cacheInvalidationCascade.GetStats()
+	}
+	if a.contextBudgetAllocator != nil {
+		stats["opt213_contextBudgetAllocator"] = a.contextBudgetAllocator.GetStats()
+	}
+	if a.tokenAwarePartitioner != nil {
+		stats["opt214_tokenAwarePartitioner"] = a.tokenAwarePartitioner.GetStats()
+	}
+	if a.promptCacheHitAnalyzer != nil {
+		stats["opt215_promptCacheHitAnalyzer"] = a.promptCacheHitAnalyzer.GetStats()
 	}
 	return stats
 }
@@ -3676,6 +3711,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.cacheInvalidationBatcher != nil && usage != nil {
 		a.cacheInvalidationBatcher.Add("usage")
+	}
+
+	// OPT-211~215: 优先级队列V3 / 级联失效 / 预算分配 / 分区 / 命中分析
+	if a.tokenAwarePartitioner != nil && usage != nil {
+		a.tokenAwarePartitioner.Partition("usage", usage.TotalTokens)
+	}
+	if a.promptCacheHitAnalyzer != nil && usage != nil {
+		a.promptCacheHitAnalyzer.RecordHit("usage", usage.CacheHitTokens > 0)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
