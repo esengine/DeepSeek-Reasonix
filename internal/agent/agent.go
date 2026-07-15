@@ -826,6 +826,16 @@ type Agent struct {
 	tokenAwareRetryStrategy *TokenAwareRetryStrategy
 	// OPT-220: 提示缓存优化顾问
 	promptCacheOptimizationAdvisor *PromptCacheOptimizationAdvisor
+	// OPT-221: Token 感知加权轮询器
+	tokenAwareWeightedRoundRobin *TokenAwareWeightedRoundRobin
+	// OPT-222: 缓存失效传播器
+	cacheInvalidationPropagator *CacheInvalidationPropagator
+	// OPT-223: 上下文相关性评分器V2
+	contextRelevanceScorerV2 *ContextRelevanceScorerV2
+	// OPT-224: Token 感知公平调度器
+	tokenAwareFairnessScheduler *TokenAwareFairnessScheduler
+	// OPT-225: 提示缓存键优化器
+	promptCacheKeyOptimizer *PromptCacheKeyOptimizer
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1981,6 +1991,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextDensityAnalyzer := NewContextDensityAnalyzer()
 	tokenAwareRetryStrategy := NewTokenAwareRetryStrategy(3, 100)
 	promptCacheOptimizationAdvisor := NewPromptCacheOptimizationAdvisor()
+	tokenAwareWeightedRoundRobin := NewTokenAwareWeightedRoundRobin()
+	cacheInvalidationPropagator := NewCacheInvalidationPropagator()
+	contextRelevanceScorerV2 := NewContextRelevanceScorerV2(0.5)
+	tokenAwareFairnessScheduler := NewTokenAwareFairnessScheduler(1000)
+	promptCacheKeyOptimizer := NewPromptCacheKeyOptimizer()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2219,6 +2234,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextDensityAnalyzer:    contextDensityAnalyzer,
 		tokenAwareRetryStrategy:   tokenAwareRetryStrategy,
 		promptCacheOptimizationAdvisor: promptCacheOptimizationAdvisor,
+		tokenAwareWeightedRoundRobin:   tokenAwareWeightedRoundRobin,
+		cacheInvalidationPropagator:   cacheInvalidationPropagator,
+		contextRelevanceScorerV2:      contextRelevanceScorerV2,
+		tokenAwareFairnessScheduler:   tokenAwareFairnessScheduler,
+		promptCacheKeyOptimizer:       promptCacheKeyOptimizer,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2963,6 +2983,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheOptimizationAdvisor != nil {
 		stats["opt220_promptCacheOptimizationAdvisor"] = a.promptCacheOptimizationAdvisor.GetStats()
+	}
+	if a.tokenAwareWeightedRoundRobin != nil {
+		stats["opt221_tokenAwareWeightedRoundRobin"] = a.tokenAwareWeightedRoundRobin.GetStats()
+	}
+	if a.cacheInvalidationPropagator != nil {
+		stats["opt222_cacheInvalidationPropagator"] = a.cacheInvalidationPropagator.GetStats()
+	}
+	if a.contextRelevanceScorerV2 != nil {
+		stats["opt223_contextRelevanceScorerV2"] = a.contextRelevanceScorerV2.GetStats()
+	}
+	if a.tokenAwareFairnessScheduler != nil {
+		stats["opt224_tokenAwareFairnessScheduler"] = a.tokenAwareFairnessScheduler.GetStats()
+	}
+	if a.promptCacheKeyOptimizer != nil {
+		stats["opt225_promptCacheKeyOptimizer"] = a.promptCacheKeyOptimizer.GetStats()
 	}
 	return stats
 }
@@ -3762,6 +3797,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.contextDensityAnalyzer != nil && usage != nil {
 		a.contextDensityAnalyzer.Analyze("usage")
+	}
+
+	// OPT-221~225: 加权轮询 / 传播 / 评分V2 / 公平调度 / 键优化
+	if a.cacheInvalidationPropagator != nil && usage != nil {
+		a.cacheInvalidationPropagator.Propagate("usage")
+	}
+	if a.promptCacheKeyOptimizer != nil && usage != nil {
+		a.promptCacheKeyOptimizer.Optimize("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
