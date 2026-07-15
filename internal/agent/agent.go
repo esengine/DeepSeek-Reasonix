@@ -866,6 +866,16 @@ type Agent struct {
 	tokenAwareBottleneckDetector *TokenAwareBottleneckDetector
 	// OPT-240: 提示缓存效率监控器
 	promptCacheEfficiencyMonitor *PromptCacheEfficiencyMonitor
+	// OPT-241: Token 感知溢出溢洪道
+	tokenAwareOverflowSpillway *TokenAwareOverflowSpillway
+	// OPT-242: 缓存失效优先级队列
+	cacheInvalidationPriorityQueue *CacheInvalidationPriorityQueue
+	// OPT-243: 上下文窗口驱逐管理器
+	contextWindowEvictionManager *ContextWindowEvictionManager
+	// OPT-244: Token 感知饱和度监控器
+	tokenAwareSaturationMonitor *TokenAwareSaturationMonitor
+	// OPT-245: 提示缓存压力指数
+	promptCachePressureIndex *PromptCachePressureIndex
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -2041,6 +2051,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowSnapshotManager := NewContextWindowSnapshotManager(10)
 	tokenAwareBottleneckDetector := NewTokenAwareBottleneckDetector()
 	promptCacheEfficiencyMonitor := NewPromptCacheEfficiencyMonitor()
+	tokenAwareOverflowSpillway := NewTokenAwareOverflowSpillway(10000)
+	cacheInvalidationPriorityQueue := NewCacheInvalidationPriorityQueue()
+	contextWindowEvictionManager := NewContextWindowEvictionManager(256)
+	tokenAwareSaturationMonitor := NewTokenAwareSaturationMonitor(100000, 50)
+	promptCachePressureIndex := NewPromptCachePressureIndex()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2299,6 +2314,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowSnapshotManager:  contextWindowSnapshotManager,
 		tokenAwareBottleneckDetector: tokenAwareBottleneckDetector,
 		promptCacheEfficiencyMonitor:  promptCacheEfficiencyMonitor,
+		tokenAwareOverflowSpillway:    tokenAwareOverflowSpillway,
+		cacheInvalidationPriorityQueue: cacheInvalidationPriorityQueue,
+		contextWindowEvictionManager: contextWindowEvictionManager,
+		tokenAwareSaturationMonitor:  tokenAwareSaturationMonitor,
+		promptCachePressureIndex:     promptCachePressureIndex,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -3103,6 +3123,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheEfficiencyMonitor != nil {
 		stats["opt240_promptCacheEfficiencyMonitor"] = a.promptCacheEfficiencyMonitor.GetStats()
+	}
+	if a.tokenAwareOverflowSpillway != nil {
+		stats["opt241_tokenAwareOverflowSpillway"] = a.tokenAwareOverflowSpillway.GetStats()
+	}
+	if a.cacheInvalidationPriorityQueue != nil {
+		stats["opt242_cacheInvalidationPriorityQueue"] = a.cacheInvalidationPriorityQueue.GetStats()
+	}
+	if a.contextWindowEvictionManager != nil {
+		stats["opt243_contextWindowEvictionManager"] = a.contextWindowEvictionManager.GetStats()
+	}
+	if a.tokenAwareSaturationMonitor != nil {
+		stats["opt244_tokenAwareSaturationMonitor"] = a.tokenAwareSaturationMonitor.GetStats()
+	}
+	if a.promptCachePressureIndex != nil {
+		stats["opt245_promptCachePressureIndex"] = a.promptCachePressureIndex.GetStats()
 	}
 	return stats
 }
@@ -3934,6 +3969,18 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptCacheEfficiencyMonitor != nil && usage != nil {
 		a.promptCacheEfficiencyMonitor.RecordRequest(usage.CacheHitTokens, usage.TotalTokens, usage.CacheHitTokens > 0)
+	}
+
+	// OPT-241~245: 溢洪道 / 优先级队列 / 驱逐 / 饱和度 / 压力指数
+	if a.tokenAwareSaturationMonitor != nil && usage != nil {
+		a.tokenAwareSaturationMonitor.Record(usage.TotalTokens)
+	}
+	if a.promptCachePressureIndex != nil && usage != nil {
+		hr := 0.0
+		if usage.TotalTokens > 0 {
+			hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
+		}
+		a.promptCachePressureIndex.Update(hr, 1.0-hr, 0.0)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
