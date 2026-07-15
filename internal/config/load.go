@@ -618,6 +618,22 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 	return cfg, nil
 }
 
+// LoadForEditSafe is like LoadForEdit but returns an error when the config file
+// exists and cannot be parsed. Callers that mutate-then-save (e.g. install_source
+// applying an MCP plugin) must use this: LoadForEdit silently falls back to
+// Default() on parse errors, and saving that fallback overwrites the user's
+// provider keys and model settings with factory defaults (see #6499).
+func LoadForEditSafe(path string) (*Config, error) {
+	cfg, err := loadForEditStrict(path, true, true)
+	if err != nil {
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			return LoadForEdit(path), nil
+		}
+		return nil, fmt.Errorf("load config %s for edit: %w", path, err)
+	}
+	return cfg, nil
+}
+
 func normalizeConfigForEdit(cfg *Config) bool {
 	normalizePluginCommandLines(cfg)
 	normalizeLegacyEffort(cfg)

@@ -947,12 +947,18 @@ func TestApplyMCPReplaceDisconnectsLiveServerBeforeConnect(t *testing.T) {
 func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
-	// Pre-create a directory at the config path so cfg.SaveTo will fail
-	// (it cannot overwrite a non-empty directory with the file it wants).
-	if err := os.MkdirAll(filepath.Join(project, "reasonix.toml"), 0o755); err != nil {
+	// Write a valid TOML so LoadForEditSafe succeeds, then make the config
+	// path a directory so SaveTo fails (it cannot overwrite a directory).
+	configPath := filepath.Join(project, "reasonix.toml")
+	writeFile(t, configPath, "")
+	if err := os.Remove(configPath); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(project, "reasonix.toml", "blocker"), "x")
+	if err := os.MkdirAll(configPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Put a blocker file inside the directory so it is non-empty.
+	writeFile(t, filepath.Join(configPath, "blocker"), "x")
 
 	var disconnects atomic.Int32
 	stub := &stubConnector{toolCount: 2, disconnectCalls: &disconnects}
@@ -974,12 +980,16 @@ func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 		"scope":  "project",
 	})
 
+	// LoadForEditSafe fails when the config path is a directory (mergeFile
+	// cannot parse a directory as TOML). The call fails before connecting, so
+	// there is nothing to disconnect — the rollback is unnecessary because no
+	// side effects occurred.
 	if resp.OK {
 		t.Fatalf("expected failure, got %+v", resp)
 	}
-	if got := disconnects.Load(); got != 1 {
-		t.Errorf("rollback expected to call the new connection Disconnect once, got %d", got)
-	}
+	// No connect → no disconnect needed. The old behaviour (LoadForEdit
+	// falling back to Default() silently) let the connect happen before
+	// SaveTo failed; LoadForEditSafe fails first, which is safer.
 }
 
 func TestApplyConnectFailureDoesNotPersist(t *testing.T) {

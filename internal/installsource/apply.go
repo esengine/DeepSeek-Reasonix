@@ -58,7 +58,10 @@ func (t *installSourceTool) apply(ctx context.Context, req request, act *action)
 // applySkillRoot appends the path to the active config's [skills].paths and
 // re-builds the Store to confirm the listed skills are discoverable.
 func (t *installSourceTool) applySkillRoot(req request, act *action) error {
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditSafe(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	if err := cfg.AddSkillPath(act.Source); err != nil {
 		return err
 	}
@@ -205,7 +208,10 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 	if act.entry.Name == "" {
 		return newErr(ErrInvalidManifest, "MCP action has no server entry")
 	}
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditSafe(act.ConfigPath)
+	if err != nil {
+		return newErr(ErrInvalidManifest, "cannot load config at %s: %v", act.ConfigPath, err)
+	}
 	var previous config.PluginEntry
 	hadPrevious := false
 	for _, existing := range cfg.Plugins {
@@ -303,7 +309,10 @@ func (t *installSourceTool) applyRemoveSkillRoot(_ request, act *action) error {
 	if target == "" {
 		return newErr(ErrInvalidManifest, "remove_skill_root action is missing target")
 	}
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditSafe(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	removed, err := cfg.RemoveSkillPath(target)
 	if err != nil {
 		return err
@@ -320,7 +329,10 @@ func (t *installSourceTool) applyRemoveSkillRoot(_ request, act *action) error {
 // applyRemoveMCP removes an MCP server entry from the active config and
 // asks the host to disconnect it (if a connector is wired).
 func (t *installSourceTool) applyRemoveMCP(_ request, act *action) error {
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditSafe(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	if !cfg.RemovePlugin(act.Name) {
 		// Nothing to remove is not a failure: idempotent.
 		return nil
