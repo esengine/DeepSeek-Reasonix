@@ -951,12 +951,6 @@ func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 	if err := cfg.SaveTo(filepath.Join(project, "reasonix.toml")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(project, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.Chmod(project, 0o755)
-	})
 
 	var disconnects atomic.Int32
 	stub := &stubConnector{toolCount: 2, disconnectCalls: &disconnects}
@@ -968,7 +962,10 @@ func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 			disconnects.Add(1)
 			return true
 		},
-	})
+	}).(*installSourceTool)
+	tl.saveConfig = func(*config.Config, string) error {
+		return errors.New("forced save failure")
+	}
 
 	resp := execInstall(t, tl, map[string]any{
 		"source": "https://mcp.example.com/mcp",

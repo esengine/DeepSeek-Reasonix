@@ -67,6 +67,7 @@ type installSourceTool struct {
 	connectMCP   MCPConnector
 	onDisconnect OnDisconnectFunc
 	approval     ApprovalFunc
+	saveConfig   func(*config.Config, string) error
 	// preparePlugin overrides plugin source preparation in tests. nil uses
 	// preparePluginSource. Plan and apply both resolve the source through the
 	// same function, and git sources additionally report the resolved commit,
@@ -118,6 +119,7 @@ func NewTool(opts Options) tool.Tool {
 		connectMCP:   opts.ConnectMCP,
 		onDisconnect: opts.OnDisconnect,
 		approval:     opts.Approval,
+		saveConfig:   func(cfg *config.Config, path string) error { return cfg.SaveTo(path) },
 	}
 }
 

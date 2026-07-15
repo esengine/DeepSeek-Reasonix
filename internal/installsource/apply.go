@@ -55,6 +55,13 @@ func (t *installSourceTool) apply(ctx context.Context, req request, act *action)
 	}
 }
 
+func (t *installSourceTool) saveConfigTo(cfg *config.Config, path string) error {
+	if t.saveConfig != nil {
+		return t.saveConfig(cfg, path)
+	}
+	return cfg.SaveTo(path)
+}
+
 // applySkillRoot appends the path to the active config's [skills].paths and
 // re-builds the Store to confirm the listed skills are discoverable.
 func (t *installSourceTool) applySkillRoot(req request, act *action) error {
@@ -65,7 +72,7 @@ func (t *installSourceTool) applySkillRoot(req request, act *action) error {
 	if err := cfg.AddSkillPath(act.Source); err != nil {
 		return err
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		return err
 	}
 	store := skill.New(skill.Options{HomeDir: t.home, ReasonixHomeDir: t.reasonixHome, ProjectRoot: t.root, CustomPaths: append(cfg.SkillCustomPaths(), act.Source)})
@@ -254,7 +261,7 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 		}
 		return err
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		if rbErr := t.rollbackMCPReplace(act, previous, oldDisconnected, connected); rbErr != nil {
 			return fmt.Errorf("%w; rollback failed: %v", err, rbErr)
 		}
@@ -320,7 +327,7 @@ func (t *installSourceTool) applyRemoveSkillRoot(_ request, act *action) error {
 	if !removed {
 		return nil
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		return err
 	}
 	return nil
@@ -337,7 +344,7 @@ func (t *installSourceTool) applyRemoveMCP(_ request, act *action) error {
 		// Nothing to remove is not a failure: idempotent.
 		return nil
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		return err
 	}
 	if t.onDisconnect != nil {
