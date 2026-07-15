@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -151,7 +152,7 @@ func TestNormalizeLegacyStepFunBaseURLsMigratesPresetProviders(t *testing.T) {
 	}
 }
 
-func TestLoadForEditPersistsLegacyStepFunBaseURLMigration(t *testing.T) {
+func TestLoadForEditNormalizesLegacyStepFunBaseURLMigrationWithoutWriting(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	cfg := Default()
 	stepfun, ok := CuratedProviderPreset("stepfun")
@@ -171,6 +172,10 @@ func TestLoadForEditPersistsLegacyStepFunBaseURLMigration(t *testing.T) {
 	if err := cfg.SaveTo(path); err != nil {
 		t.Fatalf("SaveTo: %v", err)
 	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	loaded := LoadForEdit(path)
 	if got, _ := loaded.Provider("stepfun"); got == nil || got.BaseURL != officialStepFunOpenAIBaseURL {
@@ -178,6 +183,16 @@ func TestLoadForEditPersistsLegacyStepFunBaseURLMigration(t *testing.T) {
 	}
 	if got, _ := loaded.Provider("stepfun-anthropic"); got == nil || got.BaseURL != officialStepFunAnthropicBaseURL {
 		t.Fatalf("loaded stepfun-anthropic = %+v, want official base URL", got)
+	}
+	afterLoad, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterLoad) != string(original) {
+		t.Fatalf("LoadForEdit should not rewrite legacy config:\n%s", afterLoad)
+	}
+	if err := loaded.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
 	}
 
 	var disk Config

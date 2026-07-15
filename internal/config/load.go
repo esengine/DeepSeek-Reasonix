@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,9 +27,8 @@ func Load() (*Config, error) {
 // each project's reasonix.toml + .mcp.json are resolved independently without
 // changing the process cwd, while provider keys stay rooted in Reasonix home.
 //
-// Note: LoadForRoot may rewrite legacy MCP `tier` lines on disk (see
-// mergeRuntimeTOMLFile). Callers that must not mutate config files should use
-// LoadForRootReadOnly instead.
+// Legacy MCP `tier` lines are normalized in memory. Loading never rewrites
+// config files; explicit Save/SaveTo calls are the only persistence boundary.
 func LoadForRoot(root string) (*Config, error) {
 	return loadForRoot(root, true)
 }
@@ -544,14 +542,18 @@ func DesktopProviderAccessDeclared(path string) (bool, error) {
 // of resetting to defaults. Reasonix's global .env is loaded so api_key_env
 // resolution works while the wizard decides which keys are still missing.
 func LoadForEdit(path string) *Config {
-	return loadForEdit(path, true, true)
+	cfg, err := LoadForEditStrict(path)
+	if err != nil {
+		panic(err)
+	}
+	return cfg
 }
 
 // LoadForEditReadOnlyStrict is the error-returning commit-time variant. It must
 // not fall back to defaults when another writer leaves malformed TOML, because
 // saving that fallback would overwrite the user's recoverable file.
 func LoadForEditReadOnlyStrict(path string) (*Config, error) {
-	return loadForEditStrict(path, true, false)
+	return LoadForEditStrict(path)
 }
 
 // ValidateFile parses one TOML config in isolation without loading credentials,
@@ -574,47 +576,31 @@ func ValidateFile(path string) error {
 	return nil
 }
 
-func loadForEdit(path string, loadCredentials, persistMigrations bool) *Config {
-	cfg, err := loadForEditStrict(path, loadCredentials, persistMigrations)
-	if err == nil {
-		return cfg
-	}
-	slog.Warn("config: load for edit failed, using defaults", "path", path, "err", err)
-	if loadCredentials {
-		loadDotEnvForEditPath(path)
-	}
-	cfg = Default()
-	normalizeConfigForEdit(cfg)
-	return cfg
+func LoadForEditStrict(path string) (*Config, error) {
+	return loadForEditStrict(path, true)
 }
 
 func LoadForEditWithoutCredentials(path string) *Config {
-	return loadForEdit(path, false, true)
+	cfg, err := LoadForEditWithoutCredentialsStrict(path)
+	if err != nil {
+		panic(err)
+	}
+	return cfg
 }
 
-func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*Config, error) {
+func LoadForEditWithoutCredentialsStrict(path string) (*Config, error) {
+	return loadForEditStrict(path, false)
+}
+
+func loadForEditStrict(path string, loadCredentials bool) (*Config, error) {
 	if loadCredentials {
 		loadDotEnvForEditPath(path)
 	}
 	cfg := Default()
-	if persistMigrations {
-		if _, err := os.Stat(path); err == nil {
-			if err := migrateLegacyMCPTiersFile(path); err != nil {
-				return nil, fmt.Errorf("config %s: %w", path, err)
-			}
-		}
-	}
 	if err := mergeFile(cfg, path); err != nil {
 		return nil, err
 	}
-	changed := normalizeConfigForEdit(cfg)
-	if persistMigrations && changed && strings.TrimSpace(path) != "" {
-		if _, err := os.Stat(path); err == nil {
-			if err := cfg.SaveTo(path); err != nil {
-				return nil, err
-			}
-		}
-	}
+	normalizeConfigForEdit(cfg)
 	return cfg, nil
 }
 
@@ -654,11 +640,6 @@ func mergeFile(cfg *Config, path string) error {
 }
 
 func mergeRuntimeTOMLFile(cfg *Config, path string) error {
-	if _, err := os.Stat(path); err == nil {
-		if err := migrateLegacyMCPTiersFile(path); err != nil {
-			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
-		}
-	}
 	return mergeFile(cfg, path)
 }
 

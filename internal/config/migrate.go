@@ -214,7 +214,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 	if dest == "" {
 		return nil, nil
 	}
-	userCfg, err := loadForEditStrict(dest, true, true)
+	userCfg, err := LoadForEditStrict(dest)
 	if err != nil {
 		return nil, err
 	}
