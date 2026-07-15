@@ -561,7 +561,7 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   return t("settings.botConnectionCount", { n: connections });
 }
 
-function ShortcutsSection() {
+export function ShortcutsSection() {
   const t = useT();
   const [platform] = useState(() => detectShortcutPlatform());
   const [revision, setRevision] = useState(0);
@@ -636,9 +636,16 @@ function ShortcutsSection() {
                   disabled={definition.configurable === false}
                   aria-label={isRecording ? t("settings.shortcutsRecording") : display}
                   aria-pressed={isRecording}
-                  onClick={() => {
+                  onClick={(event) => {
                     setRecording(definition.action);
                     setConflict(null);
+                    // WebKit (the desktop WKWebView) does not focus buttons on
+                    // click, and the recorder listens for keys on the button —
+                    // without this the recorder never receives any keydown.
+                    event.currentTarget.focus();
+                  }}
+                  onBlur={() => {
+                    if (isRecording) setRecording(null);
                   }}
                   onKeyDown={(event) => isRecording && commitShortcut(definition.action, event)}
                 >
