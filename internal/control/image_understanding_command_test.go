@@ -2,8 +2,10 @@ package control
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,13 +23,8 @@ func TestCommandImageUnderstandingWrapsJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(dir, "ocr.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-printf '%s\n' '{"visible_text":"状态栏\nYOLO","width":10,"height":20,"text_regions":[{"text":"状态栏"}],"elapsed_ms":12.3}'
-`), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	iu, err := NewCommandImageUnderstanding(script)
+	command := imageUnderstandingTestCommand(t, `{"visible_text":"状态栏\nYOLO","width":10,"height":20,"text_regions":[{"text":"状态栏"}],"elapsed_ms":12.3}`, "")
+	iu, err := NewCommandImageUnderstanding(command)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,18 +61,8 @@ func TestCommandImageUnderstandingCachesBySHA(t *testing.T) {
 		t.Fatal(err)
 	}
 	counter := filepath.Join(dir, "runs.txt")
-	script := filepath.Join(dir, "ocr.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-counter="`+counter+`"
-n=0
-if [ -f "$counter" ]; then n=$(cat "$counter"); fi
-n=$((n + 1))
-printf '%s\n' "$n" > "$counter"
-printf '%s\n' '{"visible_text":"cached text","confidence":"high"}'
-`), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	iu, err := NewCommandImageUnderstandingForRoot(script, dir)
+	command := imageUnderstandingTestCommand(t, `{"visible_text":"cached text","confidence":"high"}`, counter)
+	iu, err := NewCommandImageUnderstandingForRoot(command, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +114,8 @@ func TestControllerWithImageUnderstandingInjectsOnlyForTextOnlyModel(t *testing.
 	if err := os.WriteFile(image, mustBase64(t, tinyPNG), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(workspace, "ocr.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-printf '%s\n' '{"visible_text":"button text","confidence":"high"}'
-`), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	iu, err := NewCommandImageUnderstanding(script)
+	command := imageUnderstandingTestCommand(t, `{"visible_text":"button text","confidence":"high"}`, "")
+	iu, err := NewCommandImageUnderstanding(command)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,13 +151,8 @@ func TestControllerImageUnderstandingNoticeCarriesDisclosureDetail(t *testing.T)
 	if err := os.WriteFile(image, mustBase64(t, tinyPNG), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(workspace, "ocr.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-printf '%s\n' '{"visible_text":"statusbar text","confidence":"high"}'
-`), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	iu, err := NewCommandImageUnderstanding(script)
+	command := imageUnderstandingTestCommand(t, `{"visible_text":"statusbar text","confidence":"high"}`, "")
+	iu, err := NewCommandImageUnderstanding(command)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,13 +209,8 @@ func TestRunPrependsImageUnderstandingAfterCompose(t *testing.T) {
 	if err := os.WriteFile(image, mustBase64(t, tinyPNG), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	script := filepath.Join(workspace, "ocr.sh")
-	if err := os.WriteFile(script, []byte(`#!/bin/sh
-printf '%s\n' '{"visible_text":"compose path text","confidence":"high"}'
-`), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	iu, err := NewCommandImageUnderstanding(script)
+	command := imageUnderstandingTestCommand(t, `{"visible_text":"compose path text","confidence":"high"}`, "")
+	iu, err := NewCommandImageUnderstanding(command)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,4 +228,48 @@ printf '%s\n' '{"visible_text":"compose path text","confidence":"high"}'
 			t.Fatalf("Run input missing %q:\n%s", want, runner.input)
 		}
 	}
+}
+
+func imageUnderstandingTestCommand(t *testing.T, payload, counterPath string) string {
+	t.Helper()
+	args := []string{os.Args[0], "-test.run=TestImageUnderstandingCommandHelper", "--", payload}
+	if counterPath != "" {
+		args = append(args, counterPath)
+	}
+	quoted := make([]string, 0, len(args))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuoteTestArg(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func shellQuoteTestArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func TestImageUnderstandingCommandHelper(t *testing.T) {
+	marker := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			marker = i
+			break
+		}
+	}
+	if marker < 0 || marker+1 >= len(os.Args) {
+		return
+	}
+	payload := os.Args[marker+1]
+	if marker+2 < len(os.Args) {
+		counterPath := os.Args[marker+2]
+		n := 0
+		if raw, err := os.ReadFile(counterPath); err == nil {
+			n, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
+		}
+		if err := os.WriteFile(counterPath, []byte(strconv.Itoa(n+1)), 0o644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	fmt.Fprintln(os.Stdout, payload)
+	os.Exit(0)
 }
