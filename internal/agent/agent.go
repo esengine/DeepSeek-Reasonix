@@ -836,6 +836,16 @@ type Agent struct {
 	tokenAwareFairnessScheduler *TokenAwareFairnessScheduler
 	// OPT-225: 提示缓存键优化器
 	promptCacheKeyOptimizer *PromptCacheKeyOptimizer
+	// OPT-226: Token 感知槽位管理器
+	tokenAwareSlotManager *TokenAwareSlotManager
+	// OPT-227: 缓存失效去重器
+	cacheInvalidationDeduplicator *CacheInvalidationDeduplicator
+	// OPT-228: 上下文热力压缩器
+	contextThermalCompressor *ContextThermalCompressor
+	// OPT-229: Token 感知降级管理器
+	tokenAwareDegradationManager *TokenAwareDegradationManager
+	// OPT-230: 提示缓存生命周期管理器
+	promptCacheLifecycleManager *PromptCacheLifecycleManager
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -1996,6 +2006,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextRelevanceScorerV2 := NewContextRelevanceScorerV2(0.5)
 	tokenAwareFairnessScheduler := NewTokenAwareFairnessScheduler(1000)
 	promptCacheKeyOptimizer := NewPromptCacheKeyOptimizer()
+	tokenAwareSlotManager := NewTokenAwareSlotManager(64)
+	cacheInvalidationDeduplicator := NewCacheInvalidationDeduplicator()
+	contextThermalCompressor := NewContextThermalCompressor(3)
+	tokenAwareDegradationManager := NewTokenAwareDegradationManager([]int{10000, 50000, 100000})
+	promptCacheLifecycleManager := NewPromptCacheLifecycleManager()
 
 	a := &Agent{
 		prov:                     prov,
@@ -2239,6 +2254,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextRelevanceScorerV2:      contextRelevanceScorerV2,
 		tokenAwareFairnessScheduler:   tokenAwareFairnessScheduler,
 		promptCacheKeyOptimizer:       promptCacheKeyOptimizer,
+		tokenAwareSlotManager:         tokenAwareSlotManager,
+		cacheInvalidationDeduplicator: cacheInvalidationDeduplicator,
+		contextThermalCompressor:      contextThermalCompressor,
+		tokenAwareDegradationManager:  tokenAwareDegradationManager,
+		promptCacheLifecycleManager:   promptCacheLifecycleManager,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -2998,6 +3018,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheKeyOptimizer != nil {
 		stats["opt225_promptCacheKeyOptimizer"] = a.promptCacheKeyOptimizer.GetStats()
+	}
+	if a.tokenAwareSlotManager != nil {
+		stats["opt226_tokenAwareSlotManager"] = a.tokenAwareSlotManager.GetStats()
+	}
+	if a.cacheInvalidationDeduplicator != nil {
+		stats["opt227_cacheInvalidationDeduplicator"] = a.cacheInvalidationDeduplicator.GetStats()
+	}
+	if a.contextThermalCompressor != nil {
+		stats["opt228_contextThermalCompressor"] = a.contextThermalCompressor.GetStats()
+	}
+	if a.tokenAwareDegradationManager != nil {
+		stats["opt229_tokenAwareDegradationManager"] = a.tokenAwareDegradationManager.GetStats()
+	}
+	if a.promptCacheLifecycleManager != nil {
+		stats["opt230_promptCacheLifecycleManager"] = a.promptCacheLifecycleManager.GetStats()
 	}
 	return stats
 }
@@ -3805,6 +3840,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.promptCacheKeyOptimizer != nil && usage != nil {
 		a.promptCacheKeyOptimizer.Optimize("usage")
+	}
+
+	// OPT-226~230: 槽位 / 去重 / 热力压缩 / 降级 / 生命周期
+	if a.tokenAwareDegradationManager != nil && usage != nil {
+		a.tokenAwareDegradationManager.Check(usage.TotalTokens)
+	}
+	if a.cacheInvalidationDeduplicator != nil {
+		a.cacheInvalidationDeduplicator.Check("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
