@@ -170,6 +170,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		ctx = agent.WithMemoryCompilerSourceInput(ctx, turn.raw)
 	}
 	input := c.compose(turn.input, turn.raw, !turn.synthetic)
+	input = c.withImageUnderstanding(ctx, input, turn.raw, turn.input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, turn.display)
