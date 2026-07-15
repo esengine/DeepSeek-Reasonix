@@ -846,6 +846,16 @@ type Agent struct {
 	tokenAwareDegradationManager *TokenAwareDegradationManager
 	// OPT-230: 提示缓存生命周期管理器
 	promptCacheLifecycleManager *PromptCacheLifecycleManager
+	// OPT-231: Token 感知溢出处理器
+	tokenAwareOverflowHandler *TokenAwareOverflowHandler
+	// OPT-232: 缓存失效追踪器V2
+	cacheInvalidationTrackerV2 *CacheInvalidationTrackerV2
+	// OPT-233: 上下文窗口校准器V3
+	contextWindowCalibratorV3 *ContextWindowCalibratorV3
+	// OPT-234: Token 感知泄漏检测器
+	tokenAwareLeakDetector *TokenAwareLeakDetector
+	// OPT-235: 提示缓存温度追踪器
+	promptCacheWarmthTracker *PromptCacheWarmthTracker
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -2011,6 +2021,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextThermalCompressor := NewContextThermalCompressor(3)
 	tokenAwareDegradationManager := NewTokenAwareDegradationManager([]int{10000, 50000, 100000})
 	promptCacheLifecycleManager := NewPromptCacheLifecycleManager()
+	tokenAwareOverflowHandler := NewTokenAwareOverflowHandler(5000, "compress")
+	cacheInvalidationTrackerV2 := NewCacheInvalidationTrackerV2()
+	contextWindowCalibratorV3 := NewContextWindowCalibratorV3(32768, 4096)
+	tokenAwareLeakDetector := NewTokenAwareLeakDetector()
+	promptCacheWarmthTracker := NewPromptCacheWarmthTracker(5)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2259,6 +2274,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextThermalCompressor:      contextThermalCompressor,
 		tokenAwareDegradationManager:  tokenAwareDegradationManager,
 		promptCacheLifecycleManager:   promptCacheLifecycleManager,
+		tokenAwareOverflowHandler:     tokenAwareOverflowHandler,
+		cacheInvalidationTrackerV2:    cacheInvalidationTrackerV2,
+		contextWindowCalibratorV3:     contextWindowCalibratorV3,
+		tokenAwareLeakDetector:        tokenAwareLeakDetector,
+		promptCacheWarmthTracker:      promptCacheWarmthTracker,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -3033,6 +3053,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheLifecycleManager != nil {
 		stats["opt230_promptCacheLifecycleManager"] = a.promptCacheLifecycleManager.GetStats()
+	}
+	if a.tokenAwareOverflowHandler != nil {
+		stats["opt231_tokenAwareOverflowHandler"] = a.tokenAwareOverflowHandler.GetStats()
+	}
+	if a.cacheInvalidationTrackerV2 != nil {
+		stats["opt232_cacheInvalidationTrackerV2"] = a.cacheInvalidationTrackerV2.GetStats()
+	}
+	if a.contextWindowCalibratorV3 != nil {
+		stats["opt233_contextWindowCalibratorV3"] = a.contextWindowCalibratorV3.GetStats()
+	}
+	if a.tokenAwareLeakDetector != nil {
+		stats["opt234_tokenAwareLeakDetector"] = a.tokenAwareLeakDetector.GetStats()
+	}
+	if a.promptCacheWarmthTracker != nil {
+		stats["opt235_promptCacheWarmthTracker"] = a.promptCacheWarmthTracker.GetStats()
 	}
 	return stats
 }
@@ -3848,6 +3883,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.cacheInvalidationDeduplicator != nil {
 		a.cacheInvalidationDeduplicator.Check("usage")
+	}
+
+	// OPT-231~235: 溢出 / 追踪V2 / 校准V3 / 泄漏 / 温度
+	if a.tokenAwareLeakDetector != nil && usage != nil {
+		a.tokenAwareLeakDetector.SetBaseline("usage", usage.TotalTokens)
+	}
+	if a.promptCacheWarmthTracker != nil {
+		a.promptCacheWarmthTracker.Warm("usage")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
