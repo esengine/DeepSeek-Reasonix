@@ -5,9 +5,13 @@ everything you need to get started.
 
 ## Prerequisites
 
-- **Go 1.25+** — the project targets the latest stable Go release
+- **Go toolchain declared by `go.mod`** — use a Go version new enough to honor
+  the `toolchain` directive; the module file, not this prose, is authoritative
 - **Git** — for version control
-- **Node.js** (optional) — only if you work on the desktop app (`desktop/`)
+- **Node.js / package manager for the surface you change** — desktop frontend,
+  site, workers, and npm packaging are independent JavaScript projects
+- **Wails and native webview dependencies** — only for `desktop/`; see
+  [`desktop/README.md`](desktop/README.md)
 
 ## Getting started
 
@@ -15,16 +19,22 @@ everything you need to get started.
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
 go build ./cmd/reasonix    # builds the CLI binary
-go test ./...              # runs the full test suite
+go test ./...              # runs the root Go module suite
 ```
 
 ## Project structure
+
+New maintainers should first read the current as-built
+[architecture map](docs/ARCHITECTURE.zh-CN.md) and
+[maintainer guide](docs/MAINTAINER_GUIDE.zh-CN.md). The engineering contract is
+[`docs/SPEC.md`](docs/SPEC.md).
 
 | Directory | Purpose |
 |-----------|---------|
 | `cmd/reasonix` | CLI entry point |
 | `internal/agent` | Agent loop, session, coordinator |
 | `internal/cli` | TUI, subcommands, setup wizard |
+| `internal/boot` | Shared composition root for every frontend |
 | `internal/control` | Transport-agnostic controller |
 | `internal/config` | TOML configuration loading |
 | `internal/tool/builtin` | Built-in tools (bash, read_file, …) |
@@ -32,6 +42,7 @@ go test ./...              # runs the full test suite
 | `internal/provider/openai` | OpenAI-compatible provider |
 | `internal/plugin` | MCP client (stdio + HTTP) |
 | `internal/event` | Typed event stream |
+| `internal/eventwire` | Shared JSON contract for event frontends |
 | `internal/hook` | Shell hooks (PreToolUse, …) |
 | `internal/memory` | REASONIX.md hierarchy + auto-memory |
 | `internal/skill` | Skill discovery from Markdown |
@@ -39,29 +50,37 @@ go test ./...              # runs the full test suite
 | `internal/serve` | HTTP/SSE server frontend |
 | `internal/checkpoint` | Snapshot-based rewind |
 | `desktop/` | Wails-based desktop app (separate Go module) |
+| `site/`, `workers/`, `npm/` | Independently built web, cloud-service, and distribution surfaces |
 | `docs/` | Engineering spec, migration guide |
 
 ### Dependency direction
 
 ```
-cli → {agent, plugin, config} → {tool, provider}
+frontends → boot → control / agent / domain services
+                         ↓
+               provider / tool / event contracts
 ```
 
-Built-in subpackages import their parent to self-register via `init()`.
-Parents never import children.
+`boot.Build` is the composition root shared by CLI, serve, ACP/bot, and desktop.
+Built-in provider/tool subpackages import their parent to self-register via
+`init()`; the parent contract packages do not import concrete children.
 
 ## Development workflow
 
 ### Building
 
 ```bash
-make build          # go build ./...
+make build          # builds the CLI and plugin-example binaries
 make test           # go test ./...
 make vet            # go vet ./...
 make fmt            # gofmt -w .
 make hooks          # install git hooks (pre-push: go vet)
 make cross          # cross-compile for all 6 targets
 ```
+
+The root module deliberately excludes the nested `desktop/` module. Desktop
+changes require their own Go tests, frontend checks, and a native Wails build;
+see the maintainer guide's test matrix.
 
 ### Isolated development environment
 

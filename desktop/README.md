@@ -35,7 +35,8 @@ vet / test ./...` skip this directory, while the import path stays under
 
 - Go (matches the parent module).
 - Node + **pnpm** (`npm i -g pnpm`).
-- Wails CLI: `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- Wails CLI pinned to the version used by CI and `desktop/go.mod`:
+  `go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0`
 - Platform webview libs: macOS ships WebKit; Windows needs the Edge **WebView2**
   runtime; Linux needs `libgtk-3-dev` plus WebKitGTK. The default build links
   against **WebKitGTK 4.0**; distros that only ship **4.1** (Fedora 40+, Ubuntu
@@ -65,12 +66,21 @@ diff seam can all be built without rebuilding Go.
 ## Test
 
 The desktop package is a nested Go module, so parent `go test ./...` does not run
-it. Use the full lane before merging desktop changes, and the short lane for fast
-local feedback:
+it. The Make targets below are Go-only feedback lanes:
 
 ```sh
 make desktop-test        # cd desktop && go test .
 make desktop-test-short  # skips slow desktop integration/e2e checks
+```
+
+Before merging a desktop change, also run the frontend build/tests and the full
+nested-module lane used by CI:
+
+```sh
+pnpm --dir desktop/frontend install --frozen-lockfile
+pnpm --dir desktop/frontend build
+pnpm --dir desktop/frontend test:all
+cd desktop && go vet ./... && go test ./...
 ```
 
 To find the next bottleneck, rank individual test cases from the JSON stream:
@@ -140,14 +150,15 @@ not depend on homepage badge semantics. Self-update behavior by platform:
 - **Linux / Windows** — download, verify the minisign signature, then update in
   place: Linux replaces the binary and relaunches; Windows runs the per-user NSIS
   installer (no admin rights needed).
-- **macOS** — *not* self-updating yet. The build is unsigned/un-notarized, so an
-  in-place swap would be blocked by Gatekeeper; the banner links to the download
-  page for a manual update instead.
+- **macOS** — in-app replacement is enabled only for a Developer ID signed and
+  notarized release. Local/ad-hoc or otherwise unsigned builds fall back to the
+  download page because Gatekeeper would reject an in-place swap.
 
-### Unsigned builds — first launch
+### Local or unsigned builds — first launch
 
-There are no Apple/Windows code-signing certificates yet, so a downloaded build
-trips the OS gatekeepers on first run:
+The release workflow has conditional Apple Developer ID/notarization and Windows
+SignPath paths. Whether a particular artifact is signed depends on the release
+environment; local and ad-hoc builds remain unsigned and may trip OS gatekeepers:
 
 - **macOS** — open `Reasonix-darwin-universal.dmg` and drag Reasonix into
   Applications. Gatekeeper may then report the app "is damaged" or is from an
@@ -158,8 +169,8 @@ trips the OS gatekeepers on first run:
 - **Windows** — SmartScreen shows "Windows protected your PC". Click *More info →
   Run anyway*.
 
-When Developer ID / Authenticode certificates are added, the release workflow's
-`HAS_APPLE_CERT` gate flips to the signed path and these steps go away.
+Official-release claims should be checked against the workflow result and the
+artifact itself, not inferred from this README.
 
 ### Verifying a download
 
@@ -172,33 +183,24 @@ minisign -Vm Reasonix-darwin-arm64.zip \
   -P RWSw66n0RsoSr6Zhh6qt5YO95YkpCayTOCMFVDNUQSjJYwxoYngNVBSq
 ```
 
-## Editor seam (Monaco / CodeMirror)
+## Code, diff, and Markdown rendering seams
 
-Code and diff rendering go through two components with stable prop contracts and a
-lazy boundary, so a heavy editor stays out of the initial bundle and dropping one
-in is a one-line change — no consumer touches:
+Code and diff rendering go through two lazy components with stable prop
+contracts, keeping the syntax highlighter out of the initial bundle:
 
 | Component | Props | Default impl | Upgrade |
 |---|---|---|---|
-| `components/CodeViewer.tsx` | `EditorProps` | `editors/PlainCode.tsx` (`<pre>`) | swap the lazy import for `editors/MonacoCode` or `editors/CodeMirrorCode` |
-| `components/DiffView.tsx` | `DiffProps` | `editors/PlainDiff.tsx` (LCS line diff) | swap for `editors/MonacoDiff` or `editors/CodeMirrorMerge` |
+| `components/CodeViewer.tsx` | `EditorProps` | `editors/HljsCode.tsx` | swap its lazy import for another read-only/editor implementation |
+| `components/DiffView.tsx` | `DiffProps` | `editors/HljsDiff.tsx` (highlighted LCS line diff) | swap its lazy import for a richer diff implementation |
 
-```sh
-# Monaco
-pnpm add @monaco-editor/react monaco-editor
-# or CodeMirror 6
-pnpm add @uiw/react-codemirror @codemirror/lang-javascript @codemirror/merge
-```
-
-Then add `editors/MonacoCode.tsx` (default-export a component taking
-`EditorProps`) and point `CodeViewer.tsx`'s `lazy(() => import(...))` at it.
 `ToolCard` already routes `edit_file` calls' `old_string`/`new_string` through
 `DiffView`, and `Markdown` routes fenced code blocks through `CodeViewer`, so
 both seams light up everywhere at once.
 
-Markdown itself is currently minimal (fenced code + plain text). Upgrade path:
-`pnpm add react-markdown remark-gfm` and render in `components/Markdown.tsx`,
-keeping fenced code delegated to `CodeViewer`.
+Markdown is lazy-loaded through `Markdown.tsx` into `MarkdownRenderer.tsx` and
+uses `react-markdown`, GFM, math/KaTeX, and Mermaid support. Keep fenced code
+delegated to `CodeViewer` so rendering behavior stays consistent across
+transcripts, tool cards, workspace previews, and exports.
 
 ## Multi-platform adaptation
 
@@ -239,20 +241,24 @@ handled here, and what to reach for if a target misbehaves:
 ```
 desktop/
   main.go            Wails options, window, embed frontend/dist
-  app.go             App (bound command surface) + eventSink (event.Sink → webview)
-  wire.go            event.Event → JSON wire form (mirrors internal/serve/wire.go)
+  app.go             App: bound command surface and multi-tab runtime owner
+  tabs.go            WorkspaceTab/session identity, Controller assembly, event queue
   wails.json         Wails project config (pnpm install/build/dev)
   frontend/
     src/
       lib/
-        types.ts         wire contract (mirrors wire.go)
+        types.ts         frontend view of the shared eventwire contract
         bridge.ts        window.go/window.runtime wrapper + browser dev mock
-        useController.ts event-stream reducer + command surface (the hook)
+        useController.ts per-tab event state machine + command surface
       components/
-        Transcript, Message, ToolCard, Composer, ApprovalModal, ContextGauge,
+        Transcript, Message, ToolCard, Composer, ApprovalModal, ContextPanel,
         Markdown, CodeViewer, DiffView
-        editors/  PlainCode, PlainDiff   ← editor seam impls (swap targets)
+        editors/  HljsCode, HljsDiff     ← current lazy seam implementations
 ```
+
+The shared Go JSON conversion lives in `internal/eventwire`; `tabs.go` adds the
+desktop-specific `tabId` before emitting `agent:event`. There is no standalone
+`desktop/wire.go`.
 
 ## Telemetry
 

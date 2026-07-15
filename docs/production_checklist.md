@@ -1,5 +1,10 @@
 # Reasonix v5 Stable Production Checklist
 
+> **Scope:** this is the frozen **Memory v5 / execution-compiler subsystem**
+> checklist associated with PR #5217. It is not the release checklist for the
+> whole Reasonix `v1.x` product. Use [`RELEASING.md`](RELEASING.md) and the
+> current GitHub workflows for CLI, npm, desktop, site, and service releases.
+
 Reasonix v5.9.9 is frozen as a stable release candidate. This checklist is the
 release gate for PR #5217 and future v5-stable maintenance work.
 

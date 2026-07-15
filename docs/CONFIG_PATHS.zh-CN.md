@@ -28,6 +28,8 @@ Legacy 迁移、OS home 约定目录扫描以及其他 fallback 路径都会跳�
 | 旧 credentials 导入来源 | `<Reasonix home>/credentials` |
 | 全局斜杠命令 | `<Reasonix home>/commands/` |
 | 全局 skills | `<Reasonix home>/skills/` |
+| 已安装 plugin packages | `<Reasonix home>/plugins/<name>/` |
+| plugin package 状态 | `<Reasonix home>/plugin-packages.json` |
 | 全局 hooks | `<Reasonix home>/settings.json` |
 | hooks 信任状态 | `<Reasonix home>/trust.json` |
 | 会话 | `<state root>/sessions/` |

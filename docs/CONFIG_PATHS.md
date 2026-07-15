@@ -35,6 +35,8 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Legacy credentials import source | `<Reasonix home>/credentials` |
 | Global slash commands | `<Reasonix home>/commands/` |
 | Global skills | `<Reasonix home>/skills/` |
+| Installed plugin packages | `<Reasonix home>/plugins/<name>/` |
+| Plugin package state | `<Reasonix home>/plugin-packages.json` |
 | Global hooks | `<Reasonix home>/settings.json` |
 | Hook trust store | `<Reasonix home>/trust.json` |
 | Sessions | `<state root>/sessions/` |

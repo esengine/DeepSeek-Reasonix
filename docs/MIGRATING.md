@@ -35,12 +35,13 @@ npm i -g reasonix@next     # release candidate, when one is ahead of stable
 npm i -g reasonix@0.53.2   # pin the legacy TS build
 ```
 
-Prebuilt archives (`reasonix-<os>-<arch>.tar.gz` / `.zip`) and the desktop
-installer are attached to each GitHub release. These are a **separate channel**
-from npm: the installer drops a standalone desktop/binary build and does not
-touch a CLI you installed with `npm i -g`, so the two coexist — an npm `0.53` in
-your shell alongside a `1.x` desktop app is expected, not a conflict. Or build
-from source:
+Prebuilt CLI archives (`reasonix-<os>-<arch>.tar.gz` / `.zip`) and desktop
+installers ship on separate GitHub release lines: `v*` for CLI and `desktop-v*`
+for desktop; npm uses its own `npm-v*` tags. These are **separate channels**:
+the desktop installer does not touch a CLI installed with `npm i -g`, so the two
+coexist — an npm `0.53` in your shell alongside a `1.x` desktop app is expected,
+not a conflict. See [`RELEASING.md`](RELEASING.md) for the current release model.
+Or build from source:
 
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix   # default: main-v2 (Go)
