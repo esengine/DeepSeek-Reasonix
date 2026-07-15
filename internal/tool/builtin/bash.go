@@ -28,6 +28,12 @@ import (
 
 const (
 	bashWaitDelay = 5 * time.Second
+	// maxBashOutput caps the combined stdout+stderr a single command can
+	// accumulate before the rest is dropped. Unbounded output from runaway
+	// commands (e.g. infinite-loop prints) caused OOM / 96%-memory crashes
+	// (#6473). 10 MB is large enough for legitimate compiles and small
+	// enough to keep the Reasonix process responsive under memory pressure.
+	maxBashOutput = 10 << 20
 )
 
 var errBashTimeout = errors.New("bash foreground timeout")
@@ -293,13 +299,17 @@ func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell,
 	cmd.Env = cmdEnv
 	cmd.WaitDelay = bashWaitDelay
 	var buf bytes.Buffer
-	w := io.Writer(&buf)
+	capW := newCappedWriter(&buf, maxBashOutput)
+	w := io.Writer(capW)
 	if emit, ok := tool.ProgressFrom(ctx); ok {
-		w = io.MultiWriter(&buf, newProgressWriter(emit))
+		w = io.MultiWriter(capW, newProgressWriter(emit))
 	}
 	cmd.Stdout = w
 	cmd.Stderr = w
 	tracked, err := runShellProcess(runCtx, cmd, sh, p.Command, shouldTrackShellProcess(wrapped, sh, p.Command, p.PreserveBackgroundProcesses))
+	if capW.truncated {
+		buf.WriteString("\n\n[output truncated at 10 MB]\n")
+	}
 	// A foreground command that spawned a lingering child (e.g. `bazel run`'s
 	// server) leaves it in the process group; Wait only reaped the shell leader.
 	// Kill the group so those don't accumulate into an OOM (#3702). On cancel/
@@ -385,6 +395,40 @@ func shouldTrackShellProcess(wrapped bool, sh sandbox.Shell, command string, pre
 	return sh.Kind != sandbox.ShellBash || !hasExplicitBackgroundKeepalive(command)
 }
 
+// cappedWriter wraps an io.Writer and silently drops writes beyond maxBytes.
+// It is used to cap command output so a runaway process (infinite-loop prints)
+// cannot OOM the Reasonix process (#6473).
+type cappedWriter struct {
+	w         io.Writer
+	maxBytes  int64
+	written   int64
+	truncated bool
+}
+
+func newCappedWriter(w io.Writer, maxBytes int64) *cappedWriter {
+	return &cappedWriter{w: w, maxBytes: maxBytes}
+}
+
+func (c *cappedWriter) Write(p []byte) (int, error) {
+	if c.truncated {
+		return len(p), nil
+	}
+	room := c.maxBytes - c.written
+	if room <= 0 {
+		c.truncated = true
+		return len(p), nil
+	}
+	n := int64(len(p))
+	if n > room {
+		n = room
+		c.truncated = true
+	}
+	nw, err := c.w.Write(p[:n])
+	c.written += int64(nw)
+	// Report the full len(p) written so MultiWriter and exec.Cmd don't see
+	// a short write as an error.
+	return len(p), err
+}
 func runShellProcess(ctx context.Context, cmd *exec.Cmd, sh sandbox.Shell, command string, track bool) (*proc.TrackedCommand, error) {
 	return proc.RunCommand(ctx, cmd, proc.RunOptions{
 		Track:           track,
