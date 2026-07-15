@@ -1349,6 +1349,9 @@ func (s *tabEventSink) Emit(e event.Event) {
 		s.mu.Lock()
 		s.turnInFlight = true
 		s.mu.Unlock()
+		i18n := petI18n()
+		PetSetState("running", i18n.RunningBubble, 0)
+		petPopBubble(i18n.Greetings)
 	}
 	tabID, app := s.binding()
 	if app != nil {
@@ -1360,6 +1363,19 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.recordUsageTelemetry(e)
 		case event.TurnDone:
 			s.recordTurnDone()
+			i18n := petI18n()
+			if e.Err != nil {
+				PetSetState("failed", i18n.ErrorBubble, 0)
+			} else {
+				PetSetState("idle", "", 0)
+				petPopBubble(i18n.TaskDoneBubbles)
+			}
+		case event.ApprovalRequest:
+			i18n := petI18n()
+			PetSetState("need_confirm", i18n.WaitingBubble, 0)
+		case event.AskRequest:
+			i18n := petI18n()
+			PetSetState("need_confirm", i18n.WaitingBubble, 0)
 		}
 		if m := app.metrics.Load(); m != nil {
 			m.observe(e)

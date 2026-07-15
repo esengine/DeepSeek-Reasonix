@@ -128,6 +128,17 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if width := c.DesktopConversationWidth(); width == "full" {
 			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)
 		}
+		fmt.Fprintf(&b, "pet_enabled = %v   # desktop: desk pet toggle\n", c.DesktopPetEnabled())
+		if s := c.DesktopPetScale(); s != 1.0 {
+			fmt.Fprintf(&b, "pet_scale = %v   # desktop: desk pet zoom\n", s)
+		}
+		if s := c.DesktopPetSlug(); s != "" {
+			fmt.Fprintf(&b, "pet_slug = %q   # desktop: current pet\n", s)
+		}
+		if x, y := c.DesktopPetPos(); x != 0 || y != 0 {
+			fmt.Fprintf(&b, "pet_pos_x = %v   # desktop: pet window x\n", x)
+			fmt.Fprintf(&b, "pet_pos_y = %v   # desktop: pet window y\n", y)
+		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {
 		// provider_access is intentionally mergeable across user and project

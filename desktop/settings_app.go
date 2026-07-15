@@ -3013,6 +3013,8 @@ func (a *App) SetDesktopLanguage(lang string) error {
 	}
 	a.updateTrayLocale(lang)
 	a.applyResponseLanguageToLiveControllers(responseLanguage)
+	// Refresh pet window i18n when language changes in Settings.
+	petRefreshI18n()
 	return nil
 }
 

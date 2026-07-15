@@ -500,6 +500,9 @@ export interface AppBindings {
   WorkbenchRemoteRequest(method: string, paramsJSON: string): Promise<string>;
   WorkbenchResolveProviderTrust(accept: boolean): Promise<void>;
   WorkbenchPendingProviderTrust(): Promise<ProviderTrustPrompt | null>;
+  // ── Pet ──
+  AppPetEnabled(): Promise<boolean>;
+  AppPetToggle(): Promise<boolean>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -4726,6 +4729,8 @@ function makeMockApp(): AppBindings {
     async WorkbenchPendingProviderTrust() {
       return null;
     },
+    async AppPetEnabled() { return true; },
+    async AppPetToggle() { return true; },
   };
 }
 
