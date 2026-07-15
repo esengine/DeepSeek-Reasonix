@@ -1107,13 +1107,15 @@ func TestSaveToRoundTrips(t *testing.T) {
 }
 
 func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	home := isolateUserConfigHome(t)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	c := Default()
 	c.Desktop.Theme = "dark"
 	c.Desktop.ThemeStyle = "graphite"
 	c.Desktop.CloseBehavior = "background"
 
 	userPath := UserConfigPath()
+	requireTestPathWithin(t, home, userPath)
 	if err := c.SaveTo(userPath); err != nil {
 		t.Fatalf("SaveTo user config: %v", err)
 	}
