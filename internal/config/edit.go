@@ -838,8 +838,15 @@ func (c *Config) TrustPluginReadOnlyTool(name, toolName string) (PluginEntry, bo
 // user config. Source priority mirrors Load(): project TOML, user TOML, then the
 // project .mcp.json entry if TOML did not define that server.
 func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, error) {
-	if path := pluginTOMLSourcePath(name); path != "" {
-		cfg := LoadForEdit(path)
+	path, err := pluginTOMLSourcePath(name)
+	if err != nil {
+		return PluginEntry{}, false, "", err
+	}
+	if path != "" {
+		cfg, err := LoadForEditStrict(path)
+		if err != nil {
+			return PluginEntry{}, false, path, err
+		}
 		updated, changed, err := cfg.ClearPluginAuthentication(name)
 		if err != nil {
 			return PluginEntry{}, false, path, err
@@ -858,7 +865,7 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 	return updated, changed, mcpJSONFile, nil
 }
 
-func pluginTOMLSourcePath(name string) string {
+func pluginTOMLSourcePath(name string) (string, error) {
 	return pluginTOMLSourcePathForRoot(".", name)
 }
 
@@ -1103,8 +1110,15 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 // into the file that owns the server for root. TOML declarations win over
 // .mcp.json, matching LoadForRoot merge precedence.
 func TrustPluginReadOnlyToolInSourceForRoot(root, name, toolName string) (PluginEntry, bool, string, error) {
-	if path := pluginTOMLSourcePathForRoot(root, name); path != "" {
-		cfg := LoadForEdit(path)
+	path, err := pluginTOMLSourcePathForRoot(root, name)
+	if err != nil {
+		return PluginEntry{}, false, "", err
+	}
+	if path != "" {
+		cfg, err := LoadForEditStrict(path)
+		if err != nil {
+			return PluginEntry{}, false, path, err
+		}
 		updated, changed, err := cfg.TrustPluginReadOnlyTool(name, toolName)
 		if err != nil {
 			return PluginEntry{}, false, path, err
@@ -1131,7 +1145,7 @@ func TrustPluginReadOnlyToolInSource(name, toolName string) (PluginEntry, bool, 
 	return TrustPluginReadOnlyToolInSourceForRoot(".", name, toolName)
 }
 
-func pluginTOMLSourcePathForRoot(root, name string) string {
+func pluginTOMLSourcePathForRoot(root, name string) (string, error) {
 	projectTOML := "reasonix.toml"
 	if resolved := resolveRoot(root); resolved != "." {
 		projectTOML = filepath.Join(resolved, "reasonix.toml")
@@ -1141,14 +1155,17 @@ func pluginTOMLSourcePathForRoot(root, name string) string {
 		if strings.TrimSpace(path) == "" {
 			continue
 		}
-		cfg := LoadForEdit(path)
+		cfg, err := LoadForEditStrict(path)
+		if err != nil {
+			return "", err
+		}
 		for _, p := range cfg.Plugins {
 			if p.Name == name {
-				return path
+				return path, nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // validatePlugin checks a plugin entry by transport. An empty Type means stdio.
@@ -1738,7 +1755,10 @@ func (c *Config) SaveForRoot(root string) error {
 		projectTOML = filepath.Join(root, "reasonix.toml")
 	}
 	if _, err := os.Stat(projectTOML); err == nil {
-		projectCfg := LoadForEditWithoutCredentials(projectTOML)
+		projectCfg, err := LoadForEditWithoutCredentialsStrict(projectTOML)
+		if err != nil {
+			return err
+		}
 		return projectCfg.SaveTo(projectTOML)
 	}
 	if uc := userConfigPath(); uc != "" {

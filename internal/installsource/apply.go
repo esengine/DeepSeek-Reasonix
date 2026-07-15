@@ -55,14 +55,24 @@ func (t *installSourceTool) apply(ctx context.Context, req request, act *action)
 	}
 }
 
+func (t *installSourceTool) saveConfigTo(cfg *config.Config, path string) error {
+	if t.saveConfig != nil {
+		return t.saveConfig(cfg, path)
+	}
+	return cfg.SaveTo(path)
+}
+
 // applySkillRoot appends the path to the active config's [skills].paths and
 // re-builds the Store to confirm the listed skills are discoverable.
 func (t *installSourceTool) applySkillRoot(req request, act *action) error {
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditStrict(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	if err := cfg.AddSkillPath(act.Source); err != nil {
 		return err
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		return err
 	}
 	store := skill.New(skill.Options{HomeDir: t.home, ReasonixHomeDir: t.reasonixHome, ProjectRoot: t.root, CustomPaths: append(cfg.SkillCustomPaths(), act.Source)})
@@ -205,7 +215,10 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 	if act.entry.Name == "" {
 		return newErr(ErrInvalidManifest, "MCP action has no server entry")
 	}
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditStrict(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	var previous config.PluginEntry
 	hadPrevious := false
 	for _, existing := range cfg.Plugins {
@@ -248,7 +261,7 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 		}
 		return err
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		if rbErr := t.rollbackMCPReplace(act, previous, oldDisconnected, connected); rbErr != nil {
 			return fmt.Errorf("%w; rollback failed: %v", err, rbErr)
 		}
@@ -303,7 +316,10 @@ func (t *installSourceTool) applyRemoveSkillRoot(_ request, act *action) error {
 	if target == "" {
 		return newErr(ErrInvalidManifest, "remove_skill_root action is missing target")
 	}
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditStrict(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	removed, err := cfg.RemoveSkillPath(target)
 	if err != nil {
 		return err
@@ -311,7 +327,7 @@ func (t *installSourceTool) applyRemoveSkillRoot(_ request, act *action) error {
 	if !removed {
 		return nil
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		return err
 	}
 	return nil
@@ -320,12 +336,15 @@ func (t *installSourceTool) applyRemoveSkillRoot(_ request, act *action) error {
 // applyRemoveMCP removes an MCP server entry from the active config and
 // asks the host to disconnect it (if a connector is wired).
 func (t *installSourceTool) applyRemoveMCP(_ request, act *action) error {
-	cfg := config.LoadForEdit(act.ConfigPath)
+	cfg, err := config.LoadForEditStrict(act.ConfigPath)
+	if err != nil {
+		return err
+	}
 	if !cfg.RemovePlugin(act.Name) {
 		// Nothing to remove is not a failure: idempotent.
 		return nil
 	}
-	if err := cfg.SaveTo(act.ConfigPath); err != nil {
+	if err := t.saveConfigTo(cfg, act.ConfigPath); err != nil {
 		return err
 	}
 	if t.onDisconnect != nil {

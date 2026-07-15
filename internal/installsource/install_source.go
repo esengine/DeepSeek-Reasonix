@@ -67,6 +67,7 @@ type installSourceTool struct {
 	connectMCP   MCPConnector
 	onDisconnect OnDisconnectFunc
 	approval     ApprovalFunc
+	saveConfig   func(*config.Config, string) error
 	// preparePlugin overrides plugin source preparation in tests. nil uses
 	// preparePluginSource. Plan and apply both resolve the source through the
 	// same function, and git sources additionally report the resolved commit,
@@ -118,6 +119,7 @@ func NewTool(opts Options) tool.Tool {
 		connectMCP:   opts.ConnectMCP,
 		onDisconnect: opts.OnDisconnect,
 		approval:     opts.Approval,
+		saveConfig:   func(cfg *config.Config, path string) error { return cfg.SaveTo(path) },
 	}
 }
 
@@ -335,7 +337,22 @@ func (t *installSourceTool) executeUninstall(req request) string {
 	actions := []action{}
 	scopes := t.uninstallSearchScopes(req)
 	for _, scope := range scopes {
-		actions = t.uninstallActionsForScope(req.Name, scope)
+		var err error
+		actions, err = t.uninstallActionsForScope(req.Name, scope)
+		if err != nil {
+			return marshalJSON(response{
+				OK:       false,
+				Status:   "failed",
+				Op:       req.Op,
+				Applied:  false,
+				Source:   req.Source,
+				Name:     req.Name,
+				Scope:    scope,
+				Warnings: []string{err.Error()},
+				Error:    err.Error(),
+				Next:     "Fix the config file, then retry op=uninstall.",
+			})
+		}
 		if len(actions) > 0 {
 			break
 		}
@@ -408,10 +425,13 @@ func (t *installSourceTool) uninstallSearchScopes(req request) []string {
 	return append(scopes, "global")
 }
 
-func (t *installSourceTool) uninstallActionsForScope(name, scope string) []action {
+func (t *installSourceTool) uninstallActionsForScope(name, scope string) ([]action, error) {
 	var actions []action
 	cfgPath := t.configPath(scope)
-	cfg := config.LoadForEdit(cfgPath)
+	cfg, err := config.LoadForEditStrict(cfgPath)
+	if err != nil {
+		return nil, err
+	}
 
 	// Skills: try the flat file, then the directory layout, in the chosen
 	// scope. We don't require a kind — "name" disambiguates.
@@ -473,7 +493,7 @@ func (t *installSourceTool) uninstallActionsForScope(name, scope string) []actio
 			}
 		}
 	}
-	return actions
+	return actions, nil
 }
 
 // resolveSkillPath finds the on-disk location of a previously installed

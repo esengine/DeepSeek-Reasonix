@@ -947,12 +947,10 @@ func TestApplyMCPReplaceDisconnectsLiveServerBeforeConnect(t *testing.T) {
 func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
-	// Pre-create a directory at the config path so cfg.SaveTo will fail
-	// (it cannot overwrite a non-empty directory with the file it wants).
-	if err := os.MkdirAll(filepath.Join(project, "reasonix.toml"), 0o755); err != nil {
+	cfg := config.Default()
+	if err := cfg.SaveTo(filepath.Join(project, "reasonix.toml")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(project, "reasonix.toml", "blocker"), "x")
 
 	var disconnects atomic.Int32
 	stub := &stubConnector{toolCount: 2, disconnectCalls: &disconnects}
@@ -964,7 +962,10 @@ func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 			disconnects.Add(1)
 			return true
 		},
-	})
+	}).(*installSourceTool)
+	tl.saveConfig = func(*config.Config, string) error {
+		return errors.New("forced save failure")
+	}
 
 	resp := execInstall(t, tl, map[string]any{
 		"source": "https://mcp.example.com/mcp",
@@ -979,6 +980,41 @@ func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 	}
 	if got := disconnects.Load(); got != 1 {
 		t.Errorf("rollback expected to call the new connection Disconnect once, got %d", got)
+	}
+}
+
+func TestApplyMCPRefusesInvalidConfigBeforeConnect(t *testing.T) {
+	project := t.TempDir()
+	home := t.TempDir()
+	writeFile(t, filepath.Join(project, "reasonix.toml"), "default_model = [\n")
+
+	var disconnects atomic.Int32
+	stub := &stubConnector{toolCount: 2, disconnectCalls: &disconnects}
+	tl := NewTool(Options{
+		ProjectRoot: project,
+		HomeDir:     home,
+		ConnectMCP:  stub.connector(),
+	})
+
+	resp := execInstall(t, tl, map[string]any{
+		"source": "https://mcp.example.com/mcp",
+		"kind":   "mcp",
+		"apply":  true,
+		"name":   "ghost",
+		"scope":  "project",
+	})
+
+	if resp.OK || resp.Status != "failed" {
+		t.Fatalf("expected config failure, got %+v", resp)
+	}
+	if len(stub.connected) != 0 {
+		t.Fatalf("invalid config should fail before ConnectMCP, connected %+v", stub.connected)
+	}
+	if got := disconnects.Load(); got != 0 {
+		t.Errorf("invalid config should not need rollback, got %d disconnects", got)
+	}
+	if len(resp.Actions) != 1 || !strings.Contains(resp.Actions[0].Error, "reasonix.toml") {
+		t.Fatalf("action error should name config path, got %+v", resp.Actions)
 	}
 }
 

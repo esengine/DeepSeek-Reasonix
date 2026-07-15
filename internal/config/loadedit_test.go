@@ -40,6 +40,27 @@ api_key_env = "X_KEY"
 	}
 }
 
+func TestLoadForEditRefusesInvalidExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	body := []byte("default_model = [\n")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadForEditStrict(path); err == nil {
+		t.Fatal("LoadForEditStrict should reject malformed TOML")
+	} else if !strings.Contains(err.Error(), path) {
+		t.Fatalf("error %q should include config path %q", err, path)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(body) {
+		t.Fatalf("failed load changed config on disk:\n%s", after)
+	}
+}
+
 func TestLoadForEditDecodesGB18030TOML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -65,7 +86,7 @@ api_key_env = "LOCAL_KEY"
 	}
 }
 
-func TestLoadForEditMigratesLegacyMCPTiers(t *testing.T) {
+func TestLoadForEditNormalizesLegacyMCPTiersWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reasonix.toml")
 	body := `
@@ -88,15 +109,32 @@ model = "m"
 	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Tier != "" {
 		t.Fatalf("plugins after migration = %+v, want empty tier", cfg.Plugins)
 	}
+	afterLoad, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterLoad) != body {
+		t.Fatalf("LoadForEdit should not change config on disk:\n%s", afterLoad)
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
 	updated, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(updated), "\ntier") {
-		t.Fatalf("legacy tier lines should be removed from file:\n%s", updated)
+		t.Fatalf("explicit save should remove legacy tier lines from file:\n%s", updated)
 	}
-	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `name = "local"`) {
-		t.Fatalf("migration should preserve ordinary config:\n%s", updated)
+	persisted, err := LoadForEditStrict(path)
+	if err != nil {
+		t.Fatalf("reload after SaveTo: %v", err)
+	}
+	if len(persisted.Plugins) != 1 || persisted.Plugins[0].Command != "npx" {
+		t.Fatalf("explicit save should preserve plugin config: %+v", persisted.Plugins)
+	}
+	if got, ok := persisted.Provider("local"); !ok || got.BaseURL != "https://x" || got.Model != "m" {
+		t.Fatalf("explicit save should preserve provider config: %+v", got)
 	}
 }
 
