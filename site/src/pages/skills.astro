@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import SiteNav from '../components/SiteNav.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
@@ -11,23 +12,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
   titleZh="Reasonix — 技能与 MCP 市场"
   description={desc}>
 
-  <header class="nav">
-    <div class="nav-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
-      <nav class="nav-links">
-        <a href={`${base}/#features`}><span class="l-en">Features</span><span class="l-zh">特性</span></a>
-        <a href={`${base}/skills/`} class="here"><span class="l-en">Skills</span><span class="l-zh">技能市场</span></a>
-        <a href={`${base}/#community`}><span class="l-en">Community</span><span class="l-zh">社区</span></a>
-        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
-      </nav>
-      <div class="lang-switch" role="group" aria-label="Language">
-        <button type="button" data-lang="en" class="active">EN</button>
-        <button type="button" data-lang="zh">中文</button>
-      </div>
-      <span class="nav-acct" data-account-slot></span>
-      <a class="btn btn-dark" id="publish-open" href="#publish"><span class="l-en">Publish</span><span class="l-zh">发布</span></a>
-    </div>
-  </header>
+  <SiteNav active="skills" accountSlot showPublish />
 
   <main>
   <section class="reg-head">

@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import SiteNav from '../components/SiteNav.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const R2_LATEST = 'https://dl.reasonix.io/latest';
@@ -24,23 +25,7 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
   titleZh="文档 — Reasonix"
   description="Install Reasonix, start your first session, configure providers and credentials, and understand prefix cache, permissions, sandboxing, MCP plugins, memory, rewind, desktop and bot workflows.">
 
-  <header class="nav scrolled">
-    <div class="nav-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
-      <nav class="nav-links">
-        <a href={`${base}/#features`}><span class="l-en">Features</span><span class="l-zh">特性</span></a>
-        <a href={`${base}/#how`}><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
-        <a href={`${base}/#community`}><span class="l-en">Community</span><span class="l-zh">社区</span></a>
-        <a href={`${base}/docs/`} class="here"><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
-        <a href={`${base}/#start`}><span class="l-en">Get started</span><span class="l-zh">快速开始</span></a>
-      </nav>
-      <div class="lang-switch" role="group" aria-label="Language">
-        <button type="button" data-lang="en" class="active">EN</button>
-        <button type="button" data-lang="zh">中文</button>
-      </div>
-      <a class="btn btn-dark" href={`${base}/#start`}><span class="l-en">Install</span><span class="l-zh">安装</span></a>
-    </div>
-  </header>
+  <SiteNav active="docs" scrolled showInstall />
 
   <main class="docs-layout">
     <aside class="docs-side" aria-label="Documentation navigation">
