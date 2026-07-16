@@ -876,6 +876,16 @@ type Agent struct {
 	tokenAwareSaturationMonitor *TokenAwareSaturationMonitor
 	// OPT-245: 提示缓存压力指数
 	promptCachePressureIndex *PromptCachePressureIndex
+	// OPT-246: Token 感知配额强制器
+	tokenAwareQuotaEnforcer *TokenAwareQuotaEnforcer
+	// OPT-247: 缓存失效波
+	cacheInvalidationWave *CacheInvalidationWave
+	// OPT-248: 上下文窗口热力调节器
+	contextWindowThermalRegulator *ContextWindowThermalRegulator
+	// OPT-249: Token 感知回路监控器
+	tokenAwareCircuitMonitor *TokenAwareCircuitMonitor
+	// OPT-250: 提示缓存自适应控制器
+	promptCacheAdaptiveController *PromptCacheAdaptiveController
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -2056,6 +2066,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowEvictionManager := NewContextWindowEvictionManager(256)
 	tokenAwareSaturationMonitor := NewTokenAwareSaturationMonitor(100000, 50)
 	promptCachePressureIndex := NewPromptCachePressureIndex()
+	tokenAwareQuotaEnforcer := NewTokenAwareQuotaEnforcer()
+	cacheInvalidationWave := NewCacheInvalidationWave()
+	contextWindowThermalRegulator := NewContextWindowThermalRegulator(1024, 32768, 8192)
+	tokenAwareCircuitMonitor := NewTokenAwareCircuitMonitor()
+	promptCacheAdaptiveController := NewPromptCacheAdaptiveController(20)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2319,6 +2334,11 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowEvictionManager: contextWindowEvictionManager,
 		tokenAwareSaturationMonitor:  tokenAwareSaturationMonitor,
 		promptCachePressureIndex:     promptCachePressureIndex,
+		tokenAwareQuotaEnforcer:      tokenAwareQuotaEnforcer,
+		cacheInvalidationWave:        cacheInvalidationWave,
+		contextWindowThermalRegulator: contextWindowThermalRegulator,
+		tokenAwareCircuitMonitor:     tokenAwareCircuitMonitor,
+		promptCacheAdaptiveController: promptCacheAdaptiveController,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -3138,6 +3158,21 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCachePressureIndex != nil {
 		stats["opt245_promptCachePressureIndex"] = a.promptCachePressureIndex.GetStats()
+	}
+	if a.tokenAwareQuotaEnforcer != nil {
+		stats["opt246_tokenAwareQuotaEnforcer"] = a.tokenAwareQuotaEnforcer.GetStats()
+	}
+	if a.cacheInvalidationWave != nil {
+		stats["opt247_cacheInvalidationWave"] = a.cacheInvalidationWave.GetStats()
+	}
+	if a.contextWindowThermalRegulator != nil {
+		stats["opt248_contextWindowThermalRegulator"] = a.contextWindowThermalRegulator.GetStats()
+	}
+	if a.tokenAwareCircuitMonitor != nil {
+		stats["opt249_tokenAwareCircuitMonitor"] = a.tokenAwareCircuitMonitor.GetStats()
+	}
+	if a.promptCacheAdaptiveController != nil {
+		stats["opt250_promptCacheAdaptiveController"] = a.promptCacheAdaptiveController.GetStats()
 	}
 	return stats
 }
@@ -3981,6 +4016,18 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
 		}
 		a.promptCachePressureIndex.Update(hr, 1.0-hr, 0.0)
+	}
+
+	// OPT-246~250: 配额 / 波 / 热力调节 / 回路 / 自适应
+	if a.promptCacheAdaptiveController != nil && usage != nil {
+		hr := 0.0
+		if usage.TotalTokens > 0 {
+			hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
+		}
+		a.promptCacheAdaptiveController.RecordPerformance(hr)
+	}
+	if a.tokenAwareCircuitMonitor != nil {
+		a.tokenAwareCircuitMonitor.Check("main")
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {
