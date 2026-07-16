@@ -191,12 +191,39 @@ export function clearLegacyThemePreference(): void {
   }
 }
 
+export type ConversationWidth = "standard" | "full";
+const CONV_WIDTH_KEY = "reasonix-conv-width";
+
+export function getConversationWidth(): ConversationWidth {
+  try {
+    const raw = localStorage.getItem(CONV_WIDTH_KEY);
+    if (raw === "standard" || raw === "full") return raw;
+  } catch {
+    /* storage unavailable */
+  }
+  return "standard";
+}
+
+export function applyConversationWidth(width: ConversationWidth): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.style.setProperty(
+    "--maxw",
+    width === "full" ? "90%" : "960px",
+  );
+  try {
+    localStorage.setItem(CONV_WIDTH_KEY, width);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 // initTheme runs before React mounts. It applies the saved theme to the DOM and
 // sets the native window background colour to match the resolved theme, avoiding
 // a white (or wrong-colour) flash while the webview paints its first frame.
 export function initTheme(): void {
   const theme = getTheme();
   applyTheme(theme, getThemeStyle(theme), { persist: false });
+  applyConversationWidth(getConversationWidth());
 }
 
 function syncNativeWindowBackground(theme: Theme): void {

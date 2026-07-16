@@ -276,6 +276,7 @@ type SettingsView struct {
 	Metrics                 bool                 `json:"metrics"`
 	MemoryCompiler          bool                 `json:"memoryCompilerEnabled"`
 	ExpandThinking          bool                 `json:"expandThinking"`
+	ConversationWidth       string               `json:"conversationWidth"`
 	ConfigPath              string               `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -303,6 +304,7 @@ type DesktopStartupSettingsView struct {
 	StatusBarItems     []string        `json:"statusBarItems"`
 	CheckUpdates       bool            `json:"checkUpdates"`
 	SafeMode           bool            `json:"safeMode,omitempty"`
+	ConversationWidth  string          `json:"conversationWidth"`
 }
 
 func nonNil(s []string) []string {
@@ -757,8 +759,10 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 			StatusBarStyle:     "text",
 			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:       true,
+		ConversationWidth:  "standard",
 		}
 	}
+	cw := conversationWidthOrDefault(cfg.Desktop.ConversationWidth)
 	return DesktopStartupSettingsView{
 		Bot:                botSettingsView(cfg.Bot),
 		DesktopLanguage:    cfg.DesktopLanguage(),
@@ -770,7 +774,16 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 		StatusBarItems:     cfg.DesktopStatusBarItems(),
 		CheckUpdates:       cfg.DesktopCheckUpdates(),
 		SafeMode:           cfg.SafeMode(),
+		ConversationWidth:  cw,
 	}
+}
+
+func conversationWidthOrDefault(cw string) string {
+	cw = strings.TrimSpace(cw)
+	if cw != "standard" && cw != "full" {
+		return "standard"
+	}
+	return cw
 }
 
 // DesktopStartupSettings returns only the desktop chrome preferences needed at
@@ -820,6 +833,7 @@ func (a *App) Settings() SettingsView {
 			Metrics:                 true,
 			MemoryCompiler:          true,
 			ExpandThinking:          false,
+			ConversationWidth:       "standard",
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -884,6 +898,7 @@ func (a *App) Settings() SettingsView {
 		Metrics:                 cfg.DesktopMetrics(),
 		MemoryCompiler:          cfg.MemoryCompilerEnabled(),
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
+		ConversationWidth:       conversationWidthOrDefault(cfg.Desktop.ConversationWidth),
 		ConfigPath:              cfgPath,
 		ProviderKinds:           nonNil(provider.Kinds()),
 		AutoApproveTools:        ctrl != nil && ctrl.AutoApproveTools(),
@@ -3044,6 +3059,12 @@ func (a *App) SetDesktopMetrics(enabled bool) error {
 // the desktop. It is desktop-only and does not rebuild the controller.
 func (a *App) SetExpandThinking(on bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetExpandThinking(on) })
+}
+
+// SetDesktopConversationWidth sets the max transcript width preference.
+// standard = 960px fixed; full = 90% of parent container. Pure config-only.
+func (a *App) SetDesktopConversationWidth(width string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopConversationWidth(width) })
 }
 
 // MigrateDesktopPreferences imports old browser-local desktop preferences into

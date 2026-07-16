@@ -206,7 +206,6 @@
   --motion-rise: 4px; /* enter-from translateY for popovers/menus */
 
   --radius: 9px;
-  --maxw: 940px;
   --mono: var(--font-mono);
   --sans: var(--font-ui);
   --font-sans: var(--font-ui);
@@ -24014,7 +24013,6 @@ body > .mermaid-diagram--fullscreen {
   --warn: #d9a441;
   --button-radius: 7px;
   --radius: 8px;
-  --maxw: 920px;
   --sans: var(--font-ui);
 }
 
@@ -24608,7 +24606,7 @@ body > .mermaid-diagram--fullscreen {
    color tokens, not spacing, positioning, density, or component geometry.
    ------------------------------------------------------------------------- */
 :root[data-theme-style] {
-  --maxw: 760px;
+  --maxw: 960px;
   --chrome-panel-control-size: 30px;
   --app-graphite-hairline: rgba(20, 22, 28, 0.12);
   --app-graphite-hairline-strong: rgba(20, 22, 28, 0.22);

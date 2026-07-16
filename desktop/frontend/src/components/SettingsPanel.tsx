@@ -9,10 +9,12 @@ import { useUpdater } from "../lib/useUpdater";
 import {
   THEME_STYLES,
   applyTheme,
+  getConversationWidth,
   getTheme,
   getThemeStyle,
   normalizeThemePreference,
   normalizeThemeStyleForTheme,
+  type ConversationWidth,
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
@@ -98,6 +100,7 @@ export function SettingsPanel({
   const [warning, setWarning] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
+  const [convWidth, setConvWidth] = useState<ConversationWidth>(() => getConversationWidth());
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [zoomPct, setZoomPct] = useState<number>(zoomToPercent(getRestartZoom()));
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
@@ -278,6 +281,7 @@ export function SettingsPanel({
                     <AppearanceSection
                       theme={theme}
                       themeStyle={themeStyle}
+                      convWidth={convWidth}
                       textSize={textSize}
                       showDisplayZoom={desktopPlatform === "windows"}
                       zoomPct={zoomPct}
@@ -289,6 +293,10 @@ export function SettingsPanel({
                         applyTheme(nextTheme, themeStyle, { persist: false });
                         setThemeState(nextTheme);
                         void apply(() => app.SetDesktopAppearance(nextTheme, themeStyle));
+                      }}
+                      onConvWidth={(width) => {
+                        setConvWidth(width);
+                        void apply(() => app.SetDesktopConversationWidth(width));
                       }}
                       onThemeStyle={(style) => {
                         applyTheme(theme, style, { persist: false });
@@ -6575,6 +6583,7 @@ const THEME_STYLE_META: Record<ThemeStyle, { name: string; zh: DictKey; note: Di
 function AppearanceSection({
   theme,
   themeStyle,
+  convWidth,
   textSize,
   showDisplayZoom,
   zoomPct,
@@ -6584,6 +6593,7 @@ function AppearanceSection({
   customMonoFontName,
   onTheme,
   onThemeStyle,
+  onConvWidth,
   onTextSize,
   onRestartZoom,
   onFontFamily,
@@ -6593,6 +6603,7 @@ function AppearanceSection({
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
+  convWidth: ConversationWidth;
   textSize: TextSize;
   showDisplayZoom: boolean;
   zoomPct: number;
@@ -6602,6 +6613,7 @@ function AppearanceSection({
   customMonoFontName: string;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
+  onConvWidth: (width: ConversationWidth) => void;
   onTextSize: (size: TextSize) => void;
   onRestartZoom: (zoom: ZoomLevel) => Promise<void>;
   onFontFamily: (font: FontFamily) => void;
@@ -6635,6 +6647,22 @@ function AppearanceSection({
               {themeName(opt, t)}
             </button>
           ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.conversationWidth")}>
+        <div className="set-seg">
+          <button
+            className={`set-seg__btn${convWidth === "standard" ? " set-seg__btn--on" : ""}`}
+            onClick={() => onConvWidth("standard")}
+          >
+            {t("settings.conversationWidthStandard")} (960px)
+          </button>
+          <button
+            className={`set-seg__btn${convWidth === "full" ? " set-seg__btn--on" : ""}`}
+            onClick={() => onConvWidth("full")}
+          >
+            {t("settings.conversationWidthFull")} (90%)
+          </button>
         </div>
       </SettingsField>
       <SettingsField label={t("settings.themeStyle")} stacked>

@@ -124,6 +124,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		fmt.Fprintf(&b, "expand_thinking = %v   # desktop: show reasoning text expanded by default; false = collapsed\n", c.Desktop.ExpandThinking)
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
+t	if c.Desktop.ConversationWidth == "full" {
+			fmt.Fprintf(&amp;b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard
+", c.Desktop.ConversationWidth)
+		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {
 		// provider_access is intentionally mergeable across user and project
