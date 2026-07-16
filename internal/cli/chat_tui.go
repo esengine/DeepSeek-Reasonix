@@ -2723,14 +2723,26 @@ func (m chatTUI) View() tea.View {
 	// only while a turn runs); the status/data rows stay below. This mirrors Claude
 	// Code: live progress over the composer, shortcuts + stats under it.
 	working := m.runningWorkingLine(cancelRequested, true)
-	// Keep the persistent data row deliberately compact. Detailed profile, cache,
-	// jobs, balance, effort, git, and mouse state is available through /status.
+	// Restore the detailed data row: model, work mode, cache rates, context,
+	// background jobs, and wallet balance, matching the pre-simplification format.
 	var data []string
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
 	}
+	if wt := m.workModeTag(); wt != "" {
+		data = append(data, wt)
+	}
+	if cache := m.cacheTag(); cache != "" {
+		data = append(data, cache)
+	}
 	if ctxTag != "" {
 		data = append(data, ctxTag)
+	}
+	if jt := m.jobsTag(); jt != "" {
+		data = append(data, jt)
+	}
+	if m.balance != "" {
+		data = append(data, dim(m.balance))
 	}
 	dataLine := "  " + strings.Join(data, " · ")
 	// A configured custom status line replaces the built-in data row entirely.
@@ -3246,13 +3258,25 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	default:
 		status += " · " + i18n.M.ChatStatusIdle + " (" + m.cycleHint() + ")"
 	}
-	// Replicate the compact data line from View().
+	// Replicate the detailed data line from View().
 	var data []string
 	if mt := m.modelTag(); mt != "" {
 		data = append(data, mt)
 	}
+	if wt := m.workModeTag(); wt != "" {
+		data = append(data, wt)
+	}
+	if cache := m.cacheTag(); cache != "" {
+		data = append(data, cache)
+	}
 	if ct := m.contextTag(); ct != "" {
 		data = append(data, ct)
+	}
+	if jt := m.jobsTag(); jt != "" {
+		data = append(data, jt)
+	}
+	if m.balance != "" {
+		data = append(data, dim(m.balance))
 	}
 	dataLine := "  " + strings.Join(data, " · ")
 	if m.statuslineCmd != "" && m.statuslineOut != "" {

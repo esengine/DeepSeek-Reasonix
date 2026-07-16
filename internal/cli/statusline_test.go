@@ -204,7 +204,7 @@ func TestStatuslineKeepsEffortOutOfPersistentFooter(t *testing.T) {
 	}
 }
 
-func TestStatuslineKeepsCacheRatesOutOfPersistentFooter(t *testing.T) {
+func TestStatuslineShowsCacheRatesInDataRow(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineViewWithCache(t)
@@ -212,8 +212,8 @@ func TestStatuslineKeepsCacheRatesOutOfPersistentFooter(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(lines[1], "deepseek-v4-flash") || strings.Contains(lines[1], "hit") {
-		t.Fatalf("data row should keep model but omit cache rates:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[1], "deepseek-v4-flash") || !strings.Contains(lines[1], "hit") {
+		t.Fatalf("data row should show model and cache rates:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
