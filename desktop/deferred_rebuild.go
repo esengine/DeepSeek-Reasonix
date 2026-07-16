@@ -239,6 +239,13 @@ func (a *App) retryDeferredStartupBuild(tabID string, tab *WorkspaceTab) {
 		a.clearDeferredRebuild(tabID)
 		return
 	}
+	// Attach first when another same-process tab/detached runtime owns this
+	// session; looksFree would otherwise wait forever under the same-process
+	// hold (#6568).
+	if path := a.deferredRebuildSessionPath(tab); path != "" && a.attachExistingSessionRuntime(tab, path, a.ctx) {
+		a.clearDeferredRebuild(tabID)
+		return
+	}
 	if !a.deferredRebuildLeaseLooksFree(tab) {
 		return
 	}
@@ -331,6 +338,10 @@ func (a *App) tryRecoverStartupLeaseHeldTab(tab *WorkspaceTab) bool {
 	if !a.tabHasRetryableStartupLeaseError(tab) {
 		return a.controllerForTab(tab) != nil
 	}
+	if path := a.deferredRebuildSessionPath(tab); path != "" && a.attachExistingSessionRuntime(tab, path, a.ctx) {
+		a.clearDeferredRebuild(tab.ID)
+		return a.controllerForTab(tab) != nil
+	}
 	if !a.deferredRebuildLeaseLooksFree(tab) {
 		return false
 	}
@@ -347,13 +358,10 @@ func (a *App) tryRecoverStartupLeaseHeldTab(tab *WorkspaceTab) bool {
 	return false
 }
 
-// deferredRebuildLeaseLooksFree cheaply probes whether the tab's session lease
-// could be acquired right now, without touching tab.sessionLease (only the
-// serialized rebuild paths may mutate that). The probe path can lag the
-// reconciled path the rebuild will use; a stale answer either re-defers on the
-// next tick or lets the rebuild fail back into the pending set, so a mismatch
-// only delays the retry.
-func (a *App) deferredRebuildLeaseLooksFree(tab *WorkspaceTab) bool {
+func (a *App) deferredRebuildSessionPath(tab *WorkspaceTab) string {
+	if tab == nil {
+		return ""
+	}
 	a.mu.RLock()
 	ctrl := tab.Ctrl
 	path := strings.TrimSpace(tab.SessionPath)
@@ -363,6 +371,17 @@ func (a *App) deferredRebuildLeaseLooksFree(tab *WorkspaceTab) bool {
 			path = p
 		}
 	}
+	return path
+}
+
+// deferredRebuildLeaseLooksFree cheaply probes whether the tab's session lease
+// could be acquired right now, without touching tab.sessionLease (only the
+// serialized rebuild paths may mutate that). The probe path can lag the
+// reconciled path the rebuild will use; a stale answer either re-defers on the
+// next tick or lets the rebuild fail back into the pending set, so a mismatch
+// only delays the retry.
+func (a *App) deferredRebuildLeaseLooksFree(tab *WorkspaceTab) bool {
+	path := a.deferredRebuildSessionPath(tab)
 	if path == "" {
 		return true // nothing to probe; let the rebuild decide
 	}
@@ -371,10 +390,12 @@ func (a *App) deferredRebuildLeaseLooksFree(tab *WorkspaceTab) bool {
 		var leaseErr *agent.SessionLeaseError
 		if errors.As(err, &leaseErr) && leaseErr.Info != nil && leaseErr.Info.PID == os.Getpid() {
 			if host, _ := os.Hostname(); leaseErr.Info.Hostname == host {
-				// This process (usually this very tab) holds the probed path;
-				// the blocking lease is some other path. Attempt the rebuild
-				// and let its own lease checks decide.
-				return true
+				// Same-process hold: settings refresh (Ctrl set) owns its lease → proceed.
+				// Startup (Ctrl nil) must wait quietly after attach was tried (#6568).
+				a.mu.RLock()
+				hasCtrl := tab != nil && tab.Ctrl != nil
+				a.mu.RUnlock()
+				return hasCtrl
 			}
 		}
 		return !errors.Is(err, agent.ErrSessionLeaseHeld)

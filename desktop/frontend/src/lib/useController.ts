@@ -2282,25 +2282,23 @@ export function useController() {
   // turn stream has gone quiet, reconcile with the backend. This catches cases
   // where the Wails event channel silently drops turn_done after the final
   // message or synthetic todo update has already closed the live stream.
+  // Use an interval, not a one-shot timer: activity timestamps advance on each
+  // text/tool event, so a single timeout scheduled at turn start often fires
+  // while the stream is still healthy and then never reschedules (#6569).
   useEffect(() => {
     if (!activeTabId) return;
     const s = statesRef.current.get(activeTabId);
-    const now = Date.now();
-    const lastTurnActivityAt = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
-    if (!s?.running || !s.turnActive || lastTurnActivityAt <= 0) return;
-    const since = Math.max(0, now - lastTurnActivityAt);
-    if (shouldReconcileStaleTurn(s, lastTurnActivityAt, now)) {
-      void reconcileTabRuntime(activeTabId);
-      return;
-    }
-    const timer = window.setTimeout(() => {
+    if (!s?.running || !s.turnActive) return;
+    const tick = () => {
       const cur = statesRef.current.get(activeTabId);
       const lastActivity = lastTurnActivityAtByTab.current.get(activeTabId) ?? 0;
       if (shouldReconcileStaleTurn(cur, lastActivity)) {
         void reconcileTabRuntime(activeTabId);
       }
-    }, STALE_TURN_RECONCILE_MS - since);
-    return () => window.clearTimeout(timer);
+    };
+    tick();
+    const timer = window.setInterval(tick, STALE_TURN_RECONCILE_MS);
+    return () => window.clearInterval(timer);
   }, [activeTabId, reconcileTabRuntime, activeState.running, activeState.turnActive]);
 
   // Replay any pending approval/ask prompts when switching tabs, so a

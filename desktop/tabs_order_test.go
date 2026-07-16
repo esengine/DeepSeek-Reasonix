@@ -1069,6 +1069,75 @@ func TestTabAndCtrlByIDRecoversStartupLeaseBeforeAction(t *testing.T) {
 	}
 }
 
+// Same-process lease holders must not drive rebuildStartupTabLocked every tick:
+// that path clears StartupErr then re-sets it, which flashes the topbar banner
+// forever (#6568). The retry loop should wait quietly (and prefer attach).
+func TestDeferredStartupRetryDoesNotRebuildWhileSameProcessHoldsLease(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	prevInterval := deferredRebuildRetryInterval
+	deferredRebuildRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
+
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "startup-same-process.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	t.Cleanup(lease.Release)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.enableDeferredRebuildRetry()
+	t.Cleanup(app.stopDeferredRebuildRetry)
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "startup_same_process")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	installNoopRuntimeEvents(app, tab.sink)
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil {
+		t.Fatalf("controller = %T, want nil while same-process lease is held", tab.Ctrl)
+	}
+	if !tab.StartupErrLeaseHeld {
+		t.Fatalf("startup retry flag = false, startup err = %q", tab.StartupErr)
+	}
+	if !app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry was not scheduled while the lease was held")
+	}
+	firstErr := tab.StartupErr
+	if firstErr == "" {
+		t.Fatal("startup error empty after lease-held build")
+	}
+
+	// Several retry ticks must not clear the banner or rebuild (no Ready flip).
+	for i := 0; i < 5; i++ {
+		app.retryDeferredStartupBuild(tab.ID, tab)
+		if tab.Ctrl != nil {
+			t.Fatalf("tick %d rebuilt controller while same-process lease still held", i)
+		}
+		if !tab.StartupErrLeaseHeld {
+			t.Fatalf("tick %d cleared StartupErrLeaseHeld", i)
+		}
+		if tab.StartupErr != firstErr {
+			t.Fatalf("tick %d changed StartupErr from %q to %q (banner thrash)", i, firstErr, tab.StartupErr)
+		}
+		if !app.deferredRebuildPending(tab.ID) {
+			t.Fatalf("tick %d dropped deferred retry while foreign same-process holder remains", i)
+		}
+	}
+}
+
 func TestOpenGlobalTabResolvesTopicToLatestSessionRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	dir := desktopSessionDir(globalTabWorkspaceRoot())
