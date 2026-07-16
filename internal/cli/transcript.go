@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/i18n"
@@ -23,12 +24,18 @@ func wrapTranscript(s string, width int) string {
 	return lipgloss.NewStyle().Width(width).Render(s)
 }
 
-// copyToClipboard writes text through the terminal via OSC 52. That targets the
-// terminal-side clipboard in common SSH/tmux setups when the terminal permits it;
-// platform clipboard tools can instead succeed on the remote host and skip the
-// terminal clipboard path entirely.
+// copyToClipboard writes to the OS clipboard when available and also emits OSC
+// 52 so SSH/tmux terminals that honor it still receive the yank. Paste already
+// reads via atotto/clipboard; copy mirrors that for terminals that do not
+// bridge OSC 52 to the system pasteboard.
 func copyToClipboard(text string) tea.Cmd {
-	return tea.SetClipboard(text)
+	return tea.Batch(
+		func() tea.Msg {
+			_ = clipboard.WriteAll(text)
+			return nil
+		},
+		tea.SetClipboard(text),
+	)
 }
 
 // copyNoticeTTL is how long the "copied to clipboard" status-line hint stays

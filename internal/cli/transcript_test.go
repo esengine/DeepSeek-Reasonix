@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 )
 
 func TestScrollbarThumb(t *testing.T) {
@@ -70,9 +71,21 @@ func TestSelectedTextMultiLine(t *testing.T) {
 }
 
 func TestCopyToClipboard(t *testing.T) {
-	got := copyToClipboard("hello")()
+	cmd := copyToClipboard("hello")
+	if cmd == nil {
+		t.Fatal("copyToClipboard returned nil")
+	}
+	// Batch runs platform clipboard write then OSC 52; we only assert the OSC leg.
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) < 2 {
+		t.Fatalf("copyToClipboard = %#v, want tea.BatchMsg with platform + OSC legs", cmd())
+	}
+	got := batch[1]()
 	want := tea.SetClipboard("hello")()
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("copyToClipboard returned %#v, want %#v", got, want)
+		t.Fatalf("OSC clipboard leg = %#v, want %#v", got, want)
+	}
+	if err := clipboard.WriteAll(""); err != nil {
+		t.Fatalf("platform clipboard unavailable in test env: %v", err)
 	}
 }

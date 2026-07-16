@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
@@ -31,10 +32,18 @@ func requireClipboardCommand(t *testing.T, cmd tea.Cmd, want string) {
 	if cmd == nil {
 		t.Fatal("expected clipboard command, got nil")
 	}
-	gotMsg := cmd()
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok || len(batch) < 2 {
+		t.Fatalf("clipboard command = %#v, want batch with platform + OSC legs", msg)
+	}
+	gotMsg := batch[1]()
 	wantMsg := tea.SetClipboard(want)()
 	if !reflect.DeepEqual(gotMsg, wantMsg) {
-		t.Fatalf("clipboard command = %#v, want %#v", gotMsg, wantMsg)
+		t.Fatalf("OSC clipboard leg = %#v, want %#v", gotMsg, wantMsg)
+	}
+	if err := clipboard.WriteAll(""); err != nil {
+		t.Fatalf("platform clipboard unavailable in test env: %v", err)
 	}
 }
 
