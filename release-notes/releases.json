@@ -2,6 +2,223 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.17.14",
+      "date": "2026-07-16",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.17.14",
+        "zh": "Reasonix 1.17.14"
+      },
+      "summary": {
+        "en": "This release improves the desktop experience with clearer MCP error messages, Windows plugin hook fixes, executable icons, and a new bilingual changelog.",
+        "zh": "本次发布提升了桌面端体验：MCP 错误信息更清晰，修复了 Windows 插件 Hook 兼容性问题，增加了可执行程序图标，并引入了中英双语更新日志。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Desktop Hooks",
+            "zh": "桌面 Hook"
+          },
+          "body": {
+            "en": "Guide for creating and using hooks in Reasonix Desktop.",
+            "zh": "在 Reasonix 桌面端中创建和使用 Hook 的指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/DESKTOP_HOOKS.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Plugin Packages",
+            "zh": "插件包"
+          },
+          "body": {
+            "en": "How to create, configure, and distribute Reasonix plugins.",
+            "zh": "如何创建、配置和分发 Reasonix 插件。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/PLUGIN_PACKAGES.md"
+        },
+        {
+          "title": {
+            "en": "Plugin Packages (Chinese)",
+            "zh": "插件包（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for creating, configuring, and distributing Reasonix plugins.",
+            "zh": "中文指南：创建、配置和分发 Reasonix 插件。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/PLUGIN_PACKAGES.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Release Process",
+            "zh": "发布流程"
+          },
+          "body": {
+            "en": "How to build, validate, and publish a Reasonix release.",
+            "zh": "如何构建、验证和发布 Reasonix 版本。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/RELEASING.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Bilingual changelog",
+            "zh": "中英双语更新日志"
+          },
+          "body": {
+            "en": "Release notes are now reviewed and published in English and Chinese, with dedicated version pages. Desktop update banners link directly to the matching release.",
+            "zh": "更新日志现经审阅后以中英双语发布，并配有独立版本页面。桌面更新横幅将直接链接到对应版本。"
+          },
+          "refs": [
+            6576
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "MCP npm endpoint visibility",
+            "zh": "MCP npm 连接端点可见性"
+          },
+          "body": {
+            "en": "MCP connection failures now show the registry host and endpoint in the error summary, helping to diagnose proxy or network issues.",
+            "zh": "MCP 连接失败时，错误摘要现在会显示注册表主机和端点，方便诊断代理或网络问题。"
+          },
+          "refs": [
+            6559
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows plugin hook compatibility",
+            "zh": "Windows 插件 Hook 兼容性"
+          },
+          "body": {
+            "en": "Plugin hooks on Windows now correctly expand aliases like ${REASONIX_PLUGIN_ROOT}, support bash hooks, and handle non-UTF-8 output.",
+            "zh": "Windows 插件 Hook 现在能正确展开 ${REASONIX_PLUGIN_ROOT} 等别名，支持 bash Hook，并能处理非 UTF-8 输出。"
+          },
+          "refs": [
+            6550
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Windows executable icons",
+            "zh": "Windows 可执行程序图标"
+          },
+          "body": {
+            "en": "Windows launcher, guard, and updater now display the Reasonix icon and include version metadata.",
+            "zh": "Windows 启动器、守护程序和更新程序现在显示 Reasonix 图标，并包含版本元数据。"
+          },
+          "refs": [
+            6549
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop update download link",
+            "zh": "桌面更新下载链接"
+          },
+          "body": {
+            "en": "Manual desktop updates now open the Desktop download page with the correct OS highlighted.",
+            "zh": "手动桌面更新现在会打开桌面下载页面，并高亮显示正确的操作系统。"
+          },
+          "refs": [
+            6553
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Bilingual changelog",
+              "zh": "中英双语更新日志"
+            },
+            "body": {
+              "en": "Added a reviewed, versioned bilingual release catalog; website now has changelog and version pages linking from desktop update banners.",
+              "zh": "新增经审阅、版本化的中英双语发布目录；网站现在提供更新日志和版本页面，桌面更新横幅会链接到对应版本。"
+            },
+            "refs": [
+              6576
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Windows executable icons",
+              "zh": "Windows 可执行程序图标"
+            },
+            "body": {
+              "en": "Launcher, guard, and update helper now have the Reasonix icon and version metadata.",
+              "zh": "启动器、守护程序和更新助手现具有 Reasonix 图标及版本元数据。"
+            },
+            "refs": [
+              6549
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "MCP npm endpoint visibility",
+              "zh": "MCP npm 连接端点可见性"
+            },
+            "body": {
+              "en": "MCP error summaries now show the npm registry host and endpoint for connection failures.",
+              "zh": "MCP 错误摘要现在会显示 npm 注册表主机和端点，便于排查连接问题。"
+            },
+            "refs": [
+              6559
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows plugin hook compatibility",
+              "zh": "Windows 插件 Hook 兼容性"
+            },
+            "body": {
+              "en": "Plugin hooks on Windows now expand aliases, work with bash, and handle legacy encodings.",
+              "zh": "Windows 上的插件 Hook 现在可展开别名、兼容 bash 并处理旧编码。"
+            },
+            "refs": [
+              6550
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop update download link",
+              "zh": "桌面更新下载链接"
+            },
+            "body": {
+              "en": "Manual updates now open the Desktop download page with OS highlighted.",
+              "zh": "手动更新现在会打开桌面下载页面并高亮操作系统。"
+            },
+            "refs": [
+              6553
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.14",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.13...desktop-v1.17.14",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.13",
       "date": "2026-07-16",
       "channel": "stable",
@@ -13,10 +230,19 @@
         "en": "This release makes long-running work safer from planning through delivery. It adds an offline recovery Guard and Safe Mode, hardens MCP package identity and credentials, improves Claude plugin compatibility, and polishes the desktop and CLI workflows used every day.",
         "zh": "这一版把从计划到交付的长任务链路做得更可靠：新增离线恢复 Guard 与安全模式，加固 MCP 包身份、凭据与可信执行，完善 Claude 插件兼容，并集中打磨 Desktop 与 CLI 的高频工作流。"
       },
-      "surfaces": ["agent", "desktop", "cli", "mcp", "security"],
+      "surfaces": [
+        "agent",
+        "desktop",
+        "cli",
+        "mcp",
+        "security"
+      ],
       "guides": [
         {
-          "title": { "en": "Recover a broken installation", "zh": "恢复损坏的安装" },
+          "title": {
+            "en": "Recover a broken installation",
+            "zh": "恢复损坏的安装"
+          },
           "body": {
             "en": "Use reasonix-guard to diagnose configuration and installation failures, restore a snapshot, or start in Safe Mode.",
             "zh": "使用 reasonix-guard 诊断配置与安装故障、恢复快照，或进入安全模式。"
@@ -24,7 +250,10 @@
           "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/main-v2/docs/RECOVERY.zh-CN.md"
         },
         {
-          "title": { "en": "Understand plugin packages", "zh": "了解插件包" },
+          "title": {
+            "en": "Understand plugin packages",
+            "zh": "了解插件包"
+          },
           "body": {
             "en": "Learn how plugin packages bundle skills, hooks, and MCP servers while preserving explicit trust boundaries.",
             "zh": "了解插件包如何组合技能、Hooks 与 MCP 服务器，同时维持清晰的可信边界。"
@@ -35,124 +264,240 @@
       "highlights": [
         {
           "kind": "new",
-          "title": { "en": "Offline Guard and Safe Mode", "zh": "离线恢复 Guard 与安全模式" },
+          "title": {
+            "en": "Offline Guard and Safe Mode",
+            "zh": "离线恢复 Guard 与安全模式"
+          },
           "body": {
             "en": "A recovery path now exists outside the normal desktop startup. It can inspect failures, restore known-good state, and launch a minimal Safe Mode when normal boot is blocked.",
             "zh": "恢复能力不再依赖 Desktop 正常启动。现在可以在应用之外检查故障、恢复已知可用状态，并在正常启动受阻时进入最小化安全模式。"
           },
-          "refs": [6460]
+          "refs": [
+            6460
+          ]
         },
         {
           "kind": "security",
-          "title": { "en": "Trusted MCP execution", "zh": "MCP 可信执行" },
+          "title": {
+            "en": "Trusted MCP execution",
+            "zh": "MCP 可信执行"
+          },
           "body": {
             "en": "MCP startup now verifies package identity, signed catalog metadata, approval receipts, executable paths, and credential boundaries before a server is trusted.",
             "zh": "MCP 启动前会校验包身份、签名目录元数据、审批回执、可执行路径与凭据边界，避免旧授权被错误复用。"
           },
-          "refs": [6482, 6449]
+          "refs": [
+            6482,
+            6449
+          ]
         },
         {
           "kind": "improved",
-          "title": { "en": "Delivery that recovers instead of cascading", "zh": "交付失败不再级联" },
+          "title": {
+            "en": "Delivery that recovers instead of cascading",
+            "zh": "交付失败不再级联"
+          },
           "body": {
             "en": "Goal, Plan, Delivery, YOLO, and review readiness now share a consistent lifecycle. Interrupted delivery can recover without concurrent writers corrupting the final state.",
             "zh": "Goal、Plan、Delivery、YOLO 与审查就绪检查现在共享一致的生命周期；交付中断后可以恢复，同时隔离并发写入。"
           },
-          "refs": [6421, 6458, 6467, 6542]
+          "refs": [
+            6421,
+            6458,
+            6467,
+            6542
+          ]
         },
         {
           "kind": "new",
-          "title": { "en": "Claude plugin compatibility", "zh": "Claude 插件兼容" },
+          "title": {
+            "en": "Claude plugin compatibility",
+            "zh": "Claude 插件兼容"
+          },
           "body": {
             "en": "Reasonix can consume Claude-compatible plugin packages and adapt their commands and hooks into the existing plugin runtime.",
             "zh": "Reasonix 现在可以加载 Claude 兼容插件包，并把其中的命令与 Hooks 接入现有插件运行时。"
           },
-          "refs": [6434]
+          "refs": [
+            6434
+          ]
         },
         {
           "kind": "improved",
-          "title": { "en": "Faster desktop navigation", "zh": "更顺手的 Desktop 导航" },
+          "title": {
+            "en": "Faster desktop navigation",
+            "zh": "更顺手的 Desktop 导航"
+          },
           "body": {
             "en": "Pinned conversations get their own section, selected chat text or workspace code can be sent to the composer, and files can open through a dynamically discovered external-app menu.",
             "zh": "置顶会话拥有独立分组；聊天选区与工作区代码可直接加入输入区；文件可通过动态发现的外部应用菜单打开。"
           },
-          "refs": [6494, 6454, 6457]
+          "refs": [
+            6494,
+            6454,
+            6457
+          ]
         }
       ],
       "changes": {
         "new": [
           {
-            "title": { "en": "Mouse selection in the CLI composer", "zh": "CLI 输入区支持鼠标选择" },
-            "body": { "en": "Text in the terminal composer can now be selected with the mouse.", "zh": "终端输入区现在可以直接使用鼠标选择文本。" },
-            "refs": [6456]
+            "title": {
+              "en": "Mouse selection in the CLI composer",
+              "zh": "CLI 输入区支持鼠标选择"
+            },
+            "body": {
+              "en": "Text in the terminal composer can now be selected with the mouse.",
+              "zh": "终端输入区现在可以直接使用鼠标选择文本。"
+            },
+            "refs": [
+              6456
+            ]
           },
           {
-            "title": { "en": "Pinned conversations in the classic sidebar", "zh": "经典侧栏显示置顶会话" },
-            "body": { "en": "Pinned topics stay visible in a dedicated section instead of being mixed into recency sorting.", "zh": "置顶话题会保留在独立区域，不再混入按时间排序的普通会话。" },
-            "refs": [6494]
+            "title": {
+              "en": "Pinned conversations in the classic sidebar",
+              "zh": "经典侧栏显示置顶会话"
+            },
+            "body": {
+              "en": "Pinned topics stay visible in a dedicated section instead of being mixed into recency sorting.",
+              "zh": "置顶话题会保留在独立区域，不再混入按时间排序的普通会话。"
+            },
+            "refs": [
+              6494
+            ]
           }
         ],
         "improved": [
           {
-            "title": { "en": "Grounded edits without forced rereads", "zh": "编辑后无需强制重读" },
-            "body": { "en": "Bounded edit receipts keep the agent grounded while avoiding redundant full-file reads.", "zh": "通过有界编辑回执维持事实锚点，同时避免无意义的整文件重读。" },
-            "refs": [6504]
+            "title": {
+              "en": "Grounded edits without forced rereads",
+              "zh": "编辑后无需强制重读"
+            },
+            "body": {
+              "en": "Bounded edit receipts keep the agent grounded while avoiding redundant full-file reads.",
+              "zh": "通过有界编辑回执维持事实锚点，同时避免无意义的整文件重读。"
+            },
+            "refs": [
+              6504
+            ]
           },
           {
-            "title": { "en": "Classic sidebar and tab polish", "zh": "经典侧栏与标签页打磨" },
-            "body": { "en": "Sorting, previews, topic actions, tab boundaries, and draggable whitespace now behave more consistently.", "zh": "排序、预览、话题操作、标签页边界与可拖动空白区的行为更加一致。" },
-            "refs": [6468, 6433, 6463]
+            "title": {
+              "en": "Classic sidebar and tab polish",
+              "zh": "经典侧栏与标签页打磨"
+            },
+            "body": {
+              "en": "Sorting, previews, topic actions, tab boundaries, and draggable whitespace now behave more consistently.",
+              "zh": "排序、预览、话题操作、标签页边界与可拖动空白区的行为更加一致。"
+            },
+            "refs": [
+              6468,
+              6433,
+              6463
+            ]
           }
         ],
         "fixed": [
           {
-            "title": { "en": "Pending approvals survive session switches", "zh": "切换会话后待审批内容仍然可见" },
-            "body": { "en": "A pending plan approval no longer disappears after moving between sessions.", "zh": "在会话之间切换后，待确认的计划审批不再消失。" },
-            "refs": [6432]
+            "title": {
+              "en": "Pending approvals survive session switches",
+              "zh": "切换会话后待审批内容仍然可见"
+            },
+            "body": {
+              "en": "A pending plan approval no longer disappears after moving between sessions.",
+              "zh": "在会话之间切换后，待确认的计划审批不再消失。"
+            },
+            "refs": [
+              6432
+            ]
           },
           {
-            "title": { "en": "Windows paths and display scaling", "zh": "Windows 路径与显示缩放" },
-            "body": { "en": "Shell-escaped paths, mixed-DPI restore, and long isolated checkout paths are handled safely.", "zh": "Shell 转义路径、混合 DPI 恢复和超长隔离工作树路径现在都能正确处理。" },
-            "refs": [6469, 6472]
+            "title": {
+              "en": "Windows paths and display scaling",
+              "zh": "Windows 路径与显示缩放"
+            },
+            "body": {
+              "en": "Shell-escaped paths, mixed-DPI restore, and long isolated checkout paths are handled safely.",
+              "zh": "Shell 转义路径、混合 DPI 恢复和超长隔离工作树路径现在都能正确处理。"
+            },
+            "refs": [
+              6469,
+              6472
+            ]
           },
           {
-            "title": { "en": "Credential isolation", "zh": "凭据隔离" },
-            "body": { "en": "All persisted credential environment keys are isolated from unrelated providers and subprocesses.", "zh": "所有持久化凭据环境变量都会与无关 Provider 和子进程隔离。" },
-            "refs": [6536, 6544]
+            "title": {
+              "en": "Credential isolation",
+              "zh": "凭据隔离"
+            },
+            "body": {
+              "en": "All persisted credential environment keys are isolated from unrelated providers and subprocesses.",
+              "zh": "所有持久化凭据环境变量都会与无关 Provider 和子进程隔离。"
+            },
+            "refs": [
+              6536,
+              6544
+            ]
           }
         ]
       },
       "upgrade": [
         {
           "level": "warning",
-          "title": { "en": "Windows native sandbox retired", "zh": "Windows 原生沙箱后端已退役" },
+          "title": {
+            "en": "Windows native sandbox retired",
+            "zh": "Windows 原生沙箱后端已退役"
+          },
           "body": {
             "en": "If you previously selected the retired native Windows sandbox, open Settings → Sandbox after upgrading and choose a supported isolation mode. Reasonix reports a remediation message instead of silently falling back.",
             "zh": "如果此前选择了已退役的 Windows 原生沙箱，升级后请打开“设置 → 沙箱”并选择受支持的隔离方式。Reasonix 会显示修复提示，不会静默降级。"
           },
-          "refs": [6516]
+          "refs": [
+            6516
+          ]
         },
         {
           "level": "info",
-          "title": { "en": "MCP trust may require fresh approval", "zh": "MCP 信任可能需要重新确认" },
+          "title": {
+            "en": "MCP trust may require fresh approval",
+            "zh": "MCP 信任可能需要重新确认"
+          },
           "body": {
             "en": "When a package identity or executable no longer matches its stored receipt, Reasonix asks for a new approval rather than reusing stale trust.",
             "zh": "当插件包身份或可执行文件与已保存回执不一致时，Reasonix 会请求新的审批，而不会沿用过期信任。"
           },
-          "refs": [6482]
+          "refs": [
+            6482
+          ]
         }
       ],
       "risks": [
         {
-          "title": { "en": "No automatic permission expansion", "zh": "不会自动扩大权限" },
+          "title": {
+            "en": "No automatic permission expansion",
+            "zh": "不会自动扩大权限"
+          },
           "body": {
             "en": "The MCP and read-only subagent changes fail closed. Invalid schemas, identities, or receipts are quarantined or returned to human approval instead of being accepted automatically.",
             "zh": "MCP 与只读子智能体的变更采用失败关闭策略。无效 Schema、身份或回执会被隔离，或退回人工审批，不会被自动接受。"
           },
-          "refs": [6449, 6482, 6498]
+          "refs": [
+            6449,
+            6482,
+            6498
+          ]
         }
       ],
-      "contributors": ["SivanCola", "JesonChou", "SauronSkywalker", "billycat", "h4rk8s", "myipanta", "esengine"],
+      "contributors": [
+        "SivanCola",
+        "JesonChou",
+        "SauronSkywalker",
+        "billycat",
+        "h4rk8s",
+        "myipanta",
+        "esengine"
+      ],
       "links": {
         "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.13",
         "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.12...desktop-v1.17.13",
@@ -171,59 +516,125 @@
         "en": "Provider setup now works as a complete manager instead of a one-time wizard. Delivery review and liveness checks are stricter, while the Creation workspace, performance diagnostics, and everyday desktop interactions receive focused polish.",
         "zh": "Provider setup 从一次性向导升级为完整配置中心；交付审查与流式活性检查更加严格，同时集中打磨 Creation 工作区、性能诊断与 Desktop 日常交互。"
       },
-      "surfaces": ["desktop", "cli", "provider", "agent"],
+      "surfaces": [
+        "desktop",
+        "cli",
+        "provider",
+        "agent"
+      ],
       "guides": [],
       "highlights": [
         {
           "kind": "new",
-          "title": { "en": "Provider manager in reasonix setup", "zh": "reasonix setup 变成 Provider 管理器" },
-          "body": { "en": "Add, edit, test, and choose provider access from one terminal workflow instead of rerunning a first-use wizard.", "zh": "现在可以在同一套终端流程中添加、编辑、测试和选择 Provider，不再只是重复运行首次向导。" },
-          "refs": [6384]
+          "title": {
+            "en": "Provider manager in reasonix setup",
+            "zh": "reasonix setup 变成 Provider 管理器"
+          },
+          "body": {
+            "en": "Add, edit, test, and choose provider access from one terminal workflow instead of rerunning a first-use wizard.",
+            "zh": "现在可以在同一套终端流程中添加、编辑、测试和选择 Provider，不再只是重复运行首次向导。"
+          },
+          "refs": [
+            6384
+          ]
         },
         {
           "kind": "improved",
-          "title": { "en": "Stronger delivery review", "zh": "更严格的交付审查" },
-          "body": { "en": "Delivery mode now aligns review protocol, readiness gates, sign-off evidence, and streaming liveness.", "zh": "交付模式现在统一了审查协议、就绪门槛、签收证据与流式活性判定。" },
-          "refs": [6382, 6407]
+          "title": {
+            "en": "Stronger delivery review",
+            "zh": "更严格的交付审查"
+          },
+          "body": {
+            "en": "Delivery mode now aligns review protocol, readiness gates, sign-off evidence, and streaming liveness.",
+            "zh": "交付模式现在统一了审查协议、就绪门槛、签收证据与流式活性判定。"
+          },
+          "refs": [
+            6382,
+            6407
+          ]
         },
         {
           "kind": "improved",
-          "title": { "en": "Actionable performance reports", "zh": "可定位的性能报告" },
-          "body": { "en": "Desktop performance prompts use JavaScript self-profiling attribution and suppress false positives during recovery.", "zh": "Desktop 性能提示接入 JavaScript 自采样归因，并减少恢复阶段的误报。" },
-          "refs": [6374]
+          "title": {
+            "en": "Actionable performance reports",
+            "zh": "可定位的性能报告"
+          },
+          "body": {
+            "en": "Desktop performance prompts use JavaScript self-profiling attribution and suppress false positives during recovery.",
+            "zh": "Desktop 性能提示接入 JavaScript 自采样归因，并减少恢复阶段的误报。"
+          },
+          "refs": [
+            6374
+          ]
         }
       ],
       "changes": {
         "new": [],
         "improved": [
           {
-            "title": { "en": "Creation workspace polish", "zh": "Creation 工作区打磨" },
-            "body": { "en": "The changes view, sidebar alignment, dock geometry, chat scrollbar, and text scaling now follow one visual system.", "zh": "变更视图、侧栏对齐、停靠区几何、聊天滚动条与字号缩放现在遵循同一视觉系统。" },
-            "refs": [6287, 6292, 6400]
+            "title": {
+              "en": "Creation workspace polish",
+              "zh": "Creation 工作区打磨"
+            },
+            "body": {
+              "en": "The changes view, sidebar alignment, dock geometry, chat scrollbar, and text scaling now follow one visual system.",
+              "zh": "变更视图、侧栏对齐、停靠区几何、聊天滚动条与字号缩放现在遵循同一视觉系统。"
+            },
+            "refs": [
+              6287,
+              6292,
+              6400
+            ]
           }
         ],
         "fixed": [
           {
-            "title": { "en": "Composer height recovery", "zh": "输入框高度恢复" },
-            "body": { "en": "A manually resized composer no longer collapses to a single visible line.", "zh": "手动调整过高度的输入框不再错误收缩为单行。" },
-            "refs": [6399]
+            "title": {
+              "en": "Composer height recovery",
+              "zh": "输入框高度恢复"
+            },
+            "body": {
+              "en": "A manually resized composer no longer collapses to a single visible line.",
+              "zh": "手动调整过高度的输入框不再错误收缩为单行。"
+            },
+            "refs": [
+              6399
+            ]
           },
           {
-            "title": { "en": "Live cache averages stay current", "zh": "实时缓存平均值保持同步" },
-            "body": { "en": "The desktop cache summary updates with the active session instead of showing stale averages.", "zh": "Desktop 缓存摘要会跟随当前会话更新，不再显示过期平均值。" },
-            "refs": [6406]
+            "title": {
+              "en": "Live cache averages stay current",
+              "zh": "实时缓存平均值保持同步"
+            },
+            "body": {
+              "en": "The desktop cache summary updates with the active session instead of showing stale averages.",
+              "zh": "Desktop 缓存摘要会跟随当前会话更新，不再显示过期平均值。"
+            },
+            "refs": [
+              6406
+            ]
           }
         ]
       },
       "upgrade": [
         {
           "level": "info",
-          "title": { "en": "No manual migration required", "zh": "无需手动迁移" },
-          "body": { "en": "Existing providers and desktop preferences continue to load unchanged.", "zh": "现有 Provider 与 Desktop 偏好会按原样继续加载。" }
+          "title": {
+            "en": "No manual migration required",
+            "zh": "无需手动迁移"
+          },
+          "body": {
+            "en": "Existing providers and desktop preferences continue to load unchanged.",
+            "zh": "现有 Provider 与 Desktop 偏好会按原样继续加载。"
+          }
         }
       ],
       "risks": [],
-      "contributors": ["SivanCola", "Li-Charles-One", "J3y0r"],
+      "contributors": [
+        "SivanCola",
+        "Li-Charles-One",
+        "J3y0r"
+      ],
       "links": {
         "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.12",
         "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.11...desktop-v1.17.12",
@@ -242,59 +653,125 @@
         "en": "This release introduces configurable subagent and runtime profiles, maps Claude plugin commands into Reasonix, and closes several session handoff gaps that could hide messages, drop turns, or obscure provider failures.",
         "zh": "这一版新增可配置子智能体与运行档，把 Claude 插件命令接入 Reasonix，并修复多个会话交接缺口，避免消息隐藏、回合丢失或 Provider 错误被掩盖。"
       },
-      "surfaces": ["agent", "desktop", "plugin", "provider"],
+      "surfaces": [
+        "agent",
+        "desktop",
+        "plugin",
+        "provider"
+      ],
       "guides": [],
       "highlights": [
         {
           "kind": "new",
-          "title": { "en": "Configurable subagent profiles", "zh": "可配置子智能体档案" },
-          "body": { "en": "Create isolated subagent profiles with their own instructions, models, and capability boundaries.", "zh": "可以创建拥有独立指令、模型与能力边界的子智能体档案。" },
-          "refs": [6310]
+          "title": {
+            "en": "Configurable subagent profiles",
+            "zh": "可配置子智能体档案"
+          },
+          "body": {
+            "en": "Create isolated subagent profiles with their own instructions, models, and capability boundaries.",
+            "zh": "可以创建拥有独立指令、模型与能力边界的子智能体档案。"
+          },
+          "refs": [
+            6310
+          ]
         },
         {
           "kind": "new",
-          "title": { "en": "Runtime profiles and delivery routing", "zh": "运行档与交付能力路由" },
-          "body": { "en": "Work modes can select the runtime profile and delivery capabilities appropriate to the task.", "zh": "工作模式现在可以选择适合当前任务的运行档和交付能力。" },
-          "refs": [6322, 6341]
+          "title": {
+            "en": "Runtime profiles and delivery routing",
+            "zh": "运行档与交付能力路由"
+          },
+          "body": {
+            "en": "Work modes can select the runtime profile and delivery capabilities appropriate to the task.",
+            "zh": "工作模式现在可以选择适合当前任务的运行档和交付能力。"
+          },
+          "refs": [
+            6322,
+            6341
+          ]
         },
         {
           "kind": "new",
-          "title": { "en": "Claude plugin commands", "zh": "Claude 插件命令" },
-          "body": { "en": "Claude-compatible plugin commands and skills appear as qualified custom slash commands without name collisions.", "zh": "Claude 兼容插件中的命令与技能会映射为带限定名的自定义斜杠命令，避免命名冲突。" },
-          "refs": [6311, 6326, 6328]
+          "title": {
+            "en": "Claude plugin commands",
+            "zh": "Claude 插件命令"
+          },
+          "body": {
+            "en": "Claude-compatible plugin commands and skills appear as qualified custom slash commands without name collisions.",
+            "zh": "Claude 兼容插件中的命令与技能会映射为带限定名的自定义斜杠命令，避免命名冲突。"
+          },
+          "refs": [
+            6311,
+            6326,
+            6328
+          ]
         }
       ],
       "changes": {
         "new": [],
         "improved": [
           {
-            "title": { "en": "Real provider error messages", "zh": "显示真实 Provider 错误" },
-            "body": { "en": "402, 429, 5xx, 401, and 403 responses now surface the upstream reason instead of a generic failure.", "zh": "402、429、5xx、401 与 403 响应会显示上游真实原因，不再只有通用失败提示。" },
-            "refs": [6345]
+            "title": {
+              "en": "Real provider error messages",
+              "zh": "显示真实 Provider 错误"
+            },
+            "body": {
+              "en": "402, 429, 5xx, 401, and 403 responses now surface the upstream reason instead of a generic failure.",
+              "zh": "402、429、5xx、401 与 403 响应会显示上游真实原因，不再只有通用失败提示。"
+            },
+            "refs": [
+              6345
+            ]
           }
         ],
         "fixed": [
           {
-            "title": { "en": "Turns are not dropped during finish", "zh": "收尾窗口不再丢失回合" },
-            "body": { "en": "Messages submitted while a turn is finishing are parked and resumed instead of silently disappearing.", "zh": "在回合收尾阶段提交的消息会被暂存并继续处理，不再静默消失。" },
-            "refs": [6324, 6352]
+            "title": {
+              "en": "Turns are not dropped during finish",
+              "zh": "收尾窗口不再丢失回合"
+            },
+            "body": {
+              "en": "Messages submitted while a turn is finishing are parked and resumed instead of silently disappearing.",
+              "zh": "在回合收尾阶段提交的消息会被暂存并继续处理，不再静默消失。"
+            },
+            "refs": [
+              6324,
+              6352
+            ]
           },
           {
-            "title": { "en": "Diagnostics handles empty arrays", "zh": "诊断页正确处理空数组" },
-            "body": { "en": "Missing capability arrays no longer crash the diagnostics page.", "zh": "缺失的能力数组不再导致诊断页崩溃。" },
-            "refs": [6367]
+            "title": {
+              "en": "Diagnostics handles empty arrays",
+              "zh": "诊断页正确处理空数组"
+            },
+            "body": {
+              "en": "Missing capability arrays no longer crash the diagnostics page.",
+              "zh": "缺失的能力数组不再导致诊断页崩溃。"
+            },
+            "refs": [
+              6367
+            ]
           }
         ]
       },
       "upgrade": [
         {
           "level": "info",
-          "title": { "en": "No manual migration required", "zh": "无需手动迁移" },
-          "body": { "en": "Runtime profiles and plugin command qualification preserve existing configuration.", "zh": "运行档与插件命令限定名会兼容现有配置。" }
+          "title": {
+            "en": "No manual migration required",
+            "zh": "无需手动迁移"
+          },
+          "body": {
+            "en": "Runtime profiles and plugin command qualification preserve existing configuration.",
+            "zh": "运行档与插件命令限定名会兼容现有配置。"
+          }
         }
       ],
       "risks": [],
-      "contributors": ["ttmouse", "SivanCola"],
+      "contributors": [
+        "ttmouse",
+        "SivanCola"
+      ],
       "links": {
         "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.11",
         "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.10...desktop-v1.17.11",
