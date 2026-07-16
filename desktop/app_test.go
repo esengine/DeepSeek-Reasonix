@@ -4078,6 +4078,216 @@ func TestListSessionsUsesPinnedSessionOwnerBeforeStaleRuntimeDir(t *testing.T) {
 	}
 }
 
+func TestListSessionsIncludesLegacyWorktreeSessionsForParentProject(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "pr-worktree")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(parentRoot, ""); err != nil {
+		t.Fatalf("add parent project: %v", err)
+	}
+	legacyDir := filepath.Join(config.MemoryUserDir(), "projects", config.WorkspaceSlug(worktreeRoot), "sessions")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "topic_20260705-135423_c19151eac9ffc1a9"
+	title := "目前这个分子的进展怎么样？ 你帮我把…"
+	sessionPath := writeTopicSessionWithPrompt(t, legacyDir, "20260705-135423.378584000-session.jsonl", topicID, title, worktreeRoot, "目前这个分子的进展怎么样？ 你帮我把icon移动到对话的前面。", time.Now())
+
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:            "parent",
+		Scope:         "project",
+		WorkspaceRoot: parentRoot,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	sessions := app.ListSessions()
+	var found *SessionMeta
+	for i := range sessions {
+		if filepath.Clean(sessions[i].Path) == filepath.Clean(sessionPath) {
+			found = &sessions[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("legacy worktree session should appear in parent project history, got %+v", sessions)
+	}
+	if found.TopicID != topicID || found.TopicTitle != title {
+		t.Fatalf("legacy worktree session topic metadata = %+v, want topic %q title %q", found, topicID, title)
+	}
+	if got := normalizeProjectRoot(found.WorkspaceRoot); got != normalizeProjectRoot(parentRoot) {
+		t.Fatalf("legacy worktree history workspace root = %q, want parent %q", found.WorkspaceRoot, parentRoot)
+	}
+}
+
+func TestListSessionsInfersLegacyWorktreeSessionOwnerWithoutTopicMeta(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "new-skin-custom-desktop")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(parentRoot, ""); err != nil {
+		t.Fatalf("add parent project: %v", err)
+	}
+	legacyDir := filepath.Join(config.MemoryUserDir(), "projects", config.WorkspaceSlug(worktreeRoot), "sessions")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := filepath.Join(legacyDir, "20260704-095301.157712000-deepseek-v4-flash.jsonl")
+	writeHistoryTestSession(t, sessionPath, "进度怎样？")
+	meta, err := agent.EnsureBranchMeta(sessionPath)
+	if err != nil {
+		t.Fatalf("ensure branch meta: %v", err)
+	}
+	meta.SchemaVersion = agent.BranchMetaCountsVersion
+	meta.Turns = 1
+	meta.Preview = "进度怎样？"
+	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, meta); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:            "parent",
+		Scope:         "project",
+		WorkspaceRoot: parentRoot,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	sessions := app.ListSessions()
+	var found *SessionMeta
+	for i := range sessions {
+		if filepath.Clean(sessions[i].Path) == filepath.Clean(sessionPath) {
+			found = &sessions[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("legacy worktree session should appear in parent project history, got %+v", sessions)
+	}
+	if found.Scope != "project" {
+		t.Fatalf("legacy worktree session scope = %q, want project", found.Scope)
+	}
+	if got := normalizeProjectRoot(found.WorkspaceRoot); got != normalizeProjectRoot(parentRoot) {
+		t.Fatalf("legacy worktree history workspace root = %q, want parent %q", found.WorkspaceRoot, parentRoot)
+	}
+
+	binding, ok := app.resolveSessionBinding(sessionPath)
+	if !ok {
+		t.Fatalf("resolveSessionBinding(%q) failed", sessionPath)
+	}
+	if got := normalizeProjectRoot(binding.workspaceRoot); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("session binding workspace root = %q, want worktree %q", binding.workspaceRoot, worktreeRoot)
+	}
+}
+
+func TestResumeSessionOpensLegacyWorktreeSessionForParentProject(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "pr-worktree")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(parentRoot, ""); err != nil {
+		t.Fatalf("add parent project: %v", err)
+	}
+	parentDir := desktopSessionDir(parentRoot)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	activePath := filepath.Join(parentDir, "active.jsonl")
+	writeHistoryTestSession(t, activePath, "active parent prompt")
+	legacyDir := filepath.Join(config.MemoryUserDir(), "projects", config.WorkspaceSlug(worktreeRoot), "sessions")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sessionPath := writeTopicSessionWithPrompt(t, legacyDir, "20260705-135423.378584000-session.jsonl", "topic_20260705-135423_c19151eac9ffc1a9", "目前这个分子的进展怎么样？ 你帮我把…", worktreeRoot, "目前这个分子的进展怎么样？ 你帮我把icon移动到对话的前面。", time.Now())
+
+	ctrl := control.New(control.Options{
+		SessionDir:    parentDir,
+		SessionPath:   activePath,
+		WorkspaceRoot: parentRoot,
+		Sink:          event.Discard,
+	})
+	defer ctrl.Close()
+	app := NewApp()
+	tab := &WorkspaceTab{
+		ID:            "parent",
+		Scope:         "project",
+		WorkspaceRoot: parentRoot,
+		SessionPath:   activePath,
+		Ctrl:          ctrl,
+		Ready:         true,
+		sink:          &tabEventSink{tabID: "parent"},
+		disabledMCP:   map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	page, err := app.ResumeSessionPageForTab(tab.ID, sessionPath, 20)
+	if err != nil {
+		t.Fatalf("ResumeSessionPageForTab legacy worktree session: %v", err)
+	}
+	if page.TotalTurns < 0 {
+		t.Fatalf("resumed legacy worktree session returned invalid page: %+v", page)
+	}
+	if got := app.tabs[tab.ID].currentSessionPath(); filepath.Clean(got) != filepath.Clean(sessionPath) {
+		t.Fatalf("current session path = %q, want legacy worktree session %q", got, sessionPath)
+	}
+}
+
+func TestOpenProjectTabFindsNestedWorktreeMetaSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "pr-worktree")
+	nestedRoot := filepath.Join(worktreeRoot, ".worktrees", "pr-worktree")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(parentRoot, ""); err != nil {
+		t.Fatalf("add parent project: %v", err)
+	}
+	legacyDir := filepath.Join(config.MemoryUserDir(), "projects", config.WorkspaceSlug(worktreeRoot), "sessions")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "topic_nested_worktree"
+	sessionPath := writeTopicSessionWithPrompt(t, legacyDir, "nested-worktree.jsonl", topicID, "Nested worktree", nestedRoot, "hello from nested worktree meta", time.Now())
+
+	app := NewApp()
+	meta, err := app.OpenProjectTab(parentRoot, topicID)
+	if err != nil {
+		t.Fatalf("OpenProjectTab nested worktree session: %v", err)
+	}
+	if filepath.Clean(meta.SessionPath) != filepath.Clean(sessionPath) {
+		t.Fatalf("opened session path = %q, want nested worktree session %q", meta.SessionPath, sessionPath)
+	}
+	tab := waitForTabReady(t, app, meta.ID)
+	if got := normalizeProjectRoot(tab.WorkspaceRoot); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("tab workspace root = %q, want canonical worktree %q", tab.WorkspaceRoot, worktreeRoot)
+	}
+	if got := normalizeProjectRoot(tab.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("controller workspace root = %q, want canonical worktree %q", got, worktreeRoot)
+	}
+}
+
 func TestSetDefaultModelRejectsProviderWithoutKey(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("MIMO_API_KEY", "")

@@ -3394,6 +3394,242 @@ func TestProjectTreeMigratesCLISessionFromProjectDir(t *testing.T) {
 	}
 }
 
+func TestProjectTreeMigratesStoredWorktreeProjectUnderParent(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "feature-a")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "topic-from-worktree"
+	if err := saveProjectsFile(desktopProjectFile{Projects: []desktopProject{{Root: worktreeRoot, Topics: []string{topicID}}}}); err != nil {
+		t.Fatalf("save worktree project: %v", err)
+	}
+	if err := setTopicTitle(worktreeRoot, topicID, "Worktree task"); err != nil {
+		t.Fatalf("set worktree topic title: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "project" {
+		t.Fatalf("expected one parent project node, got %#v", nodes)
+	}
+	if nodes[0].Root != parentRoot {
+		t.Fatalf("project root = %q, want parent %q", nodes[0].Root, parentRoot)
+	}
+	if len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("worktree topic should appear under parent project, got %#v", nodes[0].Children)
+	}
+	if nodes[0].Children[0].Label != "Worktree task" {
+		t.Fatalf("topic title = %q, want migrated worktree title", nodes[0].Children[0].Label)
+	}
+}
+
+func TestCreateTopicForWorktreeIndexesParentProject(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "feature-a")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	topic, err := NewApp().CreateTopic("project", worktreeRoot, "Worktree new")
+	if err != nil {
+		t.Fatalf("create worktree topic: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Kind != "project" {
+		t.Fatalf("expected one parent project node, got %#v", nodes)
+	}
+	if nodes[0].Root != parentRoot {
+		t.Fatalf("project root = %q, want parent %q", nodes[0].Root, parentRoot)
+	}
+	if len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topic.ID {
+		t.Fatalf("created worktree topic should appear under parent project, got %#v", nodes[0].Children)
+	}
+	if nodes[0].Children[0].Label != "Worktree new" {
+		t.Fatalf("topic title = %q, want created title", nodes[0].Children[0].Label)
+	}
+}
+
+func TestProjectTreeMigratesWorktreeReasonixTopicFilesFromRecentWorkspace(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "feature-a")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	saveWorkspace(worktreeRoot)
+	topicID := "worktree-reasonix-topic"
+	if err := setTopicTitle(worktreeRoot, topicID, "Worktree indexed"); err != nil {
+		t.Fatalf("set worktree topic title: %v", err)
+	}
+	if err := setTopicCreatedAt(worktreeRoot, topicID, time.Now().UnixMilli()); err != nil {
+		t.Fatalf("set worktree topic created-at: %v", err)
+	}
+	if err := saveTopicAutoTitleMeta(worktreeRoot, map[string]topicAutoTitleMeta{
+		topicID: {Stage: 1, UserTurns: 2, BasisHash: "abc", UpdatedAt: 123},
+	}); err != nil {
+		t.Fatalf("set worktree auto title meta: %v", err)
+	}
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Root != parentRoot {
+		t.Fatalf("worktree .reasonix topic files should surface parent project, got %#v", nodes)
+	}
+	if len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("worktree .reasonix topic should appear under parent, got %#v", nodes[0].Children)
+	}
+	if nodes[0].Children[0].Label != "Worktree indexed" {
+		t.Fatalf("topic title = %q, want migrated title", nodes[0].Children[0].Label)
+	}
+	if got := loadTopicCreatedAt(parentRoot, topicID); got == 0 {
+		t.Fatal("worktree topic created-at should be migrated to parent project")
+	}
+	if got := loadTopicAutoTitleMeta(parentRoot)[topicID]; got.BasisHash != "abc" || got.Stage != 1 {
+		t.Fatalf("worktree auto-title meta should be migrated to parent project, got %+v", got)
+	}
+}
+
+func TestProjectTreeReadsLegacyWorktreeSessionDirUnderParent(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "feature-a")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "legacy-worktree-topic"
+	if err := saveProjectsFile(desktopProjectFile{
+		Projects: []desktopProject{{
+			Root:   worktreeRoot,
+			Topics: []string{topicID},
+		}},
+	}); err != nil {
+		t.Fatalf("save projects: %v", err)
+	}
+	legacyDir := filepath.Join(config.MemoryUserDir(), "projects", config.WorkspaceSlug(worktreeRoot), "sessions")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTopicSessionWithPrompt(t, legacyDir, "legacy-worktree.jsonl", topicID, "Legacy worktree task", worktreeRoot, "hello from worktree", time.Now())
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Root != parentRoot {
+		t.Fatalf("legacy worktree project should be represented by parent, got %#v", nodes)
+	}
+	if len(nodes[0].Children) != 1 {
+		t.Fatalf("expected one topic under parent, got %#v", nodes[0].Children)
+	}
+	child := nodes[0].Children[0]
+	if child.TopicID != topicID || child.Turns == 0 || !child.IsolatedWorktree {
+		t.Fatalf("legacy worktree session not merged into parent topic: %#v", child)
+	}
+
+	nodes = NewApp().ListProjectTree()
+	if len(nodes) != 1 || len(nodes[0].Children) != 1 || nodes[0].Children[0].TopicID != topicID {
+		t.Fatalf("legacy worktree topic should remain visible on later refreshes, got %#v", nodes)
+	}
+}
+
+func TestProjectTreeFindsLegacyWorktreeSessionDirFromParentProject(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "pr-worktree")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(parentRoot, ""); err != nil {
+		t.Fatalf("add parent project: %v", err)
+	}
+	legacyDir := filepath.Join(config.MemoryUserDir(), "projects", config.WorkspaceSlug(worktreeRoot), "sessions")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "topic_20260705-135423_c19151eac9ffc1a9"
+	if err := setTopicTitle(parentRoot, topicID, "插件能力讨论"); err != nil {
+		t.Fatalf("set conflicting parent topic title: %v", err)
+	}
+	writeTopicSessionWithPrompt(t, legacyDir, "20260705-135423.378584000-session.jsonl", topicID, "目前这个分子的进展怎么样？ 你帮我把…", worktreeRoot, "目前这个分子的进展怎么样？ 你帮我把icon移动到对话的前面。", time.Now())
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Root != parentRoot {
+		t.Fatalf("expected only parent project node, got %#v", nodes)
+	}
+	if len(nodes[0].Children) != 1 {
+		t.Fatalf("expected legacy worktree session under parent, got %#v", nodes[0].Children)
+	}
+	child := nodes[0].Children[0]
+	if child.TopicID != topicID || child.Turns == 0 || !child.IsolatedWorktree {
+		t.Fatalf("legacy worktree session should surface under parent project: %#v", child)
+	}
+	if child.Label != "目前这个分子的进展怎么样？ 你帮我把…" {
+		t.Fatalf("legacy worktree session title should win over stale parent title, got %q", child.Label)
+	}
+}
+
+func TestProjectTreeShowsSessionMetaTopicWithoutSidebarIndex(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	dir := config.ProjectSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "old-meta-topic"
+	writeTopicSessionWithPrompt(t, dir, "old-meta.jsonl", topicID, "Old meta", projectRoot, "old prompt", time.Now())
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Root != projectRoot {
+		t.Fatalf("expected parent project node, got %#v", nodes)
+	}
+	if len(nodes[0].Children) != 1 {
+		t.Fatalf("expected session-meta topic to appear, got %#v", nodes[0].Children)
+	}
+	child := nodes[0].Children[0]
+	if child.TopicID != topicID || child.Label != "Old meta" || child.Turns == 0 {
+		t.Fatalf("session-meta topic was not surfaced correctly: %#v", child)
+	}
+}
+
+func TestProjectTreeShowsWorktreeSessionMetaTopicUnderParentWithoutSidebarIndex(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "feature-a")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := addProject(parentRoot, ""); err != nil {
+		t.Fatalf("add parent project: %v", err)
+	}
+	dir := config.ProjectSessionDir(parentRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	topicID := "old-worktree-meta-topic"
+	writeTopicSessionWithPrompt(t, dir, "old-worktree-meta.jsonl", topicID, "Old wt", worktreeRoot, "old worktree prompt", time.Now())
+
+	nodes := NewApp().ListProjectTree()
+	if len(nodes) != 1 || nodes[0].Root != parentRoot {
+		t.Fatalf("expected parent project node, got %#v", nodes)
+	}
+	if len(nodes[0].Children) != 1 {
+		t.Fatalf("expected worktree session-meta topic under parent, got %#v", nodes[0].Children)
+	}
+	child := nodes[0].Children[0]
+	if child.TopicID != topicID || child.Label != "Old wt" || !child.IsolatedWorktree {
+		t.Fatalf("worktree session-meta topic was not surfaced under parent: %#v", child)
+	}
+}
+
 func TestProjectTreeMigratesNewCLISessionAfterProjectDirMarker(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

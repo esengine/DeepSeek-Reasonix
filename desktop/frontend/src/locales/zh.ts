@@ -193,6 +193,7 @@ export const zh: Record<DictKey, string> = {
   "workspace.addSelectionToChat": "添加到聊天",
   "workspace.addFileReferenceToChat": "添加文件引用",
   "workspace.addFolderReferenceToChat": "添加文件夹引用",
+  "workspace.createTopicFromDir": "基于此目录创建新对话",
   "workspace.addFileContentToChat": "添加文件内容",
   "workspace.viewMode": "工作区视图",
   "workspace.filesTab": "文件",
@@ -1085,6 +1086,7 @@ export const zh: Record<DictKey, string> = {
   "projectTree.timeFilter1d": "最近 1 天",
   "projectTree.emptyNoTimeFilterMatch": "没有话题符合时间筛选条件",
   "projectTree.clearTimeFilter": "清除筛选",
+  "projectTree.worktreeTopic": "WorkTree 目录",
 
   // 记忆抽屉
   "memory.title": "记忆",

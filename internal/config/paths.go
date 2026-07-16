@@ -391,6 +391,10 @@ func SessionDir() string {
 // ProjectSessionDir is the per-workspace session directory the desktop sidebar
 // lists: <state root>/projects/<slug>/sessions. Empty when either the state root
 // or workspaceRoot doesn't resolve.
+//
+// When workspaceRoot points inside a .worktrees/<name> subdirectory, the
+// session directory resolves to the parent project's session dir so that
+// git worktrees share the same conversation history as their parent repo.
 func ProjectSessionDir(workspaceRoot string) string {
 	base := MemoryUserDir()
 	root := strings.TrimSpace(workspaceRoot)
@@ -400,11 +404,15 @@ func ProjectSessionDir(workspaceRoot string) string {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
-	return filepath.Join(base, "projects", WorkspaceSlug(root), "sessions")
+	return filepath.Join(base, "projects", WorkspaceSlug(ProjectRootFromWorktree(root)), "sessions")
 }
 
 // MemoryCompilerDir is the project-scoped state directory for the Memory v5
 // execution compiler. Empty means persistent compiler state is unavailable.
+//
+// When workspaceRoot points inside a .worktrees/<name> subdirectory, the
+// compiler directory resolves to the parent project's dir so that git
+// worktrees share the same memory compiler state as their parent repo.
 func MemoryCompilerDir(workspaceRoot string) string {
 	base := MemoryUserDir()
 	root := strings.TrimSpace(workspaceRoot)
@@ -414,7 +422,7 @@ func MemoryCompilerDir(workspaceRoot string) string {
 	if abs, err := filepath.Abs(root); err == nil {
 		root = abs
 	}
-	return filepath.Join(base, "projects", WorkspaceSlug(root), "memory", "compiler")
+	return filepath.Join(base, "projects", WorkspaceSlug(ProjectRootFromWorktree(root)), "memory", "compiler")
 }
 
 // WorkspaceSlug flattens an absolute workspace path into the directory name
@@ -462,6 +470,73 @@ func boundFilenameComponent(s string, maxLen int) string {
 // when one will be appended).
 func BoundFilenameComponent(s string, maxLen int) string {
 	return boundFilenameComponent(s, maxLen)
+}
+
+// isAbsGlobally reports whether path is absolute in either Unix or Windows
+// convention — /path, C:\path, \\server\share. Unlike filepath.IsAbs, it
+// treats a leading '/' as absolute even on Windows, which matters when
+// test/session paths follow a Unix-style convention.
+func isAbsGlobally(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	if len(path) > 0 && (path[0] == '/' || path[0] == '\\') {
+		return true
+	}
+	return false
+}
+
+// ProjectRootFromWorktree detects whether path lies inside a .worktrees/<name>
+// subdirectory and, if so, returns the parent project root (the directory that
+// directly contains .worktrees/). Returns path unchanged when no .worktrees/
+// segment is found.
+//
+// This ensures that git worktrees stored under .worktrees/ share the same
+// project identity (sessions, memory) as their parent repository. It is a
+// purely local convention — not tied to git worktree internals — so it works
+// with any clone, symlink, or bare directory that lives under .worktrees/.
+//
+// Examples:
+//
+//	/project/.worktrees/feat-x/cmd        → /project
+//	/project/.worktrees/feat-x             → /project
+//	/project/.worktrees                    → /project
+//	/project/src                           → /project/src   (unchanged)
+//	C:\project\.worktrees\feat-x\cmd       → C:\project
+func ProjectRootFromWorktree(path string) string {
+	if path == "" || !isAbsGlobally(path) {
+		return path
+	}
+	// Walk the path looking for a path component that is exactly ".worktrees".
+	// Use the FIRST occurrence (outermost, closest to root) to handle nested
+	// worktree paths. Uses string operations instead of filepath.Dir/Base to
+	// avoid platform-specific separator edge cases on Windows.
+	//
+	// Preserve the original separator style of the input path.
+	sep := func(c byte) bool { return c == '/' || c == '\\' }
+	dotW := ".worktrees"
+	found := false
+	parentEnd := 0
+	for i := 0; i <= len(path)-len(dotW); i++ {
+		if path[i:i+len(dotW)] == dotW {
+			if i == 0 || sep(path[i-1]) {
+				end := i + len(dotW)
+				if end == len(path) || sep(path[end]) {
+					found = true
+					parentEnd = i
+					break // outermost = first match
+				}
+			}
+		}
+	}
+	if !found {
+		return path
+	}
+	if parentEnd == 0 {
+		return ""
+	}
+	// Strip the trailing separator after the parent directory
+	return strings.TrimRight(path[:parentEnd-1], "/\\")
 }
 
 // CacheDir is the per-user cache root for derived/regenerable artefacts: MCP

@@ -245,6 +245,70 @@ func TestEnsureBlankTabCreatesOneBlankPerProject(t *testing.T) {
 	}
 }
 
+func TestEnsureBlankTabKeepsWorktreeWorkspaceRoot(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "feature-a")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	meta, err := app.EnsureBlankTab("project", worktreeRoot)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(worktree): %v", err)
+	}
+	if got := normalizeProjectRoot(meta.WorkspaceRoot); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("tab meta workspace root = %q, want worktree %q", meta.WorkspaceRoot, worktreeRoot)
+	}
+	if got := normalizeProjectRoot(meta.WorkspacePath); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("tab meta workspace path = %q, want worktree %q", meta.WorkspacePath, worktreeRoot)
+	}
+	if !meta.IsolatedWorktree {
+		t.Fatalf("tab meta isolatedWorktree = false, want true")
+	}
+
+	tab := waitForTabReady(t, app, meta.ID)
+	if got := normalizeProjectRoot(tab.WorkspaceRoot); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("tab workspace root = %q, want worktree %q", tab.WorkspaceRoot, worktreeRoot)
+	}
+	if got := normalizeProjectRoot(tab.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("controller workspace root = %q, want worktree %q", got, normalizeProjectRoot(worktreeRoot))
+	}
+	if !sameDesktopPath(tab.Ctrl.SessionDir(), desktopSessionDir(parentRoot)) {
+		t.Fatalf("controller session dir = %q, want shared parent dir %q", tab.Ctrl.SessionDir(), desktopSessionDir(parentRoot))
+	}
+}
+
+func TestEnsureBlankTabCanonicalizesNestedWorktreeWorkspaceRoot(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	parentRoot := filepath.Join(t.TempDir(), "repo")
+	worktreeRoot := filepath.Join(parentRoot, ".worktrees", "pr-worktree")
+	nestedRoot := filepath.Join(worktreeRoot, ".worktrees", "pr-worktree")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	meta, err := app.EnsureBlankTab("project", nestedRoot)
+	if err != nil {
+		t.Fatalf("EnsureBlankTab(nested worktree): %v", err)
+	}
+	if got := normalizeProjectRoot(meta.WorkspaceRoot); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("tab meta workspace root = %q, want canonical worktree %q", meta.WorkspaceRoot, worktreeRoot)
+	}
+
+	tab := waitForTabReady(t, app, meta.ID)
+	if got := normalizeProjectRoot(tab.WorkspaceRoot); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("tab workspace root = %q, want canonical worktree %q", tab.WorkspaceRoot, worktreeRoot)
+	}
+	if got := normalizeProjectRoot(tab.Ctrl.WorkspaceRoot()); got != normalizeProjectRoot(worktreeRoot) {
+		t.Fatalf("controller workspace root = %q, want canonical worktree %q", got, worktreeRoot)
+	}
+}
+
 func TestEnsureBlankTabStartsProjectRuntimeWithCurrentWorkspacePrompt(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

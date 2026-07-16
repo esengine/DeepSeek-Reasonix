@@ -2372,36 +2372,103 @@ func (a *App) activeSessionDir() string {
 // marking the one the current conversation is writing to and attaching any
 // user-chosen titles.
 func (a *App) ListSessions() []SessionMeta {
-	dir := a.activeSessionDir()
-	infos, err := agent.ListSessions(dir)
-	if err != nil {
+	dirs := a.activeHistorySessionDirs()
+	if len(dirs) == 0 {
 		return []SessionMeta{}
 	}
-	open := a.openSessionPaths(dir)
-	protectedDisplays := make(map[string]struct{}, len(open))
-	for path := range open {
-		if key := filepath.Base(path); store.IsSessionTranscriptName(key) {
-			protectedDisplays[key] = struct{}{}
+	allOpen := map[string]struct{}{}
+	protectedDisplays := map[string]struct{}{}
+	for _, dir := range dirs {
+		for path := range a.openSessionPaths(dir) {
+			allOpen[path] = struct{}{}
+			if key := filepath.Base(path); store.IsSessionTranscriptName(key) {
+				protectedDisplays[key] = struct{}{}
+			}
 		}
 	}
-	_ = pruneSessionDisplays(dir, protectedDisplays)
-	titles := loadSessionTitles(dir)
-	channelRoutes := channelSessionRoutesForDir(dir)
-	active := a.activeSessionPath(dir)
-	out := make([]SessionMeta, 0, len(infos))
-	for _, s := range infos {
-		_, isOpen := open[s.Path]
-		title := strings.TrimSpace(s.CustomTitle)
-		if title == "" {
-			title = titles[filepath.Base(s.Path)]
+	out := []SessionMeta{}
+	seen := map[string]bool{}
+	for _, dir := range dirs {
+		infos, err := agent.ListSessions(dir)
+		if err != nil {
+			continue
 		}
-		meta := sessionMetaFromInfo(s, title, s.Path == active, isOpen, 0, dir)
-		if route, ok := channelRoutes[sessionRuntimeKey(s.Path)]; ok {
-			applyChannelSessionRoute(&meta, route)
+		_ = pruneSessionDisplays(dir, protectedDisplays)
+		titles := loadSessionTitles(dir)
+		channelRoutes := channelSessionRoutesForDir(dir)
+		active := a.activeSessionPath(dir)
+		for _, s := range infos {
+			if seen[s.Path] {
+				continue
+			}
+			seen[s.Path] = true
+			_, isOpen := allOpen[s.Path]
+			title := strings.TrimSpace(s.CustomTitle)
+			if title == "" {
+				title = titles[filepath.Base(s.Path)]
+			}
+			meta := sessionMetaFromInfoInDir(dir, s, title, s.Path == active, isOpen, 0)
+			if route, ok := channelRoutes[sessionRuntimeKey(s.Path)]; ok {
+				applyChannelSessionRoute(&meta, route)
+			}
+			out = append(out, meta)
 		}
-		out = append(out, meta)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].LastActivityAt != out[j].LastActivityAt {
+			return out[i].LastActivityAt > out[j].LastActivityAt
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
+}
+
+func (a *App) activeHistorySessionDirs() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+		if seen[dir] {
+			return
+		}
+		seen[dir] = true
+		out = append(out, dir)
+	}
+	activeDir := a.activeSessionDir()
+	add(activeDir)
+	if root := a.activeProjectRootForHistory(activeDir); root != "" {
+		for _, dir := range legacyWorktreeSessionDirsForProjects(desktopProjectFile{Projects: []desktopProject{{Root: root}}}) {
+			add(dir)
+		}
 	}
 	return out
+}
+
+func (a *App) activeProjectRootForHistory(activeDir string) string {
+	a.mu.RLock()
+	if tab := a.tabs[a.activeTabID]; tab != nil && tab.Scope == "project" {
+		root := normalizeProjectRoot(config.ProjectRootFromWorktree(tab.WorkspaceRoot))
+		a.mu.RUnlock()
+		return root
+	}
+	a.mu.RUnlock()
+	activeDir = strings.TrimSpace(activeDir)
+	if activeDir == "" {
+		return ""
+	}
+	for _, project := range loadProjectsFile().Projects {
+		root := normalizeProjectRoot(config.ProjectRootFromWorktree(project.Root))
+		if root != "" && sameDesktopPath(desktopSessionDir(root), activeDir) {
+			return root
+		}
+	}
+	return ""
 }
 
 // ListTrashedSessions returns sessions that were moved to the local trash,
@@ -2456,6 +2523,10 @@ func (a *App) sessionDirForPath(path string) (string, string, error) {
 }
 
 func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, deletedAt int64, parentDir string) SessionMeta {
+	workspaceRoot := s.WorkspaceRoot
+	if s.Scope == "project" {
+		workspaceRoot = normalizeProjectRoot(config.ProjectRootFromWorktree(workspaceRoot))
+	}
 	return SessionMeta{
 		Path:           s.Path,
 		Preview:        s.Preview,
@@ -2468,12 +2539,22 @@ func sessionMetaFromInfo(s agent.SessionInfo, title string, current, open bool, 
 		Current:        current,
 		Open:           open,
 		Scope:          s.Scope,
-		WorkspaceRoot:  s.WorkspaceRoot,
+		WorkspaceRoot:  workspaceRoot,
 		TopicID:        s.TopicID,
 		TopicTitle:     s.TopicTitle,
 		Recovered:      sessionInfoIsAutomaticRecovery(s),
 		RecoveryCopy:   sessionInfoIsUnmodifiedRecoveryCopy(s, parentDir),
 	}
+}
+
+func sessionMetaFromInfoInDir(dir string, s agent.SessionInfo, title string, current, open bool, deletedAt int64) SessionMeta {
+	if strings.TrimSpace(s.TopicID) == "" && strings.TrimSpace(s.WorkspaceRoot) == "" {
+		if scope, workspaceRoot, _, ok := legacyMigrationTargetForDir(dir); ok {
+			s.Scope = scope
+			s.WorkspaceRoot = workspaceRoot
+		}
+	}
+	return sessionMetaFromInfo(s, title, current, open, deletedAt, dir)
 }
 
 func applyChannelSessionRoute(meta *SessionMeta, route channelSessionRoute) {
@@ -3220,7 +3301,7 @@ func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPag
 	if tab == nil || ctrl == nil {
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
 	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	sessionPath, err := a.sessionPathForTabHistory(tab, ctrl, path)
 	if err != nil {
 		return HistoryPage{}, err
 	}
@@ -3245,7 +3326,7 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	sessionPath, err := a.sessionPathForTabHistory(tab, ctrl, path)
 	if err != nil {
 		return nil, err
 	}
@@ -3270,7 +3351,7 @@ func (a *App) OpenChannelSessionForTab(tabID, path string) ([]HistoryMessage, er
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	sessionPath, err := a.sessionPathForTabHistory(tab, ctrl, path)
 	if err != nil {
 		return nil, err
 	}
@@ -3292,7 +3373,7 @@ func (a *App) OpenChannelSessionPageForTab(tabID, path string, limit int) (Histo
 	if tab == nil || ctrl == nil {
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
 	}
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	sessionPath, err := a.sessionPathForTabHistory(tab, ctrl, path)
 	if err != nil {
 		return HistoryPage{}, err
 	}
@@ -3307,6 +3388,49 @@ func (a *App) OpenChannelSessionPageForTab(tabID, path string, limit int) (Histo
 	}
 	a.setTabReadOnly(tab.ID, true)
 	return a.HistoryPageForTab(tab.ID, 0, limit), nil
+}
+
+func (a *App) sessionPathForTabHistory(tab *WorkspaceTab, ctrl control.SessionAPI, path string) (string, error) {
+	seen := map[string]bool{}
+	dirs := []string{}
+	add := func(dir string) {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return
+		}
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+		if seen[dir] {
+			return
+		}
+		seen[dir] = true
+		dirs = append(dirs, dir)
+	}
+	add(controllerSessionDir(ctrl))
+	add(tabSessionDir(tab))
+	if tab != nil && tab.Scope == "project" {
+		root := normalizeProjectRoot(config.ProjectRootFromWorktree(tab.WorkspaceRoot))
+		if root != "" {
+			for _, dir := range legacyWorktreeSessionDirsForProjects(desktopProjectFile{Projects: []desktopProject{{Root: root}}}) {
+				add(dir)
+			}
+		}
+	}
+	var firstErr error
+	for _, dir := range dirs {
+		sessionPath, _, err := validateSessionPath(dir, path)
+		if err == nil {
+			return sessionPath, nil
+		}
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return "", firstErr
+	}
+	return "", fmt.Errorf("session path is required")
 }
 
 func (a *App) setTabReadOnly(tabID string, readOnly bool) {
@@ -3396,10 +3520,24 @@ func (a *App) rebindTabToLoadedSessionPath(tab *WorkspaceTab, sessionPath string
 	a.mu.Unlock()
 
 	profile := loadTabSessionProfile(sessionPath)
+	binding, hasBinding := a.resolveSessionBinding(sessionPath)
+	if hasBinding && binding.scope == "project" {
+		_ = addProject(binding.workspaceRoot, "")
+	}
 
 	if ctrl == nil {
 		a.mu.Lock()
 		tab.SessionPath = sessionPath
+		if hasBinding {
+			tab.Scope = binding.scope
+			tab.WorkspaceRoot = binding.workspaceRoot
+			if strings.TrimSpace(binding.topicID) != "" {
+				tab.TopicID = strings.TrimSpace(binding.topicID)
+			}
+			if strings.TrimSpace(binding.topicTitle) != "" {
+				tab.TopicTitle = strings.TrimSpace(binding.topicTitle)
+			}
+		}
 		applyTabSessionProfile(tab, profile)
 		tab.Ready = false
 		clearTabStartupError(tab)
@@ -3442,6 +3580,16 @@ func (a *App) rebindTabToLoadedSessionPath(tab *WorkspaceTab, sessionPath string
 	// the validation section above; only retarget the tab here.
 	tab.Ctrl = nil
 	tab.SessionPath = sessionPath
+	if hasBinding {
+		tab.Scope = binding.scope
+		tab.WorkspaceRoot = binding.workspaceRoot
+		if strings.TrimSpace(binding.topicID) != "" {
+			tab.TopicID = strings.TrimSpace(binding.topicID)
+		}
+		if strings.TrimSpace(binding.topicTitle) != "" {
+			tab.TopicTitle = strings.TrimSpace(binding.topicTitle)
+		}
+	}
 	applyTabSessionProfile(tab, profile)
 	tab.Ready = false
 	clearTabStartupError(tab)

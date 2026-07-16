@@ -20551,6 +20551,18 @@ body > .mermaid-diagram--fullscreen {
   font-size: 15px;
   line-height: 1.25;
   font-weight: 680;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.topicbar__worktree-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  opacity: 0.7;
+  margin-right: 4px;
 }
 
 .topicbar__title-edit {
@@ -22024,6 +22036,14 @@ body > .mermaid-diagram--fullscreen {
 .project-tree__topic-im--weixin {
   background: color-mix(in srgb, #22c55e 11%, transparent);
   color: color-mix(in srgb, #16a34a 78%, var(--fg-dim));
+}
+
+.project-tree__topic-worktree {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  opacity: 0.7;
 }
 
 .project-tree__topic-im--feishu,
