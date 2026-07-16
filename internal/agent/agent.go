@@ -886,6 +886,16 @@ type Agent struct {
 	tokenAwareCircuitMonitor *TokenAwareCircuitMonitor
 	// OPT-250: 提示缓存自适应控制器
 	promptCacheAdaptiveController *PromptCacheAdaptiveController
+	// OPT-251: Token 感知节流控制器
+	tokenAwareThrottleController *TokenAwareThrottleController
+	// OPT-252: 缓存失效批处理器（替换OPT-207）
+	// cacheInvalidationBatcher 已在 OPT-207 声明
+	// OPT-253: 上下文窗口稳定器
+	contextWindowStabilizer *ContextWindowStabilizer
+	// OPT-254: Token 感知背压中继器
+	tokenAwareBackpressureRelay *TokenAwareBackpressureRelay
+	// OPT-255: 提示缓存命中预测器V2
+	promptCacheHitPredictorV2 *PromptCacheHitPredictorV2
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -2071,6 +2081,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowThermalRegulator := NewContextWindowThermalRegulator(1024, 32768, 8192)
 	tokenAwareCircuitMonitor := NewTokenAwareCircuitMonitor()
 	promptCacheAdaptiveController := NewPromptCacheAdaptiveController(20)
+	tokenAwareThrottleController := NewTokenAwareThrottleController(100, 200)
+	contextWindowStabilizer := NewContextWindowStabilizer(8192, 20)
+	tokenAwareBackpressureRelay := NewTokenAwareBackpressureRelay(50000)
+	promptCacheHitPredictorV2 := NewPromptCacheHitPredictorV2(0.6)
 
 	a := &Agent{
 		prov:                     prov,
@@ -2339,6 +2353,10 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		contextWindowThermalRegulator: contextWindowThermalRegulator,
 		tokenAwareCircuitMonitor:     tokenAwareCircuitMonitor,
 		promptCacheAdaptiveController: promptCacheAdaptiveController,
+		tokenAwareThrottleController:  tokenAwareThrottleController,
+		contextWindowStabilizer:      contextWindowStabilizer,
+		tokenAwareBackpressureRelay:  tokenAwareBackpressureRelay,
+		promptCacheHitPredictorV2:    promptCacheHitPredictorV2,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -3043,7 +3061,7 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 		stats["opt206_tokenAwareResourcePool"] = a.tokenAwareResourcePool.GetStats()
 	}
 	if a.cacheInvalidationBatcher != nil {
-		stats["opt207_cacheInvalidationBatcher"] = a.cacheInvalidationBatcher.GetStats()
+		stats["opt207_252_cacheInvalidationBatcher"] = a.cacheInvalidationBatcher.GetStats()
 	}
 	if a.contextFidelityMonitor != nil {
 		stats["opt208_contextFidelityMonitor"] = a.contextFidelityMonitor.GetStats()
@@ -3173,6 +3191,18 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	}
 	if a.promptCacheAdaptiveController != nil {
 		stats["opt250_promptCacheAdaptiveController"] = a.promptCacheAdaptiveController.GetStats()
+	}
+	if a.tokenAwareThrottleController != nil {
+		stats["opt251_tokenAwareThrottleController"] = a.tokenAwareThrottleController.GetStats()
+	}
+	if a.contextWindowStabilizer != nil {
+		stats["opt253_contextWindowStabilizer"] = a.contextWindowStabilizer.GetStats()
+	}
+	if a.tokenAwareBackpressureRelay != nil {
+		stats["opt254_tokenAwareBackpressureRelay"] = a.tokenAwareBackpressureRelay.GetStats()
+	}
+	if a.promptCacheHitPredictorV2 != nil {
+		stats["opt255_promptCacheHitPredictorV2"] = a.promptCacheHitPredictorV2.GetStats()
 	}
 	return stats
 }
@@ -4028,6 +4058,17 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	}
 	if a.tokenAwareCircuitMonitor != nil {
 		a.tokenAwareCircuitMonitor.Check("main")
+	}
+
+	// OPT-251~255: 节流 / 批处理 / 稳定 / 背压 / 预测V2
+	if a.tokenAwareThrottleController != nil {
+		a.tokenAwareThrottleController.Allow()
+	}
+	if a.contextWindowStabilizer != nil && usage != nil {
+		a.contextWindowStabilizer.Record(usage.TotalTokens)
+	}
+	if a.tokenAwareBackpressureRelay != nil && usage != nil {
+		a.tokenAwareBackpressureRelay.Relay(usage.TotalTokens)
 	}
 
 	if usage != nil && usage.TotalTokens > 0 {

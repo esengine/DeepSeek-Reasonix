@@ -122,61 +122,61 @@ func TestCacheInvalidationBatcher_Flush(t *testing.T) {
 		t.Errorf("expected 3 keys from Flush, got %d", len(keys))
 	}
 	// Flush 后批次应清空
-	if b.GetBatchSize() != 0 {
-		t.Errorf("expected batch size 0 after Flush, got %d", b.GetBatchSize())
+	if b.GetBatchCount() != 0 {
+		t.Errorf("expected batch count 0 after Flush, got %d", b.GetBatchCount())
 	}
 }
 
-// TestCacheInvalidationBatcher_GetBatchSize 验证 GetBatchSize 返回当前批次大小。
-func TestCacheInvalidationBatcher_GetBatchSize(t *testing.T) {
+// TestCacheInvalidationBatcher_GetBatchCount 验证 GetBatchCount 返回当前批次大小。
+func TestCacheInvalidationBatcher_GetBatchCount(t *testing.T) {
 	b := NewCacheInvalidationBatcher(8)
-	if b.GetBatchSize() != 0 {
-		t.Errorf("expected batch size 0 initially, got %d", b.GetBatchSize())
+	if b.GetBatchCount() != 0 {
+		t.Errorf("expected batch count 0 initially, got %d", b.GetBatchCount())
 	}
 	b.Add("k1")
 	b.Add("k2")
-	if b.GetBatchSize() != 2 {
-		t.Errorf("expected batch size 2 after two Adds, got %d", b.GetBatchSize())
+	if b.GetBatchCount() != 2 {
+		t.Errorf("expected batch count 2 after two Adds, got %d", b.GetBatchCount())
 	}
 }
 
-// TestCacheInvalidationBatcher_StatsFlushCount 验证 Stats 中的 flushCount 统计。
-func TestCacheInvalidationBatcher_StatsFlushCount(t *testing.T) {
+// TestCacheInvalidationBatcher_StatsBatchedFlushed 验证 Stats 中的 totalBatched/totalFlushed 统计。
+func TestCacheInvalidationBatcher_StatsBatchedFlushed(t *testing.T) {
 	b := NewCacheInvalidationBatcher(8)
 	b.Add("k1")
-	b.Flush() // flushCount=1, totalInvalidated=1
+	b.Flush() // totalBatched=1, totalFlushed=1
 	b.Add("k2")
 	b.Add("k3")
-	b.Flush() // flushCount=2, totalInvalidated=3
+	b.Flush() // totalBatched=3, totalFlushed=3
 	stats := b.GetStats()
-	if stats["flushCount"].(int) != 2 {
-		t.Errorf("expected flushCount=2, got %v", stats["flushCount"])
+	if stats["totalBatched"].(int) != 3 {
+		t.Errorf("expected totalBatched=3, got %v", stats["totalBatched"])
 	}
-	if stats["totalInvalidated"].(int) != 3 {
-		t.Errorf("expected totalInvalidated=3, got %v", stats["totalInvalidated"])
+	if stats["totalFlushed"].(int) != 3 {
+		t.Errorf("expected totalFlushed=3, got %v", stats["totalFlushed"])
 	}
 }
 
-// TestCacheInvalidationBatcher_Reset 验证 Reset 清空批次和计数但保留 maxBatchSize。
+// TestCacheInvalidationBatcher_Reset 验证 Reset 清空批次和计数但保留 batchSize。
 func TestCacheInvalidationBatcher_Reset(t *testing.T) {
 	b := NewCacheInvalidationBatcher(8)
 	b.Add("k1")
 	b.Flush()
 	b.Add("k2")
 	b.Reset()
-	if b.GetBatchSize() != 0 {
-		t.Errorf("expected batch size 0 after Reset, got %d", b.GetBatchSize())
+	if b.GetBatchCount() != 0 {
+		t.Errorf("expected batch count 0 after Reset, got %d", b.GetBatchCount())
 	}
 	stats := b.GetStats()
-	if stats["flushCount"].(int) != 0 {
-		t.Errorf("expected flushCount=0 after Reset, got %v", stats["flushCount"])
+	if stats["totalBatched"].(int) != 0 {
+		t.Errorf("expected totalBatched=0 after Reset, got %v", stats["totalBatched"])
 	}
-	if stats["totalInvalidated"].(int) != 0 {
-		t.Errorf("expected totalInvalidated=0 after Reset, got %v", stats["totalInvalidated"])
+	if stats["totalFlushed"].(int) != 0 {
+		t.Errorf("expected totalFlushed=0 after Reset, got %v", stats["totalFlushed"])
 	}
-	// maxBatchSize 配置应保留
-	if stats["maxBatchSize"].(int) != 8 {
-		t.Errorf("expected maxBatchSize=8 preserved after Reset, got %v", stats["maxBatchSize"])
+	// batchSize 配置应保留
+	if stats["batchSize"].(int) != 8 {
+		t.Errorf("expected batchSize=8 preserved after Reset, got %v", stats["batchSize"])
 	}
 }
 
