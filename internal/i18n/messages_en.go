@@ -216,6 +216,7 @@ var English = Messages{
 	CmdSwitchBranch:     "switch conversation branch",
 	CmdResume:           "resume a saved session",
 	CmdRename:           "rename a session",
+	CmdTitle:            "configure terminal title",
 	CmdModel:            "switch model",
 	CmdStatus:           "show session status",
 	CmdWorkMode:         "switch work mode",

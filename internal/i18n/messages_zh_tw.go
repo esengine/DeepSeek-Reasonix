@@ -468,6 +468,7 @@ var ChineseTraditional = Messages{
 	SlashClsDone:               "已清除畫面（LLM 上下文保留）",
 	CmdClear:                   "丟棄當前上下文",
 	CmdRename:                  "重新命名會話",
+	CmdTitle:                   "設定終端標題",
 	CmdGoal:                    "設定或清除當前目標",
 	CmdDiffFold:                "切換 diff 摺疊/展開",
 	ListMemorySaved:            "儲存的記憶",

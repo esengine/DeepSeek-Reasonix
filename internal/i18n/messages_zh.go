@@ -217,6 +217,7 @@ var Chinese = Messages{
 	CmdSwitchBranch:     "切换对话分支",
 	CmdResume:           "恢复已保存的会话",
 	CmdRename:           "重命名会话",
+	CmdTitle:            "配置终端标题",
 	CmdModel:            "切换模型",
 	CmdStatus:           "显示会话状态",
 	CmdWorkMode:         "切换工作模式",

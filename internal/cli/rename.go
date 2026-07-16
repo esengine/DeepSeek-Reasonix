@@ -53,6 +53,9 @@ func (m *chatTUI) runRenameCommand(input string) {
 		m.notice("rename: " + err.Error())
 		return
 	}
+	if targetPath == m.ctrl.SessionPath() {
+		m.syncWindowTitle()
+	}
 
 	m.notice(fmt.Sprintf(i18n.M.RenameDoneFmt, title))
 }
