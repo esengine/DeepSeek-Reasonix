@@ -26,7 +26,7 @@
             "en": "Guide for creating and using hooks in Reasonix Desktop.",
             "zh": "在 Reasonix 桌面端中创建和使用 Hook 的指南。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/DESKTOP_HOOKS.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/cc9b1f52e6bc787719b78e70db8d7e487fe2fdd1/docs/DESKTOP_HOOKS.zh-CN.md"
         },
         {
           "title": {
@@ -37,7 +37,7 @@
             "en": "How to create, configure, and distribute Reasonix plugins.",
             "zh": "如何创建、配置和分发 Reasonix 插件。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/PLUGIN_PACKAGES.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/cc9b1f52e6bc787719b78e70db8d7e487fe2fdd1/docs/PLUGIN_PACKAGES.md"
         },
         {
           "title": {
@@ -48,7 +48,7 @@
             "en": "Chinese guide for creating, configuring, and distributing Reasonix plugins.",
             "zh": "中文指南：创建、配置和分发 Reasonix 插件。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/PLUGIN_PACKAGES.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/cc9b1f52e6bc787719b78e70db8d7e487fe2fdd1/docs/PLUGIN_PACKAGES.zh-CN.md"
         },
         {
           "title": {
@@ -59,7 +59,7 @@
             "en": "How to build, validate, and publish a Reasonix release.",
             "zh": "如何构建、验证和发布 Reasonix 版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/HEAD/docs/RELEASING.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/cc9b1f52e6bc787719b78e70db8d7e487fe2fdd1/docs/RELEASING.md"
         }
       ],
       "highlights": [

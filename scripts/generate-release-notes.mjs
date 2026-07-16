@@ -83,10 +83,11 @@ async function collectPullRequests(repository, commits) {
 }
 
 function collectDocLinks(from, repository, to) {
+  const linkRef = runGit(["rev-parse", to]);
   const paths = runGit(["diff", "--name-only", `${from}..${to}`])
     .split("\n")
     .filter((path) => /^(?:docs|README)[/\w.-]*\.(?:md|mdx)$/i.test(path));
-  return paths.map((path) => `https://github.com/${repository}/blob/${to}/${path}`);
+  return paths.map((path) => `https://github.com/${repository}/blob/${linkRef}/${path}`);
 }
 
 function assertGroundedRefs(value, allowedRefs, path = "release") {
