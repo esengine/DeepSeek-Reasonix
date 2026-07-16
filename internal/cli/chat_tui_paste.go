@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -149,6 +150,39 @@ func (m *chatTUI) beginClipboardImagePaste() tea.Cmd {
 	}
 	m.clipboardImagePending = true
 	return pasteClipboardImage()
+}
+
+// pastePrimary returns a tea.Cmd that reads the PRIMARY selection (the X11/Wayland
+// selection filled by highlighting text and pasted with middle-click) and sends it
+// as a tea.PasteMsg. If no PRIMARY content is available or no tool is found,
+// it returns nil (silent no-op), matching the terminal expectation that middle-click
+// with an empty selection does nothing.
+func pastePrimary() tea.Cmd {
+	return func() tea.Msg {
+		text, err := readPrimarySelection()
+		if err != nil || text == "" {
+			return nil
+		}
+		return tea.PasteMsg{Content: text}
+	}
+}
+
+// readPrimarySelection attempts to retrieve text from the PRIMARY selection by
+// trying wl-paste (Wayland), xclip (X11), and xsel (X11) in order.
+func readPrimarySelection() (string, error) {
+	// Match the order used by SaveClipboardImage: Wayland tool first, then X11.
+	for _, args := range [][]string{
+		{"wl-paste", "--primary", "--no-newline"},
+		{"xclip", "-selection", "primary", "-o"},
+		{"xsel", "--output", "--primary"},
+	} {
+		cmd := exec.Command(args[0], args[1:]...)
+		out, err := cmd.Output()
+		if err == nil {
+			return strings.TrimRight(string(out), "\n\r"), nil
+		}
+	}
+	return "", fmt.Errorf("no primary selection tool found (need wl-paste, xclip, or xsel)")
 }
 
 func (m *chatTUI) attachPastedImages(text string) bool {
