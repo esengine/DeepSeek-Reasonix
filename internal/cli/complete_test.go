@@ -496,13 +496,13 @@ func TestSlashArgCompletionReasoningLanguage(t *testing.T) {
 	if !m.completion.active || m.completion.kind != compSlashArg {
 		t.Fatalf("/reasoning-language should open arg completion: %+v", m.completion)
 	}
-	for _, want := range []string{"auto", "zh", "en"} {
+	for _, want := range []string{"auto", "zh", "en", "off"} {
 		if !hasLabel(m.completion.items, want) {
 			t.Fatalf("/reasoning-language completion missing %q: %v", want, labels(m.completion.items))
 		}
 	}
 	if hasLabel(m.completion.items, "中文") {
-		t.Fatalf("/reasoning-language completion should expose only auto|zh|en: %v", labels(m.completion.items))
+		t.Fatalf("/reasoning-language completion should expose only auto|zh|en|off: %v", labels(m.completion.items))
 	}
 }
 

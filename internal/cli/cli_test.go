@@ -680,7 +680,7 @@ func TestConfigReasoningLanguageRejectsAliases(t *testing.T) {
 			t.Fatalf("config reasoning-language alias rc = %d, want 2", rc)
 		}
 	})
-	if !strings.Contains(errOut, "must be auto|zh|en") {
+	if !strings.Contains(errOut, "must be auto|zh|en|off") {
 		t.Fatalf("config reasoning-language alias stderr = %q", errOut)
 	}
 }

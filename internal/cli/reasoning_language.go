@@ -15,11 +15,11 @@ func (m *chatTUI) runReasoningLanguageCommand(input string) {
 			m.notice("reasoning-language: " + err.Error())
 			return
 		}
-		m.notice(fmt.Sprintf("reasoning-language: %s (usage: /reasoning-language auto|zh|en)", cliReasoningLanguageMode(cfg.ReasoningLanguage())))
+		m.notice(fmt.Sprintf("reasoning-language: %s (usage: /reasoning-language auto|zh|en|off)", cliReasoningLanguageMode(cfg.ReasoningLanguage())))
 		return
 	}
 	if len(args) > 2 {
-		m.notice("usage: /reasoning-language auto|zh|en")
+		m.notice("usage: /reasoning-language auto|zh|en|off")
 		return
 	}
 	if m.ctrl != nil && m.ctrl.Running() {
@@ -68,8 +68,10 @@ func parseCLIReasoningLanguage(mode string) (string, error) {
 		return "zh", nil
 	case "en":
 		return "en", nil
+	case "off":
+		return "off", nil
 	default:
-		return "", fmt.Errorf("reasoning_language %q: must be auto|zh|en", mode)
+		return "", fmt.Errorf("reasoning_language %q: must be auto|zh|en|off", mode)
 	}
 }
 
@@ -79,6 +81,8 @@ func cliReasoningLanguageMode(mode string) string {
 		return "zh"
 	case "en":
 		return "en"
+	case "off":
+		return "off"
 	default:
 		return "auto"
 	}

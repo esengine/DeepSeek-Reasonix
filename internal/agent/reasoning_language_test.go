@@ -81,3 +81,56 @@ func TestWithReasoningLanguageAutoUsesRawSourceOverReferencedContext(t *testing.
 		t.Fatalf("referenced English code should not make auto prefer English:\n%s", got)
 	}
 }
+
+func TestReasoningLanguageOffDisablesInjection(t *testing.T) {
+	// NormalizeReasoningLanguage
+	for _, input := range []string{"off", "none", "disable"} {
+		if got := NormalizeReasoningLanguage(input); got != "off" {
+			t.Errorf("NormalizeReasoningLanguage(%q) = %q, want off", input, got)
+		}
+	}
+
+	// ResolveReasoningLanguage returns empty for off regardless of source
+	if got := ResolveReasoningLanguage("off", "帮我看看这个代码"); got != "" {
+		t.Fatalf("ResolveReasoningLanguage(off, Chinese) = %q, want empty", got)
+	}
+	if got := ResolveReasoningLanguage("off", "explain this"); got != "" {
+		t.Fatalf("ResolveReasoningLanguage(off, English) = %q, want empty", got)
+	}
+	if got := ResolveReasoningLanguage("off", "hi"); got != "" {
+		t.Fatalf("ResolveReasoningLanguage(off, short) = %q, want empty", got)
+	}
+
+	// ReasoningLanguageBlock returns empty for off
+	if got := ReasoningLanguageBlock("off"); got != "" {
+		t.Fatalf("ReasoningLanguageBlock(off) = %q, want empty", got)
+	}
+
+	// WithReasoningLanguage passes content through unchanged
+	content := "帮我解释这个 panic"
+	got := WithReasoningLanguage(content, "off")
+	if got != content {
+		t.Fatalf("WithReasoningLanguage(content, off) should not inject, got %q", got)
+	}
+
+	// WithReasoningLanguageForSource with off and any source
+	got = WithReasoningLanguageForSource(content, "off", "中文source")
+	if got != content {
+		t.Fatalf("WithReasoningLanguageForSource(content, off, Chinese) should not inject, got %q", got)
+	}
+
+	// Leading transient blocks are skipped, still no injection
+	withMemory := "<memory-update>\nRemember this.\n</memory-update>\n\n" + content
+	got = WithReasoningLanguage(withMemory, "off")
+	if got != withMemory {
+		t.Fatalf("WithReasoningLanguage(leading memory, off) should not inject, got %q", got)
+	}
+
+	// off beats auto: auto with Chinese would inject, off should not
+	if WithReasoningLanguage(content, "auto") == content {
+		t.Fatal("sanity check: auto with Chinese content should inject, but it did not")
+	}
+	if WithReasoningLanguage(content, "off") != content {
+		t.Fatal("off with same Chinese content should NOT inject, but it did")
+	}
+}

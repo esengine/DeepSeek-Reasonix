@@ -17,13 +17,15 @@ Some users read visible reasoning more comfortably in Chinese or English even
 when the task itself mixes languages. This setting makes that preference
 explicit without changing the stable system prompt or tool definitions.
 
-The setting is intentionally small:
+The setting has four values:
 
 - `auto` anchors visible reasoning to Chinese when the raw user prompt is
   clearly Chinese, ignoring injected reference context such as `@file` contents;
   English and ambiguous turns add no extra instruction.
 - `zh` asks visible reasoning to prefer Simplified Chinese.
 - `en` asks visible reasoning to prefer English.
+- `off` disables `<reasoning-language>` block injection entirely; no automatic
+  detection occurs regardless of the input language.
 
 ## Desktop
 
@@ -44,6 +46,7 @@ For shell scripts or one-off configuration:
 reasonix config reasoning-language auto
 reasonix config reasoning-language zh
 reasonix config reasoning-language en
+reasonix config reasoning-language off
 ```
 
 By default this writes the user config. To write a project-local override:
@@ -58,6 +61,7 @@ Inside `reasonix`, use the slash command:
 /reasoning-language auto
 /reasoning-language zh
 /reasoning-language en
+/reasoning-language off
 ```
 
 The slash command writes the user-level setting and updates the current chat
@@ -76,7 +80,7 @@ User or project config:
 
 ```toml
 [agent]
-reasoning_language = "auto" # auto|zh|en
+reasoning_language = "auto" # auto|zh|en|off
 ```
 
 Resolution order for this setting:
@@ -97,9 +101,9 @@ turn; English and ambiguous turns inject nothing and rely on the existing stable
 language policy. Injected reference context such as `@file` contents is ignored
 for this auto decision.
 
-When set to `zh` or `en`, Reasonix always adds a small transient
-`<reasoning-language>` block to the user turn. In all modes, this does not
-change:
+When set to `zh`, `en`, or `off`, Reasonix always adds (zh/en) or never adds
+(off) the transient `<reasoning-language>` block to the user turn. In all modes,
+this does not change:
 
 - the system prompt
 - tool schema bytes or ordering

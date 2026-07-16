@@ -106,6 +106,7 @@ func reasoningLanguageArgItems(prior []string) []SlashItem {
 		{Label: "auto", Insert: "auto", Hint: "follow conversation language"},
 		{Label: "zh", Insert: "zh", Hint: "prefer Chinese visible reasoning"},
 		{Label: "en", Insert: "en", Hint: "prefer English visible reasoning"},
+		{Label: "off", Insert: "off", Hint: "disable injection"},
 	}
 }
 

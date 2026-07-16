@@ -12,11 +12,12 @@
 
 有些用户希望可见思考过程更稳定地使用中文或英文，即使任务本身混合了多种语言。这个设置把这种偏好显式化，同时不改稳定 system prompt，也不改工具 schema。
 
-取值只有三种：
+取值有四种：
 
 - `auto`：用户原始提问明显为中文时锚定中文，并忽略 `@file` 等注入的引用内容；英文或不确定时不额外注入语言指令。
 - `zh`：可见思考过程优先使用简体中文。
 - `en`：可见思考过程优先使用英文。
+- `off`：完全关闭 `<reasoning-language>` block 注入，不自动检测，无论输入语言是什么。
 
 ## 桌面端
 
@@ -36,6 +37,7 @@
 reasonix config reasoning-language auto
 reasonix config reasoning-language zh
 reasonix config reasoning-language en
+reasonix config reasoning-language off
 ```
 
 默认写入用户配置。要写入当前项目的覆盖配置：
@@ -50,6 +52,7 @@ reasonix config reasoning-language --local zh
 /reasoning-language auto
 /reasoning-language zh
 /reasoning-language en
+/reasoning-language off
 ```
 
 斜杠命令会写入用户级设置，并立即更新当前 chat controller，后续 turn 生效。它不会改写当前项目的 `reasonix.toml`；如果要写项目级覆盖，请使用带 `--local` 的 shell 命令。
@@ -66,7 +69,7 @@ reasonix run "解释这个模块"
 
 ```toml
 [agent]
-reasoning_language = "auto" # auto|zh|en
+reasoning_language = "auto" # auto|zh|en|off
 ```
 
 这个设置的配置优先级是：
@@ -81,7 +84,7 @@ reasoning_language = "auto" # auto|zh|en
 
 `auto` 仍然对缓存友好。用户原始提问明显是中文时，Reasonix 会为这一轮加入同样很小的 `<reasoning-language>` 临时 block；英文或信号不明确时不注入，只复用已有的稳定语言策略。`@file` 等注入的引用内容不会参与这个自动判断。
 
-当设置为 `zh` 或 `en` 时，Reasonix 总是会把一个很小的 `<reasoning-language>` 临时 block 放进本次 user turn。所有模式下，它都不会改变：
+当设置为 `zh`、`en` 或 `off` 时，Reasonix 总是会（zh/en）或不会（off）把一个 `<reasoning-language>` 临时 block 放进本次 user turn。所有模式下，它都不会改变：
 
 - system prompt
 - 工具 schema 的字节或顺序

@@ -1553,6 +1553,7 @@ export const zh: Record<DictKey, string> = {
   "settings.reasoningLanguage.auto": "自动",
   "settings.reasoningLanguage.zh": "中文",
   "settings.reasoningLanguage.en": "English",
+  "settings.reasoningLanguage.off": "关闭",
   "settings.sound": "声音",
   "settings.soundHint": "背景音乐与通知音效",
   "settings.soundStatus.allOff": "全部关闭",

@@ -486,7 +486,7 @@ func (c *Config) ReasoningLanguage() string {
 	return NormalizeReasoningLanguage(c.Agent.ReasoningLanguage)
 }
 
-// NormalizeReasoningLanguage returns one of auto|zh|en.
+// NormalizeReasoningLanguage returns one of auto|zh|en|off.
 func NormalizeReasoningLanguage(lang string) string {
 	switch strings.ToLower(strings.TrimSpace(lang)) {
 	case "", "auto", "follow", "conversation", "detect", "default", "model", "model-default", "model_default", "provider":
@@ -495,6 +495,8 @@ func NormalizeReasoningLanguage(lang string) string {
 		return "zh"
 	case "en", "english":
 		return "en"
+	case "off", "none", "disable":
+		return "off"
 	default:
 		return "auto"
 	}
