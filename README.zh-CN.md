@@ -116,6 +116,8 @@ provider key 的运行时 fallback，但仍会作为当前 workspace 范围内�
 
 ## 文档
 
+- **[Remote 架构设计](./docs/REMOTE_ARCHITECTURE.zh-CN.md)** —— Remote V1 的
+  产品边界、协议语义、实施阶段与验收标准（已冻结，可进入实现）。
 - **[CLI 命令参考](./docs/CLI.zh-CN.md)** —— 交互与一次性命令、结构化输出、
   会话恢复、权限模式和可搜索选择器。
 - **[指南](./docs/GUIDE.zh-CN.md)** —— 配置、权限与沙盒、插件(MCP)、斜杠命令、
