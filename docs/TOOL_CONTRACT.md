@@ -24,6 +24,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `todo_write` | true | Record and update a structured task list for the current work. Send the COMPLETE list every call - it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. |
 | `wait` | true | Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job. |
 | `web_fetch` | true | Fetch a URL over HTTPS/HTTP and return its text content. HTML pages are reduced to readable text; JSON / plain text / markdown bodies come back verbatim. Use to read documentation pages, API responses, or source files hosted somewhere the local filesystem can't reach. |
+| `widget_readme` | true | Load the widget design specification. Call this BEFORE outputting a ```widget code block to get the complete design rules. |
 | `write_file` | false | Write content to a file at the given path (overwriting existing content). Creates parent directories as needed. |
 
 ## Schema Snapshot

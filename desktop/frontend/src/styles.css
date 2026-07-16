@@ -18540,6 +18540,80 @@ body > .mermaid-diagram--fullscreen {
   margin-left: 16px;
 }
 
+/* ── streamed widget (```widget code blocks) ───────────────────────────────── */
+.widget-stream {
+  margin: 8px 0;
+}
+.widget-stream iframe {
+  border-radius: var(--radius);
+}
+/* Host-owned confirmation for widget-initiated actions (send prompt / open
+   link). Rendered outside the sandboxed iframe so the click cannot be forged
+   by widget scripts. */
+.widget-confirm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  font-size: 12px;
+}
+.widget-confirm__label {
+  font-weight: 500;
+  color: var(--fg);
+}
+.widget-confirm__value {
+  flex: 1 1 160px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.widget-confirm__value--expanded {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-all;
+}
+.widget-confirm__origin {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0 8px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+}
+.widget-confirm__actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.widget-confirm__actions button {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  border: 0.5px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.widget-confirm__go {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-color: var(--accent);
+}
+
 /* ── live task list, pinned above the composer ─────────────────────────────── */
 .todobar {
   max-width: var(--maxw);

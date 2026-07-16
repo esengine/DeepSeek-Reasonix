@@ -69,6 +69,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"notebook_edit": true,
 	"todo_write":    true,
 	"wait":          true,
+	"widget_readme": true,
 	"write_file":    true,
 }
 
