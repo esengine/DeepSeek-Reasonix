@@ -5,6 +5,7 @@ export interface EditorProps {
   language?: string;
   readOnly?: boolean;
   maxHeight?: number;
+  showLineNumbers?: boolean;
 }
 
 // ── EDITOR SEAM (code) ───────────────────────────────────────────────────────
