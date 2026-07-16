@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,43 @@ func TestSavePreservesToolContentOnDisk(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "DEEPSEEK_API_KEY="+secret) {
 		t.Fatalf("session did not persist tool content verbatim:\n%s", body)
+	}
+}
+
+func TestSaveProtectsVerbatimSessionEventLog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file ACLs are not represented by Unix permission bits")
+	}
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect"})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "API_KEY=raw-secret"})
+	path := filepath.Join(t.TempDir(), "private.jsonl")
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("first SaveSnapshot: %v", err)
+	}
+	eventPath := store.SessionEventLog(path)
+	assertPrivateSessionFile(t, eventPath)
+
+	// Simulate an event log created by a previous release. The next append must
+	// tighten the existing inode before writing any new unredacted content.
+	if err := os.Chmod(eventPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("append SaveSnapshot: %v", err)
+	}
+	assertPrivateSessionFile(t, eventPath)
+}
+
+func assertPrivateSessionFile(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("%s mode = %04o, want 0600", path, got)
 	}
 }
 

@@ -733,7 +733,11 @@ func normalizeLegacyAgentStepLimits(c *Config) bool {
 	return found
 }
 
-var legacyAgentStepLimitMigrationMu sync.Mutex
+// retiredConfigKeyMigrationMu serializes the independent one-time removals
+// below. They may target the same user/project TOML files from concurrent
+// desktop builds, so separate locks could race and restore a key another
+// migration had just removed.
+var retiredConfigKeyMigrationMu sync.Mutex
 
 // MigrateLegacyAgentStepLimitsForRoot removes retired [agent] step-limit keys
 // from the user and project config selected for root. Boot calls it immediately
@@ -772,8 +776,8 @@ func MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
 // before runtime decoding. A process-wide lock makes concurrent desktop tab
 // builds observe a single migration; the atomic rewrite protects other readers.
 func migrateLegacyAgentStepLimitsFile(path string) (bool, error) {
-	legacyAgentStepLimitMigrationMu.Lock()
-	defer legacyAgentStepLimitMigrationMu.Unlock()
+	retiredConfigKeyMigrationMu.Lock()
+	defer retiredConfigKeyMigrationMu.Unlock()
 
 	info, err := os.Stat(path)
 	if err != nil {
@@ -806,6 +810,83 @@ func stripLegacyAgentStepLimitLines(raw string) (string, bool) {
 			section = header
 		}
 		if section == "agent" && (isTOMLKeyAssignment(line, "max_steps") || isTOMLKeyAssignment(line, "planner_max_steps")) {
+			changed = true
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n"), changed
+}
+
+// MigrateLegacyRedactToolOutputForRoot removes the retired
+// [secrets].redact_tool_output setting from the user and project configs chosen
+// for root. The setting no longer controls any runtime behavior; removing it
+// avoids leaving an explicit `true` value on disk that falsely suggests live
+// output or transcript redaction is still active.
+func MigrateLegacyRedactToolOutputForRoot(root string) (bool, error) {
+	root = resolveRoot(root)
+	paths := make([]string, 0, 2)
+	if userPath := userConfigLoadPath(); userPath != "" {
+		paths = append(paths, userPath)
+	}
+	projectPath := "reasonix.toml"
+	if root != "." {
+		projectPath = filepath.Join(root, "reasonix.toml")
+	}
+	paths = append(paths, projectPath)
+
+	changedAny := false
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		changed, err := migrateLegacyRedactToolOutputFile(path)
+		if err != nil {
+			return changedAny, fmt.Errorf("migrate deprecated redact_tool_output in %s: %w", path, err)
+		}
+		changedAny = changedAny || changed
+	}
+	return changedAny, nil
+}
+
+func migrateLegacyRedactToolOutputFile(path string) (bool, error) {
+	retiredConfigKeyMigrationMu.Lock()
+	defer retiredConfigKeyMigrationMu.Unlock()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	raw, err := fileencoding.ReadFileUTF8(path)
+	if err != nil {
+		return false, err
+	}
+	next, changed := stripLegacyRedactToolOutputLines(string(raw))
+	if !changed {
+		return false, nil
+	}
+	if err := fileutil.AtomicWriteFile(path, []byte(next), info.Mode().Perm()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func stripLegacyRedactToolOutputLines(raw string) (string, bool) {
+	lines := strings.Split(raw, "\n")
+	section := ""
+	changed := false
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if header := tomlSectionHeader(line); header != "" {
+			section = header
+		}
+		if section == "secrets" && isTOMLKeyAssignment(line, "redact_tool_output") {
 			changed = true
 			continue
 		}

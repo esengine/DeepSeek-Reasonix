@@ -3542,6 +3542,70 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
+func TestBuildMigratesDeprecatedRedactToolOutputWithOneNotice(t *testing.T) {
+	home := isolateConfigHome(t)
+	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))
+	project := robustTempDir(t)
+	configPath := filepath.Join(project, "reasonix.toml")
+	writeFile(t, project, "reasonix.toml", `
+default_model = "test-model"
+
+[secrets]
+redact_tool_output = true
+
+[[providers]]
+name = "test-model"
+kind = "openai"
+base_url = "https://example.invalid"
+model = "x"
+api_key_env = "REASONIX_TEST_KEY_UNSET"
+`)
+
+	var notices []event.Event
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	})
+	build := func() {
+		t.Helper()
+		ctrl, err := Build(context.Background(), Options{Sink: sink, WorkspaceRoot: project})
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		ctrl.Close()
+	}
+
+	build()
+	migrationNotices := 0
+	for _, notice := range notices {
+		if notice.Text == "Deprecated redact_tool_output setting was removed." {
+			migrationNotices++
+			if notice.Level != event.LevelInfo || !strings.Contains(notice.Detail, "doctor redact-sessions") {
+				t.Fatalf("migration notice = %+v", notice)
+			}
+		}
+	}
+	if migrationNotices != 1 {
+		t.Fatalf("migration notices = %d, want 1; got %+v", migrationNotices, notices)
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "redact_tool_output") {
+		t.Fatalf("deprecated redact_tool_output remains after boot:\n%s", raw)
+	}
+
+	notices = nil
+	build()
+	for _, notice := range notices {
+		if strings.Contains(notice.Text, "redact_tool_output") {
+			t.Fatalf("second boot repeated migration notice: %+v", notice)
+		}
+	}
+}
+
 func TestBuildMigratesLegacySessionsFromConfigSessionDir(t *testing.T) {
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)

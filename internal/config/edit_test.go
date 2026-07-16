@@ -1348,6 +1348,67 @@ temperature = 0.8
 	}
 }
 
+func TestMigrateLegacyRedactToolOutputForRoot(t *testing.T) {
+	isolateUserConfigHome(t)
+	root := t.TempDir()
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`[secrets]
+redact_tool_output = true
+filter_subprocess_env = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`[secrets]
+redact_tool_output = false
+protect_sensitive_files = true
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := MigrateLegacyRedactToolOutputForRoot(root)
+	if err != nil {
+		t.Fatalf("MigrateLegacyRedactToolOutputForRoot: %v", err)
+	}
+	if !changed {
+		t.Fatal("first migration should remove deprecated redact_tool_output keys")
+	}
+	for _, path := range []string{userPath, projectPath} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "redact_tool_output") {
+			t.Fatalf("deprecated redact_tool_output remains in %s:\n%s", path, raw)
+		}
+	}
+	userRaw, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(userRaw), "filter_subprocess_env = true") {
+		t.Fatalf("migration removed an active secrets setting:\n%s", userRaw)
+	}
+	projectRaw, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(projectRaw), "protect_sensitive_files = true") {
+		t.Fatalf("migration removed an unrelated project setting:\n%s", projectRaw)
+	}
+
+	again, err := MigrateLegacyRedactToolOutputForRoot(root)
+	if err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+	if again {
+		t.Fatal("migration should be a no-op after deprecated keys are removed")
+	}
+}
+
 func TestLoadForRootReadOnlyIgnoresDeprecatedAgentStepLimitsWithoutRewriting(t *testing.T) {
 	isolateUserConfigHome(t)
 	root := t.TempDir()

@@ -61,7 +61,7 @@ func writeMeta(path string, meta artifactMeta) error {
 	if path == "" {
 		return fmt.Errorf("empty metadata path")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(meta, "", "  ")

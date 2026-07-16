@@ -178,9 +178,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	var migErr error
 	var stepLimitsMigrated bool
 	var stepLimitMigErr error
+	var redactToolOutputMigrated bool
+	var redactToolOutputMigErr error
 	if !config.SafeModeRequested() {
 		migrated, migErr = config.MigrateLegacyIfNeededForRoot(root)
 		stepLimitsMigrated, stepLimitMigErr = config.MigrateLegacyAgentStepLimitsForRoot(root)
+		redactToolOutputMigrated, redactToolOutputMigErr = config.MigrateLegacyRedactToolOutputForRoot(root)
 	}
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
@@ -254,6 +257,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		})
 	} else if stepLimitMigErr != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Deprecated agent step-limit migration did not complete.", Detail: stepLimitMigErr.Error()})
+	}
+	if redactToolOutputMigrated || redactToolOutputMigErr != nil {
+		level := event.LevelInfo
+		text := "Deprecated redact_tool_output setting was removed."
+		detail := "[secrets].redact_tool_output no longer has any effect: ordinary model/tool content and local session/job artifacts now preserve their original text. Explicit diagnostics and reasonix doctor redact-sessions still redact credential values."
+		if redactToolOutputMigErr != nil {
+			level = event.LevelWarn
+			text = "Deprecated redact_tool_output setting was ignored."
+			detail += " The old key could not be removed: " + redactToolOutputMigErr.Error()
+		}
+		sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
 	}
 	// Safe Mode is a recovery boundary: it must not rewrite memory or session
 	// state that a crash may have corrupted, so the legacy-store imports run

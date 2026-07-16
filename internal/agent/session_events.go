@@ -320,8 +320,12 @@ func repairSessionEventLogTail(sessionPath string) error {
 	}
 	// The truncation point sits exactly at the end of a JSON value; restore
 	// the trailing newline so the file stays line-oriented for external tools.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
 		return err
 	}
 	if _, err := f.Write([]byte{'\n'}); err != nil {
@@ -351,9 +355,17 @@ func appendSessionEvent(sessionPath string, rec sessionEventRecord, sync bool) e
 		return fmt.Errorf("encode session event: %w", err)
 	}
 	buf = append(buf, '\n')
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("open session event log: %w", err)
+	}
+	// The event log carries the complete transcript. Chmod after opening so
+	// upgrading a pre-v0.53-boundary 0644 sidecar tightens the existing inode
+	// before any unredacted message is appended; OpenFile's perm only applies
+	// when the file is newly created.
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("protect session event log: %w", err)
 	}
 	if _, err := f.Write(buf); err != nil {
 		_ = f.Close()
@@ -421,7 +433,7 @@ func compactSessionEventLog(sessionPath string, msgs []provider.Message, digest 
 		return fmt.Errorf("encode session event: %w", err)
 	}
 	buf = append(buf, '\n')
-	return fileutil.AtomicWriteFile(path, buf, 0o644)
+	return fileutil.AtomicWriteFile(path, buf, 0o600)
 }
 
 func readSessionEventIndex(sessionPath string) (*sessionEventIndex, error) {

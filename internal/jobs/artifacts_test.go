@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -97,6 +98,55 @@ func TestJobArtifactMetadataPreservesLabel(t *testing.T) {
 	}
 	if !strings.Contains(string(data), secret) {
 		t.Fatalf("job metadata did not preserve label:\n%s", data)
+	}
+}
+
+func TestJobArtifactUsesPrivatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file ACLs are not represented by Unix permission bits")
+	}
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	m := NewManager(event.Discard)
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	// Simulate a legacy artifact at the path the first job will reuse.
+	dir := ArtifactDir(sessionPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "bash-1"+jobLogExt)
+	if err := os.WriteFile(logPath, []byte("old redacted output"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	j := m.StartForSession("session", "bash", "echo API_KEY=raw-secret", func(_ context.Context, out io.Writer) (string, error) {
+		_, _ = io.WriteString(out, "API_KEY=raw-secret\n")
+		return "", nil
+	})
+	<-j.done
+	if j.ID != "bash-1" {
+		t.Fatalf("job id = %q, want bash-1", j.ID)
+	}
+	assertPrivateArtifactMode(t, logPath)
+	assertPrivateArtifactMode(t, filepath.Join(dir, j.ID+jobMetaExt))
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("artifact dir mode = %04o, want 0700", got)
+	}
+}
+
+func assertPrivateArtifactMode(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("%s mode = %04o, want 0600", path, got)
 	}
 }
 
@@ -465,6 +515,9 @@ func TestMigrateArtifactDirFallsBackToCopyWhenRenameFails(t *testing.T) {
 	}
 	if string(got) != "persisted output" {
 		t.Fatalf("migrated artifact = %q, want persisted output", got)
+	}
+	if runtime.GOOS != "windows" {
+		assertPrivateArtifactMode(t, filepath.Join(dst, "bash-1.log"))
 	}
 	if _, err := os.Stat(filepath.Join(src, "bash-1.log")); !os.IsNotExist(err) {
 		t.Fatalf("source artifact should be removed after copy fallback, stat err = %v", err)
