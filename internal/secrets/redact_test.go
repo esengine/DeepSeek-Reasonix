@@ -183,22 +183,6 @@ func TestProcessEnvAlwaysFiltersRegisteredCredentialKeys(t *testing.T) {
 	}
 }
 
-func TestRedactToolOutputHonorsToggle(t *testing.T) {
-	const in = "DEEPSEEK_API_KEY=sk-real-secret-value-123456"
-	if got := RedactToolOutput(in); strings.Contains(got, "sk-real-secret-value-123456") {
-		t.Fatalf("tool output not redacted by default:\n%s", got)
-	}
-	SetRedactToolOutput(false)
-	t.Cleanup(func() { SetRedactToolOutput(true) })
-	if got := RedactToolOutput(in); got != in {
-		t.Fatalf("RedactToolOutput altered output with the toggle off:\n%s", got)
-	}
-	// The durable-surface entry point ignores the toggle.
-	if got := Redact(in); strings.Contains(got, "sk-real-secret-value-123456") {
-		t.Fatalf("Redact must stay active regardless of the toggle:\n%s", got)
-	}
-}
-
 func TestRedactMessagesDoesNotMutateInput(t *testing.T) {
 	const secret = "sk-real-secret-value-123456"
 	msgs := []provider.Message{

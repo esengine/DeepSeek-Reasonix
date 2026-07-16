@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"reasonix/internal/provider"
@@ -20,16 +19,14 @@ func (secretOutputTool) Execute(context.Context, json.RawMessage) (string, error
 	return "DEEPSEEK_API_KEY=sk-real-secret-value-123456\n", nil
 }
 
-func TestExecuteOneRedactsToolResultBeforeHistory(t *testing.T) {
+func TestExecuteOnePreservesToolResultBeforeHistory(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(secretOutputTool{})
 	a := &Agent{tools: reg, session: NewSession("")}
 
 	outcome := a.executeOne(context.Background(), provider.ToolCall{ID: "call_1", Name: "secret_output", Arguments: `{}`})
-	if strings.Contains(outcome.output, "sk-real-secret-value-123456") {
-		t.Fatalf("tool outcome leaked raw secret:\n%s", outcome.output)
-	}
-	if !strings.Contains(outcome.output, "DEEPSEEK_API_KEY=sk-rea") {
-		t.Fatalf("tool outcome missing masked marker:\n%s", outcome.output)
+	const want = "DEEPSEEK_API_KEY=sk-real-secret-value-123456\n"
+	if outcome.output != want {
+		t.Fatalf("tool outcome = %q, want byte-preserving output %q", outcome.output, want)
 	}
 }

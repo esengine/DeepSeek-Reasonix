@@ -45,7 +45,6 @@ const redactedValue = "[redacted]"
 // globals are safe here because [secrets] cannot be overridden per-project:
 // every concurrent workspace in one process shares the same user setting.
 var (
-	redactToolOutputEnabled      atomic.Bool
 	filterSubprocessEnvEnabled   atomic.Bool
 	protectSensitiveFilesEnabled atomic.Bool
 	credentialEnvKeys            = struct {
@@ -53,19 +52,6 @@ var (
 		keys map[string]struct{}
 	}{keys: map[string]struct{}{}}
 )
-
-func init() {
-	// Tool-output redaction defaults on; subprocess env filtering defaults
-	// off because it breaks legitimate token-based workflows (gh, git push
-	// over HTTPS, npm publish) and needs an explicit user opt-in.
-	redactToolOutputEnabled.Store(true)
-}
-
-// SetRedactToolOutput enables or disables masking of tool output before it
-// enters model context and UI events ([secrets] redact_tool_output). Durable
-// surfaces — session transcripts and background-job artifacts — are always
-// redacted regardless of this toggle.
-func SetRedactToolOutput(enabled bool) { redactToolOutputEnabled.Store(enabled) }
 
 // SetFilterSubprocessEnv enables or disables stripping credential-like
 // variables from tool subprocess environments ([secrets]
@@ -159,22 +145,10 @@ func ProcessEnv() []string {
 	return FilterEnv(os.Environ())
 }
 
-// RedactToolOutput masks credential-like values in live tool output (model
-// context, UI events) unless the user disabled [secrets] redact_tool_output.
-// Durable writers (session save, job artifacts) call Redact directly instead:
-// disk logs stay redacted even when live output is not.
-func RedactToolOutput(s string) string {
-	if !redactToolOutputEnabled.Load() {
-		return s
-	}
-	return Redact(s)
-}
-
-// Redact masks credential-like values in text before the text enters durable
-// transcripts, job artifacts, or diagnostic records. It is deterministic and
-// idempotent: redacting already-redacted text is a byte-for-byte no-op, which
-// the session save path relies on for digest stability across load/save cycles
-// (see Session.save).
+// Redact masks credential-like values for explicit diagnostic, export, and
+// cleanup paths. Normal model content, tool output, session transcripts, and
+// background-job artifacts deliberately bypass this helper to retain v0.53's
+// byte-preserving behavior.
 func Redact(s string) string {
 	if s == "" {
 		return s

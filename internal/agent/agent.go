@@ -26,7 +26,6 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
-	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
@@ -3170,7 +3169,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			if rc.ProxyAction == "call" && !rc.Unavailable {
 				a.noteCapabilityInvocation(call.Name, json.RawMessage(call.Arguments), nil)
 			}
-			result := secrets.RedactToolOutput(rc.Result)
+			result := rc.Result
 			if a.evidence != nil {
 				// inspect/decline are not mutations; unavailable call targets are not success.
 				success := !rc.Unavailable
@@ -3386,7 +3385,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	callID := call.ID
 	cctx = tool.WithProgress(cctx, func(chunk string) {
-		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: secrets.RedactToolOutput(chunk)}})
+		a.sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: callID, Output: chunk}})
 	})
 	var result string
 	var images []string
@@ -3418,7 +3417,6 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	} else {
 		result, err = runTool.Execute(cctx, runArgs)
 	}
-	result = secrets.RedactToolOutput(result)
 	if a.evidence != nil {
 		// Always record the model-visible call for audit, then the real target
 		// attributes for mutation/read classification when they differ.

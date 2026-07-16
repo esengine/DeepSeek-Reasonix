@@ -73,14 +73,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 	globalMemoryCompiler := cfg.Agent.MemoryCompiler
 	userDefaultModel := cfg.DefaultModel
-	// Deep-copy: TOML decoding writes through an existing *bool rather than
-	// replacing it, so a shallow struct copy would alias the pointer and the
-	// project merge below would mutate the captured global value in place.
 	globalSecrets := cfg.Secrets
-	if cfg.Secrets.RedactToolOutput != nil {
-		v := *cfg.Secrets.RedactToolOutput
-		globalSecrets.RedactToolOutput = &v
-	}
 
 	tomlSources = append(tomlSources, projectTOML)
 	if err := mergeTOML(cfg, projectTOML); err != nil {
@@ -88,8 +81,8 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 	cfg.Agent.MemoryCompiler = globalMemoryCompiler
 	// Secret protection is a user-global security control: a cloned repo's
-	// reasonix.toml must not be able to disable redaction or flip on the
-	// workflow-breaking env/path protections.
+	// reasonix.toml must not be able to flip on the workflow-breaking env/path
+	// protections.
 	cfg.Secrets = globalSecrets
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a

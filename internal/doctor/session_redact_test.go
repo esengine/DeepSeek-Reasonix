@@ -100,9 +100,8 @@ func TestRedactSessionsHandlesQuotedSecretsWithoutCorruption(t *testing.T) {
 	}
 }
 
-// TestRedactSessionsIsNoOpOnHealthyStore pins idempotence: a store written by
-// a redacting build must survive the doctor untouched — rerunning cleanup on
-// clean sessions must never rewrite (or worse, corrupt) them.
+// TestRedactSessionsIsNoOpOnHealthyStore pins idempotence: after an explicit
+// cleanup, rerunning the command must not rewrite or corrupt the clean store.
 func TestRedactSessionsIsNoOpOnHealthyStore(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "abc.jsonl")
@@ -117,17 +116,21 @@ func TestRedactSessionsIsNoOpOnHealthyStore(t *testing.T) {
 	if err := s.Save(sessionPath); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
+	first := RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
+	if len(first.Errors) > 0 || first.FilesChanged == 0 {
+		t.Fatalf("first RedactSessions() = %+v, want a successful rewrite", first)
+	}
 	before, err := os.ReadFile(sessionPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	res := RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
-	if len(res.Errors) > 0 {
-		t.Fatalf("RedactSessions errors = %v", res.Errors)
+	second := RedactSessions(RedactSessionsOptions{Dirs: []string{dir}})
+	if len(second.Errors) > 0 {
+		t.Fatalf("second RedactSessions errors = %v", second.Errors)
 	}
-	if res.FilesChanged != 0 {
-		t.Fatalf("healthy already-redacted store rewritten: %+v", res)
+	if second.FilesChanged != 0 {
+		t.Fatalf("healthy already-redacted store rewritten: %+v", second)
 	}
 	after, err := os.ReadFile(sessionPath)
 	if err != nil {

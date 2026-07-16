@@ -98,14 +98,9 @@ func (c *Config) IgnoredProjectDefaultModel() string {
 
 // SecretsConfig controls the credential protection layers. It is a user-global
 // setting: project reasonix.toml values are ignored (see LoadForRoot), so a
-// cloned repository cannot silently switch off redaction or opt the user into
-// workflow-breaking protections.
+// cloned repository cannot silently opt the user into workflow-breaking
+// protections.
 type SecretsConfig struct {
-	// RedactToolOutput masks credential-shaped values in tool output before it
-	// enters model context and UI events. Nil keeps the default enabled.
-	// Session transcripts and background-job artifacts on disk are always
-	// redacted, regardless of this switch.
-	RedactToolOutput *bool `toml:"redact_tool_output"`
 	// FilterSubprocessEnv strips credential-like environment variables
 	// (*_API_KEY, *TOKEN*, *SECRET*, ...) from tool subprocesses (bash, hooks,
 	// LSP, MCP stdio). Default off: it breaks token-based workflows such as
@@ -113,15 +108,9 @@ type SecretsConfig struct {
 	FilterSubprocessEnv bool `toml:"filter_subprocess_env"`
 	// ProtectSensitiveFiles makes read/list/search tools treat credential
 	// paths (.env, .git-credentials, .netrc, *.pem/*.key/*.p12/*.pfx, ~/.ssh)
-	// as invisible. Default off: output redaction already masks the values,
-	// and hiding the files breaks legitimate "edit my .env" workflows.
+	// as invisible. Default off because hiding the files breaks legitimate
+	// "edit my .env" workflows.
 	ProtectSensitiveFiles bool `toml:"protect_sensitive_files"`
-}
-
-// SecretsRedactToolOutput reports whether live tool output redaction is
-// enabled (default true).
-func (c *Config) SecretsRedactToolOutput() bool {
-	return c == nil || c.Secrets.RedactToolOutput == nil || *c.Secrets.RedactToolOutput
 }
 
 type providerSourceScope string

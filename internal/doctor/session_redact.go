@@ -188,12 +188,11 @@ func redactSessionArtifact(path string, dryRun bool) (changed int64, bytesRewrit
 }
 
 // redactSessionTranscript rewrites one session (anchor .jsonl plus its event
-// log) through the agent's own save machinery. Session.Save re-runs
-// RedactMessages on the snapshot, folds the event log into a single redacted
-// replace event, refreshes the anchor and event index, and records the
-// revision under the same cross-process file locks live sessions use — so
-// digests, the CAS ledger, and event-log replay stay coherent, and a rerun is
-// a no-op because Redact is idempotent on decoded content.
+// log) through the agent's own save machinery. This explicit cleanup command
+// redacts the loaded snapshot before saving it, folds the event log into one
+// clean replace event, and refreshes the anchor, index, and revision under the
+// same cross-process locks live sessions use. Ordinary Session.Save calls keep
+// transcript content byte-for-byte intact.
 func redactSessionTranscript(path string, dryRun bool) (int64, int64, error) {
 	s, err := agent.LoadSession(path)
 	if err != nil {
@@ -220,6 +219,7 @@ func redactSessionTranscript(path string, dryRun bool) (int64, int64, error) {
 	if dryRun {
 		return files, redactedEncodedSize(s.Messages), nil
 	}
+	s.Replace(secrets.RedactMessages(s.Messages))
 	if err := s.Save(path); err != nil {
 		return 0, 0, err
 	}

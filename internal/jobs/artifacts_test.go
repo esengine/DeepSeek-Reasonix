@@ -49,7 +49,7 @@ func TestCompletedJobPersistsOutputAndReleasesMemory(t *testing.T) {
 	}
 }
 
-func TestJobArtifactRedactsSecrets(t *testing.T) {
+func TestJobArtifactPreservesOutput(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	m := NewManager(event.Discard)
 	defer m.Close()
@@ -66,20 +66,20 @@ func TestJobArtifactRedactsSecrets(t *testing.T) {
 	if len(res) != 1 {
 		t.Fatalf("wait result = %+v", res)
 	}
-	if strings.Contains(res[0].Output, secret) || strings.Contains(res[0].Output, "ghp_abcdefghijklmnopqrstuvwxyz") {
-		t.Fatalf("wait output leaked secret:\n%s", res[0].Output)
+	if !strings.Contains(res[0].Output, secret) || !strings.Contains(res[0].Output, "ghp_abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("wait output did not preserve job output:\n%s", res[0].Output)
 	}
 
 	data, err := os.ReadFile(filepath.Join(ArtifactDir(sessionPath), j.ID+jobLogExt))
 	if err != nil {
 		t.Fatalf("read artifact: %v", err)
 	}
-	if strings.Contains(string(data), secret) || strings.Contains(string(data), "ghp_abcdefghijklmnopqrstuvwxyz") {
-		t.Fatalf("artifact leaked secret:\n%s", data)
+	if !strings.Contains(string(data), secret) || !strings.Contains(string(data), "ghp_abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("artifact did not preserve job output:\n%s", data)
 	}
 }
 
-func TestJobArtifactMetadataRedactsLabel(t *testing.T) {
+func TestJobArtifactMetadataPreservesLabel(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	m := NewManager(event.Discard)
 	defer m.Close()
@@ -95,8 +95,8 @@ func TestJobArtifactMetadataRedactsLabel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(data), secret) {
-		t.Fatalf("job metadata leaked label secret:\n%s", data)
+	if !strings.Contains(string(data), secret) {
+		t.Fatalf("job metadata did not preserve label:\n%s", data)
 	}
 }
 
