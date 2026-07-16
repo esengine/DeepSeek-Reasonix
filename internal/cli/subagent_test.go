@@ -30,6 +30,7 @@ func TestSubagentProfileCLIManageRoundTrip(t *testing.T) {
 		if rc := subagentCommand([]string{
 			"create", "helper", "--description", "Initial helper", "--prompt", "Initial prompt",
 			"--model", "provider/model", "--effort", "high", "--tools", "read_file,grep,read_file", "--color", "orange",
+			"--isolation", "worktree",
 		}); rc != 0 {
 			t.Fatalf("create rc = %d", rc)
 		}
@@ -44,17 +45,19 @@ func TestSubagentProfileCLIManageRoundTrip(t *testing.T) {
 	}
 	if sk.Scope != skill.ScopeProject || sk.RunAs != skill.RunSubagent || sk.Invocation != "manual" ||
 		sk.Description != "Initial helper" || sk.Body != "Initial prompt" || sk.Model != "provider/model" ||
-		sk.Effort != "high" || sk.Color != "orange" || strings.Join(sk.AllowedTools, ",") != "read_file,grep" {
+		sk.Effort != "high" || sk.Color != "orange" || sk.Isolation != "worktree" ||
+		strings.Join(sk.AllowedTools, ",") != "read_file,grep" {
 		t.Fatalf("created profile = %+v", sk)
 	}
 
 	if rc := subagentCommand([]string{
-		"edit", "helper", "--description", "Updated helper", "--prompt", "Updated prompt", "--model=", "--tools=",
+		"edit", "helper", "--description", "Updated helper", "--prompt", "Updated prompt", "--model=", "--tools=", "--isolation=",
 	}); rc != 0 {
 		t.Fatalf("edit rc = %d", rc)
 	}
 	sk, ok = store.Read("helper")
-	if !ok || sk.Description != "Updated helper" || sk.Body != "Updated prompt" || sk.Model != "" || len(sk.AllowedTools) != 0 {
+	if !ok || sk.Description != "Updated helper" || sk.Body != "Updated prompt" || sk.Model != "" ||
+		sk.Isolation != "" || len(sk.AllowedTools) != 0 {
 		t.Fatalf("updated profile = %+v, found=%v", sk, ok)
 	}
 
@@ -221,12 +224,14 @@ func TestSubagentProfileCLIRunAndTrySelectIsolatedRunners(t *testing.T) {
 
 	var normalCalls, readOnlyCalls int
 	var normalTask, tryTask string
+	var normalIsolation, tryIsolation string
 	setupSubagentCommand = func(context.Context, string, int, bool, event.Sink, string) (*control.Controller, error) {
 		return control.New(control.Options{
 			Skills: []skill.Skill{{Name: "helper", RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal}},
 			SkillRunner: func(_ context.Context, _ skill.Skill, task string, opts skill.SubagentRunOptions) (string, error) {
 				normalCalls++
 				normalTask = task
+				normalIsolation = opts.Isolation
 				if !opts.HostInitiated {
 					t.Fatal("run did not mark host-initiated invocation")
 				}
@@ -235,6 +240,7 @@ func TestSubagentProfileCLIRunAndTrySelectIsolatedRunners(t *testing.T) {
 			ReadOnlySkillRunner: func(_ context.Context, _ skill.Skill, task string, opts skill.SubagentRunOptions) (string, error) {
 				readOnlyCalls++
 				tryTask = task
+				tryIsolation = opts.Isolation
 				if !opts.HostInitiated {
 					t.Fatal("try did not mark host-initiated invocation")
 				}
@@ -244,12 +250,12 @@ func TestSubagentProfileCLIRunAndTrySelectIsolatedRunners(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if rc := subagentCommand([]string{"run", "helper", "inspect auth"}); rc != 0 {
+		if rc := subagentCommand([]string{"run", "helper", "--isolation", "worktree", "inspect auth"}); rc != 0 {
 			t.Fatalf("run rc = %d", rc)
 		}
 	})
-	if strings.TrimSpace(out) != "run answer" || normalCalls != 1 || normalTask != "inspect auth" || readOnlyCalls != 0 {
-		t.Fatalf("run output=%q normal=%d task=%q readonly=%d", out, normalCalls, normalTask, readOnlyCalls)
+	if strings.TrimSpace(out) != "run answer" || normalCalls != 1 || normalTask != "inspect auth" || normalIsolation != "worktree" || readOnlyCalls != 0 {
+		t.Fatalf("run output=%q normal=%d task=%q isolation=%q readonly=%d", out, normalCalls, normalTask, normalIsolation, readOnlyCalls)
 	}
 
 	out = captureStdout(t, func() {
@@ -257,8 +263,17 @@ func TestSubagentProfileCLIRunAndTrySelectIsolatedRunners(t *testing.T) {
 			t.Fatalf("try rc = %d", rc)
 		}
 	})
-	if strings.TrimSpace(out) != "try answer" || readOnlyCalls != 1 || tryTask != "inspect only" {
-		t.Fatalf("try output=%q readonly=%d task=%q", out, readOnlyCalls, tryTask)
+	if strings.TrimSpace(out) != "try answer" || readOnlyCalls != 1 || tryTask != "inspect only" || tryIsolation != "" {
+		t.Fatalf("try output=%q readonly=%d task=%q isolation=%q", out, readOnlyCalls, tryTask, tryIsolation)
+	}
+
+	errOut := captureStderr(t, func() {
+		if rc := subagentCommand([]string{"try", "helper", "--isolation", "worktree", "inspect only"}); rc != 2 {
+			t.Fatalf("try worktree rc = %d", rc)
+		}
+	})
+	if !strings.Contains(errOut, "read-only try does not support worktree isolation") {
+		t.Fatalf("try worktree error = %q", errOut)
 	}
 }
 

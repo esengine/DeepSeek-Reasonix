@@ -1676,6 +1676,19 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 // stdout rendering and exit status. readOnly selects the preview-safe runner
 // used by `reasonix subagent try`.
 func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, readOnly bool) (string, error) {
+	return c.RunSubagentProfileWithOptions(ctx, name, task, RunSubagentProfileOptions{ReadOnly: readOnly})
+}
+
+// RunSubagentProfileOptions carries headless subagent invocation knobs that are
+// part of the public CLI contract but should not be encoded into prompt text.
+type RunSubagentProfileOptions struct {
+	ReadOnly  bool
+	Isolation string
+}
+
+// RunSubagentProfileWithOptions is the typed variant used by CLI/headless
+// adapters. Empty Isolation preserves the profile/default behavior.
+func (c *Controller) RunSubagentProfileWithOptions(ctx context.Context, name, task string, opts RunSubagentProfileOptions) (string, error) {
 	name = strings.TrimSpace(name)
 	task = strings.TrimSpace(task)
 	if name == "" {
@@ -1691,8 +1704,22 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 	if sk.RunAs != skill.RunSubagent {
 		return "", fmt.Errorf("skill %q is not runAs=subagent", name)
 	}
+	isolation := strings.TrimSpace(opts.Isolation)
+	if isolation == "" {
+		isolation = strings.TrimSpace(sk.Isolation)
+	}
+	if isolation != "" {
+		normalized := skill.ParseIsolation(isolation)
+		if normalized == "" {
+			return "", fmt.Errorf("unsupported isolation %q; use none or worktree", isolation)
+		}
+		isolation = normalized
+	}
+	if opts.ReadOnly && isolation == "worktree" {
+		return "", fmt.Errorf("read-only subagent profile %q cannot use worktree isolation", name)
+	}
 	runner := c.skillRunner
-	if readOnly {
+	if opts.ReadOnly {
 		runner = c.readOnlySkillRunner
 	}
 	if runner == nil {
@@ -1707,7 +1734,10 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 	ctx = agent.WithResponseLanguagePreference(ctx, c.responseLanguage)
 	ctx = agent.WithReasoningLanguagePreference(ctx, c.reasoningLanguage)
 	ctx = agent.WithSubagentDepth(ctx, 0)
-	answer, err := runner(ctx, sk, task, skill.SubagentRunOptions{HostInitiated: true})
+	answer, err := runner(ctx, sk, task, skill.SubagentRunOptions{
+		HostInitiated: true,
+		Isolation:     isolation,
+	})
 	if err != nil {
 		return "", err
 	}

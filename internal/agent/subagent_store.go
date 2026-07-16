@@ -47,6 +47,13 @@ type SubagentMeta struct {
 	ToolSchemaHash   string         `json:"toolSchemaHash"`
 	Model            string         `json:"model"`
 	Effort           string         `json:"effort"`
+	Isolation        string         `json:"isolation,omitempty"` // none | worktree
+	IsolationID      string         `json:"isolationId,omitempty"`
+	WorktreeRoot     string         `json:"worktreeRoot,omitempty"`
+	SourceRoot       string         `json:"sourceRoot,omitempty"`
+	WorktreeBranch   string         `json:"worktreeBranch,omitempty"`
+	BaseCommit       string         `json:"baseCommit,omitempty"`
+	HeadCommit       string         `json:"headCommit,omitempty"`
 }
 
 // SubagentSpec describes the current invocation identity.
@@ -60,6 +67,13 @@ type SubagentSpec struct {
 	Registry         *tool.Registry
 	Model            string
 	Effort           string
+	Isolation        string
+	IsolationID      string
+	WorktreeRoot     string
+	SourceRoot       string
+	WorktreeBranch   string
+	BaseCommit       string
+	HeadCommit       string
 }
 
 // SubagentRun is a prepared transcript run. Call Release exactly once.
@@ -594,6 +608,13 @@ func metaFromSpec(ref string, status SubagentStatus, created, updated time.Time,
 		ToolSchemaHash:   schemaHash,
 		Model:            strings.TrimSpace(spec.Model),
 		Effort:           strings.TrimSpace(spec.Effort),
+		Isolation:        normalizeSubagentMetaIsolation(spec.Isolation),
+		IsolationID:      strings.TrimSpace(spec.IsolationID),
+		WorktreeRoot:     strings.TrimSpace(spec.WorktreeRoot),
+		SourceRoot:       strings.TrimSpace(spec.SourceRoot),
+		WorktreeBranch:   strings.TrimSpace(spec.WorktreeBranch),
+		BaseCommit:       strings.TrimSpace(spec.BaseCommit),
+		HeadCommit:       strings.TrimSpace(spec.HeadCommit),
 	}
 }
 
@@ -623,8 +644,28 @@ func validateMeta(meta SubagentMeta, spec SubagentSpec) error {
 		return fmt.Errorf("subagent reference %q uses different tool schemas", meta.Ref)
 	case meta.Model != want.Model || meta.Effort != want.Effort:
 		return fmt.Errorf("subagent reference %q uses model/effort %q/%q, current run would use %q/%q", meta.Ref, meta.Model, meta.Effort, want.Model, want.Effort)
+	case normalizeSubagentMetaIsolation(meta.Isolation) != normalizeSubagentMetaIsolation(want.Isolation):
+		return fmt.Errorf("subagent reference %q uses isolation %q, current run would use %q", meta.Ref, normalizeSubagentMetaIsolation(meta.Isolation), normalizeSubagentMetaIsolation(want.Isolation))
+	case strings.TrimSpace(meta.IsolationID) != strings.TrimSpace(want.IsolationID):
+		return fmt.Errorf("subagent reference %q belongs to isolation %q, current run would use %q", meta.Ref, meta.IsolationID, want.IsolationID)
+	case strings.TrimSpace(meta.WorktreeRoot) != strings.TrimSpace(want.WorktreeRoot):
+		return fmt.Errorf("subagent reference %q belongs to worktree %q, current run would use %q", meta.Ref, meta.WorktreeRoot, want.WorktreeRoot)
+	case strings.TrimSpace(meta.SourceRoot) != strings.TrimSpace(want.SourceRoot):
+		return fmt.Errorf("subagent reference %q belongs to source root %q, current run would use %q", meta.Ref, meta.SourceRoot, want.SourceRoot)
+	case strings.TrimSpace(meta.WorktreeBranch) != strings.TrimSpace(want.WorktreeBranch):
+		return fmt.Errorf("subagent reference %q belongs to branch %q, current run would use %q", meta.Ref, meta.WorktreeBranch, want.WorktreeBranch)
+	case strings.TrimSpace(meta.BaseCommit) != strings.TrimSpace(want.BaseCommit):
+		return fmt.Errorf("subagent reference %q belongs to base commit %q, current run would use %q", meta.Ref, meta.BaseCommit, want.BaseCommit)
 	}
 	return nil
+}
+
+func normalizeSubagentMetaIsolation(v string) string {
+	v = strings.TrimSpace(strings.ToLower(v))
+	if v == "" {
+		return "none"
+	}
+	return v
 }
 
 func requireParentSession(spec SubagentSpec) error {

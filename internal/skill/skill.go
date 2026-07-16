@@ -77,6 +77,7 @@ type Skill struct {
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	Isolation    string // optional workspace isolation for runAs=subagent: none | worktree
 	// ReadOnly, when true, runs a subagent skill against the read-only tool
 	// registry: writer tools are stripped and bash enforces the read-only
 	// command policy at execution time (frontmatter `read-only:`). This is a
@@ -766,6 +767,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
 		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
 		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
+		Isolation:    ParseIsolation(fm[skillFrontmatterIsolation]),
 		ReadOnly:     parseBoolFrontmatter(fm[skillFrontmatterReadOnly]),
 		Triggers:     parseCSVFrontmatter(fm[skillFrontmatterTriggers]),
 		NegativeTriggers: parseCSVFrontmatter(
@@ -789,6 +791,17 @@ func firstNonEmptySkillValue(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func ParseIsolation(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "none":
+		return "none"
+	case "worktree":
+		return "worktree"
+	default:
+		return ""
+	}
 }
 
 func isClaudeModelAlias(model string) bool {
@@ -830,6 +843,7 @@ const (
 	skillFrontmatterAllowedTools     = "allowed-tools"
 	skillFrontmatterModel            = "model"
 	skillFrontmatterEffort           = "effort"
+	skillFrontmatterIsolation        = "isolation"
 	skillFrontmatterReadOnly         = "read-only"
 	skillFrontmatterTriggers         = "triggers"
 	skillFrontmatterNegativeTriggers = "negative-triggers"
@@ -851,6 +865,7 @@ var skillMarkerFrontmatterKeys = []string{
 	skillFrontmatterAllowedTools,
 	skillFrontmatterModel,
 	skillFrontmatterEffort,
+	skillFrontmatterIsolation,
 	skillFrontmatterReadOnly,
 	skillFrontmatterTriggers,
 	skillFrontmatterNegativeTriggers,

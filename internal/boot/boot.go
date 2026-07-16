@@ -53,6 +53,7 @@ import (
 	"reasonix/internal/tool/builtin"
 	"reasonix/internal/tool/sessiontool"
 	"reasonix/internal/workspacelease"
+	"reasonix/internal/worktree"
 )
 
 // ErrUnknownModel is returned by Build when the configured model can't be
@@ -468,6 +469,33 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if !tokenEconomy || len(cfg.Tools.Enabled) == 0 || len(enabledBuiltins) > 0 {
 		addBuiltins(reg, enabledBuiltins, writeRoots, bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec, forbidReadRoots, readPathResolver, sessionGuard, managedConfig, opts.FileOverlay, opts.TerminalRunner)
 	}
+	subagentRegistryFactory := func(_ context.Context, workspaceRoot string, names []string, childDepth, maxDepth int) (*tool.Registry, error) {
+		workspaceRoot = strings.TrimSpace(workspaceRoot)
+		if workspaceRoot == "" || sameWorkspacePath(workspaceRoot, root) {
+			return agent.SubagentToolRegistryForDepth(reg, names, childDepth, maxDepth), nil
+		}
+		childReg := tool.NewRegistry()
+		childWriteRoots := rebaseWorkspaceRoots(writeRoots, root, workspaceRoot)
+		rebasedForbidReadRoots := rebaseWorkspaceRoots(forbidReadRoots, root, workspaceRoot)
+		childForbidReadRoots := appendUniquePaths(forbidReadRoots, rebasedForbidReadRoots...)
+		childBashSpec := bashSpec
+		childBashSpec.WriteRoots = childWriteRoots
+		childBashSpec.ForbidReadRoots = childForbidReadRoots
+		childReadPathResolver := builtin.NewPathResolver()
+		childSessionGuard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
+		if !tokenEconomy || len(cfg.Tools.Enabled) == 0 || len(enabledBuiltins) > 0 {
+			addBuiltins(childReg, enabledBuiltins, childWriteRoots, childBashSpec, bashTimeout, searchSpec, stderr, workspaceRoot, proxySpec, childForbidReadRoots, childReadPathResolver, childSessionGuard, managedConfig, opts.FileOverlay, opts.TerminalRunner)
+		}
+		for _, name := range reg.Names() {
+			if _, exists := childReg.Get(name); exists {
+				continue
+			}
+			if tl, ok := reg.Get(name); ok {
+				childReg.Add(tl)
+			}
+		}
+		return agent.SubagentToolRegistryForDepth(childReg, names, childDepth, maxDepth), nil
+	}
 	// Use the caller-supplied shared host when set, so controllers for the same
 	// workspace root reuse running MCP processes (e.g. one CodeGraph daemon
 	// instead of one per tab). Otherwise construct a private host per controller.
@@ -770,6 +798,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	taskModel := firstNonEmpty(cfg.Agent.SubagentModels["task"], cfg.Agent.SubagentModel)
 	taskEffort := firstNonEmpty(cfg.Agent.SubagentEfforts["task"], cfg.Agent.SubagentEffort)
+	worktreeManager := worktree.NewManager(config.DeliveryWorktreeDir())
 	maxSubagentDepth := agent.NormalizeMaxSubagentDepth(cfg.Agent.MaxSubagentDepth)
 	taskToolAdded := false
 	readOnlyTaskToolAdded := false
@@ -784,7 +813,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			WithTranscriptIdentityResolver(subagentIdentity).
 			WithMaxSubagentDepth(maxSubagentDepth).
 			WithDeliveryProfile(tokenDelivery).
-			WithWorkspaceLease(workspaceLease)
+			WithWorkspaceLease(workspaceLease).
+			WithWorkspaceIsolation(worktreeManager, subagentRegistryFactory)
 	}
 	addTaskTool := func() string {
 		if taskToolAdded {
@@ -887,6 +917,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if strings.TrimSpace(runOpts.ContinueFrom) != "" || strings.TrimSpace(runOpts.ForkFrom) != "" {
 			return "", fmt.Errorf("read_only_skill does not support continue_from/fork_from")
 		}
+		isolation, err := normalizeBootSubagentIsolation(firstNonEmpty(runOpts.Isolation, sk.Isolation))
+		if err != nil {
+			return "", err
+		}
+		if isolation == agent.SubagentIsolationWorktree {
+			return "", fmt.Errorf("read_only_skill %q cannot use worktree isolation", sk.Name)
+		}
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
@@ -933,6 +970,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// them. Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
+		continueFrom := strings.TrimSpace(runOpts.ContinueFrom)
+		legacyForkFrom := strings.TrimSpace(runOpts.ForkFrom)
+		if continueFrom != "" && legacyForkFrom != "" {
+			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
+		}
+		isolationRaw := firstNonEmpty(runOpts.Isolation, sk.Isolation)
+		isolation, err := normalizeBootSubagentIsolation(isolationRaw)
+		if err != nil {
+			return "", err
+		}
+		if sk.ReadOnly && isolation == agent.SubagentIsolationWorktree {
+			return "", fmt.Errorf("read-only subagent skill %q cannot use worktree isolation", sk.Name)
+		}
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)
 		effortRef := subagentEffortRef(cfg, sk)
@@ -947,15 +997,63 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if childDepth > maxSubagentDepth {
 			return "", fmt.Errorf("subagent delegation depth limit reached (max_subagent_depth=%d)", maxSubagentDepth)
 		}
+		parentID, _, _, _ := agent.CallContext(sctx)
+		if runOpts.HostInitiated {
+			parentID = ""
+		}
+		parentSession := agent.ParentSession(sctx)
+
+		workspaceRoot := root
+		var isolationResource worktree.Resource
+		if ref := firstNonEmpty(continueFrom, legacyForkFrom); ref != "" {
+			if subagentStore == nil || parentSession == "" {
+				return "", fmt.Errorf("subagent continuation requires a persisted session; none is active in this run")
+			}
+			meta, err := subagentStore.LoadMeta(ref)
+			if err != nil {
+				return "", err
+			}
+			metaIsolation, err := normalizeBootSubagentIsolation(meta.Isolation)
+			if err != nil {
+				return "", err
+			}
+			if strings.TrimSpace(isolationRaw) != "" && metaIsolation != isolation {
+				return "", fmt.Errorf("subagent continuation isolation mismatch: requested %s but %s was %s", isolation, ref, metaIsolation)
+			}
+			isolation = metaIsolation
+			if isolation == agent.SubagentIsolationWorktree {
+				workspaceRoot = strings.TrimSpace(meta.WorktreeRoot)
+				if workspaceRoot == "" {
+					return "", fmt.Errorf("subagent %s was recorded with worktree isolation but has no worktree_root", ref)
+				}
+				isolationResource = worktreeResourceFromSubagentMeta(meta)
+			}
+		} else if isolation == agent.SubagentIsolationWorktree {
+			res, err := worktreeManager.Create(sctx, root, worktree.CreatePolicy{
+				Kind:        worktree.KindSubagent,
+				DirtyPolicy: worktree.DirtyPolicyReject,
+			})
+			if err != nil {
+				return "", err
+			}
+			workspaceRoot = res.WorkspaceRoot
+			isolationResource = res
+		}
+
 		// A read-only skill (builtin review/security-review, or frontmatter
 		// `read-only: true`) gets its promise enforced at the tool boundary:
 		// writer tools are stripped and bash runs under the read-only
-		// command policy. Transcripts recorded against the writer-capable
-		// registry stop matching on continue_from (schema-hash check reports
-		// the mismatch).
+		// command policy. Writer skills rebuild their registry against
+		// workspaceRoot so filesystem, shell, project config, and MCP discovery
+		// follow the isolation boundary.
 		var subReg *tool.Registry
 		if sk.ReadOnly {
 			subReg = agent.ReadOnlySubagentToolRegistryForDepth(reg, sk.AllowedTools, childDepth, maxSubagentDepth)
+		} else if subagentRegistryFactory != nil {
+			subReg, err = subagentRegistryFactory(sctx, workspaceRoot, sk.AllowedTools, childDepth, maxSubagentDepth)
+			if err != nil {
+				return "", err
+			}
 		} else {
 			subReg = agent.SubagentToolRegistryForDepth(reg, sk.AllowedTools, childDepth, maxSubagentDepth)
 		}
@@ -965,38 +1063,32 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		case "review", "security-review", "security_review":
 			agent.AttachReviewReportTool(subReg)
 		}
-		continueFrom := strings.TrimSpace(runOpts.ContinueFrom)
-		legacyForkFrom := strings.TrimSpace(runOpts.ForkFrom)
-		if continueFrom != "" && legacyForkFrom != "" {
-			return "", fmt.Errorf("continue_from and fork_from are mutually exclusive; pass only continue_from")
-		}
-		parentID, _, _, _ := agent.CallContext(sctx)
-		if runOpts.HostInitiated {
-			parentID = ""
-		}
-		parentSession := agent.ParentSession(sctx)
 		var run *agent.SubagentRun
 		if subagentStore == nil || parentSession == "" {
 			// Headless runs (e.g. `reasonix run`) have no persistent session to
 			// own a transcript. Run the skill sub-agent ephemerally, as before
 			// persisted transcripts existed, instead of failing. Continuation needs
 			// a persisted owner, so it errors here.
-			if continueFrom != "" || legacyForkFrom != "" {
-				return "", fmt.Errorf("subagent continuation requires a persisted session; none is active in this run")
-			}
 			run = agent.EphemeralSubagentRun(sk.Body)
 		} else {
 			identityModel, identityEffort := subagentIdentity(modelRef, effortRef)
 			spec := agent.SubagentSpec{
 				Kind:             "skill",
 				Name:             sk.Name,
-				WorkspaceRoot:    root,
+				WorkspaceRoot:    workspaceRoot,
 				ParentSession:    parentSession,
 				ParentToolCallID: parentID,
 				SystemPrompt:     sk.Body,
 				Registry:         subReg,
 				Model:            identityModel,
 				Effort:           identityEffort,
+				Isolation:        string(isolation),
+				IsolationID:      isolationResource.IsolationID,
+				WorktreeRoot:     isolationResource.WorktreeRoot,
+				SourceRoot:       isolationResource.SourceRoot,
+				WorktreeBranch:   isolationResource.Branch,
+				BaseCommit:       isolationResource.BaseCommit,
+				HeadCommit:       isolationResource.HeadCommit,
 			}
 			var prepErr error
 			if continueFrom != "" {
@@ -1032,10 +1124,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				runOptions, agent.NestedSink(sctx, event.Discard))
 		}
 		if err != nil {
+			if subagentStore == nil {
+				return "", err
+			}
 			return "", errors.Join(err, subagentStore.SaveFailed(run))
 		}
-		if err := subagentStore.SaveCompleted(run); err != nil {
-			return "", errors.Join(err, subagentStore.SaveFailed(run))
+		if subagentStore != nil {
+			if err := subagentStore.SaveCompleted(run); err != nil {
+				return "", errors.Join(err, subagentStore.SaveFailed(run))
+			}
 		}
 		return agent.FormatSubagentRunResult(answer, run, false), nil
 	}
@@ -1882,6 +1979,76 @@ func appendUniquePaths(base []string, extra ...string) []string {
 		out = append(out, path)
 	}
 	return out
+}
+
+func sameWorkspacePath(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
+	}
+	return pathComparisonKey(a) == pathComparisonKey(b)
+}
+
+func rebaseWorkspaceRoots(paths []string, sourceRoot, workspaceRoot string) []string {
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		rebased, ok := rebaseWorkspacePath(path, sourceRoot, workspaceRoot)
+		if !ok {
+			path = strings.TrimSpace(path)
+			if path == "" {
+				continue
+			}
+			rebased = path
+		}
+		out = appendUniquePaths(out, rebased)
+	}
+	return out
+}
+
+func rebaseWorkspacePath(path, sourceRoot, workspaceRoot string) (string, bool) {
+	path = strings.TrimSpace(path)
+	sourceRoot = strings.TrimSpace(sourceRoot)
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if path == "" || sourceRoot == "" || workspaceRoot == "" {
+		return "", false
+	}
+	if pathComparisonKey(path) == pathComparisonKey(sourceRoot) {
+		return filepath.Clean(workspaceRoot), true
+	}
+	rel, err := filepath.Rel(sourceRoot, path)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", false
+	}
+	return filepath.Clean(filepath.Join(workspaceRoot, rel)), true
+}
+
+func normalizeBootSubagentIsolation(raw string) (agent.SubagentIsolation, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return agent.SubagentIsolationNone, nil
+	}
+	switch skill.ParseIsolation(raw) {
+	case "none":
+		return agent.SubagentIsolationNone, nil
+	case "worktree":
+		return agent.SubagentIsolationWorktree, nil
+	default:
+		return "", fmt.Errorf("unsupported subagent isolation %q; use none or worktree", raw)
+	}
+}
+
+func worktreeResourceFromSubagentMeta(meta agent.SubagentMeta) worktree.Resource {
+	return worktree.Resource{
+		IsolationID:   strings.TrimSpace(meta.IsolationID),
+		Kind:          worktree.KindSubagent,
+		WorkspaceRoot: strings.TrimSpace(meta.WorkspaceRoot),
+		WorktreeRoot:  strings.TrimSpace(meta.WorktreeRoot),
+		SourceRoot:    strings.TrimSpace(meta.SourceRoot),
+		Branch:        strings.TrimSpace(meta.WorktreeBranch),
+		BaseCommit:    strings.TrimSpace(meta.BaseCommit),
+		HeadCommit:    strings.TrimSpace(meta.HeadCommit),
+	}
 }
 
 // RuntimeForbidReadRoots returns the configured deny roots plus Reasonix's
