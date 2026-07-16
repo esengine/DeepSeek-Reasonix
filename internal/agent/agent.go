@@ -896,6 +896,16 @@ type Agent struct {
 	tokenAwareBackpressureRelay *TokenAwareBackpressureRelay
 	// OPT-255: 提示缓存命中预测器V2
 	promptCacheHitPredictorV2 *PromptCacheHitPredictorV2
+	// OPT-256: Token 感知优雅降级器
+	tokenAwareGracefulDegrader *TokenAwareGracefulDegrader
+	// OPT-257: 缓存失效调度器（替换OPT-217）
+	// cacheInvalidationScheduler 已在 OPT-217 声明
+	// OPT-258: 上下文窗口主动调整器
+	contextWindowProactiveAdjuster *ContextWindowProactiveAdjuster
+	// OPT-259: Token 感知资源仲裁器
+	tokenAwareResourceArbiter *TokenAwareResourceArbiter
+	// OPT-260: 提示缓存预热调度器
+	promptCacheWarmupScheduler *PromptCacheWarmupScheduler
 
 	// warnedMissingToolCallReasoning dedupes the missing tool-call reasoning
 	// notice: when an endpoint stops emitting reasoning it tends to do so for
@@ -2047,7 +2057,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	tokenAwarePartitioner := NewTokenAwarePartitioner(8, 4096)
 	promptCacheHitAnalyzer := NewPromptCacheHitAnalyzer()
 	tokenAwareShardManager := NewTokenAwareShardManager(16)
-	cacheInvalidationScheduler := NewCacheInvalidationScheduler(300)
+	cacheInvalidationScheduler := NewCacheInvalidationScheduler()
 	contextDensityAnalyzer := NewContextDensityAnalyzer()
 	tokenAwareRetryStrategy := NewTokenAwareRetryStrategy(3, 100)
 	promptCacheOptimizationAdvisor := NewPromptCacheOptimizationAdvisor()
@@ -2085,278 +2095,286 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	contextWindowStabilizer := NewContextWindowStabilizer(8192, 20)
 	tokenAwareBackpressureRelay := NewTokenAwareBackpressureRelay(50000)
 	promptCacheHitPredictorV2 := NewPromptCacheHitPredictorV2(0.6)
+	tokenAwareGracefulDegrader := NewTokenAwareGracefulDegrader(5)
+	contextWindowProactiveAdjuster := NewContextWindowProactiveAdjuster(8192, 8192, 5)
+	tokenAwareResourceArbiter := NewTokenAwareResourceArbiter(100000)
+	promptCacheWarmupScheduler := NewPromptCacheWarmupScheduler(64)
 
 	a := &Agent{
-		prov:                     prov,
-		tools:                    tools,
-		session:                  session,
-		maxSteps:                 opts.MaxSteps,
-		maxStepsKey:              maxStepsKey,
-		temperature:              opts.Temperature,
-		pricing:                  opts.Pricing,
-		usageSource:              usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
-		sink:                     sink,
-		gate:                     gate,
-		planModeReadOnlyTrust:    planModeReadOnlyTrust,
-		sandboxEscapeApprover:    sandboxEscapeApprover,
-		configWriteApprover:      configWriteApprover,
-		hooks:                    hooks,
-		jobs:                     opts.Jobs,
-		evidence:                 evidence.NewLedger(),
-		projectChecks:            append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
-		deliveryProfile:          opts.DeliveryProfile,
-		classifierTaskText:       opts.ClassifierTaskText,
-		capabilityLedger:         opts.CapabilityLedger,
-		capabilityAudit:          opts.CapabilityAudit,
-		contextWindow:            opts.ContextWindow,
-		softCompactRatio:         opts.SoftCompactRatio,
-		toolResultSnipRatio:      opts.ToolResultSnipRatio,
-		compactRatio:             opts.CompactRatio,
-		compactForceRatio:        opts.CompactForceRatio,
-		recentKeep:               opts.RecentKeep,
-		archiveDir:               opts.ArchiveDir,
-		keepPolicy:               opts.KeepPolicy,
-		planModeAllowedTools:     append([]string(nil), opts.PlanModeAllowedTools...),
-		planModeReadOnlyCommands: append([]string(nil), opts.PlanModeReadOnlyCommands...),
-		subagentDepth:            subagentDepth,
-		maxSubagentDepth:         maxSubagentDepth,
-		memoryCompiler:           opts.MemoryCompiler,
-		memoryCompilerVerbosity:  normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
-		cacheEnforcer:            cacheEnforcer,
-		toolMemo:                 toolMemo,
-		conversationDedup:        conversationDedup,
-		contextBudget:            contextBudget,
-		providerCacheStrategy:    providerCacheStrategy,
-		cacheHealthMonitor:       cacheHealthMonitor,
-		toolBatcher:              toolBatcher,
-		prefixPinner:             prefixPinner,
-		semanticPruner:           semanticPruner,
-		prefetchPredictor:        prefetchPredictor,
-		windowPredictor:          windowPredictor,
-		costEstimator:            costEstimator,
-		promptCompressor:         promptCompressor,
-		toolDescRotator:          toolDescRotator,
-		summaryCache:             summaryCache,
-		modelRouter:              modelRouter,
-		imageOptimizer:           imageOptimizer,
-		modeScheduler:            modeScheduler,
-		phantomReporter:          phantomReporter,
-		disclosureCoordinator:    disclosureCoordinator,
-		breakpointOptimizer:      breakpointOptimizer,
-		smartCompaction:          smartCompaction,
-		messageSorter:            messageSorter,
-		streamingGuard:           streamingGuard,
-		toolResultTruncator:      toolResultTruncator,
-		budgetAllocator:          budgetAllocator,
-		promptMinimizer:          promptMinimizer,
-		phaseDetector:            phaseDetector,
-		efficientFormatter:       efficientFormatter,
-		cacheWarmingScheduler:    cacheWarmingScheduler,
-		retryOptimizer:           retryOptimizer,
-		contextualToolFilter:     contextualToolFilter,
-		sessionArchiveOptimizer:  sessionArchiveOptimizer,
-		providerSpecOptimizer:    providerSpecOptimizer,
-		multiTurnCacheTracker:    multiTurnCacheTracker,
-		tokenSerializer:          tokenSerializer,
-		flowOptimizer:            flowOptimizer,
-		reasoningOptimizer:       reasoningOptimizer,
-		contextPrioritizer:       contextPrioritizer,
-		tokenAwarenessMonitor:    tokenAwarenessMonitor,
-		errorContextOptimizer:    errorContextOptimizer,
-		adaptiveCacheManager:     adaptiveCacheManager,
-		warmupPredictor:          warmupPredictor,
-		tokenBudgetEnforcer:      tokenBudgetEnforcer,
-		contextWindowStrategy:    contextWindowStrategy,
-		toolOutputCache:          toolOutputCache,
-		promptFragmentCache:      promptFragmentCache,
-		dedupStatsReporter:       dedupStatsReporter,
-		incrementalCacheTracker:  incrementalCacheTracker,
-		turnAwareDeduplicator:    turnAwareDeduplicator,
-		smartToolSelector:        smartToolSelector,
-		tokenFlowAnalyzer:        tokenFlowAnalyzer,
-		cachePrefixStabilizer:    cachePrefixStabilizer,
-		responseTokenController:  responseTokenController,
-		contextDecayManager:      contextDecayManager,
-		toolCallOptimizer:        toolCallOptimizer,
-		tokenEfficiencyScorer:    tokenEfficiencyScorer,
-		semanticDedup:            semanticDedup,
-		promptCacheOptimizer:     promptCacheOptimizer,
-		contextSummaryCache:      contextSummaryCache,
-		toolSchemaOptimizer:      toolSchemaOptimizer,
-		compactSummary:           compactSummary,
-		historyWindowManager:     historyWindowManager,
-		tokenAwareRetry:          tokenAwareRetry,
-		compactionTriggerV2:      compactionTriggerV2,
-		modelAwareOptimizer:      modelAwareOptimizer,
-		tokenUsagePredictor:      tokenUsagePredictor,
-		cacheInvalidationTracker: cacheInvalidationTracker,
-		tokenCostAnalyzer:        tokenCostAnalyzer,
-		messageImportanceScorer:  messageImportanceScorer,
-		contextCoherenceChecker:  contextCoherenceChecker,
-		adaptiveMessageSelector:  adaptiveMessageSelector,
-		cacheHitPredictor:        cacheHitPredictor,
-		contextBudgetNegotiator:  contextBudgetNegotiator,
-		toolResultSummarizer:     toolResultSummarizer,
-		promptSegmentManager:     promptSegmentManager,
-		zeroTokenStatsCollector:  zeroTokenStatsCollector,
-		cacheWarmingV2:           cacheWarmingV2,
-		tokenEfficiencyDashboard: tokenEfficiencyDashboard,
-		conversationTokenBudget:  conversationTokenBudget,
-		smartContextPruner:       smartContextPruner,
-		unifiedTokenOrchestrator: unifiedTokenOrchestrator,
-		tokenStreamCompressor:    tokenStreamCompressor,
-		adaptiveContextSelector:  adaptiveContextSelector,
-		promptTokenAnalyzer:      promptTokenAnalyzer,
-		cachePressureMonitor:     cachePressureMonitor,
-		tokenFlowRegulator:       tokenFlowRegulator,
-		semanticCacheRouter:      semanticCacheRouter,
-		tokenAwareScheduler:      tokenAwareScheduler,
-		contextSnapshotManager:   contextSnapshotManager,
-		tokenWasteDetector:       tokenWasteDetector,
-		adaptiveBatchOptimizer:   adaptiveBatchOptimizer,
-		contextDiffCompressor:    contextDiffCompressor,
-		tokenBudgetPredictor:     tokenBudgetPredictor,
-		cacheKeyOptimizer:        cacheKeyOptimizer,
-		responseLengthOptimizer:  responseLengthOptimizer,
-		tokenAwarePrioritizer:    tokenAwarePrioritizer,
-		conversationDepthAnalyzer: conversationDepthAnalyzer,
-		tokenEfficiencyMonitor:   tokenEfficiencyMonitor,
-		cacheLifecycleManager:    cacheLifecycleManager,
-		promptSegmentCacheV2:     promptSegmentCacheV2,
-		tokenAwareCompressor:     tokenAwareCompressor,
-		contextWeightCalculator:  contextWeightCalculator,
-		tokenAwareEvictor:        tokenAwareEvictor,
-		promptRedundancyChecker:  promptRedundancyChecker,
-		cacheHitAnalyzer:         cacheHitAnalyzer,
-		contextBoundaryDetector:  contextBoundaryDetector,
-		tokenUsageForecaster:     tokenUsageForecaster,
-		contextFreshnessTracker:  contextFreshnessTracker,
-		cacheWarmingSchedulerV2:  cacheWarmingSchedulerV2,
-		promptTemplateOptimizer:  promptTemplateOptimizer,
-		tokenBudgetNegotiator:    tokenBudgetNegotiator,
-		cacheEfficiencyScorer:    cacheEfficiencyScorer,
-		tokenAwarePruner:         tokenAwarePruner,
-		conversationTopicTracker: conversationTopicTracker,
-		tokenCostProjector:       tokenCostProjector,
-		contextAssemblyOptimizer: contextAssemblyOptimizer,
-		cacheStalenessDetector:   cacheStalenessDetector,
-		tokenAwareBatcher:        tokenAwareBatcher,
-		conversationFlowAnalyzer: conversationFlowAnalyzer,
-		promptInflationDetector:  promptInflationDetector,
-		cacheKeyHasher:           cacheKeyHasher,
-		tokenAwareGrouper:        tokenAwareGrouper,
-		contextPriorityQueue:     contextPriorityQueue,
-		tokenSavingsCalculator:   tokenSavingsCalculator,
-		cacheAdmissionController: cacheAdmissionController,
-		contextWindowCalibrator:  contextWindowCalibrator,
-		tokenAwareDispatcher:     tokenAwareDispatcher,
-		cachePopulationPredictor: cachePopulationPredictor,
-		contextSegmentAssembler:  contextSegmentAssembler,
-		tokenAwareMerger:         tokenAwareMerger,
-		cacheUtilizationTracker:  cacheUtilizationTracker,
-		tokenAwareSplitter:       tokenAwareSplitter,
-		cacheCoherenceValidator:  cacheCoherenceValidator,
-		contextRelevanceScorer:   contextRelevanceScorer,
-		weightedBudgetAllocator:  weightedBudgetAllocator,
-		promptCompressionCache:   promptCompressionCache,
-		tokenAwareFragmenter:     tokenAwareFragmenter,
-		cacheWarmingStrategy:     cacheWarmingStrategy,
-		contextPruningEngine:     contextPruningEngine,
-		tokenAwareThrottler:      tokenAwareThrottler,
-		promptSegmentIndexer:     promptSegmentIndexer,
-		tokenAwarePrioritizerV2:  tokenAwarePrioritizerV2,
-		cachePrefetchScheduler:   cachePrefetchScheduler,
-		contextWindowMonitor:     contextWindowMonitor,
-		tokenAwareDeduplicator:   tokenAwareDeduplicator,
-		promptAssemblyOptimizer:  promptAssemblyOptimizer,
-		tokenAwareAggregator:     tokenAwareAggregator,
-		contextMergeOptimizer:    contextMergeOptimizer,
-		tokenAwareRouter:         tokenAwareRouter,
-		promptCacheWarmer:        promptCacheWarmer,
-		tokenAwareBuffer:         tokenAwareBuffer,
-		cacheVersionManager:      cacheVersionManager,
-		contextOverflowHandler:   contextOverflowHandler,
-		tokenAwareCompressorV2:   tokenAwareCompressorV2,
-		promptTokenCalculator:    promptTokenCalculator,
-		tokenAwareSerializer:     tokenAwareSerializer,
-		cachePressureReliever:    cachePressureReliever,
-		contextSnapshotFreezer:   contextSnapshotFreezer,
-		tokenAwareValidator:      tokenAwareValidator,
-		promptRedundancyEliminator: promptRedundancyEliminator,
-		tokenAwareSchedulerV2:      tokenAwareSchedulerV2,
-		cacheHitPredictorV2:        cacheHitPredictorV2,
-		contextDecayManagerV2:      contextDecayManagerV2,
-		tokenAwareGatekeeper:       tokenAwareGatekeeper,
-		promptContextBridge:        promptContextBridge,
-		tokenAwarePipeline:         tokenAwarePipeline,
-		cacheWarmingOptimizer:      cacheWarmingOptimizer,
-		contextBoundaryOptimizer:   contextBoundaryOptimizer,
-		tokenAwareLoadBalancer:     tokenAwareLoadBalancer,
-		promptSegmentCacheV3:       promptSegmentCacheV3,
-		tokenAwareQuotaManager:     tokenAwareQuotaManager,
-		cacheFreshnessGuarantor:    cacheFreshnessGuarantor,
-		contextSimilarityDetector:  contextSimilarityDetector,
-		tokenAwareRateLimiter:      tokenAwareRateLimiter,
-		promptEvictionPolicy:       promptEvictionPolicy,
-		tokenAwareAdmissionController: tokenAwareAdmissionController,
-		cacheCoherenceManager:     cacheCoherenceManager,
-		contextWindowPredictorV2:  contextWindowPredictorV2,
-		tokenAwareCircuitBreaker:  tokenAwareCircuitBreaker,
-		promptTokenDistributor:    promptTokenDistributor,
-		tokenAwareBackpressure:    tokenAwareBackpressure,
-		cacheInvalidationStrategy: cacheInvalidationStrategy,
-		contextPruningStrategy:    contextPruningStrategy,
-		tokenAwareThrottleV2:      tokenAwareThrottleV2,
-		promptCacheRevalidator:    promptCacheRevalidator,
-		tokenAwareResourcePool:    tokenAwareResourcePool,
-		cacheInvalidationBatcher:  cacheInvalidationBatcher,
-		contextFidelityMonitor:    contextFidelityMonitor,
-		tokenAwareConcurrencyLimiter: tokenAwareConcurrencyLimiter,
-		promptCacheWarmingScheduler: promptCacheWarmingScheduler,
-		tokenAwarePriorityQueueV3:  tokenAwarePriorityQueueV3,
-		cacheInvalidationCascade:  cacheInvalidationCascade,
-		contextBudgetAllocator:    contextBudgetAllocator,
-		tokenAwarePartitioner:     tokenAwarePartitioner,
-		promptCacheHitAnalyzer:    promptCacheHitAnalyzer,
-		tokenAwareShardManager:    tokenAwareShardManager,
-		cacheInvalidationScheduler: cacheInvalidationScheduler,
-		contextDensityAnalyzer:    contextDensityAnalyzer,
-		tokenAwareRetryStrategy:   tokenAwareRetryStrategy,
+		prov:                           prov,
+		tools:                          tools,
+		session:                        session,
+		maxSteps:                       opts.MaxSteps,
+		maxStepsKey:                    maxStepsKey,
+		temperature:                    opts.Temperature,
+		pricing:                        opts.Pricing,
+		usageSource:                    usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
+		sink:                           sink,
+		gate:                           gate,
+		planModeReadOnlyTrust:          planModeReadOnlyTrust,
+		sandboxEscapeApprover:          sandboxEscapeApprover,
+		configWriteApprover:            configWriteApprover,
+		hooks:                          hooks,
+		jobs:                           opts.Jobs,
+		evidence:                       evidence.NewLedger(),
+		projectChecks:                  append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
+		deliveryProfile:                opts.DeliveryProfile,
+		classifierTaskText:             opts.ClassifierTaskText,
+		capabilityLedger:               opts.CapabilityLedger,
+		capabilityAudit:                opts.CapabilityAudit,
+		contextWindow:                  opts.ContextWindow,
+		softCompactRatio:               opts.SoftCompactRatio,
+		toolResultSnipRatio:            opts.ToolResultSnipRatio,
+		compactRatio:                   opts.CompactRatio,
+		compactForceRatio:              opts.CompactForceRatio,
+		recentKeep:                     opts.RecentKeep,
+		archiveDir:                     opts.ArchiveDir,
+		keepPolicy:                     opts.KeepPolicy,
+		planModeAllowedTools:           append([]string(nil), opts.PlanModeAllowedTools...),
+		planModeReadOnlyCommands:       append([]string(nil), opts.PlanModeReadOnlyCommands...),
+		subagentDepth:                  subagentDepth,
+		maxSubagentDepth:               maxSubagentDepth,
+		memoryCompiler:                 opts.MemoryCompiler,
+		memoryCompilerVerbosity:        normalizeMemoryCompilerVerbosity(opts.MemoryCompilerVerbosity),
+		cacheEnforcer:                  cacheEnforcer,
+		toolMemo:                       toolMemo,
+		conversationDedup:              conversationDedup,
+		contextBudget:                  contextBudget,
+		providerCacheStrategy:          providerCacheStrategy,
+		cacheHealthMonitor:             cacheHealthMonitor,
+		toolBatcher:                    toolBatcher,
+		prefixPinner:                   prefixPinner,
+		semanticPruner:                 semanticPruner,
+		prefetchPredictor:              prefetchPredictor,
+		windowPredictor:                windowPredictor,
+		costEstimator:                  costEstimator,
+		promptCompressor:               promptCompressor,
+		toolDescRotator:                toolDescRotator,
+		summaryCache:                   summaryCache,
+		modelRouter:                    modelRouter,
+		imageOptimizer:                 imageOptimizer,
+		modeScheduler:                  modeScheduler,
+		phantomReporter:                phantomReporter,
+		disclosureCoordinator:          disclosureCoordinator,
+		breakpointOptimizer:            breakpointOptimizer,
+		smartCompaction:                smartCompaction,
+		messageSorter:                  messageSorter,
+		streamingGuard:                 streamingGuard,
+		toolResultTruncator:            toolResultTruncator,
+		budgetAllocator:                budgetAllocator,
+		promptMinimizer:                promptMinimizer,
+		phaseDetector:                  phaseDetector,
+		efficientFormatter:             efficientFormatter,
+		cacheWarmingScheduler:          cacheWarmingScheduler,
+		retryOptimizer:                 retryOptimizer,
+		contextualToolFilter:           contextualToolFilter,
+		sessionArchiveOptimizer:        sessionArchiveOptimizer,
+		providerSpecOptimizer:          providerSpecOptimizer,
+		multiTurnCacheTracker:          multiTurnCacheTracker,
+		tokenSerializer:                tokenSerializer,
+		flowOptimizer:                  flowOptimizer,
+		reasoningOptimizer:             reasoningOptimizer,
+		contextPrioritizer:             contextPrioritizer,
+		tokenAwarenessMonitor:          tokenAwarenessMonitor,
+		errorContextOptimizer:          errorContextOptimizer,
+		adaptiveCacheManager:           adaptiveCacheManager,
+		warmupPredictor:                warmupPredictor,
+		tokenBudgetEnforcer:            tokenBudgetEnforcer,
+		contextWindowStrategy:          contextWindowStrategy,
+		toolOutputCache:                toolOutputCache,
+		promptFragmentCache:            promptFragmentCache,
+		dedupStatsReporter:             dedupStatsReporter,
+		incrementalCacheTracker:        incrementalCacheTracker,
+		turnAwareDeduplicator:          turnAwareDeduplicator,
+		smartToolSelector:              smartToolSelector,
+		tokenFlowAnalyzer:              tokenFlowAnalyzer,
+		cachePrefixStabilizer:          cachePrefixStabilizer,
+		responseTokenController:        responseTokenController,
+		contextDecayManager:            contextDecayManager,
+		toolCallOptimizer:              toolCallOptimizer,
+		tokenEfficiencyScorer:          tokenEfficiencyScorer,
+		semanticDedup:                  semanticDedup,
+		promptCacheOptimizer:           promptCacheOptimizer,
+		contextSummaryCache:            contextSummaryCache,
+		toolSchemaOptimizer:            toolSchemaOptimizer,
+		compactSummary:                 compactSummary,
+		historyWindowManager:           historyWindowManager,
+		tokenAwareRetry:                tokenAwareRetry,
+		compactionTriggerV2:            compactionTriggerV2,
+		modelAwareOptimizer:            modelAwareOptimizer,
+		tokenUsagePredictor:            tokenUsagePredictor,
+		cacheInvalidationTracker:       cacheInvalidationTracker,
+		tokenCostAnalyzer:              tokenCostAnalyzer,
+		messageImportanceScorer:        messageImportanceScorer,
+		contextCoherenceChecker:        contextCoherenceChecker,
+		adaptiveMessageSelector:        adaptiveMessageSelector,
+		cacheHitPredictor:              cacheHitPredictor,
+		contextBudgetNegotiator:        contextBudgetNegotiator,
+		toolResultSummarizer:           toolResultSummarizer,
+		promptSegmentManager:           promptSegmentManager,
+		zeroTokenStatsCollector:        zeroTokenStatsCollector,
+		cacheWarmingV2:                 cacheWarmingV2,
+		tokenEfficiencyDashboard:       tokenEfficiencyDashboard,
+		conversationTokenBudget:        conversationTokenBudget,
+		smartContextPruner:             smartContextPruner,
+		unifiedTokenOrchestrator:       unifiedTokenOrchestrator,
+		tokenStreamCompressor:          tokenStreamCompressor,
+		adaptiveContextSelector:        adaptiveContextSelector,
+		promptTokenAnalyzer:            promptTokenAnalyzer,
+		cachePressureMonitor:           cachePressureMonitor,
+		tokenFlowRegulator:             tokenFlowRegulator,
+		semanticCacheRouter:            semanticCacheRouter,
+		tokenAwareScheduler:            tokenAwareScheduler,
+		contextSnapshotManager:         contextSnapshotManager,
+		tokenWasteDetector:             tokenWasteDetector,
+		adaptiveBatchOptimizer:         adaptiveBatchOptimizer,
+		contextDiffCompressor:          contextDiffCompressor,
+		tokenBudgetPredictor:           tokenBudgetPredictor,
+		cacheKeyOptimizer:              cacheKeyOptimizer,
+		responseLengthOptimizer:        responseLengthOptimizer,
+		tokenAwarePrioritizer:          tokenAwarePrioritizer,
+		conversationDepthAnalyzer:      conversationDepthAnalyzer,
+		tokenEfficiencyMonitor:         tokenEfficiencyMonitor,
+		cacheLifecycleManager:          cacheLifecycleManager,
+		promptSegmentCacheV2:           promptSegmentCacheV2,
+		tokenAwareCompressor:           tokenAwareCompressor,
+		contextWeightCalculator:        contextWeightCalculator,
+		tokenAwareEvictor:              tokenAwareEvictor,
+		promptRedundancyChecker:        promptRedundancyChecker,
+		cacheHitAnalyzer:               cacheHitAnalyzer,
+		contextBoundaryDetector:        contextBoundaryDetector,
+		tokenUsageForecaster:           tokenUsageForecaster,
+		contextFreshnessTracker:        contextFreshnessTracker,
+		cacheWarmingSchedulerV2:        cacheWarmingSchedulerV2,
+		promptTemplateOptimizer:        promptTemplateOptimizer,
+		tokenBudgetNegotiator:          tokenBudgetNegotiator,
+		cacheEfficiencyScorer:          cacheEfficiencyScorer,
+		tokenAwarePruner:               tokenAwarePruner,
+		conversationTopicTracker:       conversationTopicTracker,
+		tokenCostProjector:             tokenCostProjector,
+		contextAssemblyOptimizer:       contextAssemblyOptimizer,
+		cacheStalenessDetector:         cacheStalenessDetector,
+		tokenAwareBatcher:              tokenAwareBatcher,
+		conversationFlowAnalyzer:       conversationFlowAnalyzer,
+		promptInflationDetector:        promptInflationDetector,
+		cacheKeyHasher:                 cacheKeyHasher,
+		tokenAwareGrouper:              tokenAwareGrouper,
+		contextPriorityQueue:           contextPriorityQueue,
+		tokenSavingsCalculator:         tokenSavingsCalculator,
+		cacheAdmissionController:       cacheAdmissionController,
+		contextWindowCalibrator:        contextWindowCalibrator,
+		tokenAwareDispatcher:           tokenAwareDispatcher,
+		cachePopulationPredictor:       cachePopulationPredictor,
+		contextSegmentAssembler:        contextSegmentAssembler,
+		tokenAwareMerger:               tokenAwareMerger,
+		cacheUtilizationTracker:        cacheUtilizationTracker,
+		tokenAwareSplitter:             tokenAwareSplitter,
+		cacheCoherenceValidator:        cacheCoherenceValidator,
+		contextRelevanceScorer:         contextRelevanceScorer,
+		weightedBudgetAllocator:        weightedBudgetAllocator,
+		promptCompressionCache:         promptCompressionCache,
+		tokenAwareFragmenter:           tokenAwareFragmenter,
+		cacheWarmingStrategy:           cacheWarmingStrategy,
+		contextPruningEngine:           contextPruningEngine,
+		tokenAwareThrottler:            tokenAwareThrottler,
+		promptSegmentIndexer:           promptSegmentIndexer,
+		tokenAwarePrioritizerV2:        tokenAwarePrioritizerV2,
+		cachePrefetchScheduler:         cachePrefetchScheduler,
+		contextWindowMonitor:           contextWindowMonitor,
+		tokenAwareDeduplicator:         tokenAwareDeduplicator,
+		promptAssemblyOptimizer:        promptAssemblyOptimizer,
+		tokenAwareAggregator:           tokenAwareAggregator,
+		contextMergeOptimizer:          contextMergeOptimizer,
+		tokenAwareRouter:               tokenAwareRouter,
+		promptCacheWarmer:              promptCacheWarmer,
+		tokenAwareBuffer:               tokenAwareBuffer,
+		cacheVersionManager:            cacheVersionManager,
+		contextOverflowHandler:         contextOverflowHandler,
+		tokenAwareCompressorV2:         tokenAwareCompressorV2,
+		promptTokenCalculator:          promptTokenCalculator,
+		tokenAwareSerializer:           tokenAwareSerializer,
+		cachePressureReliever:          cachePressureReliever,
+		contextSnapshotFreezer:         contextSnapshotFreezer,
+		tokenAwareValidator:            tokenAwareValidator,
+		promptRedundancyEliminator:     promptRedundancyEliminator,
+		tokenAwareSchedulerV2:          tokenAwareSchedulerV2,
+		cacheHitPredictorV2:            cacheHitPredictorV2,
+		contextDecayManagerV2:          contextDecayManagerV2,
+		tokenAwareGatekeeper:           tokenAwareGatekeeper,
+		promptContextBridge:            promptContextBridge,
+		tokenAwarePipeline:             tokenAwarePipeline,
+		cacheWarmingOptimizer:          cacheWarmingOptimizer,
+		contextBoundaryOptimizer:       contextBoundaryOptimizer,
+		tokenAwareLoadBalancer:         tokenAwareLoadBalancer,
+		promptSegmentCacheV3:           promptSegmentCacheV3,
+		tokenAwareQuotaManager:         tokenAwareQuotaManager,
+		cacheFreshnessGuarantor:        cacheFreshnessGuarantor,
+		contextSimilarityDetector:      contextSimilarityDetector,
+		tokenAwareRateLimiter:          tokenAwareRateLimiter,
+		promptEvictionPolicy:           promptEvictionPolicy,
+		tokenAwareAdmissionController:  tokenAwareAdmissionController,
+		cacheCoherenceManager:          cacheCoherenceManager,
+		contextWindowPredictorV2:       contextWindowPredictorV2,
+		tokenAwareCircuitBreaker:       tokenAwareCircuitBreaker,
+		promptTokenDistributor:         promptTokenDistributor,
+		tokenAwareBackpressure:         tokenAwareBackpressure,
+		cacheInvalidationStrategy:      cacheInvalidationStrategy,
+		contextPruningStrategy:         contextPruningStrategy,
+		tokenAwareThrottleV2:           tokenAwareThrottleV2,
+		promptCacheRevalidator:         promptCacheRevalidator,
+		tokenAwareResourcePool:         tokenAwareResourcePool,
+		cacheInvalidationBatcher:       cacheInvalidationBatcher,
+		contextFidelityMonitor:         contextFidelityMonitor,
+		tokenAwareConcurrencyLimiter:   tokenAwareConcurrencyLimiter,
+		promptCacheWarmingScheduler:    promptCacheWarmingScheduler,
+		tokenAwarePriorityQueueV3:      tokenAwarePriorityQueueV3,
+		cacheInvalidationCascade:       cacheInvalidationCascade,
+		contextBudgetAllocator:         contextBudgetAllocator,
+		tokenAwarePartitioner:          tokenAwarePartitioner,
+		promptCacheHitAnalyzer:         promptCacheHitAnalyzer,
+		tokenAwareShardManager:         tokenAwareShardManager,
+		cacheInvalidationScheduler:     cacheInvalidationScheduler,
+		contextDensityAnalyzer:         contextDensityAnalyzer,
+		tokenAwareRetryStrategy:        tokenAwareRetryStrategy,
 		promptCacheOptimizationAdvisor: promptCacheOptimizationAdvisor,
 		tokenAwareWeightedRoundRobin:   tokenAwareWeightedRoundRobin,
-		cacheInvalidationPropagator:   cacheInvalidationPropagator,
-		contextRelevanceScorerV2:      contextRelevanceScorerV2,
-		tokenAwareFairnessScheduler:   tokenAwareFairnessScheduler,
-		promptCacheKeyOptimizer:       promptCacheKeyOptimizer,
-		tokenAwareSlotManager:         tokenAwareSlotManager,
-		cacheInvalidationDeduplicator: cacheInvalidationDeduplicator,
-		contextThermalCompressor:      contextThermalCompressor,
-		tokenAwareDegradationManager:  tokenAwareDegradationManager,
-		promptCacheLifecycleManager:   promptCacheLifecycleManager,
-		tokenAwareOverflowHandler:     tokenAwareOverflowHandler,
-		cacheInvalidationTrackerV2:    cacheInvalidationTrackerV2,
-		contextWindowCalibratorV3:     contextWindowCalibratorV3,
-		tokenAwareLeakDetector:        tokenAwareLeakDetector,
-		promptCacheWarmthTracker:      promptCacheWarmthTracker,
-		tokenAwarePressureValve:       tokenAwarePressureValve,
-		cacheInvalidationAggregator:   cacheInvalidationAggregator,
-		contextWindowSnapshotManager:  contextWindowSnapshotManager,
-		tokenAwareBottleneckDetector: tokenAwareBottleneckDetector,
-		promptCacheEfficiencyMonitor:  promptCacheEfficiencyMonitor,
-		tokenAwareOverflowSpillway:    tokenAwareOverflowSpillway,
+		cacheInvalidationPropagator:    cacheInvalidationPropagator,
+		contextRelevanceScorerV2:       contextRelevanceScorerV2,
+		tokenAwareFairnessScheduler:    tokenAwareFairnessScheduler,
+		promptCacheKeyOptimizer:        promptCacheKeyOptimizer,
+		tokenAwareSlotManager:          tokenAwareSlotManager,
+		cacheInvalidationDeduplicator:  cacheInvalidationDeduplicator,
+		contextThermalCompressor:       contextThermalCompressor,
+		tokenAwareDegradationManager:   tokenAwareDegradationManager,
+		promptCacheLifecycleManager:    promptCacheLifecycleManager,
+		tokenAwareOverflowHandler:      tokenAwareOverflowHandler,
+		cacheInvalidationTrackerV2:     cacheInvalidationTrackerV2,
+		contextWindowCalibratorV3:      contextWindowCalibratorV3,
+		tokenAwareLeakDetector:         tokenAwareLeakDetector,
+		promptCacheWarmthTracker:       promptCacheWarmthTracker,
+		tokenAwarePressureValve:        tokenAwarePressureValve,
+		cacheInvalidationAggregator:    cacheInvalidationAggregator,
+		contextWindowSnapshotManager:   contextWindowSnapshotManager,
+		tokenAwareBottleneckDetector:   tokenAwareBottleneckDetector,
+		promptCacheEfficiencyMonitor:   promptCacheEfficiencyMonitor,
+		tokenAwareOverflowSpillway:     tokenAwareOverflowSpillway,
 		cacheInvalidationPriorityQueue: cacheInvalidationPriorityQueue,
-		contextWindowEvictionManager: contextWindowEvictionManager,
-		tokenAwareSaturationMonitor:  tokenAwareSaturationMonitor,
-		promptCachePressureIndex:     promptCachePressureIndex,
-		tokenAwareQuotaEnforcer:      tokenAwareQuotaEnforcer,
-		cacheInvalidationWave:        cacheInvalidationWave,
-		contextWindowThermalRegulator: contextWindowThermalRegulator,
-		tokenAwareCircuitMonitor:     tokenAwareCircuitMonitor,
-		promptCacheAdaptiveController: promptCacheAdaptiveController,
-		tokenAwareThrottleController:  tokenAwareThrottleController,
-		contextWindowStabilizer:      contextWindowStabilizer,
-		tokenAwareBackpressureRelay:  tokenAwareBackpressureRelay,
-		promptCacheHitPredictorV2:    promptCacheHitPredictorV2,
+		contextWindowEvictionManager:   contextWindowEvictionManager,
+		tokenAwareSaturationMonitor:    tokenAwareSaturationMonitor,
+		promptCachePressureIndex:       promptCachePressureIndex,
+		tokenAwareQuotaEnforcer:        tokenAwareQuotaEnforcer,
+		cacheInvalidationWave:          cacheInvalidationWave,
+		contextWindowThermalRegulator:  contextWindowThermalRegulator,
+		tokenAwareCircuitMonitor:       tokenAwareCircuitMonitor,
+		promptCacheAdaptiveController:  promptCacheAdaptiveController,
+		tokenAwareThrottleController:   tokenAwareThrottleController,
+		contextWindowStabilizer:        contextWindowStabilizer,
+		tokenAwareBackpressureRelay:    tokenAwareBackpressureRelay,
+		promptCacheHitPredictorV2:      promptCacheHitPredictorV2,
+		tokenAwareGracefulDegrader:    tokenAwareGracefulDegrader,
+		contextWindowProactiveAdjuster: contextWindowProactiveAdjuster,
+		tokenAwareResourceArbiter:     tokenAwareResourceArbiter,
+		promptCacheWarmupScheduler:    promptCacheWarmupScheduler,
 	}
 	// 初始化分类器
 	if opts.UseMemoryCompilerLLMClassification && prov != nil {
@@ -3204,6 +3222,18 @@ func (a *Agent) GetAllTokenOptStats() map[string]interface{} {
 	if a.promptCacheHitPredictorV2 != nil {
 		stats["opt255_promptCacheHitPredictorV2"] = a.promptCacheHitPredictorV2.GetStats()
 	}
+	if a.tokenAwareGracefulDegrader != nil {
+		stats["opt256_tokenAwareGracefulDegrader"] = a.tokenAwareGracefulDegrader.GetStats()
+	}
+	if a.contextWindowProactiveAdjuster != nil {
+		stats["opt258_contextWindowProactiveAdjuster"] = a.contextWindowProactiveAdjuster.GetStats()
+	}
+	if a.tokenAwareResourceArbiter != nil {
+		stats["opt259_tokenAwareResourceArbiter"] = a.tokenAwareResourceArbiter.GetStats()
+	}
+	if a.promptCacheWarmupScheduler != nil {
+		stats["opt260_promptCacheWarmupScheduler"] = a.promptCacheWarmupScheduler.GetStats()
+	}
 	return stats
 }
 
@@ -3442,636 +3472,641 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			return err
 		}
 		streamRecoveries = 0
-	cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
-	a.lastPrefixShape = prefixShape
-	a.haveLastPrefixShape = true
+		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
+		a.lastPrefixShape = prefixShape
+		a.haveLastPrefixShape = true
 
-	// OPT-12: 记录缓存使用情况并检查前缀稳定性
-	if a.cacheEnforcer != nil {
-		fp := a.cacheEnforcer.CaptureFingerprint(a.systemPrompt(), schemas)
-		a.cacheEnforcer.CheckPrefixStability(fp, step+1)
-		a.cacheEnforcer.RecordCacheUsage(usage)
-	}
-
-	// OPT-18: 自适应上下文预算调整
-	if a.contextBudget != nil && usage != nil {
-		a.contextBudget.AdjustForUsage(usage.PromptTokens, 0)
-	}
-
-	// OPT-20: 缓存健康监控
-	if a.cacheHealthMonitor != nil && usage != nil {
-		hit := usage.CacheHitTokens > 0
-		a.cacheHealthMonitor.RecordRequest(hit, usage.CacheHitTokens, usage.CacheMissTokens)
-	}
-
-	// OPT-22: 前缀钉扎验证
-	if a.prefixPinner != nil && step == 0 {
-		sp := a.systemPrompt()
-		if sp != "" {
-			a.prefixPinner.Pin("L1_base_prompt", sp)
+		// OPT-12: 记录缓存使用情况并检查前缀稳定性
+		if a.cacheEnforcer != nil {
+			fp := a.cacheEnforcer.CaptureFingerprint(a.systemPrompt(), schemas)
+			a.cacheEnforcer.CheckPrefixStability(fp, step+1)
+			a.cacheEnforcer.RecordCacheUsage(usage)
 		}
-	}
 
-	// OPT-19: Provider 感知缓存策略 — 首次请求时根据模型名检测 provider
-	if a.providerCacheStrategy != nil && step == 0 && a.prov != nil {
-		if modelName, ok := a.prov.(interface{ Model() string }); ok {
-			detected := DetectProviderType(modelName.Model())
-			a.providerCacheStrategy.SetProvider(detected)
+		// OPT-18: 自适应上下文预算调整
+		if a.contextBudget != nil && usage != nil {
+			a.contextBudget.AdjustForUsage(usage.PromptTokens, 0)
 		}
-	}
 
-	// OPT-27: 上下文窗口预测器 — 记录消耗并预测
-	if a.windowPredictor != nil && usage != nil {
-		a.windowPredictor.RecordConsumption(step, usage.PromptTokens, usage.CompletionTokens)
-		prediction := a.windowPredictor.Predict()
-		if prediction != nil && prediction.ShouldHardCompact {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window approaching limit — consider compacting"})
+		// OPT-20: 缓存健康监控
+		if a.cacheHealthMonitor != nil && usage != nil {
+			hit := usage.CacheHitTokens > 0
+			a.cacheHealthMonitor.RecordRequest(hit, usage.CacheHitTokens, usage.CacheMissTokens)
 		}
-	}
 
-	// OPT-28: Token 成本估算器 — 记录成本
-	if a.costEstimator != nil && usage != nil {
-		a.costEstimator.EstimateCost(
-			usage.PromptTokens,
-			usage.CompletionTokens,
-			usage.CacheHitTokens,
-			usage.CacheMissTokens,
-		)
-	}
-
-	// OPT-03: 语义上下文裁剪 — 为对话历史中的消息评分
-	if a.semanticPruner != nil && usage != nil {
-		messages := a.session.Snapshot()
-		for i, msg := range messages {
-			if msg.Role == provider.RoleAssistant || msg.Role == provider.RoleUser {
-				a.semanticPruner.ScoreMessage(i, string(msg.Role), msg.Content)
+		// OPT-22: 前缀钉扎验证
+		if a.prefixPinner != nil && step == 0 {
+			sp := a.systemPrompt()
+			if sp != "" {
+				a.prefixPinner.Pin("L1_base_prompt", sp)
 			}
 		}
-	}
 
-	// OPT-36: Token 模式感知调度器 — 首步按模式调整 OPT 行为
-	if a.modeScheduler != nil && step == 0 {
-		a.modeScheduler.ApplyToAgent(a)
-	}
-
-	// OPT-37: Phantom 统计报告器 — 通过零 token 通道推送 OPT 统计
-	if a.phantomReporter != nil && a.phantomReporter.ShouldReport() {
-		snapshot := a.phantomReporter.CollectSnapshot(a)
-		_ = snapshot // 通过 PhantomUI 通道推送，不消耗 LLM token
-	}
-
-	// OPT-39: 缓存断点优化器 — 评估断点效果
-	if a.breakpointOptimizer != nil && usage != nil {
-		if usage.CacheHitTokens > 0 {
-			a.breakpointOptimizer.RecordHit(0, true)
-		} else if usage.CacheMissTokens > 0 {
-			a.breakpointOptimizer.RecordHit(0, false)
+		// OPT-19: Provider 感知缓存策略 — 首次请求时根据模型名检测 provider
+		if a.providerCacheStrategy != nil && step == 0 && a.prov != nil {
+			if modelName, ok := a.prov.(interface{ Model() string }); ok {
+				detected := DetectProviderType(modelName.Model())
+				a.providerCacheStrategy.SetProvider(detected)
+			}
 		}
-	}
 
-	// OPT-40: 智能压缩触发器 — 基于 OPT-27 预测主动触发 compaction
-	if a.smartCompaction != nil && usage != nil {
-		action := a.smartCompaction.CheckAndTrigger(step + 1)
-		switch action {
-		case CompactionActionProactive:
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "proactive compaction triggered to save tokens"})
-		case CompactionActionImmediate:
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "immediate compaction triggered — context window critical"})
+		// OPT-27: 上下文窗口预测器 — 记录消耗并预测
+		if a.windowPredictor != nil && usage != nil {
+			a.windowPredictor.RecordConsumption(step, usage.PromptTokens, usage.CompletionTokens)
+			prediction := a.windowPredictor.Predict()
+			if prediction != nil && prediction.ShouldHardCompact {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window approaching limit — consider compacting"})
+			}
 		}
-	}
 
-	// OPT-41: Token 感知消息排序器 — 记录前缀稳定性
-	if a.messageSorter != nil {
-		msgs := a.session.Snapshot()
-		report := a.messageSorter.RecordPrefix(msgs)
-		if report.PrefixChanged {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache prefix changed — expect cache miss"})
+		// OPT-28: Token 成本估算器 — 记录成本
+		if a.costEstimator != nil && usage != nil {
+			a.costEstimator.EstimateCost(
+				usage.PromptTokens,
+				usage.CompletionTokens,
+				usage.CacheHitTokens,
+				usage.CacheMissTokens,
+			)
 		}
-	}
 
-	// OPT-42: 流式 token 守卫 — 记录 token 消耗并检查预算
-	if a.streamingGuard != nil && usage != nil {
-		a.streamingGuard.RecordInput(usage.PromptTokens)
-		a.streamingGuard.RecordOutput(usage.CompletionTokens)
-		status := a.streamingGuard.CheckBudget()
-		if status.Status == "warning" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token budget approaching limit"})
-		} else if status.Status == "critical" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget critical — consider terminating"})
+		// OPT-03: 语义上下文裁剪 — 为对话历史中的消息评分
+		if a.semanticPruner != nil && usage != nil {
+			messages := a.session.Snapshot()
+			for i, msg := range messages {
+				if msg.Role == provider.RoleAssistant || msg.Role == provider.RoleUser {
+					a.semanticPruner.ScoreMessage(i, string(msg.Role), msg.Content)
+				}
+			}
 		}
-	}
 
-	// OPT-44: Token 预算分配器 — 动态分配上下文窗口
-	if a.budgetAllocator != nil && usage != nil {
-		// 估算各组件 token 占用
-		systemPromptTokens := usage.PromptTokens / 10 // 估算 ~10% 为系统提示
-		toolsTokens := len(a.tools.Schemas()) * 200    // 每个工具 schema ~200 token
-		historyTokens := usage.PromptTokens - systemPromptTokens - toolsTokens
-		if historyTokens < 0 {
-			historyTokens = 0
+		// OPT-36: Token 模式感知调度器 — 首步按模式调整 OPT 行为
+		if a.modeScheduler != nil && step == 0 {
+			a.modeScheduler.ApplyToAgent(a)
 		}
-		alloc := a.budgetAllocator.Allocate(systemPromptTokens, toolsTokens, historyTokens)
-		if a.budgetAllocator.ShouldCompact(historyTokens) {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "budget allocator: history exceeds optimal limit — consider compacting"})
+
+		// OPT-37: Phantom 统计报告器 — 通过零 token 通道推送 OPT 统计
+		if a.phantomReporter != nil && a.phantomReporter.ShouldReport() {
+			snapshot := a.phantomReporter.CollectSnapshot(a)
+			_ = snapshot // 通过 PhantomUI 通道推送，不消耗 LLM token
 		}
-		_ = alloc
-	}
 
-	// OPT-46: 对话阶段检测器 — 分析当前对话阶段
-	if a.phaseDetector != nil {
-		msgs := a.session.Snapshot()
-		toolCalls := 0
-		if calls != nil {
-			toolCalls = len(calls)
+		// OPT-39: 缓存断点优化器 — 评估断点效果
+		if a.breakpointOptimizer != nil && usage != nil {
+			if usage.CacheHitTokens > 0 {
+				a.breakpointOptimizer.RecordHit(0, true)
+			} else if usage.CacheMissTokens > 0 {
+				a.breakpointOptimizer.RecordHit(0, false)
+			}
 		}
-		phase := a.phaseDetector.Analyze(msgs, toolCalls)
-		_ = phase // 可用于调整其他 OPT 模块行为
-	}
 
-	// OPT-48: 缓存预热调度器 — 记录查询并预测下一步
-	if a.cacheWarmingScheduler != nil && step == 0 {
-		a.cacheWarmingScheduler.RecordQuery(input)
-	}
-
-	// OPT-49: Provider 重试优化器 — 错误时记录重试
-	if a.retryOptimizer != nil && err != nil && !interrupted {
-		a.retryOptimizer.RecordRetry("server_error", 0)
-	}
-
-	// OPT-52: Provider 专属缓存优化 — 计算缓存节省
-	if a.providerSpecOptimizer != nil && usage != nil {
-		a.providerSpecOptimizer.OptimizeForProvider(usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens)
-	}
-
-	// OPT-53: 多轮缓存追踪 — 记录每轮缓存命中情况
-	if a.multiTurnCacheTracker != nil && usage != nil {
-		a.multiTurnCacheTracker.RecordTurn(step+1, usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens, cacheDiagnostics.PrefixHash)
-		if a.multiTurnCacheTracker.ShouldAlert() {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache miss detected — prefix may have changed"})
+		// OPT-40: 智能压缩触发器 — 基于 OPT-27 预测主动触发 compaction
+		if a.smartCompaction != nil && usage != nil {
+			action := a.smartCompaction.CheckAndTrigger(step + 1)
+			switch action {
+			case CompactionActionProactive:
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "proactive compaction triggered to save tokens"})
+			case CompactionActionImmediate:
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "immediate compaction triggered — context window critical"})
+			}
 		}
-	}
 
-	// OPT-55: 对话流优化 — 检测冗余查询
-	if a.flowOptimizer != nil && step == 0 && input != "" {
-		analysis := a.flowOptimizer.AnalyzeTurn(input, "", calls != nil)
-		if analysis.IsRedundant {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "redundant query detected — consider using cached response"})
+		// OPT-41: Token 感知消息排序器 — 记录前缀稳定性
+		if a.messageSorter != nil {
+			msgs := a.session.Snapshot()
+			report := a.messageSorter.RecordPrefix(msgs)
+			if report.PrefixChanged {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache prefix changed — expect cache miss"})
+			}
 		}
-	}
 
-	// OPT-58: Token 感知监控 — 检查 token 使用率
-	if a.tokenAwarenessMonitor != nil && usage != nil {
-		report := a.tokenAwarenessMonitor.CheckAwareness(usage.PromptTokens, usage.CompletionTokens, a.contextWindow)
-		if report.Status == "critical" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token usage critical — approaching context window limit"})
+		// OPT-42: 流式 token 守卫 — 记录 token 消耗并检查预算
+		if a.streamingGuard != nil && usage != nil {
+			a.streamingGuard.RecordInput(usage.PromptTokens)
+			a.streamingGuard.RecordOutput(usage.CompletionTokens)
+			status := a.streamingGuard.CheckBudget()
+			if status.Status == "warning" {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "token budget approaching limit"})
+			} else if status.Status == "critical" {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget critical — consider terminating"})
+			}
 		}
-		a.tokenAwarenessMonitor.TrackTurn(usage.PromptTokens, usage.CompletionTokens)
-	}
 
-	// OPT-59: 错误上下文优化 — 提取错误相关上下文
-	if a.errorContextOptimizer != nil && err != nil && !interrupted {
-		a.errorContextOptimizer.OptimizeErrorContext(err.Error(), input)
-	}
-
-	// OPT-60: 自适应缓存管理 — 根据命中率调整缓存策略
-	if a.adaptiveCacheManager != nil && usage != nil {
-		a.adaptiveCacheManager.RecordCachePerformance(usage.CacheHitTokens, usage.CacheMissTokens)
-		newStrategy := a.adaptiveCacheManager.AdaptStrategy(a.adaptiveCacheManager.GetStats().CurrentHitRate, usage.CacheMissTokens)
-		_ = newStrategy // 可用于调整其他 OPT 模块的缓存行为
-	}
-
-	// OPT-61: 预热预测器 — 预测下一轮需要的工具
-	if a.warmupPredictor != nil && step == 0 && input != "" {
-		predicted := a.warmupPredictor.PredictTools(input)
-		_ = predicted // 预加载预测工具的 schema
-	}
-
-	// OPT-62: Token 预算强制器 — 检查是否超出预算
-	if a.tokenBudgetEnforcer != nil && usage != nil {
-		action := a.tokenBudgetEnforcer.Enforce(usage.TotalTokens)
-		if action == EnforcementDegrade {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget exceeded — degrading to save tokens"})
+		// OPT-44: Token 预算分配器 — 动态分配上下文窗口
+		if a.budgetAllocator != nil && usage != nil {
+			// 估算各组件 token 占用
+			systemPromptTokens := usage.PromptTokens / 10 // 估算 ~10% 为系统提示
+			toolsTokens := len(a.tools.Schemas()) * 200   // 每个工具 schema ~200 token
+			historyTokens := usage.PromptTokens - systemPromptTokens - toolsTokens
+			if historyTokens < 0 {
+				historyTokens = 0
+			}
+			alloc := a.budgetAllocator.Allocate(systemPromptTokens, toolsTokens, historyTokens)
+			if a.budgetAllocator.ShouldCompact(historyTokens) {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "budget allocator: history exceeds optimal limit — consider compacting"})
+			}
+			_ = alloc
 		}
-	}
 
-	// OPT-63: 上下文窗口策略 — 评估窗口管理策略
-	if a.contextWindowStrategy != nil && usage != nil {
-		decision := a.contextWindowStrategy.Evaluate(usage.PromptTokens, a.contextWindow, step+1)
-		if decision.Action == "compact" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window strategy: compact recommended"})
+		// OPT-46: 对话阶段检测器 — 分析当前对话阶段
+		if a.phaseDetector != nil {
+			msgs := a.session.Snapshot()
+			toolCalls := 0
+			if calls != nil {
+				toolCalls = len(calls)
+			}
+			phase := a.phaseDetector.Analyze(msgs, toolCalls)
+			_ = phase // 可用于调整其他 OPT 模块行为
 		}
-	}
 
-	// OPT-70: Token 流分析 — 记录 token 流向
-	if a.tokenFlowAnalyzer != nil && usage != nil {
-		a.tokenFlowAnalyzer.RecordFlow(step+1, usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, usage.CacheMissTokens)
-	}
-
-	// OPT-66: 去重统计报告 — 定期汇总
-	if a.dedupStatsReporter != nil && a.dedupStatsReporter.ShouldReport() {
-		report := a.dedupStatsReporter.GetReport()
-		_ = report // 通过零 token 通道推送
-	}
-
-	// OPT-73: 上下文衰减管理 — 老化消息
-	if a.contextDecayManager != nil {
-		a.contextDecayManager.AgeMessages(step + 1)
-	}
-
-	// OPT-75: Token 效率评分 — 每轮评分
-	if a.tokenEfficiencyScorer != nil && usage != nil {
-		a.tokenEfficiencyScorer.ScoreEfficiency(
-			usage.PromptTokens,
-			usage.CompletionTokens,
-			usage.CacheHitTokens,
-			usage.CacheMissTokens,
-			func() int { if calls != nil { return len(calls) }; return 0 }(),
-		)
-	}
-
-	// OPT-76: 语义相似度去重 — 检查重复内容
-	if a.semanticDedup != nil && step == 0 && input != "" {
-		isDup, _ := a.semanticDedup.CheckSimilarity(input)
-		if isDup {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "semantically similar query detected"})
+		// OPT-48: 缓存预热调度器 — 记录查询并预测下一步
+		if a.cacheWarmingScheduler != nil && step == 0 {
+			a.cacheWarmingScheduler.RecordQuery(input)
 		}
-		a.semanticDedup.RecordContent(input, "")
-	}
 
-	// OPT-80: 对话压缩摘要 — 定期生成历史摘要
-	if a.compactSummary != nil && step > 0 && step%5 == 0 {
-		msgs := a.session.Snapshot()
-		a.compactSummary.Summarize(msgs, step+1)
-	}
-
-	// OPT-83: 多信号压缩触发器 V2 — 评估多信号
-	if a.compactionTriggerV2 != nil && usage != nil {
-		decision := a.compactionTriggerV2.Evaluate(usage.PromptTokens, a.contextWindow, len(a.session.Snapshot()), 0, 0)
-		if decision.ShouldCompact && decision.Priority == "high" {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "multi-signal compaction triggered: " + decision.Reason})
+		// OPT-49: Provider 重试优化器 — 错误时记录重试
+		if a.retryOptimizer != nil && err != nil && !interrupted {
+			a.retryOptimizer.RecordRetry("server_error", 0)
 		}
-	}
 
-	// OPT-85: Token 用量预测器 — 记录并预测
-	if a.tokenUsagePredictor != nil && usage != nil {
-		a.tokenUsagePredictor.RecordUsage(step+1, usage.TotalTokens)
-		predicted := a.tokenUsagePredictor.PredictNextTurn(step+1, usage.TotalTokens)
-		_ = predicted
-	}
-
-	// OPT-87: Token 成本分析 — 记录用量分析成本
-	if a.tokenCostAnalyzer != nil && usage != nil {
-		a.tokenCostAnalyzer.RecordUsage(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens)
-	}
-
-	// OPT-89: 上下文一致性检查 — 压缩后检查连贯性
-	if a.contextCoherenceChecker != nil && step > 0 && step%3 == 0 {
-		msgs := a.session.Snapshot()
-		report := a.contextCoherenceChecker.CheckCoherence(msgs)
-		if !report.IsCoherent {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "context coherence issue detected after compaction"})
+		// OPT-52: Provider 专属缓存优化 — 计算缓存节省
+		if a.providerSpecOptimizer != nil && usage != nil {
+			a.providerSpecOptimizer.OptimizeForProvider(usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens)
 		}
-	}
 
-	// OPT-98: 对话级 token 预算 — 追踪预算消耗
-	if a.conversationTokenBudget != nil && usage != nil {
-		a.conversationTokenBudget.Allocate(step+1, usage.TotalTokens)
-		if a.conversationTokenBudget.ShouldEndConversation() {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "conversation token budget nearly exhausted"})
+		// OPT-53: 多轮缓存追踪 — 记录每轮缓存命中情况
+		if a.multiTurnCacheTracker != nil && usage != nil {
+			a.multiTurnCacheTracker.RecordTurn(step+1, usage.PromptTokens, usage.CacheHitTokens, usage.CacheMissTokens, cacheDiagnostics.PrefixHash)
+			if a.multiTurnCacheTracker.ShouldAlert() {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cache miss detected — prefix may have changed"})
+			}
 		}
-	}
 
-	// OPT-100: 统一 token 编排器 — 综合编排优化
-	if a.unifiedTokenOrchestrator != nil && usage != nil {
-		ctx := OrchestrationContext{
-			PromptTokens:     usage.PromptTokens,
-			CompletionTokens: usage.CompletionTokens,
-			CacheHitTokens:   usage.CacheHitTokens,
-			CacheMissTokens:  usage.CacheMissTokens,
-			MessageCount:     len(a.session.Snapshot()),
-			Turn:             step + 1,
-			ContextWindow:    a.contextWindow,
+		// OPT-55: 对话流优化 — 检测冗余查询
+		if a.flowOptimizer != nil && step == 0 && input != "" {
+			analysis := a.flowOptimizer.AnalyzeTurn(input, "", calls != nil)
+			if analysis.IsRedundant {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "redundant query detected — consider using cached response"})
+			}
 		}
-		result := a.unifiedTokenOrchestrator.Orchestrate(ctx)
-		if result.Priority == "high" && len(result.RecommendedActions) > 0 {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "orchestrator: " + result.RecommendedActions[0]})
+
+		// OPT-58: Token 感知监控 — 检查 token 使用率
+		if a.tokenAwarenessMonitor != nil && usage != nil {
+			report := a.tokenAwarenessMonitor.CheckAwareness(usage.PromptTokens, usage.CompletionTokens, a.contextWindow)
+			if report.Status == "critical" {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token usage critical — approaching context window limit"})
+			}
+			a.tokenAwarenessMonitor.TrackTurn(usage.PromptTokens, usage.CompletionTokens)
 		}
-	}
 
-	// OPT-101~105: 流式压缩 / 自适应窗口 / Prompt分析 / 缓存压力 / 流量调节
-	if a.tokenFlowRegulator != nil && usage != nil {
-		if !a.tokenFlowRegulator.Consume(usage.TotalTokens) {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token flow rate limit exceeded, regulating"})
+		// OPT-59: 错误上下文优化 — 提取错误相关上下文
+		if a.errorContextOptimizer != nil && err != nil && !interrupted {
+			a.errorContextOptimizer.OptimizeErrorContext(err.Error(), input)
 		}
-	}
-	if a.cachePressureMonitor != nil {
-		a.cachePressureMonitor.RecordInsert()
-		if a.cachePressureMonitor.ShouldEvict() {
-			a.cachePressureMonitor.RecordEviction()
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache pressure high, evicting stale entries"})
+
+		// OPT-60: 自适应缓存管理 — 根据命中率调整缓存策略
+		if a.adaptiveCacheManager != nil && usage != nil {
+			a.adaptiveCacheManager.RecordCachePerformance(usage.CacheHitTokens, usage.CacheMissTokens)
+			newStrategy := a.adaptiveCacheManager.AdaptStrategy(a.adaptiveCacheManager.GetStats().CurrentHitRate, usage.CacheMissTokens)
+			_ = newStrategy // 可用于调整其他 OPT 模块的缓存行为
 		}
-	}
-	if a.promptTokenAnalyzer != nil && step == 0 {
-		snap := a.session.Snapshot()
-		if len(snap) > 0 {
-			a.promptTokenAnalyzer.Analyze(snap[0].Content)
+
+		// OPT-61: 预热预测器 — 预测下一轮需要的工具
+		if a.warmupPredictor != nil && step == 0 && input != "" {
+			predicted := a.warmupPredictor.PredictTools(input)
+			_ = predicted // 预加载预测工具的 schema
 		}
-	}
-	if a.adaptiveContextSelector != nil && step == 0 {
-		snap := a.session.Snapshot()
-		if len(snap) > 0 {
-			complexity := a.adaptiveContextSelector.AnalyzeQueryComplexity(snap[0].Content)
-			a.adaptiveContextSelector.SelectWindow(complexity)
+
+		// OPT-62: Token 预算强制器 — 检查是否超出预算
+		if a.tokenBudgetEnforcer != nil && usage != nil {
+			action := a.tokenBudgetEnforcer.Enforce(usage.TotalTokens)
+			if action == EnforcementDegrade {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token budget exceeded — degrading to save tokens"})
+			}
 		}
-	}
 
-	// OPT-106~110: 语义缓存路由 / 调度 / 快照 / 浪费检测 / 批处理
-	if a.tokenWasteDetector != nil && step > 0 && step%5 == 0 {
-		snap := a.session.Snapshot()
-		msgs := make([]string, len(snap))
-		for i, m := range snap {
-			msgs[i] = m.Content
+		// OPT-63: 上下文窗口策略 — 评估窗口管理策略
+		if a.contextWindowStrategy != nil && usage != nil {
+			decision := a.contextWindowStrategy.Evaluate(usage.PromptTokens, a.contextWindow, step+1)
+			if decision.Action == "compact" {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "context window strategy: compact recommended"})
+			}
 		}
-		a.tokenWasteDetector.Detect(msgs)
-	}
-	if a.contextSnapshotManager != nil && step > 0 && step%3 == 0 {
-		a.contextSnapshotManager.TakeSnapshot(step, a.session.Snapshot())
-	}
 
-	// OPT-111~115: 差异压缩 / 预算预测 / 缓存键 / 响应长度 / 优先级排序
-	if a.tokenBudgetPredictor != nil && usage != nil {
-		a.tokenBudgetPredictor.RecordUsage(usage.TotalTokens)
-		pred := a.tokenBudgetPredictor.PredictNext()
-		a.tokenBudgetPredictor.RecordAccuracy(usage.TotalTokens)
-		if pred > 0 && usage.TotalTokens > pred*2 {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "token usage exceeded prediction by 2x"})
+		// OPT-70: Token 流分析 — 记录 token 流向
+		if a.tokenFlowAnalyzer != nil && usage != nil {
+			a.tokenFlowAnalyzer.RecordFlow(step+1, usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, usage.CacheMissTokens)
 		}
-	}
 
-	// OPT-116~120: 深度分析 / 效率监控 / 生命周期 / 片段缓存 / 感知压缩
-	if a.tokenEfficiencyMonitor != nil && usage != nil {
-		a.tokenEfficiencyMonitor.RecordPoint(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, 0)
-	}
-	if a.cacheLifecycleManager != nil && step > 0 {
-		evicted := a.cacheLifecycleManager.EvictExpired(step)
-		if evicted > 0 {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache lifecycle: evicted expired entries"})
+		// OPT-66: 去重统计报告 — 定期汇总
+		if a.dedupStatsReporter != nil && a.dedupStatsReporter.ShouldReport() {
+			report := a.dedupStatsReporter.GetReport()
+			_ = report // 通过零 token 通道推送
 		}
-	}
 
-	// OPT-121~125: 权重计算 / 驱逐 / 冗余检查 / 命中分析 / 边界检测
-	if a.cacheHitAnalyzer != nil && usage != nil {
-		if usage.CacheHitTokens > 0 {
-			a.cacheHitAnalyzer.RecordHit("prompt")
-		} else {
-			a.cacheHitAnalyzer.RecordMiss("prompt")
+		// OPT-73: 上下文衰减管理 — 老化消息
+		if a.contextDecayManager != nil {
+			a.contextDecayManager.AgeMessages(step + 1)
 		}
-	}
 
-	// OPT-126~130: 预测 / 新鲜度 / 预热 / 模板 / 预算协商
-	if a.tokenUsageForecaster != nil && usage != nil {
-		a.tokenUsageForecaster.RecordUsage(usage.TotalTokens)
-		forecasts := a.tokenUsageForecaster.Forecast(3)
-		if len(forecasts) > 0 && forecasts[0] > 0 {
-			a.tokenUsageForecaster.EvaluateForecast(usage.TotalTokens)
+		// OPT-75: Token 效率评分 — 每轮评分
+		if a.tokenEfficiencyScorer != nil && usage != nil {
+			a.tokenEfficiencyScorer.ScoreEfficiency(
+				usage.PromptTokens,
+				usage.CompletionTokens,
+				usage.CacheHitTokens,
+				usage.CacheMissTokens,
+				func() int {
+					if calls != nil {
+						return len(calls)
+					}
+					return 0
+				}(),
+			)
 		}
-	}
-	if a.contextFreshnessTracker != nil {
-		a.contextFreshnessTracker.UpdateTurn(step + 1)
-	}
 
-	// OPT-131~135: 效率评分 / 修剪 / 话题追踪 / 成本投影 / 组装优化
-	if a.conversationTopicTracker != nil {
-		snap := a.session.Snapshot()
-		if len(snap) > 0 {
-			a.conversationTopicTracker.UpdateTopic(snap[len(snap)-1].Content)
+		// OPT-76: 语义相似度去重 — 检查重复内容
+		if a.semanticDedup != nil && step == 0 && input != "" {
+			isDup, _ := a.semanticDedup.CheckSimilarity(input)
+			if isDup {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "semantically similar query detected"})
+			}
+			a.semanticDedup.RecordContent(input, "")
 		}
-	}
-	if a.tokenCostProjector != nil && usage != nil {
-		a.tokenCostProjector.RecordActual(usage.TotalTokens)
-	}
 
-	// OPT-136~140: 过期检测 / 批处理 / 流分析 / 膨胀检测 / 哈希
-	if a.cacheStalenessDetector != nil && step > 0 {
-		stale := a.cacheStalenessDetector.GetStaleEntries(step)
-		if len(stale) > 0 {
-			a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache staleness: detected stale entries"})
+		// OPT-80: 对话压缩摘要 — 定期生成历史摘要
+		if a.compactSummary != nil && step > 0 && step%5 == 0 {
+			msgs := a.session.Snapshot()
+			a.compactSummary.Summarize(msgs, step+1)
 		}
-	}
 
-	// OPT-141~145: 分组 / 优先级队列 / 节省计算 / 准入控制 / 窗口校准
-	if a.tokenSavingsCalculator != nil && usage != nil && usage.CacheHitTokens > 0 {
-		a.tokenSavingsCalculator.RecordSavings("cache_hit", usage.PromptTokens, usage.CacheHitTokens)
-	}
-	if a.contextWindowCalibrator != nil && usage != nil {
-		hitRate := 0.0
-		if usage.PromptTokens > 0 {
-			hitRate = float64(usage.CacheHitTokens) / float64(usage.PromptTokens)
+		// OPT-83: 多信号压缩触发器 V2 — 评估多信号
+		if a.compactionTriggerV2 != nil && usage != nil {
+			decision := a.compactionTriggerV2.Evaluate(usage.PromptTokens, a.contextWindow, len(a.session.Snapshot()), 0, 0)
+			if decision.ShouldCompact && decision.Priority == "high" {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "multi-signal compaction triggered: " + decision.Reason})
+			}
 		}
-		a.contextWindowCalibrator.RecordPerformance(hitRate, 0.5)
-	}
 
-	// OPT-146~150: 分发 / 填充预测 / 片段组装 / 合并 / 利用率追踪
-	if a.cacheUtilizationTracker != nil && usage != nil {
-		if usage.CacheHitTokens > 0 {
-			a.cacheUtilizationTracker.RecordInsert()
+		// OPT-85: Token 用量预测器 — 记录并预测
+		if a.tokenUsagePredictor != nil && usage != nil {
+			a.tokenUsagePredictor.RecordUsage(step+1, usage.TotalTokens)
+			predicted := a.tokenUsagePredictor.PredictNextTurn(step+1, usage.TotalTokens)
+			_ = predicted
 		}
-	}
 
-	// OPT-151~155: 分割 / 一致性验证 / 相关性评分 / 预算分配 / 压缩缓存
-	if a.cacheCoherenceValidator != nil && usage != nil {
-		a.cacheCoherenceValidator.Validate("usage", int64(usage.TotalTokens))
-		a.cacheCoherenceValidator.Update("usage", int64(usage.TotalTokens))
-	}
-	if a.promptCompressionCache != nil && usage != nil && usage.PromptTokens > 0 {
-		_, _ = a.promptCompressionCache.Get("prompt")
-	}
-
-	// OPT-156~160: 分片 / 预热策略 / 修剪 / 限流 / 分段索引
-	if a.tokenAwareThrottler != nil && usage != nil {
-		if !a.tokenAwareThrottler.Allow(usage.TotalTokens) {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token throttle triggered"})
+		// OPT-87: Token 成本分析 — 记录用量分析成本
+		if a.tokenCostAnalyzer != nil && usage != nil {
+			a.tokenCostAnalyzer.RecordUsage(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens)
 		}
-	}
-	if a.cacheWarmingStrategy != nil && usage != nil && usage.PromptTokens > 0 {
-		a.cacheWarmingStrategy.RecordAccess("prompt")
-	}
 
-	// OPT-161~165: 优先级 / 预取 / 窗口监控 / 去重 / 组装优化
-	if a.contextWindowMonitor != nil && usage != nil {
-		a.contextWindowMonitor.Record(usage.TotalTokens)
-	}
-	if a.cachePrefetchScheduler != nil && usage != nil && usage.PromptTokens > 0 {
-		a.cachePrefetchScheduler.Schedule("next_prompt", 1, usage.PromptTokens)
-	}
-
-	// OPT-166~170: 聚合 / 合并 / 路由 / 预热
-	if a.tokenAwareRouter != nil && usage != nil {
-		a.tokenAwareRouter.Route(usage.TotalTokens)
-	}
-	if a.tokenAwareAggregator != nil && usage != nil {
-		a.tokenAwareAggregator.Add(AggregationItem{ID: "usage", Content: "token_usage", EstimatedTokens: usage.TotalTokens})
-	}
-
-	// OPT-171~175: 缓冲 / 版本 / 溢出 / 压缩 / 计算
-	if a.promptTokenCalculator != nil && usage != nil {
-		a.promptTokenCalculator.Calculate("usage", "token report")
-	}
-	if a.tokenAwareBuffer != nil && usage != nil {
-		a.tokenAwareBuffer.Write("token usage data")
-	}
-
-	// OPT-176~180: 序列化 / 压力缓解 / 快照冻结 / 验证 / 冗余消除
-	if a.tokenAwareValidator != nil && usage != nil {
-		a.tokenAwareValidator.Validate(usage.TotalTokens)
-	}
-	if a.cachePressureReliever != nil && usage != nil {
-		a.cachePressureReliever.RecordInsert()
-	}
-
-	// OPT-181~185: 调度V2 / 命中预测V2 / 衰减V2 / 守门 / 桥接
-	if a.tokenAwareGatekeeper != nil && usage != nil {
-		if !a.tokenAwareGatekeeper.Allow(usage.TotalTokens) {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token gatekeeper blocked request"})
+		// OPT-89: 上下文一致性检查 — 压缩后检查连贯性
+		if a.contextCoherenceChecker != nil && step > 0 && step%3 == 0 {
+			msgs := a.session.Snapshot()
+			report := a.contextCoherenceChecker.CheckCoherence(msgs)
+			if !report.IsCoherent {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "context coherence issue detected after compaction"})
+			}
 		}
-	}
-	if a.cacheHitPredictorV2 != nil && usage != nil {
-		a.cacheHitPredictorV2.RecordHit("usage", usage.CacheHitTokens > 0)
-	}
-	if a.contextDecayManagerV2 != nil {
-		a.contextDecayManagerV2.Tick()
-	}
 
-	// OPT-186~190: 流水线 / 预热优化 / 边界 / 负载均衡 / 分段缓存V3
-	if a.tokenAwareLoadBalancer != nil && usage != nil {
-		a.tokenAwareLoadBalancer.Distribute(usage.TotalTokens)
-	}
-	if a.promptSegmentCacheV3 != nil && usage != nil && usage.PromptTokens > 0 {
-		a.promptSegmentCacheV3.Get("prompt")
-	}
-
-	// OPT-191~195: 配额 / 新鲜度 / 相似度 / 速率限制 / 驱逐策略
-	if a.tokenAwareRateLimiter != nil && usage != nil {
-		a.tokenAwareRateLimiter.TryAcquire(usage.TotalTokens, 1)
-	}
-	if a.cacheFreshnessGuarantor != nil {
-		a.cacheFreshnessGuarantor.Put("usage")
-	}
-
-	// OPT-196~200: 准入 / 一致性 / 窗口预测 / 熔断 / 分配
-	if a.tokenAwareAdmissionController != nil {
-		a.tokenAwareAdmissionController.TryAdmit()
-	}
-	if a.contextWindowPredictorV2 != nil && usage != nil {
-		a.contextWindowPredictorV2.Record(usage.TotalTokens)
-	}
-	if a.tokenAwareCircuitBreaker != nil {
-		a.tokenAwareCircuitBreaker.RecordSuccess()
-	}
-
-	// OPT-201~205: 背压 / 失效策略 / 修剪策略 / 限流V2 / 重新验证
-	if a.tokenAwareThrottleV2 != nil && usage != nil {
-		a.tokenAwareThrottleV2.TryConsume(usage.TotalTokens, 1)
-	}
-	if a.tokenAwareBackpressure != nil && usage != nil {
-		a.tokenAwareBackpressure.CheckRate(usage.TotalTokens)
-	}
-	if a.promptCacheRevalidator != nil {
-		a.promptCacheRevalidator.Register("usage")
-	}
-
-	// OPT-206~210: 资源池 / 失效批处理 / 保真度 / 并发限制 / 预热调度
-	if a.tokenAwareConcurrencyLimiter != nil && usage != nil {
-		a.tokenAwareConcurrencyLimiter.Acquire(usage.TotalTokens)
-	}
-	if a.cacheInvalidationBatcher != nil && usage != nil {
-		a.cacheInvalidationBatcher.Add("usage")
-	}
-
-	// OPT-211~215: 优先级队列V3 / 级联失效 / 预算分配 / 分区 / 命中分析
-	if a.tokenAwarePartitioner != nil && usage != nil {
-		a.tokenAwarePartitioner.Partition("usage", usage.TotalTokens)
-	}
-	if a.promptCacheHitAnalyzer != nil && usage != nil {
-		a.promptCacheHitAnalyzer.RecordHit("usage", usage.CacheHitTokens > 0)
-	}
-
-	// OPT-216~220: 分片 / 失效调度 / 密度 / 重试 / 优化顾问
-	if a.tokenAwareShardManager != nil && usage != nil {
-		a.tokenAwareShardManager.Assign("usage")
-	}
-	if a.contextDensityAnalyzer != nil && usage != nil {
-		a.contextDensityAnalyzer.Analyze("usage")
-	}
-
-	// OPT-221~225: 加权轮询 / 传播 / 评分V2 / 公平调度 / 键优化
-	if a.cacheInvalidationPropagator != nil && usage != nil {
-		a.cacheInvalidationPropagator.Propagate("usage")
-	}
-	if a.promptCacheKeyOptimizer != nil && usage != nil {
-		a.promptCacheKeyOptimizer.Optimize("usage")
-	}
-
-	// OPT-226~230: 槽位 / 去重 / 热力压缩 / 降级 / 生命周期
-	if a.tokenAwareDegradationManager != nil && usage != nil {
-		a.tokenAwareDegradationManager.Check(usage.TotalTokens)
-	}
-	if a.cacheInvalidationDeduplicator != nil {
-		a.cacheInvalidationDeduplicator.Check("usage")
-	}
-
-	// OPT-231~235: 溢出 / 追踪V2 / 校准V3 / 泄漏 / 温度
-	if a.tokenAwareLeakDetector != nil && usage != nil {
-		a.tokenAwareLeakDetector.SetBaseline("usage", usage.TotalTokens)
-	}
-	if a.promptCacheWarmthTracker != nil {
-		a.promptCacheWarmthTracker.Warm("usage")
-	}
-
-	// OPT-236~240: 压力阀 / 聚合 / 快照 / 瓶颈 / 效率
-	if a.tokenAwarePressureValve != nil && usage != nil {
-		a.tokenAwarePressureValve.AddPressure(usage.TotalTokens)
-	}
-	if a.promptCacheEfficiencyMonitor != nil && usage != nil {
-		a.promptCacheEfficiencyMonitor.RecordRequest(usage.CacheHitTokens, usage.TotalTokens, usage.CacheHitTokens > 0)
-	}
-
-	// OPT-241~245: 溢洪道 / 优先级队列 / 驱逐 / 饱和度 / 压力指数
-	if a.tokenAwareSaturationMonitor != nil && usage != nil {
-		a.tokenAwareSaturationMonitor.Record(usage.TotalTokens)
-	}
-	if a.promptCachePressureIndex != nil && usage != nil {
-		hr := 0.0
-		if usage.TotalTokens > 0 {
-			hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
+		// OPT-98: 对话级 token 预算 — 追踪预算消耗
+		if a.conversationTokenBudget != nil && usage != nil {
+			a.conversationTokenBudget.Allocate(step+1, usage.TotalTokens)
+			if a.conversationTokenBudget.ShouldEndConversation() {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "conversation token budget nearly exhausted"})
+			}
 		}
-		a.promptCachePressureIndex.Update(hr, 1.0-hr, 0.0)
-	}
 
-	// OPT-246~250: 配额 / 波 / 热力调节 / 回路 / 自适应
-	if a.promptCacheAdaptiveController != nil && usage != nil {
-		hr := 0.0
-		if usage.TotalTokens > 0 {
-			hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
+		// OPT-100: 统一 token 编排器 — 综合编排优化
+		if a.unifiedTokenOrchestrator != nil && usage != nil {
+			ctx := OrchestrationContext{
+				PromptTokens:     usage.PromptTokens,
+				CompletionTokens: usage.CompletionTokens,
+				CacheHitTokens:   usage.CacheHitTokens,
+				CacheMissTokens:  usage.CacheMissTokens,
+				MessageCount:     len(a.session.Snapshot()),
+				Turn:             step + 1,
+				ContextWindow:    a.contextWindow,
+			}
+			result := a.unifiedTokenOrchestrator.Orchestrate(ctx)
+			if result.Priority == "high" && len(result.RecommendedActions) > 0 {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "orchestrator: " + result.RecommendedActions[0]})
+			}
 		}
-		a.promptCacheAdaptiveController.RecordPerformance(hr)
-	}
-	if a.tokenAwareCircuitMonitor != nil {
-		a.tokenAwareCircuitMonitor.Check("main")
-	}
 
-	// OPT-251~255: 节流 / 批处理 / 稳定 / 背压 / 预测V2
-	if a.tokenAwareThrottleController != nil {
-		a.tokenAwareThrottleController.Allow()
-	}
-	if a.contextWindowStabilizer != nil && usage != nil {
-		a.contextWindowStabilizer.Record(usage.TotalTokens)
-	}
-	if a.tokenAwareBackpressureRelay != nil && usage != nil {
-		a.tokenAwareBackpressureRelay.Relay(usage.TotalTokens)
-	}
+		// OPT-101~105: 流式压缩 / 自适应窗口 / Prompt分析 / 缓存压力 / 流量调节
+		if a.tokenFlowRegulator != nil && usage != nil {
+			if !a.tokenFlowRegulator.Consume(usage.TotalTokens) {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token flow rate limit exceeded, regulating"})
+			}
+		}
+		if a.cachePressureMonitor != nil {
+			a.cachePressureMonitor.RecordInsert()
+			if a.cachePressureMonitor.ShouldEvict() {
+				a.cachePressureMonitor.RecordEviction()
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache pressure high, evicting stale entries"})
+			}
+		}
+		if a.promptTokenAnalyzer != nil && step == 0 {
+			snap := a.session.Snapshot()
+			if len(snap) > 0 {
+				a.promptTokenAnalyzer.Analyze(snap[0].Content)
+			}
+		}
+		if a.adaptiveContextSelector != nil && step == 0 {
+			snap := a.session.Snapshot()
+			if len(snap) > 0 {
+				complexity := a.adaptiveContextSelector.AnalyzeQueryComplexity(snap[0].Content)
+				a.adaptiveContextSelector.SelectWindow(complexity)
+			}
+		}
 
-	if usage != nil && usage.TotalTokens > 0 {
+		// OPT-106~110: 语义缓存路由 / 调度 / 快照 / 浪费检测 / 批处理
+		if a.tokenWasteDetector != nil && step > 0 && step%5 == 0 {
+			snap := a.session.Snapshot()
+			msgs := make([]string, len(snap))
+			for i, m := range snap {
+				msgs[i] = m.Content
+			}
+			a.tokenWasteDetector.Detect(msgs)
+		}
+		if a.contextSnapshotManager != nil && step > 0 && step%3 == 0 {
+			a.contextSnapshotManager.TakeSnapshot(step, a.session.Snapshot())
+		}
+
+		// OPT-111~115: 差异压缩 / 预算预测 / 缓存键 / 响应长度 / 优先级排序
+		if a.tokenBudgetPredictor != nil && usage != nil {
+			a.tokenBudgetPredictor.RecordUsage(usage.TotalTokens)
+			pred := a.tokenBudgetPredictor.PredictNext()
+			a.tokenBudgetPredictor.RecordAccuracy(usage.TotalTokens)
+			if pred > 0 && usage.TotalTokens > pred*2 {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "token usage exceeded prediction by 2x"})
+			}
+		}
+
+		// OPT-116~120: 深度分析 / 效率监控 / 生命周期 / 片段缓存 / 感知压缩
+		if a.tokenEfficiencyMonitor != nil && usage != nil {
+			a.tokenEfficiencyMonitor.RecordPoint(usage.PromptTokens, usage.CompletionTokens, usage.CacheHitTokens, 0)
+		}
+		if a.cacheLifecycleManager != nil && step > 0 {
+			evicted := a.cacheLifecycleManager.EvictExpired(step)
+			if evicted > 0 {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache lifecycle: evicted expired entries"})
+			}
+		}
+
+		// OPT-121~125: 权重计算 / 驱逐 / 冗余检查 / 命中分析 / 边界检测
+		if a.cacheHitAnalyzer != nil && usage != nil {
+			if usage.CacheHitTokens > 0 {
+				a.cacheHitAnalyzer.RecordHit("prompt")
+			} else {
+				a.cacheHitAnalyzer.RecordMiss("prompt")
+			}
+		}
+
+		// OPT-126~130: 预测 / 新鲜度 / 预热 / 模板 / 预算协商
+		if a.tokenUsageForecaster != nil && usage != nil {
+			a.tokenUsageForecaster.RecordUsage(usage.TotalTokens)
+			forecasts := a.tokenUsageForecaster.Forecast(3)
+			if len(forecasts) > 0 && forecasts[0] > 0 {
+				a.tokenUsageForecaster.EvaluateForecast(usage.TotalTokens)
+			}
+		}
+		if a.contextFreshnessTracker != nil {
+			a.contextFreshnessTracker.UpdateTurn(step + 1)
+		}
+
+		// OPT-131~135: 效率评分 / 修剪 / 话题追踪 / 成本投影 / 组装优化
+		if a.conversationTopicTracker != nil {
+			snap := a.session.Snapshot()
+			if len(snap) > 0 {
+				a.conversationTopicTracker.UpdateTopic(snap[len(snap)-1].Content)
+			}
+		}
+		if a.tokenCostProjector != nil && usage != nil {
+			a.tokenCostProjector.RecordActual(usage.TotalTokens)
+		}
+
+		// OPT-136~140: 过期检测 / 批处理 / 流分析 / 膨胀检测 / 哈希
+		if a.cacheStalenessDetector != nil && step > 0 {
+			stale := a.cacheStalenessDetector.GetStaleEntries(step)
+			if len(stale) > 0 {
+				a.sink.Emit(event.Event{Kind: event.Notice, Text: "cache staleness: detected stale entries"})
+			}
+		}
+
+		// OPT-141~145: 分组 / 优先级队列 / 节省计算 / 准入控制 / 窗口校准
+		if a.tokenSavingsCalculator != nil && usage != nil && usage.CacheHitTokens > 0 {
+			a.tokenSavingsCalculator.RecordSavings("cache_hit", usage.PromptTokens, usage.CacheHitTokens)
+		}
+		if a.contextWindowCalibrator != nil && usage != nil {
+			hitRate := 0.0
+			if usage.PromptTokens > 0 {
+				hitRate = float64(usage.CacheHitTokens) / float64(usage.PromptTokens)
+			}
+			a.contextWindowCalibrator.RecordPerformance(hitRate, 0.5)
+		}
+
+		// OPT-146~150: 分发 / 填充预测 / 片段组装 / 合并 / 利用率追踪
+		if a.cacheUtilizationTracker != nil && usage != nil {
+			if usage.CacheHitTokens > 0 {
+				a.cacheUtilizationTracker.RecordInsert()
+			}
+		}
+
+		// OPT-151~155: 分割 / 一致性验证 / 相关性评分 / 预算分配 / 压缩缓存
+		if a.cacheCoherenceValidator != nil && usage != nil {
+			a.cacheCoherenceValidator.Validate("usage", int64(usage.TotalTokens))
+			a.cacheCoherenceValidator.Update("usage", int64(usage.TotalTokens))
+		}
+		if a.promptCompressionCache != nil && usage != nil && usage.PromptTokens > 0 {
+			_, _ = a.promptCompressionCache.Get("prompt")
+		}
+
+		// OPT-156~160: 分片 / 预热策略 / 修剪 / 限流 / 分段索引
+		if a.tokenAwareThrottler != nil && usage != nil {
+			if !a.tokenAwareThrottler.Allow(usage.TotalTokens) {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token throttle triggered"})
+			}
+		}
+		if a.cacheWarmingStrategy != nil && usage != nil && usage.PromptTokens > 0 {
+			a.cacheWarmingStrategy.RecordAccess("prompt")
+		}
+
+		// OPT-161~165: 优先级 / 预取 / 窗口监控 / 去重 / 组装优化
+		if a.contextWindowMonitor != nil && usage != nil {
+			a.contextWindowMonitor.Record(usage.TotalTokens)
+		}
+		if a.cachePrefetchScheduler != nil && usage != nil && usage.PromptTokens > 0 {
+			a.cachePrefetchScheduler.Schedule("next_prompt", 1, usage.PromptTokens)
+		}
+
+		// OPT-166~170: 聚合 / 合并 / 路由 / 预热
+		if a.tokenAwareRouter != nil && usage != nil {
+			a.tokenAwareRouter.Route(usage.TotalTokens)
+		}
+		if a.tokenAwareAggregator != nil && usage != nil {
+			a.tokenAwareAggregator.Add(AggregationItem{ID: "usage", Content: "token_usage", EstimatedTokens: usage.TotalTokens})
+		}
+
+		// OPT-171~175: 缓冲 / 版本 / 溢出 / 压缩 / 计算
+		if a.promptTokenCalculator != nil && usage != nil {
+			a.promptTokenCalculator.Calculate("usage", "token report")
+		}
+		if a.tokenAwareBuffer != nil && usage != nil {
+			a.tokenAwareBuffer.Write("token usage data")
+		}
+
+		// OPT-176~180: 序列化 / 压力缓解 / 快照冻结 / 验证 / 冗余消除
+		if a.tokenAwareValidator != nil && usage != nil {
+			a.tokenAwareValidator.Validate(usage.TotalTokens)
+		}
+		if a.cachePressureReliever != nil && usage != nil {
+			a.cachePressureReliever.RecordInsert()
+		}
+
+		// OPT-181~185: 调度V2 / 命中预测V2 / 衰减V2 / 守门 / 桥接
+		if a.tokenAwareGatekeeper != nil && usage != nil {
+			if !a.tokenAwareGatekeeper.Allow(usage.TotalTokens) {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "token gatekeeper blocked request"})
+			}
+		}
+		if a.cacheHitPredictorV2 != nil && usage != nil {
+			a.cacheHitPredictorV2.RecordHit("usage", usage.CacheHitTokens > 0)
+		}
+		if a.contextDecayManagerV2 != nil {
+			a.contextDecayManagerV2.Tick()
+		}
+
+		// OPT-186~190: 流水线 / 预热优化 / 边界 / 负载均衡 / 分段缓存V3
+		if a.tokenAwareLoadBalancer != nil && usage != nil {
+			a.tokenAwareLoadBalancer.Distribute(usage.TotalTokens)
+		}
+		if a.promptSegmentCacheV3 != nil && usage != nil && usage.PromptTokens > 0 {
+			a.promptSegmentCacheV3.Get("prompt")
+		}
+
+		// OPT-191~195: 配额 / 新鲜度 / 相似度 / 速率限制 / 驱逐策略
+		if a.tokenAwareRateLimiter != nil && usage != nil {
+			a.tokenAwareRateLimiter.TryAcquire(usage.TotalTokens, 1)
+		}
+		if a.cacheFreshnessGuarantor != nil {
+			a.cacheFreshnessGuarantor.Put("usage")
+		}
+
+		// OPT-196~200: 准入 / 一致性 / 窗口预测 / 熔断 / 分配
+		if a.tokenAwareAdmissionController != nil {
+			a.tokenAwareAdmissionController.TryAdmit()
+		}
+		if a.contextWindowPredictorV2 != nil && usage != nil {
+			a.contextWindowPredictorV2.Record(usage.TotalTokens)
+		}
+		if a.tokenAwareCircuitBreaker != nil {
+			a.tokenAwareCircuitBreaker.RecordSuccess()
+		}
+
+		// OPT-201~205: 背压 / 失效策略 / 修剪策略 / 限流V2 / 重新验证
+		if a.tokenAwareThrottleV2 != nil && usage != nil {
+			a.tokenAwareThrottleV2.TryConsume(usage.TotalTokens, 1)
+		}
+		if a.tokenAwareBackpressure != nil && usage != nil {
+			a.tokenAwareBackpressure.CheckRate(usage.TotalTokens)
+		}
+		if a.promptCacheRevalidator != nil {
+			a.promptCacheRevalidator.Register("usage")
+		}
+
+		// OPT-206~210: 资源池 / 失效批处理 / 保真度 / 并发限制 / 预热调度
+		if a.tokenAwareConcurrencyLimiter != nil && usage != nil {
+			a.tokenAwareConcurrencyLimiter.Acquire(usage.TotalTokens)
+		}
+		if a.cacheInvalidationBatcher != nil && usage != nil {
+			a.cacheInvalidationBatcher.Add("usage")
+		}
+
+		// OPT-211~215: 优先级队列V3 / 级联失效 / 预算分配 / 分区 / 命中分析
+		if a.tokenAwarePartitioner != nil && usage != nil {
+			a.tokenAwarePartitioner.Partition("usage", usage.TotalTokens)
+		}
+		if a.promptCacheHitAnalyzer != nil && usage != nil {
+			a.promptCacheHitAnalyzer.RecordHit("usage", usage.CacheHitTokens > 0)
+		}
+
+		// OPT-216~220: 分片 / 失效调度 / 密度 / 重试 / 优化顾问
+		if a.tokenAwareShardManager != nil && usage != nil {
+			a.tokenAwareShardManager.Assign("usage")
+		}
+		if a.contextDensityAnalyzer != nil && usage != nil {
+			a.contextDensityAnalyzer.Analyze("usage")
+		}
+
+		// OPT-221~225: 加权轮询 / 传播 / 评分V2 / 公平调度 / 键优化
+		if a.cacheInvalidationPropagator != nil && usage != nil {
+			a.cacheInvalidationPropagator.Propagate("usage")
+		}
+		if a.promptCacheKeyOptimizer != nil && usage != nil {
+			a.promptCacheKeyOptimizer.Optimize("usage")
+		}
+
+		// OPT-226~230: 槽位 / 去重 / 热力压缩 / 降级 / 生命周期
+		if a.tokenAwareDegradationManager != nil && usage != nil {
+			a.tokenAwareDegradationManager.Check(usage.TotalTokens)
+		}
+		if a.cacheInvalidationDeduplicator != nil {
+			a.cacheInvalidationDeduplicator.Check("usage")
+		}
+
+		// OPT-231~235: 溢出 / 追踪V2 / 校准V3 / 泄漏 / 温度
+		if a.tokenAwareLeakDetector != nil && usage != nil {
+			a.tokenAwareLeakDetector.SetBaseline("usage", usage.TotalTokens)
+		}
+		if a.promptCacheWarmthTracker != nil {
+			a.promptCacheWarmthTracker.Warm("usage")
+		}
+
+		// OPT-236~240: 压力阀 / 聚合 / 快照 / 瓶颈 / 效率
+		if a.tokenAwarePressureValve != nil && usage != nil {
+			a.tokenAwarePressureValve.AddPressure(usage.TotalTokens)
+		}
+		if a.promptCacheEfficiencyMonitor != nil && usage != nil {
+			a.promptCacheEfficiencyMonitor.RecordRequest(usage.CacheHitTokens, usage.TotalTokens, usage.CacheHitTokens > 0)
+		}
+
+		// OPT-241~245: 溢洪道 / 优先级队列 / 驱逐 / 饱和度 / 压力指数
+		if a.tokenAwareSaturationMonitor != nil && usage != nil {
+			a.tokenAwareSaturationMonitor.Record(usage.TotalTokens)
+		}
+		if a.promptCachePressureIndex != nil && usage != nil {
+			hr := 0.0
+			if usage.TotalTokens > 0 {
+				hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
+			}
+			a.promptCachePressureIndex.Update(hr, 1.0-hr, 0.0)
+		}
+
+		// OPT-246~250: 配额 / 波 / 热力调节 / 回路 / 自适应
+		if a.promptCacheAdaptiveController != nil && usage != nil {
+			hr := 0.0
+			if usage.TotalTokens > 0 {
+				hr = float64(usage.CacheHitTokens) / float64(usage.TotalTokens)
+			}
+			a.promptCacheAdaptiveController.RecordPerformance(hr)
+		}
+		if a.tokenAwareCircuitMonitor != nil {
+			a.tokenAwareCircuitMonitor.Check("main")
+		}
+
+		// OPT-251~255: 节流 / 批处理 / 稳定 / 背压 / 预测V2
+		if a.tokenAwareThrottleController != nil {
+			a.tokenAwareThrottleController.Allow()
+		}
+		if a.contextWindowStabilizer != nil && usage != nil {
+			a.contextWindowStabilizer.Record(usage.TotalTokens)
+		}
+		if a.tokenAwareBackpressureRelay != nil && usage != nil {
+			a.tokenAwareBackpressureRelay.Relay(usage.TotalTokens)
+		}
+
+		if usage != nil && usage.TotalTokens > 0 {
 			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
 				UsageSource:      a.usageSource,
 				CacheDiagnostics: &cacheDiagnostics,

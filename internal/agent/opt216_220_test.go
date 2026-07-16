@@ -196,7 +196,7 @@ func TestTASM_Reset(t *testing.T) {
 
 // TestCISched_ScheduleExecute_Expired 验证 Schedule + Execute 对到期任务执行失效。
 func TestCISched_ScheduleExecute_Expired(t *testing.T) {
-	sched := NewCacheInvalidationScheduler(100)
+	sched := NewCacheInvalidationScheduler()
 	sched.Schedule("key1", 100)
 	sched.Schedule("key2", 200)
 	sched.Schedule("key3", 300)
@@ -221,7 +221,7 @@ func TestCISched_ScheduleExecute_Expired(t *testing.T) {
 
 // TestCISched_Execute_NotExpired 验证未到期的任务不被执行。
 func TestCISched_Execute_NotExpired(t *testing.T) {
-	sched := NewCacheInvalidationScheduler(100)
+	sched := NewCacheInvalidationScheduler()
 	sched.Schedule("future-key", 1000)
 
 	expired := sched.Execute(500)
@@ -237,7 +237,7 @@ func TestCISched_Execute_NotExpired(t *testing.T) {
 
 // TestCISched_Cancel 验证 Cancel 取消待执行任务。
 func TestCISched_Cancel(t *testing.T) {
-	sched := NewCacheInvalidationScheduler(100)
+	sched := NewCacheInvalidationScheduler()
 	sched.Schedule("cancel-me", 500)
 
 	ok := sched.Cancel("cancel-me")
@@ -258,7 +258,7 @@ func TestCISched_Cancel(t *testing.T) {
 
 // TestCISched_GetPendingCount 验证 GetPendingCount 返回正确的待执行任务数量。
 func TestCISched_GetPendingCount(t *testing.T) {
-	sched := NewCacheInvalidationScheduler(100)
+	sched := NewCacheInvalidationScheduler()
 	sched.Schedule("k1", 100)
 	sched.Schedule("k2", 200)
 	sched.Schedule("k3", 300)
@@ -275,7 +275,7 @@ func TestCISched_GetPendingCount(t *testing.T) {
 
 // TestCISched_Stats_ExecutedCount 验证 Stats 中的 executedCount 正确。
 func TestCISched_Stats_ExecutedCount(t *testing.T) {
-	sched := NewCacheInvalidationScheduler(100)
+	sched := NewCacheInvalidationScheduler()
 	sched.Schedule("a", 100)
 	sched.Schedule("b", 200)
 	sched.Schedule("c", 300)
@@ -302,7 +302,7 @@ func TestCISched_Stats_ExecutedCount(t *testing.T) {
 
 // TestCISched_Reset 验证 Reset 清空所有任务与计数。
 func TestCISched_Reset(t *testing.T) {
-	sched := NewCacheInvalidationScheduler(100)
+	sched := NewCacheInvalidationScheduler()
 	sched.Schedule("a", 100)
 	sched.Schedule("b", 200)
 	sched.Execute(150) // 执行 a
@@ -322,12 +322,6 @@ func TestCISched_Reset(t *testing.T) {
 	cancelledCount, _ := stats["cancelledCount"].(int)
 	if cancelledCount != 0 {
 		t.Errorf("Reset 后 cancelledCount = %d, 期望 0", cancelledCount)
-	}
-
-	// maxDelay 应保留
-	maxDelay, _ := stats["maxDelay"].(int)
-	if maxDelay != 100 {
-		t.Errorf("Reset 后 maxDelay = %d, 期望 100（应保留配置）", maxDelay)
 	}
 }
 
