@@ -5,6 +5,12 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"reasonix/internal/command"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/provider"
+	"reasonix/internal/skill"
 )
 
 func TestQuickPickerNavigationFilterAndConfirm(t *testing.T) {
@@ -87,5 +93,67 @@ func TestQuickPickerEscCancels(t *testing.T) {
 	p := &quickPicker{items: []quickPickerItem{{ID: "one", Label: "One"}}}
 	if result := p.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc}); !result.cancelled {
 		t.Fatal("Esc should cancel picker")
+	}
+}
+
+// TestQuickPickerModelSwitch verifies that selecting a model from the
+// quickPicker returns a non-nil tea.Cmd that produces a modelSwitchMsg.
+// Regression test for the bug where handleQuickPickerKey set
+// m.pendingModelSwitch but returned nil as the tea.Cmd, causing the async
+// controller build to never execute.
+func TestQuickPickerModelSwitch(t *testing.T) {
+	oldCtrl := control.New(control.Options{Label: "old"})
+	newCtrl := control.New(control.Options{Label: "new-model", Commands: []command.Command{{Name: "cmd"}}, Skills: []skill.Skill{{Name: "sk"}}})
+	m := newChatTUI(oldCtrl, "", make(chan event.Event, 1), 100)
+	m.modelRef = "provider/old-model"
+	m.quickPick = &quickPicker{
+		kind:  quickPickerModel,
+		title: "Select model",
+		items: []quickPickerItem{
+			{ID: "provider/new-model", Label: "provider/new-model"},
+		},
+		selected: 0,
+	}
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
+		return newCtrl, nil
+	}
+
+	// Simulate pressing Enter in the quickPicker
+	next, cmd := m.handleQuickPickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m2 := next.(chatTUI)
+
+	if cmd == nil {
+		t.Fatal("quickPick model switch did not schedule a controller build (cmd is nil)")
+	}
+	if !m2.modelSwitchPending {
+		t.Fatal("quickPick model switch did not set modelSwitchPending")
+	}
+	if m2.pendingModelSwitch == nil {
+		t.Fatal("quickPick model switch did not set pendingModelSwitch")
+	}
+	if m2.ctrl != oldCtrl {
+		t.Fatal("controller changed before the replacement build completed")
+	}
+
+	// Execute the cmd and verify it produces a modelSwitchMsg
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("controller build cmd returned nil message")
+	}
+	swMsg, ok := msg.(modelSwitchMsg)
+	if !ok {
+		t.Fatalf("controller build returned %T, want modelSwitchMsg", msg)
+	}
+	if swMsg.err != nil {
+		t.Fatalf("controller build failed: %v", swMsg.err)
+	}
+	if swMsg.ref != "provider/new-model" {
+		t.Fatalf("modelSwitchMsg ref = %q, want %q", swMsg.ref, "provider/new-model")
+	}
+	if swMsg.ctrl != newCtrl {
+		t.Fatal("modelSwitchMsg did not carry the new controller")
+	}
+	if swMsg.oldCtrl != oldCtrl {
+		t.Fatal("modelSwitchMsg did not carry the old controller")
 	}
 }
