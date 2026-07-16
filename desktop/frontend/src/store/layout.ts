@@ -33,13 +33,11 @@ export const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
 // narrower Windows caption strip (~108px), 252 is enough for icon+label tabs.
 export const CREATION_RIGHT_DOCK_TREE_MIN_WIDTH = 252;
 export const CREATION_RIGHT_DOCK_TREE_DEFAULT_WIDTH = CREATION_RIGHT_DOCK_TREE_MIN_WIDTH;
-export const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 export const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 export const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 export const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 // Creation tree mode may render below the classic 280 floor when the viewport squeezes.
 export const CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH = 236;
-export const RIGHT_DOCK_MAX_WIDTH = 860;
 const WORKSPACE_PANEL_DEFAULT_OPEN = true;
 
 export function clampSidebarWidth(width: number): number {
@@ -54,20 +52,23 @@ function clampStoredSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(CREATION_SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
+// Right-dock preferred widths only enforce a floor. The live layout clamps the
+// rendered width to the remaining viewport (after sidebar + chat min), so a
+// fixed pixel ceiling would artificially stop drags on large monitors.
 export function clampRightDockPreviewWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
+  return Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width));
 }
 
 export function clampRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+  return Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width));
 }
 
 export function clampCreationRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+  return Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width));
 }
 
 function clampStoredRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+  return Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width));
 }
 
 export function defaultSidebarWidth(): number {
