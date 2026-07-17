@@ -834,7 +834,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return "memory tools are already enabled."
 		}
 		memoryToolsAdded = true
-		reg.Add(memory.NewRecallTool(mem.Store))
+		recallPolicy := cfg.MemoryRecallPolicy()
+		reg.Add(memory.NewRecallToolWithOptions(mem.Store, memory.RecallOptions{
+			Diversity:          recallPolicy.Diversity,
+			DiversityWeight:    recallPolicy.DiversityWeight,
+			DuplicateThreshold: recallPolicy.DuplicateThreshold,
+			Staleness:          recallPolicy.Staleness,
+			StalenessHalfLife:  time.Duration(recallPolicy.StalenessHalfLifeDays * float64(24*time.Hour)),
+		}))
 		reg.Add(memory.NewRememberTool(mem.Store))
 		reg.Add(memory.NewForgetTool(mem.Store))
 		return "enabled memory, remember, forget."

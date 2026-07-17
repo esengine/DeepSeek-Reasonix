@@ -1083,6 +1083,52 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
+	// MemoryRecall controls the lightweight post-BM25 ranking layer. It remains
+	// user-global so a cloned repository cannot silently weaken recall quality.
+	MemoryRecall MemoryRecallConfig `toml:"memory_recall"`
+}
+
+// MemoryRecallConfig controls duplicate suppression and freshness influence.
+// Pointer booleans distinguish an omitted setting (enabled by default) from an
+// explicit opt-out while keeping old configuration files compatible.
+type MemoryRecallConfig struct {
+	Diversity             *bool   `toml:"diversity"`
+	DiversityWeight       float64 `toml:"diversity_weight"`
+	DuplicateThreshold    float64 `toml:"duplicate_threshold"`
+	Staleness             *bool   `toml:"staleness"`
+	StalenessHalfLifeDays float64 `toml:"staleness_half_life_days"`
+}
+
+const (
+	DefaultMemoryRecallDiversityWeight       = 0.35
+	DefaultMemoryRecallDuplicateThreshold    = 0.82
+	DefaultMemoryRecallStalenessHalfLifeDays = 365.0
+)
+
+// MemoryRecallPolicy returns normalized user-global recall policy values.
+func (c *Config) MemoryRecallPolicy() MemoryRecallConfig {
+	var policy MemoryRecallConfig
+	if c != nil {
+		policy = c.Agent.MemoryRecall
+	}
+	if policy.Diversity == nil {
+		enabled := true
+		policy.Diversity = &enabled
+	}
+	if policy.Staleness == nil {
+		enabled := true
+		policy.Staleness = &enabled
+	}
+	if policy.DiversityWeight <= 0 || policy.DiversityWeight > 1 {
+		policy.DiversityWeight = DefaultMemoryRecallDiversityWeight
+	}
+	if policy.DuplicateThreshold <= 0 || policy.DuplicateThreshold > 1 {
+		policy.DuplicateThreshold = DefaultMemoryRecallDuplicateThreshold
+	}
+	if policy.StalenessHalfLifeDays <= 0 {
+		policy.StalenessHalfLifeDays = DefaultMemoryRecallStalenessHalfLifeDays
+	}
+	return policy
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's

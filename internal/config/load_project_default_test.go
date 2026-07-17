@@ -182,3 +182,24 @@ api_key_env = "DEEPSEEK_API_KEY"
 		t.Fatalf("IgnoredProjectDefaultModel() = %q, want empty", got)
 	}
 }
+
+func TestLoadForRoot_ProjectCannotOverrideUserMemoryRecallPolicy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	writeProjectDefaultTestConfig(t, home, "config.toml", `[agent]
+memory_recall = { diversity = false, diversity_weight = 0.2, duplicate_threshold = 0.7, staleness = false, staleness_half_life_days = 90 }
+`)
+	project := t.TempDir()
+	writeProjectDefaultTestConfig(t, project, "reasonix.toml", `[agent]
+memory_recall = { diversity = true, diversity_weight = 0.9, duplicate_threshold = 0.95, staleness = true, staleness_half_life_days = 1 }
+`)
+	cfg, err := LoadForRoot(project)
+	if err != nil {
+		t.Fatalf("LoadForRoot: %v", err)
+	}
+	policy := cfg.MemoryRecallPolicy()
+	if *policy.Diversity || *policy.Staleness || policy.DiversityWeight != 0.2 ||
+		policy.DuplicateThreshold != 0.7 || policy.StalenessHalfLifeDays != 90 {
+		t.Fatalf("project changed user-global memory recall policy: %+v", policy)
+	}
+}

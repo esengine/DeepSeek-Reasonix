@@ -129,6 +129,9 @@ func (m *memoryManager) saveMemory(fact memory.Memory) (string, error) {
 	if mem == nil {
 		return "", nil
 	}
+	if strings.TrimSpace(fact.SourceKind) == "" {
+		fact.SourceKind = "user_confirmed"
+	}
 	path, err := mem.Store.Save(fact)
 	if err != nil {
 		return "", err
