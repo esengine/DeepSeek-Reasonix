@@ -1502,14 +1502,24 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 				continue
 			}
 			if !hasVisibleFinalAnswer(text) {
-				emptyFinalBlocks++
-				if emptyFinalBlocks >= maxEmptyFinalBlocks {
-					return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
+				// DeepSeek thinking mode frequently streams a long reasoning_content
+				// and then finishes with finish_reason="stop" but an empty content
+				// block: the model has explicitly signalled completion and its
+				// reasoning was already streamed to the user. Retrying here overrides
+				// that stop signal and forces another expensive thinking round (the
+				// "still thinking after the task is done" symptom), so honour the
+				// stop when reasoning carried the substance of the answer and treat
+				// the turn as a final answer instead of retrying.
+				if !reasoningOnlyFinishHonoured(usage, reasoning) {
+					emptyFinalBlocks++
+					if emptyFinalBlocks >= maxEmptyFinalBlocks {
+						return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
+					}
+					a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
+					a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
+					a.maybeCompact(ctx, usage)
+					continue
 				}
-				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
-				a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
-				a.maybeCompact(ctx, usage)
-				continue
 			}
 			if executorHandoff && !usedAnyTool && handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(input, text) {
 				handoffNudges++
@@ -2420,6 +2430,19 @@ Use your available tools now to carry out the task. If carrying out the planner'
 
 func hasVisibleFinalAnswer(text string) bool {
 	return strings.TrimSpace(text) != ""
+}
+
+// reasoningOnlyFinishHonoured reports whether the model finished with a stop
+// signal but placed its answer in the reasoning stream rather than the content
+// block. DeepSeek thinking mode does this routinely: it streams a long
+// reasoning_content, then returns finish_reason="stop" with an empty content.
+// The model has signalled completion, so the host accepts the turn instead of
+// retrying and forcing another expensive thinking round.
+func reasoningOnlyFinishHonoured(u *provider.Usage, reasoning string) bool {
+	if u == nil || u.FinishReason != "stop" {
+		return false
+	}
+	return strings.TrimSpace(reasoning) != ""
 }
 
 func emptyFinalRetryMessage() string {

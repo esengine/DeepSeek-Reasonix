@@ -97,6 +97,35 @@ func lastAssistantContent(s *Session) string {
 	return out
 }
 
+func TestRunAcceptsReasoningOnlyFinalWhenModelStopped(t *testing.T) {
+	// DeepSeek thinking mode streams a long reasoning_content and then
+	// finishes with finish_reason="stop" but an empty content block. The
+	// model has explicitly signalled completion and its reasoning was
+	// streamed to the user, so the host must accept the turn instead of
+	// retrying and forcing another expensive thinking round.
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{
+			{Type: provider.ChunkReasoning, Text: "The user asked a simple question; I have reasoned through it and the answer is ready."},
+			{Type: provider.ChunkUsage, Usage: &provider.Usage{FinishReason: "stop", TotalTokens: 10}},
+			{Type: provider.ChunkDone},
+		},
+	}}
+	a := New(prov, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
+
+	if err := a.Run(context.Background(), "answer me"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if prov.call != 1 {
+		t.Fatalf("provider calls = %d, want 1 (model signalled stop; no retry)", prov.call)
+	}
+	if sessionHasUserMessageContaining(a.session, "visible answer") {
+		t.Fatal("must not inject a synthetic visible-answer retry when the model signalled stop")
+	}
+	if got := lastAssistantContent(a.session); got != "" {
+		t.Fatalf("last assistant content = %q, want empty (answer lived in reasoning)", got)
+	}
+}
+
 func BenchmarkHasVisibleFinalAnswer(b *testing.B) {
 	cases := []struct {
 		name string
