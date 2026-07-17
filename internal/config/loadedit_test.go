@@ -127,6 +127,208 @@ tier = "lazy"
 	}
 }
 
+func TestMergeTOMLProviderAccessProjectOnlyDoesNotRestrictWhenUserUndefined(t *testing.T) {
+	isolateUserConfigHome(t)
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// User config exists but does NOT declare provider_access (implicit "allow all").
+	if err := os.WriteFile(userPath, []byte(`
+default_model = "deepseek/deepseek-v4-flash"
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := t.TempDir()
+	projectTOML := filepath.Join(projectDir, "reasonix.toml")
+	if err := os.WriteFile(projectTOML, []byte(`
+[desktop]
+provider_access = ["deepseek"]
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only the project declares provider_access — the merge must skip it.
+	access, ok, err := mergeTOMLProviderAccess([]string{userPath, projectTOML})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if ok {
+		t.Fatalf("merge returned ok=true, access=%v; want ok=false (project-only restriction skipped)", access)
+	}
+}
+
+func TestMergeTOMLProviderAccessUserAndProjectMergeAsUnion(t *testing.T) {
+	isolateUserConfigHome(t)
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`
+[desktop]
+provider_access = ["deepseek", "custom-a"]
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := t.TempDir()
+	projectTOML := filepath.Join(projectDir, "reasonix.toml")
+	if err := os.WriteFile(projectTOML, []byte(`
+[desktop]
+provider_access = ["deepseek", "project-b"]
+
+[[providers]]
+name = "project-b"
+kind = "openai"
+base_url = "https://project-b.example.com/v1"
+model = "b-model"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both user and project declare provider_access — the union includes them all.
+	access, ok, err := mergeTOMLProviderAccess([]string{userPath, projectTOML})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if !ok {
+		t.Fatal("merge returned ok=false; want ok=true (user declared access)")
+	}
+	want := []string{"deepseek", "custom-a", "project-b"}
+	if !equalStringSlice(access, want) {
+		t.Fatalf("merged access = %v, want %v", access, want)
+	}
+}
+
+func TestMergeTOMLProviderAccessNoDeclarations(t *testing.T) {
+	isolateUserConfigHome(t)
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// User config with no provider_access and no desktop section at all.
+	if err := os.WriteFile(userPath, []byte(`
+default_model = "deepseek/deepseek-v4-flash"
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := t.TempDir()
+	projectTOML := filepath.Join(projectDir, "reasonix.toml")
+	// Project config with no provider_access either.
+	if err := os.WriteFile(projectTOML, []byte(`
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	access, ok, err := mergeTOMLProviderAccess([]string{userPath, projectTOML})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if ok {
+		t.Fatalf("merge returned ok=true, access=%v; want ok=false (no declarations)", access)
+	}
+	if len(access) != 0 {
+		t.Fatalf("access = %v, want empty", access)
+	}
+}
+
+func TestMergeTOMLProviderAccessUserDeclaresEmptyList(t *testing.T) {
+	isolateUserConfigHome(t)
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// User explicitly declares an empty list: provider_access = []
+	if err := os.WriteFile(userPath, []byte(`
+default_model = "deepseek/deepseek-v4-flash"
+
+[desktop]
+provider_access = []
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "[redacted]"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	projectDir := t.TempDir()
+	projectTOML := filepath.Join(projectDir, "reasonix.toml")
+	if err := os.WriteFile(projectTOML, []byte(`
+[desktop]
+provider_access = ["deepseek"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// User explicitly declared an empty list (which means "allow all" but is
+	// a deliberate declaration). It is indistinguishable from an omission at
+	// this layer, so the project restriction still applies (merged = union).
+	access, ok, err := mergeTOMLProviderAccess([]string{userPath, projectTOML})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if !ok {
+		t.Fatal("merge returned ok=false; want ok=true (user declared access, even if empty)")
+	}
+	want := []string{"deepseek"}
+	if !equalStringSlice(access, want) {
+		t.Fatalf("merged access = %v, want %v (project deepseek only; user's empty list contributes nothing)", access, want)
+	}
+}
+
+func equalStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestLoadForEditIgnoresProjectDotEnvForProviderCredentials(t *testing.T) {
 	project := t.TempDir()
 	launch := t.TempDir()
