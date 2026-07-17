@@ -1421,7 +1421,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		MemoryCompiler:                     memCompiler,
 		MemoryCompilerVerbosity:            cfg.MemoryCompilerVerbosity(),
 		UseMemoryCompilerLLMClassification: strings.TrimSpace(os.Getenv("REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION")) == "true",
-		CompactProvider:                     compactProv,
+		CompactProvider:                    compactProv,
 	}, sink)
 
 	var runner agent.Runner = executor
