@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"reasonix/internal/command"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -155,5 +156,57 @@ func TestQuickPickerModelSwitch(t *testing.T) {
 	}
 	if swMsg.oldCtrl != oldCtrl {
 		t.Fatal("modelSwitchMsg did not carry the old controller")
+	}
+}
+
+func TestQuickPickerProviderSingleModelSwitch(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Default()
+	cfg.Providers = []config.ProviderEntry{{
+		Name:    "new-provider",
+		Kind:    "openai",
+		BaseURL: "http://localhost:1234/v1",
+		Model:   "new-model",
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save provider config: %v", err)
+	}
+
+	oldCtrl := control.New(control.Options{Label: "old"})
+	newCtrl := control.New(control.Options{Label: "new-model"})
+	m := newChatTUI(oldCtrl, "", make(chan event.Event, 1), 100)
+	m.modelRef = "old-provider/old-model"
+	m.quickPick = &quickPicker{
+		kind:     quickPickerProvider,
+		title:    "Select provider",
+		items:    []quickPickerItem{{ID: "new-provider", Label: "new-provider"}},
+		selected: 0,
+	}
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
+		return newCtrl, nil
+	}
+
+	next, cmd := m.handleQuickPickerKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m2 := next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("provider quickPick did not schedule a controller build (cmd is nil)")
+	}
+	if !m2.modelSwitchPending || m2.pendingModelSwitch == nil {
+		t.Fatal("provider quickPick did not retain the pending model switch")
+	}
+
+	msg := cmd()
+	swMsg, ok := msg.(modelSwitchMsg)
+	if !ok {
+		t.Fatalf("controller build returned %T, want modelSwitchMsg", msg)
+	}
+	if swMsg.err != nil {
+		t.Fatalf("controller build failed: %v", swMsg.err)
+	}
+	if swMsg.ref != "new-provider/new-model" {
+		t.Fatalf("modelSwitchMsg ref = %q, want %q", swMsg.ref, "new-provider/new-model")
+	}
+	if swMsg.ctrl != newCtrl || swMsg.oldCtrl != oldCtrl {
+		t.Fatal("modelSwitchMsg did not carry the expected controllers")
 	}
 }
