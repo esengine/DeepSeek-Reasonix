@@ -759,7 +759,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 			StatusBarStyle:     "text",
 			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:       true,
-		ConversationWidth:  "standard",
+			ConversationWidth:  "standard",
 		}
 	}
 	cw := conversationWidthOrDefault(cfg.Desktop.ConversationWidth)
