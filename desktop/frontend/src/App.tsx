@@ -62,8 +62,9 @@ import { StartupSplash } from "./components/StartupSplash";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { AppChrome } from "./components/AppChrome";
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
-import { ProjectTree } from "./components/ProjectTree";
 import { WorktreeBadge } from "./components/WorktreeBadge";
+import { projectIdentityRoot } from "./lib/paths";
+import { ProjectTree } from "./components/ProjectTree";
 import { HeartbeatPanel } from "./custom/features/heartbeat/HeartbeatPanel";
 import "./custom/features/heartbeat/heartbeat.css";
 import { CopyButton } from "./components/CopyButton";
@@ -882,9 +883,24 @@ function topicDisplayTitle(tab?: TabMeta): string {
   return tab.topicTitle || (tab.scope === "global" ? tabWorkspaceTitle(tab) : "Untitled");
 }
 
+
+
+function workspaceDirProjectRoot(cwd: string | undefined, dirPath: string): string {
+  const raw = dirPath.trim().replace(/[\\/]+$/, "");
+  if (!raw) return (cwd ?? "").trim();
+  if (/^(?:[A-Za-z]:[\\/]|[\\/])/.test(raw)) return raw;
+  // Reject path traversal segments for defense-in-depth
+  if (/\.\./.test(raw)) return (cwd ?? "").trim();
+  const base = (cwd ?? "").trim().replace(/[\\/]+$/, "");
+  if (!base) return raw;
+  const sep = base.includes("\\") ? "\\" : "/";
+  return `${base}${sep}${raw}`;
+}
+
 function sessionsForScope(sessions: SessionMeta[], filter: HistoryScopeFilter): SessionMeta[] {
   if (filter.scope === "project") {
-    return sessions.filter((session) => session.scope === "project" && session.workspaceRoot === filter.workspaceRoot);
+    const targetRoot = projectIdentityRoot(filter.workspaceRoot);
+    return sessions.filter((session) => session.scope === "project" && projectIdentityRoot(session.workspaceRoot) === targetRoot);
   }
   return sessions.filter((session) => (session.scope || "global") === "global");
 }
@@ -2909,6 +2925,16 @@ export default function App() {
         targetTab = await openTopicTarget("project", session.workspaceRoot, session.topicId, session.path);
       } else if (scope === "global" && session.topicId) {
         targetTab = await openTopicTarget("global", "", session.topicId, session.path);
+      } else if (session.path) {
+        const workspaceRoot = scope === "project" ? session.workspaceRoot || "" : "";
+        targetTab = await openBlankTarget(scope === "project" ? "project" : "global", workspaceRoot);
+        if (!latest()) return;
+        try {
+          await resumeSession(session.path, targetTab.id);
+        } catch (err) {
+          if (latest()) closeTab(targetTab.id);
+          throw err;
+        }
       } else {
         throw new Error(scope === "global" && !session.topicId
           ? t("history.failedOpenSession")
@@ -3600,6 +3626,7 @@ export default function App() {
               <div className="topicbar__title-row">
                 {topicbarEditing ? (
                   <div className="topicbar__title-edit">
+                    {activeTab?.isolatedWorktree && <WorktreeBadge size={12} />}
                     <input
                       autoFocus
                       className="topicbar__title-input"
@@ -3622,6 +3649,7 @@ export default function App() {
                   </div>
                 ) : sidebarCreation && topicbarCanRename ? (
                   <h1 title={topicTitle(activeTab)}>
+                    {activeTab?.isolatedWorktree && <WorktreeBadge size={12} />}
                     <button
                       className="topicbar__title-button"
                       type="button"
@@ -3632,7 +3660,10 @@ export default function App() {
                     </button>
                   </h1>
                 ) : (
-                  <h1 title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}>{topicbarTitle}</h1>
+                  <h1 title={sidebarImDetailConnection ? topicbarTitle : topicTitle(activeTab)}>
+                    {activeTab?.isolatedWorktree && <WorktreeBadge size={12} />}
+                    {topicbarTitle}
+                  </h1>
                 )}
                 {!sidebarCreation && (
                   <Tooltip label={t("topicBar.renameSession")}>
@@ -4107,6 +4138,7 @@ export default function App() {
                   }}
                   onPreviewModeChange={handleWorkspacePreviewModeChange}
                   onAddToChat={addWorkspaceTextToComposer}
+                  onCreateTopicForDir={(dirPath) => openBlankSession("project", workspaceDirProjectRoot(state.meta?.cwd, dirPath))}
                   onAddCodeToChat={addWorkspaceCodeToComposer}
                   onRequestPanelWidth={ensureWorkspacePanelWidth}
                   onFileTreeRefresh={refreshComposerFileRefs}

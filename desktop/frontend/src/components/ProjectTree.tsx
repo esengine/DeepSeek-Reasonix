@@ -12,12 +12,13 @@ import { app } from "../lib/bridge";
 import type { ProjectNode, ProjectTopicStatus } from "../lib/types";
 import { topicActivityTime } from "../lib/session";
 import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
+import { WorktreeBadge } from "../components/WorktreeBadge";
+import { projectIdentityRoot } from "../lib/paths";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
 import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
-import { WorktreeBadge } from "./WorktreeBadge";
 
 type ProjectTreeVariant = "classic" | "workbench" | "creation";
 
@@ -126,7 +127,7 @@ function topicIsActive(node: ProjectNode, activeScope?: string, activeWorkspaceR
   return (
     activeTopicId === node.topicId &&
     activeScope === scope &&
-    (scope === "global" || activeWorkspaceRoot === node.root)
+    (scope === "global" || projectIdentityRoot(activeWorkspaceRoot) === projectIdentityRoot(node.root))
   );
 }
 
@@ -1442,6 +1443,7 @@ export function ProjectTree({
           >
             <span className="project-tree__topic-copy">
               <span className="project-tree__topic-heading">
+                {node.isolatedWorktree && <WorktreeBadge size={11} />}
                 <span className="project-tree__topic-label">{conflictCopyLabel ? `${label} · ${conflictCopyLabel}` : label}</span>
                 {imSource && (
                   <span
@@ -1574,9 +1576,9 @@ export function ProjectTree({
     const colorTargetRoot = scope === "global" ? "" : projectPath;
     const projectLabel = node.label || (scope === "global" ? "Global" : "Untitled");
     const projectPinned = Boolean(node.pinned);
-    const projectActive = activeScope === scope && (scope === "global" || activeWorkspaceRoot === node.root);
+    const projectActive = activeScope === scope && (scope === "global" || projectIdentityRoot(activeWorkspaceRoot) === projectIdentityRoot(node.root));
     const projectMenuOpen = menuProject?.key === key;
-    const activeTopicInProject = Boolean(activeTopicId) && activeScope === scope && (scope === "global" || activeWorkspaceRoot === projectRoot);
+    const activeTopicInProject = Boolean(activeTopicId) && activeScope === scope && (scope === "global" || projectIdentityRoot(activeWorkspaceRoot) === projectIdentityRoot(projectRoot));
     const draggableProject = section !== "pinned" && projectDragEnabled && depth === 0 && Boolean(projectDragKey) && editingProject?.key !== key;
     const projectDropPosition = dropProject?.root === projectDragKey ? dropProject.position : null;
     const handleProjectDragStart = (event: ReactDragEvent<HTMLElement>) => {

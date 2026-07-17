@@ -57,8 +57,7 @@ const WORKSPACE_TREE_RAIL_WIDTH = 44;
 const WORKSPACE_PREVIEW_MIN_WIDTH = 140;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
-const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
+const WORKSPACE_CONTEXT_MENU_HEIGHT = 136;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
@@ -169,6 +168,7 @@ export function WorkspacePanel({
   onToggleMaximized,
   onPreviewModeChange,
   onAddToChat,
+  onCreateTopicForDir,
   onAddCodeToChat,
   onRequestPanelWidth,
   onFileTreeRefresh,
@@ -191,6 +191,7 @@ export function WorkspacePanel({
   onToggleMaximized: () => void;
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
+  onCreateTopicForDir?: (dirPath: string) => void;
   onAddCodeToChat?: (path: string, code: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
@@ -1140,6 +1141,12 @@ export function WorkspacePanel({
     void app.RevealWorkspacePathForTab(workspaceTabId, treeMenu.path).catch(() => {});
   };
 
+  const createTopicForDir = () => {
+    if (!treeMenu || !treeMenu.isDir) return;
+    onCreateTopicForDir?.(treeMenu.path);
+    setTreeMenu(null);
+  };
+
   const renderNormalRow = (row: TreeRow) => {
     const { path, depth, entry, isOpen, active } = row;
     return (
@@ -1779,11 +1786,20 @@ export function WorkspacePanel({
         <FloatingMenu
           x={treeMenu.x}
           y={treeMenu.y}
-          estimatedHeight={treeMenu.isDir ? WORKSPACE_CONTEXT_MENU_REF_HEIGHT : WORKSPACE_CONTEXT_MENU_FILE_HEIGHT}
+          estimatedHeight={WORKSPACE_CONTEXT_MENU_HEIGHT}
           className="workspace-tree-menu"
         >
           <FloatingMenuItems
             items={[
+              ...(treeMenu.isDir
+                ? [
+                    {
+                      icon: <MessageSquarePlus size={14} />,
+                      label: t("workspace.createTopicFromDir"),
+                      onSelect: createTopicForDir,
+                    },
+                  ]
+                : []),
               {
                 icon: <MessageSquarePlus size={14} />,
                 label: treeMenu.isDir ? t("workspace.addFolderReferenceToChat") : t("workspace.addFileReferenceToChat"),

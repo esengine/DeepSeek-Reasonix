@@ -191,6 +191,7 @@ export const en = {
   "workspace.addSelectionToChat": "Add to Chat",
   "workspace.addFileReferenceToChat": "Add file reference",
   "workspace.addFolderReferenceToChat": "Add folder reference",
+  "workspace.createTopicFromDir": "New conversation here",
   "workspace.addFileContentToChat": "Add file contents",
   "workspace.viewMode": "Workspace view",
   "workspace.filesTab": "Files",
@@ -1082,6 +1083,7 @@ export const en = {
   "projectTree.timeFilter1d": "Last 24 hours",
   "projectTree.emptyNoTimeFilterMatch": "No topics match the time filter",
   "projectTree.clearTimeFilter": "Clear filter",
+  "projectTree.worktreeTopic": "Worktree context",
 
   // memory drawer
   "memory.title": "Memory",

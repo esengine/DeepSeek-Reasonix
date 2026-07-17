@@ -1554,7 +1554,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		ID:                tab.ID,
 		Scope:             tab.Scope,
 		WorkspaceRoot:     tab.WorkspaceRoot,
-		WorkspaceName:     workspaceName(tab.WorkspaceRoot),
+		WorkspaceName:     workspaceName(config.ProjectRootFromWorktree(tab.WorkspaceRoot)),
 		WorkspacePath:     tab.WorkspaceRoot,
 		TopicID:           tab.TopicID,
 		TopicTitle:        tab.TopicTitle,
@@ -1598,6 +1598,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.RecoveryDigest = meta.RecoveryDigest
 		m.RecoveryParentID = string(meta.ParentID)
 	}
+	m.IsolatedWorktree = m.IsolatedWorktree || config.ProjectRootFromWorktree(tab.WorkspaceRoot) != tab.WorkspaceRoot
 	return m
 }
 
@@ -1640,7 +1641,13 @@ func (a *App) syncTabWorkspaceRootSpellings() {
 		if tab == nil || tab.Scope != "project" {
 			continue
 		}
-		i := projectIndexByRoot(projects, tab.WorkspaceRoot)
+		i := -1
+		for candidate := range projects {
+			if sameDesktopPath(normalizeProjectRoot(projects[candidate].Root), normalizeProjectRoot(tab.WorkspaceRoot)) {
+				i = candidate
+				break
+			}
+		}
 		if i < 0 || tab.WorkspaceRoot == projects[i].Root {
 			continue
 		}
@@ -1900,6 +1907,26 @@ func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
 
 func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabMeta, error) {
 	scope = strings.TrimSpace(scope)
+	if scope != "project" && scope != "global" {
+		// Empty or unknown scope: find the most recently used project scope
+		// to prefer project-scoped new sessions over global.
+		a.mu.RLock()
+		for _, id := range a.tabOrder {
+			tab := a.tabs[id]
+			if tab != nil && tab.Scope == "project" && normalizeProjectRoot(tab.WorkspaceRoot) != "" {
+				scope = "project"
+				workspaceRoot = tab.WorkspaceRoot
+				a.mu.RUnlock()
+				goto create
+			}
+		}
+		a.mu.RUnlock()
+	}
+	if scope != "project" {
+		scope = "global"
+	}
+
+create:
 	if scope != "project" {
 		scope = "global"
 	}
@@ -1913,6 +1940,7 @@ func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabM
 		if abs, err := filepath.Abs(workspaceRoot); err == nil {
 			workspaceRoot = abs
 		}
+		workspaceRoot = canonicalSessionWorkspaceRoot(workspaceRoot)
 		saveWorkspace(workspaceRoot)
 		a.registerProjectRoot(workspaceRoot)
 	} else {
@@ -2008,6 +2036,16 @@ func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabM
 			return TabMeta{}, err
 		}
 		created.SessionPath = prePath
+		_ = saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{
+			path:             prePath,
+			scope:            scope,
+			workspaceRoot:    actualRoot,
+			topicID:          topicID,
+			topicTitle:       topicTitle,
+			tokenMode:        inheritedTokenMode,
+			mode:             inheritedMode,
+			toolApprovalMode: inheritedToolApprovalMode,
+		})
 		a.saveTabsLocked()
 		meta := a.tabMeta(created, true)
 		a.mu.Unlock()
@@ -2020,11 +2058,12 @@ func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabM
 	topicID := newTopicID()
 	topicTitle := defaultTopicTitle
 	createdAt := time.Now().UnixMilli()
-	if err := setTopicTitleWithSource(workspaceRoot, topicID, topicTitle, topicTitleSourceAuto); err != nil {
+	titleRoot := topicTitleRoot(scope, workspaceRoot)
+	if err := setTopicTitleWithSource(titleRoot, topicID, topicTitle, topicTitleSourceAuto); err != nil {
 		a.mu.Unlock()
 		return TabMeta{}, err
 	}
-	if err := setTopicCreatedAt(workspaceRoot, topicID, createdAt); err != nil {
+	if err := setTopicCreatedAt(titleRoot, topicID, createdAt); err != nil {
 		a.mu.Unlock()
 		return TabMeta{}, err
 	}
@@ -2057,6 +2096,16 @@ func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabM
 		return TabMeta{}, err
 	}
 	created.SessionPath = prePath
+	_ = saveTabSessionMetaSnapshot(tabSessionMetaSnapshot{
+		path:             prePath,
+		scope:            scope,
+		workspaceRoot:    actualRoot,
+		topicID:          topicID,
+		topicTitle:       created.TopicTitle,
+		tokenMode:        inheritedTokenMode,
+		mode:             inheritedMode,
+		toolApprovalMode: inheritedToolApprovalMode,
+	})
 	a.saveTabsLocked()
 	meta := a.tabMeta(created, true)
 	a.mu.Unlock()
@@ -2072,7 +2121,7 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 	if tab == nil || tab.Scope != scope {
 		return false
 	}
-	if scope == "project" && !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot) {
+	if scope == "project" && normalizeProjectRoot(canonicalSessionWorkspaceRoot(tab.WorkspaceRoot)) != normalizeProjectRoot(canonicalSessionWorkspaceRoot(workspaceRoot)) {
 		return false
 	}
 	if tab.Ctrl == nil {
@@ -2873,6 +2922,11 @@ func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loa
 			sessionDir = dir
 		}
 	}
+	if loadedSession.matches(tabSessionPath) {
+		if dir := filepath.Dir(loadedSession.Path); dir != "." && strings.TrimSpace(dir) != "" {
+			sessionDir = dir
+		}
+	}
 	startupSessionPath := ""
 	if pinnedPath, ok := pinnedTabSessionPath(sessionDir, tabSessionPath); ok {
 		if !agent.IsCleanupPending(pinnedPath) {
@@ -3220,7 +3274,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 		scope = "global"
 	}
 	if scope == "project" {
-		workspaceRoot = normalizeProjectRoot(workspaceRoot)
+		workspaceRoot = canonicalSessionWorkspaceRoot(workspaceRoot)
 		if workspaceRoot == "" {
 			return
 		}
@@ -3250,7 +3304,17 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	// the same workspace — do not warn the user about a switch.
 	workspaceChanged := tab.Scope != scope || !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot)
 	tab.Scope = scope
-	tab.WorkspaceRoot = workspaceRoot
+	// Preserve a worktree workspace root when the tab already has one
+	// and the binding resolved to its parent project root. This keeps
+	// worktree tabs identified by their own path, not the parent's.
+	if tab.WorkspaceRoot != "" && workspaceRoot != "" &&
+		tab.WorkspaceRoot != workspaceRoot &&
+		normalizeProjectRoot(config.ProjectRootFromWorktree(tab.WorkspaceRoot)) == normalizeProjectRoot(workspaceRoot) {
+		workspaceChanged = false
+		changed = false
+	} else {
+		tab.WorkspaceRoot = workspaceRoot
+	}
 	tab.SessionPath = canonicalTabSessionPath(binding.path)
 	if topicID != "" {
 		changed = changed || tab.TopicID != topicID
@@ -3312,6 +3376,9 @@ func (a *App) resolveSessionBinding(sessionPath string) (sessionBinding, bool) {
 	if err != nil || !ok {
 		return sessionBinding{}, false
 	}
+	if binding, ok := sessionBindingInDir(filepath.Dir(path), path); ok {
+		return binding, true
+	}
 	for _, dir := range sessionBindingCandidateDirs(meta) {
 		if binding, ok := sessionBindingInDir(dir, path); ok {
 			return binding, true
@@ -3322,7 +3389,7 @@ func (a *App) resolveSessionBinding(sessionPath string) (sessionBinding, bool) {
 
 func sessionBindingCandidateDirs(meta agent.BranchMeta) []string {
 	if meta.DefaultScope() == "project" {
-		if root := normalizeProjectRoot(meta.WorkspaceRoot); root != "" {
+		if root := canonicalSessionWorkspaceRoot(meta.WorkspaceRoot); root != "" {
 			return []string{desktopSessionDir(root)}
 		}
 		return nil
@@ -3373,7 +3440,7 @@ func sessionBindingFromMeta(path string, meta agent.BranchMeta) (sessionBinding,
 	scope := meta.DefaultScope()
 	workspaceRoot := ""
 	if scope == "project" {
-		workspaceRoot = normalizeProjectRoot(meta.WorkspaceRoot)
+		workspaceRoot = canonicalSessionWorkspaceRoot(meta.WorkspaceRoot)
 		if workspaceRoot == "" {
 			return sessionBinding{}, false
 		}
@@ -3597,6 +3664,8 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	titleRoot := tab.WorkspaceRoot
 	if tab.Scope == "global" {
 		titleRoot = ""
+	} else {
+		titleRoot = topicTitleRoot(tab.Scope, titleRoot)
 	}
 	ctrl := tab.Ctrl
 	a.mu.RUnlock()
@@ -4193,6 +4262,9 @@ func prependTopicsInProjectsFile(workspaceRoot string, topicIDs []string, ensure
 
 func prependTopicsInProjectsFileOpts(workspaceRoot string, topicIDs []string, ensureProject, respectTombstones bool) error {
 	workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	if workspaceRoot != "" {
+		workspaceRoot = normalizeProjectRoot(config.ProjectRootFromWorktree(workspaceRoot))
+	}
 	topicIDs = uniqueStrings(topicIDs)
 	if len(topicIDs) == 0 {
 		return nil
@@ -4293,7 +4365,31 @@ func normalizeProjectRoot(root string) string {
 }
 
 func sameProjectRoot(a, b string) bool {
-	return sameDesktopPath(normalizeProjectRoot(a), normalizeProjectRoot(b))
+	return projectRootKey(a) == projectRootKey(b)
+}
+
+func canonicalSessionWorkspaceRoot(root string) string {
+	root = normalizeProjectRoot(root)
+	if root == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(root)
+	volume := filepath.VolumeName(cleaned)
+	rest := strings.TrimPrefix(cleaned, volume)
+	separator := string(filepath.Separator)
+	leading := strings.HasPrefix(rest, separator)
+	parts := strings.Split(strings.Trim(rest, separator), separator)
+	for i, part := range parts {
+		if part != ".worktrees" || i+1 >= len(parts) {
+			continue
+		}
+		joined := filepath.Join(parts[:i+2]...)
+		if leading {
+			joined = separator + joined
+		}
+		return filepath.Clean(volume + joined)
+	}
+	return root
 }
 
 func projectIndexByRoot(projects []desktopProject, root string) int {
@@ -4439,6 +4535,22 @@ func removeString(values []string, value string) []string {
 		}
 	}
 	return out
+}
+
+func replaceDesktopString(values []string, oldValue, newValue string) []string {
+	oldValue = strings.TrimSpace(oldValue)
+	newValue = strings.TrimSpace(newValue)
+	if oldValue == "" || newValue == "" {
+		return uniqueStrings(values)
+	}
+	out := make([]string, 0, len(values))
+	for _, item := range uniqueStrings(values) {
+		if item == oldValue {
+			item = newValue
+		}
+		out = append(out, item)
+	}
+	return uniqueStrings(out)
 }
 
 func containsDesktopString(values []string, value string) bool {
@@ -4627,6 +4739,7 @@ func addProject(root, title string) error {
 	if root == "" {
 		return fmt.Errorf("project root is required")
 	}
+	root = normalizeProjectRoot(config.ProjectRootFromWorktree(root))
 	title = strings.TrimSpace(title)
 	return updateProjectsFile(func(f *desktopProjectFile) (bool, error) {
 		for i, p := range f.Projects {
@@ -5016,7 +5129,7 @@ func topicTitleRoot(scope, workspaceRoot string) string {
 	if scope == "global" {
 		return ""
 	}
-	return workspaceRoot
+	return normalizeProjectRoot(config.ProjectRootFromWorktree(workspaceRoot))
 }
 
 func forkTopicTitle(title string) string {
@@ -5882,11 +5995,70 @@ func legacyMigrationTargetForDir(dir string) (scope, workspaceRoot, topicTitleRo
 		return "global", "", "", true
 	}
 	for _, p := range loadProjectsFile().Projects {
+		// Skip worktree roots: ProjectSessionDir normalises them to the parent
+		// via ProjectRootFromWorktree, so only the parent entry should match.
+		if config.ProjectRootFromWorktree(p.Root) != p.Root {
+			continue
+		}
 		if sameDesktopPath(config.ProjectSessionDir(p.Root), dir) {
 			return "project", p.Root, p.Root, true
 		}
 	}
+	if workspaceRoot := legacyWorktreeWorkspaceRootForSessionDir(dir); workspaceRoot != "" {
+		return "project", workspaceRoot, config.ProjectRootFromWorktree(workspaceRoot), true
+	}
 	return "", "", "", false
+}
+
+func legacyWorktreeWorkspaceRootForSessionDir(dir string) string {
+	base := config.MemoryUserDir()
+	if base == "" {
+		return ""
+	}
+	projectsDir := filepath.Join(base, "projects")
+	parent := filepath.Dir(strings.TrimRight(dir, string(os.PathSeparator)))
+	if !sameDesktopPath(filepath.Dir(parent), projectsDir) {
+		return ""
+	}
+	slug := filepath.Base(parent)
+	for _, project := range loadProjectsFile().Projects {
+		root := normalizeProjectRoot(config.ProjectRootFromWorktree(project.Root))
+		if root == "" {
+			continue
+		}
+		prefix := config.WorkspaceSlug(root) + "-.worktrees-"
+		if !strings.HasPrefix(slug, prefix) {
+			continue
+		}
+		if worktreeRoot := existingWorktreeRootForSessionSlug(root, slug); worktreeRoot != "" {
+			return worktreeRoot
+		}
+		return root
+	}
+	return ""
+}
+
+func existingWorktreeRootForSessionSlug(projectRoot, slug string) string {
+	root := filepath.Join(projectRoot, ".worktrees")
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	var match string
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() || match != "" {
+			return nil
+		}
+		if sameDesktopPath(path, root) {
+			return nil
+		}
+		if config.WorkspaceSlug(path) == slug {
+			match = path
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return match
 }
 
 func legacySessionMetaMatchesMigrationTarget(meta agent.BranchMeta, scope, workspaceRoot string) bool {
@@ -5935,7 +6107,7 @@ func sameDesktopPath(a, b string) bool {
 // and case-folded on Windows — the same key form agent.CanonicalSessionPath
 // uses for session paths, so equivalent spellings never split lookups.
 func projectRootKey(root string) string {
-	root = cleanDesktopPath(root)
+	root = cleanDesktopPath(config.ProjectRootFromWorktree(root))
 	if os.PathSeparator == '\\' {
 		return strings.ToLower(root)
 	}
@@ -6090,6 +6262,7 @@ func (a *App) CreateTopic(scope, workspaceRoot, title string) (TopicMeta, error)
 		if abs, err := filepath.Abs(workspaceRoot); err == nil {
 			workspaceRoot = abs
 		}
+		workspaceRoot = normalizeProjectRoot(config.ProjectRootFromWorktree(workspaceRoot))
 	}
 	if err := setTopicTitleWithSource(workspaceRoot, topicID, trimmedTitle, titleSource); err != nil {
 		return TopicMeta{}, err
@@ -6635,9 +6808,11 @@ type topicSummary struct {
 	turns                int
 	adoptedRecoveryTurns int
 	lastActivityAt       int64
+	title                string
 	hasNormalSession     bool
 	hasRecoveryOnly      bool
 	hasAdoptedRecovery   bool
+	hasWorktree          bool
 }
 
 func (s topicSummary) displayTurns() int {
@@ -6662,6 +6837,7 @@ type runtimeSessionStatus struct {
 	recoveryReason   string
 	recoveryDigest   string
 	recoveryParentID string
+	hasWorktree      bool
 }
 
 // topicHiddenAsRecoveryOnly hides topics whose only on-disk sessions are
@@ -6684,15 +6860,251 @@ func topicHiddenAsRecoveryOnly(summary topicSummary, pinned bool, runtimeSession
 
 var listProjectTreeMu sync.Mutex
 
+func addRecentWorkspaceProjects(f *desktopProjectFile) bool {
+	if f == nil {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, project := range f.Projects {
+		if root := normalizeProjectRoot(project.Root); root != "" {
+			seen[root] = true
+		}
+	}
+	changed := false
+	add := func(root string) bool {
+		root = normalizeProjectRoot(root)
+		if root == "" {
+			return false
+		}
+		parent := normalizeProjectRoot(config.ProjectRootFromWorktree(root))
+		if parent == "" {
+			return false
+		}
+		added := false
+		if seen[parent] {
+			if parent != root && !seen[root] {
+				f.Projects = append(f.Projects, desktopProject{Root: root})
+				seen[root] = true
+				added = true
+			}
+			return added
+		}
+		f.Projects = append(f.Projects, desktopProject{Root: parent})
+		seen[parent] = true
+		added = true
+		if parent != root && !seen[root] {
+			f.Projects = append(f.Projects, desktopProject{Root: root})
+			seen[root] = true
+			added = true
+		}
+		return added
+	}
+	if cur := loadWorkspace(); cur != "" && add(cur) {
+		changed = true
+	}
+	for _, root := range loadWorkspaces() {
+		if add(root) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+func migrateWorktreeProjectsIntoParents(f *desktopProjectFile) ([]string, bool) {
+	if f == nil {
+		return nil, false
+	}
+	var legacySessionDirs []string
+	changed := false
+	parentIndex := map[string]int{}
+	for i, p := range f.Projects {
+		parentIndex[normalizeProjectRoot(p.Root)] = i
+	}
+	for i := range f.Projects {
+		p := f.Projects[i]
+		root := normalizeProjectRoot(p.Root)
+		parent := normalizeProjectRoot(config.ProjectRootFromWorktree(root))
+		if root == "" || parent == "" || parent == root {
+			continue
+		}
+		if base := config.MemoryUserDir(); base != "" {
+			legacySessionDirs = append(legacySessionDirs, filepath.Join(base, "projects", config.WorkspaceSlug(root), "sessions"))
+		}
+		parentIdx, ok := parentIndex[parent]
+		if !ok {
+			f.Projects = append(f.Projects, desktopProject{Root: parent, Title: p.Title, Color: p.Color})
+			parentIdx = len(f.Projects) - 1
+			parentIndex[parent] = parentIdx
+			changed = true
+		}
+		parentProject := &f.Projects[parentIdx]
+		if parentProject.Title == "" {
+			parentProject.Title = p.Title
+			changed = true
+		}
+		if parentProject.Color == "" {
+			parentProject.Color = p.Color
+			changed = true
+		}
+		for _, tid := range p.Topics {
+			parentProject.Topics = prependUniqueString(parentProject.Topics, tid)
+		}
+		for _, tid := range p.PinnedTopics {
+			parentProject.PinnedTopics = prependUniqueString(parentProject.PinnedTopics, tid)
+		}
+		if containsDesktopString(f.PinnedProjects, root) {
+			f.PinnedProjects = prependUniqueString(f.PinnedProjects, parent)
+			changed = true
+		}
+		if next := replaceDesktopString(f.SidebarOrder, root, parent); !sameStringList(next, f.SidebarOrder) {
+			f.SidebarOrder = next
+			changed = true
+		}
+		migrateWorktreeTopicFiles(root, parent)
+	}
+	filtered := make([]desktopProject, 0, len(f.Projects))
+	for _, p := range f.Projects {
+		root := normalizeProjectRoot(p.Root)
+		if config.ProjectRootFromWorktree(root) != root {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	f.Projects = filtered
+	return legacySessionDirs, changed
+}
+
+func legacyWorktreeSessionDirsForProjects(f desktopProjectFile) []string {
+	base := config.MemoryUserDir()
+	if base == "" {
+		return nil
+	}
+	projectsDir := filepath.Join(base, "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		return nil
+	}
+	seenPrefixes := map[string]bool{}
+	for _, project := range f.Projects {
+		root := normalizeProjectRoot(config.ProjectRootFromWorktree(project.Root))
+		if root != "" {
+			seenPrefixes[config.WorkspaceSlug(root)+"-.worktrees-"] = true
+		}
+	}
+	out := []string{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		matched := false
+		for prefix := range seenPrefixes {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			dir := filepath.Join(projectsDir, entry.Name(), "sessions")
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				out = append(out, dir)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func migrateWorktreeTopicFiles(worktreeRoot, parentRoot string) {
+	mergeStringTopicFile(worktreeRoot, parentRoot, loadTopicTitlesForUpdate, saveTopicTitles)
+	mergeStringTopicFile(worktreeRoot, parentRoot, loadTopicTitleSourcesForUpdate, saveTopicTitleSources)
+	mergeInt64TopicFile(worktreeRoot, parentRoot, loadTopicCreatedAtsForUpdate, saveTopicCreatedAts)
+	mergeTopicAutoTitleMetaFile(worktreeRoot, parentRoot)
+}
+
+func mergeStringTopicFile(worktreeRoot, parentRoot string, load func(string) (map[string]string, error), save func(string, map[string]string) error) {
+	source, err := load(worktreeRoot)
+	if err != nil || len(source) == 0 {
+		return
+	}
+	target, err := load(parentRoot)
+	if err != nil {
+		return
+	}
+	changed := false
+	for k, v := range source {
+		if strings.TrimSpace(k) != "" && strings.TrimSpace(target[k]) == "" && strings.TrimSpace(v) != "" {
+			target[k] = v
+			changed = true
+		}
+	}
+	if changed {
+		_ = save(parentRoot, target)
+	}
+}
+
+func mergeInt64TopicFile(worktreeRoot, parentRoot string, load func(string) (map[string]int64, error), save func(string, map[string]int64) error) {
+	source, err := load(worktreeRoot)
+	if err != nil || len(source) == 0 {
+		return
+	}
+	target, err := load(parentRoot)
+	if err != nil {
+		return
+	}
+	changed := false
+	for k, v := range source {
+		if strings.TrimSpace(k) != "" && target[k] == 0 && v != 0 {
+			target[k] = v
+			changed = true
+		}
+	}
+	if changed {
+		_ = save(parentRoot, target)
+	}
+}
+
+func mergeTopicAutoTitleMetaFile(worktreeRoot, parentRoot string) {
+	source, err := loadTopicAutoTitleMetaForUpdate(worktreeRoot)
+	if err != nil || len(source) == 0 {
+		return
+	}
+	target, err := loadTopicAutoTitleMetaForUpdate(parentRoot)
+	if err != nil {
+		return
+	}
+	changed := false
+	for topicID, meta := range source {
+		if strings.TrimSpace(topicID) == "" {
+			continue
+		}
+		existing, ok := target[topicID]
+		if !ok || meta.UpdatedAt > existing.UpdatedAt {
+			target[topicID] = meta
+			changed = true
+		}
+	}
+	if changed {
+		_ = saveTopicAutoTitleMeta(parentRoot, target)
+	}
+}
+
 func (a *App) ListProjectTree() []ProjectNode {
 	listProjectTreeMu.Lock()
 	defer listProjectTreeMu.Unlock()
 
+	f := loadProjectsFile()
+	recentProjectsChanged := addRecentWorkspaceProjects(&f)
+	worktreeSessionDirs, projectsChanged := migrateWorktreeProjectsIntoParents(&f)
+	if recentProjectsChanged || projectsChanged {
+		_ = saveProjectsFile(f)
+	}
 	knownDirs := a.knownSessionDirs()
+	knownDirs = append(knownDirs, worktreeSessionDirs...)
+	knownDirs = append(knownDirs, legacyWorktreeSessionDirsForProjects(f)...)
 	for _, dir := range knownDirs {
 		migrateLegacySessionsIntoGlobalTopics(dir)
 	}
-	f := loadProjectsFile()
+	f = loadProjectsFile()
 	// Render-side tombstone guard: a deleted topic whose title survived a racy
 	// whole-map save would otherwise reappear via the orderedTopicIDs title-map
 	// fallback. The tombstone is authoritative until an intentional
@@ -6800,6 +7212,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 			recoveryReason:   info.RecoveryReason,
 			recoveryDigest:   info.RecoveryDigest,
 			recoveryParentID: string(info.ParentID),
+			hasWorktree:      tab.Ctrl != nil && config.ProjectRootFromWorktree(tab.WorkspaceRoot) != tab.WorkspaceRoot,
 		})
 	}
 	for _, tab := range a.tabs {
@@ -6809,6 +7222,21 @@ func (a *App) ListProjectTree() []ProjectNode {
 		addRuntimeSession(tab, false)
 	}
 	a.mu.RUnlock()
+
+	// Propagate hasWorktree from runtime tabs to topic summaries immediately,
+	// without waiting for session metadata to be persisted to disk.
+	for key, sessions := range runtimeSessionsByTopic {
+		for _, s := range sessions {
+			if s.hasWorktree {
+				if summary, ok := topicSummaries[key]; ok {
+					summary.hasWorktree = true
+					topicSummaries[key] = summary
+				}
+				break
+			}
+		}
+	}
+
 	for key := range runtimeSessionsByTopic {
 		sort.Slice(runtimeSessionsByTopic[key], func(i, j int) bool {
 			left := runtimeSessionsByTopic[key][i]
@@ -6871,7 +7299,10 @@ func (a *App) ListProjectTree() []ProjectNode {
 			globalTitle = "Global"
 		}
 		globalColor := normalizeProjectColor(f.GlobalColor)
-		globalTopicIDs := pinnedTopicIDs(orderedTopicIDs(f.GlobalTopics, globalTitleMap), f.GlobalPinnedTopics)
+		globalDiscoveredTopicIDs := topicIDsFromSummaries("global", "", topicSummaries)
+		globalTopicIDs := orderedTopicIDs(append(append([]string(nil), f.GlobalTopics...), globalDiscoveredTopicIDs...), globalTitleMap)
+		globalTopicIDs = sortTopicIDsByActivity(globalTopicIDs, "global", "", topicSummaries)
+		globalTopicIDs = pinnedTopicIDs(globalTopicIDs, f.GlobalPinnedTopics)
 		children := make([]ProjectNode, 0, len(globalTopicIDs))
 		for _, id := range globalTopicIDs {
 			if deletedTopicSet[id] {
@@ -6934,6 +7365,9 @@ func (a *App) ListProjectTree() []ProjectNode {
 	topicLoadWg.Wait()
 	for _, loaded := range projectTopicResults {
 		p := loaded.project
+		if config.ProjectRootFromWorktree(p.Root) != p.Root {
+			continue
+		}
 		title := p.Title
 		if title == "" {
 			title = workspaceName(p.Root)
@@ -6946,10 +7380,15 @@ func (a *App) ListProjectTree() []ProjectNode {
 			IsolatedWorktree: worktree.IsManagedPath(p.Root, config.DeliveryWorktreeDir()),
 		}
 
-		// Gather topics: explicit topic list + all known topic titles.
+		// Gather topics: explicit topic list + all known topic titles +
+		// session-meta topics. Older sessions can have TopicID metadata without
+		// a matching sidebar index entry.
 		titleMap := loaded.titles
 		createdMap := loaded.createdAts
-		topicIDs := pinnedTopicIDs(orderedTopicIDs(p.Topics, titleMap), p.PinnedTopics)
+		discoveredTopicIDs := topicIDsFromSummaries("project", p.Root, topicSummaries)
+		topicIDs := orderedTopicIDs(append(append([]string(nil), p.Topics...), discoveredTopicIDs...), titleMap)
+		topicIDs = sortTopicIDsByActivity(topicIDs, "project", p.Root, topicSummaries)
+		topicIDs = pinnedTopicIDs(topicIDs, p.PinnedTopics)
 
 		children := make([]ProjectNode, 0, len(topicIDs))
 		for _, tid := range topicIDs {
@@ -6957,31 +7396,38 @@ func (a *App) ListProjectTree() []ProjectNode {
 				continue
 			}
 			topicTitle := strings.TrimSpace(titleMap[tid])
+			summaryKey := topicSummaryKey("project", p.Root, tid)
+			summary := topicSummaries[summaryKey]
+			if summary.hasWorktree && strings.TrimSpace(summary.title) != "" {
+				topicTitle = strings.TrimSpace(summary.title)
+			}
+			if topicTitle == "" {
+				topicTitle = strings.TrimSpace(summary.title)
+			}
 			if topicTitle == "" {
 				topicTitle = defaultTopicTitle
 			}
-			summaryKey := topicSummaryKey("project", p.Root, tid)
-			summary := topicSummaries[summaryKey]
 			open, running, status := topicRuntimeStatus(summaryKey)
 			pinned := containsDesktopString(p.PinnedTopics, tid)
 			if topicHiddenAsRecoveryOnly(summary, pinned, runtimeSessionsByTopic[summaryKey]) {
 				continue
 			}
 			children = append(children, ProjectNode{
-				Key:            "topic_" + tid,
-				Kind:           "topic",
-				Label:          topicTitle,
-				Root:           p.Root,
-				TopicID:        tid,
-				ProjectColor:   p.Color,
-				Turns:          summary.displayTurns(),
-				CreatedAt:      topicCreatedAtForTree(createdMap, tid),
-				LastActivityAt: summary.lastActivityAt,
-				Open:           open,
-				Running:        running,
-				Status:         status,
-				Pinned:         pinned,
-				Children:       runtimeSessionNodes("project", p.Root, tid, p.Color),
+				Key:              "topic_" + tid,
+				Kind:             "topic",
+				Label:            topicTitle,
+				Root:             p.Root,
+				TopicID:          tid,
+				ProjectColor:     p.Color,
+				Turns:            summary.displayTurns(),
+				CreatedAt:        topicCreatedAtForTree(createdMap, tid),
+				LastActivityAt:   summary.lastActivityAt,
+				Open:             open,
+				Running:          running,
+				Status:           status,
+				Pinned:           pinned,
+				IsolatedWorktree: summary.hasWorktree,
+				Children:         runtimeSessionNodes("project", p.Root, tid, p.Color),
 			})
 		}
 		node.Label = title
@@ -7001,6 +7447,51 @@ func topicSummaryKey(scope, workspaceRoot, topicID string) string {
 	// the registry's canonical spelling; fold both so runtime status never
 	// splits across equivalent roots.
 	return "project:" + projectRootKey(workspaceRoot) + ":" + topicID
+}
+
+func topicIDsFromSummaries(scope, workspaceRoot string, summaries map[string]topicSummary) []string {
+	prefix := "global::"
+	if scope == "project" {
+		prefix = "project:" + projectRootKey(workspaceRoot) + ":"
+	}
+	type item struct {
+		id             string
+		lastActivityAt int64
+	}
+	items := []item{}
+	for key, summary := range summaries {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		id := strings.TrimSpace(strings.TrimPrefix(key, prefix))
+		if id != "" {
+			items = append(items, item{id: id, lastActivityAt: summary.lastActivityAt})
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].lastActivityAt != items[j].lastActivityAt {
+			return items[i].lastActivityAt > items[j].lastActivityAt
+		}
+		return items[i].id < items[j].id
+	})
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.id)
+	}
+	return out
+}
+
+func sortTopicIDsByActivity(topicIDs []string, scope, workspaceRoot string, summaries map[string]topicSummary) []string {
+	if len(topicIDs) < 2 || len(summaries) == 0 {
+		return topicIDs
+	}
+	out := append([]string(nil), topicIDs...)
+	sort.SliceStable(out, func(i, j int) bool {
+		left := summaries[topicSummaryKey(scope, workspaceRoot, out[i])].lastActivityAt
+		right := summaries[topicSummaryKey(scope, workspaceRoot, out[j])].lastActivityAt
+		return left != 0 && right != 0 && left > right
+	})
+	return out
 }
 
 func projectSessionNodeKey(scope, sessionPath string) string {
@@ -7759,7 +8250,7 @@ func saveTabSessionMetaSnapshot(snap tabSessionMetaSnapshot) error {
 	scope := snap.scope
 	workspaceRoot := snap.workspaceRoot
 	if ownerScope, ownerRoot, _, ok := legacyMigrationTargetForDir(filepath.Dir(snap.path)); ok {
-		if ownerScope == "project" {
+		if ownerScope == "project" && strings.TrimSpace(workspaceRoot) == "" {
 			scope = ownerScope
 			workspaceRoot = ownerRoot
 		}
@@ -7955,11 +8446,17 @@ func (a *App) knownSessionDirs() []string {
 	}
 	add(config.SessionDir()) // legacy/global sessions from earlier desktop builds
 	add(desktopSessionDir(globalWorkspaceRoot()))
-	for _, project := range loadProjectsFile().Projects {
+	f := loadProjectsFile()
+	for _, project := range f.Projects {
 		dir := desktopSessionDir(project.Root)
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue // project dir removed or external volume unmounted
 		}
+		add(dir)
+	}
+	// Include legacy worktree session dirs so history actions (open, preview,
+	// delete, rename) can look up sessions stored under worktree slug dirs.
+	for _, dir := range legacyWorktreeSessionDirsForProjects(f) {
 		add(dir)
 	}
 	a.mu.RLock()
@@ -7996,7 +8493,24 @@ func (a *App) findTopicSessionForTargetByContent(scope, workspaceRoot, topicID s
 	var bestPath string
 	var bestDir string
 	var bestTime time.Time
-	for _, dir := range a.knownSessionDirs() {
+	dirs := a.knownSessionDirs()
+	if scope == "project" && strings.TrimSpace(workspaceRoot) != "" {
+		parentRoot := normalizeProjectRoot(config.ProjectRootFromWorktree(workspaceRoot))
+		dirs = append(dirs, legacyWorktreeSessionDirsForProjects(desktopProjectFile{Projects: []desktopProject{{Root: parentRoot}}})...)
+	}
+	seenDirs := map[string]bool{}
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
+		if seenDirs[dir] {
+			continue
+		}
+		seenDirs[dir] = true
 		for _, match := range topicSessionMatches(dir, topicID) {
 			if requireContent && !sessionFileHasConversationContent(match.path) {
 				continue
@@ -8102,6 +8616,9 @@ func mergeSessionInfos(dir string, infos []agent.SessionInfo, titles map[string]
 		key := topicSummaryKey(info.Scope, info.WorkspaceRoot, info.TopicID)
 		summary := topicSummaries[key]
 		lastActivityAt := info.LastActivityAt.UnixMilli()
+		if strings.TrimSpace(summary.title) == "" {
+			summary.title = sessionTopicTitleFallback(info, titles[filepath.Base(info.Path)])
+		}
 		if sessionInfoIsAutomaticRecovery(info) {
 			// A covered conflict copy duplicates its parent, so its turns must not
 			// be added. Any branch with unique content keeps the topic visible.
@@ -8124,8 +8641,20 @@ func mergeSessionInfos(dir string, infos []agent.SessionInfo, titles map[string]
 		if lastActivityAt > summary.lastActivityAt {
 			summary.lastActivityAt = lastActivityAt
 		}
+		if config.ProjectRootFromWorktree(info.WorkspaceRoot) != info.WorkspaceRoot {
+			summary.hasWorktree = true
+		}
 		topicSummaries[key] = summary
 	}
+}
+
+func sessionTopicTitleFallback(info agent.SessionInfo, sessionTitle string) string {
+	for _, value := range []string{info.TopicTitle, info.CustomTitle, sessionTitle, info.Preview} {
+		if title := topicTitleFromText(value); title != "" {
+			return title
+		}
+	}
+	return ""
 }
 
 var topicSessionIndexCache = struct {
