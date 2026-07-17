@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
+import { StreamWidget } from "./StreamWidget";
 import { normalizeMath } from "./mathNormalize";
 import { openExternal } from "../lib/bridge";
 
@@ -97,6 +98,9 @@ function createComponents(plainStatusBlocks: boolean): Components {
       const isBlock = match !== null || text.includes("\n");
       if (isBlock) {
         const value = text.replace(/\n$/, "");
+        if (lang === "widget") {
+          return <StreamWidget value={value} />;
+        }
         if (lang === "mermaid") {
           return (
             <Suspense fallback={<CodeViewer value={value} language="mermaid" maxHeight={360} />}>

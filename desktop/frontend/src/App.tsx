@@ -3041,6 +3041,19 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKeydown);
   }, [sidebarCollapsed, desktopPlatform, handleNavigateTopic]);
 
+  // Widget sendPrompt bridge: listen for CustomEvent from StreamWidget
+  useEffect(() => {
+    const handler = (e: CustomEvent<{ text: string }>) => {
+      const text = e.detail?.text;
+      if (text) {
+        const tabId = activeTabIdRef.current;
+        if (tabId) void commitThenSendRef.current(tabId, text).catch(() => {});
+      }
+    };
+    window.addEventListener("widget-send-prompt", handler as EventListener);
+    return () => window.removeEventListener("widget-send-prompt", handler as EventListener);
+  }, []);
+
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },

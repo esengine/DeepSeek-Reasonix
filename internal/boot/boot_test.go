@@ -1845,6 +1845,7 @@ func defaultFullBootToolNames() []string {
 		"todo_write",
 		"wait",
 		"web_fetch",
+		"widget_readme",
 		"write_file",
 	}
 }
@@ -1921,7 +1922,8 @@ command = "reasonix-missing-mockmcp"
 		}
 	}
 	for _, forbidden := range []string{
-		"web_fetch", "task", "read_only_task", "read_only_skill", "run_skill", "read_skill", "install_skill", "install_source",
+		"web_fetch",
+		"widget_readme", "task", "read_only_task", "read_only_skill", "run_skill", "read_skill", "install_skill", "install_source",
 		"explore", "research", "review", "security_review",
 		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 		"code_index", "complete_step", "glob", "grep", "ls", "move_file", "multi_edit", "todo_write",
