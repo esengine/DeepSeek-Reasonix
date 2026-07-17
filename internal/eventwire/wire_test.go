@@ -62,6 +62,15 @@ func TestKindNamesComplete(t *testing.T) {
 	}
 }
 
+func TestBackgroundJobLifecycleWirePayload(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.BackgroundJobLifecycle, BackgroundJob: event.BackgroundJob{
+		ID: "task-1", Kind: "task", Status: "running", SessionID: "session-a",
+	}})
+	if w.Kind != "background_job_lifecycle" || w.BackgroundJob == nil || w.BackgroundJob.ID != "task-1" || w.BackgroundJob.SessionID != "session-a" {
+		t.Fatalf("wire event = %+v", w)
+	}
+}
+
 func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for k := event.Kind(0); k < event.KindCount; k++ {
@@ -82,6 +91,8 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
 		"cacheDiagnostics?: WireCacheDiagnostics;",
+		"backgroundJob?: WireBackgroundJob;",
+		"export interface WireBackgroundJob",
 		"export interface WireCacheDiagnostics",
 		"prefixHash: string;",
 		"prefixChanged: boolean;",
@@ -215,6 +226,7 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 		},
 		Pricing:     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
 		UsageSource: event.UsageSourceTitle,
+		UsageModel:  "deepseek-title",
 		CacheDiagnostics: &event.CacheDiagnostics{
 			PrefixHash: "p", PrefixChanged: true, PrefixChangeReasons: []string{"log_rewrite"},
 			SystemHash: "s", ToolsHash: "t", LogRewriteVersion: 1, ToolSchemaTokens: 42,
@@ -230,13 +242,16 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 	for _, want := range []string{
 		`"kind":"usage"`, `"promptTokens":1000`, `"completionTokens":200`, `"totalTokens":1200`,
 		`"cacheHitTokens":900`, `"cacheMissTokens":100`, `"reasoningTokens":33`,
-		`"source":"title"`, `"sessionCacheHitTokens":8000`, `"sessionCacheMissTokens":2000`,
-		`"currency":"¥"`, `"costUsd":`, `"cacheDiagnostics":`, `"prefixHash":"p"`,
+		`"source":"title"`, `"model":"deepseek-title"`, `"sessionCacheHitTokens":8000`, `"sessionCacheMissTokens":2000`,
+		`"currency":"¥"`, `"cacheDiagnostics":`, `"prefixHash":"p"`,
 		`"prefixChanged":true`, `"prefixChangeReasons":["log_rewrite"]`, `"toolSchemaTokens":42`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("usage JSON = %s, want it to contain %s", s, want)
 		}
+	}
+	if strings.Contains(s, `"costUsd":`) {
+		t.Fatalf("non-USD usage must not expose costUsd: %s", s)
 	}
 }
 

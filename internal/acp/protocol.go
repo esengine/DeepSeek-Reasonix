@@ -18,6 +18,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"reasonix/internal/usageledger"
 )
 
 // ProtocolVersion is the ACP version this agent implements. Matches main.
@@ -439,8 +441,15 @@ const (
 // SessionPromptResult ends a session/prompt. TranscriptPath is reserved for a
 // future on-disk transcript pointer; omitted (null) for now.
 type SessionPromptResult struct {
-	StopReason     StopReason `json:"stopReason"`
-	TranscriptPath *string    `json:"transcriptPath,omitempty"`
+	StopReason     StopReason         `json:"stopReason"`
+	TranscriptPath *string            `json:"transcriptPath,omitempty"`
+	Meta           *SessionPromptMeta `json:"_meta,omitempty"`
+}
+
+// SessionPromptMeta carries additive Reasonix extensions that older ACP clients
+// can ignore. Usage uses the same fail-closed projection as headless output.
+type SessionPromptMeta struct {
+	Usage usageledger.Projection `json:"usage"`
 }
 
 // --- session/update (agent → client notifications) ---

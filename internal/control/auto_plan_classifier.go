@@ -68,7 +68,7 @@ func (c *ProviderAutoPlanClassifier) NeedsPlan(ctx context.Context, input string
 		}
 	}
 	if usage != nil && usage.TotalTokens > 0 && !nilutil.IsNil(c.sink) {
-		c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.pricing, UsageSource: event.UsageSourceClassifier})
+		c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.pricing, UsageSource: event.UsageSourceClassifier, UsageModel: c.prov.Name()})
 	}
 
 	var out struct {

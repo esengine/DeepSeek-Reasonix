@@ -79,6 +79,29 @@ func TestStartForSessionStampsJobContext(t *testing.T) {
 	}
 }
 
+func TestTaskJobEmitsStructuredLifecycle(t *testing.T) {
+	sink := &recordingSink{}
+	m := NewManager(sink)
+	defer m.Close()
+	j := m.StartForSession("session-a", "task", "scoped", func(context.Context, io.Writer) (string, error) {
+		return "done", nil
+	})
+	if res := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, 5); len(res) != 1 || res[0].Status != Done {
+		t.Fatalf("job result = %+v", res)
+	}
+	waitFor(t, func() bool {
+		sink.mu.Lock()
+		defer sink.mu.Unlock()
+		var states []string
+		for _, ev := range sink.events {
+			if ev.Kind == event.BackgroundJobLifecycle && ev.BackgroundJob.ID == j.ID {
+				states = append(states, ev.BackgroundJob.Status)
+			}
+		}
+		return len(states) == 2 && states[0] == "running" && states[1] == "done"
+	})
+}
+
 func TestJobStartObserverSeesLifetimeUntilTerminal(t *testing.T) {
 	observed := make(chan (<-chan struct{}), 1)
 	release := make(chan struct{})

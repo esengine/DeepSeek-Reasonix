@@ -2,6 +2,8 @@
 package eventwire
 
 import (
+	"strings"
+
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -21,6 +23,7 @@ type Event struct {
 	Ask             *Ask             `json:"ask,omitempty"`
 	Compaction      *Compaction      `json:"compaction,omitempty"`
 	Guardian        *Guardian        `json:"guardian,omitempty"`
+	BackgroundJob   *BackgroundJob   `json:"backgroundJob,omitempty"`
 	Err             string           `json:"err,omitempty"`
 	Outcome         string           `json:"outcome,omitempty"`
 	Readiness       *FinalReadiness  `json:"readiness,omitempty"`
@@ -63,6 +66,7 @@ func ToWire(e event.Event) Event {
 				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
 				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
 				Source:                e.UsageSource,
+				Model:                 e.UsageModel,
 				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
 			if e.CacheDiagnostics != nil {
@@ -72,7 +76,9 @@ func ToWire(e event.Event) Event {
 				cost := e.Pricing.Cost(u)
 				w.Usage.Cost = cost
 				w.Usage.Currency = e.Pricing.Symbol()
-				w.Usage.CostUSD = cost
+				if isUSD(e.Pricing.Currency) {
+					w.Usage.CostUSD = cost
+				}
 			}
 		}
 	case event.ApprovalRequest:
@@ -89,6 +95,8 @@ func ToWire(e event.Event) Event {
 		}
 	case event.GuardianAssessment:
 		w.Guardian = ToWireGuardian(e.Guardian)
+	case event.BackgroundJobLifecycle:
+		w.BackgroundJob = &BackgroundJob{ID: e.BackgroundJob.ID, Kind: e.BackgroundJob.Kind, Status: e.BackgroundJob.Status, SessionID: e.BackgroundJob.SessionID}
 	case event.TurnDone:
 		w.Outcome = e.Outcome
 		if e.Readiness != nil {
@@ -107,6 +115,13 @@ func ToWire(e event.Event) Event {
 type FinalReadiness struct {
 	Attempts int      `json:"attempts,omitempty"`
 	Missing  []string `json:"missing,omitempty"`
+}
+
+type BackgroundJob struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Status    string `json:"status"`
+	SessionID string `json:"sessionId,omitempty"`
 }
 
 // MemoryCitation is the JSON form of provider.MemoryCitation.
@@ -202,14 +217,25 @@ type Usage struct {
 	CacheMissTokens  int               `json:"cacheMissTokens"`
 	ReasoningTokens  int               `json:"reasoningTokens,omitempty"`
 	Source           string            `json:"source,omitempty"`
+	Model            string            `json:"model,omitempty"`
 	CacheDiagnostics *CacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens keep status displays steadier than one-turn values.
 	SessionCacheHitTokens  int     `json:"sessionCacheHitTokens"`
 	SessionCacheMissTokens int     `json:"sessionCacheMissTokens"`
 	Cost                   float64 `json:"cost,omitempty"`
 	Currency               string  `json:"currency,omitempty"`
-	// CostUSD is a compatibility alias for older consumers; it mirrors Cost.
+	// CostUSD is a compatibility alias for older consumers. It is omitted when
+	// the configured pricing currency is not explicitly USD.
 	CostUSD float64 `json:"costUsd,omitempty"`
+}
+
+func isUSD(currency string) bool {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "$", "USD", "US$":
+		return true
+	default:
+		return false
+	}
 }
 
 // CacheDiagnostics is the JSON form of cache prefix diagnostics.
@@ -307,7 +333,9 @@ func ToWireGuardian(g event.GuardianResult) *Guardian {
 			cost := g.Pricing.Cost(u)
 			out.Usage.Cost = cost
 			out.Usage.Currency = g.Pricing.Symbol()
-			out.Usage.CostUSD = cost
+			if isUSD(g.Pricing.Currency) {
+				out.Usage.CostUSD = cost
+			}
 		}
 	}
 	return out
@@ -342,23 +370,24 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 }
 
 var kindNames = map[event.Kind]string{
-	event.TurnStarted:        "turn_started",
-	event.Reasoning:          "reasoning",
-	event.Text:               "text",
-	event.Message:            "message",
-	event.ToolDispatch:       "tool_dispatch",
-	event.ToolResult:         "tool_result",
-	event.Usage:              "usage",
-	event.Notice:             "notice",
-	event.Phase:              "phase",
-	event.ApprovalRequest:    "approval_request",
-	event.AskRequest:         "ask_request",
-	event.TurnDone:           "turn_done",
-	event.CompactionStarted:  "compaction_started",
-	event.CompactionDone:     "compaction_done",
-	event.ToolProgress:       "tool_progress",
-	event.MCPSurfaceReady:    "mcp_surface_ready",
-	event.Retrying:           "retrying",
-	event.Steer:              "steer",
-	event.GuardianAssessment: "guardian_assessment",
+	event.TurnStarted:              "turn_started",
+	event.Reasoning:                "reasoning",
+	event.Text:                     "text",
+	event.Message:                  "message",
+	event.ToolDispatch:             "tool_dispatch",
+	event.ToolResult:               "tool_result",
+	event.Usage:                    "usage",
+	event.Notice:                   "notice",
+	event.Phase:                    "phase",
+	event.ApprovalRequest:          "approval_request",
+	event.AskRequest:               "ask_request",
+	event.TurnDone:                 "turn_done",
+	event.CompactionStarted:        "compaction_started",
+	event.CompactionDone:           "compaction_done",
+	event.ToolProgress:             "tool_progress",
+	event.MCPSurfaceReady:          "mcp_surface_ready",
+	event.Retrying:                 "retrying",
+	event.Steer:                    "steer",
+	event.GuardianAssessment:       "guardian_assessment",
+	event.BackgroundJobLifecycle:   "background_job_lifecycle",
 }

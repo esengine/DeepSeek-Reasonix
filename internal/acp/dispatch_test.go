@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // fakeNotifier captures Notify calls and answers Request via an injectable hook,
@@ -510,6 +511,43 @@ func TestUpdateSinkApprovalUsesTurnContext(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("turn context cancellation did not deny permission request")
+	}
+}
+
+func TestUpdateSinkUsageProjectionResetsPerTurn(t *testing.T) {
+	sink := newUpdateSink(&fakeNotifier{}, "sess-1")
+	sink.setTurnContext(context.Background())
+	sink.Emit(event.Event{Kind: event.Usage, UsageModel: "executor", Usage: &provider.Usage{
+		PromptTokens: 7, CompletionTokens: 2,
+	}, Pricing: &provider.Pricing{Input: 1, Output: 1, Currency: "USD"}})
+	first := sink.usageProjection()
+	if first.Usage.InputTokens != 7 || len(first.ModelUsage) != 1 {
+		t.Fatalf("first projection = %+v", first)
+	}
+
+	sink.setTurnContext(context.Background())
+	second := sink.usageProjection()
+	if second.Usage.InputTokens != 0 || len(second.ModelUsage) != 0 {
+		t.Fatalf("second projection retained prior turn usage: %+v", second)
+	}
+}
+
+func TestUpdateSinkUsageProjectionTracksBackgroundSubagent(t *testing.T) {
+	sink := newUpdateSink(&fakeNotifier{}, "sess-1")
+	sink.setTurnContext(context.Background())
+	sink.Emit(event.Event{Kind: event.BackgroundJobLifecycle, BackgroundJob: event.BackgroundJob{
+		ID: "task-1", Kind: "task", Status: "running",
+	}})
+	running := sink.usageProjection()
+	if !running.UsageIsIncomplete || running.OpenBackgroundSubagents != 1 {
+		t.Fatalf("running projection = %+v", running)
+	}
+	sink.Emit(event.Event{Kind: event.BackgroundJobLifecycle, BackgroundJob: event.BackgroundJob{
+		ID: "task-1", Kind: "task", Status: "done",
+	}})
+	done := sink.usageProjection()
+	if !done.UsageIsIncomplete || !done.CostIsPartial || done.OpenBackgroundSubagents != 0 {
+		t.Fatalf("done projection = %+v", done)
 	}
 }
 

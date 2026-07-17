@@ -718,7 +718,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	}
 	// Closes the planner's raw text block (no markdown redraw) and prints its
 	// usage line, mirroring the old Fprintln + printUsage tail.
-	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner})
+	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner, UsageModel: c.planner.Name()})
 
 	plan := text.String()
 	c.plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})

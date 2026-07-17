@@ -1059,7 +1059,10 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 			stop = StopError
 		}
 	}
-	res := SessionPromptResult{StopReason: stop}
+	res := SessionPromptResult{
+		StopReason: stop,
+		Meta:       &SessionPromptMeta{Usage: sess.sink.usageProjection()},
+	}
 	if sess.transcript != "" {
 		res.TranscriptPath = &sess.transcript
 	}

@@ -642,7 +642,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	var usage *provider.Usage
 	emitUsage := func() {
 		if usage != nil && usage.TotalTokens > 0 {
-			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
+			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction, UsageModel: a.prov.Name()})
 		}
 	}
 	for {

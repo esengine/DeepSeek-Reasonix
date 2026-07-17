@@ -103,6 +103,7 @@ The final structured object has this shape:
 
 ```json
 {
+  "schema_version": 2,
   "type": "result",
   "subtype": "success",
   "is_error": false,
@@ -110,7 +111,11 @@ The final structured object has this shape:
   "num_turns": 1,
   "result": "...",
   "session_id": "...",
-  "total_cost_usd": 0,
+  "usage_is_incomplete": false,
+  "cost_is_partial": false,
+  "total_cost_usd": 0.00000123,
+  "total_cost_usd_ticks": 12300,
+  "modelUsage": {},
   "usage": {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -119,6 +124,13 @@ The final structured object has this shape:
   }
 }
 ```
+
+`usage_is_incomplete` is true while background subagents are still open or when
+usage attribution could not be completed. `open_background_subagents` and
+`incomplete_reasons` explain that state. `cost_is_partial` is true when any
+pricing is missing or is not denominated in USD; in that case
+`total_cost_usd` and `total_cost_usd_ticks` are omitted rather than reported as
+zero. `modelUsage` attributes tokens and exact cost ticks by role and model.
 
 Execution failures use `subtype: "error_during_execution"` and
 `is_error: true`. Structured modes keep runtime errors in JSON instead of also

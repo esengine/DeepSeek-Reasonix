@@ -1185,6 +1185,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		if usage != nil && usage.TotalTokens > 0 {
 			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
 				UsageSource:      a.usageSource,
+				UsageModel:       a.prov.Name(),
 				CacheDiagnostics: &cacheDiagnostics,
 				SessionHit:       int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
 		}

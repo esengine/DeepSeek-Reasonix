@@ -99,6 +99,7 @@ reasonix run "运行测试" --output-format stream-json
 
 ```json
 {
+  "schema_version": 2,
   "type": "result",
   "subtype": "success",
   "is_error": false,
@@ -106,7 +107,11 @@ reasonix run "运行测试" --output-format stream-json
   "num_turns": 1,
   "result": "...",
   "session_id": "...",
-  "total_cost_usd": 0,
+  "usage_is_incomplete": false,
+  "cost_is_partial": false,
+  "total_cost_usd": 0.00000123,
+  "total_cost_usd_ticks": 12300,
+  "modelUsage": {},
   "usage": {
     "input_tokens": 0,
     "output_tokens": 0,
@@ -115,6 +120,12 @@ reasonix run "运行测试" --output-format stream-json
   }
 }
 ```
+
+后台 subagent 尚未结束，或用量归因不完整时，`usage_is_incomplete` 为 `true`；
+`open_background_subagents` 和 `incomplete_reasons` 会说明原因。任一模型缺少定价或
+定价币种不是 USD 时，`cost_is_partial` 为 `true`，并省略
+`total_cost_usd` / `total_cost_usd_ticks`，不会用 `0` 冒充免费。
+`modelUsage` 按角色和模型拆分 token 与精确成本 ticks。
 
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。
 结构化模式会把运行时错误保留在 JSON 中，不再额外重复输出一份人类可读错误。
