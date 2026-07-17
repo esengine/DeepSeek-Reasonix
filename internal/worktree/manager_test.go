@@ -185,6 +185,131 @@ func TestLegacyCreateUsesDeliveryPolicyAndAllowsDirtyCommittedHead(t *testing.T)
 	}
 }
 
+func TestManagerRemoveRefusesUncommittedAndCommittedChanges(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	repo := initRepo(t)
+	mgr := NewManager(t.TempDir())
+
+	dirty, err := mgr.Create(ctx, repo, CreatePolicy{Kind: KindSubagent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirty.WorktreeRoot, "README.md"), []byte("dirty child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.Remove(ctx, dirty); !errors.Is(err, ErrResourceHasChanges) {
+		t.Fatalf("Remove dirty err = %v, want ErrResourceHasChanges", err)
+	}
+	if _, err := os.Stat(dirty.WorktreeRoot); err != nil {
+		t.Fatalf("dirty worktree was removed: %v", err)
+	}
+
+	committed, err := mgr.Create(ctx, repo, CreatePolicy{Kind: KindSubagent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(committed.WorktreeRoot, "README.md"), []byte("committed child\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, committed.WorktreeRoot, "add", "README.md")
+	runGitTest(t, committed.WorktreeRoot, "commit", "-m", "child commit")
+	if _, err := mgr.Remove(ctx, committed); !errors.Is(err, ErrResourceHasChanges) {
+		t.Fatalf("Remove committed err = %v, want ErrResourceHasChanges", err)
+	}
+	if _, err := os.Stat(committed.WorktreeRoot); err != nil {
+		t.Fatalf("committed worktree was removed: %v", err)
+	}
+}
+
+func TestManagerDiscardRequiresExplicitCallAndPersistsRemoval(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	repo := initRepo(t)
+	mgr := NewManager(t.TempDir())
+	res, err := mgr.Create(ctx, repo, CreatePolicy{Kind: KindSubagent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(res.WorktreeRoot, "scratch.txt"), []byte("user data\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := mgr.Discard(ctx, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.CleanupState != CleanupStateRemoved || removed.LifecycleState != LifecycleStateRemoved {
+		t.Fatalf("removed resource = %+v", removed)
+	}
+	if _, err := os.Stat(res.WorktreeRoot); !os.IsNotExist(err) {
+		t.Fatalf("discarded worktree still exists: %v", err)
+	}
+	shown, err := mgr.Show(ctx, res.IsolationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown.CleanupState != CleanupStateRemoved {
+		t.Fatalf("persisted cleanup state = %q", shown.CleanupState)
+	}
+}
+
+func TestManagerGCReclaimsSafeOrphanAndRetainsCommittedBranch(t *testing.T) {
+	requireGit(t)
+	ctx := context.Background()
+	repo := initRepo(t)
+	mgr := NewManager(t.TempDir())
+
+	safe, err := mgr.Create(ctx, repo, CreatePolicy{Kind: KindSubagent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(safe.WorktreeRoot); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repo, "worktree", "prune")
+
+	committed, err := mgr.Create(ctx, repo, CreatePolicy{Kind: KindSubagent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(committed.WorktreeRoot, "README.md"), []byte("orphan commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, committed.WorktreeRoot, "add", "README.md")
+	runGitTest(t, committed.WorktreeRoot, "commit", "-m", "orphan commit")
+	if err := os.RemoveAll(committed.WorktreeRoot); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repo, "worktree", "prune")
+
+	result, err := mgr.GC(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Removed) != 1 || result.Removed[0].IsolationID != safe.IsolationID {
+		t.Fatalf("GC removed = %+v, want safe orphan", result.Removed)
+	}
+	if len(result.Blocked) != 1 || result.Blocked[0].IsolationID != committed.IsolationID {
+		t.Fatalf("GC blocked = %+v, want committed orphan", result.Blocked)
+	}
+	if out := runGitTest(t, repo, "branch", "--list", safe.Branch); strings.TrimSpace(out) != "" {
+		t.Fatalf("safe orphan branch remains: %q", out)
+	}
+	if out := runGitTest(t, repo, "branch", "--list", committed.Branch); strings.TrimSpace(out) == "" {
+		t.Fatal("committed orphan branch was deleted")
+	}
+}
+
+func runGitTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
 func gitStatus(t *testing.T, repo string) string {
 	t.Helper()
 	cmd := exec.Command("git", "-C", repo, "status", "--porcelain=v1", "--untracked-files=normal")

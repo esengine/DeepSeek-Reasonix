@@ -3,9 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/tool"
 	"reasonix/internal/worktree"
 )
@@ -149,4 +154,167 @@ func TestTaskToolNormalizeSubagentIsolation(t *testing.T) {
 	if _, err := normalizeSubagentIsolation("sandbox"); err == nil {
 		t.Fatal("unknown isolation should be rejected")
 	}
+}
+
+func TestTaskToolWriterRunsInsideWorktreeAndContinueReusesResource(t *testing.T) {
+	source := initTaskIsolationRepo(t)
+	manager := worktree.NewManager(filepath.Join(t.TempDir(), "managed"))
+	store := NewSubagentStore(t.TempDir())
+	parentReg := tool.NewRegistry()
+	provider := writerCallingProvider{}
+
+	task := NewTaskTool(provider, nil, parentReg, 20, 0, 0, 0, 0, 0, 0, 0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(store, source, "base-model", "base-effort").
+		WithWorkspaceIsolation(manager, func(_ context.Context, workspaceRoot string, _ []string, _, _ int) (*tool.Registry, error) {
+			reg := tool.NewRegistry()
+			reg.Add(worktreeRootWriter{root: workspaceRoot})
+			return reg, nil
+		})
+
+	out, err := task.Execute(testTaskContext(), []byte(`{"prompt":"write the isolated file","isolation":"worktree"}`))
+	if err != nil {
+		t.Fatalf("isolated Execute: %v", err)
+	}
+	ref := subagentRefFromOutput(t, out)
+	resources, err := manager.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(resources) != 1 {
+		t.Fatalf("managed resources = %d, want 1: %+v", len(resources), resources)
+	}
+	childPath := filepath.Join(resources[0].WorkspaceRoot, "x")
+	if got, err := os.ReadFile(childPath); err != nil || string(got) != "y" {
+		t.Fatalf("isolated writer result = %q, %v; want child x=y", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(source, "x")); !os.IsNotExist(err) {
+		t.Fatalf("parent workspace was mutated, stat err = %v", err)
+	}
+
+	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"continue","continue_from":"`+ref+`"}`)); err != nil {
+		t.Fatalf("continued Execute: %v", err)
+	}
+	after, err := manager.List(context.Background())
+	if err != nil {
+		t.Fatalf("List after continuation: %v", err)
+	}
+	if len(after) != 1 || after[0].IsolationID != resources[0].IsolationID || after[0].WorkspaceRoot != resources[0].WorkspaceRoot {
+		t.Fatalf("continuation created or changed isolation resource: before=%+v after=%+v", resources, after)
+	}
+}
+
+func TestTaskToolBackgroundWritersUseIndependentWorktrees(t *testing.T) {
+	source := initTaskIsolationRepo(t)
+	manager := worktree.NewManager(filepath.Join(t.TempDir(), "managed"))
+	store := NewSubagentStore(t.TempDir())
+	task := NewTaskTool(writerCallingProvider{}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(store, source, "base-model", "base-effort").
+		WithWorkspaceIsolation(manager, func(_ context.Context, workspaceRoot string, _ []string, _, _ int) (*tool.Registry, error) {
+			reg := tool.NewRegistry()
+			reg.Add(worktreeRootWriter{root: workspaceRoot})
+			return reg, nil
+		})
+
+	jm := jobs.NewManager(event.Discard)
+	defer jm.Close()
+	ctx := jobs.WithManager(jobs.WithSession(testTaskContext(), "parent-session"), jm)
+
+	var jobIDs []string
+	for _, prompt := range []string{"writer one", "writer two"} {
+		out, err := task.Execute(ctx, []byte(`{"prompt":"`+prompt+`","run_in_background":true,"isolation":"worktree"}`))
+		if err != nil {
+			t.Fatalf("start %q: %v", prompt, err)
+		}
+		jobID := extractJobID(out)
+		if jobID == "" {
+			t.Fatalf("start %q returned no job ID:\n%s", prompt, out)
+		}
+		jobIDs = append(jobIDs, jobID)
+	}
+
+	results := jm.WaitForSession(context.Background(), "parent-session", jobIDs, 10)
+	if len(results) != 2 {
+		t.Fatalf("background results = %d, want 2: %+v", len(results), results)
+	}
+	for _, result := range results {
+		if result.Status != jobs.Done {
+			t.Fatalf("background writer %s status = %s, want done: %+v", result.ID, result.Status, result)
+		}
+	}
+
+	resources, err := manager.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(resources) != 2 {
+		t.Fatalf("managed resources = %d, want 2: %+v", len(resources), resources)
+	}
+	if resources[0].IsolationID == resources[1].IsolationID || cleanPathEqual(resources[0].WorkspaceRoot, resources[1].WorkspaceRoot) {
+		t.Fatalf("background writers shared isolation: %+v", resources)
+	}
+	for _, resource := range resources {
+		got, err := os.ReadFile(filepath.Join(resource.WorkspaceRoot, "x"))
+		if err != nil || string(got) != "y" {
+			t.Fatalf("isolated result for %s = %q, %v; want x=y", resource.IsolationID, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(source, "x")); !os.IsNotExist(err) {
+		t.Fatalf("parent workspace was mutated, stat err = %v", err)
+	}
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = source
+	if out, err := cmd.CombinedOutput(); err != nil || len(out) != 0 {
+		t.Fatalf("parent git status = %q, %v; want clean", out, err)
+	}
+}
+
+type worktreeRootWriter struct {
+	root string
+}
+
+func (w worktreeRootWriter) Name() string            { return "write_file" }
+func (w worktreeRootWriter) Description() string     { return "write a file" }
+func (w worktreeRootWriter) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (w worktreeRootWriter) ReadOnly() bool          { return false }
+func (w worktreeRootWriter) Execute(_ context.Context, args json.RawMessage) (string, error) {
+	var p struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return "", err
+	}
+	path := filepath.Join(w.root, filepath.Clean(p.Path))
+	if err := os.WriteFile(path, []byte(p.Content), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func initTaskIsolationRepo(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	commands := [][]string{
+		{"init", "-b", "main"},
+		{"config", "user.email", "reasonix@example.test"},
+		{"config", "user.name", "Reasonix Test"},
+	}
+	for _, args := range commands {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "seed.txt"}, {"commit", "-m", "seed"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = root
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return root
 }

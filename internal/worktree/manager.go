@@ -52,8 +52,9 @@ const (
 )
 
 var (
-	ErrDirtySource   = errors.New("source workspace has uncommitted changes")
-	ErrApplyConflict = errors.New("worktree apply conflict")
+	ErrDirtySource        = errors.New("source workspace has uncommitted changes")
+	ErrApplyConflict      = errors.New("worktree apply conflict")
+	ErrResourceHasChanges = errors.New("worktree resource has changes")
 )
 
 // DirtySourceError is returned when policy requires a clean parent workspace.
@@ -141,6 +142,36 @@ func (e *ApplyConflictError) Error() string {
 }
 
 func (e *ApplyConflictError) Unwrap() error { return ErrApplyConflict }
+
+// ResourceChangesError prevents implicit cleanup from deleting uncommitted
+// files or commits that may belong to the user.
+type ResourceChangesError struct {
+	Paths       []string
+	HeadChanged bool
+}
+
+func (e *ResourceChangesError) Error() string {
+	parts := make([]string, 0, 2)
+	if len(e.Paths) > 0 {
+		parts = append(parts, "paths: "+strings.Join(e.Paths, ", "))
+	}
+	if e.HeadChanged {
+		parts = append(parts, "branch contains commits after the isolation base")
+	}
+	if len(parts) == 0 {
+		return ErrResourceHasChanges.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrResourceHasChanges, strings.Join(parts, "; "))
+}
+
+func (e *ResourceChangesError) Unwrap() error { return ErrResourceHasChanges }
+
+// GCResult reports which orphaned resources were reclaimed and which were
+// retained because their branch contains commits not represented elsewhere.
+type GCResult struct {
+	Removed []Resource `json:"removed,omitempty"`
+	Blocked []Resource `json:"blocked,omitempty"`
+}
 
 // Manager owns the durable lifecycle for worktrees under one managed root.
 type Manager struct {
@@ -378,6 +409,114 @@ func (m *Manager) Apply(ctx context.Context, res Resource) (ApplyResult, error) 
 		return ApplyResult{}, err
 	}
 	return ApplyResult{Status: ApplyStatusApplied, Paths: diff.Paths}, nil
+}
+
+// Remove safely removes an unchanged worktree. It refuses both uncommitted
+// changes and commits created after the isolation base.
+func (m *Manager) Remove(ctx context.Context, res Resource) (Resource, error) {
+	if res.CleanupState == CleanupStateRemoved {
+		return res, nil
+	}
+	status, err := m.Status(ctx, res)
+	if err != nil {
+		return Resource{}, err
+	}
+	head, err := worktreeHead(ctx, res.WorktreeRoot)
+	if err != nil {
+		return Resource{}, err
+	}
+	if status.Dirty || head != res.BaseCommit {
+		return Resource{}, &ResourceChangesError{Paths: status.Paths, HeadChanged: head != res.BaseCommit}
+	}
+	return m.removeResource(ctx, res, false)
+}
+
+// Discard explicitly removes a worktree and its managed branch even when it
+// contains changes. Callers must put this behind their approval boundary.
+func (m *Manager) Discard(ctx context.Context, res Resource) (Resource, error) {
+	return m.removeResource(ctx, res, true)
+}
+
+// GC reclaims orphaned resources only when their managed branch still points
+// at the original base commit. Branches with later commits are retained.
+func (m *Manager) GC(ctx context.Context) (GCResult, error) {
+	resources, err := m.List(ctx)
+	if err != nil {
+		return GCResult{}, err
+	}
+	var result GCResult
+	for _, res := range resources {
+		if res.CleanupState != CleanupStateOrphan {
+			continue
+		}
+		head, exists, err := branchHead(ctx, res.SourceRoot, res.Branch)
+		if err != nil {
+			return result, err
+		}
+		if exists && head != res.BaseCommit {
+			result.Blocked = append(result.Blocked, res)
+			continue
+		}
+		if exists {
+			if _, stderr, err := runGit(ctx, res.SourceRoot, "branch", "-D", res.Branch); err != nil {
+				return result, fmt.Errorf("delete orphaned worktree branch: %w%s", err, stderrSuffix(stderr))
+			}
+		}
+		res.LifecycleState = LifecycleStateRemoved
+		res.CleanupState = CleanupStateRemoved
+		if err := m.writeResource(res); err != nil {
+			return result, err
+		}
+		result.Removed = append(result.Removed, res)
+	}
+	return result, nil
+}
+
+func (m *Manager) removeResource(ctx context.Context, res Resource, force bool) (Resource, error) {
+	if res.CleanupState == CleanupStateRemoved {
+		return res, nil
+	}
+	if _, err := os.Stat(res.WorktreeRoot); err == nil {
+		args := []string{"worktree", "remove"}
+		if force {
+			args = append(args, "--force")
+		}
+		args = append(args, res.WorktreeRoot)
+		if _, stderr, err := runGit(ctx, res.SourceRoot, args...); err != nil {
+			return Resource{}, fmt.Errorf("remove managed worktree: %w%s", err, stderrSuffix(stderr))
+		}
+	} else if !os.IsNotExist(err) {
+		return Resource{}, fmt.Errorf("inspect managed worktree: %w", err)
+	}
+	if _, exists, err := branchHead(ctx, res.SourceRoot, res.Branch); err != nil {
+		return Resource{}, err
+	} else if exists {
+		if _, stderr, err := runGit(ctx, res.SourceRoot, "branch", "-D", res.Branch); err != nil {
+			return Resource{}, fmt.Errorf("delete managed worktree branch: %w%s", err, stderrSuffix(stderr))
+		}
+	}
+	res.LifecycleState = LifecycleStateRemoved
+	res.CleanupState = CleanupStateRemoved
+	if err := m.writeResource(res); err != nil {
+		return Resource{}, err
+	}
+	return res, nil
+}
+
+func worktreeHead(ctx context.Context, root string) (string, error) {
+	head, stderr, err := runGit(ctx, root, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree head: %w%s", err, stderrSuffix(stderr))
+	}
+	return strings.TrimSpace(head), nil
+}
+
+func branchHead(ctx context.Context, sourceRoot, branch string) (head string, exists bool, err error) {
+	head, _, err = runGit(ctx, sourceRoot, "rev-parse", "--verify", "refs/heads/"+branch)
+	if err != nil {
+		return "", false, nil
+	}
+	return strings.TrimSpace(head), true, nil
 }
 
 func (m *Manager) writeResource(res Resource) error {
