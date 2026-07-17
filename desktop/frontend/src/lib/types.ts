@@ -728,7 +728,6 @@ export interface ServerView {
   resources: number;
   hasTools?: boolean;
   error?: string;
-  requiresReverification?: boolean;
   toolList?: MCPToolView[];
   trustedReadOnlyTools?: string[];
   callTimeoutSeconds?: number;
@@ -1472,6 +1471,7 @@ export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
   subagentModel: string;
+  compactModel: string;
   subagentEffort: string;
   autoPlan: string;
   providers: ProviderView[];

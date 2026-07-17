@@ -263,6 +263,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# subagent_models = { review = \"deepseek-pro\", security_review = \"deepseek-pro\" }   # per-skill overrides\n")
 	}
+	if c.Agent.CompactModel != "" {
+		fmt.Fprintf(&b, "compact_model = %q   # independent compaction model; empty = use main model\n", c.Agent.CompactModel)
+	} else {
+		b.WriteString("# compact_model = \"deepseek-flash\"   # independent compaction model; empty = use main model\n")
+	}
 	if c.Agent.SubagentEffort != "" {
 		fmt.Fprintf(&b, "subagent_effort = %q   # default effort for subagent entry points\n", c.Agent.SubagentEffort)
 	} else {

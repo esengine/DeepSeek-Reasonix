@@ -252,6 +252,7 @@ type SettingsView struct {
 	DefaultModel            string               `json:"defaultModel"`
 	PlannerModel            string               `json:"plannerModel"`
 	SubagentModel           string               `json:"subagentModel"`
+	CompactModel            string               `json:"compactModel"`
 	SubagentEffort          string               `json:"subagentEffort"`
 	AutoPlan                string               `json:"autoPlan"`
 	Providers               []ProviderView       `json:"providers"`
@@ -839,6 +840,7 @@ func (a *App) Settings() SettingsView {
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
 		SubagentModel:     cfg.Agent.SubagentModel,
+		CompactModel:      cfg.Agent.CompactModel,
 		SubagentEffort:    cfg.Agent.SubagentEffort,
 		AutoPlan:          desktopAutoPlanMode(cfg.Agent.AutoPlan),
 		Providers:         []ProviderView{},
@@ -1702,6 +1704,22 @@ func (a *App) SetSubagentModel(ref string) error {
 	})
 }
 
+// SetCompactModel sets (or, with "", clears) the independent compaction model.
+func (a *App) SetCompactModel(ref string) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		ref = strings.TrimSpace(ref)
+		if ref != "" {
+			resolved, err := selectableDesktopModelRef(c, ref)
+			if err != nil {
+				return err
+			}
+			ref = resolved
+		}
+		c.Agent.CompactModel = ref
+		return nil
+	})
+}
+
 func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
 	entry, ok := c.ResolveModel(ref)
 	if !ok {
@@ -2380,6 +2398,9 @@ func retargetProviderReferences(c *config.Config, name, fallbackRef string) {
 	}
 	if desktopModelRefsProvider(c, c.Agent.SubagentModel, name) {
 		c.Agent.SubagentModel = fallbackRef
+	}
+	if desktopModelRefsProvider(c, c.Agent.CompactModel, name) {
+		c.Agent.CompactModel = fallbackRef
 	}
 	for skill, ref := range c.Agent.SubagentModels {
 		if desktopModelRefsProvider(c, ref, name) {
