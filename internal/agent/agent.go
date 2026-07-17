@@ -1502,15 +1502,15 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 				continue
 			}
 			if !hasVisibleFinalAnswer(text) {
-				// DeepSeek thinking mode frequently streams a long reasoning_content
-				// and then finishes with finish_reason="stop" but an empty content
+				// DeepSeek thinking mode can stream a long reasoning_content and
+				// then finish with finish_reason="stop" but an empty content
 				// block: the model has explicitly signalled completion and its
 				// reasoning was already streamed to the user. Retrying here overrides
 				// that stop signal and forces another expensive thinking round (the
 				// "still thinking after the task is done" symptom), so honour the
 				// stop when reasoning carried the substance of the answer and treat
 				// the turn as a final answer instead of retrying.
-				if !reasoningOnlyFinishHonoured(usage, reasoning) {
+				if !reasoningOnlyFinishHonoured(a.prov, usage, reasoning) {
 					emptyFinalBlocks++
 					if emptyFinalBlocks >= maxEmptyFinalBlocks {
 						return fmt.Errorf("model finished without a visible final answer %d times", emptyFinalBlocks)
@@ -2434,11 +2434,20 @@ func hasVisibleFinalAnswer(text string) bool {
 
 // reasoningOnlyFinishHonoured reports whether the model finished with a stop
 // signal but placed its answer in the reasoning stream rather than the content
-// block. DeepSeek thinking mode does this routinely: it streams a long
+// block. DeepSeek thinking mode does this occasionally: it streams a long
 // reasoning_content, then returns finish_reason="stop" with an empty content.
 // The model has signalled completion, so the host accepts the turn instead of
 // retrying and forcing another expensive thinking round.
-func reasoningOnlyFinishHonoured(u *provider.Usage, reasoning string) bool {
+//
+// The accept is scoped to DeepSeek thinking mode (ToolCallReasoningPolicy):
+// for other providers a reasoning-only turn keeps the empty-final retry
+// safety net — local <think>-tag models often recover a visible answer on
+// the second attempt, and a gateway that mislabels truncation as "stop"
+// must not have a degenerate turn committed as the final answer.
+func reasoningOnlyFinishHonoured(p provider.Provider, u *provider.Usage, reasoning string) bool {
+	if !provider.RequiresToolCallReasoning(p) {
+		return false
+	}
 	if u == nil || u.FinishReason != "stop" {
 		return false
 	}
