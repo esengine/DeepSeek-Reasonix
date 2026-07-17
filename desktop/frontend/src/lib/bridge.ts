@@ -331,6 +331,7 @@ export interface AppBindings {
   SetDefaultModel(ref: string): Promise<void>;
   SetPlannerModel(ref: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
+  SetCompactModel(ref: string): Promise<void>;
   SetSubagentEffort(level: string): Promise<void>;
   SetMaxSubagentDepth(depth: number): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
@@ -1144,6 +1145,7 @@ function makeMockApp(): AppBindings {
     defaultModel: "deepseek",
     plannerModel: "",
     subagentModel: "",
+    compactModel: "",
     subagentEffort: "",
     autoPlan: "off",
     providers: [
@@ -3424,6 +3426,9 @@ function makeMockApp(): AppBindings {
     },
     async SetSubagentModel(ref: string) {
       settings.subagentModel = ref;
+    },
+    async SetCompactModel(ref: string) {
+      settings.compactModel = ref;
     },
     async SetSubagentEffort(level: string) {
       settings.subagentEffort = level;

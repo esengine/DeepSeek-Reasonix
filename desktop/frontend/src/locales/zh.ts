@@ -1312,6 +1312,8 @@ export const zh: Record<DictKey, string> = {
   "settings.subagentDefaults": "子代理默认值",
   "settings.subagentModel": "子代理模型",
   "settings.subagentModelDefault": "使用当前/默认模型",
+  "settings.compactModel": "上下文压缩模型",
+  "settings.compactModelDefault": "使用当前/默认模型",
   "settings.subagentEffort": "子代理 effort",
   "settings.subagentEffortDefault": "auto（模型服务默认）",
   "settings.subagentHint": "作用于 task 和 runAs=subagent skills；工具调用参数或单个 skill 配置会覆盖它。",

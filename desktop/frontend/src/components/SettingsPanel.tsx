@@ -4046,6 +4046,18 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
               />
             </SettingsField>
 
+            <SettingsField label={t("settings.compactModel")}>
+              <ModelPicker
+                s={s}
+                refs={refs}
+                value={toRef(s.compactModel, s)}
+                disabled={busy}
+                emptyOptionLabel={t("settings.compactModelDefault")}
+                emptyOptionHint={t("common.auto")}
+                onPick={(ref) => void apply(() => app.SetCompactModel(ref))}
+              />
+            </SettingsField>
+
             <SettingsField label={t("settings.subagentEffort")} hint={t("settings.subagentHint")}>
               <select
                 className="mem-select set-grow"

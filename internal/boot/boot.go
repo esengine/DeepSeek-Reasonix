@@ -1378,6 +1378,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if cfg.MemoryCompilerEnabled() && !cfg.SafeMode() {
 		memCompiler = memorycompiler.New(config.MemoryCompilerDir(root))
 	}
+
+	var compactProv provider.Provider
+	if cm := strings.TrimSpace(cfg.Agent.CompactModel); cm != "" {
+		ce, ok := cfg.ResolveModel(cm)
+		if ok {
+			compactProv, err = NewProviderWithProxy(ce, proxySpec)
+			if err != nil {
+				slog.Warn("compact_model provider init failed, falling back to main model", "model", cm, "err", err)
+			}
+		} else {
+			slog.Warn("compact_model not found, falling back to main model", "model", cm)
+		}
+	}
+
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		MaxSteps:                           maxSteps,
 		MaxStepsKey:                        opts.MaxStepsKey,
@@ -1407,6 +1421,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		MemoryCompiler:                     memCompiler,
 		MemoryCompilerVerbosity:            cfg.MemoryCompilerVerbosity(),
 		UseMemoryCompilerLLMClassification: strings.TrimSpace(os.Getenv("REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION")) == "true",
+		CompactProvider:                    compactProv,
 	}, sink)
 
 	var runner agent.Runner = executor

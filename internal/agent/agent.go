@@ -327,6 +327,10 @@ type Agent struct {
 	// Plan workflows. nil disables gating entirely.
 	gate Gate
 
+	// compactProv, when non-nil, is used for context compaction (summarization)
+	// instead of the main provider. Nil = use a.prov.
+	compactProv provider.Provider
+
 	// planModeReadOnlyTrust is retained for legacy controller wiring. The main
 	// Plan execution path no longer consults it.
 	planModeReadOnlyTrust PlanModeReadOnlyTrustGate
@@ -1028,6 +1032,10 @@ type Options struct {
 	ArchiveDir          string
 	KeepPolicy          KeepPolicy
 
+	// CompactProvider, when non-nil, is used for context compaction summaries
+	// instead of the main provider. Nil = use the main provider.
+	CompactProvider provider.Provider
+
 	// Hooks fires PreToolUse / PostToolUse shell hooks around tool calls. nil
 	// disables hook firing.
 	Hooks ToolHooks
@@ -1169,6 +1177,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		pricing:                 opts.Pricing,
 		usageSource:             usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
 		sink:                    sink,
+		compactProv:             opts.CompactProvider,
 		gate:                    gate,
 		readOnlyExecution:       opts.ReadOnlyExecution,
 		planModeReadOnlyTrust:   planModeReadOnlyTrust,

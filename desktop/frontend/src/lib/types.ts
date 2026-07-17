@@ -1472,6 +1472,7 @@ export interface SettingsView {
   defaultModel: string;
   plannerModel: string;
   subagentModel: string;
+  compactModel: string;
   subagentEffort: string;
   autoPlan: string;
   providers: ProviderView[];

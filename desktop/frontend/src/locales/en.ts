@@ -1310,6 +1310,8 @@ export const en = {
   "settings.subagentDefaults": "Subagent defaults",
   "settings.subagentModel": "Subagent model",
   "settings.subagentModelDefault": "Use current/default model",
+  "settings.compactModel": "Compaction model",
+  "settings.compactModelDefault": "Use current/default model",
   "settings.subagentEffort": "Subagent effort",
   "settings.subagentEffortDefault": "auto (provider default)",
   "settings.subagentHint": "Applies to task and runAs=subagent skills unless a tool call or skill-specific config overrides it.",
