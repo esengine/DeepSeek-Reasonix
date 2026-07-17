@@ -277,6 +277,7 @@ const (
 	UsageSourceSubagent         = "subagent"
 	UsageSourceCompaction       = "compaction"
 	UsageSourceClassifier       = "classifier"
+	UsageSourceVision           = "vision"
 	UsageSourceTitle            = "title"
 	UsageSourceCapabilityRouter = "capability-router"
 )

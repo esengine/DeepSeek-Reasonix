@@ -84,6 +84,23 @@ func (c *Config) SetAutoPlan(mode string) error {
 	return nil
 }
 
+// SetImageUnderstandingLog controls how much OCR/vision sidecar output the CLI
+// should display. The prompt injection itself is controlled by agent settings.
+func (c *Config) SetImageUnderstandingLog(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "off", "none", "false", "0", "disabled":
+		c.UI.ImageUnderstandingLog = "off"
+	case "", "summary", "status":
+		c.UI.ImageUnderstandingLog = "summary"
+	case "detail", "details", "verbose", "full":
+		c.UI.ImageUnderstandingLog = "detail"
+	default:
+		c.UI.ImageUnderstandingLog = ""
+		return fmt.Errorf("image_understanding_log %q: must be off|summary|detail", mode)
+	}
+	return nil
+}
+
 // SetDesktopDefaultToolApprovalMode sets the Ask/Auto/YOLO posture used only
 // for newly-created desktop sessions.
 func (c *Config) SetDesktopDefaultToolApprovalMode(mode string) error {

@@ -87,6 +87,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# show_reasoning = true   # CLI: show thinking text by default; false = collapsed (toggle with Ctrl+O)\n")
 		}
+		if strings.TrimSpace(c.UI.ImageUnderstandingLog) != "" {
+			fmt.Fprintf(&b, "image_understanding_log = %q   # off|summary|detail; CLI visibility for OCR/vision sidecar notices\n", c.UIImageUnderstandingLog())
+		} else {
+			b.WriteString("# image_understanding_log = \"summary\"   # off|summary|detail; CLI visibility for OCR/vision sidecar notices\n")
+		}
 		b.WriteString("\n")
 	}
 
@@ -222,6 +227,16 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "auto_plan_classifier = %q   # optional provider/model for borderline auto-plan decisions\n", c.Agent.AutoPlanClassifier)
 	} else {
 		b.WriteString("# auto_plan_classifier = \"deepseek-flash\"   # optional; only used for borderline tasks\n")
+	}
+	if c.Agent.ImageUnderstandingModel != "" {
+		fmt.Fprintf(&b, "image_understanding_model = %q   # optional vision sidecar for images when the active model is text-only\n", c.Agent.ImageUnderstandingModel)
+	} else {
+		b.WriteString("# image_understanding_model = \"provider/vision-model\"   # optional; describes images for text-only active models\n")
+	}
+	if c.Agent.ImageUnderstandingCommand != "" {
+		fmt.Fprintf(&b, "image_understanding_command = %q   # optional local OCR/vision sidecar command; receives image paths\n", c.Agent.ImageUnderstandingCommand)
+	} else {
+		b.WriteString("# image_understanding_command = \"reasonix-vision-ocr\"   # optional; local sidecar, no model downloads\n")
 	}
 	fmt.Fprintf(&b, "soft_compact_ratio  = %s   # notice only; keeps cache-first prefix intact\n", formatFloat(c.Agent.SoftCompactRatio))
 	fmt.Fprintf(&b, "tool_result_snip_ratio = %s   # snip stale tool results at this fraction before summary compaction\n", formatFloat(c.Agent.ToolResultSnipRatio))
@@ -762,6 +777,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if c.UI.ShowReasoning != d.UI.ShowReasoning {
 			fmt.Fprintf(&b, "show_reasoning = %v\n", c.UI.ShowReasoning)
 		}
+		if strings.TrimSpace(c.UI.ImageUnderstandingLog) != "" {
+			fmt.Fprintf(&b, "image_understanding_log = %q\n", c.UIImageUnderstandingLog())
+		}
 		b.WriteString("\n")
 	}
 
@@ -826,6 +844,14 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 	if c.Agent.AutoPlanClassifier != "" && c.Agent.AutoPlanClassifier != d.Agent.AutoPlanClassifier {
 		fmt.Fprintf(&agentBuf, "auto_plan_classifier = %q\n", c.Agent.AutoPlanClassifier)
+		anyAgent = true
+	}
+	if c.Agent.ImageUnderstandingModel != "" && c.Agent.ImageUnderstandingModel != d.Agent.ImageUnderstandingModel {
+		fmt.Fprintf(&agentBuf, "image_understanding_model = %q\n", c.Agent.ImageUnderstandingModel)
+		anyAgent = true
+	}
+	if c.Agent.ImageUnderstandingCommand != "" && c.Agent.ImageUnderstandingCommand != d.Agent.ImageUnderstandingCommand {
+		fmt.Fprintf(&agentBuf, "image_understanding_command = %q\n", c.Agent.ImageUnderstandingCommand)
 		anyAgent = true
 	}
 	if c.Agent.SoftCompactRatio != d.Agent.SoftCompactRatio {

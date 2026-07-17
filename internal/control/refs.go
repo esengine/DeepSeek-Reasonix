@@ -566,6 +566,59 @@ func (c *Controller) inputImages(line string) []string {
 	return urls
 }
 
+func (c *Controller) inputImageRefs(line string) []ImageUnderstandingRef {
+	var images []ImageUnderstandingRef
+	seen := map[string]bool{}
+	for _, r := range c.detectRefs(line) {
+		baseDir := c.workspaceRoot
+		if r.baseDir != "" {
+			baseDir = r.baseDir
+		}
+		url, err := visionRefImageDataURL(r, baseDir)
+		if err != nil {
+			continue
+		}
+		path, err := imageRefLocalPath(r, baseDir)
+		if err != nil {
+			continue
+		}
+		key := path
+		if key == "" {
+			key = url
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		sha, _ := fileSHA256(path)
+		images = append(images, ImageUnderstandingRef{
+			Source:  imageRefSource(r),
+			Path:    path,
+			DataURL: url,
+			SHA256:  sha,
+		})
+	}
+	return images
+}
+
+func imageRefLocalPath(r ref, baseDir string) (string, error) {
+	switch r.kind {
+	case refImage:
+		if strings.HasPrefix(r.path, ".reasonix/attachments/") {
+			return filepath.Join(baseDir, filepath.FromSlash(r.path)), nil
+		}
+		return "", fmt.Errorf("image reference has no local path")
+	case refFile:
+		absPath, _, ok := resolveAbsRef(r.path, baseDir)
+		if !ok {
+			return "", os.ErrNotExist
+		}
+		return absPath, nil
+	default:
+		return "", fmt.Errorf("reference is not an image")
+	}
+}
+
 func visionRefImageDataURL(r ref, baseDir string) (string, error) {
 	switch r.kind {
 	case refImage:

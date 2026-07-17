@@ -129,6 +129,9 @@ type UIConfig struct {
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
+	// ImageUnderstandingLog controls how much OCR/vision sidecar output the CLI
+	// transcript shows. The model-facing context is controlled by [agent].
+	ImageUnderstandingLog string `toml:"image_understanding_log"` // off|summary|detail
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -226,6 +229,20 @@ func (c *Config) UICursorShape() string {
 		return "bar"
 	default:
 		return "underline"
+	}
+}
+
+// UIImageUnderstandingLog normalizes ui.image_understanding_log. The default is
+// a compact one-line transcript notice; the sidecar detail remains available to
+// the model without flooding terminal history.
+func (c *Config) UIImageUnderstandingLog() string {
+	switch strings.ToLower(strings.TrimSpace(c.UI.ImageUnderstandingLog)) {
+	case "off", "none", "false", "0", "disabled":
+		return "off"
+	case "detail", "details", "verbose", "full":
+		return "detail"
+	default:
+		return "summary"
 	}
 }
 
@@ -1064,6 +1081,13 @@ type AgentConfig struct {
 	// AutoPlanClassifier optionally names a provider/model used to classify
 	// borderline auto-plan decisions. Empty keeps the zero-cost heuristic path.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`
+	// ImageUnderstandingModel optionally names a vision-capable provider/model
+	// used to describe pasted images before text-only active models see a turn.
+	ImageUnderstandingModel string `toml:"image_understanding_model"`
+	// ImageUnderstandingCommand optionally names a local command that receives
+	// image paths and emits <image-understanding> text. When set, it wins over
+	// image_understanding_model so local OCR can keep image bytes off-network.
+	ImageUnderstandingCommand string `toml:"image_understanding_command"`
 	// Compaction window fractions: soft = notice only, compact = trigger, force = hard ceiling.
 	SoftCompactRatio    float64 `toml:"soft_compact_ratio"`
 	ToolResultSnipRatio float64 `toml:"tool_result_snip_ratio"`
