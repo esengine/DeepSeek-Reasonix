@@ -225,12 +225,17 @@ selection, scrollbar, and footer use the active CLI theme. See
 multiline input, rewind, and clipboard controls.
 
 Clipboard actions are deliberately split by content type. Local transcript
-selection uses the native system clipboard and reports success only after that
-write completes; SSH falls back to an explicitly labelled OSC 52 request. Text
-paste remains the terminal's bracketed-paste action (`Cmd+V` on macOS and the
-terminal's configured shortcut elsewhere). Image paste is application-owned:
-use `Ctrl+V` on macOS/Linux, `Alt+V` on Windows, or `/paste-image`; the footer
-shows `Pasting image…` until the attachment token is ready.
+and composer selections use the native system clipboard and report success only
+after that write completes; SSH falls back to an explicitly labelled OSC 52
+request. Text paste remains the terminal's bracketed-paste action (`Cmd+V` on
+macOS and the terminal's configured shortcut elsewhere). While Reasonix owns the
+mouse in a local session, right-click with no selection reads clipboard text
+through the same paste path; right-click with a selection copies it. Over SSH,
+use the terminal paste shortcut because the remote process cannot read the local
+clipboard; `/mouse` restores the terminal's native right-click menu. Image paste
+is application-owned: use `Ctrl+V` on macOS/Linux, `Alt+V` on Windows, or
+`/paste-image`; the footer shows `Pasting image…` until the attachment token is
+ready.
 
 ## In-session commands
 

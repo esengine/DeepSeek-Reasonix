@@ -288,8 +288,8 @@ func TestStatusFooterUsesReadableLocalizedHintAndWrapsCleanly(t *testing.T) {
 			primary := m.primaryStatusLine(" Auto ", false, false)
 			block := ansi.Strip(m.renderStatusBlock(primary, 100))
 			lines := strings.Split(block, "\n")
-			if len(lines) != 4 {
-				t.Fatalf("localized footer rows = %d, want wrapped primary/session rows plus divider and telemetry:\n%s", len(lines), block)
+			if len(lines) != 2 {
+				t.Fatalf("localized footer rows = %d, want wrapped primary/session rows without an empty data band:\n%s", len(lines), block)
 			}
 			if !strings.Contains(lines[0], tt.compact) || !strings.Contains(lines[1], tt.session) {
 				t.Fatalf("localized footer did not keep readable shortcut and session groups:\n%s", block)
@@ -409,6 +409,33 @@ func TestStatusFooterSwapsModelAndGitGroups(t *testing.T) {
 	}
 }
 
+func TestStatusFooterWithoutGitLeftAlignsTelemetry(t *testing.T) {
+	defer i18n.DetectLanguage("en")
+	i18n.DetectLanguage("en")
+
+	m := newTestChatTUI()
+	m.balance = "¥12.34"
+	line := ansi.Strip(m.layoutGitTelemetry(120))
+	if !strings.HasPrefix(line, statusFooterIndent+"BAL ¥12.34") {
+		t.Fatalf("non-Git telemetry should be left aligned, got %q", line)
+	}
+	if visibleWidth(line) >= 120 {
+		t.Fatalf("non-Git telemetry unexpectedly retained right-alignment padding: %q", line)
+	}
+}
+
+func TestStatusFooterOmitsEmptyDataBand(t *testing.T) {
+	m := newTestChatTUI()
+	primary := "  Auto · ready"
+	block := ansi.Strip(m.renderStatusBlock(primary, 120))
+	if block != primary {
+		t.Fatalf("empty Git/telemetry status block = %q, want only %q", block, primary)
+	}
+	if strings.Contains(block, "─") {
+		t.Fatalf("empty Git/telemetry status block retained a divider: %q", block)
+	}
+}
+
 func TestStatusFooterMediumLayoutLeftAlignsModelWork(t *testing.T) {
 	i18n.DetectLanguage("en")
 
@@ -420,17 +447,10 @@ func TestStatusFooterMediumLayoutLeftAlignsModelWork(t *testing.T) {
 
 	primary := m.primaryStatusLine(" Auto ", false, false)
 	lines := strings.Split(ansi.Strip(m.renderStatusBlock(primary, 82)), "\n")
-	divider := -1
-	for i, line := range lines {
-		if strings.Trim(line, "─ ") == "" && strings.Contains(line, "─") {
-			divider = i
-			break
-		}
+	if len(lines) != 2 {
+		t.Fatalf("medium footer rows = %d, want primary plus model/work without an empty data band:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if divider < 2 {
-		t.Fatalf("medium footer should place model/work on a deliberate row before the divider:\n%s", strings.Join(lines, "\n"))
-	}
-	modelRow := lines[divider-1]
+	modelRow := lines[1]
 	if !strings.HasPrefix(modelRow, statusFooterIndent+"MODEL deepseek-v4-flash") ||
 		!strings.Contains(modelRow, "EFFORT auto   WORK balanced") {
 		t.Fatalf("medium model/effort/work row should be left aligned, got %q:\n%s", modelRow, strings.Join(lines, "\n"))

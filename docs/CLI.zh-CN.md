@@ -207,11 +207,13 @@ reasonix -p "同时更新两个项目" \
 强调色。输入框上下边线、插入光标、选区、滚动条和底栏都会使用当前 CLI 主题。Transcript
 导航、多行输入、rewind 和剪贴板操作见[快捷键](./GUIDE.zh-CN.md#快捷键)。
 
-剪贴板操作按内容类型明确分开。本地 transcript 选区写入系统剪贴板，并且只有写入成功后
-才提示完成；SSH 会回退到明确标记的 OSC 52 请求。文本粘贴继续走终端的 bracketed-paste
-动作（macOS 通常为 `Cmd+V`，其它平台使用终端自身配置）。图片粘贴由 Reasonix 接管：
-macOS/Linux 使用 `Ctrl+V`，Windows 使用 `Alt+V`，也可运行 `/paste-image`；附件标记
-准备完成前，底栏会显示“正在粘贴图片…”。
+剪贴板操作按内容类型明确分开。本地 transcript 和输入框选区写入系统剪贴板，并且只有写入
+成功后才提示完成；SSH 会回退到明确标记的 OSC 52 请求。文本粘贴继续走终端的
+bracketed-paste 动作（macOS 通常为 `Cmd+V`，其它平台使用终端自身配置）。Reasonix 接管
+本地会话的鼠标时，没有选区的右键会读取剪贴板文本并走同一粘贴路径，有选区时右键优先复制。
+SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键；`/mouse` 可恢复终端原生右键菜单。
+图片粘贴由 Reasonix 接管：macOS/Linux 使用 `Ctrl+V`，Windows 使用 `Alt+V`，也可运行
+`/paste-image`；附件标记准备完成前，底栏会显示“正在粘贴图片…”。
 
 ## 会话内命令
 

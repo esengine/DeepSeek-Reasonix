@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/atotto/clipboard"
 
 	"reasonix/internal/control"
 	"reasonix/internal/shellparse"
@@ -111,6 +112,27 @@ func pasteClipboardImage() tea.Cmd {
 	return func() tea.Msg {
 		path, err := control.SaveClipboardImage()
 		return clipboardImageMsg{path: path, err: err}
+	}
+}
+
+type clipboardTextPasteMsg struct {
+	text   string
+	err    error
+	remote bool
+}
+
+var readNativeClipboardText = clipboard.ReadAll
+
+// pasteClipboardText backs the captured-mouse right-click path. Keyboard text
+// paste still arrives from the terminal as a bracketed tea.PasteMsg; this read
+// is deliberately text-only so right-click never probes for an image first.
+func pasteClipboardText() tea.Cmd {
+	return func() tea.Msg {
+		if remoteClipboardSession() {
+			return clipboardTextPasteMsg{remote: true}
+		}
+		text, err := readNativeClipboardText()
+		return clipboardTextPasteMsg{text: text, err: err}
 	}
 }
 

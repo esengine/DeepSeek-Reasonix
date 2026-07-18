@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 )
 
 func newComposerMouseTestTUI(t *testing.T, width, height int) chatTUI {
@@ -282,6 +283,56 @@ func TestComposerSelectionPasteAndCopyTakePrecedence(t *testing.T) {
 	m = updateComposerMouseTestTUI(t, m, tea.PasteMsg{Content: "gamma"})
 	if got := ansi.Strip(m.input.Value()); got != "alpha gamma" {
 		t.Fatalf("paste over selection produced %q, want %q", got, "alpha gamma")
+	}
+}
+
+func TestComposerDragReleaseAutoCopies(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 40, 12)
+	m.input.SetValue("alpha beta")
+	x, y, _ := m.composerOrigin()
+	m = updateComposerMouseTestTUI(t, m, tea.MouseClickMsg{X: x + 6, Y: y, Button: tea.MouseLeft})
+	m = updateComposerMouseTestTUI(t, m, tea.MouseMotionMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "beta" {
+			t.Fatalf("composer drag copied %q, want beta", text)
+		}
+		return nil
+	}
+
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("composer drag release should copy the selected text")
+	}
+	if got := m.selectedComposerText(); got != "beta" {
+		t.Fatalf("composer selection after drag copy = %q, want beta", got)
+	}
+
+	result := clipboardCopyResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if m.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Fatalf("composer drag copy notice = %q, want %q", m.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+func TestComposerPlainClickReleaseDoesNotCopy(t *testing.T) {
+	m := newComposerMouseTestTUI(t, 40, 12)
+	m.input.SetValue("alpha beta")
+	x, y, _ := m.composerOrigin()
+	m = updateComposerMouseTestTUI(t, m, tea.MouseClickMsg{X: x + 3, Y: y, Button: tea.MouseLeft})
+
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: x + 3, Y: y, Button: tea.MouseLeft})
+	m = next.(chatTUI)
+	if cmd != nil {
+		t.Fatal("plain composer click must not copy an empty selection")
+	}
+	if m.validComposerSelection() {
+		t.Fatal("plain composer click should clear its empty selection")
 	}
 }
 

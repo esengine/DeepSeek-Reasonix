@@ -195,12 +195,10 @@ func TestStatuslineShowsEffortInPersistentFooter(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineViewWithEffort(t, "auto")
-	lines := bottomStatusPlainLines(content)
-	if len(lines) != 3 {
-		t.Fatalf("status block lines = %d, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
-	}
-	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash   EFFORT auto") {
-		t.Fatalf("session row should keep effort beside the model:\n%s", strings.Join(lines, "\n"))
+	lines := strings.Split(ansi.Strip(content), "\n")
+	statusLine := lines[len(lines)-1]
+	if !strings.Contains(statusLine, "MODEL deepseek-v4-flash   EFFORT auto") {
+		t.Fatalf("session row should keep effort beside the model:\n%s", statusLine)
 	}
 }
 

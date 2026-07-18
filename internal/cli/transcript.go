@@ -84,12 +84,7 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	contentWidth := transcriptContentWidth(terminalWidth, m.nativeScrollback)
 	switch source.kind {
 	case transcriptSourceMarkdown:
-		renderer := newMarkdownRenderer(contentWidth)
-		rendered := renderer.Render(source.raw)
-		if rendered == "" {
-			rendered = source.raw
-		}
-		return strings.TrimRight(rendered, "\n")
+		return renderAssistantMarkdown(source.raw, contentWidth)
 	case transcriptSourceUser:
 		return renderUserBubble(source.raw, terminalWidth, source.planMode)
 	case transcriptSourceReasoning:
@@ -101,8 +96,7 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceReplayBundle:
 		var b strings.Builder
 		b.WriteString(renderTUIBanner(m.label, source.raw, contentWidth))
-		renderer := newMarkdownRenderer(contentWidth)
-		for _, section := range replaySectionsFor(source.history, contentWidth, renderer) {
+		for _, section := range replaySectionsFor(source.history, contentWidth) {
 			b.WriteString(section)
 		}
 		return strings.TrimRight(b.String(), "\n")
@@ -111,6 +105,45 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	default:
 		return ""
 	}
+}
+
+const assistantTranscriptIndent = "  "
+
+// renderAssistantMarkdown gives assistant prose the same explicit transcript
+// identity that user, reasoning, tool, and receipt blocks already have. The
+// body keeps a restrained two-cell gutter instead of using a heavy card, and
+// rendering at the reduced width keeps every indented row inside the viewport.
+func renderAssistantMarkdown(raw string, contentWidth int) string {
+	contentWidth = max(contentWidth, 1)
+	indent := assistantTranscriptIndent
+	if contentWidth <= visibleWidth(indent) {
+		indent = ""
+	}
+	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
+	renderer := newMarkdownRenderer(bodyWidth)
+	rendered := renderer.Render(raw)
+	if rendered == "" {
+		rendered = raw
+	}
+	body := strings.TrimRight(rendered, "\n")
+	header := indent + accent("◆") + " " + bold("Reasonix")
+	if body == "" {
+		return header
+	}
+	return header + "\n\n" + indentTranscriptBlock(body, indent)
+}
+
+func indentTranscriptBlock(block, indent string) string {
+	if indent == "" || block == "" {
+		return block
+	}
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = indent + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderTurnReceiptBand(receipt string, contentWidth int) string {

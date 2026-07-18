@@ -262,9 +262,9 @@ func (m chatTUI) statusTelemetryGroups() []string {
 	return data
 }
 
-// renderStatusBlock owns the complete persistent footer layout. Wide screens
-// get two visually stable information rows; narrow screens add deliberate
-// left-aligned rows only between semantic groups.
+// renderStatusBlock owns the complete persistent footer layout. The optional
+// data band is separated from interaction state when Git or telemetry exists;
+// narrow screens add deliberate left-aligned rows only between semantic groups.
 func (m chatTUI) renderStatusBlock(primary string, width int) string {
 	if width <= 0 {
 		width = 1
@@ -274,7 +274,7 @@ func (m chatTUI) renderStatusBlock(primary string, width int) string {
 	first := layoutStatusSides(primary, modelWork, width)
 	second := m.layoutGitTelemetry(width)
 	if second == "" {
-		second = statusFooterIndent
+		return first
 	}
 	return first + "\n" + statusFooterDivider(width) + "\n" + second
 }
@@ -360,10 +360,10 @@ func (m chatTUI) layoutGitTelemetry(width int) string {
 	telemetry := strings.Join(telemetryGroups, "  ")
 	hasGit := strings.TrimSpace(m.gitStatus.Repo) != "" && strings.TrimSpace(m.gitStatus.Branch) != ""
 	if !hasGit {
-		if visibleWidth(telemetry) > width {
-			return packStatusGroups(telemetryGroups, width)
-		}
-		return rightAlignStatusGroup(telemetry, width)
+		// Without a Git identity there is no left-hand peer to balance. Keep the
+		// telemetry anchored to the normal footer indent instead of leaving a
+		// repo-sized visual hole across most of a wide terminal.
+		return packStatusGroups(telemetryGroups, width)
 	}
 
 	fullGitBudget := max(width-visibleWidth(statusFooterIndent), 1)

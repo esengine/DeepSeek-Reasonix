@@ -2,8 +2,56 @@ package cli
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/provider"
 )
+
+func TestAssistantMarkdownHasIdentityAndIndentedBody(t *testing.T) {
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = false
+	configureCLITheme("dark")
+
+	rendered := renderAssistantMarkdown("A concise answer that wraps across the available width.", 32)
+	lines := strings.Split(ansi.Strip(rendered), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("assistant block should contain a header, gap, and wrapped body:\n%s", rendered)
+	}
+	if lines[0] != "  ◆ Reasonix" {
+		t.Fatalf("assistant header = %q, want %q", lines[0], "  ◆ Reasonix")
+	}
+	if lines[1] != "" {
+		t.Fatalf("assistant header/body separator = %q, want blank row", lines[1])
+	}
+	for i, line := range lines[2:] {
+		if line != "" && !strings.HasPrefix(line, assistantTranscriptIndent) {
+			t.Fatalf("assistant body row %d lacks the two-cell gutter: %q", i+2, line)
+		}
+		if width := visibleWidth(line); width > 32 {
+			t.Fatalf("assistant row %d width = %d, want <= 32: %q", i+2, width, line)
+		}
+	}
+}
+
+func TestReplaySectionsKeepAssistantIdentity(t *testing.T) {
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = false
+	configureCLITheme("dark")
+
+	sections := replaySectionsFor([]provider.Message{
+		{Role: provider.RoleUser, Content: "Which version?"},
+		{Role: provider.RoleAssistant, Content: "Version 1.2.3"},
+	}, 48)
+	if len(sections) != 2 {
+		t.Fatalf("replay sections = %d, want user and assistant", len(sections))
+	}
+	if plain := ansi.Strip(sections[1]); !strings.HasPrefix(plain, "  ◆ Reasonix\n\n  Version 1.2.3") {
+		t.Fatalf("replayed assistant answer lost its identity: %q", plain)
+	}
+}
 
 func TestScrollbarThumb(t *testing.T) {
 	if _, size := scrollbarThumb(10, 0, 5); size != 0 {

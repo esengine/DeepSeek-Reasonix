@@ -262,9 +262,9 @@ func TestCompletionMenuPadsWithNonBreakingSpaces(t *testing.T) {
 }
 
 // TestTranscriptViewportSizing proves the viewport tracks the terminal size and
-// gets the rows left over after the pinned bottom region (input box + two
-// information rows and their divider = 6 with an empty 1-line composer), and
-// is fed the committed transcript.
+// gets the rows left over after the pinned bottom region (input box + the one
+// available information row = 4 with an empty 1-line composer and no Git or
+// telemetry), and is fed the committed transcript.
 func TestTranscriptViewportSizing(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
@@ -272,14 +272,14 @@ func TestTranscriptViewportSizing(t *testing.T) {
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = m0.(chatTUI)
 
-	if got := m.bottomRows(); got != 6 {
-		t.Fatalf("bottomRows with an empty composer = %d, want 6 (input 1 + border 2 + status 3)", got)
+	if got := m.bottomRows(); got != 4 {
+		t.Fatalf("bottomRows with an empty composer = %d, want 4 (input 1 + border 2 + status 1)", got)
 	}
 	if m.viewport.Width() != 79 {
 		t.Errorf("viewport content width = %d, want 79 (terminal 80 - 1 scrollbar column)", m.viewport.Width())
 	}
-	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 18 {
-		t.Errorf("viewport height = %d, transcriptHeight = %d, want 18 (24-6)", m.viewport.Height(), want)
+	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 20 {
+		t.Errorf("viewport height = %d, transcriptHeight = %d, want 20 (24-4)", m.viewport.Height(), want)
 	}
 	if m.viewport.TotalLineCount() == 0 {
 		t.Errorf("viewport should hold the committed banner after the first resize")
@@ -518,8 +518,8 @@ func TestTranscriptResizeRerendersCommittedMarkdownAtNewWidth(t *testing.T) {
 			break
 		}
 	}
-	if got, want := ruleWidth, transcriptContentWidth(80, false); got != want {
-		t.Fatalf("resized thematic rule width = %d, want new transcript width %d", got, want)
+	if got, want := ruleWidth, transcriptContentWidth(80, false)-visibleWidth(assistantTranscriptIndent); got != want {
+		t.Fatalf("resized thematic rule width = %d, want indented assistant body width %d", got, want)
 	}
 	if newLines >= oldLines {
 		t.Fatalf("wider transcript kept old hard wrapping: old lines=%d new lines=%d\n%s", oldLines, newLines, newRendered)
@@ -552,15 +552,14 @@ func TestTranscriptResizeKeepsScrolledReaderOnSameBlock(t *testing.T) {
 	if m.viewport.AtBottom() {
 		t.Fatal("test reader anchor must be above the transcript bottom")
 	}
-	if top := ansi.Strip(m.wrappedLines[m.viewport.YOffset()]); !strings.Contains(top, "ANCHOR-1") {
-		t.Fatalf("test setup top row = %q, want ANCHOR-1", top)
-	}
 
 	m0, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
 	m = m0.(chatTUI)
-	top := ansi.Strip(m.wrappedLines[m.viewport.YOffset()])
-	if !strings.Contains(top, "ANCHOR-1") {
-		t.Fatalf("resize moved reader to another transcript block: top row %q", top)
+	newContentWidth := transcriptContentWidth(m.width, false)
+	newSecondBlockStart := transcriptBlockLineCount(m.transcript[0], newContentWidth)
+	newThirdBlockStart := newSecondBlockStart + transcriptBlockLineCount(m.transcript[1], newContentWidth)
+	if offset := m.viewport.YOffset(); offset < newSecondBlockStart || offset >= newThirdBlockStart {
+		t.Fatalf("resize moved reader outside ANCHOR-1 block: offset=%d block=[%d,%d)", offset, newSecondBlockStart, newThirdBlockStart)
 	}
 }
 
@@ -809,7 +808,7 @@ func TestMarkdownDividerFitsTranscriptContentWidth(t *testing.T) {
 	if m.viewport.Width() != wantW {
 		t.Fatalf("viewport width = %d, want transcript content width %d", m.viewport.Width(), wantW)
 	}
-	rule := strings.TrimRight(m.renderer.Render("---"), "\n")
+	rule := strings.TrimRight(newMarkdownRenderer(wantW).Render("---"), "\n")
 	lines := strings.Split(wrapTranscript(rule, m.viewport.Width()), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("markdown divider wrapped into %d lines at width %d: %q", len(lines), m.viewport.Width(), lines)
@@ -1429,12 +1428,119 @@ func clipboardCopyResultFromCmd(t *testing.T, cmd tea.Cmd) clipboardCopyMsg {
 	return clipboardCopyMsg{}
 }
 
+func clipboardTextPasteResultFromCmd(t *testing.T, cmd tea.Cmd) clipboardTextPasteMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case clipboardTextPasteMsg:
+		return msg
+	case tea.BatchMsg:
+		for _, child := range msg {
+			if child == nil {
+				continue
+			}
+			childMsg := child()
+			if result, ok := childMsg.(clipboardTextPasteMsg); ok {
+				return result
+			}
+		}
+	}
+	t.Fatalf("clipboard paste command returned %T, want clipboardTextPasteMsg", msg)
+	return clipboardTextPasteMsg{}
+}
+
+func setLocalClipboardSession(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+}
+
+func TestMouseRightClickWithoutSelectionPastesClipboardText(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) { return "pasted text", nil }
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "before pasted text" {
+		t.Fatalf("right-click paste produced %q, want %q", got, "before pasted text")
+	}
+}
+
+func TestMouseRightClickPasteOverSSHDoesNotReadRemoteClipboard(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) {
+		t.Fatal("SSH right-click paste must not read the remote host clipboard")
+		return "", nil
+	}
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	if !result.remote {
+		t.Fatalf("SSH right-click paste result = %+v, want remote hint", result)
+	}
+
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "before " {
+		t.Fatalf("SSH right-click paste changed composer to %q", got)
+	}
+	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, i18n.M.ClipboardTextPasteRemoteHint) {
+		t.Fatalf("SSH right-click paste notice = %q, want %q", got, i18n.M.ClipboardTextPasteRemoteHint)
+	}
+}
+
+func TestMouseRightClickPasteUsesCanonicalFoldedPastePath(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	pasted := "one\ntwo\nthree\nfour\nfive"
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) { return pasted, nil }
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "[Pasted text #1 · 5 lines] " {
+		t.Fatalf("right-click folded paste display = %q", got)
+	}
+	if len(m.pastedBlocks) != 1 || m.pastedBlocks[0].text != pasted {
+		t.Fatalf("right-click folded paste block = %+v", m.pastedBlocks)
+	}
+}
+
 // TestMouseDragReleaseAutoCopies verifies that releasing the mouse after a
 // left-drag over the transcript copies the selection to the clipboard
 // automatically (native terminal convention), keeps the selection highlighted
 // so a follow-up right-click can still re-copy it, and arms the transient
 // "copied to clipboard" status-line notice.
 func TestMouseDragReleaseAutoCopies(t *testing.T) {
+	setLocalClipboardSession(t)
 	m := newTestChatTUI()
 	m.transcript = []string{"hello world"}
 	m.wrappedLines = []string{"hello world"}

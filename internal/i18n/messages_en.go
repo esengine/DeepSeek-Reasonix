@@ -209,6 +209,8 @@ var English = Messages{
 	MouseCopiedHint:              "copied to clipboard",
 	ClipboardCopyOSC52Hint:       "copy sent via OSC 52 — terminal permission may be required",
 	ClipboardCopyFallbackHint:    "native clipboard unavailable — copy sent via OSC 52",
+	ClipboardTextPasteRemoteHint: "right-click paste cannot read your local clipboard over SSH — use the terminal paste shortcut or /mouse",
+	ClipboardTextPasteFailedFmt:  "paste text failed: %v",
 	ClipboardImagePastingHint:    "Pasting image…",
 	ClipboardImagePasteFailedFmt: "paste image failed: %v",
 	MouseCaptureOnHint:           "mouse capture on — in-app drag-select/scrollbar/wheel active",
