@@ -96,7 +96,7 @@ func TestRemoteAppHostCRUDPreservesPrivateStableIdentities(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.ID == "" || created.Alias != "lab" || created.Label != "Linux lab" {
+	if created.ID == "" || created.Mode != RemoteHostConnectionConfig || created.Alias != "lab" || created.Label != "Linux lab" {
 		t.Fatalf("created Host view = %#v", created)
 	}
 	privateBefore, found, err := store.Get(created.ID)
@@ -157,6 +157,66 @@ func TestRemoteAppHostCRUDPreservesPrivateStableIdentities(t *testing.T) {
 	}
 	if _, found, err := store.Get(created.ID); err != nil || found {
 		t.Fatalf("deleted Host lookup found=%v err=%v", found, err)
+	}
+}
+
+func TestRemoteAppDirectHostDefaultsPortAndCanSwitchModes(t *testing.T) {
+	store := newRemoteAppTestStore(t)
+	local := newTargetManagerTestAdapter(TargetDescriptor{Kind: TargetLocal, ID: remoteLocalTargetID, Label: "Local"})
+	manager, err := NewTargetManager(TargetConnectorFunc(func(context.Context, TargetDescriptor) (TargetAdapter, error) {
+		return nil, errors.New("unexpected target connection")
+	}), local, TargetManagerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := &App{ctx: context.Background()}
+	installRemoteAppTestState(t, app, store, manager)
+
+	created, err := app.SaveRemoteHost(RemoteHostInput{Destination: "taibai@EXAMPLE.com."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Mode != RemoteHostConnectionDirect || created.Destination != "taibai@example.com" || created.Port != defaultRemoteSSHPort || created.Label != "taibai@example.com" || created.Alias != "" || created.SSHConfigPath != "" {
+		t.Fatalf("created direct Host view = %#v", created)
+	}
+	privateBefore, found, err := store.Get(created.ID)
+	if err != nil || !found {
+		t.Fatalf("load direct Host = %#v, %v, found=%v", privateBefore, err, found)
+	}
+	if err := store.UpdateResumeLease(created.ID, "lease_survives_mode_change"); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(t.TempDir(), "ssh config")
+	updated, err := app.SaveRemoteHost(RemoteHostInput{
+		ID: created.ID, Mode: RemoteHostConnectionConfig, Alias: "advanced-host",
+		SSHConfigPath: configPath, Label: "Advanced lab",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Mode != RemoteHostConnectionConfig || updated.Alias != "advanced-host" || updated.SSHConfigPath != configPath || updated.Destination != "" || updated.Port != 0 {
+		t.Fatalf("updated config Host view = %#v", updated)
+	}
+	privateAfter, found, err := store.Get(created.ID)
+	if err != nil || !found {
+		t.Fatalf("load changed Host = %#v, %v, found=%v", privateAfter, err, found)
+	}
+	if privateAfter.ID != privateBefore.ID || privateAfter.ClientInstanceID != privateBefore.ClientInstanceID || privateAfter.ResumeLeaseID != "lease_survives_mode_change" {
+		t.Fatalf("private identity changed across connection mode edit: before=%#v after=%#v", privateBefore, privateAfter)
+	}
+}
+
+func TestNormalizeRemoteHostInputRejectsAmbiguousAndInvalidDirectValues(t *testing.T) {
+	for _, input := range []RemoteHostInput{
+		{},
+		{Destination: "user@host", Alias: "host"},
+		{Mode: "unknown", Destination: "user@host", Port: 22},
+		{Mode: RemoteHostConnectionDirect, Destination: "user@-oProxyCommand=evil", Port: 22},
+		{Mode: RemoteHostConnectionDirect, Destination: "user@host", Port: 65536},
+	} {
+		if _, err := normalizeRemoteHostInput(input); err == nil {
+			t.Errorf("normalizeRemoteHostInput(%#v) unexpectedly succeeded", input)
+		}
 	}
 }
 

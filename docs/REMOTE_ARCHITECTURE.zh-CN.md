@@ -1,7 +1,7 @@
 # Reasonix Remote 架构设计
 
-> 状态：Remote V1 产品、架构与协议语义已冻结；阶段 1–6 与阶段 7 当前环境自动化已完成，
-> 实机人工验收状态见
+> 状态：Remote V1 产品、架构与协议语义已冻结；RMT-046 已实现默认 `username@host` 与独立端口，
+> 且不改变 Remote wire、schema 或 daemon；自动化与实机人工验收状态见
 > [`REMOTE_IMPLEMENTATION_STATUS.zh-CN.md`](./REMOTE_IMPLEMENTATION_STATUS.zh-CN.md)。
 >
 > 最后更新：2026-07-18
@@ -116,7 +116,8 @@ flowchart LR
 
 ### 5.1 Desktop 职责
 
-- 保存非敏感 Host 条目，例如 SSH Host alias、SSH config 文件和最近工作区。
+- 保存非敏感 Host 条目，例如直接连接的 SSH 用户名、Host、端口，高级连接的 SSH Host alias、
+  可选 config 文件，以及最近工作区。
 - 启动和管理系统 `ssh` 进程。
 - 处理 Host Key 确认、密码、密钥口令、keyboard-interactive/2FA 等认证交互。
 - 呈现连接阶段、错误、重试、断开与重连状态。
@@ -241,14 +242,36 @@ CLI 与 installed 不同表示升级后尚未同步；installed 与 daemon 不�
 
 ## 7. Desktop 连接流程与 SSH 边界
 
-### 7.1 SSH 配置
+### 7.1 SSH 目标与高级配置
 
-系统 OpenSSH config 是连接配置的权威来源。Desktop 可以保存或创建标准 SSH Host 条目，
-但 ProxyJump、ProxyCommand 等高级配置继续由用户维护。
+Desktop Host 条目使用显式 `mode` 区分 `direct` 与 `config`。默认的 `direct` 模式不依赖用户
+手写 OpenSSH config：`destination` 保存 `<username>@<host>`，`port` 为独立字段且默认 `22`。
+`host` 可以是 DNS 名、IPv4，或使用括号消除边界歧义的 IPv6，例如
+`taibai@[2001:db8::10]`；V1 不把
+`username@host:port` 解释为带端口目标，端口只能来自独立字段。
+
+直接目标必须先解析和校验，再作为结构化 argv 交给系统 `ssh`：用户名和 Host 均非空，不得包含
+空白或控制字符，Host 不得以 `-` 开头；端口必须是十进制 `1..65535`。Desktop 不经过 shell，
+不拼接命令字符串；实现把解析后的用户名、端口和 Host 分别放入固定的
+`-l <username>`、`-p <port>` 和 `-- <host>` 参数位置，远端命令仍固定为
+`reasonix remote attach --stdio`。IPv6 输入的方括号只用于明确解析边界，传给 OpenSSH 的独立 Host
+argv 使用规范化地址本身。direct 模式不传自定义 `-F`；因此用户输入不能增加 SSH option 或改变
+远端命令。
+
+高级 `config` 模式继续使用 `alias` 和可选 `sshConfigPath`；ProxyJump、ProxyCommand、
+IdentityFile 等高级配置仍由用户在 OpenSSH config 中维护。未指定自定义 config 时，系统
+OpenSSH 仍可读取其默认配置和 ssh-agent，但直接模式的显式用户名与端口优先。已有只保存
+alias/config 的 v1 Host store 条目读取时只在内存中映射为 `mode=config`，保持原语义且不失效；
+首次后续 mutation 才原子写回 v2。该非破坏性懒迁移不把 alias 猜测为 Host 或拆成用户名，也不
+强制用户改写配置。
+
+两种模式都继续由系统 OpenSSH 管理 known_hosts、Host Key、私钥和认证。该调整只改变 Desktop
+本地 Host 配置模型、输入 UI 与 SSH argv，不增加 Remote Protocol 字段，不改变 schemaHash、
+Build ID、attach、daemon、lease 或 Session 恢复语义。
 
 Desktop 负责完整连接体验，而不是要求用户先在外部终端登录：
 
-1. 用户添加或选择一个 SSH Host。
+1. 用户添加或选择一个直接 `username@host` 目标，或选择高级 SSH Host alias。
 2. Desktop 启动系统 `ssh`。
 3. Desktop 呈现 Host Key 指纹确认。
 4. Desktop 通过 AskPass 或专用交互通道处理密码、私钥口令和 2FA。
@@ -1917,7 +1940,8 @@ desktop/remote_runtime_adapter.go
 
 ### 阶段 5：Desktop 最小连接
 
-- SSH Host 管理、认证交互、Host Key 和连接日志。
+- 默认 `username@host` 与独立端口、可选高级 SSH alias/config 的 Host 管理，以及认证交互、
+  Host Key 和连接日志；旧 alias 条目保持兼容。
 - Host 条目 `clientInstanceId`、`leaseId` 保存、心跳、TTL 续接和旧 transport 替换。
 - Host 级 `workspace/browse`、primary 目录选择和可重复 additional-dir 高级选项。
 - TargetManager、LocalRuntimeAdapter、RemoteRuntimeAdapter。
@@ -1951,7 +1975,8 @@ desktop/remote_runtime_adapter.go
 V1 必须全部满足：
 
 1. Linux 安装同版本 Reasonix CLI，并由用户手动管理 Remote service。
-2. Windows Desktop 通过系统 OpenSSH 完成 Host Key、密码、密钥和 2FA 交互。
+2. Windows Desktop 可直接使用 `username@host` 与独立端口连接，也可使用高级 SSH alias/config；
+   两种模式都通过系统 OpenSSH 完成 Host Key、密码、密钥和 2FA 交互，旧 alias 条目不失效。
 3. Desktop、attach CLI、daemon Build ID 完全一致；不一致时拒绝连接。
 4. 一个 Host 同时只允许一个客户端；一个客户端可操作多个 workspace/session。
 5. workspace 路径和 additional dirs 与当前 CLI 语义一致。
@@ -2089,6 +2114,7 @@ schemaHash 显式变化；不得通过未注册字段、宽松 JSON、Desktop �
 | RMT-043 | 文件、Git 与 jobs 的最终分页、截断、metadata、partial-success 和错误语义由 Local/Remote 共用；Local 原生能力保留为 overlay |
 | RMT-044 | Memory、AutoResearch、Prompt history、slash args、balance 与一次性 Shell 属于 V1 shared-runtime；Desktop 本机和 Host 管理写入按 14.2 分类 |
 | RMT-045 | 架构讨论收口；阶段 1 只把冻结契约编码为 registry/schema/tests，并以 RuntimeParityManifest 阻止功能漏接 |
+| RMT-046 | Desktop Host 条目使用 `mode=direct/config`；默认 direct 保存 `destination=username@host` 与独立 `1..65535` 端口，不要求用户手写 SSH config，并经严格解析后以无 shell 的固定 argv 调用系统 OpenSSH，IPv6 使用括号形式；config 保存 alias/sshConfigPath，v1 store 旧条目读取时在内存映射为 config、首次 mutation 原子写回 v2 且继续兼容；该变更不修改 Remote wire、schema、Build ID 或 daemon |
 
 ## 22. 当前代码依据
 

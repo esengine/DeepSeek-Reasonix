@@ -134,7 +134,7 @@ console.log("\nRemote target UI");
 // switch confirmation all exercise the actual bridge-facing component contract.
 {
   const dom = installDOM();
-  let hosts: RemoteHostView[] = [{ id: "host-1", alias: "devbox", label: "Dev box" }];
+  let hosts: RemoteHostView[] = [{ id: "host-1", mode: "config", alias: "devbox", label: "Dev box" }];
   let status: RemoteTargetStatusView = { state: "LocalConnected", canReconnect: false };
   const savedInputs: RemoteHostInput[] = [];
   const deleted: string[] = [];
@@ -200,7 +200,20 @@ console.log("\nRemote target UI");
         SaveRemoteHost: async (input: RemoteHostInput) => {
           savedInputs.push({ ...input });
           if (saveFailure) throw new Error(saveFailure);
-          const saved = { id: input.id ?? "host-2", alias: input.alias, label: input.label, sshConfigPath: input.sshConfigPath };
+          const savedLabel = input.label.trim() || (input.mode === "direct" ? input.destination : input.alias) || "";
+          const saved: RemoteHostView = input.mode === "direct" ? {
+            id: input.id ?? "host-2",
+            mode: input.mode,
+            destination: input.destination,
+            port: input.port,
+            label: savedLabel,
+          } : {
+            id: input.id ?? "host-2",
+            mode: input.mode,
+            alias: input.alias,
+            label: savedLabel,
+            sshConfigPath: input.sshConfigPath,
+          };
           hosts = input.id ? hosts.map((host) => host.id === input.id ? saved : host) : [...hosts, saved];
           return saved;
         },
@@ -239,35 +252,53 @@ console.log("\nRemote target UI");
   ok(logReads === readsBeforeRefresh + 1, "connection lifecycle log can be refreshed explicitly");
 
   await act(async () => {
-    button(rootElement, "Add Host").click();
+    button(rootElement, "Edit").click();
     await flush();
   });
-  const editorInputs = rootElement.querySelectorAll<HTMLInputElement>(".remote-host-editor input");
-  ok(editorInputs.length === 3, "Host editor exposes alias, label, and optional SSH config path");
-  inputValue(editorInputs[0], "gpu-host");
-  inputValue(editorInputs[1], "GPU Host");
-  inputValue(editorInputs[2], "/tmp/ssh/config");
-  ok(editorInputs[0].value === "gpu-host" && editorInputs[1].value === "GPU Host", "Host editor accepts controlled input");
-  ok(!button(rootElement, "Save").disabled, "Host Save enables after required fields are filled");
+  ok(button(rootElement, "SSH config (advanced)").getAttribute("aria-pressed") === "true", "existing alias entry opens in advanced SSH config mode");
+  const legacyAlias = rootElement.querySelector<HTMLInputElement>('input[name="remote-host-alias"]');
+  const legacyConfig = rootElement.querySelector<HTMLInputElement>('input[name="remote-host-ssh-config"]');
+  ok(legacyAlias?.value === "devbox" && legacyConfig !== null, "advanced editor preserves the saved alias and optional config field");
+  inputValue(legacyConfig!, "/tmp/ssh/config");
   await act(async () => {
     button(rootElement, "Save").click();
     await flush();
   });
-  await waitFor("saved Host", () => rootElement.textContent?.includes("GPU Host") === true);
-  ok(savedInputs[0]?.alias === "gpu-host" && savedInputs[0]?.sshConfigPath === "/tmp/ssh/config", "Host create sends the documented input fields");
+  ok(savedInputs[0]?.mode === "config" && savedInputs[0]?.alias === "devbox" && savedInputs[0]?.sshConfigPath === "/tmp/ssh/config", "advanced Host edit sends config mode without direct fields");
+
+  await act(async () => {
+    button(rootElement, "Add Host").click();
+    await flush();
+  });
+  ok(button(rootElement, "Direct connection").getAttribute("aria-pressed") === "true", "new Host defaults to direct connection without requiring SSH config");
+  const destination = rootElement.querySelector<HTMLInputElement>('input[name="remote-host-destination"]');
+  const port = rootElement.querySelector<HTMLInputElement>('input[name="remote-host-port"]');
+  const hostLabel = rootElement.querySelector<HTMLInputElement>('input[name="remote-host-label"]');
+  ok(destination !== null && port?.value === "22" && hostLabel?.value === "", "direct editor exposes username@host, default port 22, and an optional display label");
+  inputValue(destination!, "developer@10.0.0.8");
+  ok(destination?.value === "developer@10.0.0.8" && port?.value === "22" && hostLabel?.value === "", "direct Host requires only one user-entered username@host value");
+  ok(!button(rootElement, "Save").disabled, "Host Save enables with destination only while port stays at its default");
+  await act(async () => {
+    button(rootElement, "Save").click();
+    await flush();
+  });
+  await waitFor("saved Host", () => rootElement.textContent?.includes("developer@10.0.0.8") === true);
+  ok(savedInputs[1]?.mode === "direct" && savedInputs[1]?.destination === "developer@10.0.0.8" && savedInputs[1]?.port === 22 && savedInputs[1]?.label === "" && !savedInputs[1]?.alias && !savedInputs[1]?.sshConfigPath, "direct Host create sends destination and default numeric port with no required label or config fields");
+  ok(hosts.find((host) => host.id === "host-2")?.label === "developer@10.0.0.8", "backend default display label is accepted and rendered for a destination-only Host");
 
   await act(async () => {
     button(rootElement, "Edit").click();
     await flush();
   });
-  const editInputs = rootElement.querySelectorAll<HTMLInputElement>(".remote-host-editor input");
-  inputValue(editInputs[1], "GPU Host renamed");
+  const editLabel = rootElement.querySelector<HTMLInputElement>('input[name="remote-host-label"]');
+  ok(button(rootElement, "Direct connection").getAttribute("aria-pressed") === "true" && rootElement.querySelector<HTMLInputElement>('input[name="remote-host-destination"]')?.value === "developer@10.0.0.8", "editing a direct Host restores its mode and destination");
+  inputValue(editLabel!, "GPU Host renamed");
   await act(async () => {
     button(rootElement, "Save").click();
     await flush();
   });
   await waitFor("edited Host", () => rootElement.textContent?.includes("GPU Host renamed") === true);
-  ok(savedInputs[1]?.id === "host-2" && savedInputs[1]?.label === "GPU Host renamed", "Host edit preserves the stable Host id");
+  ok(savedInputs[2]?.id === "host-2" && savedInputs[2]?.label === "GPU Host renamed", "Host edit preserves the stable Host id");
 
   await act(async () => {
     button(rootElement, "Delete").click();
@@ -281,9 +312,8 @@ console.log("\nRemote target UI");
   ok(deleted[0] === "host-2", "confirmed deletion removes the selected disconnected Host");
 
   saveFailure = "alias rejected by backend";
-  const failedInputs = rootElement.querySelectorAll<HTMLInputElement>(".remote-host-editor input");
-  inputValue(failedInputs[0], "bad-host");
-  inputValue(failedInputs[1], "Bad Host");
+  inputValue(rootElement.querySelector<HTMLInputElement>('input[name="remote-host-destination"]')!, "developer@bad-host");
+  inputValue(rootElement.querySelector<HTMLInputElement>('input[name="remote-host-label"]')!, "Bad Host");
   await act(async () => {
     button(rootElement, "Save").click();
     await flush();

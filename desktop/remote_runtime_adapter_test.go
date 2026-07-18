@@ -627,6 +627,36 @@ func TestRemoteRuntimeAdapterFailedDetachPreservesResumeLease(t *testing.T) {
 	}
 }
 
+func TestSameRemoteConnectionIdentityIncludesDirectEndpoint(t *testing.T) {
+	entry, err := NewRemoteDirectHostEntry("developer@192.168.1.20", 22, "Direct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cosmetic := entry
+	cosmetic.Label = "Renamed"
+	cosmetic.LayoutRef = "layout_changed"
+	cosmetic.ResumeLeaseID = "lease_changed"
+	if !sameRemoteConnectionIdentity(entry, cosmetic) {
+		t.Fatal("label, layout, and refreshed lease unexpectedly changed connection identity")
+	}
+	for name, mutate := range map[string]func(*RemoteHostEntry){
+		"mode":        func(host *RemoteHostEntry) { host.Mode = RemoteHostConnectionConfig },
+		"destination": func(host *RemoteHostEntry) { host.Destination = "developer@192.168.1.21" },
+		"port":        func(host *RemoteHostEntry) { host.Port = 2222 },
+		"client": func(host *RemoteHostEntry) {
+			host.ClientInstanceID = strings.Replace(host.ClientInstanceID, "desktop_", "desktop_f", 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := entry
+			mutate(&changed)
+			if sameRemoteConnectionIdentity(entry, changed) {
+				t.Fatalf("%s change did not alter connection identity", name)
+			}
+		})
+	}
+}
+
 func TestRemoteRuntimeAdapterUnknownMutationOutcomeRequiresExplicitSameRequestRetry(t *testing.T) {
 	buildID := remoteAdapterTestBuildID()
 	target := protocol.RuntimeTarget{WorkspaceID: "workspace-unknown", SessionID: "session-unknown"}

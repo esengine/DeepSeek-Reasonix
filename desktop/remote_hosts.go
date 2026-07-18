@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -20,9 +22,18 @@ import (
 )
 
 const (
-	remoteHostStoreVersion  = 1
+	remoteHostStoreVersion  = 2
+	remoteHostStoreVersion1 = 1
 	remoteHostStoreMaxBytes = 1 << 20
 	remoteHostStoreMaxHosts = 256
+	defaultRemoteSSHPort    = 22
+)
+
+type RemoteHostConnectionMode string
+
+const (
+	RemoteHostConnectionDirect RemoteHostConnectionMode = "direct"
+	RemoteHostConnectionConfig RemoteHostConnectionMode = "config"
 )
 
 var (
@@ -33,23 +44,30 @@ var (
 	// ErrRemoteHostStoreUnsafe means the path is not a private regular file.
 	ErrRemoteHostStoreUnsafe = errors.New("remote host store is unsafe")
 
-	remoteHostAliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
-	remoteHostIDPattern    = regexp.MustCompile(`^host_[0-9a-f]{64}$`)
-	remoteClientIDPattern  = regexp.MustCompile(`^desktop_[0-9a-f]{64}$`)
-	remoteHostPathLocks    sync.Map // canonical path -> *sync.Mutex
+	remoteHostAliasPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$`)
+	remoteSSHUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$`)
+	remoteDNSLabelPattern    = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
+	remoteNumericHostPattern = regexp.MustCompile(`^[0-9.]+$`)
+	remoteHostIDPattern      = regexp.MustCompile(`^host_[0-9a-f]{64}$`)
+	remoteClientIDPattern    = regexp.MustCompile(`^desktop_[0-9a-f]{64}$`)
+	remoteHostPathLocks      sync.Map // canonical path -> *sync.Mutex
 )
 
 // RemoteHostEntry is deliberately a secret-free record.  SSH credentials,
-// private-key passphrases, passwords and AskPass material never belong here;
-// OpenSSH config remains the authority for connection details.
+// private-key passphrases, passwords and AskPass material never belong here.
+// Direct entries carry only a validated username, Host and port; advanced
+// entries retain an OpenSSH config alias.
 type RemoteHostEntry struct {
-	ID               string `json:"id"`
-	Alias            string `json:"alias"`
-	Label            string `json:"label"`
-	SSHConfigPath    string `json:"sshConfigPath,omitempty"`
-	ClientInstanceID string `json:"clientInstanceId"`
-	ResumeLeaseID    string `json:"resumeLeaseId,omitempty"`
-	LayoutRef        string `json:"layoutRef,omitempty"`
+	ID               string                   `json:"id"`
+	Mode             RemoteHostConnectionMode `json:"mode"`
+	Destination      string                   `json:"destination,omitempty"`
+	Port             int                      `json:"port,omitempty"`
+	Alias            string                   `json:"alias,omitempty"`
+	Label            string                   `json:"label"`
+	SSHConfigPath    string                   `json:"sshConfigPath,omitempty"`
+	ClientInstanceID string                   `json:"clientInstanceId"`
+	ResumeLeaseID    string                   `json:"resumeLeaseId,omitempty"`
+	LayoutRef        string                   `json:"layoutRef,omitempty"`
 }
 
 type remoteHostStoreDocument struct {
@@ -83,6 +101,23 @@ func (s *RemoteHostStore) Path() string { return s.path }
 // NewRemoteHostEntry creates the stable 256-bit client identity owned by one
 // saved Host entry.  Reconnects reuse it; different Host entries never do.
 func NewRemoteHostEntry(alias, label string) (RemoteHostEntry, error) {
+	return newRemoteHostEntry(RemoteHostEntry{Mode: RemoteHostConnectionConfig, Alias: alias, Label: label})
+}
+
+func NewRemoteDirectHostEntry(destination string, port int, label string) (RemoteHostEntry, error) {
+	target, err := ParseRemoteSSHDirectDestination(destination)
+	if err != nil {
+		return RemoteHostEntry{}, err
+	}
+	if err := ValidateRemoteSSHPort(port); err != nil {
+		return RemoteHostEntry{}, err
+	}
+	return newRemoteHostEntry(RemoteHostEntry{
+		Mode: RemoteHostConnectionDirect, Destination: target.Destination(), Port: port, Label: label,
+	})
+}
+
+func newRemoteHostEntry(entry RemoteHostEntry) (RemoteHostEntry, error) {
 	var entryEntropy, clientEntropy [32]byte
 	if _, err := rand.Read(entryEntropy[:]); err != nil {
 		return RemoteHostEntry{}, fmt.Errorf("generate remote Host identity: %w", err)
@@ -90,16 +125,88 @@ func NewRemoteHostEntry(alias, label string) (RemoteHostEntry, error) {
 	if _, err := rand.Read(clientEntropy[:]); err != nil {
 		return RemoteHostEntry{}, fmt.Errorf("generate remote client identity: %w", err)
 	}
-	entry := RemoteHostEntry{
-		ID:               "host_" + hex.EncodeToString(entryEntropy[:]),
-		Alias:            alias,
-		Label:            label,
-		ClientInstanceID: "desktop_" + hex.EncodeToString(clientEntropy[:]),
-	}
+	entry.ID = "host_" + hex.EncodeToString(entryEntropy[:])
+	entry.ClientInstanceID = "desktop_" + hex.EncodeToString(clientEntropy[:])
 	if err := validateRemoteHostEntry(entry); err != nil {
 		return RemoteHostEntry{}, err
 	}
 	return entry, nil
+}
+
+type RemoteSSHDirectTarget struct {
+	Username string
+	Host     string
+}
+
+func (t RemoteSSHDirectTarget) Destination() string {
+	host := t.Host
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return t.Username + "@" + host
+}
+
+// ParseRemoteSSHDirectDestination validates the user-facing username@host
+// form and returns canonical argv values. IPv6 literals must be bracketed so
+// the separator remains unambiguous.
+func ParseRemoteSSHDirectDestination(destination string) (RemoteSSHDirectTarget, error) {
+	if !utf8.ValidString(destination) || len(destination) > 384 || strings.TrimSpace(destination) != destination || strings.Count(destination, "@") != 1 {
+		return RemoteSSHDirectTarget{}, errors.New("remote SSH destination must be username@host")
+	}
+	username, host, _ := strings.Cut(destination, "@")
+	if !remoteSSHUsernamePattern.MatchString(username) || strings.HasPrefix(username, "-") {
+		return RemoteSSHDirectTarget{}, errors.New("remote SSH username is invalid")
+	}
+	canonicalHost, err := canonicalRemoteSSHHost(host)
+	if err != nil {
+		return RemoteSSHDirectTarget{}, err
+	}
+	return RemoteSSHDirectTarget{Username: username, Host: canonicalHost}, nil
+}
+
+func canonicalRemoteSSHHost(host string) (string, error) {
+	if host == "" || strings.HasPrefix(host, "-") {
+		return "", errors.New("remote SSH host is invalid")
+	}
+	if strings.HasPrefix(host, "[") || strings.HasSuffix(host, "]") {
+		if len(host) < 3 || host[0] != '[' || host[len(host)-1] != ']' {
+			return "", errors.New("remote SSH IPv6 host must use [address] form")
+		}
+		ip := net.ParseIP(host[1 : len(host)-1])
+		if ip == nil || ip.To4() != nil {
+			return "", errors.New("remote SSH bracketed host must be an IPv6 address")
+		}
+		return ip.String(), nil
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.To4() == nil {
+			return "", errors.New("remote SSH IPv6 host must use [address] form")
+		}
+		return ip.String(), nil
+	}
+	if strings.Contains(host, ":") {
+		return "", errors.New("remote SSH IPv6 host must use [address] form")
+	}
+	if len(host) > 253 || remoteNumericHostPattern.MatchString(host) {
+		return "", errors.New("remote SSH host is invalid")
+	}
+	trimmed := strings.TrimSuffix(host, ".")
+	if trimmed == "" || len(trimmed) > 253 {
+		return "", errors.New("remote SSH host is invalid")
+	}
+	for _, label := range strings.Split(trimmed, ".") {
+		if !remoteDNSLabelPattern.MatchString(label) {
+			return "", errors.New("remote SSH host is invalid")
+		}
+	}
+	return strings.ToLower(trimmed), nil
+}
+
+func ValidateRemoteSSHPort(port int) error {
+	if port < 1 || port > 65535 {
+		return errors.New("remote SSH port must be between 1 and 65535")
+	}
+	return nil
 }
 
 func ValidateRemoteHostAlias(alias string) error {
@@ -251,8 +358,13 @@ func (s *RemoteHostStore) loadLocked() ([]RemoteHostEntry, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRemoteHostStoreCorrupt, err)
 	}
-	if document.Version != remoteHostStoreVersion {
+	if document.Version != remoteHostStoreVersion && document.Version != remoteHostStoreVersion1 {
 		return nil, fmt.Errorf("%w: unsupported version %d", ErrRemoteHostStoreCorrupt, document.Version)
+	}
+	if document.Version == remoteHostStoreVersion1 {
+		for index := range document.Hosts {
+			document.Hosts[index].Mode = RemoteHostConnectionConfig
+		}
 	}
 	if len(document.Hosts) > remoteHostStoreMaxHosts {
 		return nil, fmt.Errorf("%w: too many Host entries", ErrRemoteHostStoreCorrupt)
@@ -293,7 +405,7 @@ func (s *RemoteHostStore) saveLocked(hosts []RemoteHostEntry) error {
 		seenIDs[host.ID] = struct{}{}
 		connectionKey := remoteHostConnectionKey(host)
 		if _, exists := seenConnections[connectionKey]; exists {
-			return fmt.Errorf("duplicate SSH Host entry %q", host.Alias)
+			return fmt.Errorf("duplicate SSH Host entry %q", remoteHostDisplayConnection(host))
 		}
 		seenConnections[connectionKey] = struct{}{}
 	}
@@ -316,13 +428,35 @@ func validateRemoteHostEntry(host RemoteHostEntry) error {
 	if err := ValidateRemoteHostEntryID(host.ID); err != nil {
 		return err
 	}
-	if err := ValidateRemoteHostAlias(host.Alias); err != nil {
-		return err
+	switch host.Mode {
+	case RemoteHostConnectionDirect:
+		target, err := ParseRemoteSSHDirectDestination(host.Destination)
+		if err != nil {
+			return err
+		}
+		if target.Destination() != host.Destination {
+			return errors.New("remote SSH destination must be canonical")
+		}
+		if err := ValidateRemoteSSHPort(host.Port); err != nil {
+			return err
+		}
+		if host.Alias != "" || host.SSHConfigPath != "" {
+			return errors.New("direct remote Host must not contain OpenSSH config fields")
+		}
+	case RemoteHostConnectionConfig:
+		if err := ValidateRemoteHostAlias(host.Alias); err != nil {
+			return err
+		}
+		if err := validateRemoteSSHConfigPath(host.SSHConfigPath); err != nil {
+			return err
+		}
+		if host.Destination != "" || host.Port != 0 {
+			return errors.New("config remote Host must not contain direct connection fields")
+		}
+	default:
+		return errors.New("remote Host connection mode is invalid")
 	}
 	if err := validateRemoteHostText("label", host.Label, 256, false); err != nil {
-		return err
-	}
-	if err := validateRemoteSSHConfigPath(host.SSHConfigPath); err != nil {
 		return err
 	}
 	if !remoteClientIDPattern.MatchString(host.ClientInstanceID) {
@@ -356,7 +490,25 @@ func validateRemoteSSHConfigPath(path string) error {
 }
 
 func remoteHostConnectionKey(host RemoteHostEntry) string {
-	return host.SSHConfigPath + "\x00" + host.Alias
+	switch host.Mode {
+	case RemoteHostConnectionDirect:
+		return string(host.Mode) + "\x00" + host.Destination + "\x00" + strconv.Itoa(host.Port)
+	case RemoteHostConnectionConfig:
+		return string(host.Mode) + "\x00" + host.SSHConfigPath + "\x00" + host.Alias
+	default:
+		return string(host.Mode)
+	}
+}
+
+func remoteHostDisplayConnection(host RemoteHostEntry) string {
+	if host.Mode == RemoteHostConnectionDirect {
+		target, err := ParseRemoteSSHDirectDestination(host.Destination)
+		if err == nil {
+			return target.Username + "@" + net.JoinHostPort(target.Host, strconv.Itoa(host.Port))
+		}
+		return host.Destination
+	}
+	return host.Alias
 }
 
 func validateRemoteHostText(field, value string, maxBytes int, allowEmpty bool) error {

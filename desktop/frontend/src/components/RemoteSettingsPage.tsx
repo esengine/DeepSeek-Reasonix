@@ -3,7 +3,7 @@ import { Loader2, Pencil, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 
 import { app, onRemoteTargetState } from "../lib/bridge";
 import { useT } from "../lib/i18n";
-import type { RemoteConnectionLogView, RemoteHostInput, RemoteHostRuntimeSummaryView, RemoteHostView, RemoteTargetState, RemoteTargetStatusView } from "../lib/types";
+import type { RemoteConnectionLogView, RemoteHostInput, RemoteHostMode, RemoteHostRuntimeSummaryView, RemoteHostView, RemoteTargetState, RemoteTargetStatusView } from "../lib/types";
 
 const LOCAL_STATUS: RemoteTargetStatusView = { state: "LocalConnected", canReconnect: false };
 
@@ -24,6 +24,18 @@ function isTargetTransition(state: RemoteTargetState): boolean {
 
 function isRemoteTarget(state: RemoteTargetState): boolean {
   return state === "RemoteConnected" || state === "RemoteReconnecting" || state === "RemoteConnecting";
+}
+
+function hostMode(host: RemoteHostView): RemoteHostMode {
+  // Older saved entries had only alias/config fields. Keep those entries in
+  // config mode when opened instead of silently changing their SSH target.
+  return host.mode === "direct" ? "direct" : "config";
+}
+
+function hostPort(host: RemoteHostView): number {
+  return Number.isInteger(host.port) && Number(host.port) >= 1 && Number(host.port) <= 65535
+    ? Number(host.port)
+    : 22;
 }
 
 function formatLogTime(atMillis: number): string {
@@ -51,6 +63,9 @@ export function RemoteSettingsPage() {
   const [status, setStatus] = useState<RemoteTargetStatusView>(LOCAL_STATUS);
   const [selectedId, setSelectedId] = useState("");
   const [editingId, setEditingId] = useState<string | undefined>();
+  const [mode, setMode] = useState<RemoteHostMode>("direct");
+  const [destination, setDestination] = useState("");
+  const [port, setPort] = useState("22");
   const [alias, setAlias] = useState("");
   const [label, setLabel] = useState("");
   const [sshConfigPath, setSSHConfigPath] = useState("");
@@ -141,9 +156,15 @@ export function RemoteSettingsPage() {
   const selectedIsCurrent = Boolean(selected && status.hostId === selected.id && isRemoteTarget(status.state));
   const selectedHasRecovery = Boolean(selected && status.hostId === selected.id && status.canReconnect);
   const transition = isTargetTransition(status.state);
+  const numericPort = Number(port);
+  const portValid = /^\d+$/.test(port.trim()) && Number.isInteger(numericPort) && numericPort >= 1 && numericPort <= 65535;
+  const canSaveHost = Boolean(mode === "direct" ? destination.trim() && portValid : alias.trim());
 
   const startAdd = useCallback(() => {
     setEditingId(undefined);
+    setMode("direct");
+    setDestination("");
+    setPort("22");
     setAlias("");
     setLabel("");
     setSSHConfigPath("");
@@ -153,7 +174,10 @@ export function RemoteSettingsPage() {
 
   const startEdit = useCallback((host: RemoteHostView) => {
     setEditingId(host.id);
-    setAlias(host.alias);
+    setMode(hostMode(host));
+    setDestination(host.destination ?? "");
+    setPort(String(hostPort(host)));
+    setAlias(host.alias ?? "");
     setLabel(host.label);
     setSSHConfigPath(host.sshConfigPath ?? "");
     setConfirmDelete(false);
@@ -173,10 +197,17 @@ export function RemoteSettingsPage() {
   }, []);
 
   const saveHost = useCallback(() => apply(async () => {
-    const input: RemoteHostInput = {
+    const input: RemoteHostInput = mode === "direct" ? {
       ...(editingId ? { id: editingId } : {}),
-      alias: alias.trim(),
+      mode,
       label: label.trim(),
+      destination: destination.trim(),
+      port: Number(port),
+    } : {
+      ...(editingId ? { id: editingId } : {}),
+      mode,
+      label: label.trim(),
+      alias: alias.trim(),
       ...(sshConfigPath.trim() ? { sshConfigPath: sshConfigPath.trim() } : {}),
     };
     const saved = await app.SaveRemoteHost(input);
@@ -185,10 +216,13 @@ export function RemoteSettingsPage() {
       : [...current, saved]);
     setSelectedId(saved.id);
     setEditingId(saved.id);
-    setAlias(saved.alias);
+    setMode(hostMode(saved));
+    setDestination(saved.destination ?? "");
+    setPort(String(hostPort(saved)));
+    setAlias(saved.alias ?? "");
     setLabel(saved.label);
     setSSHConfigPath(saved.sshConfigPath ?? "");
-  }), [alias, apply, editingId, label, sshConfigPath]);
+  }), [alias, apply, destination, editingId, label, mode, port, sshConfigPath]);
 
   const connect = useCallback(() => {
     if (!selected) return;
@@ -340,8 +374,14 @@ export function RemoteSettingsPage() {
               >
                 <span className="remote-host-card__copy">
                   <strong>{host.label}</strong>
-                  <code>{host.alias}</code>
-                  {host.sshConfigPath && <small>{host.sshConfigPath}</small>}
+                  <code>{hostMode(host) === "direct" ? host.destination : host.alias}</code>
+                  {hostMode(host) === "direct" ? (
+                    <small>{t("remote.host.directSummary", { port: hostPort(host) })}</small>
+                  ) : host.sshConfigPath ? (
+                    <small>{host.sshConfigPath}</small>
+                  ) : (
+                    <small>{t("remote.host.defaultConfig")}</small>
+                  )}
                 </span>
                 {status.hostId === host.id && <span className="remote-host-card__active">{t("remote.host.current")}</span>}
               </button>
@@ -374,22 +414,52 @@ export function RemoteSettingsPage() {
 
       <section className="settings-section remote-host-editor">
         <div className="settings-section__title">{editingId ? t("remote.host.edit") : t("remote.host.add")}</div>
-        <label className="remote-host-editor__field">
-          <span>{t("remote.host.alias")}</span>
-          <input value={alias} disabled={busy} autoComplete="off" spellCheck={false} onInput={(event) => setAlias(event.currentTarget.value)} placeholder="reasonix-host" />
-          <small>{t("remote.host.aliasHint")}</small>
-        </label>
-        <label className="remote-host-editor__field">
+        <div className="remote-host-editor__mode">
+          <span>{t("remote.host.mode")}</span>
+          <div role="group" aria-label={t("remote.host.mode")}>
+            <button className={`btn btn--small${mode === "direct" ? " btn--primary" : ""}`} type="button" disabled={busy} aria-pressed={mode === "direct"} onClick={() => setMode("direct")}>
+              {t("remote.host.mode.direct")}
+            </button>
+            <button className={`btn btn--small${mode === "config" ? " btn--primary" : ""}`} type="button" disabled={busy} aria-pressed={mode === "config"} onClick={() => setMode("config")}>
+              {t("remote.host.mode.config")}
+            </button>
+          </div>
+          <small>{t(mode === "direct" ? "remote.host.mode.directHint" : "remote.host.mode.configHint")}</small>
+        </div>
+        {mode === "direct" ? (
+          <>
+            <label className="remote-host-editor__field remote-host-editor__field--destination">
+              <span>{t("remote.host.destination")}</span>
+              <input name="remote-host-destination" value={destination} disabled={busy} autoComplete="off" spellCheck={false} onInput={(event) => setDestination(event.currentTarget.value)} placeholder={t("remote.host.destinationPlaceholder")} />
+              <small>{t("remote.host.destinationHint")}</small>
+            </label>
+            <label className="remote-host-editor__field remote-host-editor__field--port">
+              <span>{t("remote.host.port")}</span>
+              <input name="remote-host-port" type="number" min={1} max={65535} step={1} inputMode="numeric" value={port} disabled={busy} autoComplete="off" onInput={(event) => setPort(event.currentTarget.value)} />
+              <small>{t("remote.host.portHint")}</small>
+            </label>
+          </>
+        ) : (
+          <>
+            <label className="remote-host-editor__field remote-host-editor__field--alias">
+              <span>{t("remote.host.alias")}</span>
+              <input name="remote-host-alias" value={alias} disabled={busy} autoComplete="off" spellCheck={false} onInput={(event) => setAlias(event.currentTarget.value)} placeholder="reasonix-host" />
+              <small>{t("remote.host.aliasHint")}</small>
+            </label>
+            <label className="remote-host-editor__field remote-host-editor__field--config">
+              <span>{t("remote.host.sshConfig")}</span>
+              <input name="remote-host-ssh-config" value={sshConfigPath} disabled={busy} autoComplete="off" spellCheck={false} onInput={(event) => setSSHConfigPath(event.currentTarget.value)} placeholder={t("remote.host.sshConfigPlaceholder")} />
+              <small>{t("remote.host.sshConfigHint")}</small>
+            </label>
+          </>
+        )}
+        <label className="remote-host-editor__field remote-host-editor__field--label">
           <span>{t("remote.host.label")}</span>
-          <input value={label} disabled={busy} autoComplete="off" onInput={(event) => setLabel(event.currentTarget.value)} placeholder={t("remote.host.labelPlaceholder")} />
-        </label>
-        <label className="remote-host-editor__field">
-          <span>{t("remote.host.sshConfig")}</span>
-          <input value={sshConfigPath} disabled={busy} autoComplete="off" spellCheck={false} onInput={(event) => setSSHConfigPath(event.currentTarget.value)} placeholder={t("remote.host.sshConfigPlaceholder")} />
-          <small>{t("remote.host.sshConfigHint")}</small>
+          <input name="remote-host-label" value={label} disabled={busy} autoComplete="off" onInput={(event) => setLabel(event.currentTarget.value)} placeholder={t("remote.host.labelPlaceholder")} />
+          <small>{t("remote.host.labelHint")}</small>
         </label>
         <div className="remote-host-editor__actions">
-          <button className="btn btn--primary" type="button" disabled={busy || !alias.trim() || !label.trim()} onClick={() => void saveHost()}>{t("common.save")}</button>
+          <button className="btn btn--primary" type="button" disabled={busy || !canSaveHost} onClick={() => void saveHost()}>{t("common.save")}</button>
           {editingId && <button className="btn" type="button" disabled={busy} onClick={startAdd}>{t("common.cancel")}</button>}
         </div>
       </section>

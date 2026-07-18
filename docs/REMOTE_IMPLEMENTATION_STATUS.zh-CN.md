@@ -8,8 +8,10 @@
 
 ## 当前阶段
 
-阶段 7：当前环境可执行的 Remote V1 实现与自动化验收已完成；真实 Windows Desktop → 普通
-Linux Host、systemd user service 与外部 SSH 实机验收待执行，不能计为本环境已经实机通过。
+阶段 7：当前环境可执行的 Remote V1 实现与自动化验收已完成。RMT-046 也已完成：Host 条目使用
+`mode=direct/config`；默认 direct 保存 `destination=username@host` 与独立 port，config 保存
+alias/sshConfigPath，v1 store 旧条目迁移为 config 并继续兼容。真实 Windows Desktop → 普通 Linux
+Host、systemd user service 与外部 SSH 实机验收仍待执行，不能计为本环境已经实机通过。
 
 开始实现前的工作树与架构一致性预检已经完成。预检时，分支
 `codex/remote-feature` 相对 `origin/main-v2` 只有冻结架构文档提交，且不存在
@@ -25,7 +27,7 @@ Linux Host、systemd user service 与外部 SSH 实机验收待执行，不能�
   `site/package-lock.json`、`_go-learn/`、`developer-portal/`；Remote 实现不会修改或清理它们。
 - 已逐节核对冻结架构的组件边界、方法注册表、错误表、固定资源上限、七阶段计划和 31 项
   V1 验收标准。
-- 已校验文档结构连续：22 个一级章节、RMT-001 至 RMT-045 连续、71 个
+- 实现开始前已校验文档结构连续：22 个一级章节、当时的 RMT-001 至 RMT-045 连续、71 个
   method/notification、51 个领域错误；README 入口有效，冻结文档提交无 whitespace 错误。
 - 已确认 Remote Protocol 必须独立于 ACP，阶段 1 只能提取中立 wire 层，不能复用 ACP 的
   connection-owned service 生命周期或有损事件投影。
@@ -203,14 +205,19 @@ Linux Host、systemd user service 与外部 SSH 实机验收待执行，不能�
   filesystem 事务与 daemon identity 由 fake runner、真实 Unix socket 和对抗集成测试覆盖，阶段 7
   仍保留普通 Linux 登录会话中的人工 service 启停项。
 
-### 阶段 5（已完成）
+### 阶段 5（已完成，包括 RMT-046）
 
-- 已实现 Desktop 非敏感 Remote Host 存储：Host 条目使用稳定随机 Host ID 和
+- 已实现原冻结基线的 Desktop 非敏感 Remote Host 存储：Host 条目使用稳定随机 Host ID 和
   `clientInstanceId`，保存 SSH alias/label/可选 config 路径及 resume lease；文件为 `0600` 原子替换，
   frontend 不能读取或覆盖 client/lease identity，也不保存密码、私钥口令或 2FA 答案。
 - 已实现系统 OpenSSH transport，固定使用 `-T`、`RequestTTY=no`、`StrictHostKeyChecking=ask`、
   `ClearAllForwardings=yes`、`PermitLocalCommand=no` 和 `RemoteCommand=none`，不经过 shell；远端命令固定为
   `reasonix remote attach --stdio`。stdout 只承载协议，stderr 独立限界排空并只投影为结构化安全错误。
+- Windows 默认连接不再依赖 GUI 进程恰好继承完整 PATH：Desktop 先验证并使用
+  `%SystemRoot%\System32\OpenSSH\ssh.exe` / `%WINDIR%\System32\OpenSSH\ssh.exe`，再回退到
+  `exec.LookPath("ssh.exe")` 的绝对结果；显式 SSHPath 与非 Windows 的 PATH 行为保持不变。当前 Windows
+  环境已确认 inbox OpenSSH 9.5p2 文件存在、Microsoft 签名有效且可执行；resolver 普通/race 测试、vet 和
+  Windows amd64 交叉编译通过。修复版 Desktop 已生成并启动，最终 GUI 点击连接结果仍以本节下方实机项为准。
 - 已实现 Desktop 进程的早期 AskPass helper 模式和 loopback broker：每次连接独立 HMAC capability、
   replay/deadline 校验、AES-GCM 响应、prompt 类型化与长度限制；Host Key 变化 fail closed。密码、key
   passphrase 和 verification code 只在内存中一次性交付，取消/超时后失效，日志、Host store 和事件均不
@@ -242,6 +249,15 @@ Linux Host、systemd user service 与外部 SSH 实机验收待执行，不能�
   Windows → Linux 操作。生产代码经过 Windows/amd64 交叉编译；SSH argv/AskPass/daemon client/workbench
   闭环由真实进程 transport、协议 client 和自动化 adapter 测试覆盖。真实 Windows GUI → 普通 Linux
   Host 仍按冻结计划作为阶段 7 必须执行并逐项记录的人工验收。
+- 已实现 RMT-046：Host 条目明确使用 `mode=direct/config`；默认 direct 保存
+  `destination=username@host` 与独立 `1..65535` port，无需用户手写 SSH config；config 保存
+  alias/sshConfigPath，v1 store 旧条目迁移为 config 且不得失效。直接目标必须先解析 username、Host
+  和 port，以固定 `-l`/`-p`/`--` argv 无 shell 启动 `ssh`；拒绝空值、空白、控制字符、
+  option-shaped Host 和越界端口，IPv6 使用 `username@[addr]`，不接受内嵌端口。该变更只涉及 Desktop
+  Host store/UI/SSH argv，不改变 Remote wire、schemaHash、Build ID、daemon、lease 或 Session 状态。
+- direct 模式默认端口为 22，显示名称可留空并由后端使用规范化 destination；高级 config 模式与旧
+  frontend 的省略 mode 输入继续兼容。store v2 持久化新字段，v1 条目只按 config 语义读取，首次后续
+  mutation 原子写回 v2，不猜测或改写原 alias。
 
 ### 阶段 6（已完成）
 
@@ -534,6 +550,39 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/reasonix-desktop-phas
 均通过。
 ```
 
+RMT-046 最终增量门禁：
+
+```text
+cd desktop
+go test -count=1 ./...
+go test -race -count=1 ./...
+go vet ./...
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go test -c .
+
+全部通过。focused normal/race 另覆盖 direct 目标解析与规范化、DNS/IPv4/括号 IPv6、端口
+1/22/65535 边界、option/空白/控制字符/内嵌端口拒绝、精确 SSH argv、direct 不传自定义 `-F`、
+config 兼容、v1 store 迁移、重复连接身份、CRUD 模式切换以及 client/lease identity 保持。
+
+go run ./cmd/remote-protocol-gen -check
+Remote protocol artifacts are up to date.
+```
+
+协议生成检查证明此次 Desktop 本地配置变更没有引入 Remote schema、生成类型或 schemaHash 漂移。
+
+当前 Linux 系统 OpenSSH 还用与生产 direct 模式同形的 argv 执行了非连接型解析检查：
+
+```text
+ssh -G -T -o RequestTTY=no -o StrictHostKeyChecking=ask \
+  -o ClearAllForwardings=yes -o PermitLocalCommand=no -o RemoteCommand=none \
+  -l reasonix -p 2222 -- 192.0.2.10 reasonix remote attach --stdio
+
+exit 0；关键解析结果为 user=reasonix、hostname=192.0.2.10、port=2222、requesttty=false、
+clearallforwardings=yes、permitlocalcommand=no、stricthostkeychecking=ask。
+```
+
+该检查只证明当前 Linux OpenSSH 接受并正确解析固定 argv，不替代 Windows GUI 到外部 Linux Host 的
+认证与连接实机验收。
+
 阶段 6 最终功能对齐证据：
 
 ```text
@@ -569,9 +618,28 @@ npm run check:css
 npm run test
 npm run build
 
-全部以 exit 0 通过；Remote focused UI 共 40 项检查。目录 browser、additional dirs、Topic/Session 创建、
-AskPass modal、连接状态、安全只读配置、结构化日志与 Remote 工作台状态均进入正常测试套件；
-production Vite build 成功。
+全部以 exit 0 通过；RMT-046 最终文件上的 Remote focused UI 共 46 项检查。默认 direct 表单仅填写
+`username@host` 即可保存，端口预填 22、显示名称可选；高级 config/旧 alias 编辑、后端默认 label、
+目录 browser、additional dirs、Topic/Session 创建、AskPass modal、连接状态、安全只读配置、结构化日志
+与 Remote 工作台状态均进入正常测试套件；production Vite build 成功。
+
+紧接该 production frontend build，Wails 2.12.0 未跳过 bindings 生成，并复用刚验证的 `dist` 完成
+Windows amd64 application 交叉编译：
+
+```text
+wails build -platform windows/amd64 -m -nosyncgomod -nopackage -nocolour \
+  -s -o reasonix-desktop-direct.exe
+
+Generating bindings: Done.
+Compiling application: Done.
+Built desktop/build/bin/reasonix-desktop-direct.exe in 8.315s.
+SHA256 813151eb43987ea8e115c5109378e2e5be317812487fe6b83f5c0ae798197f8f
+```
+
+这里的 `-s` 只避免 Wails 再次调用仓库配置中的 pnpm install/build；frontend 已由上一组正式脚本即时
+构建，bindings 生成和 Windows application compile 均未跳过。该证据证明当前代码可生成 Windows exe，
+不等同于已在原生 Windows 上启动 GUI 或连接外部 Host。生成 bindings 后再次运行 frontend
+`typecheck` 与 `test:typecheck`，两者均以 exit 0 通过。
 ```
 
 阶段 7 当前环境最终门禁：
@@ -639,22 +707,23 @@ Linux 上尝试完整 Wails 应用构建时，代码已进入原生依赖解析�
 
 ## 尚未完成内容
 
-当前环境可执行的代码、协议、CLI、daemon、Desktop backend/frontend 与自动化验收已完成。以下仅为
-必须在对应外部实机环境逐项执行并记录的人工验收，不得伪称已经完成：
+当前环境可执行的代码、协议、CLI、daemon、Desktop backend/frontend、RMT-046 与自动化验收已完成。
+以下仅为必须在对应外部实机环境逐项执行并记录的人工验收，不得伪称已经完成：
 
 1. 在普通 Linux 用户、真实 systemd user bus 中执行
    `install → status/doctor → restart → logs → stop/start → uninstall`，核对 unit、managed binary、
    lingering、权限和 CLI/installed/daemon 三方 Build ID。
-2. 在 Windows Desktop 与外部 Linux Host 上使用同一提交协调构建，验证系统 OpenSSH alias/config/
-   known_hosts、首次 Host Key、密码、密钥、密钥口令、keyboard-interactive/2FA，以及 Host Key changed
-   fail closed。
+2. 在 Windows Desktop 与外部 Linux Host 上使用同一提交协调构建，分别验证直接
+   `username@host` + port 与高级 alias/config、known_hosts、首次 Host Key、密码、密钥、密钥口令、
+   keyboard-interactive/2FA，以及 Host Key changed fail closed。
 3. 在该实机闭环逐项走 V1 工作台能力，并验证运行中 SSH 断线重连、pending Approval/Ask 恢复、
    Desktop 重启、daemon 崩溃重启、第二客户端 `HOST_BUSY` 和 Build ID mismatch。
-4. 在原生 Windows Wails 环境完成 GUI 构建与人工交互验收。
+4. 在原生 Windows 上启动已生成的 Wails 应用并完成人工交互验收。
 
 ## 真实阻塞
 
-当前没有架构、产品、代码或新权限阻塞，也不应把 Goal 显示为受阻。系统默认 `/usr/bin/go` 为
+当前没有架构、产品、代码或新权限阻塞；RMT-046 已实现并通过当前环境自动化门禁。
+系统默认 `/usr/bin/go` 为
 Go 1.18.1，无法解析仓库的 Go 版本和 `toolchain` 指令；已在 `/tmp` 使用项目要求的 Go 1.26.5
 工具链解决，不构成阻塞。
 

@@ -32690,12 +32690,13 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .remote-host-editor > .settings-section__title,
-.remote-host-editor__field:first-of-type,
-.remote-host-editor__field:last-of-type,
+.remote-host-editor__mode,
+.remote-host-editor__field--label,
 .remote-host-editor__actions {
   grid-column: 1 / -1;
 }
 
+.remote-host-editor__mode,
 .remote-host-editor__field,
 .remote-askpass-modal__field {
   min-width: 0;
@@ -32705,6 +32706,19 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   font-size: var(--font-control-small);
   font-weight: 600;
+}
+
+.remote-host-editor__mode > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remote-host-editor__mode > small {
+  color: var(--fg-faint);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .remote-host-editor__field input,
@@ -33158,6 +33172,12 @@ body > .mermaid-diagram--fullscreen {
   }
 
   .remote-host-editor__field {
+    grid-column: 1;
+  }
+
+  .remote-host-editor__mode,
+  .remote-host-editor__field--label,
+  .remote-host-editor__actions {
     grid-column: 1;
   }
 

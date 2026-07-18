@@ -57,8 +57,125 @@ func TestRemoteHostStoreRoundTripPrivateAndSecretFree(t *testing.T) {
 	}
 	entries := object["hosts"].([]any)
 	stored := entries[0].(map[string]any)
-	if len(stored) != 7 {
+	if len(stored) != 8 {
 		t.Fatalf("stored fields = %#v, want exactly the frozen non-secret fields", stored)
+	}
+}
+
+func TestRemoteHostStoreDirectRoundTripAndDuplicateIdentity(t *testing.T) {
+	store, err := NewRemoteHostStore(filepath.Join(t.TempDir(), "hosts.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewRemoteDirectHostEntry("Builder@EXAMPLE.com.", 2222, "Builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Destination != "Builder@example.com" || first.Mode != RemoteHostConnectionDirect || first.Port != 2222 {
+		t.Fatalf("canonical direct entry = %#v", first)
+	}
+	if err := store.Upsert(first); err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewRemoteDirectHostEntry("Builder@example.com", 2222, "Duplicate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Upsert(second); err == nil || !strings.Contains(err.Error(), "duplicate SSH Host") {
+		t.Fatalf("duplicate direct identity error = %v", err)
+	}
+	hosts, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 || hosts[0] != first {
+		t.Fatalf("direct hosts = %#v, want %#v", hosts, first)
+	}
+}
+
+func TestRemoteHostStoreLoadsV1AsConfigAndWritesV2OnMutation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hosts.json")
+	configPath := filepath.Join(t.TempDir(), "legacy ssh config")
+	entry, err := NewRemoteHostEntry("legacy-host", "Legacy Host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(fmt.Sprintf(
+		`{"version":1,"hosts":[{"id":%q,"alias":%q,"label":%q,"sshConfigPath":%q,"clientInstanceId":%q,"resumeLeaseId":"lease_legacy","layoutRef":"layout_legacy"}]}`,
+		entry.ID, entry.Alias, entry.Label, configPath, entry.ClientInstanceID,
+	))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewRemoteHostStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 || hosts[0].Mode != RemoteHostConnectionConfig || hosts[0].Alias != "legacy-host" || hosts[0].SSHConfigPath != configPath || hosts[0].ResumeLeaseID != "lease_legacy" {
+		t.Fatalf("migrated v1 host = %#v", hosts)
+	}
+	if err := store.UpdateLayoutRef(entry.ID, "layout_v2"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document remoteHostStoreDocument
+	if err := json.Unmarshal(after, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Version != remoteHostStoreVersion || len(document.Hosts) != 1 || document.Hosts[0].Mode != RemoteHostConnectionConfig || document.Hosts[0].SSHConfigPath != configPath {
+		t.Fatalf("persisted migration = %s", after)
+	}
+}
+
+func TestParseRemoteSSHDirectDestination(t *testing.T) {
+	valid := map[string]RemoteSSHDirectTarget{
+		"taibai@192.168.1.20":      {Username: "taibai", Host: "192.168.1.20"},
+		"build_user@EXAMPLE.COM.":  {Username: "build_user", Host: "example.com"},
+		"root@[2001:0db8:0:0::10]": {Username: "root", Host: "2001:db8::10"},
+	}
+	for raw, want := range valid {
+		got, err := ParseRemoteSSHDirectDestination(raw)
+		if err != nil || got != want {
+			t.Errorf("ParseRemoteSSHDirectDestination(%q) = %#v, %v, want %#v", raw, got, err, want)
+		}
+	}
+	invalid := []string{
+		"", "host", "@host", "user@", "user@@host", "-evil@host", "user name@host",
+		"user@-oProxyCommand=evil", "user@host name", "user@host;evil", "user@../host",
+		"user@2001:db8::10", "user@[192.168.1.1]", "user@[bad::address]", "user@999.999.999.999",
+		"user@host:2222", " user@host", "user@host\n",
+	}
+	for _, raw := range invalid {
+		if _, err := ParseRemoteSSHDirectDestination(raw); err == nil {
+			t.Errorf("ParseRemoteSSHDirectDestination(%q) unexpectedly succeeded", raw)
+		}
+	}
+	for _, port := range []int{-1, 0, 65536} {
+		if err := ValidateRemoteSSHPort(port); err == nil {
+			t.Errorf("ValidateRemoteSSHPort(%d) unexpectedly succeeded", port)
+		}
+	}
+	for _, port := range []int{1, 22, 65535} {
+		if err := ValidateRemoteSSHPort(port); err != nil {
+			t.Errorf("ValidateRemoteSSHPort(%d): %v", port, err)
+		}
+	}
+}
+
+func TestRemoteHostDisplayConnectionFormatsIPv6WithoutDoubleBrackets(t *testing.T) {
+	entry, err := NewRemoteDirectHostEntry("builder@[2001:db8::10]", 2222, "Builder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := remoteHostDisplayConnection(entry), "builder@[2001:db8::10]:2222"; got != want {
+		t.Fatalf("remoteHostDisplayConnection() = %q, want %q", got, want)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,35 +77,59 @@ type RemoteSSHTransportFactory struct {
 }
 
 func (f *RemoteSSHTransportFactory) Start(ctx context.Context, alias string) (*RemoteSSHTransport, error) {
-	if ctx == nil {
-		return nil, errors.New("SSH context is required")
-	}
 	if err := ValidateRemoteHostAlias(alias); err != nil {
 		return nil, err
 	}
-	sshPath := strings.TrimSpace(f.SSHPath)
-	if sshPath == "" {
-		sshPath = "ssh"
-	}
-	if strings.IndexByte(sshPath, 0) >= 0 {
-		return nil, errors.New("invalid OpenSSH executable path")
-	}
-	args := make([]string, 0, 20)
+	args := make([]string, 0, 22)
 	if f.SSHConfigPath != "" {
 		if err := validateRemoteSSHConfigPath(f.SSHConfigPath); err != nil {
 			return nil, err
 		}
 		args = append(args, "-F", f.SSHConfigPath)
 	}
+	args = append(args, remoteSSHPolicyArgs()...)
+	args = append(args, "--", alias, "reasonix", "remote", "attach", "--stdio")
+	return f.start(ctx, args)
+}
+
+func (f *RemoteSSHTransportFactory) StartDirect(ctx context.Context, destination string, port int) (*RemoteSSHTransport, error) {
+	target, err := ParseRemoteSSHDirectDestination(destination)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateRemoteSSHPort(port); err != nil {
+		return nil, err
+	}
+	args := make([]string, 0, 24)
+	args = append(args, remoteSSHPolicyArgs()...)
 	args = append(args,
+		"-l", target.Username,
+		"-p", strconv.Itoa(port),
+		"--", target.Host,
+		"reasonix", "remote", "attach", "--stdio",
+	)
+	return f.start(ctx, args)
+}
+
+func remoteSSHPolicyArgs() []string {
+	return []string{
 		"-T",
 		"-o", "RequestTTY=no",
 		"-o", "StrictHostKeyChecking=ask",
 		"-o", "ClearAllForwardings=yes",
 		"-o", "PermitLocalCommand=no",
 		"-o", "RemoteCommand=none",
-		"--", alias, "reasonix", "remote", "attach", "--stdio",
-	)
+	}
+}
+
+func (f *RemoteSSHTransportFactory) start(ctx context.Context, args []string) (*RemoteSSHTransport, error) {
+	if ctx == nil {
+		return nil, errors.New("SSH context is required")
+	}
+	sshPath, err := resolveRemoteSSHExecutable(f.SSHPath)
+	if err != nil {
+		return nil, err
+	}
 	builder := f.commandContext
 	if builder == nil {
 		builder = exec.CommandContext
@@ -162,13 +187,16 @@ func (f *RemoteSSHTransportFactory) Start(ctx context.Context, alias string) (*R
 	return transport, nil
 }
 
-// RemoteSSHHostTransportFactory binds the immutable saved Host alias to the
+// RemoteSSHHostTransportFactory binds the immutable saved Host connection to the
 // transport-neutral client.TransportFactory surface. It contains no reconnect,
 // lease, Runtime or product business rules.
 type RemoteSSHHostTransportFactory struct {
-	SSH     *RemoteSSHTransportFactory
-	EntryID string
-	Alias   string
+	SSH         *RemoteSSHTransportFactory
+	EntryID     string
+	Mode        RemoteHostConnectionMode
+	Destination string
+	Port        int
+	Alias       string
 }
 
 func NewRemoteSSHHostTransportFactory(factory *RemoteSSHTransportFactory, entry RemoteHostEntry) (RemoteSSHHostTransportFactory, error) {
@@ -180,7 +208,10 @@ func NewRemoteSSHHostTransportFactory(factory *RemoteSSHTransportFactory, entry 
 	}
 	boundFactory := *factory
 	boundFactory.SSHConfigPath = entry.SSHConfigPath
-	return RemoteSSHHostTransportFactory{SSH: &boundFactory, EntryID: entry.ID, Alias: entry.Alias}, nil
+	return RemoteSSHHostTransportFactory{
+		SSH: &boundFactory, EntryID: entry.ID, Mode: entry.Mode,
+		Destination: entry.Destination, Port: entry.Port, Alias: entry.Alias,
+	}, nil
 }
 
 func (f RemoteSSHHostTransportFactory) Open(ctx context.Context) (remoteclient.Transport, error) {
@@ -190,7 +221,14 @@ func (f RemoteSSHHostTransportFactory) Open(ctx context.Context) (remoteclient.T
 	if err := ValidateRemoteHostEntryID(f.EntryID); err != nil {
 		return nil, err
 	}
-	return f.SSH.Start(ctx, f.Alias)
+	switch f.Mode {
+	case RemoteHostConnectionDirect:
+		return f.SSH.StartDirect(ctx, f.Destination, f.Port)
+	case RemoteHostConnectionConfig:
+		return f.SSH.Start(ctx, f.Alias)
+	default:
+		return nil, errors.New("remote Host connection mode is invalid")
+	}
 }
 
 // RemoteSSHTransport exposes protocol-only stdin/stdout. Authentication and

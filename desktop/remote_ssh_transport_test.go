@@ -70,6 +70,59 @@ func TestRemoteSSHTransportExactArgvAndProtocolPurity(t *testing.T) {
 	}
 }
 
+func TestRemoteSSHTransportDirectExactArgvIPv4AndIPv6(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		destination string
+		port        int
+		wantUser    string
+		wantHost    string
+	}{
+		{name: "ipv4", destination: "taibai@192.168.1.20", port: 22, wantUser: "taibai", wantHost: "192.168.1.20"},
+		{name: "ipv6", destination: "builder@[2001:0db8::10]", port: 2222, wantUser: "builder", wantHost: "2001:db8::10"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("GO_WANT_REMOTE_SSH_FAKE", "1")
+			t.Setenv("REMOTE_SSH_FAKE_MODE", "protocol")
+			var gotPath string
+			var gotArgs []string
+			factory := &RemoteSSHTransportFactory{
+				SSHPath:       "/usr/bin/ssh",
+				SSHConfigPath: filepath.Join(t.TempDir(), "advanced config must not apply"),
+				commandContext: func(ctx context.Context, path string, args ...string) *exec.Cmd {
+					gotPath = path
+					gotArgs = append([]string(nil), args...)
+					return remoteSSHFakeCommand(ctx)
+				},
+			}
+			transport, err := factory.StartDirect(context.Background(), test.destination, test.port)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = transport.Close() })
+			wantArgs := append(remoteSSHPolicyArgs(),
+				"-l", test.wantUser, "-p", fmt.Sprint(test.port), "--", test.wantHost,
+				"reasonix", "remote", "attach", "--stdio",
+			)
+			if gotPath != factory.SSHPath || !reflect.DeepEqual(gotArgs, wantArgs) {
+				t.Fatalf("command = %q %#v, want %q %#v", gotPath, gotArgs, factory.SSHPath, wantArgs)
+			}
+			if slicesContains(gotArgs, "-F") {
+				t.Fatalf("direct connection unexpectedly used advanced config: %#v", gotArgs)
+			}
+		})
+	}
+}
+
+func slicesContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRemoteSSHTransportDrainsAndBoundsLargeStderr(t *testing.T) {
 	t.Setenv("GO_WANT_REMOTE_SSH_FAKE", "1")
 	t.Setenv("REMOTE_SSH_FAKE_MODE", "huge-cli")
@@ -157,6 +210,40 @@ func TestRemoteSSHTransportRejectsAliasInjectionBeforeExec(t *testing.T) {
 	}
 }
 
+func TestRemoteSSHTransportRejectsDirectInjectionBeforeExec(t *testing.T) {
+	for _, destination := range []string{
+		"user@-oProxyCommand=evil", "user@host name", "user@host;evil", "-o@host",
+		"user@host\n-o evil", "user@@host", "user@2001:db8::1",
+	} {
+		t.Run(strings.NewReplacer("/", "_", " ", "_").Replace(destination), func(t *testing.T) {
+			var called atomic.Bool
+			factory := &RemoteSSHTransportFactory{commandContext: func(context.Context, string, ...string) *exec.Cmd {
+				called.Store(true)
+				return nil
+			}}
+			if _, err := factory.StartDirect(context.Background(), destination, 22); err == nil {
+				t.Fatal("injection destination accepted")
+			}
+			if called.Load() {
+				t.Fatal("exec builder reached for invalid direct destination")
+			}
+		})
+	}
+	for _, port := range []int{-1, 0, 65536} {
+		var called atomic.Bool
+		factory := &RemoteSSHTransportFactory{commandContext: func(context.Context, string, ...string) *exec.Cmd {
+			called.Store(true)
+			return nil
+		}}
+		if _, err := factory.StartDirect(context.Background(), "user@host", port); err == nil {
+			t.Fatalf("invalid port %d accepted", port)
+		}
+		if called.Load() {
+			t.Fatalf("exec builder reached for invalid port %d", port)
+		}
+	}
+}
+
 func TestRemoteSSHTransportSystemSSHMissingIsControlledCLINotFound(t *testing.T) {
 	factory := &RemoteSSHTransportFactory{SSHPath: filepath.Join(t.TempDir(), "missing-ssh")}
 	_, err := factory.Start(context.Background(), "host")
@@ -202,6 +289,36 @@ func TestRemoteSSHHostTransportFactoryAdaptsClientTransport(t *testing.T) {
 		t.Fatal("Open returned nil transport")
 	}
 	_ = transport.Close()
+}
+
+func TestRemoteSSHHostTransportFactoryBindsDirectConnection(t *testing.T) {
+	t.Setenv("GO_WANT_REMOTE_SSH_FAKE", "1")
+	t.Setenv("REMOTE_SSH_FAKE_MODE", "protocol")
+	var gotArgs []string
+	sshFactory := &RemoteSSHTransportFactory{commandContext: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		gotArgs = append([]string(nil), args...)
+		return remoteSSHFakeCommand(ctx)
+	}}
+	entry, err := NewRemoteDirectHostEntry("developer@[2001:db8::20]", 2200, "Direct Host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory, err := NewRemoteSSHHostTransportFactory(sshFactory, entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if factory.EntryID != entry.ID || factory.Mode != RemoteHostConnectionDirect || factory.Destination != entry.Destination || factory.Port != 2200 {
+		t.Fatalf("bound direct factory = %#v", factory)
+	}
+	transport, err := factory.Open(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = transport.Close() })
+	wantTail := []string{"-l", "developer", "-p", "2200", "--", "2001:db8::20", "reasonix", "remote", "attach", "--stdio"}
+	if len(gotArgs) < len(wantTail) || !reflect.DeepEqual(gotArgs[len(gotArgs)-len(wantTail):], wantTail) {
+		t.Fatalf("direct argv = %#v, want tail %#v", gotArgs, wantTail)
+	}
 }
 
 func TestRemoteSSHTransportAskPassEnvironmentIsControlled(t *testing.T) {

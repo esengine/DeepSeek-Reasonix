@@ -260,7 +260,8 @@ func validateRemoteTargetDescriptor(target TargetDescriptor) error {
 }
 
 func sameRemoteConnectionIdentity(left, right RemoteHostEntry) bool {
-	return left.ID == right.ID && left.Alias == right.Alias && left.SSHConfigPath == right.SSHConfigPath &&
+	return left.ID == right.ID && left.Mode == right.Mode && left.Destination == right.Destination &&
+		left.Port == right.Port && left.Alias == right.Alias && left.SSHConfigPath == right.SSHConfigPath &&
 		left.ClientInstanceID == right.ClientInstanceID
 }
 

@@ -29,19 +29,25 @@ const (
 // creating an entry and retained when updating one; client and lease identities
 // are never accepted from the frontend.
 type RemoteHostInput struct {
-	ID            string `json:"id,omitempty"`
-	Alias         string `json:"alias"`
-	Label         string `json:"label"`
-	SSHConfigPath string `json:"sshConfigPath,omitempty"`
+	ID            string                   `json:"id,omitempty"`
+	Mode          RemoteHostConnectionMode `json:"mode,omitempty"`
+	Destination   string                   `json:"destination,omitempty"`
+	Port          int                      `json:"port,omitempty"`
+	Alias         string                   `json:"alias,omitempty"`
+	Label         string                   `json:"label"`
+	SSHConfigPath string                   `json:"sshConfigPath,omitempty"`
 }
 
 // RemoteHostView deliberately excludes clientInstanceId, resumeLeaseId and all
 // authentication material.
 type RemoteHostView struct {
-	ID            string `json:"id"`
-	Alias         string `json:"alias"`
-	Label         string `json:"label"`
-	SSHConfigPath string `json:"sshConfigPath,omitempty"`
+	ID            string                   `json:"id"`
+	Mode          RemoteHostConnectionMode `json:"mode"`
+	Destination   string                   `json:"destination,omitempty"`
+	Port          int                      `json:"port,omitempty"`
+	Alias         string                   `json:"alias,omitempty"`
+	Label         string                   `json:"label"`
+	SSHConfigPath string                   `json:"sshConfigPath,omitempty"`
 }
 
 type RemoteTargetStatusView struct {
@@ -258,7 +264,10 @@ func (a *App) RemoteHosts() ([]RemoteHostView, error) {
 }
 
 func remoteHostView(host RemoteHostEntry) RemoteHostView {
-	return RemoteHostView{ID: host.ID, Alias: host.Alias, Label: host.Label, SSHConfigPath: host.SSHConfigPath}
+	return RemoteHostView{
+		ID: host.ID, Mode: host.Mode, Destination: host.Destination, Port: host.Port,
+		Alias: host.Alias, Label: host.Label, SSHConfigPath: host.SSHConfigPath,
+	}
 }
 
 func (a *App) SaveRemoteHost(input RemoteHostInput) (RemoteHostView, error) {
@@ -266,18 +275,28 @@ func (a *App) SaveRemoteHost(input RemoteHostInput) (RemoteHostView, error) {
 	if err != nil {
 		return RemoteHostView{}, err
 	}
-	input.Alias = strings.TrimSpace(input.Alias)
-	input.Label = strings.TrimSpace(input.Label)
-	input.SSHConfigPath = strings.TrimSpace(input.SSHConfigPath)
+	input, err = normalizeRemoteHostInput(input)
+	if err != nil {
+		return RemoteHostView{}, err
+	}
 	if input.Label == "" {
-		input.Label = input.Alias
+		if input.Mode == RemoteHostConnectionDirect {
+			input.Label = input.Destination
+		} else {
+			input.Label = input.Alias
+		}
 	}
 	if input.ID == "" {
-		entry, err := NewRemoteHostEntry(input.Alias, input.Label)
+		var entry RemoteHostEntry
+		if input.Mode == RemoteHostConnectionDirect {
+			entry, err = NewRemoteDirectHostEntry(input.Destination, input.Port, input.Label)
+		} else {
+			entry, err = NewRemoteHostEntry(input.Alias, input.Label)
+			entry.SSHConfigPath = input.SSHConfigPath
+		}
 		if err != nil {
 			return RemoteHostView{}, err
 		}
-		entry.SSHConfigPath = input.SSHConfigPath
 		if err := store.Upsert(entry); err != nil {
 			return RemoteHostView{}, err
 		}
@@ -293,6 +312,9 @@ func (a *App) SaveRemoteHost(input RemoteHostInput) (RemoteHostView, error) {
 	if !found {
 		return RemoteHostView{}, fmt.Errorf("Remote Host entry %q is not saved", input.ID)
 	}
+	entry.Mode = input.Mode
+	entry.Destination = input.Destination
+	entry.Port = input.Port
 	entry.Alias = input.Alias
 	entry.Label = input.Label
 	entry.SSHConfigPath = input.SSHConfigPath
@@ -300,6 +322,56 @@ func (a *App) SaveRemoteHost(input RemoteHostInput) (RemoteHostView, error) {
 		return RemoteHostView{}, err
 	}
 	return remoteHostView(entry), nil
+}
+
+func normalizeRemoteHostInput(input RemoteHostInput) (RemoteHostInput, error) {
+	input.ID = strings.TrimSpace(input.ID)
+	input.Destination = strings.TrimSpace(input.Destination)
+	input.Alias = strings.TrimSpace(input.Alias)
+	input.Label = strings.TrimSpace(input.Label)
+	input.SSHConfigPath = strings.TrimSpace(input.SSHConfigPath)
+
+	if input.Mode == "" {
+		hasDirect := input.Destination != "" || input.Port != 0
+		hasConfig := input.Alias != "" || input.SSHConfigPath != ""
+		if hasDirect == hasConfig {
+			return RemoteHostInput{}, errors.New("choose either a direct SSH destination or an OpenSSH config alias")
+		}
+		if hasDirect {
+			input.Mode = RemoteHostConnectionDirect
+		} else {
+			input.Mode = RemoteHostConnectionConfig
+		}
+	}
+
+	switch input.Mode {
+	case RemoteHostConnectionDirect:
+		target, err := ParseRemoteSSHDirectDestination(input.Destination)
+		if err != nil {
+			return RemoteHostInput{}, err
+		}
+		input.Destination = target.Destination()
+		if input.Port == 0 {
+			input.Port = defaultRemoteSSHPort
+		}
+		if err := ValidateRemoteSSHPort(input.Port); err != nil {
+			return RemoteHostInput{}, err
+		}
+		input.Alias = ""
+		input.SSHConfigPath = ""
+	case RemoteHostConnectionConfig:
+		if err := ValidateRemoteHostAlias(input.Alias); err != nil {
+			return RemoteHostInput{}, err
+		}
+		if err := validateRemoteSSHConfigPath(input.SSHConfigPath); err != nil {
+			return RemoteHostInput{}, err
+		}
+		input.Destination = ""
+		input.Port = 0
+	default:
+		return RemoteHostInput{}, errors.New("remote Host connection mode is invalid")
+	}
+	return input, nil
 }
 
 func (a *App) DeleteRemoteHost(id string) error {

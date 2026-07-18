@@ -1052,17 +1052,25 @@ export type SettingsTab = "general" | "models" | "providers" | "bots" | "remote"
 // Remote target bindings intentionally expose only Desktop-owned display and
 // connection metadata. Client ids, lease ids, SSH credentials, and AskPass
 // answers never cross this frontend contract.
+export type RemoteHostMode = "direct" | "config";
+
 export interface RemoteHostInput {
   id?: string;
-  alias: string;
+  mode: RemoteHostMode;
   label: string;
+  destination?: string;
+  port?: number;
+  alias?: string;
   sshConfigPath?: string;
 }
 
 export interface RemoteHostView {
   id: string;
-  alias: string;
+  mode: RemoteHostMode;
   label: string;
+  destination?: string;
+  port?: number;
+  alias?: string;
   sshConfigPath?: string;
 }
 

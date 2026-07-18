@@ -1047,7 +1047,7 @@ function makeMockApp(): AppBindings {
   let mockDesktopZoomFactor = 1.0;
   let mockRemoteHostSequence = 2;
   let mockRemoteHosts: RemoteHostView[] = [
-    { id: "mock-host-1", alias: "reasonix-dev", label: "Linux development Host" },
+    { id: "mock-host-1", mode: "direct", destination: "reasonix@192.168.1.20", port: 22, label: "Linux development Host" },
   ];
   let mockRemoteTargetStatus: RemoteTargetStatusView = {
     state: "LocalConnected",
@@ -1972,24 +1972,44 @@ function makeMockApp(): AppBindings {
       return mockRemoteHosts.map((host) => ({ ...host }));
     },
     async SaveRemoteHost(input) {
-      const alias = input.alias.trim();
-      const label = input.label.trim();
+      const mode = input.mode;
+      const destination = input.destination?.trim() || undefined;
+      const port = input.port ?? 22;
+      const alias = input.alias?.trim() || undefined;
       const sshConfigPath = input.sshConfigPath?.trim() || undefined;
-      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(alias)) {
-        throw new Error("invalid SSH Host alias");
+      const label = input.label.trim() || (mode === "direct" ? destination : alias) || "";
+      if (mode === "direct") {
+        if (!destination || !/^[^@\s]+@(?:\[[^\]\s]+\]|[^@\s:\[\]]+)$/.test(destination)) {
+          throw new Error("invalid SSH destination; use username@host");
+        }
+        if (!Number.isInteger(port) || port < 1 || port > 65535) {
+          throw new Error("SSH port must be between 1 and 65535");
+        }
+      } else if (mode === "config") {
+        if (!alias || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(alias)) {
+          throw new Error("invalid SSH Host alias");
+        }
+      } else {
+        throw new Error("invalid SSH connection mode");
       }
-      if (!label) throw new Error("Host label is required");
-      if (mockRemoteHosts.some((host) => host.alias === alias && host.id !== input.id)) {
-        throw new Error("SSH Host alias is already saved");
+      if (mockRemoteHosts.some((host) => host.id !== input.id && (
+        mode === "direct"
+          ? host.mode === "direct" && host.destination === destination && (host.port ?? 22) === port
+          : host.mode === "config" && host.alias === alias && (host.sshConfigPath ?? "") === (sshConfigPath ?? "")
+      ))) {
+        throw new Error("SSH Host is already saved");
       }
       if (input.id && !mockRemoteHosts.some((host) => host.id === input.id)) {
         throw new Error("Remote Host is not saved");
       }
       const saved: RemoteHostView = {
         id: input.id || `mock-host-${mockRemoteHostSequence++}`,
-        alias,
+        mode,
         label,
-        ...(sshConfigPath ? { sshConfigPath } : {}),
+        ...(mode === "direct" ? { destination, port } : {
+          alias,
+          ...(sshConfigPath ? { sshConfigPath } : {}),
+        }),
       };
       mockRemoteHosts = input.id
         ? mockRemoteHosts.map((host) => (host.id === input.id ? saved : host))
