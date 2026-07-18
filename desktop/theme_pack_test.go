@@ -141,7 +141,7 @@ func TestThemeTokenAndRecipeCSSVars(t *testing.T) {
 	}
 }
 
-func TestTaskOpacityCapped(t *testing.T) {
+func TestOpacityClamped(t *testing.T) {
 	bg, err := normalizeThemeBackground(&ThemePackBackground{
 		Image: "bg.png", FocusX: 2, FocusY: -1, SafeArea: "left",
 		HomeOpacity: 1.5, TaskOpacity: 0.9, OverlayStrength: 2,
@@ -149,14 +149,30 @@ func TestTaskOpacityCapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bg.TaskOpacity > 0.45 {
-		t.Fatalf("task opacity not capped: %v", bg.TaskOpacity)
+	if bg.TaskOpacity > 1 {
+		t.Fatalf("task opacity not clamped: %v", bg.TaskOpacity)
+	}
+	if bg.PaneOpacity != 0.72 {
+		t.Fatalf("pane opacity default: %v", bg.PaneOpacity)
 	}
 	if bg.FocusX != 1 || bg.FocusY != 0 {
 		t.Fatalf("focus clamp: %v %v", bg.FocusX, bg.FocusY)
 	}
 	if bg.HomeOpacity != 1 || bg.OverlayStrength != 1 {
 		t.Fatalf("opacity clamp: home=%v overlay=%v", bg.HomeOpacity, bg.OverlayStrength)
+	}
+	// Task scene background defaults
+	sbg, err := normalizeThemeSceneBackground(&ThemePackSceneBackground{
+		Image: "task.png", Opacity: 1.5, OverlayStrength: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sbg.Opacity > 1 {
+		t.Fatalf("scene opacity not clamped: %v", sbg.Opacity)
+	}
+	if sbg.PaneOpacity != 0.80 {
+		t.Fatalf("scene pane opacity default: %v", sbg.PaneOpacity)
 	}
 }
 

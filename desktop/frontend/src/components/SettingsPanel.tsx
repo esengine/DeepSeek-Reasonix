@@ -296,9 +296,9 @@ export function SettingsPanel({
                       onThemeStyle={(style) => {
                         // AppearanceOverview already persists via ActivateBaseStyle /
                         // experience APIs. Parent only mirrors React + DOM state.
-                        applyTheme(theme, style, { persist: false });
+                        applyTheme(getTheme(), style, { persist: false });
                         setThemeStyleState(style);
-                        setBaseAppearance(theme, style);
+                        setBaseAppearance(getTheme(), style);
                       }}
                       onTextSize={(size) => {
                         applyTextSize(size);

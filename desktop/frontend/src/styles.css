@@ -3529,6 +3529,11 @@ a[href] {
   color: var(--fg-faint);
   overflow: visible;
 }
+/* Welcome container breathing room (classic + workbench only) */
+.app:not(.app--creation) .welcome {
+  padding: 24px 28px;
+  border-radius: 14px;
+}
 .welcome--brand {
   margin-top: 0;
   transform: translateY(-20px);
@@ -32328,7 +32333,7 @@ body > .mermaid-diagram--fullscreen {
   display: none;
 }
 
-:root[data-theme-has-bg="true"] .theme-bg {
+:root[data-theme-pack] .theme-bg {
   display: block;
 }
 
@@ -32408,27 +32413,126 @@ body > .mermaid-diagram--fullscreen {
   covers .theme-bg underneath. When a pack background is active, make the layout
   shell transparent so the image can show through; panes keep their own fills.
 */
-:root[data-theme-has-bg="true"] .layout {
+:root[data-theme-has-bg="true"] .app:not(.app--creation) .layout {
   background: transparent;
 }
 
 /* Home: semi-transparent panes so the full-strength image reads through */
-:root[data-theme-has-bg="true"][data-theme-scene="home"] .chat-pane,
-:root[data-theme-has-bg="true"][data-theme-scene="home"] .welcome {
+:root[data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .chat-pane,
+:root[data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .welcome {
   background-color: color-mix(in srgb, var(--chat-bg, var(--bg)) 72%, transparent);
 }
 
-:root[data-theme-has-bg="true"][data-theme-scene="home"] .sidebar {
+:root[data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .sidebar {
   background-color: color-mix(in srgb, var(--sidebar-bg) 78%, transparent);
 }
 
 /* Task: more opaque panes for readability while the dimmed image remains visible at edges */
-:root[data-theme-has-bg="true"][data-theme-scene="task"] .chat-pane {
+:root[data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .chat-pane {
   background-color: color-mix(in srgb, var(--chat-bg, var(--bg)) 88%, transparent);
 }
 
-:root[data-theme-has-bg="true"][data-theme-scene="task"] .sidebar {
+:root[data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .sidebar {
   background-color: color-mix(in srgb, var(--sidebar-bg) 90%, transparent);
+}
+
+/* ── Extended pane transparency (classic + workbench only) ── */
+:root[data-theme-pack] .app:not(.app--creation) .layout {
+  background: transparent !important;
+}
+
+/* Home: shell elements — controlled by paneOpacity (面板透明度) */
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .sidebar,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .topicbar,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock__tools,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .workspace-panel,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .statusbar {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-shell-pct, 80%), transparent) !important;
+}
+
+/* Home: chat area — controlled by paneOpacity (面板透明度) */
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .chat-pane {
+  background: color-mix(in srgb, var(--chat-bg, var(--bg)) calc(var(--theme-pane-alpha, 0.72) * 100%), transparent) !important;
+}
+
+/* Home: high-opacity elements — fixed for content clarity */
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .context-panel__section,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .topicbar__chrome-btn,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .topicbar__action-btn,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .topicbar__icon-btn {
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+}
+
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .workspace-change-scope__head {
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-shell-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .transcript,
+:root[data-theme-pack][data-theme-scene="home"] .app:not(.app--creation) .transcript-shell {
+  background: transparent !important;
+}
+
+/* Task: shell elements — controlled by paneOpacity (面板透明度) */
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .sidebar,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .topicbar,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock__tools,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .workspace-panel,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .statusbar {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-shell-pct, 88%), transparent) !important;
+}
+
+/* Task: chat area — controlled by paneOpacity (面板透明度) */
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .chat-pane {
+  background: color-mix(in srgb, var(--chat-bg, var(--bg)) calc(var(--theme-pane-task-alpha, 0.80) * 100%), transparent) !important;
+}
+
+/* Task: high-opacity elements — fixed for content clarity */
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .context-panel__section,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .topicbar__chrome-btn,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .topicbar__action-btn,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .topicbar__icon-btn {
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+}
+
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .workspace-change-scope__head {
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-shell-pct, 88%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .transcript,
+:root[data-theme-pack][data-theme-scene="task"] .app:not(.app--creation) .transcript-shell {
+  background: transparent !important;
+}
+
+/* Fallback: scene-independent transparency for data-theme-pack */
+:root[data-theme-pack] .app:not(.app--creation) .sidebar,
+:root[data-theme-pack] .app:not(.app--creation) .topicbar,
+:root[data-theme-pack] .app:not(.app--creation) .workbench-dock,
+:root[data-theme-pack] .app:not(.app--creation) .workbench-dock__tools,
+:root[data-theme-pack] .app:not(.app--creation) .workspace-panel,
+:root[data-theme-pack] .app:not(.app--creation) .statusbar {
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent) !important;
+}
+:root[data-theme-pack] .app:not(.app--creation) .chat-pane {
+  background: color-mix(in srgb, var(--chat-bg, var(--bg)) 72%, transparent) !important;
+}
+:root[data-theme-pack] .app:not(.app--creation) .chat-pane > * {
+  background: transparent !important;
+}
+:root[data-theme-pack] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack] .app:not(.app--creation) .context-panel__section,
+:root[data-theme-pack] .app:not(.app--creation) .topicbar__chrome-btn,
+:root[data-theme-pack] .app:not(.app--creation) .topicbar__action-btn,
+:root[data-theme-pack] .app:not(.app--creation) .topicbar__icon-btn {
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+}
+:root[data-theme-pack] .app:not(.app--creation) .workspace-change-scope__head {
+  background: color-mix(in srgb, var(--bg-soft) 80%, transparent) !important;
+}
+:root[data-theme-pack] .app:not(.app--creation) .transcript,
+:root[data-theme-pack] .app:not(.app--creation) .transcript-shell {
+  background: transparent !important;
 }
 
 /* Density recipe consumers — pack overlay sets --theme-density-* / --theme-row-h */
@@ -33121,7 +33225,7 @@ body > .mermaid-diagram--fullscreen {
   min-height: 160px;
 }
 .theme-preview-surface__side {
-  background: color-mix(in srgb, var(--tp-sidebar) 88%, transparent);
+  background: color-mix(in srgb, var(--tp-sidebar) calc((var(--tp-pane-alpha, 0.72) + 0.06) * 100%), transparent);
   border-right: 1px solid color-mix(in srgb, var(--tp-border) 70%, transparent);
   padding: 10px 8px; display: flex; flex-direction: column; gap: 8px;
 }
@@ -33138,7 +33242,7 @@ body > .mermaid-diagram--fullscreen {
 .theme-preview-surface__main { padding: 14px; display: flex; align-items: center; justify-content: center; }
 .theme-preview-surface__card {
   width: min(220px, 90%);
-  background: color-mix(in srgb, var(--tp-panel) 92%, transparent);
+  background: color-mix(in srgb, var(--tp-panel) calc((var(--tp-pane-alpha, 0.72) + 0.20) * 100%), transparent);
   border: 1px solid color-mix(in srgb, var(--tp-border) 80%, transparent);
   border-radius: var(--tp-radius, 10px); padding: 12px; display: flex; flex-direction: column; gap: 8px;
 }

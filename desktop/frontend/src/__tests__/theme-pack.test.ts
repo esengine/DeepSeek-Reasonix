@@ -215,8 +215,7 @@ ok(stylesSource.includes("--list-row-height: var(--theme-row-h)"), "density maps
 
 // Layout must go transparent when a background is active so theme-bg is visible.
 ok(
-  stylesSource.includes(':root[data-theme-has-bg="true"] .layout') &&
-    /data-theme-has-bg="true"\]\s*\.layout\s*\{[^}]*background:\s*transparent/s.test(stylesSource),
+  /data-theme-has-bg="true"\][^}]*\.layout\s*\{[^}]*background:\s*transparent/s.test(stylesSource),
   "layout background transparent when theme has background",
 );
 

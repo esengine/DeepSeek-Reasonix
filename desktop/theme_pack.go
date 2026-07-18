@@ -108,6 +108,7 @@ type ThemePackBackground struct {
 	HomeOpacity     float64 `json:"homeOpacity"`
 	TaskOpacity     float64 `json:"taskOpacity"`
 	OverlayStrength float64 `json:"overlayStrength"`
+	PaneOpacity     float64 `json:"paneOpacity"` // home scene pane transparency (0=clear, 1=opaque)
 }
 
 // ThemePackSceneBackground optionally overrides the task/workspace scene.
@@ -119,6 +120,7 @@ type ThemePackSceneBackground struct {
 	SafeArea        string  `json:"safeArea,omitempty"` // left|right|center
 	Opacity         float64 `json:"opacity"`
 	OverlayStrength float64 `json:"overlayStrength"`
+	PaneOpacity     float64 `json:"paneOpacity"` // task scene pane transparency (0=clear, 1=opaque)
 }
 
 // ThemeDesktopState is the versioned active-theme pointer (not config.toml).
@@ -227,6 +229,7 @@ func defaultThemePackBackground() ThemePackBackground {
 		HomeOpacity:     1,
 		TaskOpacity:     0.28,
 		OverlayStrength: 0.62,
+		PaneOpacity:     0.72,
 	}
 }
 
@@ -237,6 +240,7 @@ func defaultThemePackTaskBackground() ThemePackSceneBackground {
 		SafeArea:        "center",
 		Opacity:         0.28,
 		OverlayStrength: 0.62,
+		PaneOpacity:     0.80,
 	}
 }
 
@@ -412,8 +416,11 @@ func normalizeThemeBackground(in *ThemePackBackground) (*ThemePackBackground, er
 	}
 	// Home may be full strength; task opacity is capped for readability.
 	out.HomeOpacity = clampFloat(in.HomeOpacity, 0, 1, 1)
-	out.TaskOpacity = clampFloat(in.TaskOpacity, 0, 0.45, 0.28)
+	out.TaskOpacity = clampFloat(in.TaskOpacity, 0, 1, 0.28)
 	out.OverlayStrength = clampFloat(in.OverlayStrength, 0, 1, 0.62)
+	if in.PaneOpacity > 0 {
+		out.PaneOpacity = clampFloat(in.PaneOpacity, 0, 1, 0.50)
+	}
 	// Empty image means token-only pack — drop background block.
 	if out.Image == "" {
 		return nil, nil
@@ -449,8 +456,11 @@ func normalizeThemeSceneBackground(in *ThemePackSceneBackground) (*ThemePackScen
 	default:
 		return nil, fmt.Errorf("taskBackground.safeArea must be left|right|center")
 	}
-	out.Opacity = clampFloat(in.Opacity, 0, 0.45, 0.28)
+	out.Opacity = clampFloat(in.Opacity, 0, 1, 0.28)
 	out.OverlayStrength = clampFloat(in.OverlayStrength, 0, 1, 0.62)
+	if in.PaneOpacity > 0 {
+		out.PaneOpacity = clampFloat(in.PaneOpacity, 0, 1, 0.68)
+	}
 	if out.Image == "" {
 		return nil, nil
 	}

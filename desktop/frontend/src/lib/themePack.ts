@@ -22,6 +22,7 @@ export type ThemePackBackground = {
   homeOpacity: number;
   taskOpacity: number;
   overlayStrength: number;
+  paneOpacity: number;
 };
 
 export type ThemePackSceneBackground = {
@@ -31,6 +32,7 @@ export type ThemePackSceneBackground = {
   safeArea?: "left" | "right" | "center" | string;
   opacity: number;
   overlayStrength: number;
+  paneOpacity: number;
 };
 
 export type ThemeContrastWarning = {
@@ -319,6 +321,15 @@ export function commitThemePreview(pack: ThemePackView | null): void {
   }
 }
 
+/**
+ * Clear the preview snapshot without restoring the original theme.
+ * Use this before activating a new theme to prevent cancelThemePreview()
+ * from overwriting the theme being applied.
+ */
+export function clearPreviewSnapshotOnly(): void {
+  previewSnapshot = null;
+}
+
 function ensurePackStyleElement(): HTMLStyleElement {
   let el = document.getElementById(PACK_STYLE_ID) as HTMLStyleElement | null;
   if (!el) {
@@ -428,6 +439,15 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
     root.style.setProperty("--theme-bg-home-focus-x", `${clamp01(home.focusX) * 100}%`);
     root.style.setProperty("--theme-bg-home-focus-y", `${clamp01(home.focusY) * 100}%`);
     root.style.setProperty("--theme-bg-home-opacity", String(clamp01(home.homeOpacity ?? 1)));
+    // Pane transparency: how much the background shows through the UI panes.
+    const homePane = clamp01(home.paneOpacity ?? 0.50);
+    root.style.setProperty("--theme-pane-alpha", String(homePane));
+    // Pre-computed percentages for CSS (avoids calc() compat issues).
+    // Clamp to 100% to prevent color-mix from receiving values > 100%.
+    root.style.setProperty("--theme-pane-shell-pct", `${Math.min((homePane + 0.08) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-card-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-inner-pct", `${Math.min((homePane + 0.22) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-composer-pct", `${Math.min((homePane + 0.08) * 100, 100)}%`);
     // Legacy aliases keep V1 tests and third-party diagnostics stable.
     root.style.setProperty("--theme-bg-image", `url("${cssUrlEscape(homeUrl)}")`);
     root.style.setProperty("--theme-bg-focus-x", `${clamp01(home.focusX) * 100}%`);
@@ -447,9 +467,16 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
   }
   const taskOpacity = task ? task.opacity : home?.taskOpacity;
   const taskOverlay = task ? task.overlayStrength : home?.overlayStrength;
-  root.style.setProperty("--theme-bg-task-opacity", String(Math.min(0.45, clamp01(taskOpacity ?? 0.28))));
+  root.style.setProperty("--theme-bg-task-opacity", String(clamp01(taskOpacity ?? 0.28)));
   root.style.setProperty("--theme-bg-task-overlay", String(clamp01(taskOverlay ?? 0.62)));
   root.style.setProperty("--theme-bg-overlay", String(clamp01(taskOverlay ?? 0.62)));
+  // Task scene pane transparency (defaults to home paneOpacity if not set on task scene).
+  const taskPane = clamp01(task ? task.paneOpacity : home?.paneOpacity ?? 0.68);
+  root.style.setProperty("--theme-pane-task-alpha", String(taskPane));
+  root.style.setProperty("--theme-pane-task-shell-pct", `${Math.min((taskPane + 0.08) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-card-pct", `${Math.min((taskPane + 0.14) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-inner-pct", `${Math.min((taskPane + 0.12) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-composer-pct", `${Math.min((taskPane + 0.06) * 100, 100)}%`);
   const safe = taskSource?.safeArea === "left" || taskSource?.safeArea === "right" ? taskSource.safeArea : "center";
   root.setAttribute("data-theme-safe-area", safe);
   root.setAttribute("data-theme-has-bg", "true");
@@ -469,6 +496,16 @@ function clearBackgroundCSSVars(root: HTMLElement): void {
   root.style.removeProperty("--theme-bg-home-opacity");
   root.style.removeProperty("--theme-bg-task-opacity");
   root.style.removeProperty("--theme-bg-overlay");
+  root.style.removeProperty("--theme-pane-alpha");
+  root.style.removeProperty("--theme-pane-task-alpha");
+  root.style.removeProperty("--theme-pane-shell-pct");
+  root.style.removeProperty("--theme-pane-task-shell-pct");
+  root.style.removeProperty("--theme-pane-card-pct");
+  root.style.removeProperty("--theme-pane-task-card-pct");
+  root.style.removeProperty("--theme-pane-inner-pct");
+  root.style.removeProperty("--theme-pane-task-inner-pct");
+  root.style.removeProperty("--theme-pane-composer-pct");
+  root.style.removeProperty("--theme-pane-task-composer-pct");
   root.removeAttribute("data-theme-safe-area");
   root.removeAttribute("data-theme-has-bg");
 }
@@ -543,6 +580,7 @@ export function defaultBackground(): ThemePackBackground {
     homeOpacity: 1,
     taskOpacity: 0.28,
     overlayStrength: 0.62,
+    paneOpacity: 0.50,
   };
 }
 
@@ -553,5 +591,6 @@ export function defaultTaskBackground(): ThemePackSceneBackground {
     safeArea: "center",
     opacity: 0.28,
     overlayStrength: 0.62,
+    paneOpacity: 0.68,
   };
 }

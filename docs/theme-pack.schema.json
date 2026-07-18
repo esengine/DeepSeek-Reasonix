@@ -47,8 +47,9 @@
         "focusY": { "type": "number", "minimum": 0, "maximum": 1 },
         "safeArea": { "type": "string", "enum": ["left", "right", "center"] },
         "homeOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
-        "taskOpacity": { "type": "number", "minimum": 0, "maximum": 0.45 },
-        "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 }
+        "taskOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 },
+        "paneOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
     "taskBackground": { "$ref": "#/$defs/sceneBackground" }
@@ -75,8 +76,9 @@
         "focusX": { "type": "number", "minimum": 0, "maximum": 1 },
         "focusY": { "type": "number", "minimum": 0, "maximum": 1 },
         "safeArea": { "type": "string", "enum": ["left", "right", "center"] },
-        "opacity": { "type": "number", "minimum": 0, "maximum": 0.45 },
-        "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 }
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 },
+        "paneOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
     "tokenMap": {

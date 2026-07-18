@@ -30,6 +30,9 @@ export function ThemePreviewSurface({
     const overlay = scene === "task"
       ? pack?.taskBackground?.overlayStrength ?? pack?.background?.overlayStrength ?? 0.62
       : pack?.background?.overlayStrength ?? 0.62;
+    const paneAlpha = scene === "home"
+      ? pack?.background?.paneOpacity ?? 0.50
+      : pack?.taskBackground?.paneOpacity ?? pack?.background?.paneOpacity ?? 0.68;
     return {
       ["--tp-bg" as string]: palette.bg,
       ["--tp-panel" as string]: palette.panel,
@@ -45,6 +48,7 @@ export function ThemePreviewSurface({
       ["--tp-focus-y" as string]: `${focusY * 100}%`,
       ["--tp-bg-opacity" as string]: String(opacity),
       ["--tp-overlay" as string]: String(overlay),
+      ["--tp-pane-alpha" as string]: String(paneAlpha),
     } as CSSProperties;
   }, [pack, mode, scene]);
 

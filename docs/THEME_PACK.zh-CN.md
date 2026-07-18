@@ -137,13 +137,15 @@ JSON Schema： [theme-pack.schema.json](./theme-pack.schema.json)
 | `background.focusX/Y` | 0–1 焦点 |
 | `background.safeArea` | `left` \| `right` \| `center`（任务页遮罩方向） |
 | `background.homeOpacity` | 0–1 |
-| `background.taskOpacity` | 0–0.45（硬上限） |
+| `background.taskOpacity` | 0–1 |
 | `background.overlayStrength` | 0–1 |
+| `background.paneOpacity` | 0–1（首页场景面板不透明度） |
 | `taskBackground.image` | 可选的独立任务/工作区图片，仅允许本地裸文件名 |
 | `taskBackground.focusX/Y` | 0–1 焦点 |
 | `taskBackground.safeArea` | `left` \| `right` \| `center` |
-| `taskBackground.opacity` | 0–0.45（硬上限） |
+| `taskBackground.opacity` | 0–1 |
 | `taskBackground.overlayStrength` | 0–1 |
+| `taskBackground.paneOpacity` | 0–1（任务场景面板不透明度） |
 
 ### 允许的令牌键
 

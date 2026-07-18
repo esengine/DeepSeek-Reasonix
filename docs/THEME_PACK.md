@@ -152,13 +152,15 @@ JSON Schema: [theme-pack.schema.json](./theme-pack.schema.json)
 | `background.focusX/Y` | 0–1 focal point |
 | `background.safeArea` | `left` \| `right` \| `center` (task overlay direction) |
 | `background.homeOpacity` | 0–1 |
-| `background.taskOpacity` | 0–0.45 (hard cap) |
+| `background.taskOpacity` | 0–1 |
 | `background.overlayStrength` | 0–1 |
+| `background.paneOpacity` | 0–1 (home scene panel opacity) |
 | `taskBackground.image` | Optional independent task/workspace image; bare local file name only |
 | `taskBackground.focusX/Y` | 0–1 focal point |
 | `taskBackground.safeArea` | `left` \| `right` \| `center` |
-| `taskBackground.opacity` | 0–0.45 (hard cap) |
+| `taskBackground.opacity` | 0–1 |
 | `taskBackground.overlayStrength` | 0–1 |
+| `taskBackground.paneOpacity` | 0–1 (task scene panel opacity) |
 
 ### Allowed token keys
 

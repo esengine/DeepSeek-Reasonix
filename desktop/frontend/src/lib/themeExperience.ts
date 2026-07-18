@@ -7,6 +7,7 @@ import {
   applyThemePack,
   beginThemePreview,
   cancelThemePreview,
+  clearPreviewSnapshotOnly,
   clearThemePack,
   commitThemePreview,
   setBaseAppearance,
@@ -149,6 +150,10 @@ export async function activateBaseStyle(style: ThemeStyle): Promise<ThemeExperie
 }
 
 export async function activateThemePack(id: string): Promise<ThemeExperienceView> {
+  // Clear preview snapshot FIRST without restoring original theme,
+  // so cancelThemePreview() inside endPreviewIfAny() won't overwrite
+  // the theme we're about to apply.
+  clearPreviewSnapshotOnly();
   await app.ActivateThemePack(id);
   endPreviewIfAny();
   const view = await loadThemeExperience();
