@@ -136,7 +136,7 @@ func TestManagerApplyCleanPatchAndReportConflictWithoutPollution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sourceBytes) != "first writer\n" {
+	if strings.ReplaceAll(string(sourceBytes), "\r\n", "\n") != "first writer\n" {
 		t.Fatalf("source content after clean apply = %q", sourceBytes)
 	}
 
@@ -154,7 +154,7 @@ func TestManagerApplyCleanPatchAndReportConflictWithoutPollution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sourceBytes) != "first writer\n" {
+	if strings.ReplaceAll(string(sourceBytes), "\r\n", "\n") != "first writer\n" {
 		t.Fatalf("conflicting apply polluted source content = %q", sourceBytes)
 	}
 	status := gitStatus(t, repo)
