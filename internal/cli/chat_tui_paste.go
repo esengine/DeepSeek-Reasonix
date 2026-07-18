@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -152,19 +153,39 @@ func (m *chatTUI) beginClipboardImagePaste() tea.Cmd {
 	return pasteClipboardImage()
 }
 
-// pastePrimary returns a tea.Cmd that reads the PRIMARY selection (the X11/Wayland
-// selection filled by highlighting text and pasted with middle-click) and sends it
-// as a tea.PasteMsg. If no PRIMARY content is available or no tool is found,
-// it returns nil (silent no-op), matching the terminal expectation that middle-click
-// with an empty selection does nothing.
-func pastePrimary() tea.Cmd {
+var (
+	readTmuxPasteBuffer       = readTmuxBuffer
+	readPrimaryPasteSelection = readPrimarySelection
+)
+
+// pasteMiddleClick returns a tea.Cmd that reads from the selection owner for the
+// current terminal environment and sends the result through the canonical paste
+// path. tmux normally owns middle-click and pastes its current buffer, but forwards
+// the event when an application enables mouse reporting; honor that same contract
+// here instead of unexpectedly switching to the desktop PRIMARY selection.
+func pasteMiddleClick() tea.Cmd {
 	return func() tea.Msg {
-		text, err := readPrimarySelection()
+		reader := readPrimaryPasteSelection
+		if os.Getenv("TMUX") != "" {
+			reader = readTmuxPasteBuffer
+		}
+		text, err := reader()
 		if err != nil || text == "" {
 			return nil
 		}
 		return tea.PasteMsg{Content: text}
 	}
+}
+
+// readTmuxBuffer retrieves the current tmux buffer verbatim. The inherited TMUX
+// environment variable identifies the correct server socket, just as the tmux
+// client command does for an interactive shell inside the pane.
+func readTmuxBuffer() (string, error) {
+	out, err := exec.Command("tmux", "save-buffer", "-").Output()
+	if err != nil {
+		return "", fmt.Errorf("read tmux paste buffer: %w", err)
+	}
+	return string(out), nil
 }
 
 // readPrimarySelection attempts to retrieve text from the PRIMARY selection by

@@ -1540,6 +1540,59 @@ func TestMouseRightClickPasteUsesCanonicalFoldedPastePath(t *testing.T) {
 	}
 }
 
+func TestMiddleClickUsesTmuxPasteBufferInsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	previousTmux := readTmuxPasteBuffer
+	previousPrimary := readPrimaryPasteSelection
+	t.Cleanup(func() {
+		readTmuxPasteBuffer = previousTmux
+		readPrimaryPasteSelection = previousPrimary
+	})
+	readTmuxPasteBuffer = func() (string, error) { return "tmux buffer", nil }
+	readPrimaryPasteSelection = func() (string, error) {
+		t.Fatal("middle-click inside tmux must not read the desktop PRIMARY selection")
+		return "", nil
+	}
+
+	msg := pasteMiddleClick()()
+	paste, ok := msg.(tea.PasteMsg)
+	if !ok || paste.Content != "tmux buffer" {
+		t.Fatalf("middle-click result = %#v, want tmux-buffer PasteMsg", msg)
+	}
+}
+
+func TestMiddleClickUsesPrimarySelectionOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+	previousTmux := readTmuxPasteBuffer
+	previousPrimary := readPrimaryPasteSelection
+	t.Cleanup(func() {
+		readTmuxPasteBuffer = previousTmux
+		readPrimaryPasteSelection = previousPrimary
+	})
+	readTmuxPasteBuffer = func() (string, error) {
+		t.Fatal("middle-click outside tmux must not read a tmux buffer")
+		return "", nil
+	}
+	readPrimaryPasteSelection = func() (string, error) { return "primary selection", nil }
+
+	msg := pasteMiddleClick()()
+	paste, ok := msg.(tea.PasteMsg)
+	if !ok || paste.Content != "primary selection" {
+		t.Fatalf("middle-click result = %#v, want PRIMARY-selection PasteMsg", msg)
+	}
+}
+
+func TestMiddleClickTmuxReadFailureIsSilent(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	previous := readTmuxPasteBuffer
+	t.Cleanup(func() { readTmuxPasteBuffer = previous })
+	readTmuxPasteBuffer = func() (string, error) { return "", errors.New("no buffers") }
+
+	if msg := pasteMiddleClick()(); msg != nil {
+		t.Fatalf("failed tmux-buffer read returned %#v, want silent no-op", msg)
+	}
+}
+
 // TestMouseDragReleaseAutoCopies verifies that releasing the mouse after a
 // left-drag over the transcript copies the selection to the clipboard
 // automatically (native terminal convention), keeps the selection highlighted

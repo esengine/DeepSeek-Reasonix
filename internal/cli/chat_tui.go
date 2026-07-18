@@ -894,9 +894,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the mouse: copy an active selection, otherwise paste clipboard text into
 		// the visible composer. Left-press begins a selection unless it lands on
 		// the transcript scrollbar or a shell-output hint line.
-		// Middle-click pastes the PRIMARY selection (X11/Wayland convention).
+		// Middle-click pastes tmux's current buffer when tmux owns the pane;
+		// otherwise it follows the X11/Wayland PRIMARY-selection convention.
 		if msg.Button == tea.MouseMiddle {
-			cmds = append(cmds, pastePrimary())
+			cmds = append(cmds, pasteMiddleClick())
 			return m, finalize(m, cmds)
 		}
 		if msg.Button == tea.MouseRight && m.validComposerSelection() && !m.composerSel.empty() {
