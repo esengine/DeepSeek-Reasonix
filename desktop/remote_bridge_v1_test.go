@@ -225,7 +225,7 @@ func TestRemotePreviewOfOpenSessionDoesNotReplaceOrRemoveSubscription(t *testing
 
 	beforeAttach := len(recording.base.attachInputs)
 	beforeUnsubscribe := len(recording.base.unsubscribed)
-	if _, err := app.PreviewSession(string(recording.base.created.Session.SessionID)); err != nil {
+	if _, err := app.PreviewSession(remoteSessionToken(recording.base.created.Session)); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(recording.base.attachInputs); got != beforeAttach {

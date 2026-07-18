@@ -275,7 +275,7 @@ func TestRemoteWorkbenchBrowseCreateRetryAndOpaquePathBoundary(t *testing.T) {
 	if tabs[0].TargetKind != string(TargetRemote) || tabs[0].WorkspaceID != string(rt.workspace.ID) || tabs[0].SessionID != string(rt.created.Session.SessionID) {
 		t.Fatalf("Remote tab opaque identity = %#v", tabs[0])
 	}
-	if tabs[0].WorkspaceRoot != string(rt.workspace.ID) || tabs[0].SessionPath != string(rt.created.Session.SessionID) {
+	if tabs[0].WorkspaceRoot != string(rt.workspace.ID) || tabs[0].SessionPath != remoteSessionToken(rt.created.Session) {
 		t.Fatalf("Remote opaque identities missing from compatibility fields: %#v", tabs[0])
 	}
 	if tabs[0].WorkspacePath != rt.workspace.DisplayPath || tabs[0].Cwd != rt.workspace.DisplayPath {
@@ -442,7 +442,7 @@ func TestRemoteWorkbenchRoutesCurrentSessionAndMapsSnapshot(t *testing.T) {
 		t.Fatalf("Remote checkpoints = %#v", checkpoints)
 	}
 	meta := app.MetaForTab(tabID)
-	if meta.Label != rt.created.TopicTitle || !meta.Ready || meta.Goal != goal || meta.GoalStatus != string(runtimeapi.GoalRunning) || meta.WorkspaceRoot != string(rt.workspace.ID) {
+	if meta.Label != remoteProfileModelLabel(rt.snapshot.Profile.Model) || !meta.Ready || meta.Goal != goal || meta.GoalStatus != string(runtimeapi.GoalRunning) || meta.WorkspaceRoot != string(rt.workspace.ID) {
 		t.Fatalf("Remote Meta = %#v", meta)
 	}
 
@@ -594,6 +594,34 @@ func TestRemoteWorkbenchProjectsResolvedProfileOntoLegacyModeAxes(t *testing.T) 
 	}
 }
 
+func TestRemoteWorkbenchMetaProjectsResolvedModelForDesktopSelector(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_model_label", Label: "Host model label"}
+	rt := newRemoteWorkbenchTestRuntime()
+	rt.created.TopicTitle = "Topic title must not become a model"
+	rt.created.ResolvedProfile.Model = "openrouter/anthropic/claude-sonnet-4"
+	rt.snapshot.Title = rt.created.TopicTitle
+	rt.snapshot.Profile = rt.created.ResolvedProfile
+	app, _ := newRemoteWorkbenchTestApp(t, target, rt, nil)
+	status, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+		PrimaryDirectoryRef: "dir_primary", TopicTitle: rt.created.TopicTitle,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	meta := app.MetaForTab(status.TabID)
+	if meta.Label != "anthropic/claude-sonnet-4" {
+		t.Fatalf("Remote model selector label = %q, want catalog model name", meta.Label)
+	}
+	if meta.Label == rt.created.TopicTitle {
+		t.Fatalf("Remote model selector label leaked topic title %q", meta.Label)
+	}
+	tab, ok := app.remoteTabMeta(status.TabID)
+	if !ok || tab.Label != meta.Label {
+		t.Fatalf("Remote optimistic tab model label = %q, ok=%v; want %q", tab.Label, ok, meta.Label)
+	}
+}
+
 func TestRemoteWorkbenchProfileProjectionDistinguishesInPlaceAndRebuilt(t *testing.T) {
 	target := TargetDescriptor{Kind: TargetRemote, ID: "host_profile_projection", Label: "Host profile projection"}
 	rt := newRemoteWorkbenchTestRuntime()
@@ -632,6 +660,9 @@ func TestRemoteWorkbenchProfileProjectionDistinguishesInPlaceAndRebuilt(t *testi
 		t.Fatalf("in-place profile projection = %#v", projected)
 	}
 	app.remote.workbenchMu.RUnlock()
+	if meta, ok := app.remoteMeta(status.TabID); !ok || meta.Label != "remote-updated" {
+		t.Fatalf("Remote Meta model after profile update = %#v, ok=%v", meta, ok)
+	}
 	rt.mu.Lock()
 	if len(rt.attachInputs) != attachBefore {
 		t.Fatalf("in-place profile unexpectedly resubscribed: %#v", rt.attachInputs)
@@ -864,6 +895,22 @@ func TestRemoteWorkbenchDoesNotRouteWhenTargetIsLocal(t *testing.T) {
 	defer rt.mu.Unlock()
 	if len(rt.submitInputs) != 0 || len(rt.attachInputs) != 0 || len(rt.openInputs) != 0 || len(rt.createInputs) != 0 {
 		t.Fatalf("Local target invoked stale Remote RuntimeAPI: submit=%#v attach=%#v open=%#v create=%#v", rt.submitInputs, rt.attachInputs, rt.openInputs, rt.createInputs)
+	}
+}
+
+func TestPickWorkspaceDoesNotOpenLocalDialogForRemoteTarget(t *testing.T) {
+	rt := newRemoteWorkbenchTestRuntime()
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_remote_picker", Label: "Remote picker"}
+	app, _ := newRemoteWorkbenchTestApp(t, target, rt, nil)
+
+	path, err := app.PickWorkspace()
+	if path != "" || !containsError(err, "Host workspace setup") {
+		t.Fatalf("PickWorkspace() = %q, %v; want Remote setup rejection", path, err)
+	}
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	if len(rt.browseInputs) != 0 || len(rt.openInputs) != 0 || len(rt.createInputs) != 0 {
+		t.Fatalf("PickWorkspace unexpectedly mutated Remote runtime: browse=%#v open=%#v create=%#v", rt.browseInputs, rt.openInputs, rt.createInputs)
 	}
 }
 

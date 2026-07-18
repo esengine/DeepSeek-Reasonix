@@ -89,12 +89,14 @@ import {
   type Mode,
   modeHasPlan,
   type ProjectNode,
+  type RemoteTargetStatusView,
   type SessionMeta,
   type SettingsView,
   type TabMeta,
   type TokenMode,
   type ToolApprovalMode,
 } from "./lib/types";
+import { workspaceCreationRoute } from "./lib/workspaceTargetRouting";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import {
@@ -1166,6 +1168,7 @@ export default function App() {
   const refreshComposerFileRefs = useCallback(() => setFileRefRefreshKey((value) => value + 1), []);
   const composerFileRefRefreshKey = `${dockRefreshKey}:${fileRefRefreshKey}`;
   const [projectRevision, setProjectRevision] = useState(0);
+  const [remoteWorkspaceSetupRequest, setRemoteWorkspaceSetupRequest] = useState(0);
   const [activeTopicTurns, setActiveTopicTurns] = useState<number | undefined>(undefined);
   const [composerInsertRequestsByTab, setComposerInsertRequestsByTab] = useState<Record<string, ComposerInsertRequest>>({});
   const [selectedTextRequestsByTab, setSelectedTextRequestsByTab] = useState<Record<string, SelectedTextInsertRequest>>({});
@@ -3181,6 +3184,27 @@ export default function App() {
     return picked;
   }, [pickWorkspace, switchWorkspace, refreshTabMetas]);
 
+  const openProjectWorkspace = useCallback(async () => {
+    let target: RemoteTargetStatusView;
+    try {
+      target = await app.RemoteTargetStatus();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
+      return;
+    }
+    switch (workspaceCreationRoute(target)) {
+      case "local-picker":
+        await switchFolder();
+        return;
+      case "remote-setup":
+        closeTransientOverlays();
+        setRemoteWorkspaceSetupRequest((request) => request + 1);
+        return;
+      case "blocked":
+        showToast(target.failure || t("remote.workspace.connectionRequired"), "error");
+    }
+  }, [closeTransientOverlays, showToast, switchFolder, t]);
+
   const refreshProjectsAndTabs = useCallback(async () => {
     setProjectRevision((value) => value + 1);
     const tabs = await refreshTabMetas();
@@ -3455,7 +3479,7 @@ export default function App() {
               onRenameTopic={renameTopic}
               refreshSignal={projectRevision}
               onAddProject={async () => {
-                await switchFolder();
+                await openProjectWorkspace();
               }}
               timeFilter={topicTimeFilter}
               onTimeFilterChange={setTopicTimeFilter}
@@ -4198,7 +4222,7 @@ export default function App() {
       )}
 
       <Suspense fallback={null}>
-        <RemoteTargetSurfaces />
+        <RemoteTargetSurfaces workspaceSetupRequest={remoteWorkspaceSetupRequest} />
       </Suspense>
 
       <CommandPalette

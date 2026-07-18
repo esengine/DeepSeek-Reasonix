@@ -144,9 +144,20 @@ func (a *App) remoteOpenProjectTab(workspaceID, topicID string) (TabMeta, error)
 }
 
 func (a *App) remoteOpenTopicSession(workspaceID, topicID, sessionID string) (TabMeta, error) {
-	ref := runtimeapi.SessionRef{
-		WorkspaceID: runtimeapi.WorkspaceID(strings.TrimSpace(workspaceID)),
-		SessionID:   runtimeapi.SessionID(strings.TrimSpace(sessionID)),
+	workspace := runtimeapi.WorkspaceID(strings.TrimSpace(workspaceID))
+	ref, encoded, err := parseRemoteSessionToken(sessionID)
+	if err != nil {
+		return TabMeta{}, err
+	}
+	if encoded {
+		if ref.WorkspaceID != workspace {
+			return TabMeta{}, errors.New("Remote Session token does not belong to the selected workspace")
+		}
+	} else {
+		// Raw IDs remain accepted for older Desktop callers. New projections use
+		// remoteSessionToken so the complete opaque SessionRef survives every
+		// history/tree/tab round trip.
+		ref = runtimeapi.SessionRef{WorkspaceID: workspace, SessionID: runtimeapi.SessionID(strings.TrimSpace(sessionID))}
 	}
 	if !ref.Valid() {
 		return TabMeta{}, errors.New("Remote workspace and Session identities are required")
@@ -583,31 +594,39 @@ func (a *App) remoteProjectTree() []ProjectNode {
 		for _, topic := range orderedTopics {
 			sessionNodes := make([]ProjectNode, 0, topic.SessionCount)
 			turns := 0
-			open := false
-			running := false
 			for _, summary := range sessions {
 				if summary.TopicID != topic.TopicID {
 					continue
 				}
 				isOpen, isRunning, status := a.remoteSessionCatalogState(summary)
-				open = open || isOpen
-				running = running || isRunning
 				if summary.Turns > turns {
 					turns = summary.Turns
 				}
 				sessionNodes = append(sessionNodes, ProjectNode{
 					Key: "remote_session_" + remoteSessionTabID(summary.Session), Kind: "session",
 					Label: summary.Title, Root: string(workspace.ID), TopicID: string(summary.TopicID),
-					SessionPath: string(summary.Session.SessionID), Turns: summary.Turns,
+					SessionPath: remoteSessionToken(summary.Session), Turns: summary.Turns,
 					CreatedAt: summary.CreatedAtMillis, LastActivityAt: summary.LastActivityMillis,
 					Open: isOpen, Running: isRunning, Status: status, Recovered: summary.RecoveryInterrupted,
 				})
+			}
+			// Match Local projection semantics. With one runtime Session the Topic
+			// row is that Session's navigation/status surface. Once a topic has
+			// multiple Sessions, expose concrete children and stop presenting an
+			// aggregate runtime state on the parent row.
+			var topicChildren []ProjectNode
+			var open, running bool
+			var status string
+			if len(sessionNodes) == 1 {
+				open, running, status = sessionNodes[0].Open, sessionNodes[0].Running, sessionNodes[0].Status
+			} else if len(sessionNodes) > 1 {
+				topicChildren = sessionNodes
 			}
 			children = append(children, ProjectNode{
 				Key: "remote_topic_" + string(topic.TopicID), Kind: "topic", Label: topic.Title,
 				Root: string(workspace.ID), TopicID: string(topic.TopicID), Turns: turns,
 				CreatedAt: topic.CreatedAtMillis, LastActivityAt: topic.LastActivityMillis,
-				Open: open, Running: running, Children: sessionNodes,
+				Open: open, Running: running, Status: status, Children: topicChildren,
 			})
 		}
 		out = append(out, ProjectNode{

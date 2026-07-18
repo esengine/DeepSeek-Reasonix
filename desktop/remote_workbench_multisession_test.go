@@ -144,6 +144,25 @@ func (r *remoteWorkbenchV1TestRuntime) CreateSession(_ context.Context, input ru
 	if created.Session.WorkspaceID != input.WorkspaceID {
 		return runtimeapi.CreatedSession{}, errors.New("created Remote Session workspace mismatch")
 	}
+	snapshot := r.snapshots[created.Session]
+	r.sessions[input.WorkspaceID] = append(r.sessions[input.WorkspaceID], runtimeapi.SessionSummary{
+		Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+		Turns: snapshot.History.TotalTurns, LastActivityMillis: int64(snapshot.History.TotalTurns),
+	})
+	foundTopic := false
+	for index := range r.topics[input.WorkspaceID] {
+		if r.topics[input.WorkspaceID][index].TopicID != created.TopicID {
+			continue
+		}
+		r.topics[input.WorkspaceID][index].SessionCount++
+		foundTopic = true
+		break
+	}
+	if !foundTopic {
+		r.topics[input.WorkspaceID] = append(r.topics[input.WorkspaceID], runtimeapi.TopicSummary{
+			TopicID: created.TopicID, Title: created.TopicTitle, SessionCount: 1,
+		})
+	}
 	return created, nil
 }
 
@@ -302,12 +321,185 @@ func TestRemoteWorkbenchMultipleWorkspacesTabsAndCatalogTree(t *testing.T) {
 		t.Fatalf("Remote project tree = %#v", tree)
 	}
 	sessionNode := tree[0].Children[0].Children[0]
-	if sessionNode.Root != string(refs[0].WorkspaceID) || sessionNode.SessionPath != string(refs[0].SessionID) || sessionNode.SessionPath == "/host/srv/a" {
+	if sessionNode.Root != string(refs[0].WorkspaceID) || sessionNode.SessionPath != remoteSessionToken(refs[0]) || sessionNode.SessionPath == "/host/srv/a" {
 		t.Fatalf("Remote tree opaque identity/path boundary = %#v", sessionNode)
+	}
+	if got := tree[1].Children[0]; len(got.Children) != 0 || !got.Open {
+		t.Fatalf("single-Session Remote topic did not own status without a duplicate child: %#v", got)
 	}
 	trash, err := listAllRemoteTrash(context.Background(), rt, refs[0].WorkspaceID)
 	if err != nil || len(trash) != 1 || trash[0].Session.SessionID != "trash_a" {
 		t.Fatalf("Remote trash catalog = %#v, %v", trash, err)
+	}
+}
+
+func TestRemoteSessionSurfacesPreserveFullRefAcrossWorkspaces(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_session_surfaces", Label: "Host session surfaces"}
+	rt, refs := remoteWorkbenchV1Fixture()
+	originalB := refs[2]
+	refs[2] = runtimeapi.SessionRef{WorkspaceID: originalB.WorkspaceID, SessionID: refs[0].SessionID}
+	rt.sessions[refs[2].WorkspaceID][0].Session = refs[2]
+	snapshotB := rt.snapshots[originalB]
+	delete(rt.snapshots, originalB)
+	snapshotB.Session = refs[2]
+	rt.snapshots[refs[2]] = snapshotB
+	rt.trash[refs[2].WorkspaceID] = []runtimeapi.TrashEntry{{
+		Session: runtimeapi.SessionRef{WorkspaceID: refs[2].WorkspaceID, SessionID: "trash_b"},
+		TopicID: "topic_old_b", Title: "Newer trash", TrashedAtMillis: 90,
+	}}
+	app, _ := newRemoteWorkbenchTestApp(t, target, rt, nil)
+	if _, err := app.attachRemoteWorkbenchSession(refs[0], true); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := app.ListSessions()
+	if len(sessions) != 3 {
+		t.Fatalf("Remote all-workspace sessions = %#v", sessions)
+	}
+	wantOrder := []runtimeapi.SessionRef{refs[2], refs[1], refs[0]}
+	for index, want := range wantOrder {
+		got, encoded, err := parseRemoteSessionToken(sessions[index].Path)
+		if err != nil || !encoded || got != want {
+			t.Fatalf("session[%d] token = %q => %#v, encoded=%v, err=%v; want %#v", index, sessions[index].Path, got, encoded, err, want)
+		}
+		if sessions[index].WorkspaceRoot != string(want.WorkspaceID) {
+			t.Fatalf("session[%d] WorkspaceRoot = %q, want %q", index, sessions[index].WorkspaceRoot, want.WorkspaceID)
+		}
+	}
+	if !sessions[2].Current || sessions[0].Current || sessions[1].Current {
+		t.Fatalf("Remote current Session projection = %#v", sessions)
+	}
+	if _, err := app.remoteSessionRefForToken("", string(refs[0].SessionID)); err == nil || !containsError(err, "ambiguous across workspaces") {
+		t.Fatalf("duplicate raw SessionID was not rejected: %v", err)
+	}
+	if resolved, err := app.remoteSessionRefForToken("", sessions[0].Path); err != nil || resolved != refs[2] {
+		t.Fatalf("encoded full SessionRef resolved as %#v, %v; want %#v", resolved, err, refs[2])
+	}
+
+	tabs := app.ListTabs()
+	tree := app.ListProjectTree()
+	if len(tabs) != 1 || tabs[0].SessionPath != remoteSessionToken(refs[0]) ||
+		tree[0].Children[0].Children[0].SessionPath != tabs[0].SessionPath || sessions[2].Path != tabs[0].SessionPath {
+		t.Fatalf("Remote Session identity diverged across tab/tree/history: tab=%#v tree=%#v history=%#v", tabs, tree, sessions)
+	}
+
+	trash := app.ListTrashedSessions()
+	if len(trash) != 2 || trash[0].WorkspaceRoot != string(refs[2].WorkspaceID) || trash[1].WorkspaceRoot != string(refs[0].WorkspaceID) {
+		t.Fatalf("Remote all-workspace trash = %#v", trash)
+	}
+	for _, item := range trash {
+		if ref, encoded, err := parseRemoteSessionToken(item.Path); err != nil || !encoded || ref.WorkspaceID != runtimeapi.WorkspaceID(item.WorkspaceRoot) {
+			t.Fatalf("Remote trash token/WorkspaceRoot mismatch: %#v => %#v, encoded=%v, err=%v", item, ref, encoded, err)
+		}
+	}
+
+	beforeAttach := len(rt.attachInputs)
+	beforeUnsubscribe := len(rt.unsubscribed)
+	if _, err := app.remotePreviewSessionV1("", sessions[0].Path); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.attachInputs) != beforeAttach+1 || rt.attachInputs[len(rt.attachInputs)-1].Session != refs[2] ||
+		len(rt.unsubscribed) != beforeUnsubscribe+1 || rt.unsubscribed[len(rt.unsubscribed)-1] != refs[2] {
+		t.Fatalf("cross-workspace preview lost SessionRef pair: attach=%#v unsubscribe=%#v", rt.attachInputs, rt.unsubscribed)
+	}
+}
+
+func TestRemoteProjectTreeNewSessionExpandsOneToTwoAndPublishesRefresh(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_tree_new", Label: "Host tree new"}
+	rt := newRemoteWorkbenchV1TestRuntime()
+	workspace := runtimeapi.Workspace{ID: "workspace_tree", Name: "Tree", DisplayPath: "/host/tree"}
+	source := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_source"}
+	topicID := runtimeapi.TopicID("topic_tree")
+	rt.workspaces = []runtimeapi.Workspace{workspace}
+	rt.topics[workspace.ID] = []runtimeapi.TopicSummary{{TopicID: topicID, Title: "Tree topic", SessionCount: 1, LastActivityMillis: 10}}
+	rt.sessions[workspace.ID] = []runtimeapi.SessionSummary{{Session: source, TopicID: topicID, Title: "Source", Turns: 2, LastActivityMillis: 10}}
+	rt.snapshots[source] = runtimeapi.SessionSnapshot{
+		Session: source, TopicID: topicID, Title: "Tree topic", Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+		History: runtimeapi.HistoryPage{TotalTurns: 2},
+	}
+	app, manager := newRemoteWorkbenchTestApp(t, target, rt, nil)
+	if _, err := app.attachRemoteWorkbenchSession(source, true); err != nil {
+		t.Fatal(err)
+	}
+	initial := app.ListProjectTree()
+	if len(initial) != 1 || len(initial[0].Children) != 1 || len(initial[0].Children[0].Children) != 0 || !initial[0].Children[0].Open {
+		t.Fatalf("single-Session topic projection = %#v", initial)
+	}
+
+	replacement := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_replacement"}
+	replacementSnapshot := runtimeapi.SessionSnapshot{
+		Session: replacement, TopicID: topicID, Title: "Tree topic", Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+	}
+	rt.mu.Lock()
+	rt.sessions[workspace.ID] = append(rt.sessions[workspace.ID], runtimeapi.SessionSummary{
+		Session: replacement, TopicID: topicID, Title: "Replacement", LastActivityMillis: 20,
+	})
+	rt.topics[workspace.ID][0].SessionCount = 2
+	rt.topics[workspace.ID][0].LastActivityMillis = 20
+	rt.snapshots[replacement] = replacementSnapshot
+	rt.mu.Unlock()
+	refreshes := 0
+	app.projectTreeChangedHook = func() { refreshes++ }
+	app.emitRemoteRuntimeEvent(TargetRuntimeEvent{
+		Generation: manager.Snapshot().Generation, Target: target,
+		Event: runtimeapi.Event{Session: replacement, Snapshot: &runtimeapi.SnapshotUpdate{Previous: source, Snapshot: replacementSnapshot}},
+	})
+	if refreshes != 1 {
+		t.Fatalf("replacement SnapshotUpdate project-tree refreshes = %d, want 1", refreshes)
+	}
+	updated := app.ListProjectTree()
+	if len(updated) != 1 || len(updated[0].Children) != 1 || len(updated[0].Children[0].Children) != 2 || updated[0].Children[0].Open {
+		t.Fatalf("two-Session topic projection = %#v", updated)
+	}
+	paths := map[string]ProjectNode{}
+	for _, child := range updated[0].Children[0].Children {
+		paths[child.SessionPath] = child
+	}
+	if paths[remoteSessionToken(source)].Open || !paths[remoteSessionToken(replacement)].Open {
+		t.Fatalf("replacement child status projection = %#v", paths)
+	}
+	if tabs := app.ListTabs(); len(tabs) != 1 || tabs[0].SessionPath != remoteSessionToken(replacement) {
+		t.Fatalf("replacement tab identity = %#v", tabs)
+	}
+}
+
+func TestRemoteEnsureBlankAfterUsedSessionCreatesNewTopicVisibleInTree(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_tree_plus", Label: "Host tree plus"}
+	rt := newRemoteWorkbenchV1TestRuntime()
+	workspace := runtimeapi.Workspace{ID: "workspace_plus", Name: "Plus", DisplayPath: "/host/plus"}
+	source := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_used"}
+	createdRef := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_new_topic"}
+	rt.workspaces = []runtimeapi.Workspace{workspace}
+	rt.topics[workspace.ID] = []runtimeapi.TopicSummary{{TopicID: "topic_used", Title: "Used", SessionCount: 1}}
+	rt.sessions[workspace.ID] = []runtimeapi.SessionSummary{{Session: source, TopicID: "topic_used", Title: "Used", Turns: 3}}
+	rt.snapshots[source] = runtimeapi.SessionSnapshot{
+		Session: source, TopicID: "topic_used", Title: "Used", Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+		History: runtimeapi.HistoryPage{TotalTurns: 3},
+	}
+	created := runtimeapi.CreatedSession{Session: createdRef, TopicID: "topic_new", TopicTitle: defaultTopicTitle}
+	rt.created = []runtimeapi.CreatedSession{created}
+	rt.snapshots[createdRef] = runtimeapi.SessionSnapshot{
+		Session: createdRef, TopicID: created.TopicID, Title: created.TopicTitle, Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+	}
+	app, _ := newRemoteWorkbenchTestApp(t, target, rt, nil)
+	if _, err := app.attachRemoteWorkbenchSession(source, true); err != nil {
+		t.Fatal(err)
+	}
+	meta, err := app.remoteEnsureBlankTab(string(workspace.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SessionID != string(createdRef.SessionID) || meta.SessionPath != remoteSessionToken(createdRef) || meta.TopicID != string(created.TopicID) {
+		t.Fatalf("new blank Remote tab = %#v", meta)
+	}
+	tree := app.ListProjectTree()
+	if len(tree) != 1 || len(tree[0].Children) != 2 {
+		t.Fatalf("new blank topic was not visible in Remote tree: %#v", tree)
+	}
+	for _, topic := range tree[0].Children {
+		if len(topic.Children) != 0 {
+			t.Fatalf("single-Session topic rendered duplicate child: %#v", topic)
+		}
 	}
 }
 

@@ -25,7 +25,11 @@ function statusNeedsSurface(status: RemoteTargetStatusView | null): status is Re
   return Boolean(status && (status.state !== "LocalConnected" || status.failure || status.canReconnect));
 }
 
-export function RemoteTargetSurfaces() {
+export interface RemoteTargetSurfacesProps {
+  workspaceSetupRequest?: number;
+}
+
+export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTargetSurfacesProps) {
   const t = useT();
   const [status, setStatus] = useState<RemoteTargetStatusView | null>(null);
   const [prompt, setPrompt] = useState<RemoteAskPassView | null>(null);
@@ -167,7 +171,7 @@ export function RemoteTargetSurfaces() {
         </aside>
       )}
 
-      <RemoteWorkspaceSetup target={status} />
+      <RemoteWorkspaceSetup target={status} requestSignal={workspaceSetupRequest} />
 
       {responseError && <div className="remote-askpass-error banner banner--error" role="alert">{responseError}</div>}
 

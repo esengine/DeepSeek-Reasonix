@@ -657,22 +657,29 @@ func TestRemoteDesktopBackendRestartResumesLinuxHostSessionEndToEnd(t *testing.T
 
 	tree := secondApp.ListProjectTree()
 	var restoredWorkspace *ProjectNode
-	var restoredSession bool
+	var restoredTopic bool
 	for index := range tree {
 		if tree[index].Root != string(sessionRef.WorkspaceID) {
 			continue
 		}
 		restoredWorkspace = &tree[index]
 		for _, topic := range tree[index].Children {
-			for _, session := range topic.Children {
-				if session.SessionPath == string(sessionRef.SessionID) {
-					restoredSession = true
-				}
+			if topic.TopicID == string(topicID) && len(topic.Children) == 0 && topic.Turns == 1 {
+				// One Session is represented by its Topic row, matching Local.
+				restoredTopic = true
 			}
 		}
 		break
 	}
-	if restoredWorkspace == nil || restoredWorkspace.Label != "Persisted Remote Workspace" || !restoredWorkspace.Pinned || !restoredSession {
+	restoredSession := false
+	for _, session := range secondApp.ListSessions() {
+		ref, encoded, tokenErr := parseRemoteSessionToken(session.Path)
+		if tokenErr == nil && encoded && ref == sessionRef && session.WorkspaceRoot == string(sessionRef.WorkspaceID) {
+			restoredSession = true
+			break
+		}
+	}
+	if restoredWorkspace == nil || restoredWorkspace.Label != "Persisted Remote Workspace" || !restoredWorkspace.Pinned || !restoredTopic || !restoredSession {
 		t.Fatalf("second Desktop Remote catalog/layout = %#v", tree)
 	}
 	meta, err := secondApp.OpenTopicSession("project", string(sessionRef.WorkspaceID), string(topicID), string(sessionRef.SessionID))

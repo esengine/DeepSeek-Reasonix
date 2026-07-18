@@ -714,8 +714,8 @@ func (a *App) remoteTabMeta(tabID string) (TabMeta, bool) {
 		WorkspaceRoot: string(session.Created.Session.WorkspaceID),
 		WorkspaceName: workspace.Name, WorkspacePath: workspace.DisplayPath,
 		TopicID: string(session.Created.TopicID), TopicTitle: session.Created.TopicTitle,
-		SessionPath: string(session.Created.Session.SessionID),
-		Label:       session.Created.TopicTitle, Ready: ready, Running: running,
+		SessionPath: remoteSessionToken(session.Created.Session),
+		Label:       remoteProfileModelLabel(snapshot.Profile.Model), Ready: ready, Running: running,
 		PendingPrompt: snapshot.PendingPrompt != nil, BackgroundJobs: len(snapshot.Jobs),
 		CancelRequested: snapshot.Runtime.CancelRequested,
 		Cancellable:     snapshot.Runtime.CurrentTurn != nil || snapshot.Runtime.CurrentOperation != nil,
@@ -1274,7 +1274,11 @@ func (a *App) remoteMeta(tabID string) (Meta, bool) {
 	}
 	autoApproveTools := normalizeToolApprovalMode(session.Snapshot.Profile.ToolApprovalMode) == "yolo"
 	return Meta{
-		Label:      session.Created.TopicTitle,
+		// Meta.Label is the model label consumed by the Composer model switcher
+		// and status bar. TopicTitle belongs to the tab/session navigation model;
+		// projecting it here made Remote sessions show their topic as the selected
+		// model even though the authoritative profile and catalog were correct.
+		Label:      remoteProfileModelLabel(session.Snapshot.Profile.Model),
 		Ready:      target.State == TargetRemoteConnected && session.AttachedGeneration == target.Generation,
 		StartupErr: session.LastAttachError, EventChannel: eventChannel,
 		Cwd: workspace.DisplayPath, WorkspaceRoot: string(session.Created.Session.WorkspaceID),
@@ -1284,6 +1288,14 @@ func (a *App) remoteMeta(tabID string) (Meta, bool) {
 		ToolApprovalMode:  session.Snapshot.Profile.ToolApprovalMode, TokenMode: session.Snapshot.Profile.TokenMode,
 		Goal: dereferenceString(session.Snapshot.Goal), GoalStatus: string(session.Snapshot.GoalStatus),
 	}, true
+}
+
+func remoteProfileModelLabel(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if _, model, ok := strings.Cut(ref, "/"); ok && strings.TrimSpace(model) != "" {
+		return model
+	}
+	return ref
 }
 
 func removeRemoteTabID(values []string, target string) []string {

@@ -110,8 +110,8 @@ func TestRemoteLayoutPersistsPerHostAndNeverTouchesLocalProjectRegistry(t *testi
 	if len(projectA.Children) != 2 || projectA.Children[0].TopicID != "topic_old" || !projectA.Children[0].Pinned || projectA.Children[1].TopicID != "topic_new" {
 		t.Fatalf("Remote pinned topic order = %#v", projectA.Children)
 	}
-	if projectA.Children[0].ProjectColor != "blue" || len(projectA.Children[0].Children) != 1 || projectA.Children[0].Children[0].ProjectColor != "blue" {
-		t.Fatalf("Remote project color was not projected through topic/session nodes: %#v", projectA.Children[0])
+	if projectA.Children[0].ProjectColor != "blue" || len(projectA.Children[0].Children) != 0 {
+		t.Fatalf("Remote project color/single-Session topic projection = %#v", projectA.Children[0])
 	}
 
 	hostAAfter, found, err := store.Get(hostA.ID)

@@ -11,7 +11,11 @@
 阶段 7：当前环境可执行的 Remote V1 实现与自动化验收已完成。RMT-046 也已完成：Host 条目使用
 `mode=direct/config`；默认 direct 保存 `destination=username@host` 与独立 port，config 保存
 alias/sshConfigPath，v1 store 旧条目迁移为 config 并继续兼容。真实 Windows Desktop → 普通 Linux
-Host、systemd user service 与外部 SSH 实机验收仍待执行，不能计为本环境已经实机通过。
+Host 与外部 SSH 实机验收仍待执行；当前 WSL systemd user service 已完成本页记录的真实 lifecycle
+复验，但不能替代普通物理机或 VM Linux Host 的验收。2026-07-18
+收到的模型标签、Session 显示/新增可见性和 Remote 新建项目误开本地 picker 三项缺陷已经完成真实
+修复、完整 Desktop/frontend 回归、变更面 race/E2E 以及协调跨平台编译，证据记录在阶段 7 缺陷修复
+复验小节。
 
 开始实现前的工作树与架构一致性预检已经完成。预检时，分支
 `codex/remote-feature` 相对 `origin/main-v2` 只有冻结架构文档提交，且不存在
@@ -705,14 +709,109 @@ Linux 上尝试完整 Wails 应用构建时，代码已进入原生依赖解析�
 `gtk+-3.0`、`gio-unix-2.0`、`webkit2gtk-4.1`、`libsoup-3.0` 开发包；这不是 Go/TypeScript/Remote
 实现失败，也没有在未获授权时安装系统包。
 
+### 阶段 7 缺陷修复复验（2026-07-18）
+
+针对 Windows Desktop 实机使用反馈，已完成以下真实修复，不是 mock 或静态界面替换：
+
+- 模型选择器不再把 Remote Topic 标题当作模型名。`MetaForTab` 与 `ListTabs` 的乐观元数据均从
+  Host `SessionSnapshot.Profile.Model` 投影与 catalog 一致的模型标签；provider 前缀只移除一层，
+  OpenRouter 等包含嵌套路径的模型名不会被截断。
+- Remote ProjectTree 与 Local 的 Session 语义对齐：Topic 只有一个 Session 时由 Topic 行承载，
+  达到两个 Session 后才显示具体子节点，因此一个真实 Session 不再显示为两个。Session 与回收站
+  列表会分页聚合所有 Host Workspace，并携带 `WorkspaceRoot`。
+- Desktop 历史、Tab 与 ProjectTree 现在使用 versioned base64url token 无损携带完整
+  `WorkspaceID + SessionID`。旧 raw SessionID 仍可兼容解析，但跨 Workspace 重名时会拒绝为歧义，
+  不再把 active Workspace 错套到另一 Session。
+- `/new` 与 `/clear` 的 ordered SnapshotUpdate 会替换 opaque SessionRef，进而替换 backend tab ID。
+  前端现在只在权威 `ListTabs` 已移除旧 Tab、且新 Tab 是 backend active 时迁移状态并完整 hydrate；
+  背景 `ready/rebuilt` 不会抢焦点，RPC 与 SnapshotUpdate 两种到达顺序均有自动化覆盖，Local 的
+  tab-scoped Session 操作语义保持不变。
+- Remote 状态下的“新建项目”不再调用 Windows 本地目录选择器。入口先读取 TargetManager：Local
+  使用系统 picker，Remote 打开已有 Host 目录 browser 与 `CreateRemoteWorkspaceSession`；连接过渡态
+  明确拒绝。Go backend 也会 fail closed，防止其他调用路径绕过前端。创建 RPC 进行中禁止关闭窗口，
+  避免界面看似取消但 Host 实际已经创建 Session。
+
+本次最终文件上的验证证据：
+
+```text
+# Desktop Go（完整包）
+cd desktop
+go test -count=1 ./...                         # PASS, 68.971s
+
+# 变更面的 race + Linux Host E2E
+go test -race -count=1 . -run '<model/session/picker/Linux E2E cases>'
+# PASS
+
+# ACP、rpcwire、RuntimeAPI、协议注册表/生成器/parity（含 race）
+go test -race -count=1 ./internal/rpcwire ./internal/acp ./internal/buildinfo \
+  ./internal/eventwire ./internal/runtimeservice
+go test -race -count=1 ./internal/remote/protocol ./internal/remote/protocolgen \
+  ./internal/remote/parity ./internal/runtimeapi ./internal/remote/client ./internal/remote/daemon
+go run ./cmd/remote-protocol-gen -check
+# 全部 PASS；生成器报告 Remote protocol artifacts are up to date.
+
+# Desktop frontend
+npm run typecheck
+npm run test:typecheck
+npm run test
+npm run build
+# 全部 exit 0；Remote target UI 53/53，new/clear replacement 28/28，
+# tab switch 75/75，ready 6/6，prompt lifecycle 78/78。
+```
+
+使用同一协调 Build ID 完成了 Linux CLI/daemon 与 Windows amd64 Desktop 编译：
+
+```text
+productVersion: desktop-v1.17.12-264-g276a52fa
+sourceRevision: 276a52fac9ab3b9a8139fafd6a3d4ae9767be33c+dirty
+protocolVersion: 1
+schemaHash: sha256:5d7a9582b014e88f6787c41b577b467610abbfac23ffa3ce61d839fe2e315c48
+
+bin/reasonix-linux-amd64-remote-bugfix
+sha256 34c3b51c4a8be9794f2626fe4df64e24fe053dc54845cd00c5e9fbcc3a65d3c8
+
+desktop/build/bin/reasonix-desktop-remote-bugfix.exe
+sha256 40052acd2f5d66180209dd3c7aac2bc3d5dd4ca8776171ff1907f6dc066d907d
+```
+
+Wails 2.12.0 未跳过 bindings 生成，复用已通过 production build 的 frontend `dist`；最终源码上的
+Windows application rebuild 在 4.687s 内完成。`go version -m` 已核对 Windows exe 的完整 ldflags。
+
+当前 WSL Host 随后在原生 WSL namespace 中完成了真实 systemd user lifecycle 复验。安装
+`dbus-user-session` 并恢复 user manager 后，全程只使用上述新 CLI 管理 Host，没有手工覆盖 managed
+binary、手工启动 daemon 或绕过 unit：
+
+```text
+reasonix remote restart                     # PASS
+reasonix remote status                      # PASS
+reasonix remote doctor                      # healthy，11/11 检查通过
+reasonix remote logs --lines 20             # PASS
+
+reasonix remote stop                        # PASS
+# enabled=yes, active=no, daemon unavailable, socket removed
+reasonix remote start                       # PASS
+# CLI/installed/daemon Build ID 再次完全一致
+
+reasonix remote uninstall                   # PASS
+# unit LoadState=not-found，managed binary 已移除
+reasonix remote install                     # PASS
+# enabled=yes, active=yes, socket 0600，doctor healthy
+```
+
+最终 managed binary 的 SHA256 为
+`34c3b51c4a8be9794f2626fe4df64e24fe053dc54845cd00c5e9fbcc3a65d3c8`，与工作区 Linux
+构建产物逐字节一致；CLI、installed、daemon 均报告上方同一完整 Build ID。服务最终保持 enabled、
+active/running，lingering enabled。SSH 登录环境使用的 `/home/taibai/.local/bin/reasonix` 也已原子同步
+为同一 SHA256 与 Build ID，避免远端 `reasonix remote attach --stdio` 在认证后因旧 CLI 版本被严格拒绝。
+
 ## 尚未完成内容
 
 当前环境可执行的代码、协议、CLI、daemon、Desktop backend/frontend、RMT-046 与自动化验收已完成。
 以下仅为必须在对应外部实机环境逐项执行并记录的人工验收，不得伪称已经完成：
 
-1. 在普通 Linux 用户、真实 systemd user bus 中执行
-   `install → status/doctor → restart → logs → stop/start → uninstall`，核对 unit、managed binary、
-   lingering、权限和 CLI/installed/daemon 三方 Build ID。
+1. 当前 WSL Linux Host 已完成
+   `restart → status/doctor → logs → stop/start → uninstall/install` 全链路；仍需在独立物理机或 VM 的
+   普通 Linux 登录/SSH 会话中重复该流程，覆盖非 WSL 的 PAM、session bus 与 lingering 环境差异。
 2. 在 Windows Desktop 与外部 Linux Host 上使用同一提交协调构建，分别验证直接
    `username@host` + port 与高级 alias/config、known_hosts、首次 Host Key、密码、密钥、密钥口令、
    keyboard-interactive/2FA，以及 Host Key changed fail closed。
@@ -722,12 +821,18 @@ Linux 上尝试完整 Wails 应用构建时，代码已进入原生依赖解析�
 
 ## 真实阻塞
 
-当前没有架构、产品、代码或新权限阻塞；RMT-046 已实现并通过当前环境自动化门禁。
-系统默认 `/usr/bin/go` 为
+当前没有架构、产品或代码阻塞；RMT-046 已实现并通过当前环境自动化门禁，协调构建也已部署到
+当前 WSL Host 并完成上述 lifecycle 复验。系统默认 `/usr/bin/go` 为
 Go 1.18.1，无法解析仓库的 Go 版本和 `toolchain` 指令；已在 `/tmp` 使用项目要求的 Go 1.26.5
 工具链解决，不构成阻塞。
 
-当前仅有三项环境边界：容器没有可用的 systemd user bus；没有 Windows GUI/外部 SSH Host；Linux
-Wails 缺少上述原生开发包。自动化已经覆盖 CLI manager/probe、精确 systemctl argv/顺序、真实 Unix
-socket 与生产 daemon、文件事务、SSH argv/AskPass/transport、Windows 交叉编译及故障分支。剩余实机
-人工验收不能在此环境执行，也不能据此跳过实现或伪称已经实机通过。
+当前 WSL 最初缺少 `/run/user/1000/bus` 与 `dbus-user-session`；获得用户授权后已安装该系统包并恢复
+`user@1000.service`。Codex 命令沙箱内直接执行 `systemctl --user` 仍会因 bwrap user namespace 的
+inner/outer UID 映射在 private socket 认证阶段失败；相同命令在原生 WSL namespace 成功。这是执行
+沙箱边界，不是 Host 或 `XDG_RUNTIME_DIR` 尾斜杠缺陷。已撤销针对该误判的实验性环境改写，产品代码
+不携带 sandbox 特判，所有 lifecycle 证据均来自原生 WSL namespace。
+
+另外两项环境边界保持不变：当前任务没有可靠的 Windows GUI 点击自动化通道/外部 SSH 实机闭环；
+Linux Wails 缺少上述原生开发包。自动化已经覆盖 CLI manager/probe、精确 systemctl argv/顺序、真实
+Unix socket 与生产 daemon、文件事务、SSH argv/AskPass/transport、Windows 交叉编译及故障分支。
+剩余实机人工验收不能据此跳过，也不能伪称已经实机通过。

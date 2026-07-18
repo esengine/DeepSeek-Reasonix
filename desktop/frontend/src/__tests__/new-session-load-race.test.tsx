@@ -285,6 +285,237 @@ eq(controller?.state.meta?.workspaceRoot, targetProjectB, "guarded startup sync 
 await act(async () => {
   guardRoot.unmount();
 });
+
+const remoteOld = tabMeta({
+  id: "remote-old",
+  targetKind: "remote",
+  workspaceRoot: "workspace-opaque",
+  workspaceName: "Remote workspace",
+  workspacePath: "/host/workspace",
+  cwd: "/host/workspace",
+  topicId: "topic-opaque",
+  topicTitle: "Remote topic",
+  sessionPath: "session-token-old",
+});
+const remoteReplacement = tabMeta({
+  ...remoteOld,
+  id: "remote-new",
+  sessionPath: "session-token-new",
+});
+const remoteCleared = tabMeta({
+  ...remoteOld,
+  id: "remote-cleared",
+  sessionPath: "session-token-cleared",
+});
+const remoteBackground = tabMeta({
+  ...remoteOld,
+  id: "remote-background",
+  topicId: "topic-background",
+  topicTitle: "Background",
+  sessionPath: "session-token-background",
+  active: false,
+});
+let remoteTabs = [remoteOld];
+const remoteReadyHandlers: Array<(tabId?: string) => void> = [];
+const remoteRebuiltHandlers: Array<(tabId?: string) => void> = [];
+const remoteNewGate = deferred<void>();
+const remoteClearGate = deferred<void>();
+const remoteNewTargets: string[] = [];
+const remoteClearTargets: string[] = [];
+
+window.runtime = {
+  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
+    if (name === "agent:ready") remoteReadyHandlers.push(cb as (tabId?: string) => void);
+    if (name === "runtime:rebuilt") remoteRebuiltHandlers.push(cb as (tabId?: string) => void);
+    return () => {};
+  },
+  BrowserOpenURL: () => {},
+};
+window.go.main.App = {
+  ListTabs: async () => remoteTabs,
+  MetaForTab: async (tabID: string) => meta({
+    cwd: "/host/workspace",
+    workspaceRoot: "workspace-opaque",
+    workspaceName: "Remote workspace",
+    workspacePath: "/host/workspace",
+    sessionPath: remoteTabs.find((tab) => tab.id === tabID)?.sessionPath,
+  }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryForTab: async () => [],
+  HistoryPageForTab: async () => ({ messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false }),
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  NewSessionForTab: async (tabID: string) => {
+    remoteNewTargets.push(tabID);
+    await remoteNewGate.promise;
+  },
+  ClearSessionForTab: async (tabID: string) => {
+    remoteClearTargets.push(tabID);
+    await remoteClearGate.promise;
+  },
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const remoteRoot = createRoot(rootEl);
+await act(async () => {
+  remoteRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("Remote old active tab", () => controller?.activeTabId === remoteOld.id);
+
+remoteTabs = [{ ...remoteOld, active: true }, remoteBackground];
+await act(async () => {
+  for (const handler of remoteReadyHandlers) handler(remoteBackground.id);
+  for (const handler of remoteRebuiltHandlers) handler(remoteBackground.id);
+  await flushPromises();
+});
+eq(controller?.activeTabId, remoteOld.id, "background ready/rebuilt cannot steal the active Remote tab while it remains authoritative");
+
+let remoteNewPromise: Promise<void> | undefined;
+await act(async () => {
+  remoteNewPromise = controller?.newSession();
+  await flushPromises();
+});
+await waitFor("Remote NewSession RPC", () => remoteNewTargets.length === 1);
+eq(remoteNewTargets[0], remoteOld.id, "Remote NewSession targets the pre-replacement tab");
+
+remoteTabs = [{ ...remoteReplacement, active: true }, remoteBackground];
+await act(async () => {
+  for (const handler of remoteReadyHandlers) handler(remoteReplacement.id);
+  await flushPromises();
+});
+await waitFor("Remote replacement adoption", () => controller?.activeTabId === remoteReplacement.id);
+eq(controller?.state.meta?.sessionPath, remoteReplacement.sessionPath, "ready event adopts the authoritative Remote replacement Session");
+
+await act(async () => {
+  remoteNewGate.resolve();
+  await remoteNewPromise;
+  await flushPromises();
+});
+eq(controller?.activeTabId, remoteReplacement.id, "late NewSession RPC continuation cannot recreate the retired tab");
+eq(controller?.state.meta?.sessionPath, remoteReplacement.sessionPath, "late NewSession RPC continuation keeps replacement metadata");
+
+let remoteClearPromise: Promise<void> | undefined;
+await act(async () => {
+  remoteClearPromise = controller?.clearSession();
+  await flushPromises();
+});
+await waitFor("Remote ClearSession RPC", () => remoteClearTargets.length === 1);
+eq(remoteClearTargets[0], remoteReplacement.id, "Remote ClearSession targets the current replacement tab");
+
+await act(async () => {
+  remoteClearGate.resolve();
+  await remoteClearPromise;
+  await flushPromises();
+});
+eq(controller?.activeTabId, remoteReplacement.id, "ClearSession RPC completion keeps the current tab until SnapshotUpdate arrives");
+
+remoteTabs = [{ ...remoteCleared, active: true }, remoteBackground];
+await act(async () => {
+  for (const handler of remoteRebuiltHandlers) handler(remoteCleared.id);
+  await flushPromises();
+});
+await waitFor("Remote clear replacement adoption", () => controller?.activeTabId === remoteCleared.id);
+eq(controller?.state.meta?.sessionPath, remoteCleared.sessionPath, "rebuilt event adopts the authoritative Remote clear replacement");
+eq(controller?.state.items.length, 0, "Remote replacement hydrate exposes the new blank Session");
+
+await act(async () => {
+  remoteRoot.unmount();
+});
+
+const localA = tabMeta({ id: "local-a", targetKind: "local", sessionPath: "/sessions/local-a.jsonl" });
+const localB = tabMeta({
+  id: "local-b",
+  targetKind: "local",
+  topicId: "topic-b",
+  topicTitle: "Local B",
+  sessionPath: "/sessions/local-b.jsonl",
+  active: false,
+});
+let localBackendActive = localA.id;
+let localANew = false;
+const localNewGate = deferred<void>();
+const localNewTargets: string[] = [];
+const localHistoryCalls: string[] = [];
+const currentLocalTabs = () => [localA, localB].map((tab) => ({ ...tab, active: tab.id === localBackendActive }));
+
+window.runtime = {
+  EventsOn: () => () => {},
+  BrowserOpenURL: () => {},
+};
+window.go.main.App = {
+  ListTabs: async () => currentLocalTabs(),
+  MetaForTab: async (tabID: string) => meta({ sessionPath: tabID === localA.id ? localA.sessionPath : localB.sessionPath }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryForTab: async (tabID: string) => {
+    localHistoryCalls.push(tabID);
+    if (tabID === localA.id) return localANew ? [] : [{ role: "user", content: "Local A old" }];
+    return [{ role: "user", content: "Local B" }];
+  },
+  HistoryPageForTab: async (tabID: string) => {
+    const messages = await window.go.main.App.HistoryForTab(tabID);
+    return { messages, startTurn: 0, endTurn: messages.length, totalTurns: messages.length, hasOlder: false };
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  SetActiveTab: async (tabID: string) => {
+    localBackendActive = tabID;
+  },
+  NewSessionForTab: async (tabID: string) => {
+    localNewTargets.push(tabID);
+    await localNewGate.promise;
+    localANew = true;
+  },
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const localRoot = createRoot(rootEl);
+await act(async () => {
+  localRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("Local A initial history", () => controller?.activeTabId === localA.id && controller.state.items.length === 1);
+
+let localNewPromise: Promise<void> | undefined;
+await act(async () => {
+  localNewPromise = controller?.newSession();
+  await flushPromises();
+});
+await waitFor("Local NewSession RPC", () => localNewTargets.length === 1);
+eq(localNewTargets[0], localA.id, "Local NewSession keeps its explicit source tab");
+
+await act(async () => {
+  await controller?.switchTab(localB.id, localB);
+  await flushPromises();
+});
+await waitFor("Local B active", () => controller?.activeTabId === localB.id && controller.state.items.some((item) => item.kind === "user" && item.text === "Local B"));
+
+await act(async () => {
+  localNewGate.resolve();
+  await localNewPromise;
+  await flushPromises();
+});
+eq(controller?.activeTabId, localB.id, "Local NewSession completion does not steal focus from tab B");
+
+await act(async () => {
+  await controller?.switchTab(localA.id, localA);
+  await flushPromises();
+});
+await waitFor("Local A blank completion", () => controller?.activeTabId === localA.id && !controller.state.hydrating);
+eq(controller?.state.items.length, 0, "Local NewSession completes and clears tab A while focus was on tab B");
+ok(localHistoryCalls.filter((tabID) => tabID === localA.id).length >= 1, "Local A session state remains loadable after tab-scoped completion");
+
+await act(async () => {
+  localRoot.unmount();
+});
 dom.window.close();
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

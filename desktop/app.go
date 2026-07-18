@@ -4169,6 +4169,12 @@ func normalizeTimestampMillisFloat(v float64) (int64, bool) {
 // PickWorkspace opens a folder chooser and, on a pick, opens a new project tab
 // scoped to that folder. Returns the chosen path ("" if cancelled).
 func (a *App) PickWorkspace() (string, error) {
+	if manager := a.remote.manager; manager != nil {
+		target := manager.Snapshot()
+		if target.State != TargetLocalConnected || target.Target.Kind != TargetLocal {
+			return "", errors.New("Remote target uses Host workspace setup; the local folder picker is unavailable")
+		}
+	}
 	if a.ctx == nil {
 		return "", nil
 	}

@@ -2007,6 +2007,27 @@ export function useController() {
     return tabs.find((tab) => tab.active) ?? tabs[0];
   }, []);
 
+  const discardFrontendTabState = useCallback((tabId: string) => {
+    const cancelTimer = cancelReconcileTimers.current.get(tabId);
+    if (cancelTimer !== undefined) window.clearTimeout(cancelTimer);
+    cancelReconcileTimers.current.delete(tabId);
+    const promptTimer = stalePromptReconcileTimers.current.get(tabId);
+    if (promptTimer !== undefined) window.clearTimeout(promptTimer);
+    stalePromptReconcileTimers.current.delete(tabId);
+    statesRef.current.delete(tabId);
+    lastTurnActivityAtByTab.current.delete(tabId);
+    checkpointRefreshSeq.current.delete(tabId);
+    sessionLoadSeq.current.delete(tabId);
+    sessionLoadInFlight.current.delete(tabId);
+    backendActivationPromises.current.delete(tabId);
+    if (backendActiveTabIdRef.current === tabId) backendActiveTabIdRef.current = undefined;
+    if (readyMetaReconcileActive.current?.tabId === tabId) {
+      readyMetaReconcileSeq.current += 1;
+      readyMetaReconcileActive.current = undefined;
+    }
+    bump();
+  }, [bump]);
+
   // snapshotAt is the promptEventClock() reading taken immediately before
   // initiating the backend call that produced `tab`. The reducer uses it to
   // ignore snapshots that predate a live approval/ask event (#6429).
@@ -2077,6 +2098,36 @@ export function useController() {
     if (reset) dispatchRuntimeStatusForTab(active.id, active, snapshotAt);
     return active.id;
   }, [activeTabFromBackend, beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
+
+  // Remote /new and /clear replace the opaque SessionRef, which also changes
+  // the backend tab id. The RPC result and ordered SnapshotUpdate travel on
+  // different streams, so adoption is event-driven and authority-checked:
+  // ordinary ready/rebuilt events for background tabs must never steal focus.
+  const adoptBackendSessionReplacement = useCallback(async (
+    previousTabId: string,
+    expectedTabId?: string,
+  ): Promise<string | undefined> => {
+    if (!previousTabId || activeTabIdRef.current !== previousTabId) return undefined;
+    const snapshotAt = promptEventClock();
+    const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
+    const active = tabs.find((tab) => tab.active) ?? tabs[0];
+    if (!active || active.id === previousTabId) return undefined;
+    if (expectedTabId && active.id !== expectedTabId) return undefined;
+    if (tabs.some((tab) => tab.id === previousTabId)) return undefined;
+    // Re-check after the awaited authority read. A user navigation that moved
+    // away in the meantime wins and the replacement remains a background tab.
+    if (activeTabIdRef.current !== previousTabId) return undefined;
+
+    beginActiveNavigation();
+    discardFrontendTabState(previousTabId);
+    setActiveTabId(active.id);
+    activeTabIdRef.current = active.id;
+    confirmBackendActiveTab(active.id);
+    dispatchTo(active.id, { type: "optimistic_meta", meta: metaFromTab(active, statesRef.current.get(active.id)?.meta) });
+    dispatchRuntimeStatusForTab(active.id, active, snapshotAt);
+    await loadSessionDataForTab(active.id, true, "new-session", { sessionPath: active.sessionPath });
+    return active.id;
+  }, [beginActiveNavigation, confirmBackendActiveTab, discardFrontendTabState, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
 
   const reconcileTabRuntime = useCallback(async (
     tabId: string,
@@ -2197,7 +2248,9 @@ export function useController() {
     const offReady = onReady((readyTabId) => {
       const activeId = activeTabIdRef.current;
       if (readyTabId && activeId && readyTabId !== activeId) {
-        addBreadcrumb("tab.hydrate", `ready ignored ${readyTabId}`);
+        void adoptBackendSessionReplacement(activeId, readyTabId).then((adopted) => {
+          if (!adopted) addBreadcrumb("tab.hydrate", `ready ignored ${readyTabId}`);
+        });
         return;
       }
       // A ready event can race the initial hydrate. Refresh the tab metadata
@@ -2213,6 +2266,10 @@ export function useController() {
     const offRebuilt = onRuntimeRebuilt((rebuiltTabId) => {
       if (rebuiltTabId) {
         dispatchTo(rebuiltTabId, { type: "controller_rebuilt" });
+        const activeId = activeTabIdRef.current;
+        if (activeId && rebuiltTabId !== activeId) {
+          void adoptBackendSessionReplacement(activeId, rebuiltTabId);
+        }
       } else {
         for (const id of Array.from(statesRef.current.keys())) dispatchTo(id, { type: "controller_rebuilt" });
       }
@@ -2239,7 +2296,7 @@ export function useController() {
       offReady();
       offRebuilt();
     };
-  }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+  }, [adoptBackendSessionReplacement, dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
   // Keep shared all-source telemetry live between turn boundaries. Delivery
   // mode can complete dozens of provider requests inside one UI turn, while
@@ -2596,13 +2653,22 @@ export function useController() {
     }
     invalidateCache();
     if (tabId) {
+      // The SnapshotUpdate may have landed before the RPC continuation or may
+      // arrive later. This immediate authority check shortens the first case;
+      // ready/rebuilt handlers remain the durable path for the second.
+      if (await adoptBackendSessionReplacement(tabId)) return;
+      // An event-driven adoption may have completed while the RPC continuation
+      // was awaiting ListTabs. Never recreate the retired old-tab state.
+      if (!statesRef.current.has(tabId)) return;
+    }
+    if (tabId) {
       dispatchTo(tabId, { type: "history", messages: [] });
       dispatchTo(tabId, { type: "hydrate_done" });
       void refreshMetaForTab(tabId, dispatchTo);
       app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
       void refreshCheckpoints(tabId);
     }
-  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, waitForTabReady]);
+  }, [activeTabId, adoptBackendSessionReplacement, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, waitForTabReady]);
 
   const clearSession = useCallback(async () => {
     const tabId = activeTabId;
@@ -2618,14 +2684,18 @@ export function useController() {
       if (tabId) void loadSessionDataForTab(tabId);
       return;
     }
-    if (tabId) bumpSessionLoadSeq(tabId);
     invalidateCache();
     if (tabId) {
+      if (await adoptBackendSessionReplacement(tabId)) return;
+      if (!statesRef.current.has(tabId)) return;
+    }
+    if (tabId) {
+      bumpSessionLoadSeq(tabId);
       dispatchTo(tabId, { type: "reset" });
       // Clear placeholder items since no history action follows.
       dispatchTo(tabId, { type: "history", messages: [] });
     }
-  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, waitForTabReady]);
+  }, [activeTabId, adoptBackendSessionReplacement, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, waitForTabReady]);
 
   const listSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListSessions().catch(() => [])), []);
   const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])), []);

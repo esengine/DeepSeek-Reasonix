@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"reasonix/internal/control"
@@ -278,18 +281,85 @@ func (a *App) remoteResumeGoalV1(tabID string) (bool, error) {
 	return result.Resumed, err
 }
 
-func remoteSessionToken(ref runtimeapi.SessionRef) string { return string(ref.SessionID) }
+const remoteSessionTokenPrefix = "reasonix-remote-session-v1:"
+
+type remoteSessionTokenEnvelope struct {
+	WorkspaceID runtimeapi.WorkspaceID `json:"workspaceId"`
+	SessionID   runtimeapi.SessionID   `json:"sessionId"`
+}
+
+// remoteSessionToken preserves the complete opaque SessionRef inside legacy
+// Desktop surfaces whose Local contract historically carried a filesystem
+// path. SessionID alone is not an identity: two Host workspaces may use the
+// same opaque value, and actions must never silently borrow the active
+// workspace.
+func remoteSessionToken(ref runtimeapi.SessionRef) string {
+	payload, _ := json.Marshal(remoteSessionTokenEnvelope{WorkspaceID: ref.WorkspaceID, SessionID: ref.SessionID})
+	return remoteSessionTokenPrefix + base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func parseRemoteSessionToken(token string) (runtimeapi.SessionRef, bool, error) {
+	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(token, remoteSessionTokenPrefix) {
+		return runtimeapi.SessionRef{}, false, nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(token, remoteSessionTokenPrefix))
+	if err != nil {
+		return runtimeapi.SessionRef{}, true, errors.New("Remote Session token is malformed")
+	}
+	var envelope remoteSessionTokenEnvelope
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return runtimeapi.SessionRef{}, true, errors.New("Remote Session token is malformed")
+	}
+	ref := runtimeapi.SessionRef{WorkspaceID: envelope.WorkspaceID, SessionID: envelope.SessionID}
+	if !ref.Valid() {
+		return runtimeapi.SessionRef{}, true, errors.New("Remote Session token has an invalid identity")
+	}
+	return ref, true, nil
+}
 
 func (a *App) remoteSessionRefForToken(tabID, token string) (runtimeapi.SessionRef, error) {
-	_, session, _, _, err := a.remoteV1ForTab(tabID)
-	if err != nil {
-		return runtimeapi.SessionRef{}, err
+	if ref, encoded, err := parseRemoteSessionToken(token); encoded {
+		return ref, err
 	}
 	id := runtimeapi.SessionID(strings.TrimSpace(token))
 	if id == "" {
 		return runtimeapi.SessionRef{}, errors.New("Remote Session identity is required")
 	}
-	return runtimeapi.SessionRef{WorkspaceID: session.Created.Session.WorkspaceID, SessionID: id}, nil
+	// Raw SessionID is retained only for older callers and project-tree paths.
+	// Resolve it from Host authority even when the active Session appears to
+	// match: SessionID is workspace-scoped, so that apparent match may be
+	// ambiguous on another workspace. Never silently borrow active workspace.
+	api, _, err := a.remoteConnectedV1Runtime()
+	if err != nil {
+		return runtimeapi.SessionRef{}, err
+	}
+	ctx, cancel := a.remoteActionContext()
+	defer cancel()
+	workspaces, err := listAllRemoteWorkspaces(ctx, api)
+	if err != nil {
+		return runtimeapi.SessionRef{}, err
+	}
+	var match runtimeapi.SessionRef
+	for _, workspace := range workspaces {
+		sessions, listErr := listAllRemoteSessions(ctx, api, workspace.ID)
+		if listErr != nil {
+			return runtimeapi.SessionRef{}, listErr
+		}
+		for _, summary := range sessions {
+			if summary.Session.SessionID != id {
+				continue
+			}
+			if match.Valid() && match != summary.Session {
+				return runtimeapi.SessionRef{}, errors.New("Remote Session identity is ambiguous across workspaces")
+			}
+			match = summary.Session
+		}
+	}
+	if !match.Valid() {
+		return runtimeapi.SessionRef{}, fmt.Errorf("Remote Session %q not found", id)
+	}
+	return match, nil
 }
 
 func remoteSessionMeta(item runtimeapi.SessionSummary, current runtimeapi.SessionRef) SessionMeta {
@@ -297,74 +367,87 @@ func remoteSessionMeta(item runtimeapi.SessionSummary, current runtimeapi.Sessio
 		Path: remoteSessionToken(item.Session), Preview: item.Preview, Title: item.Title, Turns: item.Turns,
 		CreatedAt: item.CreatedAtMillis, LastActivityAt: item.LastActivityMillis, ModTime: item.LastActivityMillis,
 		Current: item.Session == current, Open: item.Runtime != nil, Scope: "project",
-		TopicID: string(item.TopicID), TopicTitle: item.Title, Recovered: item.RecoveryInterrupted,
+		WorkspaceRoot: string(item.Session.WorkspaceID),
+		TopicID:       string(item.TopicID), TopicTitle: item.Title, Recovered: item.RecoveryInterrupted,
 	}
 }
 
 func (a *App) remoteListSessionsV1(tabID string) ([]SessionMeta, error) {
-	api, session, _, _, err := a.remoteV1ForTab(tabID)
+	api, _, err := a.remoteConnectedV1Runtime()
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := a.remoteActionContext()
 	defer cancel()
-	out := []SessionMeta{}
-	cursor := runtimeapi.Cursor("")
-	seen := map[runtimeapi.Cursor]struct{}{cursor: {}}
-	for pages := 1; ; pages++ {
-		page, callErr := api.ListSessions(ctx, runtimeapi.ListSessionsInput{
-			WorkspaceID: session.Created.Session.WorkspaceID, Cursor: cursor, Limit: runtimeapi.PageMaxItems,
-		})
-		if callErr != nil {
-			return nil, callErr
-		}
-		for _, item := range page.Items {
-			out = append(out, remoteSessionMeta(item, session.Created.Session))
-		}
-		next, more, cursorErr := advanceRemoteLegacyCursor("session/list", cursor, page.Next, page.HasMore, seen, pages)
-		if cursorErr != nil {
-			return nil, cursorErr
-		}
-		if !more {
-			return out, nil
-		}
-		cursor = next
+	current, _, _, hasCurrent := a.remoteSessionView(tabID)
+	currentRef := runtimeapi.SessionRef{}
+	if hasCurrent {
+		currentRef = current.Created.Session
 	}
+	workspaces, err := listAllRemoteWorkspaces(ctx, api)
+	if err != nil {
+		return nil, err
+	}
+	out := []SessionMeta{}
+	for _, workspace := range workspaces {
+		sessions, listErr := listAllRemoteSessions(ctx, api, workspace.ID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, item := range sessions {
+			out = append(out, remoteSessionMeta(item, currentRef))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].LastActivityAt != out[j].LastActivityAt {
+			return out[i].LastActivityAt > out[j].LastActivityAt
+		}
+		if out[i].CreatedAt != out[j].CreatedAt {
+			return out[i].CreatedAt > out[j].CreatedAt
+		}
+		if out[i].WorkspaceRoot != out[j].WorkspaceRoot {
+			return out[i].WorkspaceRoot < out[j].WorkspaceRoot
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out, nil
 }
 
 func (a *App) remoteListTrashV1(tabID string) ([]SessionMeta, error) {
-	api, session, _, _, err := a.remoteV1ForTab(tabID)
+	api, _, err := a.remoteConnectedV1Runtime()
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := a.remoteActionContext()
 	defer cancel()
+	workspaces, err := listAllRemoteWorkspaces(ctx, api)
+	if err != nil {
+		return nil, err
+	}
 	out := []SessionMeta{}
-	cursor := runtimeapi.Cursor("")
-	seen := map[runtimeapi.Cursor]struct{}{cursor: {}}
-	for pages := 1; ; pages++ {
-		page, callErr := api.ListTrashedSessions(ctx, runtimeapi.ListTrashedSessionsInput{
-			WorkspaceID: session.Created.Session.WorkspaceID, Cursor: cursor, Limit: runtimeapi.PageMaxItems,
-		})
-		if callErr != nil {
-			return nil, callErr
+	for _, workspace := range workspaces {
+		trash, listErr := listAllRemoteTrash(ctx, api, workspace.ID)
+		if listErr != nil {
+			return nil, listErr
 		}
-		for _, item := range page.Items {
+		for _, item := range trash {
 			out = append(out, SessionMeta{
 				Path: remoteSessionToken(item.Session), Preview: item.Preview, Title: item.Title,
-				DeletedAt: item.TrashedAtMillis, Scope: "project", TopicID: string(item.TopicID),
+				DeletedAt: item.TrashedAtMillis, Scope: "project", WorkspaceRoot: string(item.Session.WorkspaceID), TopicID: string(item.TopicID),
 				TopicTitle: item.Title, RecoveryCopy: item.RecoveryCopy,
 			})
 		}
-		next, more, cursorErr := advanceRemoteLegacyCursor("session/trashList", cursor, page.Next, page.HasMore, seen, pages)
-		if cursorErr != nil {
-			return nil, cursorErr
-		}
-		if !more {
-			return out, nil
-		}
-		cursor = next
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].DeletedAt != out[j].DeletedAt {
+			return out[i].DeletedAt > out[j].DeletedAt
+		}
+		if out[i].WorkspaceRoot != out[j].WorkspaceRoot {
+			return out[i].WorkspaceRoot < out[j].WorkspaceRoot
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out, nil
 }
 
 func (a *App) remoteTrashSessionV1(tabID, token string, redundantOnly bool) error {

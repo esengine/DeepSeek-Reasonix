@@ -26,9 +26,10 @@ function sameDirectory(left: RemoteDirectoryView, right: RemoteDirectoryView): b
 
 export interface RemoteWorkspaceSetupProps {
   target: RemoteTargetStatusView | null;
+  requestSignal?: number;
 }
 
-export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
+export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorkspaceSetupProps) {
   const t = useT();
   const [workbench, setWorkbench] = useState<RemoteWorkbenchStatusView | null>(null);
   const [page, setPage] = useState<RemoteWorkspacePageView | null>(null);
@@ -41,10 +42,16 @@ export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
   const [creating, setCreating] = useState(false);
   const [browseError, setBrowseError] = useState("");
   const [createError, setCreateError] = useState("");
+  const [requested, setRequested] = useState(false);
   const browseSequence = useRef(0);
+  const handledRequest = useRef(0);
 
   const connected = target?.state === "RemoteConnected";
   const hostId = target?.hostId;
+
+  useEffect(() => {
+    setRequested(false);
+  }, [connected, hostId]);
 
   const browse = useCallback(async (input: RemoteWorkspaceBrowseInput, append = false) => {
     const sequence = ++browseSequence.current;
@@ -115,6 +122,23 @@ export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
     };
   }, [browse, connected, hostId, t]);
 
+  useEffect(() => {
+    if (!connected || requestSignal <= 0 || requestSignal === handledRequest.current) return;
+    handledRequest.current = requestSignal;
+    browseSequence.current += 1;
+    setRequested(true);
+    setPage(null);
+    setTypedPath("");
+    setPrimary(null);
+    setAdditional([]);
+    setTopicTitle("");
+    setBrowseError("");
+    setCreateError("");
+    setCreating(false);
+    setLoadingStatus(false);
+    void browse({});
+  }, [browse, connected, requestSignal]);
+
   const submitTypedPath = useCallback((event: FormEvent) => {
     event.preventDefault();
     const path = typedPath.trim();
@@ -148,6 +172,7 @@ export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
         topicTitle: title,
       });
       setWorkbench(next);
+      setRequested(false);
     } catch (cause) {
       setCreateError(errorText(cause));
     } finally {
@@ -155,7 +180,15 @@ export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
     }
   }, [additional, creating, primary, topicTitle]);
 
-  if (!connected || workbench?.sessionAttached) return null;
+  const closeRequestedSetup = () => {
+    if (creating) return;
+    browseSequence.current += 1;
+    setBrowsing(false);
+    setLoadingStatus(false);
+    setRequested(false);
+  };
+
+  if (!connected || (workbench?.sessionAttached && !requested)) return null;
 
   const currentIsPrimary = Boolean(page && primary && sameDirectory(primary, page.directory));
   const currentIsAdditional = Boolean(page && additional.some((entry) => sameDirectory(entry, page.directory)));
@@ -170,7 +203,11 @@ export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
               {target?.hostLabel ? t("remote.workspace.host", { host: target.hostLabel }) : t("remote.workspace.description")}
             </div>
           </div>
-          <Server size={19} aria-hidden="true" />
+          {requested ? (
+            <button className="btn btn--small" type="button" aria-label={t("common.close")} disabled={creating} onClick={closeRequestedSetup}>
+              <X size={15} aria-hidden="true" />
+            </button>
+          ) : <Server size={19} aria-hidden="true" />}
         </header>
 
         <div className="remote-workspace-modal__body">
@@ -196,7 +233,7 @@ export function RemoteWorkspaceSetup({ target }: RemoteWorkspaceSetupProps) {
 
             {(browseError || createError) && <div className="banner banner--error remote-workspace-error" role="alert">{browseError || createError}</div>}
 
-            {loadingStatus && !page ? (
+            {(loadingStatus || browsing) && !page ? (
               <div className="remote-workspace-loading"><Loader2 className="spin" size={18} aria-hidden="true" />{t("remote.workspace.loading")}</div>
             ) : page ? (
               <>

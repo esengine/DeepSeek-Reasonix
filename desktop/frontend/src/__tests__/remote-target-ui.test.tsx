@@ -22,6 +22,7 @@ import type {
   RemoteWorkspaceBrowseInput,
   RemoteWorkspacePageView,
 } from "../lib/types";
+import { workspaceCreationRoute } from "../lib/workspaceTargetRouting";
 
 let passed = 0;
 
@@ -127,6 +128,10 @@ function inputValue(input: HTMLInputElement, value: string) {
     input.dispatchEvent(new eventCtor("change", { bubbles: true }));
   });
 }
+
+ok(workspaceCreationRoute({ state: "LocalConnected", canReconnect: false }) === "local-picker", "project creation routes a connected Local target to the Desktop picker");
+ok(workspaceCreationRoute({ state: "RemoteConnected", hostId: "host-route", canReconnect: false }) === "remote-setup", "project creation routes a connected Remote target to Host workspace setup");
+ok(workspaceCreationRoute({ state: "RemoteReconnecting", hostId: "host-route", canReconnect: true }) === "blocked", "project creation never falls back to a local picker while Remote recovery is pending");
 
 console.log("\nRemote target UI");
 
@@ -446,6 +451,8 @@ console.log("\nRemote target UI");
   const browseInputs: RemoteWorkspaceBrowseInput[] = [];
   const createInputs: RemoteCreateWorkspaceSessionInput[] = [];
   let createFailure = "workspace lease changed";
+  let holdCreate = false;
+  let releaseCreate: (() => void) | null = null;
 
   const home: RemoteDirectoryView = { ref: "dir-home", name: "dev", displayPath: "/home/dev" };
   const projects: RemoteDirectoryView = { ref: "dir-projects", name: "projects", displayPath: "/home/dev/projects", parentRef: home.ref };
@@ -469,6 +476,7 @@ console.log("\nRemote target UI");
         },
         CreateRemoteWorkspaceSession: async (input: RemoteCreateWorkspaceSessionInput) => {
           createInputs.push({ ...input, additionalDirectoryRefs: [...input.additionalDirectoryRefs] });
+          if (holdCreate) await new Promise<void>((resolve) => { releaseCreate = resolve; });
           if (createFailure) throw new Error(createFailure);
           workbench = {
             hostId: target.hostId,
@@ -547,6 +555,43 @@ console.log("\nRemote target UI");
   ok(createInputs[1]?.additionalDirectoryRefs.length === 1 && createInputs[1]?.additionalDirectoryRefs[0] === scratch.ref, "Session create sends every selected additional opaque directory ref");
   ok(createInputs[1]?.topicTitle === "Remote V1 implementation", "Session create sends the trimmed Topic title");
   ok(!rootElement.textContent?.includes("Open a Remote workspace"), "workbench-state attachment removes setup instead of rendering a second chat surface");
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 1 })));
+    await flush();
+  });
+  await waitFor("explicit Remote workspace setup", () => rootElement.querySelector(".remote-workspace-modal") !== null);
+  ok(browseInputs.at(-1)?.limit === 100, "an add-project request reopens Host browsing after a Remote Session is attached");
+  const closeSetup = rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+  ok(closeSetup, "explicit Remote workspace setup is cancellable");
+  await act(async () => {
+    closeSetup.click();
+    await flush();
+  });
+  ok(rootElement.querySelector(".remote-workspace-modal") === null && workbench.sessionAttached, "closing explicit setup preserves the attached Remote Session");
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 2 })));
+    await flush();
+  });
+  await waitFor("second explicit Remote workspace setup", () => rootElement.textContent?.includes("Use as primary") === true);
+  await act(async () => {
+    button(rootElement, "Use as primary").click();
+    await flush();
+  });
+  inputValue(rootElement.querySelector<HTMLInputElement>(".remote-workspace-topic input")!, "Concurrent Remote create");
+  holdCreate = true;
+  await act(async () => {
+    button(rootElement, "Create Remote session").click();
+  });
+  await waitFor("Remote create in progress", () => rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled === true);
+  ok(rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled, "explicit setup cannot close while Remote Session creation is in flight");
+  await act(async () => {
+    holdCreate = false;
+    releaseCreate?.();
+    await flush();
+  });
+  await waitFor("concurrent create completion", () => rootElement.querySelector(".remote-workspace-modal") === null);
 
   await act(async () => root.unmount());
   dom.close();
