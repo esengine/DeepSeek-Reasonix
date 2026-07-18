@@ -107,9 +107,6 @@ export function parseAttachmentRefsForDisplay(text: string): { text: string; att
       attachments.push(displayAttachment(core, name));
       return lead + suffix;
     })
-    .replace(/[ \t]+([.,;!?)\]}，。；！？）】])/g, " $1")
-    .replace(/[ \t]{2,}/g, " ")
-    .replace(/^\s+/, " ").replace(/\s+$/, " ");
   return { text: cleaned, attachments };
 }
 

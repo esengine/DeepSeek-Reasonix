@@ -59,7 +59,6 @@ function renderHighlightedText(text: string, keyPrefix: string): React.ReactNode
   const nodes: React.ReactNode[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
-  let idx = 0;
   CMD_HIGHLIGHT_RE.lastIndex = 0;
   while ((match = CMD_HIGHLIGHT_RE.exec(text)) !== null) {
     if (match.index > lastIndex) {
@@ -69,12 +68,14 @@ function renderHighlightedText(text: string, keyPrefix: string): React.ReactNode
     const punctMatch = TRAILING_PUNCTUATION_RE.exec(token);
     const trailing = punctMatch ? punctMatch[0] : "";
     const core = punctMatch ? token.slice(0, -trailing.length) : token;
-    nodes.push(
-      <span key={`${keyPrefix}:hl:${idx}`} className="composer-cmd-highlight">
-        {match[1]}{core}
-      </span>,
-    );
-    idx++;
+    if (match[1]) nodes.push(match[1]);
+    if (core) {
+      nodes.push(
+        <span key={`${keyPrefix}:hl:${match.index}`} className="composer-cmd-highlight">
+          {core}
+        </span>,
+      );
+    }
     if (trailing) nodes.push(trailing);
     lastIndex = match.index + match[0].length - trailing.length;
   }
