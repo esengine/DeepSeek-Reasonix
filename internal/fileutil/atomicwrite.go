@@ -100,7 +100,10 @@ func ReplaceFile(tmp, dest string) error {
 			return err
 		}
 		if attempt >= maxReplaceRetries || !fileExists(tmp) {
-			return err
+			// Retries exhausted but the file may be transiently locked
+			// (Windows sharing violation, antivirus scan). Fall back to
+			// backup-and-overwrite before giving up.
+			return replaceWithBackup(tmp, dest, err)
 		}
 		time.Sleep(time.Duration(attempt+1) * replaceRetryBase)
 	}
