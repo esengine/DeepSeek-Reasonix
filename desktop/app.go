@@ -821,6 +821,7 @@ func (a *App) shutdown(context.Context) {
 			_ = repair.RecordHealthyConfig(version)
 		}
 	}
+	killWebView2Processes()
 }
 
 // domReady is called (via OnDomReady) after the webview finishes loading its DOM
@@ -868,6 +869,7 @@ func (a *App) domReady(_ context.Context) {
 
 	runtime.WindowShow(a.ctx)
 	a.startupReady.Store(true)
+	killOrphanWebView2()
 	if a.startupTracker != nil {
 		_ = a.startupTracker.MarkReady()
 		tracker := a.startupTracker
