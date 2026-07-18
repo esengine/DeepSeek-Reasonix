@@ -1382,7 +1382,18 @@ export function Composer({
     }
     const ref = parseWorkspaceReference(insertRequest.text);
     if (ref) {
-      addWorkspaceReference(ref);
+      const currentText = textRef.current;
+      const selection = getComposerSelection();
+      const atPath = formatWorkspaceReference(ref.path, ref.isDir);
+      const before = currentText.slice(0, selection.start);
+      const leadingSpace = before.length > 0 && !/[\s(]$/.test(before) ? " " : "";
+      const inserted = leadingSpace + atPath + " ";
+      const next = replaceInvocationTextRange(currentText, invocationsRef.current, selection.start, selection.end, inserted);
+      textRef.current = next.text;
+      invocationsRef.current = next.invocations;
+      setText(next.text);
+      setInvocations(next.invocations);
+      setComposerSelection(selection.start + inserted.length);
       return;
     }
     insertTextAtCaret(insertRequest.text);
@@ -1634,7 +1645,7 @@ export function Composer({
       warnImageInputFallback();
     }
     const currentAttachments = attachmentsRef.current;
-    const currentWorkspaceRefs = workspaceRefsRef.current;
+    const _unusedWorkspaceRefs = workspaceRefsRef.current;
     const inlineInvocationCount = trimmedDraft.invocations.filter((invocation) => invocation.command.kind === "skill").length;
     const subagentInvocationCount = trimmedDraft.invocations.filter((invocation) => invocation.command.kind === "subagent").length;
     if (goalModeOn && !activeGoal && trimmedDraft.invocations.length > 0) {
@@ -1645,7 +1656,7 @@ export function Composer({
       requestAnimationFrame(focusComposerInput);
       return;
     }
-    if (!trimmedText && currentAttachments.length === 0 && currentWorkspaceRefs.length === 0 && inlineInvocationCount === 0) {
+    if (!trimmedText && currentAttachments.length === 0 && inlineInvocationCount === 0) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
         requestAnimationFrame(focusComposerInput);
@@ -1660,11 +1671,9 @@ export function Composer({
     try {
       const orderedAttachments = sortComposerAttachments(currentAttachments);
       const refs = [
-        ...currentWorkspaceRefs.map((ref) => formatWorkspaceReference(ref.path, ref.isDir)),
         ...orderedAttachments.map((a) => `@${a.path}`),
       ].join(" ");
       const displayRefs = [
-        ...currentWorkspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
         ...orderedAttachments.map(formatAttachmentDisplayReference),
       ].join(" ");
       const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
@@ -1832,13 +1841,33 @@ export function Composer({
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
-          addWorkspaceReferenceToDraft(sourceDraftKey, { path: item.path, isDir: item.isDir, displayPath: item.displayPath });
+          if (sourceDraftKey === activeDraftKeyRef.current) {
+            const atPath = formatWorkspaceReference(item.path, item.isDir);
+            const sel = getComposerSelection();
+            const currentText = textRef.current;
+            const inserted = " " + atPath + " ";
+            const next = replaceInvocationTextRange(currentText, invocationsRef.current, sel.start, sel.end, inserted);
+            textRef.current = next.text;
+            invocationsRef.current = next.invocations;
+            setText(next.text);
+            setInvocations(next.invocations);
+            setComposerSelection(sel.start + inserted.length);
+          } else {
+            const draft = cloneComposerDraft(draftsBySessionRef.current[sourceDraftKey] ?? emptyComposerDraft());
+            draft.text += " " + atPath + " ";
+            draftsBySessionRef.current[sourceDraftKey] = draft;
+          }
         } else {
           addAttachmentToDraft(sourceDraftKey, { path: item.path, previewUrl: item.previewUrl, displayName: baseName(path) }, key);
         }
-      } catch {
-        console.warn("[composer] failed to attach dropped file");
-        showToast(t("composer.attachDropFailed"), "warn");
+      } catch (err) {
+        const reason = String(err?.toString?.() ?? err ?? "");
+        console.warn("[composer] failed to attach dropped file:", reason);
+        if (/must be between 1 byte/.test(reason)) {
+          showToast(t("composer.attachDropEmptyFile"), "warn");
+        } else {
+          showToast(t("composer.attachDropFailed"), "warn");
+        }
         // non-fatal: a failed drop attach must not block normal text input
       } finally {
         updatePendingPasteForDraft(sourceDraftKey, -1);
@@ -2121,7 +2150,16 @@ export function Composer({
     if (droppedWorkspaceRef) {
       e.preventDefault();
       setDragOver(false);
-      addWorkspaceReference(droppedWorkspaceRef);
+      const atPath = formatWorkspaceReference(droppedWorkspaceRef.path, droppedWorkspaceRef.isDir);
+      const sel = getComposerSelection();
+      const currentText = textRef.current;
+      const inserted = " " + atPath + " ";
+      const next = replaceInvocationTextRange(currentText, invocationsRef.current, sel.start, sel.end, inserted);
+      textRef.current = next.text;
+      invocationsRef.current = next.invocations;
+      setText(next.text);
+      setInvocations(next.invocations);
+      setComposerSelection(sel.start + inserted.length);
       return;
     }
 
@@ -2362,8 +2400,16 @@ export function Composer({
   const pickEntry = (e: DirEntry) => {
     const picked = composerPickFileEntry(text, atRaw, atDir, e);
     if (picked.workspaceRef) {
-      setTextCaretEnd(picked.text);
-      addWorkspaceReference(picked.workspaceRef);
+      const atPath = formatWorkspaceReference(picked.workspaceRef.path, picked.workspaceRef.isDir);
+      const sel = getComposerSelection();
+      const currentText = textRef.current;
+      const inserted = " " + atPath + " ";
+      const next = replaceInvocationTextRange(currentText, invocationsRef.current, sel.start, sel.end, inserted);
+      textRef.current = next.text;
+      invocationsRef.current = next.invocations;
+      setText(next.text);
+      setInvocations(next.invocations);
+      setComposerSelection(sel.start + inserted.length);
       return;
     }
     // A directory keeps the menu open (trailing "/"); a file completes it (space).

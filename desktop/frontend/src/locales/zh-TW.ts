@@ -1919,6 +1919,7 @@ export const zhTW: Record<DictKey, string> = {
   "composer.shellModeOn": "Shell 模式已開：點選移除 !",
   "composer.attachImageFailed": "圖片貼上失敗",
   "composer.attachFileFailed": "檔案附加失敗",
+  "composer.attachDropEmptyFile": "文件為空(0位元組)，無法附加",
   "composer.attachDropFailed": "拖放檔案附加失敗",
   "composer.pasteImageFailed": "未能讀取剪貼簿圖片",
   "status.ctxLabel": "上下文",

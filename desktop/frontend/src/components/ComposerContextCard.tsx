@@ -84,7 +84,7 @@ export function ComposerContextCard({
           type="button"
           aria-label={removeLabel}
           disabled={removeDisabled}
-          onClick={onRemove}
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
         >
           <X size={removeIconSize ?? (variant === "attachment" ? 14 : 13)} aria-hidden="true" />
         </button>

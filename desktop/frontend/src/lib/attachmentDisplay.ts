@@ -158,3 +158,27 @@ function displayAttachment(path: string, name: string): DisplayAttachment {
     ext: isDir ? "" : attachmentExt(path).replace(/^\./, "").toUpperCase(),
   };
 }
+
+/**
+ * Split text into segments, marking @-ref tokens so callers can render them
+ * with visual highlighting. Uses refTokenRe() — the same regex the composer
+ * uses to detect inline references — for consistent token boundaries.
+ */
+export function highlightRefsInText(text: string): Array<{ text: string; isRef: boolean }> {
+  const segments: Array<{ text: string; isRef: boolean }> = [];
+  const re = refTokenRe();
+  re.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let lastIndex = 0;
+  while ((match = re.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ text: text.slice(lastIndex, match.index), isRef: false });
+    }
+    segments.push({ text: match[0], isRef: true });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ text: text.slice(lastIndex), isRef: false });
+  }
+  return segments;
+}

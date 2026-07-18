@@ -204,6 +204,7 @@ export function UserMessage({
   const invocationSegments = imSource ? [] : invocationSegmentsFromMessage(displayText, submitText, invocationMetadata);
   const hasInvocationSegments = invocationSegments.some((segment) => segment.type === "invocation");
   const orderedAttachments = sortDisplayAttachments(attachments);
+const cardAttachments = useMemo(() => orderedAttachments.filter((a) => a.source !== "workspace"), [orderedAttachments]);
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
   const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
@@ -490,19 +491,19 @@ export function UserMessage({
           </>
         )}
         {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
-        {orderedAttachments.length > 0 && (
+        {cardAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
-            {orderedAttachments.map((attachment, index) => {
+            {cardAttachments.map((attachment, index) => {
               const isImage = attachment.kind === "image";
               const el = (
                 <div
                   className={`msg-attachment msg-attachment--${attachment.kind}`}
                   key={isImage ? undefined : `${attachment.path}:${index}`}
                   title={isImage ? undefined : attachment.path}
-                  onClick={isImage ? () => openImageViewer(attachment.path, attachment.name) : undefined}
-                  role={isImage ? "button" : undefined}
-                  tabIndex={isImage ? 0 : undefined}
-                  onKeyDown={isImage ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openImageViewer(attachment.path, attachment.name); } } : undefined}
+                  onClick={isImage ? () => openImageViewer(attachment.path, attachment.name) : () => app.OpenWorkspacePath(attachment.path)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); isImage ? openImageViewer(attachment.path, attachment.name) : app.OpenWorkspacePath(attachment.path); } }}
                 >
                   <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
                     {isImage && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}
@@ -510,9 +511,7 @@ export function UserMessage({
                   <span className="msg-attachment__main">
                     <span className="msg-attachment__name">{attachment.name}</span>
                     <span className="msg-attachment__meta">
-                      {attachment.kind === "folder"
-                        ? t("msg.folderReference")
-                        : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
+                      {attachment.path}
                     </span>
                   </span>
                 </div>

@@ -52,6 +52,38 @@ type RenderedComposerModel = ComposerModel & {
 
 const CARET_SENTINEL = "\u00A0";
 
+const CMD_HIGHLIGHT_RE = /(^|\s)(@(?!\[)[^\s]+|\/[A-Za-z][A-Za-z0-9_.:-]*|#[^\s]+|![^\s]+)/g;
+const TRAILING_PUNCTUATION_RE = /[,.;:，。；：]+$/;
+
+function renderHighlightedText(text: string, keyPrefix: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let idx = 0;
+  CMD_HIGHLIGHT_RE.lastIndex = 0;
+  while ((match = CMD_HIGHLIGHT_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    let token = match[2];
+    const punctMatch = TRAILING_PUNCTUATION_RE.exec(token);
+    const trailing = punctMatch ? punctMatch[0] : "";
+    const core = punctMatch ? token.slice(0, -trailing.length) : token;
+    nodes.push(
+      <span key={`${keyPrefix}:hl:${idx}`} className="composer-cmd-highlight">
+        {match[1]}{core}
+      </span>,
+    );
+    idx++;
+    if (trailing) nodes.push(trailing);
+    lastIndex = match.index + match[0].length - trailing.length;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
+
 function sameComposerModel(left: ComposerModel, right: ComposerModel | null): boolean {
   if (!right || left.text !== right.text || left.invocations.length !== right.invocations.length) return false;
   return left.invocations.every((item, index) => {
@@ -358,7 +390,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
   let cursor = 0;
   renderedOrdered.forEach((item) => {
     const offset = Math.max(cursor, Math.min(renderedModel.text.length, item.offset));
-    if (offset > cursor) children.push(renderedModel.text.slice(cursor, offset));
+    if (offset > cursor) children.push(...renderHighlightedText(renderedModel.text.slice(cursor, offset), `seg:${item.id}`));
     const invocation = invocationDisplayForCommand(item.command);
     children.push(
       <span
@@ -396,7 +428,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
     );
     cursor = offset;
   });
-  if (cursor < renderedModel.text.length) children.push(renderedModel.text.slice(cursor));
+  if (cursor < renderedModel.text.length) children.push(...renderHighlightedText(renderedModel.text.slice(cursor), "tail"));
 
   return (
     <div
