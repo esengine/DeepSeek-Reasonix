@@ -4561,11 +4561,14 @@ a[href] {
   font-style: normal;
   line-height: 1.72;
   white-space: pre-wrap;
+  word-break: break-word;
 }
 /* ── markdown prose ──────────────────────────────────────────────────────── */
 .md {
   font-family: var(--font-content-family);
   font-weight: var(--font-weight-regular);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .md > :first-child {
   margin-top: 0;
