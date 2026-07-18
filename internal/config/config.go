@@ -153,6 +153,7 @@ type DesktopConfig struct {
 	ExternalOpener          string   `toml:"external_opener"`            // preferred installed app used by the desktop Open control
 	CloseBehavior           string   `toml:"close_behavior"`             // quit|background; desktop window close behavior
 	DisplayMode             string   `toml:"display_mode"`               // standard|compact (legacy "minimal" maps to compact); transcript display mode
+	HistoryPageTurns        int      `toml:"history_page_turns"`         // 1..200; Local/Remote history and attach page size, zero defaults to 60
 	StatusBarStyle          string   `toml:"status_bar_style"`           // icon|text; desktop status bar metric labels
 	StatusBarItems          []string `toml:"status_bar_items"`           // ordered visible desktop status bar items
 	DefaultToolApprovalMode string   `toml:"default_tool_approval_mode"` // ask|auto|yolo; defaults to auto for newly-created desktop sessions
@@ -162,6 +163,12 @@ type DesktopConfig struct {
 	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
 }
+
+const (
+	DesktopHistoryPageTurnsMin     = 1
+	DesktopHistoryPageTurnsMax     = 200
+	DefaultDesktopHistoryPageTurns = 60
+)
 
 // DesktopExternalOpener returns the user-selected external opener id. The
 // desktop shell resolves it against applications installed on the current OS;
@@ -341,6 +348,16 @@ func (c *Config) DesktopDisplayMode() string {
 	default:
 		return "standard"
 	}
+}
+
+// DesktopHistoryPageTurns returns the shared Local/Remote transcript page and
+// attach window. Invalid values loaded from a hand-edited config fail closed to
+// the documented default instead of reaching either Runtime adapter.
+func (c *Config) DesktopHistoryPageTurns() int {
+	if c == nil || c.Desktop.HistoryPageTurns < DesktopHistoryPageTurnsMin || c.Desktop.HistoryPageTurns > DesktopHistoryPageTurnsMax {
+		return DefaultDesktopHistoryPageTurns
+	}
+	return c.Desktop.HistoryPageTurns
 }
 
 // NormalizeToolApprovalMode returns the canonical desktop/session tool approval
@@ -1590,7 +1607,10 @@ func Default() *Config {
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto"},
-		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto"},
+		Desktop: DesktopConfig{
+			DefaultToolApprovalMode: "auto",
+			HistoryPageTurns:        DefaultDesktopHistoryPageTurns,
+		},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
 			TurnDone:        true,

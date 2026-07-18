@@ -116,6 +116,10 @@ func (a *App) stopBotRuntime() {
 }
 
 func (a *App) BotRuntimeStatus() BotRuntimeStatusView {
+	if err := a.rejectRemoteOutOfScope("BotRuntimeStatus"); err != nil {
+		logRemoteBridgeError("BotRuntimeStatus", err)
+		return BotRuntimeStatusView{Status: "unavailable", Message: err.Error()}
+	}
 	if a.botRuntime == nil {
 		return BotRuntimeStatusView{Status: "stopped", Message: "bot runtime is not started"}
 	}

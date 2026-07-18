@@ -11,16 +11,13 @@
 package control
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -48,7 +45,6 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
-	"reasonix/internal/proc"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
@@ -218,10 +214,32 @@ type Controller struct {
 	// and rotating are mutually exclusive gates — a turn refuses to start while
 	// a rotation is in progress, and a rotation refuses to start while a turn
 	// runs — so the run loop's session reference cannot change under it.
-	rotating    bool
-	autosaveWG  sync.WaitGroup
-	planMode    bool
-	sessionPath string
+	rotating   bool
+	autosaveWG sync.WaitGroup
+	turnWG     sync.WaitGroup
+	// operation is the one admitted non-Turn foreground action (user shell,
+	// compact, or summarize). Operation admission is deliberately separate from
+	// the legacy Turn fields: an Operation never emits TurnDone and TryCancel
+	// must never cancel it. Compact and summarize additionally hold rotating for
+	// their whole worker lifetime; shell only holds this operation slot.
+	operation   *OperationHandle
+	operationWG sync.WaitGroup
+	// runtimeShutdown is enabled only by PrepareRuntimeShutdown. Ordinary
+	// completion still clears the marker; only an errored turn terminated across
+	// that Host boundary leaves it for cold recovery.
+	runtimeShutdown bool
+	// durableTurnAdmission is enabled only by runtime hosts that must not
+	// acknowledge an accepted Turn until its canonical user message is on disk.
+	// pending is armed by the host before Submit*, then claimed by the exact
+	// runGuarded body; active is resolved by the Agent persistence hook. All
+	// three fields are protected by mu.
+	durableTurnAdmission      bool
+	durableAdmissionPoison    error
+	durableAdmissionPreparing *durableAdmission
+	durableAdmissionPending   *durableAdmission
+	durableAdmissionActive    *durableAdmission
+	planMode                  bool
+	sessionPath               string
 	// recoveryDepthCapNotices records session paths that already surfaced the
 	// depth-cap recovery warning. Repeated saves on the same conflict copy are
 	// diagnostic noise for the UI; keep logging/diagnostics, but emit the user
@@ -238,6 +256,13 @@ type Controller struct {
 	// Not reentrant — never call snapshot (or anything that snapshots, such as
 	// recoverInterruptedTurn or maybeColdResumePrune) while holding it.
 	snapshotMu sync.Mutex
+	// sessionMetaUpdate is an internal fault-injection seam for the listing-only
+	// write that follows transcript persistence. Nil uses agent.UpdateSessionMeta.
+	// It is configured only while the Controller is idle.
+	sessionMetaUpdate func(path, model, preview string, turns int, markActivity bool) error
+	// sessionInFlightClear is an internal fault-injection seam for the critical
+	// marker clear. Nil uses agent.ClearSessionInFlightTurn.
+	sessionInFlightClear func(path string) error
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 
@@ -617,11 +642,33 @@ func (c *Controller) rebindCheckpoints(sessionPath string) {
 // beginCheckpoint opens a checkpoint for the turn about to run, recording the
 // current message count as the conversation-rewind boundary. Called at the top of
 // runTurn, before the user message is appended.
-func (c *Controller) beginCheckpoint(input string) {
+func (c *Controller) beginCheckpoint(input string) (int, bool) {
 	if c.executor == nil {
+		return 0, false
+	}
+	return c.checkpoints.begin(input, len(c.executor.Session().Messages))
+}
+
+func (c *Controller) beginCheckpointAt(input string, messageIndex int) (int, bool) {
+	if c.executor == nil {
+		return 0, false
+	}
+	return c.checkpoints.begin(input, messageIndex)
+}
+
+// rollbackDurableCheckpointIfUnadmitted removes a visible-turn checkpoint
+// whose user message never crossed the Remote durable admission boundary.
+// Local controllers keep their historical checkpoint behavior.
+func (c *Controller) rollbackDurableCheckpointIfUnadmitted(turn, startMessages int, opened bool) {
+	if !opened {
 		return
 	}
-	c.checkpoints.begin(input, len(c.executor.Session().Messages))
+	c.mu.Lock()
+	durable := c.durableTurnAdmission
+	c.mu.Unlock()
+	if durable && c.messageCount() <= startMessages {
+		c.checkpoints.truncateFrom(turn)
+	}
 }
 
 // --- commands (frontend → controller) ---
@@ -684,10 +731,25 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		c.mu.Unlock()
 		return turnDroppedClosed
 	}
+	if c.operation != nil {
+		// An Operation is foreground work just like a Turn, but it owns a
+		// different cancellation and completion identity. Keep the historical
+		// quiet running-drop behavior for local opportunistic submitters.
+		c.mu.Unlock()
+		return turnDroppedRunning
+	}
 	if c.rotating {
 		c.mu.Unlock()
 		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "input was not accepted: the session is being switched — please resend"})
 		return turnDroppedRotating
+	}
+	if c.durableTurnAdmission && c.durableAdmissionPending == nil {
+		// A Remote Controller may execute only a body whose stable user anchor
+		// already crossed PrepareDurableTurn's authoritative snapshot boundary.
+		// This also closes the small window while Prepare is doing filesystem I/O:
+		// no concurrent Submit can slip past and perform refs/hooks/provider work.
+		c.mu.Unlock()
+		return turnDroppedRunning
 	}
 	if c.running {
 		if parkWhileRunning {
@@ -699,14 +761,16 @@ func (c *Controller) admitGuardedTurn(body func(ctx context.Context) error, park
 		return turnDroppedRunning
 	}
 	if c.finishing {
-		c.parkedTurns = append(c.parkedTurns, body)
+		c.parkedTurns = append(c.parkedTurns, c.claimDurableAdmissionLocked(body))
 		c.mu.Unlock()
 		return turnParked
 	}
+	body = c.claimDurableAdmissionLocked(body)
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
 	c.running = true
 	c.canceling = false
+	c.turnWG.Add(1)
 	c.mu.Unlock()
 	c.spawnGuardedTurn(ctx, cancel, body)
 	return turnStarted
@@ -721,6 +785,7 @@ func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.Cancel
 		c.autosaveWhileRunning(ctx)
 	}()
 	go func() {
+		defer c.turnWG.Done()
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
@@ -768,6 +833,7 @@ func (c *Controller) finishGuardedTurn(err error) {
 		c.cancel = cancel
 		c.running = true
 		c.canceling = false
+		c.turnWG.Add(1)
 		c.mu.Unlock()
 		c.spawnGuardedTurn(ctx, cancel, next)
 	}()
@@ -849,7 +915,7 @@ func (c *Controller) RunTurn(ctx context.Context, input string) error {
 	// to prevent (Running() already reports true here). closed seals a torn-
 	// down controller. Synchronous callers get an error rather than parking:
 	// they hold a request/response boundary open and already handle busy.
-	if c.running || c.finishing || c.rotating || c.closed {
+	if c.running || c.finishing || c.rotating || c.operation != nil || c.closed {
 		c.mu.Unlock()
 		cancel()
 		return ErrTurnRunning
@@ -857,9 +923,11 @@ func (c *Controller) RunTurn(ctx context.Context, input string) error {
 	c.cancel = cancel
 	c.running = true
 	c.canceling = false
+	c.turnWG.Add(1)
 	c.mu.Unlock()
 
 	defer func() {
+		defer c.turnWG.Done()
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
@@ -1496,80 +1564,10 @@ func (c *Controller) RunShell(command string) {
 		return
 	}
 	c.runGuarded(func(ctx context.Context) error {
-		sh := c.shell
-		if sh.Path == "" {
-			sh = sandbox.ResolveShell("", "", nil)
-		}
-		argv, _ := sandbox.Command(sandbox.Spec{}, sh, command) // false = unsandboxed (user invoked)
-
-		preview := []rune(command)
-		if len(preview) > 32 {
-			preview = preview[:32]
-		}
-		id := "shell-" + string(preview)
-		diagnosticPreview := shellCommandPreview(command)
-
-		c.sink.Emit(event.Event{
-			Kind: event.ToolDispatch,
-			Tool: event.Tool{
-				ID:   id,
-				Name: "bash",
-				Args: fmt.Sprintf(`{"command":%q}`, command),
-			},
-		})
-
-		ctx, cancel := context.WithTimeout(ctx, shellTimeout)
-		defer cancel()
-
-		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-		cmd.WaitDelay = shellWaitDelay
-		cmd.Dir = c.workspaceRoot
-		var buf bytes.Buffer
-		w := io.MultiWriter(&buf, &shellWriter{emit: func(chunk string) {
-			c.sink.Emit(event.Event{
-				Kind: event.ToolProgress,
-				Tool: event.Tool{ID: id, Output: chunk},
-			})
-		}})
-		cmd.Stdout = w
-		cmd.Stderr = w
-		start := time.Now()
-		_, err := proc.RunCommand(ctx, cmd, proc.RunOptions{
-			Track:           true,
-			CancelWaitGrace: shellWaitDelay + time.Second,
-			Source:          "user_shell",
-			ShellKind:       sh.Kind.String(),
-			ShellPath:       sh.Path,
-			CommandPreview:  diagnosticPreview,
-		})
-		durationMs := time.Since(start).Milliseconds()
-		out := buf.String()
-
-		if ctx.Err() == context.Canceled {
-			c.sink.Emit(event.Event{
-				Kind: event.ToolResult,
-				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: i18n.M.TurnCancelled, DurationMs: durationMs},
-			})
-			return nil
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			c.sink.Emit(event.Event{
-				Kind: event.ToolResult,
-				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecTimeoutFmt, shellTimeout), DurationMs: durationMs},
-			})
-			return nil
-		}
-		if err != nil {
-			c.sink.Emit(event.Event{
-				Kind: event.ToolResult,
-				Tool: event.Tool{ID: id, Name: "bash", Output: out, Err: fmt.Sprintf(i18n.M.ShellExecFailedFmt, err), DurationMs: durationMs},
-			})
-			return nil
-		}
-		c.sink.Emit(event.Event{
-			Kind: event.ToolResult,
-			Tool: event.Tool{ID: id, Name: "bash", Output: out, DurationMs: durationMs},
-		})
+		// Preserve the Local contract: command/cancel failures live on ToolResult
+		// and TurnDone remains successful. Operation callers consume the returned
+		// error from runShellBlocking instead.
+		_ = c.runShellBlocking(ctx, command)
 		return nil
 	})
 }
@@ -1665,8 +1663,10 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 		}
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
-	c.markInFlightTurn(startMessages, true)
-	defer c.clearInFlightTurn()
+	if err := c.markInFlightTurn(startMessages, true); err != nil {
+		return err
+	}
+	defer func() { err = joinTurnErrors(err, c.finishInFlightTurn(err)) }()
 	err = c.runner.Run(ctx, c.withCapabilityRoute(input, rawInput))
 	return err
 }
@@ -1718,20 +1718,35 @@ func (c *Controller) RunSubagentProfile(ctx context.Context, name, task string, 
 // Cancel aborts the in-flight turn. A goroutine blocked awaiting approval
 // unblocks via the cancelled context.
 func (c *Controller) Cancel() {
-	c.mu.Lock()
-	cancel := c.cancel
-	if cancel != nil {
-		c.canceling = true
-	}
-	c.mu.Unlock()
-	if cancel != nil {
-		c.approval.clearAll()
-		cancel()
+	if c.TryCancel() != CancelNotActive {
 		return
 	}
 	if c.goals.active() {
 		c.stopGoal(GoalStatusStopped)
 	}
+}
+
+// TryCancel atomically requests cancellation only for a currently active turn
+// or prompt and reports whether this call changed the state. It deliberately
+// does not stop an otherwise-idle Goal: opaque-ID runtimes use it after their
+// own identity check, so a late cancel must never affect unrelated later work.
+func (c *Controller) TryCancel() CancelAttempt {
+	c.mu.Lock()
+	cancel := c.cancel
+	already := c.canceling
+	if cancel != nil && !already {
+		c.canceling = true
+	}
+	c.mu.Unlock()
+	if cancel == nil {
+		return CancelNotActive
+	}
+	if already {
+		return CancelAlreadyRequested
+	}
+	c.approval.clearAll()
+	cancel()
+	return CancelRequestedNow
 }
 
 // Running reports whether a turn is currently in flight.
@@ -1752,6 +1767,9 @@ func (c *Controller) beginRotation() error {
 	defer c.mu.Unlock()
 	if c.running || c.finishing {
 		return errTurnRunningRotation
+	}
+	if c.operation != nil {
+		return errRotationInProgress
 	}
 	if c.rotating {
 		return errRotationInProgress
@@ -2017,17 +2035,25 @@ func (c *Controller) refreshInteractiveGate() {
 
 // Steer queues mid-turn guidance without interrupting the in-flight request.
 func (c *Controller) Steer(text string) {
-	c.mu.Lock()
-	exec := c.executor
-	running := c.running
-	c.mu.Unlock()
-	if running && exec != nil && exec.Steer(text) {
+	if c.TrySteer(text) {
 		return
 	}
 	// No active turn accepted the steer: the frontend's runningRef was stale,
 	// the turn exited between our running check and the enqueue, or no
 	// executor is bound yet. Deliver it as a regular turn instead.
 	c.submitSteerFallback(text)
+}
+
+// TrySteer queues guidance only when the currently active Agent turn accepts
+// it. Unlike Steer it never falls back to starting or parking a new turn. This
+// strict primitive is used by runtimes that already validated an opaque active
+// turn identity, where a late steer must fail rather than affect later work.
+func (c *Controller) TrySteer(text string) bool {
+	c.mu.Lock()
+	exec := c.executor
+	running := c.running
+	c.mu.Unlock()
+	return running && exec != nil && exec.Steer(text)
 }
 
 // submitSteerFallback delivers steer text that no active turn accepted as a
@@ -2593,7 +2619,17 @@ func (c *Controller) Compact(ctx context.Context, instructions string) error {
 		return err
 	}
 	defer c.endRotation()
+	return c.compactUnderRotation(ctx, instructions)
+}
+
+func (c *Controller) compactUnderRotation(ctx context.Context, instructions string) error {
 	return c.executor.CompactNow(ctx, instructions)
+}
+
+func (c *Controller) compactOperationUnderRotation(ctx context.Context, h *OperationHandle) error {
+	return c.executor.CompactNowWithCommit(ctx, h.spec.Instructions, func() error {
+		return c.commitOperation(ctx, h)
+	})
 }
 
 // maybeSessionStart fires the SessionStart hook exactly once per session, lazily
@@ -2806,6 +2842,13 @@ func (c *Controller) Checkpoints() []checkpoint.Meta {
 	return c.checkpoints.list()
 }
 
+// CheckpointSnapshot captures checkpoint metadata, transcript mapping, and
+// conversation capability in one lock boundary. Runtime adapters should prefer
+// this over calling the legacy getters separately.
+func (c *Controller) CheckpointSnapshot() CheckpointSnapshot {
+	return c.checkpoints.capture()
+}
+
 func (c *Controller) CheckpointTurnsByMessageIndex() map[int]int {
 	return c.checkpoints.turnsByMessageIndex()
 }
@@ -2825,52 +2868,12 @@ func (c *Controller) rewindFail(err error) error {
 // unavailable for turns inherited from a resumed session (code rewind still works).
 // Frontends re-render their transcript from History after the call.
 func (c *Controller) Rewind(turn int, scope RewindScope) error {
-	if !c.checkpoints.enabled() || c.executor == nil {
-		return c.rewindFail(fmt.Errorf("checkpoints unavailable"))
-	}
-	// Rewind rewrites the live session (conversation scope) and restores files;
-	// hold the rotation gate across the whole operation so a turn cannot start
-	// between the check and the Replace/SnapshotRewrite below.
-	if err := c.beginRotation(); err != nil {
-		if errors.Is(err, errTurnRunningRotation) {
-			return c.rewindFail(fmt.Errorf("cannot rewind while a turn is running"))
-		}
+	// The legacy local surface historically accepts a code scope with no file
+	// snapshots as a successful no-op. Keep that compatibility while the typed
+	// runtime-host surface below enforces the advertised CanCode capability.
+	_, err := c.rewindDetailed(turn, scope, true)
+	if err != nil {
 		return c.rewindFail(err)
-	}
-	defer c.endRotation()
-	boundary, hasBound := c.checkpoints.boundary(turn)
-
-	if scope == RewindCode || scope == RewindBoth {
-		written, deleted, err := c.checkpoints.restoreCode(turn)
-		if err != nil {
-			return c.rewindFail(fmt.Errorf("rewind code: %w", err))
-		}
-		if len(written) > 0 || len(deleted) > 0 {
-			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-				Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
-		}
-	}
-	if scope == RewindConversation || scope == RewindBoth {
-		if !hasBound {
-			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d (resumed session)", turn))
-		}
-		s := c.executor.Session()
-		// boundary is the message-log index at turn start; compaction shrinks the
-		// log without rewriting boundaries, so a stale boundary past the end means
-		// the turn was compacted away — fail loudly instead of skipping silently.
-		// Snapshot/Replace keep the truncation safe against concurrent History/Save
-		// readers on other goroutines.
-		msgs := s.Snapshot()
-		if boundary > len(msgs) {
-			return c.rewindFail(fmt.Errorf("conversation rewind unavailable for turn %d: the conversation was compacted past this point", turn))
-		}
-		s.Replace(msgs[:boundary])
-		c.checkpoints.truncateFrom(turn) // renumber future turns from here; later turns are gone
-		if err := c.SnapshotRewrite(); err != nil {
-			slog.Warn("controller: snapshot after rewind", "err", err)
-		}
-		c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-			Text: fmt.Sprintf("rewound conversation to turn %d", turn)})
 	}
 	return nil
 }
@@ -2984,14 +2987,25 @@ func (c *Controller) CheckpointHasBoundary(turn int) bool {
 // Branch copies the current conversation into a child branch and switches to it.
 // Unlike Fork, it branches at the current tip and does not require a checkpoint.
 func (c *Controller) Branch(name string) (string, error) {
+	return c.branchSession(name, true)
+}
+
+// BranchSession copies the current conversation at its exact tip without
+// switching this Controller. Runtime hosts use it to persist the child before
+// atomically migrating their own opaque target/runtime ownership.
+func (c *Controller) BranchSession(name string) (string, error) {
+	return c.branchSession(name, false)
+}
+
+func (c *Controller) branchSession(name string, switchToBranch bool) (string, error) {
 	if c.executor == nil {
 		return "", c.rewindFail(fmt.Errorf("branch unavailable"))
 	}
 	if c.sessionDir == "" {
 		return "", c.rewindFail(fmt.Errorf("branch needs session persistence, which is disabled"))
 	}
-	// Hold the rotation gate across the Snapshot and the switch below so a turn
-	// cannot start mid-branch and then have its session replaced.
+	// Hold the rotation gate across Snapshot and optional switch so a turn
+	// cannot start mid-branch and produce a child from an unstable tip.
 	if err := c.beginRotation(); err != nil {
 		if errors.Is(err, errTurnRunningRotation) {
 			return "", c.rewindFail(fmt.Errorf("cannot branch while a turn is running"))
@@ -3028,20 +3042,22 @@ func (c *Controller) Branch(name string) (string, error) {
 	}); err != nil {
 		return "", c.rewindFail(err)
 	}
-	// See snapshotMu: the swap must not interleave with an in-flight save.
-	c.snapshotMu.Lock()
-	c.executor.SetSession(sess)
-	c.ResetPlannerSession()
-	c.mu.Lock()
-	c.sessionPath = newPath
-	c.guardianPath = guardian.PathFor(newPath)
-	c.mu.Unlock()
-	c.setActiveJobSession(newPath)
-	c.rebindCheckpoints(newPath)
-	if c.guardianSess != nil {
-		c.guardianSess.Reset()
+	if switchToBranch {
+		// See snapshotMu: the swap must not interleave with an in-flight save.
+		c.snapshotMu.Lock()
+		c.executor.SetSession(sess)
+		c.ResetPlannerSession()
+		c.mu.Lock()
+		c.sessionPath = newPath
+		c.guardianPath = guardian.PathFor(newPath)
+		c.mu.Unlock()
+		c.setActiveJobSession(newPath)
+		c.rebindCheckpoints(newPath)
+		if c.guardianSess != nil {
+			c.guardianSess.Reset()
+		}
+		c.snapshotMu.Unlock()
 	}
-	c.snapshotMu.Unlock()
 	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("created branch %s", agent.BranchID(newPath))})
 	return newPath, nil
@@ -3178,15 +3194,33 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 		return c.rewindFail(err)
 	}
 	defer c.endRotation()
+	return c.summarizeAtUnderRotation(ctx, turn, from)
+}
+
+// summarizeAtUnderRotation performs the actual boundary capture and rewrite.
+// Its caller must already own rotating. Remote Operations use this seam so
+// admission and rotation ownership are one atomic decision rather than a
+// worker that can fail a second beginRotation after reporting acceptance.
+func (c *Controller) summarizeAtUnderRotation(ctx context.Context, turn int, from bool) error {
+	return c.summarizeAtUnderRotationWithCommit(ctx, turn, from, nil)
+}
+
+func (c *Controller) summarizeOperationAtUnderRotation(ctx context.Context, h *OperationHandle) error {
+	return c.summarizeAtUnderRotationWithCommit(ctx, h.spec.Turn, h.spec.Direction == SummarizeFrom, func() error {
+		return c.commitOperation(ctx, h)
+	})
+}
+
+func (c *Controller) summarizeAtUnderRotationWithCommit(ctx context.Context, turn int, from bool, commit func() error) error {
 	boundary, hasBound := c.checkpoints.boundary(turn)
 	if !hasBound {
 		return c.rewindFail(fmt.Errorf("summarize unavailable for turn %d (resumed session)", turn))
 	}
 	var err error
 	if from {
-		err = c.executor.SummarizeFrom(ctx, boundary)
+		err = c.executor.SummarizeFromWithCommit(ctx, boundary, commit)
 	} else {
-		err = c.executor.SummarizeUpTo(ctx, boundary)
+		err = c.executor.SummarizeUpToWithCommit(ctx, boundary, commit)
 	}
 	if err != nil {
 		return c.rewindFail(err)
@@ -3204,6 +3238,16 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 // Resume seeds the session from a loaded transcript and pins the active file to
 // its path so auto-save keeps appending there.
 func (c *Controller) Resume(s *agent.Session, path string) {
+	if _, err := c.ResumeWithRecovery(s, path); err != nil {
+		slog.Warn("controller: resume interrupted Turn recovery", "err", err)
+	}
+}
+
+// ResumeWithRecovery performs the same transcript repair as Resume and returns
+// whether it consumed a genuine stale in-flight marker. Runtime hosts must
+// capture this result here: reading branch metadata after Resume is too late,
+// because successful repair deliberately clears the marker.
+func (c *Controller) ResumeWithRecovery(s *agent.Session, path string) (SessionResumeState, error) {
 	// See snapshotMu: the swap must not interleave with an in-flight save.
 	// recoverInterruptedTurn and maybeColdResumePrune snapshot on their own,
 	// so they stay outside the locked section (snapshotMu is not reentrant).
@@ -3225,8 +3269,12 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.restoreTerminalGoalTodos(path)
 	c.loadGuardianSession()
 	c.snapshotMu.Unlock()
-	c.recoverInterruptedTurn(path)
+	interrupted, recoveryErr := c.recoverInterruptedTurn(path)
+	if recoveryErr != nil {
+		return SessionResumeState{PreviousTurnInterrupted: interrupted}, recoveryErr
+	}
 	c.maybeColdResumePrune(path)
+	return SessionResumeState{PreviousTurnInterrupted: interrupted}, nil
 }
 
 func (c *Controller) loadGuardianSession() {
@@ -3342,6 +3390,26 @@ func (c *Controller) autosaveWhileRunning(ctx context.Context) {
 }
 
 func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
+	return c.snapshotWithCommit(markActivity, forceRewrite).Err
+}
+
+// SnapshotCommitResult reports the authoritative transcript boundary
+// separately from any later metadata failure. TranscriptCommitted is false
+// for pre-write failures and conflict paths that adopted/dropped another
+// transcript; it remains true when only the revision/listing sidecar failed.
+type SnapshotCommitResult struct {
+	TranscriptCommitted bool
+	Err                 error
+}
+
+func (c *Controller) updateSessionListingMeta(path, model, preview string, turns int, markActivity bool) error {
+	if c.sessionMetaUpdate != nil {
+		return c.sessionMetaUpdate(path, model, preview, turns, markActivity)
+	}
+	return agent.UpdateSessionMeta(path, model, preview, turns, markActivity)
+}
+
+func (c *Controller) snapshotWithCommit(markActivity, forceRewrite bool) SnapshotCommitResult {
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
 
@@ -3350,13 +3418,13 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 	modelRef := c.modelRef
 	c.mu.Unlock()
 	if c.executor == nil {
-		return nil
+		return SnapshotCommitResult{}
 	}
 	s := c.executor.Session()
 	if !s.HasContent() {
 		// Nothing to persist yet (e.g. a fresh session with only a system
 		// prompt) — staying quiet here is correct, not a data-loss path.
-		return nil
+		return SnapshotCommitResult{}
 	}
 	if !s.HasSystemMessage() {
 		// The session has user/assistant/tool messages but no leading system
@@ -3368,7 +3436,7 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 		// diagnosed, then refuse to write a corrupted transcript.
 		slog.Warn("controller: refusing to snapshot session with content but no system message",
 			"label", c.Label(), "session_dir", c.SessionDir(), "message_count", len(s.Snapshot()))
-		return nil
+		return SnapshotCommitResult{}
 	}
 	if path == "" {
 		// There IS content but nowhere to write it: this silently dropped whole
@@ -3376,7 +3444,7 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 		// so the missing session path can be diagnosed and fixed at the source.
 		slog.Warn("controller: session has content but no session path; conversation will not be persisted",
 			"label", c.Label(), "session_dir", c.SessionDir())
-		return errNoSessionPath
+		return SnapshotCommitResult{Err: errNoSessionPath}
 	}
 	forceRewrite = forceRewrite || s.NeedsRewriteSave()
 	var err error
@@ -3397,14 +3465,14 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 	}
 	if err != nil {
 		if !errors.Is(err, agent.ErrSessionSnapshotConflict) {
-			return err
+			return SnapshotCommitResult{TranscriptCommitted: agent.SessionTranscriptCommitted(err), Err: err}
 		}
 		recoveredPath, outcome, recoverErr := c.recoverSnapshotConflict(path, err, forceRewrite)
 		if recoverErr != nil {
-			return recoverErr
+			return SnapshotCommitResult{Err: recoverErr}
 		}
 		if outcome == conflictDropped {
-			return nil
+			return SnapshotCommitResult{}
 		}
 		// Whatever recovery did — adopted the disk transcript, force-saved
 		// the depth-capped branch, or forked — the rewrite baseline lives on
@@ -3412,6 +3480,15 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 		// there is nothing to re-anchor here.
 		path = recoveredPath
 		s = c.executor.Session()
+		if outcome == conflictAdoptedDisk {
+			// The newly admitted local user is not known to be represented by the
+			// adopted transcript, so this cannot release durable admission.
+			preview, turns := agent.SessionPreviewFromMessages(s.Snapshot())
+			if metaErr := c.updateSessionListingMeta(path, modelRef, preview, turns, markActivity); metaErr != nil {
+				return SnapshotCommitResult{Err: metaErr}
+			}
+			return SnapshotCommitResult{}
+		}
 	}
 	// Persist guardian session so the prefix cache stays warm after restart.
 	if c.guardianSess != nil {
@@ -3429,10 +3506,10 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 	// like SetBranchModelPreserveUpdated. The single write subsumes the old
 	// EnsureBranchMeta / SetBranchModel / TouchBranchMeta sequence.
 	preview, turns := agent.SessionPreviewFromMessages(s.Snapshot())
-	if err := agent.UpdateSessionMeta(path, modelRef, preview, turns, markActivity); err != nil {
-		return err
+	if err := c.updateSessionListingMeta(path, modelRef, preview, turns, markActivity); err != nil {
+		return SnapshotCommitResult{TranscriptCommitted: true, Err: err}
 	}
-	return nil
+	return SnapshotCommitResult{TranscriptCommitted: true}
 }
 
 // snapshotConflictLogAttrs flattens a snapshot-conflict error into slog attrs.
@@ -3657,24 +3734,86 @@ func (c *Controller) messageCount() int {
 	return c.executor.Session().Len()
 }
 
-func (c *Controller) markInFlightTurn(startMessageIndex int, preserveUser bool) {
+func (c *Controller) markInFlightTurn(startMessageIndex int, preserveUser bool) error {
+	c.mu.Lock()
+	durable := c.durableTurnAdmission
+	c.mu.Unlock()
 	path := c.SessionPath()
 	if path == "" {
-		return
+		if durable {
+			return errors.New("persist in-flight Turn marker: session path is empty")
+		}
+		return nil
 	}
 	if err := agent.MarkSessionInFlightTurn(path, startMessageIndex, preserveUser); err != nil {
 		slog.Warn("controller: mark in-flight turn", "err", err)
+		if durable {
+			return fmt.Errorf("persist in-flight Turn marker: %w", err)
+		}
 	}
+	return nil
 }
 
-func (c *Controller) clearInFlightTurn() {
+func (c *Controller) clearInFlightTurn() error {
 	path := c.SessionPath()
 	if path == "" {
-		return
+		return nil
 	}
-	if err := agent.ClearSessionInFlightTurn(path); err != nil {
+	c.mu.Lock()
+	clear := c.sessionInFlightClear
+	c.mu.Unlock()
+	if clear == nil {
+		clear = agent.ClearSessionInFlightTurn
+	}
+	if err := clear(path); err != nil {
 		slog.Warn("controller: clear in-flight turn", "err", err)
+		return err
 	}
+	return nil
+}
+
+// finishInFlightTurn preserves a marker only when a runtime-host shutdown won
+// the boundary and the turn ended with an error. A turn that completed
+// successfully while shutdown was being prepared is complete, not interrupted,
+// and must still clear the marker.
+func (c *Controller) finishInFlightTurn(turnErr error) error {
+	c.mu.Lock()
+	shutdown := c.runtimeShutdown
+	durable := c.durableTurnAdmission
+	c.mu.Unlock()
+	if shutdown && turnErr != nil {
+		return nil
+	}
+	if durable {
+		// Remote may clear its crash marker only after the final transcript is
+		// authoritative. The ordinary activity snapshot is deferred outside this
+		// function, so clearing first left a kill window where a complete-looking
+		// marker state pointed at an incomplete assistant/tool tail.
+		commit := c.snapshotWithCommit(false, false)
+		if commit.Err != nil {
+			slog.Warn("controller: final durable Turn snapshot", "err", commit.Err)
+			return fmt.Errorf("persist final durable Turn transcript: %w", commit.Err)
+		}
+		if !commit.TranscriptCommitted {
+			// No transcript tail means admission failed before the canonical user
+			// append; clearing that marker is cleanup, not a false completion.
+			path := c.SessionPath()
+			if meta, ok, err := agent.LoadBranchMeta(path); err == nil && ok && meta.InFlightTurn != nil &&
+				c.messageCount() <= meta.InFlightTurn.StartMessageIndex {
+				return c.clearInFlightTurn()
+			}
+			return errors.New("persist final durable Turn transcript: snapshot did not commit")
+		}
+	}
+	if err := c.clearInFlightTurn(); err != nil {
+		if durable {
+			return fmt.Errorf("clear final durable Turn marker: %w", err)
+		}
+		// Local has historically treated the sidecar as best-effort. Preserve
+		// that compatibility; Remote's prepared wrapper uses the strict branch.
+		return nil
+	}
+	return nil
 }
 
 // transplantInFlightTurnMarker moves a pending in-flight-turn marker from the
@@ -3706,16 +3845,16 @@ func (c *Controller) transplantInFlightTurnMarker(fromPath, toPath string) {
 	}
 }
 
-func (c *Controller) recoverInterruptedTurn(path string) {
+func (c *Controller) recoverInterruptedTurn(path string) (bool, error) {
 	if c.executor == nil || path == "" {
-		return
+		return false, nil
 	}
 	meta, ok, err := agent.LoadBranchMeta(path)
-	if err != nil || !ok || meta.InFlightTurn == nil {
-		if err != nil {
-			slog.Warn("controller: load in-flight turn marker", "err", err)
-		}
-		return
+	if err != nil {
+		return false, fmt.Errorf("load in-flight Turn marker: %w", err)
+	}
+	if !ok || meta.InFlightTurn == nil {
+		return false, nil
 	}
 	marker := meta.InFlightTurn
 	if interruptedTurnContinuedOnRecoveryBranch(path, marker) {
@@ -3725,10 +3864,10 @@ func (c *Controller) recoverInterruptedTurn(path string) {
 		// transplant in recoverSnapshotConflict left the marker behind on the
 		// forked-from branch; stripping now would truncate a transcript the
 		// completed turn already superseded. Clear the stale marker instead.
-		if err := agent.ClearSessionInFlightTurn(path); err != nil {
-			slog.Warn("controller: clear fork-orphaned in-flight turn", "err", err)
+		if err := c.clearInFlightTurn(); err != nil {
+			return false, fmt.Errorf("clear fork-orphaned in-flight Turn marker: %w", err)
 		}
-		return
+		return false, nil
 	}
 	msgs := c.executor.Session().Snapshot()
 	changed := marker.StartMessageIndex >= 0 && len(msgs) > marker.StartMessageIndex
@@ -3738,13 +3877,79 @@ func (c *Controller) recoverInterruptedTurn(path string) {
 		} else {
 			c.stripTurnMessagesAfter(marker.StartMessageIndex)
 		}
-		if err := c.snapshot(false, true); err != nil {
-			slog.Warn("controller: post-interrupted-turn snapshot", "err", err)
+		commit := c.snapshotWithCommit(false, true)
+		if !commit.TranscriptCommitted {
+			// The marker is the only durable proof that recovery is unfinished.
+			// Keep it so a later Resume retries the idempotent repair instead of
+			// exposing the still-unrepaired on-disk assistant/tool tail.
+			if commit.Err != nil {
+				return true, fmt.Errorf("persist interrupted Turn repair: %w", commit.Err)
+			}
+			return true, errors.New("persist interrupted Turn repair: snapshot did not commit")
+		}
+		if commit.Err != nil {
+			slog.Warn("controller: interrupted Turn transcript repaired; metadata repair deferred", "err", commit.Err)
+			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+				Text: "session transcript was repaired; metadata repair will be retried automatically"})
 		}
 	}
-	if err := agent.ClearSessionInFlightTurn(path); err != nil {
-		slog.Warn("controller: clear stale in-flight turn", "err", err)
+	// Snapshot conflict recovery may have moved the live Session to a recovery
+	// branch and transplanted the marker. Clear on the actual current path, never
+	// on the stale Resume argument.
+	if err := c.clearInFlightTurn(); err != nil {
+		return true, fmt.Errorf("clear recovered in-flight Turn marker: %w", err)
 	}
+	if !changed {
+		// A process that died after writing the marker but before committing the
+		// stable user anchor never accepted a Turn. Clearing this orphan must not
+		// surface PreviousTurnInterrupted or poison lastOutcome.
+		return false, nil
+	}
+	return true, nil
+}
+
+// PrepareRuntimeShutdown terminates an active runtime without reclassifying it
+// as an explicit user cancellation. It first seals admission, then marks the
+// active turn for durable recovery before cancelling its execution context.
+// Waiting for the turn goroutine prevents a replacement process from acquiring
+// the Session lease while the old Controller can still write its transcript.
+func (c *Controller) PrepareRuntimeShutdown() {
+	c.mu.Lock()
+	c.closed = true
+	c.parkedTurns = nil
+	preparing := c.durableAdmissionPreparing
+	cancel := c.cancel
+	operationCancel := context.CancelFunc(nil)
+	if c.operation != nil && !c.operation.commitStarted {
+		c.operation.cancelRequested = true
+		operationCancel = c.operation.cancel
+	}
+	active := c.running || c.finishing || preparing != nil || c.durableAdmissionPending != nil
+	userCancelled := c.canceling
+	if active && !userCancelled {
+		c.runtimeShutdown = true
+	}
+	c.mu.Unlock()
+
+	if preparing != nil {
+		// Prepare owns the marker/transcript semantic boundary but is not yet in
+		// turnWG. Wait until it either rolls back+clears or publishes the durable
+		// pending anchor; returning early would let runtime teardown race its save.
+		<-preparing.prepareDone
+	}
+
+	if operationCancel != nil {
+		operationCancel()
+	}
+	if cancel != nil {
+		// Old Approval/Ask waiters are process-local and must not survive a Host
+		// restart. This only unblocks them; unlike TryCancel it does not set the
+		// user-cancel bit or strip the accepted user's prompt.
+		c.approval.clearAll()
+		cancel()
+	}
+	c.operationWG.Wait()
+	c.turnWG.Wait()
 }
 
 // interruptedTurnContinuedOnRecoveryBranch reports whether a recovery branch
@@ -4571,7 +4776,16 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 		// flight) would park again and start after teardown.
 		c.closed = true
 		c.parkedTurns = nil
+		operationCancel := context.CancelFunc(nil)
+		if c.operation != nil && !c.operation.commitStarted {
+			c.operation.cancelRequested = true
+			operationCancel = c.operation.cancel
+		}
 		c.mu.Unlock()
+		if operationCancel != nil {
+			operationCancel()
+		}
+		c.operationWG.Wait()
 		if fireSessionEnd && started {
 			c.hooks.SessionEnd(context.Background(), "other")
 		}
@@ -5360,6 +5574,14 @@ func listItem(line string) (content string, level int, ok bool) {
 //
 // If no turn is given, the latest checkpoint is used. If no scope is given, Both is assumed.
 func parseRewind(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
+	return ParseRewindTarget(args, cps)
+}
+
+// ParseRewindTarget is the shared raw-composer parser for Local and Remote.
+// It returns the Controller's canonical zero-based checkpoint turn; Remote
+// resolves that turn to its current runtime-bound opaque CheckpointID before
+// executing the typed rewind transaction.
+func ParseRewindTarget(args string, cps []checkpoint.Meta) (int, RewindScope, error) {
 	fields := strings.Fields(args)
 	if len(fields) == 0 {
 		if len(cps) == 0 {

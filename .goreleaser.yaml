@@ -14,7 +14,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Tag }}
+      - -s -w -X main.version={{ .Tag }} -X reasonix/internal/buildinfo.SourceRevision={{ .Env.GITHUB_SHA }}
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
 

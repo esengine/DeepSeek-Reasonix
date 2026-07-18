@@ -1,13 +1,16 @@
 # Reasonix Remote 架构设计
 
-> 状态：Remote V1 产品、架构与协议语义已冻结，可以进入阶段 1；尚未开始实现。
+> 状态：Remote V1 产品、架构与协议语义已冻结；阶段 1–6 与阶段 7 当前环境自动化已完成，
+> 实机人工验收状态见
+> [`REMOTE_IMPLEMENTATION_STATUS.zh-CN.md`](./REMOTE_IMPLEMENTATION_STATUS.zh-CN.md)。
 >
-> 最后更新：2026-07-17
+> 最后更新：2026-07-18
 >
 > 首个正式支持组合：Windows Desktop → Linux Host
 >
-> 注意：本文中的 Remote 命令、RPC 方法与 RuntimeAPI 语义已经冻结但尚未实现；内部包路径和
-> 文件名是初始工程布局，可以在不改变依赖方向与 wire 的前提下调整。
+> 注意：本文中的 Remote 命令、RPC 方法与 RuntimeAPI 语义是冻结基线；内部包路径和文件名是
+> 初始工程布局，可以在不改变依赖方向与 wire 的前提下调整。实现完成度只由状态文档中的代码
+> 与测试证据确认。
 
 本文记录 Reasonix Remote V1 的产品边界、架构不变量、协议契约、实施阶段和验收标准。
 实现阶段可以调整内部包名、私有结构和工程拆分，但 wire 方法、身份、状态语义、固定限额和
@@ -2017,11 +2020,11 @@ V1 必须全部满足：
 
 ## 20. 实施入口与变更控制
 
-当前不存在阻止阶段 1 开始的产品或架构待决项。本文已经冻结 V1 方法注册表、公共 envelope、
-关键 request/result 判别、状态与恢复语义、错误 data、能力边界和固定资源限制。阶段 1 要做的
-是把这些契约编码为 Go 类型、规范化 schema、生成物和测试，不是继续扩展产品范围。
+实现开始前不存在阻止阶段 1 开始的产品或架构待决项。本文已经冻结 V1 方法注册表、公共 envelope、
+关键 request/result 判别、状态与恢复语义、错误 data、能力边界和固定资源限制。阶段 1 执行的是
+把这些契约编码为 Go 类型、规范化 schema、生成物和测试，而不是继续扩展产品范围。
 
-第一批实现按以下顺序展开：
+第一批实现已按以下顺序展开；以下保留为实施与变更控制记录：
 
 1. 从 ACP 提取 `internal/rpcwire` 的 NDJSON connection/framing/error 基础，只做等价移动并补
    8 MiB 可配置帧限制；先证明现有 ACP 行为与测试不变。
@@ -2031,7 +2034,7 @@ V1 必须全部满足：
    cursor/contentRef DTO、错误 data 脱敏与 Build ID mismatch。
 4. 建立 RuntimeParityManifest 并把当前 bridge 全量分类；本步只建立边界和 CI gate，不迁移
    大量 Desktop 业务代码。
-5. 上述门槛通过后再进入阶段 2 daemon/lease/单 Session 闭环，避免协议、Host 和 UI 同时
+5. 上述门槛通过后进入阶段 2 daemon/lease/单 Session 闭环，避免协议、Host 和 UI 同时
    大范围变化。
 
 如果实现证据证明某个冻结字段不可行，必须先在本文增加新的 RMT 决策、说明迁移影响并让

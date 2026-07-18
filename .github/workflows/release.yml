@@ -24,6 +24,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify coordinated release source commit
+        run: |
+          checkout_commit="$(git rev-parse HEAD)"
+          if [ "$GITHUB_SHA" != "$checkout_commit" ]; then
+            echo "::error::release event commit $GITHUB_SHA does not match checkout $checkout_commit"
+            exit 1
+          fi
+          ./scripts/verify-coordinated-release-tags.sh "$GITHUB_REF_NAME" "$checkout_commit"
       - run: ./scripts/cache-guard.sh
 
   goreleaser:
@@ -43,6 +51,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify coordinated release source commit
+        run: |
+          checkout_commit="$(git rev-parse HEAD)"
+          if [ "$GITHUB_SHA" != "$checkout_commit" ]; then
+            echo "::error::release event commit $GITHUB_SHA does not match checkout $checkout_commit"
+            exit 1
+          fi
+          ./scripts/verify-coordinated-release-tags.sh "$GITHUB_REF_NAME" "$checkout_commit"
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'

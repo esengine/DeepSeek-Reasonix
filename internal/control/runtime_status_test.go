@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/event"
 )
 
@@ -100,6 +101,37 @@ func TestCancelClearsPendingAskRuntimeStatus(t *testing.T) {
 	waitIdle(t, c)
 	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
 		t.Fatalf("status after turn done = %+v, want idle", st)
+	}
+}
+
+func TestTryCancelIsStrictAndIdempotent(t *testing.T) {
+	c := New(Options{Runner: appendingRunner{session: agent.NewSession("")}, Sink: event.Discard})
+	if got := c.TryCancel(); got != CancelNotActive {
+		t.Fatalf("idle TryCancel = %q", got)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	c.runGuarded(func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	})
+	<-started
+	if got := c.TryCancel(); got != CancelRequestedNow {
+		t.Fatalf("first TryCancel = %q", got)
+	}
+	if got := c.TryCancel(); got != CancelAlreadyRequested {
+		t.Fatalf("second TryCancel = %q", got)
+	}
+	close(release)
+	waitIdleAdmission(t, c)
+	if got := c.TryCancel(); got != CancelNotActive {
+		t.Fatalf("finished TryCancel = %q", got)
 	}
 }
 

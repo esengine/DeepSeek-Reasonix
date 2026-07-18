@@ -45,6 +45,55 @@ type Lifecycle interface {
 	Close()
 }
 
+// SessionResumeState is the durable recovery fact discovered while Resume
+// repairs a persisted transcript. It intentionally carries no Remote protocol
+// identity: any runtime host can consume the same Controller lifecycle result.
+type SessionResumeState struct {
+	PreviousTurnInterrupted bool
+}
+
+// RecoveryLifecycle is the optional lifecycle surface for runtime hosts that
+// outlive an individual frontend connection. ResumeWithRecovery reports the
+// in-flight marker consumed by the ordinary Resume repair path.
+// PrepareRuntimeShutdown is distinct from user Cancel: it seals admission,
+// terminates an active execution stack, and preserves its in-flight marker so a
+// later process can report an interrupted turn instead of a user cancellation.
+type RecoveryLifecycle interface {
+	ResumeWithRecovery(s *agent.Session, path string) (SessionResumeState, error)
+	PrepareRuntimeShutdown()
+}
+
+// DurableTurnInput is the stable, user-visible anchor a runtime host commits
+// before it invokes any Controller submit primitive. Input is the raw composer
+// input; DisplayText wins when it is non-empty. EditedOriginal is stored on the
+// anchored user message before the first durable snapshot.
+type DurableTurnInput struct {
+	Input          string
+	DisplayText    string
+	EditedOriginal string
+}
+
+// DurableTurnAdmission is an optional runtime-host boundary. It leaves the
+// ordinary asynchronous TurnControl API intact while allowing a host to commit
+// one stable user anchor before calling Submit*. The returned completion waits
+// only until that exact guarded body has claimed the prepared anchor; execution
+// continues asynchronously and reports its final persistence result in
+// TurnDone.
+type DurableTurnAdmission interface {
+	EnableDurableTurnAdmission() error
+	PrepareDurableTurn(input DurableTurnInput) (complete func() DurableTurnAdmissionResult, err error)
+}
+
+// DurableTurnAdmissionResult separates execution admission from its durable
+// semantic boundary. SemanticCommit=true is successful admission even if a
+// repairable revision/listing-sidecar diagnostic occurred after transcript
+// commit; such diagnostics are logged/noticed and do not populate Err.
+type DurableTurnAdmissionResult struct {
+	Claimed        bool
+	SemanticCommit bool
+	Err            error
+}
+
 // TurnControl covers driving a model turn and observing its run state: the
 // various submit/run entry points, cancellation, steering, and status reads.
 type TurnControl interface {
@@ -61,7 +110,9 @@ type TurnControl interface {
 	RunTurn(ctx context.Context, input string) error
 	RunShell(command string)
 	Cancel()
+	TryCancel() CancelAttempt
 	Steer(text string)
+	TrySteer(text string) bool
 	SteerConsumed() bool
 	Running() bool
 	CancelRequested() bool
@@ -70,6 +121,23 @@ type TurnControl interface {
 	History() []provider.Message
 	ToolResult(toolID string) *ToolResultData
 }
+
+// Operations covers non-Turn foreground work. Admission is synchronous and
+// never parks; an admitted handle owns completion/cancellation independently
+// from TurnControl.TryCancel.
+type Operations interface {
+	StartOperation(spec OperationSpec) (*OperationHandle, error)
+}
+
+// CancelAttempt is the strict, race-safe outcome of requesting cancellation
+// from a currently active Controller turn or prompt.
+type CancelAttempt string
+
+const (
+	CancelNotActive        CancelAttempt = "not_active"
+	CancelRequestedNow     CancelAttempt = "cancel_requested"
+	CancelAlreadyRequested CancelAttempt = "already_requested"
+)
 
 // Approvals covers tool-approval and ask prompts plus the runtime approval
 // posture (ask/auto/yolo). It mirrors the approvalManager surface.
@@ -113,12 +181,15 @@ type Goals interface {
 // operations (compact, summarize).
 type SessionHistory interface {
 	Checkpoints() []checkpoint.Meta
+	CheckpointSnapshot() CheckpointSnapshot
 	CheckpointTurnsByMessageIndex() map[int]int
 	CheckpointHasBoundary(turn int) bool
 	Rewind(turn int, scope RewindScope) error
+	RewindDetailed(turn int, scope RewindScope) (RewindResult, error)
 	Fork(turn int) (string, error)
 	ForkNamed(turn int, name string) (string, error)
 	ForkSession(turn int, name string) (string, error)
+	BranchSession(name string) (string, error)
 	Branch(name string) (string, error)
 	Branches() ([]agent.BranchInfo, error)
 	BranchTreeText() string
@@ -216,6 +287,7 @@ type Settings interface {
 type SessionAPI interface {
 	Lifecycle
 	TurnControl
+	Operations
 	Approvals
 	Goals
 	SessionHistory
@@ -231,16 +303,19 @@ type SessionAPI interface {
 // the full port, so frontend migrations to the interfaces are mechanical and can
 // never silently drift from the implementation.
 var (
-	_ Lifecycle          = (*Controller)(nil)
-	_ TurnControl        = (*Controller)(nil)
-	_ Approvals          = (*Controller)(nil)
-	_ Goals              = (*Controller)(nil)
-	_ SessionHistory     = (*Controller)(nil)
-	_ MemoryControl      = (*Controller)(nil)
-	_ Capabilities       = (*Controller)(nil)
-	_ Status             = (*Controller)(nil)
-	_ SessionPersistence = (*Controller)(nil)
-	_ Input              = (*Controller)(nil)
-	_ Settings           = (*Controller)(nil)
-	_ SessionAPI         = (*Controller)(nil)
+	_ Lifecycle            = (*Controller)(nil)
+	_ RecoveryLifecycle    = (*Controller)(nil)
+	_ DurableTurnAdmission = (*Controller)(nil)
+	_ TurnControl          = (*Controller)(nil)
+	_ Operations           = (*Controller)(nil)
+	_ Approvals            = (*Controller)(nil)
+	_ Goals                = (*Controller)(nil)
+	_ SessionHistory       = (*Controller)(nil)
+	_ MemoryControl        = (*Controller)(nil)
+	_ Capabilities         = (*Controller)(nil)
+	_ Status               = (*Controller)(nil)
+	_ SessionPersistence   = (*Controller)(nil)
+	_ Input                = (*Controller)(nil)
+	_ Settings             = (*Controller)(nil)
+	_ SessionAPI           = (*Controller)(nil)
 )

@@ -199,6 +199,10 @@ func estimateTextTokens(s string) int {
 // summarize so the UI can show a "compacting…" placeholder, and a Done event
 // (carrying the summary) replaces it.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
+	return a.compactWithCommit(ctx, trigger, instructions, force, nil)
+}
+
+func (a *Agent) compactWithCommit(ctx context.Context, trigger, instructions string, force bool, commit func() error) error {
 	msgs := a.session.Messages
 	head, start, ok := a.planCompaction(msgs, minCompactMessages)
 	if !ok {
@@ -227,6 +231,10 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	}
 
 	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+	if err := ctx.Err(); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
 
 	// A PreCompact hook can steer what the summary keeps; its stdout joins any
 	// explicit /compact <focus> text.
@@ -238,6 +246,10 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			instructions += hookInstr
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
 
 	archived := ""
 	if a.archiveDir != "" {
@@ -248,6 +260,10 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		}
 		archived = path
 	}
+	if err := ctx.Err(); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
 
 	// The digest covers only the foldable work; kept user turns and prior digests
 	// are spliced back verbatim, so a fact that reached a digest once is never
@@ -255,12 +271,33 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// accumulate (small) rather than collapsing into one lossy rolling summary.
 	summary, err := a.summarizeWithRetry(ctx, fold, instructions)
 	if err != nil {
+		// Cancellation is an instruction to leave the transcript unchanged, not
+		// a provider failure that authorizes the deterministic mechanical fold.
+		// Resolve the in-progress compaction card and preserve every message.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			a.emitCompactionAborted(trigger)
+			return ctxErr
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			a.emitCompactionAborted(trigger)
+			return err
+		}
 		// Mechanical fold: the foldable region is already archived, so stand in a
 		// deterministic marker rather than aborting. /compact then always frees
 		// context (and auto-compaction can't loop on a still-full window); the
 		// verbatim user turns kept above are untouched.
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context was compacted without a generated summary.", Detail: "compaction summary unavailable (" + err.Error() + "); folded mechanically"})
 		summary = mechanicalFoldDigest(len(fold), archived)
+	}
+	if err := ctx.Err(); err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
+	if commit != nil {
+		if err := commit(); err != nil {
+			a.emitCompactionAborted(trigger)
+			return err
+		}
 	}
 
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
@@ -296,17 +333,37 @@ func (a *Agent) emitCompactionAborted(trigger string) {
 // boundary (a user message), so the split never severs a tool_call/result pair —
 // those live within one turn. A no-op when the region is empty.
 func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
+	return a.SummarizeFromWithCommit(ctx, fromIdx, nil)
+}
+
+// SummarizeFromWithCommit is SummarizeFrom with a final gate immediately
+// before the transcript rewrite. See CompactNowWithCommit.
+func (a *Agent) SummarizeFromWithCommit(ctx context.Context, fromIdx int, commit func() error) error {
 	msgs := a.session.Messages
 	if fromIdx < 0 || fromIdx >= len(msgs) {
 		return nil
 	}
 	region := msgs[fromIdx:]
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if a.archiveDir != "" {
 		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if commit != nil {
+		if err := commit(); err != nil {
+			return err
+		}
 	}
 	next := make([]provider.Message, 0, fromIdx+1)
 	next = append(next, msgs[:fromIdx]...)
@@ -325,6 +382,12 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 // a single summary, keeping toIdx onward verbatim ("summarize up to here"). toIdx
 // is a turn boundary, so no tool pair is split. A no-op when the region is empty.
 func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
+	return a.SummarizeUpToWithCommit(ctx, toIdx, nil)
+}
+
+// SummarizeUpToWithCommit is SummarizeUpTo with a final gate immediately
+// before the transcript rewrite. See CompactNowWithCommit.
+func (a *Agent) SummarizeUpToWithCommit(ctx context.Context, toIdx int, commit func() error) error {
 	msgs := a.session.Messages
 	head := 0
 	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
@@ -334,12 +397,26 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 		return nil
 	}
 	region := msgs[head:toIdx]
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if a.archiveDir != "" {
 		_, _ = archiveMessages(a.archiveDir, region)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	summary, err := a.summarize(ctx, region, "")
 	if err != nil {
 		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if commit != nil {
+		if err := commit(); err != nil {
+			return err
+		}
 	}
 	next := make([]provider.Message, 0, head+1+len(msgs)-toIdx)
 	next = append(next, msgs[:head]...)

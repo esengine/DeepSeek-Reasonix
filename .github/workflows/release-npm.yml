@@ -44,10 +44,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Checkout requested stable tag
+        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        env:
+          BASE_VERSION: ${{ inputs.base_version }}
+        run: |
+          set -euo pipefail
+          base="${BASE_VERSION#npm-v}"
+          base="${base#v}"
+          test -n "$base" || { echo "::error::stable dispatch requires base_version"; exit 2; }
+          tag="npm-v${base}"
+          git check-ref-format "refs/tags/$tag" >/dev/null
+          git fetch --no-tags origin "refs/tags/$tag"
+          git checkout --detach "FETCH_HEAD^{commit}"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      - name: Verify coordinated release source commit
+        if: github.event_name != 'workflow_dispatch' || inputs.channel != 'canary'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_VERSION: ${{ inputs.base_version }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            base="${BASE_VERSION#npm-v}"
+            base="${base#v}"
+            tag="npm-v${base}"
+          fi
+          ./scripts/verify-coordinated-release-tags.sh "$tag" "$(git rev-parse HEAD)"
       - run: ./scripts/cache-guard.sh
 
   npm:
@@ -60,6 +86,19 @@ jobs:
     environment: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'canary' && 'canary' || 'release' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Checkout requested stable tag
+        if: github.event_name == 'workflow_dispatch' && inputs.channel == 'stable'
+        env:
+          BASE_VERSION: ${{ inputs.base_version }}
+        run: |
+          set -euo pipefail
+          base="${BASE_VERSION#npm-v}"
+          base="${base#v}"
+          test -n "$base" || { echo "::error::stable dispatch requires base_version"; exit 2; }
+          tag="npm-v${base}"
+          git check-ref-format "refs/tags/$tag" >/dev/null
+          git fetch --no-tags origin "refs/tags/$tag"
+          git checkout --detach "FETCH_HEAD^{commit}"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -68,6 +107,19 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+      - name: Verify coordinated release source commit
+        if: github.event_name != 'workflow_dispatch' || inputs.channel != 'canary'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_VERSION: ${{ inputs.base_version }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            base="${BASE_VERSION#npm-v}"
+            base="${base#v}"
+            tag="npm-v${base}"
+          fi
+          ./scripts/verify-coordinated-release-tags.sh "$tag" "$(git rev-parse HEAD)"
       # Tag push uses the npm-v* tag. A canary dispatch synthesizes a
       # <base>-canary.<run_number> version; a manual stable dispatch publishes
       # the requested semver exactly. build.mjs strips the leading `npm-`/`v`.
@@ -75,7 +127,7 @@ jobs:
         id: ver
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            base="${{ inputs.base_version }}"; base="${base#v}"
+            base="${{ inputs.base_version }}"; base="${base#npm-v}"; base="${base#v}"
             if [ "${{ inputs.channel }}" = "canary" ]; then
               echo "arg=v${base}-canary.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
             else
@@ -84,7 +136,13 @@ jobs:
           else
             echo "arg=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           fi
-      - run: node npm/build.mjs "${{ steps.ver.outputs.arg }}" --publish
+      - name: Build and publish npm packages
+        run: |
+          # A manual stable dispatch changes the checkout after the workflow
+          # event was created. Force build.mjs to derive the revision from the
+          # checked-out tag rather than the immutable event GITHUB_SHA.
+          unset GITHUB_SHA
+          node npm/build.mjs "${{ steps.ver.outputs.arg }}" --publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       # Assert the dist-tag landed where build.mjs aimed it. This is the guard

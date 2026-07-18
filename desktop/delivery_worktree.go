@@ -29,6 +29,9 @@ type DeliveryWorktreeOpenResult struct {
 // optional Git isolation path. A false result never disables Delivery itself;
 // the cross-platform workspace writer lease remains the no-Git fallback.
 func (a *App) DeliveryWorktreeAvailability(workspaceRoot string) worktree.Availability {
+	if err := a.rejectRemoteDeferred("DeliveryWorktreeAvailability"); err != nil {
+		return worktree.Availability{Available: false, Reason: err.Error()}
+	}
 	return inspectDeliveryWorktree(a.bootContext(), workspaceRoot)
 }
 
@@ -36,6 +39,9 @@ func (a *App) DeliveryWorktreeAvailability(workspaceRoot string) worktree.Availa
 // as a project. It never switches or modifies the source checkout, and it does
 // not delete the new worktree if later UI registration fails.
 func (a *App) CreateDeliveryWorktree(workspaceRoot string) (DeliveryWorktreeOpenResult, error) {
+	if err := a.rejectRemoteDeferred("CreateDeliveryWorktree"); err != nil {
+		return DeliveryWorktreeOpenResult{}, err
+	}
 	workspaceRoot = strings.TrimSpace(workspaceRoot)
 	created, err := createDeliveryWorktree(a.bootContext(), workspaceRoot, config.DeliveryWorktreeDir())
 	if err != nil {

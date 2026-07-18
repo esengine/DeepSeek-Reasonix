@@ -51,6 +51,7 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/repair"
+	"reasonix/internal/runtimeapi"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
@@ -108,6 +109,23 @@ type PromptHistoryResult struct {
 // forwards events tagged with tabId to the webview via runtime.EventsEmit.
 type App struct {
 	ctx context.Context
+
+	// localTarget owns the admission/lifecycle boundary between the in-process
+	// Local runtime and a mutually-exclusive Remote target. Its zero value is an
+	// admitted Local runtime so tests and embedders that do not install a
+	// TargetManager retain the historical Local behaviour.
+	localTarget appLocalTargetState
+
+	// localRuntimeAdapter is the sole target-neutral observer of Local
+	// controller events. The ordinary Wails event stream remains independent;
+	// registering an adapter must not steal events from the existing workbench.
+	localRuntimeAdapterMu sync.RWMutex
+	localRuntimeAdapter   *LocalTargetAdapter
+
+	// remote owns the secret-free Host store, TargetManager and ephemeral
+	// AskPass requests. It is initialized lazily so App's zero value remains
+	// usable in focused Local tests.
+	remote remoteDesktopState
 
 	// mu protects the tab map, tabOrder, activeTabID, and per-tab fields that are read
 	// from bound methods. All bound methods that touch a controller use activeCtrl().
@@ -430,6 +448,12 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if _, _, err := a.ensureRemoteDesktop(); err != nil {
+		// Remote is an optional connection surface; a broken Host store or
+		// missing desktop identity must not make the existing Local workbench
+		// unbootable. The same concrete error is returned by RemoteTargetStatus.
+		slog.Warn("desktop: initialize Remote target support", "err", err)
+	}
 	installSystemQuitHook()
 	a.startTray()
 	a.enableDeferredRebuildRetry()
@@ -776,6 +800,9 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	if err := a.shutdownRemoteDesktop(); err != nil {
+		slog.Warn("desktop: shut down target manager", "err", err)
+	}
 	a.stopDeferredRebuildRetry()
 	a.stopMainThreadWatchdog()
 	if a.heartbeat != nil {
@@ -907,6 +934,9 @@ func (a *App) Submit(input string) error {
 }
 
 func (a *App) SubmitToTab(tabID, input string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteComposerSubmitV1(tabID, runtimeapi.ComposerSubmitInput{Input: input})
+	}
 	return a.submitToTab(tabID, input, false)
 }
 
@@ -914,6 +944,15 @@ func (a *App) SubmitToTab(tabID, input string) error {
 // event sink until TurnDone has completed all of its fan-out. The caller must
 // call finishTabTurnStart exactly once after invoking the controller.
 func (a *App) beginTabTurn(tabID string, reclaim bool) (*WorkspaceTab, control.SessionAPI, error) {
+	if err := a.beginLocalTargetAdmission(); err != nil {
+		return nil, nil, err
+	}
+	releaseAdmission := true
+	defer func() {
+		if releaseAdmission {
+			a.endLocalTargetAdmission()
+		}
+	}()
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return nil, nil, readOnlyChannelErr()
@@ -947,6 +986,7 @@ func (a *App) beginTabTurn(tabID string, reclaim bool) (*WorkspaceTab, control.S
 		tab.turnStartMu.Unlock()
 		return nil, nil, control.ErrTurnRunning
 	}
+	releaseAdmission = false
 	return tab, ctrl, nil
 }
 
@@ -958,6 +998,7 @@ func (a *App) finishTabTurnStart(tab *WorkspaceTab, ctrl control.SessionAPI) boo
 	if tab != nil {
 		tab.turnStartMu.Unlock()
 	}
+	a.endLocalTargetAdmission()
 	return started
 }
 
@@ -1015,6 +1056,9 @@ func (a *App) RunShell(command string) error {
 }
 
 func (a *App) RunShellForTab(tabID, command string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteRunShellV1(tabID, command)
+	}
 	tab, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1032,6 +1076,9 @@ func (a *App) SubmitDisplay(display, input string) error {
 }
 
 func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteComposerSubmitV1(tabID, runtimeapi.ComposerSubmitInput{Input: input, DisplayText: display})
+	}
 	tab, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1043,6 +1090,11 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
 }
 
 func (a *App) SubmitDeliveryRecoveryToTab(tabID, display, input string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteComposerSubmitV1(tabID, runtimeapi.ComposerSubmitInput{
+			Input: input, DisplayText: display, DeliveryRecovery: true,
+		})
+	}
 	tab, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1061,6 +1113,15 @@ type InvocationRequest struct {
 }
 
 func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations []InvocationRequest) error {
+	if a.remoteTargetSelected() {
+		projected, err := remoteInvocationInputs(invocations)
+		if err != nil {
+			return err
+		}
+		return a.remoteComposerSubmitV1(tabID, runtimeapi.ComposerSubmitInput{
+			Input: input, DisplayText: display, Invocations: projected,
+		})
+	}
 	tab, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1078,6 +1139,11 @@ func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations [
 }
 
 func (a *App) SubmitEditedDisplayToTab(tabID, display, input, original string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteComposerSubmitV1(tabID, runtimeapi.ComposerSubmitInput{
+			Input: input, DisplayText: display, EditedOriginal: original,
+		})
+	}
 	tab, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1107,9 +1173,11 @@ func (a *App) Cancel() {
 }
 
 func (a *App) CancelTab(tabID string) {
-	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
-		ctrl.Cancel()
+	if a.remoteTargetSelected() {
+		_ = a.remoteCancel(tabID)
+		return
 	}
+	_ = a.cancelLocalTab(tabID)
 }
 
 // Steer sends mid-turn guidance to the agent without interrupting the in-flight request.
@@ -1119,6 +1187,13 @@ func (a *App) Steer(text string) error {
 
 // SteerForTab sends mid-turn guidance to a specific tab's agent.
 func (a *App) SteerForTab(tabID, text string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteSteer(tabID, text)
+	}
+	if err := a.beginLocalTargetAdmission(); err != nil {
+		return err
+	}
+	defer a.endLocalTargetAdmission()
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -1404,18 +1479,16 @@ func safeControllerSessionDir(ctrl control.SessionAPI) (dir string, ok bool) {
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
 func (a *App) Approve(id string, allow, session, persist bool) {
-	ctrl := a.ctrlByTabID("")
-	if ctrl != nil {
-		ctrl.Approve(id, allow, session, persist)
-	}
+	a.ApproveTab("", id, allow, session, persist)
 }
 
 // ApproveTab is like Approve but scoped to a specific tab.
 func (a *App) ApproveTab(tabID, id string, allow, session, persist bool) {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl != nil {
-		ctrl.Approve(id, allow, session, persist)
+	if a.remoteTargetSelected() {
+		_ = a.remoteApprove(tabID, id, allow, session, persist)
+		return
 	}
+	_ = a.approveLocalPrompt(tabID, id, allow, session, persist)
 }
 
 // ReplayPendingPrompts asks every tab's controller to re-emit any approval/ask
@@ -1424,6 +1497,10 @@ func (a *App) ApproveTab(tabID, id string, allow, session, persist bool) {
 // already awaiting confirmation rebuilds its modal instead of showing a
 // "waiting" status with no way to answer — and no way to stop.
 func (a *App) ReplayPendingPrompts() {
+	if a.remoteTargetSelected() {
+		_ = a.replayRemotePendingPrompt()
+		return
+	}
 	a.mu.RLock()
 	tabs := a.runtimeTabsLocked()
 	ctrls := make([]control.SessionAPI, 0, len(tabs))
@@ -1465,6 +1542,29 @@ func (a *App) SetMode(mode string) {
 // ones the backend still holds (plan/memory/sandbox-escape never drain, and
 // auto keeps approvals an allow policy would not cover — #6432).
 func (a *App) SetModeForTab(tabID, mode string) []string {
+	if a.remoteTargetSelected() {
+		normalized := normalizeTabMode(mode)
+		collaboration := "normal"
+		if tabModeHasPlan(normalized) {
+			collaboration = "plan"
+		}
+		approval := control.ToolApprovalAsk
+		if tabModeHasAutoApproveTools(normalized) {
+			approval = control.ToolApprovalYolo
+		}
+		result, err := a.remoteSetProfileV1(tabID, runtimeapi.ProfilePatch{
+			CollaborationMode: &collaboration, ToolApprovalMode: &approval,
+		})
+		if err != nil {
+			logRemoteBridgeError("SetModeForTab", err)
+			return nil
+		}
+		ids := make([]string, len(result.AutoResolvedPromptIDs))
+		for index, id := range result.AutoResolvedPromptIDs {
+			ids[index] = string(id)
+		}
+		return ids
+	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return nil
@@ -1557,6 +1657,13 @@ func (a *App) SetCollaborationMode(mode string) {
 }
 
 func (a *App) SetCollaborationModeForTab(tabID, mode string) {
+	if a.remoteTargetSelected() {
+		mode = normalizeCollaborationMode(mode)
+		if _, err := a.remoteSetProfileV1(tabID, runtimeapi.ProfilePatch{CollaborationMode: &mode}); err != nil {
+			logRemoteBridgeError("SetCollaborationModeForTab", err)
+		}
+		return
+	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return
@@ -1609,15 +1716,11 @@ func (a *App) AnswerQuestion(id string, answers []QuestionAnswer) {
 }
 
 func (a *App) AnswerQuestionForTab(tabID, id string, answers []QuestionAnswer) {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
+	if a.remoteTargetSelected() {
+		_ = a.remoteAnswer(tabID, id, answers)
 		return
 	}
-	out := make([]event.AskAnswer, len(answers))
-	for i, an := range answers {
-		out[i] = event.AskAnswer{QuestionID: an.QuestionID, Selected: an.Selected}
-	}
-	ctrl.AnswerQuestion(id, out)
+	_ = a.answerLocalPrompt(tabID, id, answers)
 }
 
 // Compact runs a plain compaction pass (the "compact now" button). Focus-guided
@@ -1629,6 +1732,9 @@ func (a *App) Compact() error {
 // CompactForTab compacts the requested tab without depending on which tab is
 // focused when the asynchronous frontend call reaches the backend.
 func (a *App) CompactForTab(tabID string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteCompactV1(tabID)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -1685,6 +1791,9 @@ func (a *App) NewSession() error {
 // NewSessionForTab snapshots and rotates the requested tab regardless of which
 // tab becomes active while the Wails call is in flight.
 func (a *App) NewSessionForTab(tabID string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteNewSessionV1(tabID)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -1798,6 +1907,9 @@ func (a *App) ClearSession() error {
 
 // ClearSessionForTab clears the requested tab regardless of later focus changes.
 func (a *App) ClearSessionForTab(tabID string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteClearSessionV1(tabID)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2034,6 +2146,12 @@ func (a *App) Checkpoints() []CheckpointMeta {
 }
 
 func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
+	if a.remoteTargetSelected() {
+		if checkpoints, ok := a.remoteCheckpointViews(tabID); ok {
+			return checkpoints
+		}
+		return []CheckpointMeta{}
+	}
 	a.mu.RLock()
 	var ctrl control.SessionAPI
 	if tab := a.tabByIDLocked(tabID); tab != nil {
@@ -2110,6 +2228,9 @@ func insertCheckpointFilePreview(preview []string, path string, limit int) []str
 // caller (frontend ToolCard) loads this on demand when the user expands a
 // collapsed tool card. Returns nil when the tool ID is not found.
 func (a *App) ToolResultForTab(tabID, toolID string) *control.ToolResultData {
+	if a.remoteTargetSelected() {
+		return a.remoteToolResultV1(tabID, toolID)
+	}
 	a.mu.RLock()
 	var ctrl control.SessionAPI
 	if tab := a.tabByIDLocked(tabID); tab != nil {
@@ -2132,6 +2253,9 @@ func (a *App) Rewind(turn int, scope string) error {
 // RewindForTab rewinds the requested tab instead of resolving the active tab at
 // execution time, which may have changed after frontend confirmation.
 func (a *App) RewindForTab(tabID string, turn int, scope string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteRewindV1(tabID, turn, scope)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2159,6 +2283,9 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 // backend begins processing the request. The fork becomes active only while the
 // source tab still owns focus, so a later tab selection remains authoritative.
 func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteForkV1(tabID, turn)
+	}
 	sourceTab, ctrl := a.tabAndCtrlByID(tabID)
 	if sourceTab == nil || ctrl == nil {
 		return TabMeta{}, nil
@@ -2250,6 +2377,9 @@ func (a *App) SummarizeFrom(turn int) error {
 }
 
 func (a *App) SummarizeFromForTab(tabID string, turn int) error {
+	if a.remoteTargetSelected() {
+		return a.remoteSummarizeV1(tabID, turn, runtimeapi.SummaryFrom)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2265,6 +2395,9 @@ func (a *App) SummarizeUpTo(turn int) error {
 }
 
 func (a *App) SummarizeUpToForTab(tabID string, turn int) error {
+	if a.remoteTargetSelected() {
+		return a.remoteSummarizeV1(tabID, turn, runtimeapi.SummaryUpTo)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2372,6 +2505,14 @@ func (a *App) activeSessionDir() string {
 // marking the one the current conversation is writing to and attaching any
 // user-chosen titles.
 func (a *App) ListSessions() []SessionMeta {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteListSessionsV1("")
+		if err != nil {
+			logRemoteBridgeError("ListSessions", err)
+			return []SessionMeta{}
+		}
+		return out
+	}
 	dir := a.activeSessionDir()
 	infos, err := agent.ListSessions(dir)
 	if err != nil {
@@ -2407,6 +2548,14 @@ func (a *App) ListSessions() []SessionMeta {
 // ListTrashedSessions returns sessions that were moved to the local trash,
 // newest-deleted first. These can be previewed, restored, or permanently purged.
 func (a *App) ListTrashedSessions() []SessionMeta {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteListTrashV1("")
+		if err != nil {
+			logRemoteBridgeError("ListTrashedSessions", err)
+			return []SessionMeta{}
+		}
+		return out
+	}
 	out := []SessionMeta{}
 	for _, dir := range a.knownSessionDirs() {
 		paths, err := listTrashedSessionFiles(dir)
@@ -2575,6 +2724,9 @@ func channelDisplayName(provider, domain string) string {
 // has an in-process runtime, the runtime is cancelled and removed first so
 // autosave cannot recreate or append to the deleted file later.
 func (a *App) DeleteSession(path string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteTrashSessionV1("", path, false)
+	}
 	return friendlySessionFileError(a.deleteSession(path, false))
 }
 
@@ -2582,6 +2734,9 @@ func (a *App) DeleteSession(path string) error {
 // marker is only a hint; the backend re-reads the branch and parent immediately
 // before changing runtime state or moving any files.
 func (a *App) DeleteRecoveryCopy(path string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteTrashSessionV1("", path, true)
+	}
 	return friendlySessionFileError(a.deleteSession(path, true))
 }
 
@@ -3082,6 +3237,9 @@ func (a *App) activeSessionPath(dir string) string {
 
 // RestoreSession moves a trashed session back into the saved-session list.
 func (a *App) RestoreSession(path string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteRestoreSessionV1("", path)
+	}
 	return friendlySessionFileError(a.restoreSession(path))
 }
 
@@ -3144,12 +3302,18 @@ func (a *App) sessionOpen(dir, sessionPath string) bool {
 // PurgeTrashedSession permanently removes a trashed session and its title/display
 // sidecars.
 func (a *App) PurgeTrashedSession(path string) error {
+	if a.remoteTargetSelected() {
+		return a.remotePurgeSessionV1("", path, false)
+	}
 	return friendlySessionFileError(a.purgeTrashedSession(path, false))
 }
 
 // PurgeRecoveryCopy is the guarded permanent-cleanup path. A trashed branch is
 // rechecked against its live parent; missing, stale, or divergent data is kept.
 func (a *App) PurgeRecoveryCopy(path string) error {
+	if a.remoteTargetSelected() {
+		return a.remotePurgeSessionV1("", path, true)
+	}
 	return friendlySessionFileError(a.purgeTrashedSession(path, true))
 }
 
@@ -3187,6 +3351,9 @@ func (a *App) purgeTrashedSession(path string, requireRedundantRecovery bool) er
 // the branch meta sidecar, with the legacy .titles.json map kept as a
 // compatibility write-through for older desktop data paths.
 func (a *App) RenameSession(path, title string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteRenameSessionV1("", path, title)
+	}
 	dir := a.activeSessionDir()
 	sessionPath, _, err := validateSessionPath(dir, path)
 	if err != nil {
@@ -3216,6 +3383,9 @@ func (a *App) ResumeSessionPage(path string, limit int) (HistoryPage, error) {
 }
 
 func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteResumeSessionV1(tabID, path)
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
@@ -3241,6 +3411,10 @@ func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPag
 // path is a runtime identity, so changing to a different path must replace the
 // tab's controller binding rather than mutating the current controller in place.
 func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) {
+	if a.remoteTargetSelected() {
+		page, err := a.remoteResumeSessionV1(tabID, path)
+		return page.Messages, err
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
@@ -3266,6 +3440,9 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 }
 
 func (a *App) OpenChannelSessionForTab(tabID, path string) ([]HistoryMessage, error) {
+	if err := a.rejectRemoteOutOfScope("OpenChannelSessionForTab"); err != nil {
+		return []HistoryMessage{}, err
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
@@ -3288,6 +3465,9 @@ func (a *App) OpenChannelSessionForTab(tabID, path string) ([]HistoryMessage, er
 }
 
 func (a *App) OpenChannelSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
+	if err := a.rejectRemoteOutOfScope("OpenChannelSessionPageForTab"); err != nil {
+		return HistoryPage{}, err
+	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
@@ -3473,6 +3653,9 @@ func loadResumableSession(sessionPath string) (*agent.Session, error) {
 // PreviewSession reads a saved session for display only. It does not snapshot or
 // swap the active controller, so the history drawer can call it while a turn runs.
 func (a *App) PreviewSession(path string) ([]HistoryMessage, error) {
+	if a.remoteTargetSelected() {
+		return a.remotePreviewSessionV1("", path)
+	}
 	sessionDir, sessionPath, err := a.sessionDirForPath(path)
 	if err != nil {
 		return nil, err
@@ -3522,6 +3705,9 @@ type promptHistoryTape struct {
 // carry a cursor and page limit. Older clients may still pass a bare nonce; that
 // path keeps the old cache-hit behavior.
 func (a *App) ScanPromptHistory(rawRequest string) (PromptHistoryResult, error) {
+	if a.remoteTargetSelected() {
+		return a.remotePromptHistoryV1(rawRequest)
+	}
 	req := parsePromptHistoryRequest(rawRequest)
 	dir := a.activeSessionDir()
 	sessionPath := a.activeSessionPath(dir)
@@ -4045,6 +4231,14 @@ func nearestExistingDirectory(path string) string {
 }
 
 func (a *App) ListWorkspaces() []WorkspaceMeta {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteListWorkspacesV1()
+		if err != nil {
+			logRemoteBridgeError("ListWorkspaces", err)
+			return []WorkspaceMeta{}
+		}
+		return out
+	}
 	migrateLegacyWorkspacesIntoProjects()
 	activeRoot := ""
 	cur, _ := os.Getwd()
@@ -4069,6 +4263,9 @@ func (a *App) ListWorkspaces() []WorkspaceMeta {
 }
 
 func (a *App) RemoveWorkspace(dir string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteRemoveWorkspaceV1(dir)
+	}
 	if dir == "" {
 		return fmt.Errorf("workspace path is required")
 	}
@@ -4258,6 +4455,9 @@ func tabWorkspaceNameForScope(scope, cwd string) string {
 }
 
 func (a *App) SwitchWorkspace(dir string) (string, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteSwitchWorkspaceV1(dir)
+	}
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -4363,6 +4563,14 @@ func (a *App) HistoryPage(beforeTurn, limit int) HistoryPage {
 }
 
 func (a *App) HistoryPageForTab(tabID string, beforeTurn, limit int) HistoryPage {
+	if a.remoteTargetSelected() {
+		page, err := a.remoteHistoryPageV1(tabID, beforeTurn, limit)
+		if err == nil {
+			return page
+		}
+		logRemoteBridgeError("HistoryPageForTab", err)
+		return HistoryPage{Messages: []HistoryMessage{}}
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -4456,6 +4664,12 @@ func historyMessagesForTurnRange(messages []HistoryMessage, startTurn, endTurn i
 }
 
 func (a *App) HistoryForTab(tabID string) []HistoryMessage {
+	if a.remoteTargetSelected() {
+		if page, ok := a.remoteHistoryPage(tabID); ok {
+			return page.Messages
+		}
+		return []HistoryMessage{}
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -4488,6 +4702,24 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 }
 
 func (a *App) HistoryCheckpointTurnsForTab(tabID string) []int {
+	if a.remoteTargetSelected() {
+		page, ok := a.remoteHistoryPage(tabID)
+		if !ok {
+			return []int{}
+		}
+		turns := make([]int, 0)
+		for _, message := range page.Messages {
+			if message.Role != "user" {
+				continue
+			}
+			turn := -1
+			if message.CheckpointTurn != nil {
+				turn = *message.CheckpointTurn
+			}
+			turns = append(turns, turn)
+		}
+		return turns
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -5251,6 +5483,13 @@ func (a *App) ContextUsage() ContextInfo {
 }
 
 func (a *App) ContextUsageForTab(tabID string) ContextInfo {
+	if a.remoteTargetSelected() {
+		view, err := a.remoteContextV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("ContextUsageForTab", err)
+		}
+		return view
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -5307,6 +5546,13 @@ func (a *App) Balance() BalanceInfo {
 }
 
 func (a *App) BalanceForTab(tabID string) BalanceInfo {
+	if a.remoteTargetSelected() {
+		view, err := a.remoteBalanceV1(tabID)
+		if err != nil {
+			view.Err = err.Error()
+		}
+		return view
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return BalanceInfo{}
@@ -5334,12 +5580,28 @@ type JobView struct {
 // Jobs returns the still-running background jobs for the status bar. It refreshes
 // on demand (mount, turn end, and on each notice the frontend receives).
 func (a *App) Jobs() []JobView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteJobsV1("")
+		if err != nil {
+			logRemoteBridgeError("Jobs", err)
+			return []JobView{}
+		}
+		return out
+	}
 	out := []JobView{}
 	ctrl := a.ctrlByTabID("")
 	return a.jobsForCtrl(ctrl, out)
 }
 
 func (a *App) JobsForTab(tabID string) []JobView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteJobsV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("JobsForTab", err)
+			return []JobView{}
+		}
+		return out
+	}
 	out := []JobView{}
 	ctrl := a.ctrlByTabID(tabID)
 	return a.jobsForCtrl(ctrl, out)
@@ -5462,6 +5724,12 @@ func (a *App) imageInputEnabledForTab(tabID string) bool {
 }
 
 func (a *App) MetaForTab(tabID string) Meta {
+	if a.remoteTargetSelected() {
+		if meta, ok := a.remoteMeta(tabID); ok {
+			return meta
+		}
+		return Meta{EventChannel: eventChannel}
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	snap := snapshotTabRuntimeLocked(tab)
@@ -5572,6 +5840,13 @@ func (a *App) AutoResearchCurrent() AutoResearchStatusView {
 }
 
 func (a *App) AutoResearchStatus(tabID string) AutoResearchStatusView {
+	if a.remoteTargetSelected() {
+		view, err := a.remoteResearchStatusV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("AutoResearchStatus", err)
+		}
+		return view
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return AutoResearchStatusView{OpenCriteria: []AutoResearchCriterionView{}}
@@ -5584,6 +5859,14 @@ func (a *App) AutoResearchStatus(tabID string) AutoResearchStatusView {
 }
 
 func (a *App) AutoResearchList(tabID string) []AutoResearchStatusView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteResearchListV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("AutoResearchList", err)
+			return []AutoResearchStatusView{}
+		}
+		return out
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return []AutoResearchStatusView{}
@@ -5600,6 +5883,14 @@ func (a *App) AutoResearchList(tabID string) []AutoResearchStatusView {
 }
 
 func (a *App) AutoResearchFindings(tabID string, limit int) []AutoResearchFindingView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteResearchFindingsV1(tabID, limit)
+		if err != nil {
+			logRemoteBridgeError("AutoResearchFindings", err)
+			return []AutoResearchFindingView{}
+		}
+		return out
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return []AutoResearchFindingView{}
@@ -5625,6 +5916,9 @@ func (a *App) AutoResearchFindings(tabID string, limit int) []AutoResearchFindin
 }
 
 func (a *App) AutoResearchOpenTask(tabID string) error {
+	if a.remoteTargetSelected() {
+		return ErrRemoteLocalPathOperation
+	}
 	status := a.AutoResearchStatus(tabID)
 	if strings.TrimSpace(status.TaskPath) == "" {
 		return os.ErrInvalid
@@ -5633,6 +5927,9 @@ func (a *App) AutoResearchOpenTask(tabID string) error {
 }
 
 func (a *App) AutoResearchRecordEvidence(tabID, criterionID string, input AutoResearchEvidenceView) error {
+	if a.remoteTargetSelected() {
+		return a.remoteRecordResearchEvidenceV1(tabID, criterionID, input)
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return os.ErrInvalid
@@ -5653,6 +5950,12 @@ func (a *App) SetGoal(goal string) {
 }
 
 func (a *App) SetGoalForTab(tabID, goal string) {
+	if a.remoteTargetSelected() {
+		if err := a.remoteSetGoalV1(tabID, goal); err != nil {
+			logRemoteBridgeError("SetGoalForTab", err)
+		}
+		return
+	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return
@@ -5711,6 +6014,13 @@ func (a *App) ClearGoalForTab(tabID string) {
 // ResumeGoalForTab re-enters a blocked or stopped Goal while preserving its
 // delivery scope and persisted verification checkpoint.
 func (a *App) ResumeGoalForTab(tabID string) bool {
+	if a.remoteTargetSelected() {
+		resumed, err := a.remoteResumeGoalV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("ResumeGoalForTab", err)
+		}
+		return resumed
+	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return false
@@ -5753,6 +6063,19 @@ func (a *App) SetToolApprovalMode(mode string) {
 // SetToolApprovalModeForTab returns the pending approval prompt ids the
 // switch auto-allowed (see SetModeForTab).
 func (a *App) SetToolApprovalModeForTab(tabID, mode string) []string {
+	if a.remoteTargetSelected() {
+		mode = normalizeToolApprovalMode(mode)
+		result, err := a.remoteSetProfileV1(tabID, runtimeapi.ProfilePatch{ToolApprovalMode: &mode})
+		if err != nil {
+			logRemoteBridgeError("SetToolApprovalModeForTab", err)
+			return nil
+		}
+		ids := make([]string, len(result.AutoResolvedPromptIDs))
+		for index, id := range result.AutoResolvedPromptIDs {
+			ids[index] = string(id)
+		}
+		return ids
+	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return nil
@@ -5795,6 +6118,14 @@ type CommandInfo struct {
 // custom commands (.reasonix/commands), and MCP prompts — for the composer's "/"
 // autocomplete menu.
 func (a *App) Commands() []CommandInfo {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteCommandsV1("")
+		if err != nil {
+			logRemoteBridgeError("Commands", err)
+			return []CommandInfo{}
+		}
+		return out
+	}
 	out := []CommandInfo{
 		{Name: "new", Description: i18n.M.CmdNew, Kind: "builtin", Group: "actions"},
 		{Name: "clear", Description: i18n.M.CmdClear, Kind: "builtin", Group: "actions"},
@@ -5869,6 +6200,13 @@ type SlashArgsResult struct {
 // /skill, /hooks) for the composer — the same logic the chat TUI uses. Empty
 // Items means the input has no structured arguments to complete.
 func (a *App) SlashArgs(input string) SlashArgsResult {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteSlashArgsV1(input)
+		if err != nil {
+			logRemoteBridgeError("SlashArgs", err)
+		}
+		return out
+	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	model := ""
@@ -6071,6 +6409,13 @@ type SkillRootView struct {
 // Capabilities projects the session's MCP servers (connected + failed) and skills
 // for the MCP & Skills drawer. Non-nil slices so the frontend can map over them.
 func (a *App) Capabilities() CapabilitiesView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteCapabilitiesV1("")
+		if err != nil {
+			logRemoteBridgeError("Capabilities", err)
+		}
+		return out
+	}
 	skills := a.SkillsSettings()
 	return CapabilitiesView{
 		Servers:    a.MCPServers(),
@@ -6083,12 +6428,23 @@ func (a *App) Capabilities() CapabilitiesView {
 // MCPServers returns only MCP server status for settings pages that do not need
 // skill discovery.
 func (a *App) MCPServers() []ServerView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteMCPServersV1("")
+		if err != nil {
+			logRemoteBridgeError("MCPServers", err)
+			return []ServerView{}
+		}
+		return out
+	}
 	return a.mcpServersView()
 }
 
 // InspectMCPTrust performs only initialize/tools-list when the server is not
 // already connected. No MCP tool is invoked.
 func (a *App) InspectMCPTrust(name string) (MCPTrustInspectionView, error) {
+	if a.remoteTargetSelected() {
+		return MCPTrustInspectionView{}, runtimeapi.Unavailable(runtimeapi.CapabilityHostConfig, "Remote V1 exposes only the safe MCP catalog summary")
+	}
 	ctrl := a.activeCtrl()
 	if ctrl == nil {
 		return MCPTrustInspectionView{}, fmt.Errorf("no active session")
@@ -6124,6 +6480,9 @@ func (a *App) InspectMCPTrust(name string) (MCPTrustInspectionView, error) {
 // SetMCPTrust grants session/workspace trust or revokes it. The receipt remains
 // host-local and never modifies the project MCP configuration.
 func (a *App) SetMCPTrust(name, decision string) error {
+	if err := a.rejectRemoteOutOfScope("SetMCPTrust"); err != nil {
+		return err
+	}
 	a.runtimeRebuildMu.Lock()
 	defer a.runtimeRebuildMu.Unlock()
 
@@ -6266,6 +6625,9 @@ func (a *App) mcpControllersSharingHost(host *plugin.Host, name string, preferre
 }
 
 func (a *App) RefreshMCPCatalog() (MCPCatalogRefreshView, error) {
+	if a.remoteTargetSelected() {
+		return MCPCatalogRefreshView{}, runtimeapi.Unavailable(runtimeapi.CapabilityHostConfig, "Remote MCP catalog refresh is owned by the Host")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	result, err := (mcpcatalog.Loader{CacheDir: config.CacheDir()}).Load(ctx, true)
@@ -6372,6 +6734,13 @@ func mcpToolTrustChangeViews(changes []mcptrust.ToolChange) []MCPToolTrustChange
 
 // SkillsSettings returns the skills management snapshot without MCP status.
 func (a *App) SkillsSettings() SkillsSettingsView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteSkillsV1("")
+		if err != nil {
+			logRemoteBridgeError("SkillsSettings", err)
+		}
+		return out
+	}
 	out := SkillsSettingsView{Skills: []SkillView{}, SkillRoots: []SkillRootView{}}
 	a.mu.RLock()
 	tab := a.activeTabLocked()
@@ -6447,6 +6816,11 @@ func subagentOverrideFor(overrides map[string]string, name string) string {
 // allowlist (agent.AlwaysHiddenSubagentTools) are left out entirely — they'd
 // be a selectable no-op otherwise.
 func (a *App) AvailableSubagentTools() []ToolView {
+	if a.remoteTargetSelected() {
+		// SessionCatalog intentionally excludes tool schemas. Never substitute
+		// the Desktop's local builtin registry for the selected Host.
+		return []ToolView{}
+	}
 	hidden := map[string]bool{}
 	for _, name := range agent.AlwaysHiddenSubagentTools() {
 		hidden[name] = true
@@ -6913,6 +7287,9 @@ func rootActive(roots []SkillRootView, path string) bool {
 // PickSkillFolder opens a directory picker for adding custom skill roots. It only
 // returns a path; AddSkillPath performs normalization and writes config.
 func (a *App) PickSkillFolder() (string, error) {
+	if err := a.rejectRemoteOutOfScope("PickSkillFolder"); err != nil {
+		return "", err
+	}
 	if a.ctx == nil {
 		return "", nil
 	}
@@ -6931,6 +7308,9 @@ func (a *App) PickSkillFolder() (string, error) {
 // source. It returns the selected directory path; plugin install/plan performs
 // manifest validation and decides whether to copy or link the package.
 func (a *App) PickPluginFolder() (string, error) {
+	if err := a.rejectRemoteOutOfScope("PickPluginFolder"); err != nil {
+		return "", err
+	}
 	if a.ctx == nil {
 		return "", nil
 	}
@@ -6951,6 +7331,9 @@ func (a *App) PickPluginFolder() (string, error) {
 // AddSkillPath adds a custom skill root to the user config and rebuilds the
 // controller so the skills index and slash menu reflect it immediately.
 func (a *App) AddSkillPath(path string) error {
+	if err := a.rejectRemoteOutOfScope("AddSkillPath"); err != nil {
+		return err
+	}
 	path = normalizeSkillPath(path)
 	workspaceRoot := a.activeWorkspaceRoot()
 	err := a.applyConfigChange(func(c *config.Config) error {
@@ -6968,6 +7351,9 @@ func (a *App) AddSkillPath(path string) error {
 // RemoveSkillPath removes a skill source from the user config and rebuilds. For
 // convention roots, it records a pseudo-delete in excluded_paths.
 func (a *App) RemoveSkillPath(path string) error {
+	if err := a.rejectRemoteOutOfScope("RemoveSkillPath"); err != nil {
+		return err
+	}
 	path = normalizeSkillPath(path)
 	err := a.applyConfigChange(func(c *config.Config) error {
 		removed, err := c.RemoveSkillPath(path)
@@ -6985,6 +7371,9 @@ func (a *App) RemoveSkillPath(path string) error {
 // RefreshSkills rebuilds the controller without changing config, reloading skill
 // discovery, the system prompt index, and slash completions.
 func (a *App) RefreshSkills() error {
+	if err := a.rejectRemoteOutOfScope("RefreshSkills"); err != nil {
+		return err
+	}
 	a.invalidateSkillRootsCache()
 	if err := a.rebuild(); err != nil {
 		// The skill cache is already invalidated; refresh the runtime once the
@@ -7000,6 +7389,9 @@ func (a *App) RefreshSkills() error {
 // ReloadCommands rescans command directories and hot-swaps without restarting
 // the controller — no MCP disconnect, no hook rerun.
 func (a *App) ReloadCommands() error {
+	if err := a.rejectRemoteOutOfScope("ReloadCommands"); err != nil {
+		return err
+	}
 	if a.ctx == nil {
 		return nil
 	}
@@ -7016,6 +7408,9 @@ func (a *App) ReloadCommands() error {
 // SetSkillEnabled persists a skill toggle and rebuilds the controller so the
 // prompt index, slash menu, and skill tools reflect it immediately.
 func (a *App) SetSkillEnabled(name string, enabled bool) error {
+	if err := a.rejectRemoteOutOfScope("SetSkillEnabled"); err != nil {
+		return err
+	}
 	err := a.applyConfigChange(func(c *config.Config) error {
 		return c.SetSkillEnabled(name, enabled)
 	})
@@ -7127,6 +7522,9 @@ type MCPServerInput struct {
 // AddMCPServer connects a server live and persists it to config (Customize → MCP →
 // Add). Returns the number of tools it exposed.
 func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
+	if err := a.rejectRemoteOutOfScope("AddMCPServer"); err != nil {
+		return 0, err
+	}
 	ctrl := a.activeCtrl()
 	if ctrl == nil {
 		return 0, fmt.Errorf("no active session")
@@ -7160,6 +7558,9 @@ func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
 // UpdateMCPServer edits a persisted external MCP server. The name is the stable
 // identity; callers must remove + add if they want to rename a server.
 func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
+	if err := a.rejectRemoteOutOfScope("UpdateMCPServer"); err != nil {
+		return err
+	}
 	ctrl := a.activeCtrl()
 	if ctrl == nil {
 		return fmt.Errorf("no active session")
@@ -7240,6 +7641,9 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 
 // RemoveMCPServer disconnects a live server and drops it from config (the row's ✕).
 func (a *App) RemoveMCPServer(name string) error {
+	if err := a.rejectRemoteOutOfScope("RemoveMCPServer"); err != nil {
+		return err
+	}
 	tab, ctrl := a.activeTabAndCtrl()
 	if tab == nil || ctrl == nil {
 		return fmt.Errorf("no active session")
@@ -7272,6 +7676,9 @@ func (a *App) RemoveMCPServer(name string) error {
 // a fresh handshake and tool re-registration), then reconnects.  Failures are
 // recorded on the Host so the UI can render them.
 func (a *App) ReconnectMCPServer(name string) error {
+	if err := a.rejectRemoteOutOfScope("ReconnectMCPServer"); err != nil {
+		return err
+	}
 	tab, ctrl := a.activeTabAndCtrl()
 	if tab == nil || ctrl == nil {
 		return fmt.Errorf("no active session")
@@ -7308,6 +7715,9 @@ func (a *App) ReconnectMCPServer(name string) error {
 // clears the current session's cached connection failure. It does not remove the
 // server itself or try to sign the user out of the third-party browser session.
 func (a *App) ClearMCPServerAuthentication(name string) error {
+	if err := a.rejectRemoteOutOfScope("ClearMCPServerAuthentication"); err != nil {
+		return err
+	}
 	tab, ctrl := a.activeTabAndCtrl()
 	if tab == nil || ctrl == nil {
 		return fmt.Errorf("no active session")
@@ -7332,6 +7742,9 @@ func (a *App) ClearMCPServerAuthentication(name string) error {
 // for this session, off disconnects it (config untouched either way — like Claude
 // Code's per-conversation enable/disable, it resets on the next session start).
 func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
+	if err := a.rejectRemoteOutOfScope("SetMCPServerEnabled"); err != nil {
+		return err
+	}
 	a.mu.RLock()
 	tab := a.activeTabLocked()
 	var ctrl control.SessionAPI
@@ -7415,6 +7828,9 @@ func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (
 // SetMCPServerTier is kept for old desktop bindings. New config writes drop the
 // retired tier field.
 func (a *App) SetMCPServerTier(name, tier string) error {
+	if err := a.rejectRemoteOutOfScope("SetMCPServerTier"); err != nil {
+		return err
+	}
 	tier = normalizeMCPTier(tier)
 	tab, ctrl := a.activeTabAndCtrl()
 	if tab != nil && controllerHasActiveRuntimeWork(ctrl) {
@@ -7807,6 +8223,14 @@ func (a *App) Models() []ModelInfo {
 }
 
 func (a *App) ModelsForTab(tabID string) []ModelInfo {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteModelsV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("ModelsForTab", err)
+			return []ModelInfo{}
+		}
+		return out
+	}
 	a.mu.RLock()
 	curModel := ""
 	workspaceRoot := ""
@@ -7975,6 +8399,13 @@ func (a *App) SetModel(name string) error {
 }
 
 func (a *App) SetModelForTab(tabID, name string) error {
+	if a.remoteTargetSelected() {
+		if strings.TrimSpace(name) == "" {
+			return nil
+		}
+		_, err := a.remoteSetProfileV1(tabID, runtimeapi.ProfilePatch{Model: &name})
+		return err
+	}
 	if a.ctx == nil || name == "" {
 		return nil
 	}
@@ -8132,6 +8563,13 @@ func (a *App) Effort() EffortInfo {
 }
 
 func (a *App) EffortForTab(tabID string) EffortInfo {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteEffortV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("EffortForTab", err)
+		}
+		return out
+	}
 	entry, err := a.currentProviderEntryForTab(tabID)
 	if err != nil {
 		return EffortInfo{Current: "auto", Levels: []string{}}
@@ -8152,6 +8590,11 @@ func (a *App) SetEffort(level string) error {
 }
 
 func (a *App) SetEffortForTab(tabID, level string) error {
+	if a.remoteTargetSelected() {
+		level = strings.TrimSpace(level)
+		_, err := a.remoteSetProfileV1(tabID, runtimeapi.ProfilePatch{Effort: &level})
+		return err
+	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		if strings.TrimSpace(tabID) == "" {
@@ -8289,6 +8732,11 @@ func (a *App) SetTokenMode(mode string) error {
 }
 
 func (a *App) SetTokenModeForTab(tabID, mode string) error {
+	if a.remoteTargetSelected() {
+		mode = strings.TrimSpace(mode)
+		_, err := a.remoteSetProfileV1(tabID, runtimeapi.ProfilePatch{TokenMode: &mode})
+		return err
+	}
 	mode = boot.NormalizeTokenMode(mode)
 	tab := a.tabByID(tabID)
 	if tab == nil {
@@ -8648,6 +9096,14 @@ func (a *App) ListDir(rel string) []DirEntry {
 
 // ListDirForTab is the tab-scoped variant used by multi-tab frontend surfaces.
 func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteListFilesV1(tabID, rel)
+		if err != nil {
+			logRemoteBridgeError("ListDirForTab", err)
+			return []DirEntry{}
+		}
+		return out
+	}
 	root, ctrl, ok := a.workspaceTargetForTab(tabID)
 	if !ok {
 		return []DirEntry{}
@@ -8701,6 +9157,14 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 
 // SearchFileRefsForTab is the tab-scoped variant used by multi-tab frontend surfaces.
 func (a *App) SearchFileRefsForTab(tabID, query string) []DirEntry {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteSearchFilesV1(tabID, query)
+		if err != nil {
+			logRemoteBridgeError("SearchFileRefsForTab", err)
+			return []DirEntry{}
+		}
+		return out
+	}
 	root, ctrl, ok := a.workspaceTargetForTab(tabID)
 	if !ok {
 		return []DirEntry{}
@@ -8772,6 +9236,9 @@ func (a *App) ReadFile(rel string) FilePreview {
 
 // ReadFileForTab returns a preview resolved against the requested tab.
 func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
+	if a.remoteTargetSelected() {
+		return a.remoteReadFileV1(tabID, rel)
+	}
 	out := FilePreview{Path: rel}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
@@ -8863,6 +9330,9 @@ func (a *App) OpenWorkspacePath(rel string) error {
 
 // OpenWorkspacePathForTab opens a path resolved against the requested tab.
 func (a *App) OpenWorkspacePathForTab(tabID, rel string) error {
+	if a.remoteTargetSelected() {
+		return ErrRemoteLocalPathOperation
+	}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
 		return os.ErrInvalid
@@ -8878,6 +9348,9 @@ func (a *App) RevealWorkspacePath(rel string) error {
 
 // RevealWorkspacePathForTab reveals a path resolved against the requested tab.
 func (a *App) RevealWorkspacePathForTab(tabID, rel string) error {
+	if a.remoteTargetSelected() {
+		return ErrRemoteLocalPathOperation
+	}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
 		return os.ErrInvalid
@@ -8887,6 +9360,9 @@ func (a *App) RevealWorkspacePathForTab(tabID, rel string) error {
 
 // RevealPath shows an arbitrary absolute path in the native file manager.
 func (a *App) RevealPath(path string) error {
+	if a.remoteTargetSelected() {
+		return ErrRemoteLocalPathOperation
+	}
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return os.ErrInvalid
@@ -9059,6 +9535,9 @@ func (a *App) withActiveWorkspaceDo(fn func() error) error {
 // SavePastedImage stores a browser clipboard image data URL under the active
 // tab's workspace .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedImage(dataURL string) (string, error) {
+	if err := a.rejectRemoteDeferred("SavePastedImage"); err != nil {
+		return "", err
+	}
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveImageDataURL(dataURL)
 	})
@@ -9067,6 +9546,9 @@ func (a *App) SavePastedImage(dataURL string) (string, error) {
 // SaveClipboardImage reads the native OS clipboard image under the active tab's
 // workspace .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SaveClipboardImage() (string, error) {
+	if err := a.rejectRemoteDeferred("SaveClipboardImage"); err != nil {
+		return "", err
+	}
 	return a.withActiveWorkspace(control.SaveClipboardImage)
 }
 
@@ -9074,6 +9556,9 @@ func (a *App) SaveClipboardImage() (string, error) {
 // as a data URL but not a real path) under the active tab's workspace
 // .reasonix/attachments and returns the relative @-reference path.
 func (a *App) SavePastedFile(name, dataURL string) (string, error) {
+	if err := a.rejectRemoteDeferred("SavePastedFile"); err != nil {
+		return "", err
+	}
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.SaveAttachmentDataURL(name, dataURL)
 	})
@@ -9152,6 +9637,9 @@ func exportFileFilters(mimeType, ext string) []runtime.FileFilter {
 
 // AttachmentDataURL returns a safe data URL for a stored image attachment.
 func (a *App) AttachmentDataURL(path string) (string, error) {
+	if err := a.rejectRemoteDeferred("AttachmentDataURL"); err != nil {
+		return "", err
+	}
 	return a.withActiveWorkspace(func() (string, error) {
 		return control.ImageDataURL(path)
 	})
@@ -9175,6 +9663,9 @@ type DroppedItem struct {
 // outside the workspace are registered as current-session folder references;
 // files outside the workspace are copied into .reasonix/attachments.
 func (a *App) AttachDropped(path string) (DroppedItem, error) {
+	if err := a.rejectRemoteDeferred("AttachDropped"); err != nil {
+		return DroppedItem{}, err
+	}
 	var item DroppedItem
 	err := a.withActiveWorkspaceDo(func() error {
 		info, err := os.Lstat(path)
@@ -9304,6 +9795,13 @@ var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memor
 // active/archived auto-memories, and the writable scopes. Read-only; mutations
 // go through Remember / SaveDoc.
 func (a *App) Memory() MemoryView {
+	if a.remoteTargetSelected() {
+		view, err := a.remoteMemoryV1("")
+		if err != nil {
+			logRemoteBridgeError("Memory", err)
+		}
+		return view
+	}
 	return a.memoryForCtrl(nil, true)
 }
 
@@ -9314,6 +9812,13 @@ func (a *App) Memory() MemoryView {
 // An empty tabID is treated as "no tab specified" and falls back to the
 // active tab for backward compatibility.
 func (a *App) MemoryForTab(tabID string) MemoryView {
+	if a.remoteTargetSelected() {
+		view, err := a.remoteMemoryV1(tabID)
+		if err != nil {
+			logRemoteBridgeError("MemoryForTab", err)
+		}
+		return view
+	}
 	if tabID == "" {
 		return a.memoryForCtrl(nil, true)
 	}
@@ -9370,10 +9875,16 @@ func (a *App) memoryForCtrl(ctrl control.SessionAPI, fallback bool) MemoryView {
 // panel's explicit "remember" action, equivalent to typing "/remember <note>".
 // An unknown scope falls back to project. Returns the file written.
 func (a *App) Remember(scope, note string) (string, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteRememberV1("", scope, note)
+	}
 	return a.rememberForCtrl(nil, scope, note, true)
 }
 
 func (a *App) RememberForTab(tabID, scope, note string) (string, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteRememberV1(tabID, scope, note)
+	}
 	if tabID == "" {
 		return a.rememberForCtrl(nil, scope, note, true)
 	}
@@ -9398,10 +9909,16 @@ func (a *App) rememberForCtrl(ctrl control.SessionAPI, scope, note string, fallb
 // Forget deletes a saved auto-memory by name — the panel's delete action for a
 // fact the model owns. A no-op when no controller is attached.
 func (a *App) Forget(name string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteForgetV1("", name)
+	}
 	return a.forgetForCtrl(nil, name, true)
 }
 
 func (a *App) ForgetForTab(tabID, name string) error {
+	if a.remoteTargetSelected() {
+		return a.remoteForgetV1(tabID, name)
+	}
 	if tabID == "" {
 		return a.forgetForCtrl(nil, name, true)
 	}
@@ -9426,10 +9943,16 @@ func (a *App) forgetForCtrl(ctrl control.SessionAPI, name string, fallback bool)
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
 // validates path against the recognized memory files. Returns the file written.
 func (a *App) SaveDoc(path, body string) (string, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteSaveDocV1("", path, body)
+	}
 	return a.saveDocForCtrl(nil, path, body, true)
 }
 
 func (a *App) SaveDocForTab(tabID, path, body string) (string, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteSaveDocV1(tabID, path, body)
+	}
 	if tabID == "" {
 		return a.saveDocForCtrl(nil, path, body, true)
 	}
@@ -9541,6 +10064,9 @@ func (a *App) NeedsOnboarding() bool {
 // ConnectKey validates apiKey against the balance endpoint, persists it to
 // Reasonix's global .env, and rebuilds the controller so the new key takes effect.
 func (a *App) ConnectKey(apiKey string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("ConnectKey"); err != nil {
+		return "", err
+	}
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return "", fmt.Errorf("key is required")

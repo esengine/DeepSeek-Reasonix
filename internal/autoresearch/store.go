@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,6 +21,8 @@ import (
 
 var safeTaskID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 var explicitTaskPath = regexp.MustCompile(`\.reasonix/autoresearch/([A-Za-z0-9][A-Za-z0-9._-]*)/?`)
+
+const maxBoundedReadBytes = 8 << 20
 
 type Store struct {
 	workspaceRoot string
@@ -116,12 +119,35 @@ func (s *Store) CreateTask(goal string, opts CreateOptions) (*Task, error) {
 }
 
 func (s *Store) ListSummaries() ([]Summary, error) {
-	entries, err := os.ReadDir(s.root)
+	return s.ListSummariesLimit(0)
+}
+
+// ListSummariesLimit bounds directory enumeration for remote/catalog callers.
+// A zero limit preserves the historical all-items behavior used by local
+// maintenance flows.
+func (s *Store) ListSummariesLimit(limit int) ([]Summary, error) {
+	directory, err := os.Open(s.root)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []Summary{}, nil
 		}
 		return nil, fmt.Errorf("autoresearch: list tasks: %w", err)
+	}
+	defer directory.Close()
+	readLimit := -1
+	if limit > 0 {
+		readLimit = limit
+	}
+	entries, err := directory.ReadDir(readLimit)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("autoresearch: list tasks: %w", err)
+	}
+	// ReadDir(n) may return exactly n entries with a nil error even when more
+	// entries remain. Treat the boundary conservatively as overflow so a
+	// remote/catalog caller never mistakes a partial directory snapshot for a
+	// complete one. Callers that need at most N tasks pass N+1 here.
+	if limit > 0 && len(entries) >= limit {
+		return nil, fmt.Errorf("autoresearch: list tasks: bounded item limit exceeded")
 	}
 	ids := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -136,8 +162,16 @@ func (s *Store) ListSummaries() ([]Summary, error) {
 	}
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	out := make([]Summary, 0, len(ids))
+	remainingBytes := int64(maxBoundedReadBytes)
 	for _, id := range ids {
-		summary, err := s.Summary(id)
+		var summary *Summary
+		if limit > 0 {
+			var used int64
+			summary, used, err = s.summaryBounded(id, remainingBytes)
+			remainingBytes -= used
+		} else {
+			summary, err = s.Summary(id)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -258,6 +292,20 @@ func (s *Store) RecordEvidence(taskID, criterionID string, f Finding) error {
 }
 
 func (s *Store) Findings(taskID string, limit int) ([]Finding, error) {
+	return s.findingsBounded(taskID, limit, 0)
+}
+
+// FindingsBounded is the Remote/catalog read path. It preserves the existing
+// newest-first and exact-limit semantics while refusing to read an oversized
+// source tail. Local callers of Findings retain their historical behavior.
+func (s *Store) FindingsBounded(taskID string, limit int, maxBytes int64) ([]Finding, error) {
+	if limit <= 0 || maxBytes <= 0 {
+		return nil, errors.New("autoresearch: bounded findings require positive item and byte limits")
+	}
+	return s.findingsBounded(taskID, limit, maxBytes)
+}
+
+func (s *Store) findingsBounded(taskID string, limit int, maxBytes int64) ([]Finding, error) {
 	storeRoot, taskRel, err := s.openTaskRoot(taskID)
 	if err != nil {
 		return nil, err
@@ -266,7 +314,7 @@ func (s *Store) Findings(taskID string, limit int) ([]Finding, error) {
 	path := filepath.Join(taskRel, "state", "findings.jsonl")
 	// Bounded requests (the newest-N views) read only the file tail; limit 0
 	// keeps the full scan because accepted-evidence lookups need every entry.
-	lines, err := tailJSONLLines(storeRoot, path, limit)
+	lines, err := tailJSONLLinesBounded(storeRoot, path, limit, maxBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -642,7 +690,14 @@ func readJSONL(root *os.Root, path string, each func([]byte) error) error {
 // rescan an append-only log that grows for the life of a task. limit <= 0
 // reads the whole file (legacy unbounded behavior).
 func tailJSONLLines(root *os.Root, path string, limit int) ([][]byte, error) {
+	return tailJSONLLinesBounded(root, path, limit, 0)
+}
+
+func tailJSONLLinesBounded(root *os.Root, path string, limit int, maxBytes int64) ([][]byte, error) {
 	if limit <= 0 {
+		if maxBytes > 0 {
+			return nil, errors.New("autoresearch: bounded JSONL read requires a positive item limit")
+		}
 		var lines [][]byte
 		if err := readJSONL(root, path, func(data []byte) error {
 			line := make([]byte, len(data))
@@ -677,6 +732,9 @@ func tailJSONLLines(root *os.Root, path string, limit int) ([][]byte, error) {
 		chunk := make([]byte, readLen)
 		if _, err := f.ReadAt(chunk, off); err != nil {
 			return nil, fmt.Errorf("autoresearch: read %s: %w", path, err)
+		}
+		if maxBytes > 0 && int64(len(buf)+len(chunk)) > maxBytes {
+			return nil, fmt.Errorf("autoresearch: read %s: bounded tail exceeds byte limit", path)
 		}
 		buf = append(chunk, buf...)
 		// Stop once the buffered tail holds enough complete lines. Count

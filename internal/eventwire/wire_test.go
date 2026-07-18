@@ -55,9 +55,16 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 }
 
 func TestKindNamesComplete(t *testing.T) {
+	names := KindNames()
+	if len(names) != int(event.KindCount) {
+		t.Fatalf("KindNames length = %d, want %d", len(names), event.KindCount)
+	}
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
 			t.Fatalf("kind %d has no wire name", k)
+		}
+		if names[k] != ToWire(event.Event{Kind: k}).Kind {
+			t.Fatalf("KindNames[%d] = %q, want %q", k, names[k], ToWire(event.Event{Kind: k}).Kind)
 		}
 	}
 }

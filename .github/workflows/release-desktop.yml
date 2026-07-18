@@ -44,11 +44,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'canary' && inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Verify coordinated release source commit
+        if: github.event_name != 'workflow_dispatch' || inputs.channel != 'canary'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_TAG: ${{ inputs.tag }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$IN_TAG"
+          fi
+          case "$tag" in
+            desktop-v*) ;;
+            *) echo "::error::desktop stable release requires a desktop-v* tag"; exit 2 ;;
+          esac
+          ./scripts/verify-coordinated-release-tags.sh "$tag" "$(git rev-parse HEAD)"
 
       - name: Cache hit guard
         run: ./scripts/cache-guard.sh
@@ -79,6 +97,24 @@ jobs:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'canary' && inputs.tag || github.ref }}
+
+      - name: Verify coordinated release source commit
+        if: github.event_name != 'workflow_dispatch' || inputs.channel != 'canary'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_TAG: ${{ inputs.tag }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$IN_TAG"
+          fi
+          case "$tag" in
+            desktop-v*) ;;
+            *) echo "::error::desktop stable release requires a desktop-v* tag"; exit 2 ;;
+          esac
+          ./scripts/verify-coordinated-release-tags.sh "$tag" "$(git rev-parse HEAD)"
 
       - uses: actions/setup-go@v6
         with:
@@ -167,7 +203,11 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
+        run: |
+          # Stable workflow_dispatch checks out the requested tag after the
+          # event SHA was chosen. Stamp the actual checkout in every artifact.
+          unset GITHUB_SHA
+          scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
 
       # Authenticode-sign the Windows installer through SignPath. Runs BEFORE minisign:
       # the signature rewrites the installer's bytes, so the updater's minisign sig and
@@ -229,6 +269,8 @@ jobs:
     environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') && 'canary' || 'release' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'canary' && inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -298,6 +340,8 @@ jobs:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.channel != 'canary' && inputs.tag || github.ref }}
 
       - name: Resolve version
         id: ver

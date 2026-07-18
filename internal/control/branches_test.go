@@ -57,6 +57,37 @@ func TestBranchAndSwitch(t *testing.T) {
 	}
 }
 
+func TestBranchSessionCopiesExactTipWithoutSwitchingController(t *testing.T) {
+	dir := t.TempDir()
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	exec.Session().Add(provider.Message{Role: provider.RoleUser, Content: "tip prompt"})
+	exec.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: "tip answer"})
+	c := New(Options{Executor: exec, SessionDir: dir, Label: "test"})
+	c.SetSessionPath(agent.NewSessionPath(dir, "test"))
+	if err := c.Snapshot(); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := c.SessionPath()
+	childPath, err := c.BranchSession("remote child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if childPath == sourcePath || c.SessionPath() != sourcePath {
+		t.Fatalf("BranchSession child=%q current=%q source=%q", childPath, c.SessionPath(), sourcePath)
+	}
+	child, err := agent.LoadSession(childPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := child.Snapshot(); len(got) != 3 || got[0].Role != provider.RoleSystem || got[1].Content != "tip prompt" || got[2].Content != "tip answer" {
+		t.Fatalf("BranchSession history = %+v", got)
+	}
+	meta, ok, err := agent.LoadBranchMeta(childPath)
+	if err != nil || !ok || meta.ParentID != agent.BranchID(sourcePath) || meta.ForkTurn != -1 || meta.ForkMessageIndex != 3 {
+		t.Fatalf("BranchSession metadata = %+v ok=%v err=%v", meta, ok, err)
+	}
+}
+
 func TestSwitchBranchRejectsCleanupPending(t *testing.T) {
 	dir := t.TempDir()
 	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)

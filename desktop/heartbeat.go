@@ -820,6 +820,10 @@ func weeksBetween(a, b time.Time) int {
 
 // HeartbeatListTasks returns all heartbeat tasks.
 func (a *App) HeartbeatListTasks() []HeartbeatTask {
+	if err := a.rejectRemoteOutOfScope("HeartbeatListTasks"); err != nil {
+		logRemoteBridgeError("HeartbeatListTasks", err)
+		return []HeartbeatTask{}
+	}
 	if a.heartbeat == nil {
 		return []HeartbeatTask{}
 	}
@@ -828,6 +832,10 @@ func (a *App) HeartbeatListTasks() []HeartbeatTask {
 
 // HeartbeatReloadTasks reloads tasks from disk and returns them.
 func (a *App) HeartbeatReloadTasks() []HeartbeatTask {
+	if err := a.rejectRemoteOutOfScope("HeartbeatReloadTasks"); err != nil {
+		logRemoteBridgeError("HeartbeatReloadTasks", err)
+		return []HeartbeatTask{}
+	}
 	if a.heartbeat == nil {
 		return []HeartbeatTask{}
 	}
@@ -836,6 +844,9 @@ func (a *App) HeartbeatReloadTasks() []HeartbeatTask {
 
 // HeartbeatSaveTasks replaces the full task list and persists it.
 func (a *App) HeartbeatSaveTasks(tasks []HeartbeatTask) error {
+	if err := a.rejectRemoteOutOfScope("HeartbeatSaveTasks"); err != nil {
+		return err
+	}
 	if a.heartbeat == nil {
 		return nil
 	}
@@ -844,6 +855,10 @@ func (a *App) HeartbeatSaveTasks(tasks []HeartbeatTask) error {
 
 // HeartbeatTriggerNow immediately executes the task with the given ID.
 func (a *App) HeartbeatTriggerNow(id string) {
+	if err := a.rejectRemoteOutOfScope("HeartbeatTriggerNow"); err != nil {
+		logRemoteBridgeError("HeartbeatTriggerNow", err)
+		return
+	}
 	if a.heartbeat == nil {
 		return
 	}
@@ -852,6 +867,10 @@ func (a *App) HeartbeatTriggerNow(id string) {
 
 // HeartbeatGenerateID returns a random id for new tasks.
 func (a *App) HeartbeatGenerateID() string {
+	if err := a.rejectRemoteOutOfScope("HeartbeatGenerateID"); err != nil {
+		logRemoteBridgeError("HeartbeatGenerateID", err)
+		return ""
+	}
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
 	b := make([]byte, 12)
 	for i := range b {

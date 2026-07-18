@@ -68,6 +68,9 @@ func editableSubagentProfileScope(raw string) (skill.Scope, error) {
 // must be caught here rather than left to the generic CreateWithContent
 // same-scope-only overwrite check.
 func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) {
+	if err := a.rejectRemoteOutOfScope("CreateSubagentProfile"); err != nil {
+		return "", err
+	}
 	name := strings.TrimSpace(input.Name)
 	desc := strings.TrimSpace(input.Description)
 	if desc == "" {
@@ -144,6 +147,9 @@ func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) 
 // editableSubagentProfile. This is the backend enforcement of the same rule
 // the frontend applies by filtering its list to invocation=manual.
 func (a *App) UpdateSubagentProfile(name, scope string, input SubagentProfileInput) error {
+	if err := a.rejectRemoteOutOfScope("UpdateSubagentProfile"); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name is required")
@@ -213,6 +219,9 @@ func (a *App) UpdateSubagentProfile(name, scope string, input SubagentProfileInp
 // Store.Delete refuses a scope mismatch rather than guessing, so a stale
 // client-side scope fails safely instead of deleting the wrong file.
 func (a *App) DeleteSubagentProfile(name, scope string) error {
+	if err := a.rejectRemoteOutOfScope("DeleteSubagentProfile"); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name is required")
@@ -278,6 +287,9 @@ func (a *App) DeleteSubagentProfile(name, scope string) error {
 // boot path installs (boot.go addBuiltins), and the headless permission gate
 // applies the user's configured deny rules.
 func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("TrySubagentProfile"); err != nil {
+		return "", err
+	}
 	task = strings.TrimSpace(task)
 	if task == "" {
 		return "", fmt.Errorf("task is required")
@@ -375,6 +387,10 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 // CancelTrySubagentProfile aborts the in-flight settings-page try run, if
 // any. The pending TrySubagentProfile call returns its context error.
 func (a *App) CancelTrySubagentProfile() {
+	if err := a.rejectRemoteOutOfScope("CancelTrySubagentProfile"); err != nil {
+		logRemoteBridgeError("CancelTrySubagentProfile", err)
+		return
+	}
 	a.tryRunMu.Lock()
 	cancel := a.tryRunCancel
 	a.tryRunMu.Unlock()

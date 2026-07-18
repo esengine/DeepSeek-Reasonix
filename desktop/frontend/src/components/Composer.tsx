@@ -502,6 +502,7 @@ export function Composer({
   cwd,
   modelLabel,
   imageInputEnabled = true,
+  attachmentsEnabled = true,
   tabId,
   effort,
   onSend,
@@ -555,6 +556,7 @@ export function Composer({
   cwd?: string;
   modelLabel: string;
   imageInputEnabled?: boolean;
+  attachmentsEnabled?: boolean;
   tabId?: string;
   effort?: EffortInfo;
   onSend: (displayText: string, submitText?: string, tabId?: string, structured?: StructuredInvocationSubmit) => void | Promise<void>;
@@ -1754,6 +1756,10 @@ export function Composer({
     });
 
   const attachImageFiles = async (files: File[], sourceDraftKey: string) => {
+    if (!attachmentsEnabled) {
+      showToast(t("composer.remoteAttachmentsUnavailable"), "warn");
+      return;
+    }
     const images = files.filter((f) => f.type.startsWith("image/"));
     if (images.length === 0) return;
     for (const file of images) {
@@ -1778,6 +1784,10 @@ export function Composer({
   // Non-image pastes (PDFs, docs): the clipboard hands us bytes, not a path, so
   // the kernel stores them and we reference the saved path — attached, not ignored.
   const attachOtherFiles = async (files: File[], sourceDraftKey: string) => {
+    if (!attachmentsEnabled) {
+      showToast(t("composer.remoteAttachmentsUnavailable"), "warn");
+      return;
+    }
     const others = files.filter((f) => !f.type.startsWith("image/"));
     if (others.length === 0) return;
     for (const file of others) {
@@ -1805,6 +1815,10 @@ export function Composer({
   };
 
   const attachNativeClipboardImage = async (notifyOnError: boolean, sourceDraftKey: string) => {
+    if (!attachmentsEnabled) {
+      if (notifyOnError) showToast(t("composer.remoteAttachmentsUnavailable"), "warn");
+      return;
+    }
     updatePendingPasteForDraft(sourceDraftKey, 1);
     try {
       const path = await app.SaveClipboardImage();
@@ -1824,6 +1838,11 @@ export function Composer({
   // withholds them from the HTML drop event); the kernel resolves each into a
   // workspace @reference or a stored attachment.
   const attachDroppedPaths = async (paths: string[], sourceDraftKey = activeDraftKeyRef.current) => {
+    if (!attachmentsEnabled) {
+      if (paths.length > 0) showToast(t("composer.remoteAttachmentsUnavailable"), "warn");
+      setDragOver(false);
+      return;
+    }
     setDragOver(false);
     for (const path of paths) {
       updatePendingPasteForDraft(sourceDraftKey, 1);
@@ -1848,7 +1867,7 @@ export function Composer({
 
   useEffect(() => {
     return onFilesDropped((paths) => void attachDroppedPaths(paths, activeDraftKeyRef.current));
-  }, []);
+  }, [attachmentsEnabled]);
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
     clearNativeClipboardPasteTimer();
@@ -2113,6 +2132,10 @@ export function Composer({
     if (files.length === 0) return;
     stopNativeFileDrop(e);
     setDragOver(false);
+    if (!attachmentsEnabled) {
+      showToast(t("composer.remoteAttachmentsUnavailable"), "warn");
+      return;
+    }
     attachFiles(files);
   };
 
@@ -2474,6 +2497,10 @@ export function Composer({
 
   const chooseAttachmentFiles = () => {
     setContentMenuOpen(false);
+    if (!attachmentsEnabled) {
+      showToast(t("composer.remoteAttachmentsUnavailable"), "warn");
+      return;
+    }
     fileInputRef.current?.click();
   };
 
@@ -3016,11 +3043,11 @@ export function Composer({
         align="start"
       >
         <div className="composer-access-menu__section" role="menu" aria-label={t("composer.contentMenuTitle")}>
-          <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={chooseAttachmentFiles}>
+          <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={chooseAttachmentFiles} disabled={!attachmentsEnabled}>
             <FilePlus2 size={16} aria-hidden="true" />
             <span className="composer-access-menu__copy">
               <span className="composer-access-menu__title">{t("composer.contentAddAttachment")}</span>
-              <span className="composer-access-menu__desc">{t("composer.contentAddAttachmentDesc")}</span>
+              <span className="composer-access-menu__desc">{t(attachmentsEnabled ? "composer.contentAddAttachmentDesc" : "composer.remoteAttachmentsUnavailable")}</span>
             </span>
           </button>
           <button type="button" role="menuitem" className="composer-access-menu__item composer-content-menu__item" onClick={() => insertContentTrigger("@")}>

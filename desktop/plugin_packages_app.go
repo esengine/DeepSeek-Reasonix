@@ -101,6 +101,14 @@ type PluginMCPServerView struct {
 }
 
 func (a *App) Plugins() []PluginView {
+	if a.remoteTargetSelected() {
+		out, err := a.remotePluginsV1("")
+		if err != nil {
+			logRemoteBridgeError("Plugins", err)
+			return []PluginView{}
+		}
+		return out
+	}
 	st, err := pluginpkg.LoadState(config.ReasonixHomeDir())
 	if err != nil {
 		return []PluginView{{Error: err.Error()}}
@@ -217,11 +225,17 @@ func applyPluginPackageDetails(view *PluginView, pkg pluginpkg.Package, warnings
 }
 
 func (a *App) PlanPluginInstall(source string, opts PluginInstallOptions) (string, error) {
+	if err := a.rejectRemoteOutOfScope("PlanPluginInstall"); err != nil {
+		return "", err
+	}
 	opts.DryRun = true
 	return a.runPluginInstallSource(source, opts, false)
 }
 
 func (a *App) InstallPlugin(source string, opts PluginInstallOptions) (string, error) {
+	if err := a.rejectRemoteOutOfScope("InstallPlugin"); err != nil {
+		return "", err
+	}
 	if err := a.ensureActiveTabRebuildAllowed("plugins"); err != nil {
 		return "", err
 	}
@@ -240,6 +254,9 @@ func (a *App) InstallPlugin(source string, opts PluginInstallOptions) (string, e
 }
 
 func (a *App) RemovePlugin(name string) error {
+	if err := a.rejectRemoteOutOfScope("RemovePlugin"); err != nil {
+		return err
+	}
 	if err := a.ensureActiveTabRebuildAllowed("plugins"); err != nil {
 		return err
 	}
@@ -268,6 +285,9 @@ func (a *App) RemovePlugin(name string) error {
 }
 
 func (a *App) SetPluginEnabled(name string, enabled bool) error {
+	if err := a.rejectRemoteOutOfScope("SetPluginEnabled"); err != nil {
+		return err
+	}
 	if err := a.ensureActiveTabRebuildAllowed("plugins"); err != nil {
 		return err
 	}
@@ -285,6 +305,9 @@ func (a *App) SetPluginEnabled(name string, enabled bool) error {
 }
 
 func (a *App) UpdatePlugin(name string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("UpdatePlugin"); err != nil {
+		return "", err
+	}
 	name = strings.TrimSpace(name)
 	for _, p := range a.Plugins() {
 		if p.Name == name {
@@ -298,6 +321,9 @@ func (a *App) UpdatePlugin(name string) (string, error) {
 }
 
 func (a *App) PluginDoctor(name string) PluginView {
+	if err := a.rejectRemoteOutOfScope("PluginDoctor"); err != nil {
+		return PluginView{Name: strings.TrimSpace(name), Error: err.Error()}
+	}
 	name = strings.TrimSpace(name)
 	for _, p := range a.Plugins() {
 		if p.Name != name {

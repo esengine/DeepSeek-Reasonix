@@ -69,6 +69,15 @@ func Run(args []string, version string) int {
 	if len(args) > 0 && isDefaultInteractiveFlag(cmd) {
 		cmd = ""
 	}
+	// Remote owns its own lifecycle/config boundary. In particular,
+	// `remote attach --stdio` is an NDJSON protocol process whose stdout must
+	// stay byte-pure and whose Desktop-vs-attach Build ID check must happen
+	// before any Host service observation. Route the whole command group before
+	// legacy migration or config loading so those unrelated startup paths can
+	// neither write protocol output nor mutate Host state.
+	if cmd == "remote" {
+		return dispatchRemoteCommand(args[1:], version)
+	}
 	doctorRepair := isDoctorRepairCommand(args)
 	if shouldMigrateLegacyConfigForCLI(cmd) && !doctorRepair {
 		migrateLegacyConfigForCLI()

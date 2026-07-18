@@ -675,7 +675,11 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan strin
 	if c == nil || c.executor == nil || c.executor.session == nil {
 		return
 	}
-	c.executor.session.Add(provider.Message{Role: provider.RoleUser, Content: c.executor.withTurnPreferences(input), Images: userImages(ctx)})
+	content := c.executor.withTurnPreferences(input)
+	images := userImages(ctx)
+	if !c.executor.ReuseAcceptedTurn(ctx, content, images) {
+		c.executor.session.Add(provider.Message{Role: provider.RoleUser, Content: content, Images: images})
+	}
 	c.executor.session.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 }
 

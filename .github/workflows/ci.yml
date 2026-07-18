@@ -61,6 +61,10 @@ jobs:
       - name: build
         run: go build ./...
 
+      - name: Verify generated Remote protocol contract
+        if: runner.os == 'Linux'
+        run: go run ./cmd/remote-protocol-gen -check
+
       - name: test
         if: runner.os != 'Windows'
         env:

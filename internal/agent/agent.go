@@ -83,6 +83,37 @@ type Asker interface {
 	Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error)
 }
 
+// AcceptedTurnPersistError reports that the crash-safe admission hook failed
+// and whether the canonical user message nevertheless crossed its durable
+// transcript boundary. Callers must never infer this from the error text: a
+// sidecar write can fail after the authoritative transcript was atomically
+// committed, in which case retrying the request would append the user twice.
+type AcceptedTurnPersistError struct {
+	Committed bool
+	Err       error
+}
+
+func (e *AcceptedTurnPersistError) Error() string {
+	if e == nil || e.Err == nil {
+		return "persist accepted user turn"
+	}
+	return e.Err.Error()
+}
+
+func (e *AcceptedTurnPersistError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// AcceptedTurnSemanticCommitted is true only when err explicitly carries a
+// durable transcript commit. Unknown errors remain conservatively retryable.
+func AcceptedTurnSemanticCommitted(err error) bool {
+	var persistErr *AcceptedTurnPersistError
+	return errors.As(err, &persistErr) && persistErr != nil && persistErr.Committed
+}
+
 // callContextKey carries the executing tool call's identity into Execute.
 type callContextKey struct{}
 type parentSessionContextKey struct{}
@@ -354,6 +385,14 @@ type Agent struct {
 	// tool.Previewer (so bash, whose targets are unknowable, is never tracked).
 	// Set via SetPreEditHook.
 	onPreEdit func(diff.Change)
+
+	// acceptedTurnPersist, when non-nil, durably records the canonical user
+	// message immediately after it enters the Session and before the main Agent
+	// provider/tool loop. Input classifiers and memory compilation may already
+	// have run while producing that canonical message. Runtime hosts enable this hook when
+	// acknowledging an accepted Turn requires a crash-safe admission boundary;
+	// ordinary Local controllers leave it nil and retain periodic autosave.
+	acceptedTurnPersist func() error
 
 	// jobs, when non-nil, is the session's background-job manager. executeOne
 	// stamps it onto each tool call's context so the background tools (bash
@@ -804,6 +843,10 @@ func (a *Agent) SetMemoryQueue(q memory.Queue) { a.memQueue = q }
 // controller wires it to its per-session checkpoint store; nil disables capture.
 func (a *Agent) SetPreEditHook(fn func(diff.Change)) { a.onPreEdit = fn }
 
+// SetAcceptedTurnPersistHook installs the optional crash-safe admission hook.
+// Controllers configure it only while idle, before any turn can execute.
+func (a *Agent) SetAcceptedTurnPersistHook(fn func() error) { a.acceptedTurnPersist = fn }
+
 // Session returns the agent's current conversation, useful for persistence
 // hooks that need to read the message log between turns. sessMu serialises this
 // pointer read against SetSession, so a frontend (serve's concurrent /history and
@@ -986,6 +1029,14 @@ func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 // naturally fills up.
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
 	return a.compact(ctx, "manual", instructions, true)
+}
+
+// CompactNowWithCommit is CompactNow with a final, synchronous commit gate.
+// The gate runs after all provider/archive work and immediately before the
+// Session rewrite. Runtime owners use it to linearize completion against an
+// opaque Operation cancellation; nil preserves ordinary Local behavior.
+func (a *Agent) CompactNowWithCommit(ctx context.Context, instructions string, commit func() error) error {
+	return a.compactWithCommit(ctx, "manual", instructions, true, commit)
 }
 
 // Options configures an Agent.
@@ -1382,7 +1433,24 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			}
 		}
 	}
-	a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: userImages(ctx)})
+	images := userImages(ctx)
+	if !a.ReuseAcceptedTurn(ctx, input, images) {
+		acceptedMessageIndex := a.session.Len()
+		a.session.Add(provider.Message{Role: provider.RoleUser, Content: input, Images: images})
+		if a.acceptedTurnPersist != nil {
+			if err := a.acceptedTurnPersist(); err != nil {
+				// No provider/tool side effect has happened. Roll back only when the
+				// authoritative transcript did not commit. A revision/listing sidecar
+				// can fail after the transcript landed; removing that user in memory
+				// would diverge from disk and make an accidental retry duplicate it.
+				if !AcceptedTurnSemanticCommitted(err) {
+					messages := a.session.Snapshot()
+					a.session.Replace(messages[:acceptedMessageIndex])
+				}
+				return fmt.Errorf("persist accepted user turn: %w", err)
+			}
+		}
+	}
 
 	finalReadinessBlocks := 0
 	seenReadinessStates := make(map[string]struct{})

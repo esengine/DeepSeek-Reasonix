@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"os"
 	"path/filepath"
@@ -92,6 +93,14 @@ func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
 }
 
 func main() {
+	// OpenSSH launches the Desktop executable itself as the short-lived
+	// SSH_ASKPASS helper. Handle that capability before config migration,
+	// startup tracking, single-instance setup, Wails, or any other code that
+	// could log, persist, or consume the one-time authentication exchange.
+	if handled, exitCode := RunRemoteAskPassHelper(context.Background(), os.Args[1:], os.Getenv, os.Stdout); handled {
+		os.Exit(exitCode)
+	}
+
 	launch := parseDesktopLaunchArgs(os.Args[1:])
 	if config.SafeModeRequested() {
 		launch.SafeMode = true

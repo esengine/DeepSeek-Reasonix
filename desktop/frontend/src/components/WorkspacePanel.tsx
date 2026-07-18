@@ -181,6 +181,7 @@ export function WorkspacePanel({
   showViewTabs = true,
   workspaceScopeKey: workspaceScopeKeyProp,
   creationMode = false,
+  localPathActionsEnabled = true,
 }: {
   open: boolean;
   tabId?: string;
@@ -203,6 +204,7 @@ export function WorkspacePanel({
   showViewTabs?: boolean;
   workspaceScopeKey?: string;
   creationMode?: boolean;
+  localPathActionsEnabled?: boolean;
 }) {
   const t = useT();
   const workspaceTabId = tabId ?? "";
@@ -1798,11 +1800,11 @@ export function WorkspacePanel({
                       onSelect: () => void addTreeFileToChat(),
                     },
                   ]),
-              {
+              ...(localPathActionsEnabled ? [{
                 icon: <FolderOpen size={14} />,
                 label: t("workspace.revealInFileManager"),
                 onSelect: revealInFileManager,
-              },
+              }] : []),
             ]}
           />
         </FloatingMenu>

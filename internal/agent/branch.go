@@ -18,26 +18,42 @@ import (
 // navigable conversation tree. The conversation itself remains in the .jsonl
 // file; metadata lives beside it at <session>.meta.
 type BranchMeta struct {
-	ID               string    `json:"id"`
-	Name             string    `json:"name,omitempty"`
-	ParentID         string    `json:"parent_id,omitempty"`
-	ForkTurn         int       `json:"fork_turn,omitempty"`
-	ForkMessageIndex int       `json:"fork_message_index,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	Scope            string    `json:"scope,omitempty"`
-	WorkspaceRoot    string    `json:"workspace_root,omitempty"`
-	TopicID          string    `json:"topic_id,omitempty"`
-	TopicTitle       string    `json:"topic_title,omitempty"`
-	CustomTitle      string    `json:"custom_title,omitempty"`
-	Model            string    `json:"model,omitempty"`
-	TokenMode        string    `json:"token_mode,omitempty"`
-	Mode             string    `json:"mode,omitempty"`
-	ToolApprovalMode string    `json:"tool_approval_mode,omitempty"`
-	Goal             string    `json:"goal,omitempty"`
-	Recovered        bool      `json:"recovered,omitempty"`
-	RecoveryReason   string    `json:"recovery_reason,omitempty"`
-	RecoveryDigest   string    `json:"recovery_digest,omitempty"`
+	ID string `json:"id"`
+	// RemoteSessionID is the durable, opaque identity used by Reasonix Remote.
+	// It is intentionally independent from ID, which remains the basename-based
+	// branch identity used by the legacy CLI/Desktop conversation tree. Moving or
+	// renaming a transcript therefore never changes its Remote target.
+	RemoteSessionID string `json:"remote_session_id,omitempty"`
+	// Remote branch ancestry uses opaque protocol identities. ParentID/ForkTurn
+	// remain the local basename/message-index representation for legacy callers.
+	RemoteParentSessionID    string    `json:"remote_parent_session_id,omitempty"`
+	RemoteParentCheckpointID string    `json:"remote_parent_checkpoint_id,omitempty"`
+	Name                     string    `json:"name,omitempty"`
+	ParentID                 string    `json:"parent_id,omitempty"`
+	ForkTurn                 int       `json:"fork_turn,omitempty"`
+	ForkMessageIndex         int       `json:"fork_message_index,omitempty"`
+	CreatedAt                time.Time `json:"created_at"`
+	UpdatedAt                time.Time `json:"updated_at"`
+	Scope                    string    `json:"scope,omitempty"`
+	WorkspaceRoot            string    `json:"workspace_root,omitempty"`
+	TopicID                  string    `json:"topic_id,omitempty"`
+	TopicTitle               string    `json:"topic_title,omitempty"`
+	CustomTitle              string    `json:"custom_title,omitempty"`
+	Model                    string    `json:"model,omitempty"`
+	Effort                   string    `json:"effort,omitempty"`
+	TokenMode                string    `json:"token_mode,omitempty"`
+	Mode                     string    `json:"mode,omitempty"`
+	ToolApprovalMode         string    `json:"tool_approval_mode,omitempty"`
+	// AdditionalDirs and RemoteProfileVersion are daemon-owned recovery data.
+	// Paths are canonical Host paths; they never enter the Remote wire contract.
+	// Version 1 means Model/Effort/Mode/TokenMode/ToolApprovalMode are a fully
+	// resolved Host profile rather than a partial client selection.
+	AdditionalDirs       []string `json:"additional_dirs,omitempty"`
+	RemoteProfileVersion int      `json:"remote_profile_version,omitempty"`
+	Goal                 string   `json:"goal,omitempty"`
+	Recovered            bool     `json:"recovered,omitempty"`
+	RecoveryReason       string   `json:"recovery_reason,omitempty"`
+	RecoveryDigest       string   `json:"recovery_digest,omitempty"`
 	// RecoveryDepth counts how many recovery forks separate this branch from a
 	// normal session (1 = forked from a normal session). SaveRecoveryBranch
 	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot
@@ -172,6 +188,32 @@ func SaveBranchMetaPreserveUpdated(sessionPath string, m BranchMeta) error {
 	return saveBranchMeta(sessionPath, m, false)
 }
 
+// UpdateBranchMetaPreserveUpdated performs an atomic, process-local serialized
+// read/modify/write of a session sidecar without changing its activity time.
+// Shared services such as the Remote catalog use this instead of open-coding a
+// LoadBranchMeta + SaveBranchMeta pair that could lose an autosave revision.
+func UpdateBranchMetaPreserveUpdated(sessionPath string, update func(*BranchMeta) error) (BranchMeta, error) {
+	if sessionPath == "" {
+		return BranchMeta{}, fmt.Errorf("empty session path")
+	}
+	if update == nil {
+		return BranchMeta{}, fmt.Errorf("nil branch meta update")
+	}
+	unlock := lockSessionSavePath(sessionPath)
+	defer unlock()
+	m, err := EnsureBranchMeta(sessionPath)
+	if err != nil {
+		return BranchMeta{}, err
+	}
+	if err := update(&m); err != nil {
+		return BranchMeta{}, err
+	}
+	if err := saveBranchMeta(sessionPath, m, false); err != nil {
+		return BranchMeta{}, err
+	}
+	return m, nil
+}
+
 func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 	metaPath := BranchMetaPath(sessionPath)
 	if metaPath == "" {
@@ -222,6 +264,32 @@ func saveBranchMeta(sessionPath string, m BranchMeta, touchUpdated bool) error {
 func preserveBranchMetaPersistence(next *BranchMeta, existing BranchMeta) {
 	if next == nil {
 		return
+	}
+	// RemoteSessionID is a durable identity, not a caller-owned listing field.
+	// Legacy writers may save a partially populated BranchMeta; once Remote has
+	// assigned an identity, such a write must never erase it. A non-empty
+	// replacement remains possible for Remote's duplicate-sidecar migration.
+	if strings.TrimSpace(existing.RemoteSessionID) != "" && strings.TrimSpace(next.RemoteSessionID) == "" {
+		next.RemoteSessionID = existing.RemoteSessionID
+	}
+	if strings.TrimSpace(existing.RemoteParentSessionID) != "" && strings.TrimSpace(next.RemoteParentSessionID) == "" {
+		next.RemoteParentSessionID = existing.RemoteParentSessionID
+	}
+	if strings.TrimSpace(existing.RemoteParentCheckpointID) != "" && strings.TrimSpace(next.RemoteParentCheckpointID) == "" {
+		next.RemoteParentCheckpointID = existing.RemoteParentCheckpointID
+	}
+	// A non-Remote metadata writer has no resolved Host profile to contribute.
+	// Preserve the complete profile when the incoming value is legacy/partial;
+	// explicit Remote profile updates carry the same or a newer version and are
+	// applied while holding the shared path lock.
+	if existing.RemoteProfileVersion > next.RemoteProfileVersion {
+		next.Model = existing.Model
+		next.Effort = existing.Effort
+		next.Mode = existing.Mode
+		next.TokenMode = existing.TokenMode
+		next.ToolApprovalMode = existing.ToolApprovalMode
+		next.AdditionalDirs = append([]string(nil), existing.AdditionalDirs...)
+		next.RemoteProfileVersion = existing.RemoteProfileVersion
 	}
 	if existing.Revision > next.Revision {
 		next.Revision = existing.Revision

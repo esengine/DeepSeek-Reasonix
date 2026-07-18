@@ -268,6 +268,7 @@ type SettingsView struct {
 	DesktopThemeStyle       string               `json:"desktopThemeStyle"`
 	CloseBehavior           string               `json:"closeBehavior"`
 	DisplayMode             string               `json:"displayMode"`
+	HistoryPageTurns        int                  `json:"historyPageTurns"`
 	StatusBarStyle          string               `json:"statusBarStyle"`
 	StatusBarItems          []string             `json:"statusBarItems"`
 	DefaultToolApprovalMode string               `json:"defaultToolApprovalMode"`
@@ -299,6 +300,7 @@ type DesktopStartupSettingsView struct {
 	DesktopTheme       string          `json:"desktopTheme"`
 	DesktopThemeStyle  string          `json:"desktopThemeStyle"`
 	DisplayMode        string          `json:"displayMode"`
+	HistoryPageTurns   int             `json:"historyPageTurns"`
 	StatusBarStyle     string          `json:"statusBarStyle"`
 	StatusBarItems     []string        `json:"statusBarItems"`
 	CheckUpdates       bool            `json:"checkUpdates"`
@@ -754,6 +756,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 			DesktopTheme:       "auto",
 			DesktopThemeStyle:  "graphite",
 			DisplayMode:        "standard",
+			HistoryPageTurns:   config.DefaultDesktopHistoryPageTurns,
 			StatusBarStyle:     "text",
 			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:       true,
@@ -766,6 +769,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 		DesktopTheme:       cfg.DesktopTheme(),
 		DesktopThemeStyle:  cfg.DesktopThemeStyle(),
 		DisplayMode:        cfg.DesktopDisplayMode(),
+		HistoryPageTurns:   cfg.DesktopHistoryPageTurns(),
 		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
 		StatusBarItems:     cfg.DesktopStatusBarItems(),
 		CheckUpdates:       cfg.DesktopCheckUpdates(),
@@ -784,6 +788,9 @@ func (a *App) DesktopStartupSettings() DesktopStartupSettingsView {
 		return view
 	}
 	view := desktopStartupSettingsFromConfig(cfg)
+	if a.remoteTargetSelected() {
+		view.Bot = botSettingsView(config.BotConfig{})
+	}
 	view.SafeMode = config.SafeModeRequested()
 	return view
 }
@@ -791,6 +798,9 @@ func (a *App) DesktopStartupSettings() DesktopStartupSettingsView {
 // Settings returns the current configuration for the Settings panel.
 func (a *App) Settings() SettingsView {
 	cfg, cfgPath, err := a.loadDesktopUserConfigForView()
+	if a.remoteTargetSelected() {
+		return remoteSafeSettingsView(cfg)
+	}
 	if err != nil {
 		return SettingsView{
 			Providers:         []ProviderView{},
@@ -812,6 +822,7 @@ func (a *App) Settings() SettingsView {
 			DesktopThemeStyle:       "graphite",
 			CloseBehavior:           "background",
 			DisplayMode:             "standard",
+			HistoryPageTurns:        config.DefaultDesktopHistoryPageTurns,
 			StatusBarStyle:          "text",
 			StatusBarItems:          config.DefaultDesktopStatusBarItems(),
 			DefaultToolApprovalMode: "auto",
@@ -876,6 +887,7 @@ func (a *App) Settings() SettingsView {
 		DesktopThemeStyle:       cfg.DesktopThemeStyle(),
 		CloseBehavior:           cfg.DesktopCloseBehavior(),
 		DisplayMode:             cfg.DesktopDisplayMode(),
+		HistoryPageTurns:        cfg.DesktopHistoryPageTurns(),
 		StatusBarStyle:          cfg.DesktopStatusBarStyle(),
 		StatusBarItems:          cfg.DesktopStatusBarItems(),
 		DefaultToolApprovalMode: cfg.DesktopDefaultToolApprovalMode(),
@@ -1252,7 +1264,29 @@ func (a *App) loadDesktopUserConfigForEdit() (*config.Config, string, error) {
 // loaded; callers that hand the config to a runtime resolving secrets from the
 // process env must use loadDesktopUserConfigForViewWithCredentials.
 func (a *App) loadDesktopUserConfigForView() (*config.Config, string, error) {
-	return a.loadDesktopUserConfigReadOnly(config.LoadForEditWithoutCredentials)
+	return a.loadDesktopUserConfigReadOnly(loadDesktopConfigForViewWithoutCredentials)
+}
+
+// loadDesktopConfigForViewWithoutCredentials preserves the historical
+// best-effort/default fallback of LoadForEditWithoutCredentials while using
+// its strict read-only parser. The edit-oriented loader persists legacy MCP
+// tier migrations, which is never valid from Settings(), Remote-safe settings
+// projections, or any other read-only Desktop surface.
+func loadDesktopConfigForViewWithoutCredentials(path string) *config.Config {
+	return loadDesktopConfigForView(path, config.LoadForEditReadOnlyWithoutCredentialsStrict)
+}
+
+func loadDesktopConfigForViewWithCredentials(path string) *config.Config {
+	return loadDesktopConfigForView(path, config.LoadForEditReadOnlyStrict)
+}
+
+func loadDesktopConfigForView(path string, load func(string) (*config.Config, error)) *config.Config {
+	cfg, err := load(path)
+	if err == nil {
+		return cfg
+	}
+	slog.Warn("desktop: read user config for view failed, using defaults", "path", path, "err", err)
+	return config.Default()
 }
 
 // loadDesktopUserConfigForViewWithCredentials is loadDesktopUserConfigForView
@@ -1262,7 +1296,7 @@ func (a *App) loadDesktopUserConfigForView() (*config.Config, string, error) {
 // (app-secret/control-token envs) and MCP server connects. It still never
 // writes to disk.
 func (a *App) loadDesktopUserConfigForViewWithCredentials() (*config.Config, string, error) {
-	return a.loadDesktopUserConfigReadOnly(config.LoadForEdit)
+	return a.loadDesktopUserConfigReadOnly(loadDesktopConfigForViewWithCredentials)
 }
 
 // loadDesktopUserConfigReadOnly is the shared pure-read loader behind the View
@@ -1642,6 +1676,9 @@ func (a *App) rebuildSettingLocked(setting string) error {
 
 // SetDefaultModel sets the config default and switches the live model to it.
 func (a *App) SetDefaultModel(ref string) error {
+	if err := a.rejectRemoteOutOfScope("SetDefaultModel"); err != nil {
+		return err
+	}
 	tab := a.activeTab()
 	if tab == nil {
 		return fmt.Errorf("no active tab")
@@ -1673,6 +1710,9 @@ func (a *App) SetDefaultModel(ref string) error {
 
 // SetPlannerModel sets (or, with "", clears) the two-model planner.
 func (a *App) SetPlannerModel(ref string) error {
+	if err := a.rejectRemoteOutOfScope("SetPlannerModel"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		if ref != "" {
 			resolved, err := selectableDesktopModelRef(c, ref)
@@ -1688,6 +1728,9 @@ func (a *App) SetPlannerModel(ref string) error {
 
 // SetSubagentModel sets (or clears) the default model used by subagent entry points.
 func (a *App) SetSubagentModel(ref string) error {
+	if err := a.rejectRemoteOutOfScope("SetSubagentModel"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		ref = strings.TrimSpace(ref)
 		if ref != "" {
@@ -1718,6 +1761,9 @@ func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
 
 // SetSubagentEffort sets (or clears) the default effort used by subagent entry points.
 func (a *App) SetSubagentEffort(level string) error {
+	if err := a.rejectRemoteOutOfScope("SetSubagentEffort"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		level = strings.TrimSpace(level)
 		if level == "" || level == "auto" {
@@ -1759,6 +1805,9 @@ func deleteSubagentOverrideAliases(overrides map[string]string, name string) {
 // clear both sweep the underscore/hyphen alias keys so a legacy alias entry
 // can neither shadow the new value nor survive a clear.
 func (a *App) SetSubagentProfileModel(name, ref string) error {
+	if err := a.rejectRemoteOutOfScope("SetSubagentProfileModel"); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name is required")
@@ -1785,6 +1834,9 @@ func (a *App) SetSubagentProfileModel(name, ref string) error {
 // SetSubagentProfileEffort sets (or clears) a per-name effort override. See
 // SetSubagentProfileModel.
 func (a *App) SetSubagentProfileEffort(name, level string) error {
+	if err := a.rejectRemoteOutOfScope("SetSubagentProfileEffort"); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name is required")
@@ -1834,6 +1886,9 @@ func desktopMaxSubagentDepth(depth int) int {
 
 // SetMaxSubagentDepth controls whether first-layer subagents may delegate once more.
 func (a *App) SetMaxSubagentDepth(depth int) error {
+	if err := a.rejectRemoteOutOfScope("SetMaxSubagentDepth"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Agent.MaxSubagentDepth = desktopMaxSubagentDepth(depth)
 		return nil
@@ -1842,6 +1897,9 @@ func (a *App) SetMaxSubagentDepth(depth int) error {
 
 // SetAutoPlan updates the automatic plan-first workflow setting (off|on).
 func (a *App) SetAutoPlan(mode string) error {
+	if err := a.rejectRemoteOutOfScope("SetAutoPlan"); err != nil {
+		return err
+	}
 	if err := a.ensureLiveControllersRuntimeMutationAllowed("auto-plan"); err != nil {
 		return err
 	}
@@ -1881,6 +1939,9 @@ func (a *App) SetAutoPlan(mode string) error {
 // SetDefaultToolApprovalMode updates the global Ask/Auto/YOLO default used only
 // for newly-created desktop sessions. Existing tabs keep their persisted mode.
 func (a *App) SetDefaultToolApprovalMode(mode string) error {
+	if err := a.rejectRemoteOutOfScope("SetDefaultToolApprovalMode"); err != nil {
+		return err
+	}
 	return a.applyConfigOnly(func(c *config.Config) error {
 		return c.SetDesktopDefaultToolApprovalMode(mode)
 	})
@@ -1888,6 +1949,9 @@ func (a *App) SetDefaultToolApprovalMode(mode string) error {
 
 // SetMemoryCompilerEnabled toggles the Memory v5 execution compiler.
 func (a *App) SetMemoryCompilerEnabled(enabled bool) error {
+	if err := a.rejectRemoteOutOfScope("SetMemoryCompilerEnabled"); err != nil {
+		return err
+	}
 	// Lock only the load-modify-save cycle; the live-controller fan-out below
 	// must not hold the config edit lock.
 	if err := func() error {
@@ -2088,6 +2152,9 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 // `models` even when only one model is selected, while `model` remains populated
 // in-memory for validation/back-compat. The shared key/endpoint live on the entry.
 func (a *App) SaveProvider(p ProviderView) error {
+	if err := a.rejectRemoteOutOfScope("SaveProvider"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		return saveProviderConfig(c, p)
 	})
@@ -2096,6 +2163,9 @@ func (a *App) SaveProvider(p ProviderView) error {
 // SaveProviderWithKey saves a custom provider and its credential as one settings
 // transaction, then rebuilds once after both are visible to the runtime.
 func (a *App) SaveProviderWithKey(p ProviderView, key string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("SaveProviderWithKey"); err != nil {
+		return "", err
+	}
 	apiKeyEnv := strings.TrimSpace(p.APIKeyEnv)
 	if apiKeyEnv == "" {
 		return "", fmt.Errorf("this provider has no api_key_env set")
@@ -2134,6 +2204,9 @@ func (a *App) SaveProviderWithKey(p ProviderView, key string) (string, error) {
 // Settings > Model > Access list. The runtime default providers still exist
 // independently; this only records the user's explicit access setup.
 func (a *App) AddOfficialProviderAccess(kind, key string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("AddOfficialProviderAccess"); err != nil {
+		return "", err
+	}
 	// Read-only pre-read (pricing language); the actual write happens inside
 	// applyConfigChange below, under the config edit lock.
 	cfg, _, err := a.loadDesktopUserConfigForView()
@@ -2177,6 +2250,9 @@ func (a *App) AddOfficialProviderAccess(kind, key string) (string, error) {
 // tweak endpoints, model lists, and capability overrides after the one-click
 // setup path.
 func (a *App) AddProviderPresetAccess(id, key string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("AddProviderPresetAccess"); err != nil {
+		return "", err
+	}
 	preset, ok := config.CuratedProviderPreset(id)
 	if !ok {
 		return "", fmt.Errorf("unknown provider preset %q", id)
@@ -2236,6 +2312,9 @@ func (a *App) AddProviderPresetAccess(id, key string) (string, error) {
 // with the curated preset template. It only mutates config; provider secrets stay
 // in Reasonix home .env under whichever api_key_env the resulting preset uses.
 func (a *App) ResetProviderPresetAccess(id string) error {
+	if err := a.rejectRemoteOutOfScope("ResetProviderPresetAccess"); err != nil {
+		return err
+	}
 	preset, ok := config.CuratedProviderPreset(id)
 	if !ok {
 		return fmt.Errorf("unknown provider preset %q", id)
@@ -2300,6 +2379,9 @@ func providerPresetNoExistingProviderError(id string) error {
 // endpoint and returns the available model IDs. This is a settings-only helper:
 // it never touches chat request serialization or provider-visible prompt data.
 func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
+	if err := a.rejectRemoteOutOfScope("FetchProviderModels"); err != nil {
+		return []string{}, err
+	}
 	e := config.ProviderEntry{
 		Name:       p.Name,
 		Kind:       p.Kind,
@@ -2321,6 +2403,9 @@ func (a *App) FetchProviderModels(p ProviderView) ([]string, error) {
 
 // DeleteProvider removes a provider and retargets open idle tabs that used it.
 func (a *App) DeleteProvider(name string) error {
+	if err := a.rejectRemoteOutOfScope("DeleteProvider"); err != nil {
+		return err
+	}
 	return a.deleteProviderAndRetargetTabs(name)
 }
 
@@ -2330,6 +2415,9 @@ func (a *App) DeleteProvider(name string) error {
 // the removed access entry when another accessed provider is available. Custom
 // providers are deleted outright.
 func (a *App) RemoveProviderAccess(name string) error {
+	if err := a.rejectRemoteOutOfScope("RemoveProviderAccess"); err != nil {
+		return err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("remove provider access: empty provider name")
@@ -2625,6 +2713,9 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 // env-var name (the one a provider's api_key_env points at) and rebuilds so it
 // resolves immediately.
 func (a *App) SetProviderKey(apiKeyEnv, value string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("SetProviderKey"); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return "", fmt.Errorf("this provider has no api_key_env set")
 	}
@@ -2651,6 +2742,9 @@ func (a *App) SetProviderKey(apiKeyEnv, value string) (string, error) {
 // It is used by settings probes that need credentials only for a model-list
 // request; explicit "save key" actions still call SetProviderKey.
 func (a *App) SaveProviderKey(apiKeyEnv, value string) (string, error) {
+	if err := a.rejectRemoteOutOfScope("SaveProviderKey"); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return "", fmt.Errorf("this provider has no api_key_env set")
 	}
@@ -2715,6 +2809,9 @@ func (a *App) ensureProviderAccessForKey(apiKeyEnv string) error {
 // ClearProviderKey removes a provider secret from Reasonix's global .env
 // and rebuilds so the provider immediately becomes unauthenticated.
 func (a *App) ClearProviderKey(apiKeyEnv string) error {
+	if err := a.rejectRemoteOutOfScope("ClearProviderKey"); err != nil {
+		return err
+	}
 	if strings.TrimSpace(apiKeyEnv) == "" {
 		return fmt.Errorf("this provider has no api_key_env set")
 	}
@@ -2735,16 +2832,25 @@ func (a *App) ClearProviderKey(apiKeyEnv string) error {
 
 // SetPermissionMode sets the writer-fallback mode (ask|allow|deny).
 func (a *App) SetPermissionMode(mode string) error {
+	if err := a.rejectRemoteOutOfScope("SetPermissionMode"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error { return c.SetPermissionMode(mode) })
 }
 
 // AddPermissionRule appends a rule to the allow/ask/deny list.
 func (a *App) AddPermissionRule(list, rule string) error {
+	if err := a.rejectRemoteOutOfScope("AddPermissionRule"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error { return c.AddPermissionRule(list, rule) })
 }
 
 // RemovePermissionRule drops a rule from the allow/ask/deny list.
 func (a *App) RemovePermissionRule(list, rule string) error {
+	if err := a.rejectRemoteOutOfScope("RemovePermissionRule"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		_, err := c.RemovePermissionRule(list, rule)
 		return err
@@ -2754,6 +2860,9 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 // ReloadSettings rebuilds the active controller from the current config without
 // changing any config file. It lets manual config.toml edits take effect.
 func (a *App) ReloadSettings() error {
+	if err := a.rejectRemoteOutOfScope("ReloadSettings"); err != nil {
+		return err
+	}
 	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
 		return err
 	}
@@ -2770,6 +2879,9 @@ func (a *App) ReloadSettings() error {
 
 // SetSandbox updates the bash sandbox mode, network egress, and write roots.
 func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
+	if err := a.rejectRemoteOutOfScope("SetSandbox"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Sandbox.Bash = bash
 		c.Sandbox.Network = network
@@ -2782,6 +2894,9 @@ func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowW
 
 // SetNetwork updates ordinary outbound proxy settings.
 func (a *App) SetNetwork(n NetworkView) error {
+	if err := a.rejectRemoteOutOfScope("SetNetwork"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		return c.SetNetwork(config.NetworkConfig{
 			ProxyMode: n.ProxyMode,
@@ -2799,6 +2914,9 @@ func (a *App) SetNetwork(n NetworkView) error {
 }
 
 func (a *App) SetBotSettings(b BotSettingsView) error {
+	if err := a.rejectRemoteOutOfScope("SetBotSettings"); err != nil {
+		return err
+	}
 	err := a.applyConfigOnly(func(c *config.Config) error {
 		c.Bot.Enabled = b.Enabled
 		c.Bot.Model = strings.TrimSpace(b.Model)
@@ -2881,6 +2999,9 @@ func (a *App) SetBotSettings(b BotSettingsView) error {
 // mode without restarting the bot gateway. Only the connection's mode field is
 // persisted; existing sessions on the running gateway are updated in-place.
 func (a *App) SetBotConnectionToolApprovalMode(connID, mode string) error {
+	if err := a.rejectRemoteOutOfScope("SetBotConnectionToolApprovalMode"); err != nil {
+		return err
+	}
 	connID = strings.TrimSpace(connID)
 	mode = normalizeBotConnectionToolApprovalMode(mode)
 	runtimeConnID := connID
@@ -2909,6 +3030,9 @@ func (a *App) SetBotConnectionToolApprovalMode(connID, mode string) error {
 }
 
 func (a *App) SetBotSecret(envName, value string) error {
+	if err := a.rejectRemoteOutOfScope("SetBotSecret"); err != nil {
+		return err
+	}
 	envName = strings.TrimSpace(envName)
 	if envName == "" {
 		return fmt.Errorf("bot secret env name is empty")
@@ -2921,6 +3045,9 @@ func (a *App) SetBotSecret(envName, value string) error {
 }
 
 func (a *App) ClearBotSecret(envName string) error {
+	if err := a.rejectRemoteOutOfScope("ClearBotSecret"); err != nil {
+		return err
+	}
 	envName = strings.TrimSpace(envName)
 	if envName == "" {
 		return fmt.Errorf("bot secret env name is empty")
@@ -3069,6 +3196,9 @@ func (a *App) MigrateDesktopPreferences(language, theme, style string) error {
 // step arguments remain in the Wails contract for older frontends, but are
 // retired and deliberately normalized to automatic execution.
 func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps int, systemPrompt string) error {
+	if err := a.rejectRemoteOutOfScope("SetAgentParams"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Agent.Temperature = temperature
 		c.Agent.MaxSteps = 0
@@ -3079,10 +3209,16 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 }
 
 func (a *App) SetColdResumePrune(enabled bool) error {
+	if err := a.rejectRemoteOutOfScope("SetColdResumePrune"); err != nil {
+		return err
+	}
 	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
 }
 
 func (a *App) SetReasoningLanguage(lang string) error {
+	if err := a.rejectRemoteOutOfScope("SetReasoningLanguage"); err != nil {
+		return err
+	}
 	if err := a.ensureLiveControllersRuntimeMutationAllowed("reasoning language"); err != nil {
 		return err
 	}

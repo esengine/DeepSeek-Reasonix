@@ -1430,6 +1430,11 @@ export function MemorySettingsPage() {
 							{t("memory.scanSuggestions")}
 						</button>
 					</div>
+				) : !suggestions.available ? (
+					<div className="mem-empty mem-empty--cta" role="status">
+						<strong>{t("memory.remoteSuggestionsUnavailableTitle")}</strong>
+						<span>{t("memory.remoteSuggestionsUnavailableBody")}</span>
+					</div>
 				) : suggestionTotal(suggestions) === 0 ? (
 					<div className="mem-empty mem-empty--cta">
 						<strong>{t("memory.noSuggestionsTitle")}</strong>

@@ -251,6 +251,7 @@ function NoticePreviewPanel() {
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
+const RemoteTargetSurfaces = lazy(() => import("./components/RemoteTargetSurfaces").then((module) => ({ default: module.RemoteTargetSurfaces })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -3464,6 +3465,7 @@ export default function App() {
               showShortcutBadges={showTopicBadges}
               shortcutPlatform={desktopPlatform}
               onVisibleTopicsChange={handleVisibleTopicsChange}
+              localPathActionsEnabled={activeTab?.targetKind !== "remote"}
             />
           </section>
 
@@ -3771,7 +3773,7 @@ export default function App() {
                   </button>
                 </Tooltip>
               )}
-              {!sidebarImDetailConnection && activeTab?.scope === "project" && (
+              {!sidebarImDetailConnection && activeTab?.scope === "project" && activeTab.targetKind !== "remote" && (
                 <ExternalOpener tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
               )}
               <Tooltip label={t("shortcuts.cheatsheetTitle")}>
@@ -3972,6 +3974,7 @@ export default function App() {
               cwd={state.meta?.cwd}
               modelLabel={state.meta?.label ?? t("status.connecting")}
               imageInputEnabled={state.meta?.imageInputEnabled !== false}
+              attachmentsEnabled={activeTab?.targetKind !== "remote"}
               tabId={activeTabId}
               effort={state.effort}
               onSend={handleSend}
@@ -4138,6 +4141,7 @@ export default function App() {
                   initialViewMode={rightDockMode === "changed" ? "changed" : "files"}
                   showViewTabs={false}
                   creationMode={sidebarCreation}
+                  localPathActionsEnabled={activeTab?.targetKind !== "remote"}
                 />
               )}
             </div>
@@ -4192,6 +4196,10 @@ export default function App() {
           />
         </Suspense>
       )}
+
+      <Suspense fallback={null}>
+        <RemoteTargetSurfaces />
+      </Suspense>
 
       <CommandPalette
         open={paletteOpen}

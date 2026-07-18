@@ -32289,3 +32289,907 @@ body > .mermaid-diagram--fullscreen {
   color: var(--accent, #ff6b35);
   vertical-align: middle;
 }
+
+/* ── Remote target connection and AskPass surfaces ───────────────────────── */
+.remote-settings {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.remote-target-status__host,
+.remote-target-status__actions,
+.remote-host-actions,
+.remote-host-editor__actions,
+.remote-inline-confirm,
+.remote-target-surface__identity,
+.remote-target-surface__actions,
+.remote-target-surface__confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remote-target-status__host {
+  margin: 4px 0 12px;
+  color: var(--fg);
+  font-size: var(--font-control-small);
+}
+
+.remote-target-status__actions,
+.remote-host-actions,
+.remote-host-editor__actions {
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.remote-connection-log-list {
+  max-height: 240px;
+  display: grid;
+  gap: 5px;
+  margin: 12px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.remote-connection-log-list > li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 74px max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-elev);
+}
+
+.remote-connection-log-list time {
+  color: var(--fg-faint);
+  font: 400 var(--text-2xs)/1.3 var(--font-mono);
+  white-space: nowrap;
+}
+
+.remote-connection-log-list .remote-state {
+  min-height: 20px;
+  padding: 2px 7px;
+  font-size: var(--text-2xs);
+}
+
+.remote-connection-log-list__detail {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
+.remote-connection-log-list__detail strong,
+.remote-connection-log-list__detail span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-connection-log-list__detail strong {
+  flex: 0 1 auto;
+  color: var(--fg);
+  font-weight: 650;
+}
+
+.remote-connection-log-list__detail span {
+  flex: 1 1 auto;
+}
+
+.remote-connection-logs__empty {
+  min-height: 52px;
+}
+
+.remote-host-runtime__body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.remote-host-runtime__group {
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.remote-host-runtime__group h3 {
+  margin: 0 0 8px;
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+
+.remote-host-runtime__group > p {
+  margin: -3px 0 9px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.remote-host-runtime__config,
+.remote-host-runtime__catalog {
+  grid-column: 1 / -1;
+}
+
+.remote-host-runtime__capabilities,
+.remote-host-runtime__feature-states {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-host-runtime__capabilities > li,
+.remote-host-runtime__feature-states > li,
+.remote-host-runtime__paths > div,
+.remote-host-runtime__hints > div {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
+.remote-host-runtime__capabilities strong[data-available="true"] {
+  color: var(--ok);
+}
+
+.remote-host-runtime__capabilities strong[data-available="false"] {
+  color: var(--fg-faint);
+}
+
+.remote-host-runtime__paths {
+  margin: 10px 0 0;
+}
+
+.remote-host-runtime__paths dt,
+.remote-host-runtime__paths dd {
+  margin: 0;
+}
+
+.remote-host-runtime__paths dd,
+.remote-host-runtime__hints code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.remote-host-runtime__hints {
+  display: grid;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+.remote-session-catalog {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.remote-session-catalog section {
+  min-width: 0;
+}
+
+.remote-session-catalog h4 {
+  margin: 0 0 5px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.remote-session-catalog ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-session-catalog li {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
+.remote-session-catalog li > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.remote-session-catalog li strong,
+.remote-session-catalog li small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.remote-session-catalog li small {
+  color: var(--fg-faint);
+  font-size: var(--text-2xs);
+}
+
+.remote-session-catalog li em {
+  flex: 0 0 auto;
+  color: var(--fg-faint);
+  font-size: var(--text-2xs);
+  font-style: normal;
+}
+
+.remote-session-catalog li em[data-available="true"] {
+  color: var(--ok);
+}
+
+.remote-session-catalog .remote-session-catalog__empty {
+  justify-content: flex-start;
+  color: var(--fg-faint);
+}
+
+.remote-host-panel-unavailable {
+  padding: 16px;
+  border-color: color-mix(in srgb, var(--warn) 36%, var(--border));
+  background: color-mix(in srgb, var(--warn) 6%, var(--bg-elev));
+}
+
+.remote-host-panel-unavailable p {
+  margin: 8px 0 0;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+@media (max-width: 780px) {
+  .remote-host-runtime__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .remote-host-runtime__config {
+    grid-column: auto;
+  }
+
+  .remote-host-runtime__catalog {
+    grid-column: auto;
+  }
+
+  .remote-session-catalog {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.remote-state {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.remote-state--remoteconnected,
+.remote-state--localconnected {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: var(--ok);
+}
+
+.remote-state--remoteconnecting,
+.remote-state--remotereconnecting,
+.remote-state--switching {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+}
+
+.remote-inline-confirm {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 42%, var(--border));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-elev));
+  font-size: var(--text-xs);
+}
+
+.remote-inline-confirm > span {
+  flex: 1 1 300px;
+  line-height: 1.4;
+}
+
+.remote-host-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.remote-host-card {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.remote-host-card:hover,
+.remote-host-card:focus-visible,
+.remote-host-card--selected {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elev));
+}
+
+.remote-host-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.remote-host-card__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.remote-host-card__copy strong,
+.remote-host-card__copy code,
+.remote-host-card__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-host-card__copy code,
+.remote-host-card__copy small {
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
+.remote-host-card__active {
+  flex: 0 0 auto;
+  color: var(--ok);
+  font-size: var(--text-2xs);
+  font-weight: 650;
+}
+
+.remote-host-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 16px;
+}
+
+.remote-host-editor > .settings-section__title,
+.remote-host-editor__field:first-of-type,
+.remote-host-editor__field:last-of-type,
+.remote-host-editor__actions {
+  grid-column: 1 / -1;
+}
+
+.remote-host-editor__field,
+.remote-askpass-modal__field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--fg);
+  font-size: var(--font-control-small);
+  font-weight: 600;
+}
+
+.remote-host-editor__field input,
+.remote-askpass-modal__field input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 400;
+}
+
+.remote-host-editor__field input:focus,
+.remote-askpass-modal__field input:focus {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.remote-host-editor__field small {
+  color: var(--fg-faint);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.remote-target-surface {
+  --wails-draggable: no-drag;
+  position: fixed;
+  z-index: var(--z-dock);
+  top: 46px;
+  right: 14px;
+  width: min(420px, calc(100vw - 28px));
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.remote-target-surface__identity {
+  min-width: 0;
+}
+
+.remote-target-surface__identity > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.remote-target-surface__identity strong,
+.remote-target-surface__identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-target-surface__identity strong {
+  font-size: var(--text-xs);
+}
+
+.remote-target-surface__identity small,
+.remote-target-surface__failure {
+  color: var(--fg-dim);
+  font-size: var(--text-2xs);
+}
+
+.remote-target-surface__failure {
+  margin-top: 7px;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.remote-target-surface__actions {
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.remote-target-surface__confirm {
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+}
+
+.remote-target-surface__confirm > span {
+  flex: 1 1 220px;
+}
+
+.remote-workspace-backdrop {
+  /* Keep the connection/target surface actionable above workspace selection so
+     a user can reconnect or explicitly switch back to Local without a trap. */
+  z-index: var(--z-menu-backdrop);
+  padding-top: 70px;
+}
+
+.remote-workspace-modal {
+  width: min(1040px, calc(100vw - 72px));
+  height: min(720px, calc(100vh - 112px));
+}
+
+.remote-workspace-modal__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.85fr);
+  overflow: hidden;
+}
+
+.remote-workspace-browser,
+.remote-workspace-selection {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.remote-workspace-browser {
+  border-right: 1px solid var(--border-soft);
+}
+
+.remote-workspace-selection {
+  margin: 0;
+  background: color-mix(in srgb, var(--bg-elev) 70%, var(--bg-soft));
+  overflow-y: auto;
+}
+
+.remote-workspace-path,
+.remote-workspace-topic {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--fg);
+  font-size: var(--font-control-small);
+  font-weight: 650;
+}
+
+.remote-workspace-path > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.remote-workspace-path input,
+.remote-workspace-topic input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 450;
+}
+
+.remote-workspace-path input {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.remote-workspace-path input:focus,
+.remote-workspace-topic input:focus {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.remote-workspace-error {
+  flex: 0 0 auto;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.remote-workspace-loading,
+.remote-workspace-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 96px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+
+.remote-workspace-current {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+}
+
+.remote-workspace-current > div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.remote-workspace-current > div:first-child {
+  flex: 1 1 250px;
+  color: var(--fg);
+  font: 500 var(--text-xs)/1.4 var(--font-mono);
+}
+
+.remote-workspace-current > div:first-child span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-workspace-current > div:last-child {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+}
+
+.remote-workspace-directory-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  overflow-y: auto;
+}
+
+.remote-workspace-directory-list > button {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.remote-workspace-directory-list > button:hover:not(:disabled),
+.remote-workspace-directory-list > button:focus-visible:not(:disabled) {
+  border-color: var(--border-soft);
+  background: var(--bg-elev);
+  color: var(--fg);
+  outline: none;
+}
+
+.remote-workspace-directory-list > button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.remote-workspace-directory-list strong,
+.remote-workspace-directory-list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-workspace-directory-list strong {
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.remote-workspace-directory-list small {
+  color: var(--fg-faint);
+  font: 400 var(--text-2xs)/1.3 var(--font-mono);
+}
+
+.remote-workspace-load-more,
+.remote-workspace-retry {
+  align-self: center;
+}
+
+.remote-workspace-selection h3 {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-control);
+}
+
+.remote-workspace-selection p {
+  margin: 5px 0 0;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.remote-workspace-selected {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.remote-workspace-selected > span,
+.remote-workspace-topic > span {
+  color: var(--fg);
+  font-size: var(--font-control-small);
+  font-weight: 650;
+}
+
+.remote-workspace-selected code,
+.remote-workspace-selected em {
+  display: block;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font: 400 var(--text-xs)/1.4 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-workspace-selected em {
+  color: var(--fg-faint);
+  font-family: var(--font-ui);
+  font-style: normal;
+}
+
+.remote-workspace-selected ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.remote-workspace-selected li {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.remote-workspace-selected li code {
+  flex: 1 1 auto;
+}
+
+.remote-workspace-selected li button {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+}
+
+.remote-workspace-selected li button:hover,
+.remote-workspace-selected li button:focus-visible {
+  background: var(--button-bg);
+  color: var(--danger);
+  outline: none;
+}
+
+.remote-workspace-create {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.remote-askpass-backdrop {
+  z-index: var(--z-overlay-backdrop);
+}
+
+.remote-askpass-modal {
+  width: min(560px, calc(100vw - 40px));
+  height: auto;
+  max-height: min(680px, calc(100vh - 48px));
+}
+
+.remote-askpass-modal__host {
+  margin-top: 3px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
+.remote-askpass-modal__body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.remote-askpass-modal__kind {
+  color: var(--fg);
+  font-size: var(--font-control);
+  font-weight: 700;
+}
+
+.remote-askpass-modal__prompt {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--bg-elev-2);
+  color: var(--fg-dim);
+  font: 400 var(--text-xs)/1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.remote-askpass-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.remote-askpass-error {
+  position: fixed;
+  z-index: var(--z-toast);
+  right: 16px;
+  bottom: 16px;
+  max-width: min(460px, calc(100vw - 32px));
+}
+
+@media (max-width: 720px) {
+  .remote-host-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .remote-host-editor__field {
+    grid-column: 1;
+  }
+
+  .remote-connection-log-list > li {
+    grid-template-columns: 70px minmax(0, 1fr);
+  }
+
+  .remote-connection-log-list__detail {
+    grid-column: 1 / -1;
+  }
+
+  .remote-workspace-backdrop {
+    padding-top: 64px;
+  }
+
+  .remote-workspace-modal {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 76px);
+  }
+
+  .remote-workspace-modal__body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+
+  .remote-workspace-browser {
+    min-height: 430px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .remote-workspace-selection {
+    overflow: visible;
+  }
+}

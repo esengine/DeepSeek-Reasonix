@@ -75,6 +75,7 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 // top-level run_skill cards.
 func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []skill.Skill, task, raw, display string, runner skill.SubagentRunner, planMode bool) (err error) {
 	c := o.c
+	prepared := preparedDurableTurn(ctx)
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
 	images := c.inputImages(raw)
@@ -85,10 +86,19 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	ctx = agent.WithReasoningLanguagePreference(ctx, c.reasoningLanguage)
 
 	input := c.compose(task, raw, true)
-	startMessages := c.messageCount()
-	defer c.snapshotActivityIfChanged(startMessages)
-	defer c.recordDisplayForNewUser(startMessages, display)
-	c.beginCheckpoint(input)
+	startMessages, initialPrepared := preparedTurnStart(ctx, c.messageCount())
+	if !prepared {
+		defer c.snapshotActivityIfChanged(startMessages)
+		defer c.recordDisplayForNewUser(startMessages, display)
+	}
+	var checkpointTurn int
+	var checkpointOpened bool
+	if initialPrepared {
+		checkpointTurn, checkpointOpened = c.beginCheckpointAt(input, startMessages)
+	} else {
+		checkpointTurn, checkpointOpened = c.beginCheckpoint(input)
+	}
+	defer c.rollbackDurableCheckpointIfUnadmitted(checkpointTurn, startMessages, checkpointOpened)
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()
 	}
@@ -103,18 +113,23 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
 
-	c.markInFlightTurn(startMessages, true)
-	inFlight := true
-	defer func() {
-		if inFlight {
-			c.clearInFlightTurn()
+	if !prepared {
+		if err := c.markInFlightTurn(startMessages, true); err != nil {
+			return err
 		}
-	}()
+		defer func() { err = joinTurnErrors(err, c.finishInFlightTurn(err)) }()
+	}
 	c.sink.Emit(event.Event{Kind: event.TurnStarted})
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
 	}
-	c.executor.Session().Add(provider.Message{Role: provider.RoleUser, Content: input, Images: images})
+	if initialPrepared {
+		if !c.executor.ReuseAcceptedTurn(ctx, input, images) {
+			return errors.New("reuse prepared durable user turn")
+		}
+	} else {
+		c.executor.Session().Add(provider.Message{Role: provider.RoleUser, Content: input, Images: images})
+	}
 
 	for _, sk := range skills {
 		callID := fmt.Sprintf("slash-skill-%d", c.slashSkillSeq.Add(1))
@@ -145,13 +160,12 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		c.sink.Emit(event.Event{Kind: event.Message, Text: answer})
 	}
 
-	c.clearInFlightTurn()
-	inFlight = false
 	return nil
 }
 
 func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchestratedTurn) (err error) {
 	c := o.c
+	prepared := preparedDurableTurn(ctx)
 	c.maybeSessionStart(ctx)
 	if !turn.synthetic {
 		c.maybeAutoPlan(ctx, turn.raw)
@@ -170,10 +184,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		ctx = agent.WithMemoryCompilerSourceInput(ctx, turn.raw)
 	}
 	input := c.compose(turn.input, turn.raw, !turn.synthetic)
-	startMessages := c.messageCount()
-	defer c.snapshotActivityIfChanged(startMessages)
-	defer c.recordDisplayForNewUser(startMessages, turn.display)
-	if turn.editedOriginal != "" {
+	startMessages, initialPrepared := preparedTurnStart(ctx, c.messageCount())
+	if !prepared {
+		defer c.snapshotActivityIfChanged(startMessages)
+		defer c.recordDisplayForNewUser(startMessages, turn.display)
+	}
+	if !prepared && turn.editedOriginal != "" {
 		defer c.markEditedForNewUser(startMessages, turn.editedOriginal)
 	}
 	// Open a checkpoint only for visible user turns before the user message is
@@ -182,7 +198,14 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// turn that spawned them; otherwise hidden user-role messages would advance
 	// backend checkpoint turns without a matching frontend turn.
 	if !turn.synthetic {
-		c.beginCheckpoint(input)
+		var checkpointTurn int
+		var checkpointOpened bool
+		if initialPrepared {
+			checkpointTurn, checkpointOpened = c.beginCheckpointAt(input, startMessages)
+		} else {
+			checkpointTurn, checkpointOpened = c.beginCheckpoint(input)
+		}
+		defer c.rollbackDurableCheckpointIfUnadmitted(checkpointTurn, startMessages, checkpointOpened)
 	}
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()
@@ -200,7 +223,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		}
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
-	c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
+	if !prepared {
+		if err := c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw)); err != nil {
+			return err
+		}
+		defer func() { err = joinTurnErrors(err, c.finishInFlightTurn(err)) }()
+	}
 	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
 	autoResearchAcceptedBefore := c.autoResearchAcceptedEvidenceIDs(autoResearchTaskID)
 	c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
@@ -217,7 +245,6 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		c.recordAutoResearchEvidenceFromAssistant(autoResearchTaskID, lastAssistantText(c.History()))
 		c.recordAutoResearchTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore)
 		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatTurnDone, "")
-		c.clearInFlightTurn()
 	} else {
 		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatWarning, err.Error())
 		// When the user explicitly cancels (Ctrl+C), the incomplete turn's
@@ -233,7 +260,6 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 				c.stripCancelledVisibleTurnMessagesAfter(startMessages)
 			}
 		}
-		c.clearInFlightTurn()
 		return err
 	}
 	c.mu.Lock()
@@ -271,9 +297,13 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// later turn (even "continue") falls back to the normal per-tool approval.
 	c.approval.setPlanAutoApprove(true)
 	defer c.approval.setPlanAutoApprove(false)
-	err = func() error {
-		c.markInFlightTurn(execStart, false)
-		defer c.clearInFlightTurn()
+	err = func() (turnErr error) {
+		if !prepared {
+			if err := c.markInFlightTurn(execStart, false); err != nil {
+				return err
+			}
+			defer func() { turnErr = joinTurnErrors(turnErr, c.finishInFlightTurn(turnErr)) }()
+		}
 		return o.runComposedSyntheticTurn(ctx, planApprovedMessage)
 	}()
 	if err != nil {

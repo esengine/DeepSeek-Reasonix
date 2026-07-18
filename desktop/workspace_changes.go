@@ -43,6 +43,13 @@ var workspaceGitBranchCache = struct {
 var workspaceGitBranchForMetaProbe = workspaceGitBranch
 
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
+	if a.remoteTargetSelected() {
+		out, err := a.remoteWorkspaceChangesV1(tabID)
+		if err != nil {
+			out.GitErr = err.Error()
+		}
+		return out
+	}
 	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
 	tabID = strings.TrimSpace(tabID)
 
@@ -333,6 +340,9 @@ func workspaceGitBranch(base string) string {
 
 // GitBranches returns all local git branches for the active workspace's repo.
 func (a *App) GitBranches() ([]string, error) {
+	if err := a.rejectRemoteDeferred("GitBranches"); err != nil {
+		return nil, err
+	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return nil, err
@@ -349,6 +359,9 @@ func (a *App) GitBranches() ([]string, error) {
 // GitCheckout switches the active workspace's git branch and returns the
 // current branch name, or an error when git is unavailable.
 func (a *App) GitCheckout(branch string) error {
+	if err := a.rejectRemoteDeferred("GitCheckout"); err != nil {
+		return err
+	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return err
@@ -377,6 +390,9 @@ type GitCommitDetailView struct {
 }
 
 func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteGitHistoryV1(tabID, path)
+	}
 	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
 		return nil, err
@@ -408,6 +424,9 @@ func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, e
 }
 
 func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (GitCommitDetailView, error) {
+	if a.remoteTargetSelected() {
+		return a.remoteGitCommitDetailV1(tabID, hash, path)
+	}
 	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
 		return GitCommitDetailView{}, err

@@ -607,6 +607,15 @@ func LoadForEditReadOnlyStrict(path string) (*Config, error) {
 	return loadForEditStrict(path, true, false)
 }
 
+// LoadForEditReadOnlyWithoutCredentialsStrict parses one configuration layer
+// over built-in defaults without migrations, disk writes, credential-store
+// reads, or process-environment mutation. It is intended for safe metadata
+// projections such as Remote host/configSummary which must inspect normalized
+// feature switches without ever resolving provider secrets.
+func LoadForEditReadOnlyWithoutCredentialsStrict(path string) (*Config, error) {
+	return loadForEditStrict(path, false, false)
+}
+
 // ValidateFile parses one TOML config in isolation without loading credentials,
 // applying migrations, or writing the file. A missing file is valid.
 func ValidateFile(path string) error {

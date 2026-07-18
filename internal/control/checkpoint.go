@@ -21,15 +21,33 @@ import (
 // checkpoint and rebuilt from the store on resume (so a reopened session can still
 // rewind conversation / fork), but dropped after a summarize restructures the log
 // so those operations report "unavailable" rather than mis-truncating; code
-// rewind (file-based) is unaffected. Every store call does its disk I/O off mu —
-// mu is taken only to read/swap the store pointer and mutate turn/bound.
+// rewind (file-based) is unaffected. Begin/truncate keep the manager lock through
+// their matching Store mutation so a consistent capture cannot observe only one
+// half of the transition. Independent file snapshot/restore I/O still runs off
+// the manager lock and is serialized by Store itself.
 type checkpointManager struct {
-	// mu guards store, turn, and bound; every critical section under it is short
-	// and non-blocking (no disk I/O).
+	// mu guards store, turn, bound, and the atomic visibility boundary described
+	// above. The lock order is manager -> Store; Store never calls back here.
 	mu    sync.Mutex
 	store *checkpoint.Store
 	turn  int
 	bound map[int]int
+
+	// beforeStoreMutation is a deterministic test seam invoked while mu is
+	// held after the manager-side state has changed but before the matching
+	// Store mutation. Production leaves it nil. It proves capture cannot expose
+	// either half of that otherwise-observable transition.
+	beforeStoreMutation func(kind string)
+}
+
+// CheckpointSnapshot is one consistent, deeply-owned view of checkpoint
+// metadata and conversation capabilities. TurnsByMessageIndex is the mapping
+// consumed by transcript projection; ConversationAvailable reports whether
+// each displayed checkpoint still has a live message boundary.
+type CheckpointSnapshot struct {
+	Metas                 []checkpoint.Meta
+	TurnsByMessageIndex   map[int]int
+	ConversationAvailable map[int]bool
 }
 
 // rebind points the store at the (possibly new) session, loading any checkpoints
@@ -59,18 +77,22 @@ func (m *checkpointManager) enabled() bool {
 
 // begin opens a checkpoint for the turn about to run, recording msgIndex as the
 // conversation-rewind boundary. No-op when checkpoints are disabled.
-func (m *checkpointManager) begin(input string, msgIndex int) {
+func (m *checkpointManager) begin(input string, msgIndex int) (int, bool) {
 	m.mu.Lock()
 	store := m.store
 	if store == nil {
 		m.mu.Unlock()
-		return
+		return 0, false
 	}
 	turn := m.turn
 	m.turn++
 	m.bound[turn] = msgIndex
-	m.mu.Unlock()
+	if m.beforeStoreMutation != nil {
+		m.beforeStoreMutation("begin")
+	}
 	store.Begin(turn, input, msgIndex)
+	m.mu.Unlock()
+	return turn, true
 }
 
 // turnsByMessageIndex returns message-log index -> checkpoint turn over live
@@ -78,16 +100,7 @@ func (m *checkpointManager) begin(input string, msgIndex int) {
 // recounting visible user bubbles, which can diverge when synthetic user-role
 // messages are hidden from the UI.
 func (m *checkpointManager) turnsByMessageIndex() map[int]int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := make(map[int]int, len(m.bound))
-	for turn, index := range m.bound {
-		if existing, ok := out[index]; ok && existing < turn {
-			continue
-		}
-		out[index] = turn
-	}
-	return out
+	return m.capture().TurnsByMessageIndex
 }
 
 // boundary returns the recorded turn-start message index, if any.
@@ -100,13 +113,42 @@ func (m *checkpointManager) boundary(turn int) (int, bool) {
 
 // list returns the checkpoint metadata (nil when disabled).
 func (m *checkpointManager) list() []checkpoint.Meta {
+	return m.capture().Metas
+}
+
+// capture freezes Store metadata and manager conversation boundaries behind
+// the same manager lock used by begin/truncate. Store methods only take the
+// Store's own mutex and never call back into checkpointManager, so the lock
+// order is one-way (manager -> Store).
+func (m *checkpointManager) capture() CheckpointSnapshot {
 	m.mu.Lock()
-	store := m.store
-	m.mu.Unlock()
-	if store == nil {
-		return nil
+	defer m.mu.Unlock()
+	if m.store == nil {
+		return CheckpointSnapshot{
+			// Preserve the legacy Checkpoints() nil-when-disabled contract.
+			Metas:                 nil,
+			TurnsByMessageIndex:   map[int]int{},
+			ConversationAvailable: map[int]bool{},
+		}
 	}
-	return store.List()
+
+	metas := m.store.List()
+	turnsByMessageIndex := make(map[int]int, len(m.bound))
+	for turn, index := range m.bound {
+		if existing, ok := turnsByMessageIndex[index]; ok && existing < turn {
+			continue
+		}
+		turnsByMessageIndex[index] = turn
+	}
+	conversationAvailable := make(map[int]bool, len(metas))
+	for _, meta := range metas {
+		_, conversationAvailable[meta.Turn] = m.bound[meta.Turn]
+	}
+	return CheckpointSnapshot{
+		Metas:                 metas,
+		TurnsByMessageIndex:   turnsByMessageIndex,
+		ConversationAvailable: conversationAvailable,
+	}
 }
 
 // restoreCode reverts every file changed at or after turn to its pre-turn
@@ -143,10 +185,13 @@ func (m *checkpointManager) truncateFrom(turn int) {
 			delete(m.bound, k)
 		}
 	}
-	m.mu.Unlock()
 	if store != nil {
+		if m.beforeStoreMutation != nil {
+			m.beforeStoreMutation("truncate")
+		}
 		store.TruncateFrom(turn)
 	}
+	m.mu.Unlock()
 }
 
 // clearBounds drops every boundary after a summarize restructures the log (so

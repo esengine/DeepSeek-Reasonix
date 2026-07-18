@@ -43,6 +43,7 @@ interface ProjectTreeProps {
   showShortcutBadges?: boolean;
   shortcutPlatform?: ShortcutPlatform;
   onVisibleTopicsChange?: (topics: TopicShortcutEntry[]) => void;
+  localPathActionsEnabled?: boolean;
 }
 
 type ProjectTreeImTopicSource = {
@@ -604,6 +605,7 @@ export function ProjectTree({
   showShortcutBadges = false,
   shortcutPlatform,
   onVisibleTopicsChange,
+  localPathActionsEnabled = true,
 }: ProjectTreeProps) {
   const t = useT();
   const { showToast } = useToast();
@@ -1620,7 +1622,7 @@ export function ProjectTree({
       setMenuPoint(contextMenuPointFromEvent(event));
       setMenuProject({ key, root: projectRoot, path: projectPath, scope, label: projectLabel });
       setConfirmRemoveProject(null);
-      if (scope === "project" && projectRoot) {
+      if (localPathActionsEnabled && scope === "project" && projectRoot) {
         void app.DeliveryWorktreeAvailability(projectRoot).then((availability) => {
           setWorktreeAvailability((current) => ({
             ...current,
@@ -1630,7 +1632,7 @@ export function ProjectTree({
       }
     };
     const isolationAvailability = worktreeAvailability[projectRoot];
-    const isolatedWorkspaceItems: ContextMenuItem[] = scope === "project"
+    const isolatedWorkspaceItems: ContextMenuItem[] = localPathActionsEnabled && scope === "project"
       ? [{
           key: "isolated-delivery-workspace",
           icon: <GitBranch size={13} />,
@@ -1681,7 +1683,7 @@ export function ProjectTree({
         },
       })),
       { type: "separator" as const, key: "path-separator" },
-      {
+      ...(localPathActionsEnabled ? [{
         key: "reveal",
         icon: <FolderOpen size={13} />,
         label: t(revealLabelKey(platform)),
@@ -1690,7 +1692,7 @@ export function ProjectTree({
           void app.RevealPath(projectPath).catch(() => {});
           closeMenu();
         },
-      },
+      }] : []),
       {
         key: "copy-path",
         icon: <Copy size={13} />,
@@ -1731,7 +1733,7 @@ export function ProjectTree({
           ]
         : []),
       ...isolatedWorkspaceItems,
-      {
+      ...(localPathActionsEnabled ? [{
         key: "reveal",
         icon: <FolderOpen size={13} />,
         label: t(revealLabelKey(platform)),
@@ -1740,7 +1742,7 @@ export function ProjectTree({
           void app.RevealPath(projectPath).catch(() => {});
           closeMenu();
         },
-      },
+      }] : []),
       ...(scope === "project"
         ? [
             {

@@ -130,6 +130,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
     displayMode,
+    historyPageTurns: 60,
     statusBarStyle: "text",
     statusBarItems: ["model", "workspace", "git_branch", "cache", "balance"],
     defaultToolApprovalMode: "auto",
@@ -480,6 +481,58 @@ ok(document.querySelector(".bot-simple-advanced")?.textContent?.includes("local 
 
 await act(async () => {
   botsRoot.unmount();
+});
+
+const remoteRootEl = document.createElement("div");
+document.body.appendChild(remoteRootEl);
+const remoteRoot = createRoot(remoteRootEl);
+const remoteSettings = baseSettings("compact");
+remoteSettings.historyPageTurns = 125;
+remoteSettings.bot.model = "DESKTOP_LOCAL_BOT_SHOULD_NOT_RENDER";
+let remoteSettingsReads = 0;
+let remoteHostMutationCalls = 0;
+window.go = {
+  main: {
+    App: {
+      RemoteTargetStatus: async () => ({ state: "RemoteConnected", hostId: "host-remote", hostLabel: "Remote Host", canReconnect: false }),
+      Settings: async () => {
+        remoteSettingsReads += 1;
+        return remoteSettings;
+      },
+      SetDefaultToolApprovalMode: async () => { remoteHostMutationCalls += 1; },
+      SetAutoPlan: async () => { remoteHostMutationCalls += 1; },
+      SetMemoryCompilerEnabled: async () => { remoteHostMutationCalls += 1; },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  remoteRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="bots" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+await waitFor("Remote Host settings isolation", () => document.body.textContent?.includes("This Host panel is unavailable in Remote V1") === true);
+eq(remoteSettingsReads, 0, "blocked Remote Host settings tab does not load the broad Local SettingsView");
+ok(!document.body.textContent?.includes("DESKTOP_LOCAL_BOT_SHOULD_NOT_RENDER"), "Remote bots tab cannot render Desktop-local bot state");
+
+const generalTab = Array.from(remoteRootEl.querySelectorAll("button")).find((button) => button.textContent?.trim().startsWith("General")) as HTMLButtonElement | undefined;
+if (!generalTab) throw new Error("Remote General tab did not render");
+await act(async () => {
+  generalTab.click();
+  await flushPromises();
+});
+await waitFor("Remote Desktop general settings", () => Boolean(remoteRootEl.querySelector('input[aria-label="History page turns"]')));
+eq((remoteRootEl.querySelector('input[aria-label="History page turns"]') as HTMLInputElement | null)?.value, "125", "Remote General keeps the shared Desktop history turns setting");
+ok(!remoteRootEl.textContent?.includes("New session approval"), "Remote General hides Local default tool approval mutation");
+ok(!remoteRootEl.textContent?.includes("Automatic plan mode"), "Remote General hides Local auto-plan mutation");
+ok(!remoteRootEl.textContent?.includes("Memory v5"), "Remote General hides Local memory compiler mutation");
+eq(remoteHostMutationCalls, 0, "Remote General cannot invoke hidden Local Host mutations");
+
+await act(async () => {
+  remoteRoot.unmount();
 });
 dom.window.close();
 

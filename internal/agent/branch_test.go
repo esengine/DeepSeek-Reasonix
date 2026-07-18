@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -189,5 +190,47 @@ func TestSessionModelRoundTripPreservesActivity(t *testing.T) {
 	}
 	if !updated.UpdatedAt.Equal(meta.UpdatedAt) {
 		t.Fatalf("model write refreshed activity: before=%s after=%s", meta.UpdatedAt, updated.UpdatedAt)
+	}
+}
+
+func TestBranchMetaLegacyWritePreservesRemoteIdentityAndResolvedProfile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "remote.jsonl")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	remote := BranchMeta{
+		RemoteSessionID:          "session_opaque",
+		RemoteParentSessionID:    "session_parent",
+		RemoteParentCheckpointID: "checkpoint_parent",
+		Model:                    "provider/model",
+		Effort:                   "medium",
+		Mode:                     "normal",
+		TokenMode:                "full",
+		ToolApprovalMode:         "ask",
+		AdditionalDirs:           []string{"/host/additional"},
+		RemoteProfileVersion:     1,
+	}
+	if err := SaveBranchMetaPreserveUpdated(path, remote); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an older caller that constructs metadata without knowing any
+	// Remote fields. Durable identity/profile data must not be erased.
+	if err := SaveBranchMetaPreserveUpdated(path, BranchMeta{Name: "legacy rename"}); err != nil {
+		t.Fatal(err)
+	}
+	got, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	if got.RemoteSessionID != remote.RemoteSessionID ||
+		got.RemoteParentSessionID != remote.RemoteParentSessionID ||
+		got.RemoteParentCheckpointID != remote.RemoteParentCheckpointID ||
+		got.Model != remote.Model || got.Effort != remote.Effort ||
+		got.Mode != remote.Mode || got.TokenMode != remote.TokenMode ||
+		got.ToolApprovalMode != remote.ToolApprovalMode ||
+		got.RemoteProfileVersion != remote.RemoteProfileVersion ||
+		len(got.AdditionalDirs) != 1 || got.AdditionalDirs[0] != remote.AdditionalDirs[0] {
+		t.Fatalf("legacy write dropped Remote metadata: %+v", got)
 	}
 }

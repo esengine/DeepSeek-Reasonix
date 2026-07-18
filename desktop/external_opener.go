@@ -201,6 +201,9 @@ func (a *App) OpenWorkspaceInExternalOpener(id string) error {
 // OpenWorkspaceInExternalOpenerForTab is tab-scoped so a rapid tab switch cannot
 // send the wrong project to an external application.
 func (a *App) OpenWorkspaceInExternalOpenerForTab(tabID, id string) error {
+	if a.remoteTargetSelected() {
+		return ErrRemoteLocalPathOperation
+	}
 	root, _, ok := a.workspaceTargetForTab(tabID)
 	if !ok {
 		return os.ErrNotExist

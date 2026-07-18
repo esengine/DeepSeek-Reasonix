@@ -94,6 +94,11 @@ const (
 	// GuardianAssessment reports the outcome of a guardian sub-agent safety review.
 	// Carries GuardianResult payload (Outcome, RiskLevel, Rationale, etc.).
 	GuardianAssessment
+	// OperationDone marks the terminal boundary of one non-Turn foreground
+	// Operation (Shell, Compact, or Summarize). Err is non-nil on failure or
+	// cancellation. Runtime hosts attach their own opaque Operation identity;
+	// Controller deliberately carries no transport identity.
+	OperationDone
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount

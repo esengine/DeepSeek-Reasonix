@@ -103,6 +103,9 @@ type botInstallSession struct {
 }
 
 func (a *App) StartBotConnectionInstall(provider, domain string) (BotInstallStartResult, error) {
+	if err := a.rejectRemoteOutOfScope("StartBotConnectionInstall"); err != nil {
+		return BotInstallStartResult{}, err
+	}
 	provider, domain = normalizeBotInstallTarget(provider, domain)
 	if provider == "weixin" {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -137,6 +140,9 @@ func (a *App) StartBotConnectionInstall(provider, domain string) (BotInstallStar
 }
 
 func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, error) {
+	if err := a.rejectRemoteOutOfScope("PollBotConnectionInstall"); err != nil {
+		return BotInstallPollResult{}, err
+	}
 	installID = strings.TrimSpace(installID)
 	// Copy the session under a.mu: overlapping polls of the same install can
 	// race the locked PollDomain upgrade below with unlocked field reads.
@@ -195,6 +201,9 @@ func (a *App) PollBotConnectionInstall(installID string) (BotInstallPollResult, 
 }
 
 func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) {
+	if err := a.rejectRemoteOutOfScope("DiagnoseBotConnection"); err != nil {
+		return BotConnectionDiagnostic{}, err
+	}
 	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		return botConnectionDiagnostic(nil, id, "error", "config", "config_load_failed", err.Error(), true), nil
@@ -242,6 +251,9 @@ func (a *App) DiagnoseBotConnection(id string) (BotConnectionDiagnostic, error) 
 }
 
 func (a *App) TestBotConnection(id, target string) (BotConnectionDiagnostic, error) {
+	if err := a.rejectRemoteOutOfScope("TestBotConnection"); err != nil {
+		return BotConnectionDiagnostic{}, err
+	}
 	cfg, err := a.loadDesktopBotConfig()
 	if err != nil {
 		return botConnectionDiagnostic(nil, id, "error", "config", "config_load_failed", err.Error(), true), nil

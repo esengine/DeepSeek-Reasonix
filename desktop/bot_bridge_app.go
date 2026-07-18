@@ -127,8 +127,7 @@ func (a *App) bridgeDrive(tabID, text string, route bot.DesktopWatchRoute) error
 	// for the per-tab admission gate. Revalidate ownership only after the gate is
 	// held, immediately before attaching the route-specific forwarder.
 	if a.botBridge == nil || a.botBridge.TakeoverTab(route) != tabID {
-		tab.sink.cancelTurnStart()
-		tab.turnStartMu.Unlock()
+		a.finishTabTurnStart(tab, nil)
 		return fmt.Errorf("接管已解除，请重新接管会话")
 	}
 	target := botForwardTarget{

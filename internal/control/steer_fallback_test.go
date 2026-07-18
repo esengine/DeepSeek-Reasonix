@@ -85,3 +85,34 @@ func TestSteerBetweenTurnsRunsNewTurn(t *testing.T) {
 		waitIdleAdmission(t, c)
 	}
 }
+
+func TestTrySteerNeverFallsBackToNewOrParkedTurn(t *testing.T) {
+	c, ag := steerFallbackController(t)
+	if c.TrySteer("late strict steer") {
+		t.Fatal("idle strict steer was accepted")
+	}
+	time.Sleep(10 * time.Millisecond)
+	if sessionHasUserText(ag, "late strict steer") {
+		t.Fatal("TrySteer must not turn a stale steer into a new turn")
+	}
+
+	block := make(chan struct{})
+	started := make(chan struct{})
+	c.runGuarded(func(context.Context) error {
+		close(started)
+		<-block
+		return nil
+	})
+	<-started
+	if c.TrySteer("rejected while executor intake is closed") {
+		t.Fatal("strict steer unexpectedly accepted")
+	}
+	c.mu.Lock()
+	parked := len(c.parkedTurns)
+	c.mu.Unlock()
+	if parked != 0 {
+		t.Fatalf("TrySteer parked %d fallback turns", parked)
+	}
+	close(block)
+	waitIdleAdmission(t, c)
+}

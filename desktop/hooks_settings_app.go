@@ -30,6 +30,10 @@ type HooksSettingsView struct {
 }
 
 func (a *App) HooksSettings(scope string) HooksSettingsView {
+	if err := a.rejectRemoteOutOfScope("HooksSettings"); err != nil {
+		logRemoteBridgeError("HooksSettings", err)
+		return HooksSettingsView{Scope: strings.TrimSpace(scope), Hooks: []HookConfigView{}, Events: []string{}}
+	}
 	s, path, root := normalizeHooksScope(scope, a.activeHookProjectRoot())
 	view := HooksSettingsView{
 		Scope:       s,
@@ -55,10 +59,16 @@ func (a *App) HooksSettings(scope string) HooksSettingsView {
 }
 
 func (a *App) SaveHooksSettings(scope string, hooks []HookConfigView) error {
+	if err := a.rejectRemoteOutOfScope("SaveHooksSettings"); err != nil {
+		return err
+	}
 	return a.SaveHooksSettingsForRoot(scope, a.activeHookProjectRoot(), hooks)
 }
 
 func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookConfigView) error {
+	if err := a.rejectRemoteOutOfScope("SaveHooksSettingsForRoot"); err != nil {
+		return err
+	}
 	s, path, _ := normalizeHooksScope(scope, projectRoot)
 	settings := hook.Settings{Hooks: map[hook.Event][]hook.HookConfig{}}
 	for _, h := range hooks {
@@ -86,10 +96,16 @@ func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookCo
 }
 
 func (a *App) TrustProjectHooks() error {
+	if err := a.rejectRemoteOutOfScope("TrustProjectHooks"); err != nil {
+		return err
+	}
 	return a.TrustProjectHooksForRoot(a.activeHookProjectRoot())
 }
 
 func (a *App) TrustProjectHooksForRoot(root string) error {
+	if err := a.rejectRemoteOutOfScope("TrustProjectHooksForRoot"); err != nil {
+		return err
+	}
 	root = strings.TrimSpace(root)
 	if strings.TrimSpace(root) == "" || root == "." {
 		return fmt.Errorf("no active project workspace")

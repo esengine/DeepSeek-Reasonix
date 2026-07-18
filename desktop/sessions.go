@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,8 +13,8 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
-	"reasonix/internal/control"
 	"reasonix/internal/fileutil"
+	"reasonix/internal/sessiondisplay"
 	"reasonix/internal/store"
 )
 
@@ -27,13 +26,13 @@ import (
 // it. Deleting a session also drops its title entry.
 
 const sessionTitlesFile = ".titles.json"
-const sessionDisplayFile = ".display.json"
+const sessionDisplayFile = sessiondisplay.FileName
 const sessionPlannerDisplayFile = ".planner-display.json"
 const sessionTrashDir = ".trash"
 const sessionTrashMetaFile = ".trash-meta.json"
 
 func sessionTitlesPath(dir string) string  { return filepath.Join(dir, sessionTitlesFile) }
-func sessionDisplayPath(dir string) string { return filepath.Join(dir, sessionDisplayFile) }
+func sessionDisplayPath(dir string) string { return sessiondisplay.Path(dir) }
 func sessionTrashPath(dir string) string   { return filepath.Join(dir, sessionTrashDir) }
 
 func desktopSessionDir(root string) string {
@@ -926,7 +925,7 @@ func validateTrashedSessionPath(dir, sessionPath string) (string, string, string
 	return absPath, filepath.Base(absPath), filepath.Dir(absPath), nil
 }
 
-type sessionDisplayMap map[string]map[string]string
+type sessionDisplayMap = sessiondisplay.Map
 
 type sessionPlannerDisplayMap map[string][]plannerDisplayTurn
 
@@ -936,18 +935,11 @@ type plannerDisplayTurn struct {
 }
 
 func messageDisplayKey(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return fmt.Sprintf("%x", sum[:])
+	return sessiondisplay.MessageKey(content)
 }
 
 func loadSessionDisplays(dir string) sessionDisplayMap {
-	m := sessionDisplayMap{}
-	b, err := readFileUTF8(sessionDisplayPath(dir))
-	if err != nil {
-		return m
-	}
-	_ = json.Unmarshal(b, &m)
-	return m
+	return sessiondisplay.Load(dir)
 }
 
 func sessionPlannerDisplayPath(dir string) string {
@@ -1028,78 +1020,21 @@ func sessionPlannerDisplayTurns(dir, sessionPath string) []plannerDisplayTurn {
 }
 
 func saveSessionDisplays(dir string, m sessionDisplayMap) error {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".display.*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return fileutil.ReplaceFile(tmpPath, sessionDisplayPath(dir))
-}
-
-func saveOrRemoveSessionDisplays(dir string, m sessionDisplayMap) error {
-	if len(m) == 0 {
-		err := os.Remove(sessionDisplayPath(dir))
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return saveSessionDisplays(dir, m)
+	return sessiondisplay.Save(dir, m)
 }
 
 func removeSessionDisplayKey(dir, key string) error {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil
-	}
-	m := loadSessionDisplays(dir)
-	if m[key] == nil {
-		return nil
-	}
-	delete(m, key)
-	return saveOrRemoveSessionDisplays(dir, m)
+	return sessiondisplay.RemoveKey(dir, key)
 }
 
 func removeSessionDisplay(dir, sessionPath string) error {
-	if strings.TrimSpace(sessionPath) == "" {
-		return nil
-	}
-	return removeSessionDisplayKey(dir, filepath.Base(sessionPath))
+	return sessiondisplay.Remove(dir, sessionPath)
 }
 
 func pruneSessionDisplays(dir string, protected map[string]struct{}) error {
-	m := loadSessionDisplays(dir)
-	if len(m) == 0 {
-		return nil
-	}
-	changed := false
-	for key := range m {
-		if sessionDisplayKeyStillOwned(dir, key, protected) {
-			continue
-		}
-		delete(m, key)
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return saveOrRemoveSessionDisplays(dir, m)
+	return sessiondisplay.Prune(dir, func(key string) bool {
+		return sessionDisplayKeyStillOwned(dir, key, protected)
+	})
 }
 
 func sessionDisplayKeyStillOwned(dir, key string, protected map[string]struct{}) bool {
@@ -1131,36 +1066,19 @@ func sessionDisplayKeyStillOwned(dir, key string, protected map[string]struct{})
 }
 
 func recordSessionDisplay(dir, sessionPath, content, display string) error {
-	if strings.TrimSpace(sessionPath) == "" || content == display || strings.TrimSpace(display) == "" {
-		return nil
-	}
-	m := loadSessionDisplays(dir)
-	key := filepath.Base(sessionPath)
-	if m[key] == nil {
-		m[key] = map[string]string{}
-	}
-	m[key][messageDisplayKey(content)] = display
-	return saveSessionDisplays(dir, m)
+	return sessiondisplay.Record(dir, sessionPath, content, display)
 }
 
 // sessionDisplayResolver loads the sidecar once and returns a per-message
 // resolver, so a transcript of N messages doesn't re-read .display.json N times.
 func sessionDisplayResolver(dir, sessionPath string) func(content string) string {
-	return sessionDisplayResolverFromMap(loadSessionDisplays(dir), sessionPath)
+	return sessiondisplay.Resolver(dir, sessionPath)
 }
 
 func sessionDisplayResolverFromMap(displays sessionDisplayMap, sessionPath string) func(content string) string {
-	byHash := displays[filepath.Base(sessionPath)]
-	return func(content string) string {
-		if byHash != nil {
-			if display := byHash[messageDisplayKey(content)]; strings.TrimSpace(display) != "" {
-				return display
-			}
-		}
-		return control.StripComposePrefixes(content)
-	}
+	return sessiondisplay.ResolverFromMap(displays, sessionPath)
 }
 
 func resolveSessionDisplay(dir, sessionPath, content string) string {
-	return sessionDisplayResolver(dir, sessionPath)(content)
+	return sessiondisplay.Resolve(dir, sessionPath, content)
 }

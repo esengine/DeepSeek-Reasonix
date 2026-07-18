@@ -56,6 +56,41 @@ var (
 	sessionWriterID                 = newSessionWriterID()
 )
 
+// SessionTranscriptCommitError means a Session save failed only after its
+// authoritative transcript bytes had committed. Metadata and listing indexes
+// may still need repair, but replaying the semantic mutation is unsafe.
+type SessionTranscriptCommitError struct {
+	Err error
+}
+
+func (e *SessionTranscriptCommitError) Error() string {
+	if e == nil || e.Err == nil {
+		return "session transcript committed before persistence failure"
+	}
+	return e.Err.Error()
+}
+
+func (e *SessionTranscriptCommitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+// SessionTranscriptCommitted distinguishes a partial metadata failure from a
+// pre-commit save failure without relying on filesystem-specific error text.
+func SessionTranscriptCommitted(err error) bool {
+	var committed *SessionTranscriptCommitError
+	return errors.As(err, &committed) && committed != nil
+}
+
+func afterTranscriptCommit(err error) error {
+	if err == nil || SessionTranscriptCommitted(err) {
+		return err
+	}
+	return &SessionTranscriptCommitError{Err: err}
+}
+
 // SessionRecoveryMaxDepth bounds nested recovery forks: a normal session may
 // fork a recovery branch (depth 1), which may itself fork twice more under
 // genuine repeated incidents; past that the caller should stop forking and
@@ -252,7 +287,9 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 				// the state the interrupted save would have left.
 				revision, err := recordSessionContentRevision(path, digest, decision.revision)
 				if err != nil {
-					return err
+					// The exact transcript was already present on disk; this path
+					// only attempts to heal its stale revision ledger.
+					return afterTranscriptCommit(err)
 				}
 				if probe.native {
 					if err := writeSessionEventIndex(path, msgs, digest, revision); err != nil {
@@ -269,11 +306,13 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 		}
 		if decision.appendOnly && probe.native {
 			logSize := sessionEventLogSize(path)
+			transcriptCommitted := false
 			switch {
 			case logSize == 0:
 				if err := appendSessionReplaceEvent(path, msgs, digest, decision.revision, "snapshot"); err != nil {
 					return err
 				}
+				transcriptCommitted = true
 			case sessionEventLogOversized(logSize, contentBytes):
 				// Checkpoint: fold history into one replace event and refresh
 				// the .jsonl anchor so direct readers and older binaries stay
@@ -281,16 +320,21 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 				if err := compactSessionEventLog(path, msgs, digest, decision.revision, "compact"); err != nil {
 					return err
 				}
+				transcriptCommitted = true
 				if err := writeSessionMessages(path, msgs); err != nil {
-					return err
+					return afterTranscriptCommit(err)
 				}
 			default:
 				if err := appendSessionAppendEvent(path, decision.appendFrom, msgs[decision.appendFrom:], digest, decision.revision); err != nil {
 					return err
 				}
+				transcriptCommitted = true
 			}
 			revision, err := recordSessionContentRevision(path, digest, decision.revision)
 			if err != nil {
+				if transcriptCommitted {
+					return afterTranscriptCommit(err)
+				}
 				return err
 			}
 			if err := writeSessionEventIndex(path, msgs, digest, revision); err != nil {
@@ -326,6 +370,7 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 		reason = "repair"
 	}
 	logSize := sessionEventLogSize(path)
+	transcriptCommitted := false
 	switch {
 	case !probe.native:
 		// A foreign file (legacy import leftover) squats the native log path.
@@ -339,22 +384,29 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 			if err := compactSessionEventLog(path, msgs, digest, baseRevision, reason); err != nil {
 				return err
 			}
+			transcriptCommitted = true
 		}
 	case repairLog, sessionEventLogOversized(logSize, contentBytes):
 		if err := compactSessionEventLog(path, msgs, digest, baseRevision, reason); err != nil {
 			return err
 		}
+		transcriptCommitted = true
 	default:
 		if err := appendSessionReplaceEvent(path, msgs, digest, baseRevision, reason); err != nil {
 			return err
 		}
+		transcriptCommitted = true
 	}
 	if err := writeSessionMessages(path, msgs); err != nil {
+		if transcriptCommitted {
+			return afterTranscriptCommit(err)
+		}
 		return err
 	}
+	transcriptCommitted = true
 	revision, err := recordSessionContentRevision(path, digest, baseRevision)
 	if err != nil {
-		return err
+		return afterTranscriptCommit(err)
 	}
 	if probe.native {
 		if err := writeSessionEventIndex(path, msgs, digest, revision); err != nil {

@@ -10,6 +10,19 @@ import (
 // status is merged from the active tab Host only — no new MCP processes are
 // started, and no controller rebuild or session snapshot is triggered.
 func (a *App) CapabilityDiagnostics(includeSessionRuntime bool) capdiag.Report {
+	if err := a.rejectRemoteOutOfScope("CapabilityDiagnostics"); err != nil {
+		logRemoteBridgeError("CapabilityDiagnostics", err)
+		return capdiag.Report{
+			SchemaVersion: capdiag.SchemaVersion,
+			Summary:       capdiag.Summary{Infos: 1},
+			Issues: []capdiag.Issue{{
+				Severity:  "info",
+				Code:      "remote_v1_out_of_scope",
+				Subsystem: "desktop",
+				Message:   err.Error(),
+			}},
+		}
+	}
 	root, host := a.activeDiagSnapshot(includeSessionRuntime)
 	opts := capdiag.Options{Root: root, Live: false}
 

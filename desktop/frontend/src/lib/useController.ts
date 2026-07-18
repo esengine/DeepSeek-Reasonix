@@ -56,7 +56,16 @@ type SyncActiveTabOptions = {
   preserveCachedHistory?: boolean;
 };
 
-const HISTORY_PAGE_TURNS = 60;
+const DEFAULT_HISTORY_PAGE_TURNS = 60;
+
+async function configuredHistoryPageTurns(): Promise<number> {
+  try {
+    const turns = (await app.DesktopStartupSettings()).historyPageTurns;
+    return Number.isInteger(turns) && turns >= 1 && turns <= 200 ? turns : DEFAULT_HISTORY_PAGE_TURNS;
+  } catch {
+    return DEFAULT_HISTORY_PAGE_TURNS;
+  }
+}
 
 export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
@@ -1009,6 +1018,29 @@ function applyEvent(s: State, e: WireEvent): State {
       const level = e.guardian.outcome === "deny" ? "warn" : "info";
       return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `g${s.seq}`, level, text: formatGuardianAssessmentNotice(e.guardian) }] };
     }
+    case "operation_done": {
+      if (s.pendingUser !== undefined) s = flushPendingUser(s);
+      let items = s.items.map((item) => item.kind === "tool" && item.status === "running"
+        ? { ...item, status: "stopped" as const }
+        : item);
+      if (e.err) {
+        items = [...items, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }];
+      }
+      return endPromptWait({
+        ...s,
+        items,
+        running: false,
+        turnActive: false,
+        pendingPrompt: false,
+        cancelRequested: false,
+        cancellable: false,
+        currentAssistant: undefined,
+        approval: undefined,
+        ask: undefined,
+        deliveryRecoveryActive: false,
+        seq: s.seq + 1,
+      }, Date.now());
+    }
     case "turn_done": {
       if (s.pendingUser !== undefined) s = flushPendingUser(s);
       const now = Date.now();
@@ -1850,7 +1882,7 @@ export function useController() {
       const historyStartedAt = Date.now();
       const historyPage = skipHistory
         ? undefined
-        : await loadTimed("history", () => app.HistoryPageForTab(tabId, 0, HISTORY_PAGE_TURNS));
+        : await loadTimed("history", async () => app.HistoryPageForTab(tabId, 0, await configuredHistoryPageTurns()));
 
       if (!stillCurrent()) return;
       if (!skipHistory && historyPage !== undefined) {
@@ -1953,7 +1985,7 @@ export function useController() {
     dispatchTo(targetTabId, { type: "history_older_start" });
     const startedAt = Date.now();
     try {
-      const page = await app.HistoryPageForTab(targetTabId, beforeTurn, HISTORY_PAGE_TURNS);
+      const page = await app.HistoryPageForTab(targetTabId, beforeTurn, await configuredHistoryPageTurns());
       const current = statesRef.current.get(targetTabId);
       if (!current || current.historyStartTurn !== beforeTurn || (current.meta?.sessionPath ?? "") !== sessionPath) {
         dispatchTo(targetTabId, { type: "history_older_error" });
@@ -2608,8 +2640,8 @@ export function useController() {
     let page: HistoryPage;
     try {
       page = tabId
-        ? await app.ResumeSessionPageForTab(tabId, path, HISTORY_PAGE_TURNS)
-        : await app.ResumeSessionPage(path, HISTORY_PAGE_TURNS);
+        ? await app.ResumeSessionPageForTab(tabId, path, await configuredHistoryPageTurns())
+        : await app.ResumeSessionPage(path, await configuredHistoryPageTurns());
     } catch (err) {
       if (sessionLoadCurrent(targetTabId, seq)) {
         dispatchTo(targetTabId, { type: "hydrate_error", reason: "resume-session", error: errorMessage(err) });
@@ -2633,7 +2665,7 @@ export function useController() {
     dispatchTo(tabId, { type: "hydrate_start", reason: "resume-session" });
     let page: HistoryPage;
     try {
-      page = await app.OpenChannelSessionPageForTab(tabId, path, HISTORY_PAGE_TURNS);
+      page = await app.OpenChannelSessionPageForTab(tabId, path, await configuredHistoryPageTurns());
     } catch (err) {
       if (sessionLoadCurrent(tabId, seq)) {
         dispatchTo(tabId, { type: "hydrate_error", reason: "resume-session", error: errorMessage(err) });

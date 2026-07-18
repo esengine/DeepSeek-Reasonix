@@ -1355,6 +1355,64 @@ func TestLoadDesktopUserConfigForViewDoesNotPersistLegacyProviderAccess(t *testi
 	}
 }
 
+func TestLoadDesktopUserConfigForViewDoesNotPersistLegacyMCPTierMigration(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte("[[plugins]]\nname = \"playwright\"\ncommand = \"npx\"\ntier = \"lazy\"\n")
+	if err := os.WriteFile(userPath, legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	for name, load := range map[string]func() (*config.Config, string, error){
+		"view":                  app.loadDesktopUserConfigForView,
+		"view-with-credentials": app.loadDesktopUserConfigForViewWithCredentials,
+	} {
+		cfg, _, err := load()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(cfg.Plugins) != 1 || cfg.Plugins[0].Tier != "" {
+			t.Fatalf("%s did not normalize legacy tier in memory: %+v", name, cfg.Plugins)
+		}
+		after, err := os.ReadFile(userPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(after) != string(legacy) {
+			t.Fatalf("%s rewrote local config:\n%s", name, after)
+		}
+	}
+}
+
+func TestRemoteSettingsDoesNotMigrateLocalConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := []byte("[[plugins]]\nname = \"playwright\"\ncommand = \"npx\"\ntier = \"lazy\"\n")
+	if err := os.WriteFile(userPath, legacy, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app, _ := newRemoteBridgeV1TestApp(t, newRemoteBridgeRecordingV1())
+	settings := app.Settings()
+	if len(settings.Providers) != 0 || len(settings.ProviderKinds) != 0 || settings.Network.ProxyMode != "off" {
+		t.Fatalf("Remote Settings exposed a Local runtime projection: %+v", settings)
+	}
+	after, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(legacy) {
+		t.Fatalf("Remote Settings rewrote local config:\n%s", after)
+	}
+}
+
 // TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory locks the
 // same contract for the legacy bot-config migration: read paths (including the
 // bot runtime's credential-loading view) see the merged bot config in memory

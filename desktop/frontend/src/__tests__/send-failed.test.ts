@@ -121,6 +121,21 @@ const shellNotice = shellFailed.items[shellFailed.items.length - 1];
 eq(shellNotice.kind, "notice", "rejected shell command appends a visible notice");
 eq(shellNotice.kind === "notice" && shellNotice.text.includes("workspace is still starting"), true, "shell rejection notice includes the backend error");
 
+const shellCompleted = reducer(shellSent, {
+  type: "event",
+  e: { kind: "operation_done" } as WireEvent,
+});
+eq(shellCompleted.running, false, "operation_done clears the running state without a fake turn_done");
+eq(shellCompleted.cancellable, false, "operation_done clears the operation cancel affordance");
+eq(shellCompleted.items.some((it) => it.kind === "user" && it.text === "!ls"), true, "operation_done confirms the shell composer entry");
+const shellOperationFailed = reducer(shellSent, {
+  type: "event",
+  e: { kind: "operation_done", err: "command failed" } as WireEvent,
+});
+const shellOperationFailureNotice = shellOperationFailed.items[shellOperationFailed.items.length - 1];
+eq(shellOperationFailureNotice?.kind, "notice", "failed operation_done appends a visible notice");
+eq(shellOperationFailureNotice?.kind === "notice" && shellOperationFailureNotice.text, "command failed", "failed operation_done preserves the safe diagnostic");
+
 const lateFailure = reducer(confirmed, { type: "send_failed", error: "Send failed: late" });
 eq(lateFailure, confirmed, "send_failed after backend confirmation is a no-op");
 
@@ -142,6 +157,7 @@ const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const typesSource = readFileSync(resolve(here, "../lib/types.ts"), "utf8");
 const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), "utf8");
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
+eq(typesSource.includes('"operation_done"'), true, "TypeScript EventKind declares operation_done");
 eq(controllerSource.includes('e.kind === "memory_compiler_stats" || e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
 eq(
   /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),

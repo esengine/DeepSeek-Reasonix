@@ -815,6 +815,49 @@ func TestSaveSnapshotSameContentSkipsRevisionBump(t *testing.T) {
 	}
 }
 
+func TestSaveSnapshotClassifiesRevisionSidecarFailureAfterTranscriptCommit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "partial-commit.jsonl")
+	metaPath := BranchMetaPath(path)
+	if err := os.Mkdir(metaPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	session := NewSession("system")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: "only once"})
+
+	err := session.SaveSnapshot(path)
+	if err == nil || !SessionTranscriptCommitted(err) {
+		t.Fatalf("SaveSnapshot error = %v, committed=%v", err, SessionTranscriptCommitted(err))
+	}
+	var committed *SessionTranscriptCommitError
+	if !errors.As(err, &committed) || committed == nil || committed.Err == nil {
+		t.Fatalf("SaveSnapshot did not expose typed partial commit: %T %v", err, err)
+	}
+	loaded, loadErr := LoadSession(path)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if messages := loaded.Snapshot(); len(messages) != 2 || messages[1].Role != provider.RoleUser || messages[1].Content != "only once" {
+		t.Fatalf("durable transcript after sidecar failure = %+v", messages)
+	}
+
+	// Repair retries persistence of the already-committed transcript; it does
+	// not replay the semantic user mutation or append another message.
+	if err := os.Remove(metaPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SaveSnapshot(path); err != nil {
+		t.Fatalf("same-content ledger repair: %v", err)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages := reloaded.Snapshot(); len(messages) != 2 || messages[1].Content != "only once" {
+		t.Fatalf("ledger repair duplicated transcript = %+v", messages)
+	}
+}
+
 func TestSaveSnapshotSameContentByOtherRuntimeKeepsClonedBaselineWritable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	s := NewSession("sys")

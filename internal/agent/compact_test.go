@@ -5,10 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reasonix/internal/event"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
@@ -16,17 +18,24 @@ import (
 // fakeProvider returns a fixed reply and records the messages it was asked to
 // complete, so tests can drive summarization without a network call.
 type fakeProvider struct {
-	reply        string
-	promptTokens int
-	got          []provider.Message
-	streamErr    error // when set, Stream emits a ChunkError instead of the reply
-	hang         bool  // when true, Stream returns a channel that never sends or closes
+	reply         string
+	promptTokens  int
+	got           []provider.Message
+	streamErr     error // when set, Stream emits a ChunkError instead of the reply
+	hang          bool  // when true, Stream returns a channel that never sends or closes
+	streamStarted chan struct{}
 }
 
 func (f *fakeProvider) Name() string { return "fake" }
 
 func (f *fakeProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	f.got = req.Messages
+	if f.streamStarted != nil {
+		select {
+		case f.streamStarted <- struct{}{}:
+		default:
+		}
+	}
 	if f.hang {
 		return make(chan provider.Chunk), nil
 	}
@@ -458,6 +467,192 @@ func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
 	}
 	if done == nil || !strings.Contains(done.Summary, "summary was unavailable") {
 		t.Fatalf("CompactionDone = %+v, want a mechanical-fold summary", done)
+	}
+}
+
+func TestCompactCancellationAbortsWithoutMechanicalRewrite(t *testing.T) {
+	streamStarted := make(chan struct{}, 1)
+	prov := &fakeProvider{hang: true, streamStarted: streamStarted}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	before := sess.Snapshot()
+	events := make(chan event.Event, 8)
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.CompactionStarted || e.Kind == event.CompactionDone || e.Kind == event.Notice {
+			events <- e
+		}
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.CompactNow(ctx, "") }()
+	select {
+	case <-streamStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("compaction summarizer did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("CompactNow error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled compaction did not return")
+	}
+	if got := sess.Snapshot(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("cancelled compaction rewrote session:\nbefore=%+v\nafter=%+v", before, got)
+	}
+
+	var started, aborted int
+	for {
+		select {
+		case e := <-events:
+			switch e.Kind {
+			case event.CompactionStarted:
+				started++
+			case event.CompactionDone:
+				aborted++
+				if e.Compaction.Summary != "" || e.Compaction.Messages != 0 {
+					t.Fatalf("aborted compaction event = %+v", e.Compaction)
+				}
+			case event.Notice:
+				if strings.Contains(e.Text, "without a generated summary") {
+					t.Fatalf("cancellation incorrectly used mechanical fold: %+v", e)
+				}
+			}
+		default:
+			if started != 1 || aborted != 1 {
+				t.Fatalf("compaction events started=%d aborted=%d, want 1/1", started, aborted)
+			}
+			return
+		}
+	}
+}
+
+func TestCompactCommitGateCancellationPreventsRewrite(t *testing.T) {
+	prov := &fakeProvider{reply: "summary"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	before := sess.Snapshot()
+	var got []event.Event
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.FuncSink(func(e event.Event) {
+		got = append(got, e)
+	}))
+	err := a.CompactNowWithCommit(context.Background(), "", func() error { return context.Canceled })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompactNowWithCommit error = %v", err)
+	}
+	if after := sess.Snapshot(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed commit gate rewrote session:\nbefore=%+v\nafter=%+v", before, after)
+	}
+	var started, aborted int
+	for _, e := range got {
+		switch e.Kind {
+		case event.CompactionStarted:
+			started++
+		case event.CompactionDone:
+			aborted++
+			if e.Compaction.Summary != "" || e.Compaction.Messages != 0 {
+				t.Fatalf("commit-gate abort event = %+v", e.Compaction)
+			}
+		}
+	}
+	if started != 1 || aborted != 1 {
+		t.Fatalf("events started=%d aborted=%d, want 1/1", started, aborted)
+	}
+}
+
+func TestExplicitSummarizeCancellationNeverReplacesSession(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*Agent, context.Context) error
+	}{
+		{name: "from", run: func(a *Agent, ctx context.Context) error { return a.SummarizeFrom(ctx, 1) }},
+		{name: "up-to", run: func(a *Agent, ctx context.Context) error { return a.SummarizeUpTo(ctx, 3) }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			streamStarted := make(chan struct{}, 1)
+			prov := &fakeProvider{hang: true, streamStarted: streamStarted}
+			sess := &Session{Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "sys"},
+				{Role: provider.RoleUser, Content: "one"},
+				{Role: provider.RoleAssistant, Content: "answer"},
+				{Role: provider.RoleUser, Content: "two"},
+				{Role: provider.RoleAssistant, Content: "answer two"},
+			}}
+			before := sess.Snapshot()
+			a := New(prov, tool.NewRegistry(), sess, Options{}, event.Discard)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- tc.run(a, ctx) }()
+			select {
+			case <-streamStarted:
+			case <-time.After(2 * time.Second):
+				t.Fatal("summarizer did not start")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("summarize error = %v, want context.Canceled", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("cancelled summarize did not return")
+			}
+			if got := sess.Snapshot(); !reflect.DeepEqual(got, before) {
+				t.Fatalf("cancelled summarize rewrote session:\nbefore=%+v\nafter=%+v", before, got)
+			}
+		})
+	}
+}
+
+func TestExplicitSummarizeCommitGatePreventsRewrite(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*Agent, context.Context, func() error) error
+	}{
+		{name: "from", run: func(a *Agent, ctx context.Context, gate func() error) error {
+			return a.SummarizeFromWithCommit(ctx, 1, gate)
+		}},
+		{name: "up-to", run: func(a *Agent, ctx context.Context, gate func() error) error {
+			return a.SummarizeUpToWithCommit(ctx, 3, gate)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := &Session{Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "sys"},
+				{Role: provider.RoleUser, Content: "one"},
+				{Role: provider.RoleAssistant, Content: "answer"},
+				{Role: provider.RoleUser, Content: "two"},
+				{Role: provider.RoleAssistant, Content: "answer two"},
+			}}
+			before := sess.Snapshot()
+			a := New(&fakeProvider{reply: "summary"}, tool.NewRegistry(), sess, Options{}, event.Discard)
+			err := tc.run(a, context.Background(), func() error { return context.Canceled })
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("summarize error = %v", err)
+			}
+			if after := sess.Snapshot(); !reflect.DeepEqual(after, before) {
+				t.Fatalf("failed commit gate rewrote session:\nbefore=%+v\nafter=%+v", before, after)
+			}
+		})
 	}
 }
 

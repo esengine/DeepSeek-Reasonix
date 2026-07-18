@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/memory"
 	"reasonix/internal/provider"
+	"reasonix/internal/runtimeapi"
 	"reasonix/internal/skill"
 )
 
@@ -36,17 +38,22 @@ type MemorySuggestion struct {
 	Body        string   `json:"body"`
 	Reason      string   `json:"reason"`
 	Evidence    []string `json:"evidence"`
+	// ExpectedRevision is empty for Local compiler candidates. Remote runtime
+	// candidates carry the opaque catalog revision required for stale-safe
+	// acceptance; the frontend treats it as an opaque round-trip value.
+	ExpectedRevision string `json:"expectedRevision,omitempty"`
 }
 
 // SkillSuggestion is a user-confirmed candidate for a reusable skill.
 type SkillSuggestion struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Scope       string   `json:"scope"`
-	Body        string   `json:"body"`
-	Reason      string   `json:"reason"`
-	Evidence    []string `json:"evidence"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Description      string   `json:"description"`
+	Scope            string   `json:"scope"`
+	Body             string   `json:"body"`
+	Reason           string   `json:"reason"`
+	Evidence         []string `json:"evidence"`
+	ExpectedRevision string   `json:"expectedRevision,omitempty"`
 }
 
 // MemorySuggestionsView is the desktop Memory page's suggestion payload.
@@ -87,6 +94,9 @@ func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
 		Memories:    []MemorySuggestion{},
 		Skills:      []SkillSuggestion{},
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if a.remoteTargetSelected() {
+		return a.remoteMemorySuggestionsForTab(tabID, view.GeneratedAt)
 	}
 
 	a.mu.RLock()
@@ -132,6 +142,22 @@ func (a *App) AcceptMemorySuggestion(in MemorySuggestion) (string, error) {
 // AcceptMemorySuggestionForTab persists a memory candidate into the selected
 // tab's memory store, matching the tab used to generate suggestions.
 func (a *App) AcceptMemorySuggestionForTab(tabID string, in MemorySuggestion) (string, error) {
+	if a.remoteTargetSelected() {
+		api, session, _, _, err := a.remoteV1ForTab(tabID)
+		if err != nil {
+			return "", err
+		}
+		ctx, cancel := a.remoteActionContext()
+		defer cancel()
+		result, err := api.AcceptMemorySuggestion(ctx, runtimeapi.AcceptMemorySuggestionInput{
+			Session: session.Created.Session, SuggestionID: runtimeapi.SuggestionID(strings.TrimSpace(in.ID)),
+			ExpectedRevision: runtimeapi.CatalogRevision(strings.TrimSpace(in.ExpectedRevision)),
+		})
+		if err != nil {
+			return "", err
+		}
+		return string(result.MemoryID), nil
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return "", nil
@@ -161,6 +187,22 @@ func (a *App) AcceptSkillSuggestion(in SkillSuggestion) (string, error) {
 // AcceptSkillSuggestionForTab writes a skill candidate into the selected tab's
 // workspace/global skill store, matching the tab used to generate suggestions.
 func (a *App) AcceptSkillSuggestionForTab(tabID string, in SkillSuggestion) (string, error) {
+	if a.remoteTargetSelected() {
+		api, session, _, _, err := a.remoteV1ForTab(tabID)
+		if err != nil {
+			return "", err
+		}
+		ctx, cancel := a.remoteActionContext()
+		defer cancel()
+		result, err := api.AcceptSkillSuggestion(ctx, runtimeapi.AcceptSkillSuggestionInput{
+			Session: session.Created.Session, SuggestionID: runtimeapi.SuggestionID(strings.TrimSpace(in.ID)),
+			ExpectedRevision: runtimeapi.CatalogRevision(strings.TrimSpace(in.ExpectedRevision)),
+		})
+		if err != nil {
+			return "", err
+		}
+		return string(result.SkillID), nil
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	workspaceRoot := ""
@@ -186,6 +228,50 @@ func (a *App) AcceptSkillSuggestionForTab(tabID string, in SkillSuggestion) (str
 	// skill then surfaces with no description and default run semantics).
 	content := skill.RenderSkillFile(skill.SkillFileOptions{Name: name, Description: desc, Body: body})
 	return st.CreateWithContent(name, scope, content)
+}
+
+func (a *App) remoteMemorySuggestionsForTab(tabID, generatedAt string) MemorySuggestionsView {
+	view := MemorySuggestionsView{
+		Memories: []MemorySuggestion{}, Skills: []SkillSuggestion{}, GeneratedAt: generatedAt,
+		Source: "remote-runtime",
+	}
+	api, session, _, _, err := a.remoteV1ForTab(tabID)
+	if err != nil {
+		view.Source = "remote-unavailable"
+		return view
+	}
+	ctx, cancel := a.remoteActionContext()
+	defer cancel()
+	result, err := api.MemorySuggestions(ctx, runtimeapi.MemoryInput{Session: session.Created.Session})
+	if err != nil {
+		view.Source = remoteMemorySuggestionErrorSource(err)
+		return view
+	}
+	view.Available = result.Available
+	revision := string(result.Revision)
+	for _, item := range result.Memories {
+		view.Memories = append(view.Memories, MemorySuggestion{
+			ID: string(item.SuggestionID), Name: item.Name, Title: item.Title,
+			Description: item.Description, Type: item.Type, Body: dereferenceString(item.Body),
+			Reason: item.Reason, Evidence: append([]string(nil), item.Evidence...), ExpectedRevision: revision,
+		})
+	}
+	for _, item := range result.Skills {
+		view.Skills = append(view.Skills, SkillSuggestion{
+			ID: string(item.SuggestionID), Name: item.Name, Description: item.Description,
+			Scope: item.Scope, Body: dereferenceString(item.Body), Reason: item.Reason,
+			Evidence: append([]string(nil), item.Evidence...), ExpectedRevision: revision,
+		})
+	}
+	return view
+}
+
+func remoteMemorySuggestionErrorSource(err error) string {
+	var unavailable *runtimeapi.UnavailableError
+	if err != nil && errors.As(err, &unavailable) {
+		return "remote-capability-unavailable"
+	}
+	return "remote-error"
 }
 
 func loadSuggestionSessions(dir string, limit int) []suggestionSession {

@@ -31,6 +31,26 @@ GUARDNAME="reasonix-guard"
 LAUNCHERNAME="reasonix-launcher"
 windows_resource_tool_dir=""
 
+resolve_source_revision() {
+	if [ -n "${GITHUB_SHA:-}" ]; then
+		printf '%s' "$GITHUB_SHA"
+		return
+	fi
+	local revision status
+	if ! revision=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null); then
+		return
+	fi
+	if ! status=$(git -C "$ROOT" status --porcelain 2>/dev/null); then
+		return
+	fi
+	if [ -n "$status" ]; then
+		revision="${revision}+dirty"
+	fi
+	printf '%s' "$revision"
+}
+
+SOURCE_REVISION="$(resolve_source_revision)"
+
 cleanup() {
 	if [ -n "$windows_resource_tool_dir" ]; then
 		rm -rf "$windows_resource_tool_dir"
@@ -77,7 +97,7 @@ numver="${VERSION#v}"; numver="${numver%%-*}"
 node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
 
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
-ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL"
+ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL -X reasonix/internal/buildinfo.SourceRevision=$SOURCE_REVISION"
 [ "$os" = "darwin" ] && [ "${HAS_APPLE_CERT:-}" = "true" ] && ldflags="$ldflags -X main.macSelfUpdate=true"
 UPDATE_HELPER="reasonix-update-helper.exe"
 if [ "$os" = windows ]; then

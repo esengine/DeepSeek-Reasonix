@@ -21,7 +21,8 @@ export type EventKind =
   | "retrying"
   | "steer"
   | "memory_compiler_stats"
-  | "guardian_assessment";
+  | "guardian_assessment"
+  | "operation_done";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -211,6 +212,9 @@ export interface WireFinalReadiness {
 // Tab management types (desktop/tabs.go).
 export interface TabMeta {
   id: string;
+  targetKind?: "local" | "remote";
+  workspaceId?: string;
+  sessionId?: string;
   tabType?: "session" | "file";
   scope: string;
   workspaceRoot: string;
@@ -1010,6 +1014,7 @@ export interface MemorySuggestion {
   body: string;
   reason: string;
   evidence: string[];
+  expectedRevision?: string; // opaque Remote catalog revision; round-trip only
 }
 
 export interface SkillSuggestion {
@@ -1020,6 +1025,7 @@ export interface SkillSuggestion {
   body: string;
   reason: string;
   evidence: string[];
+  expectedRevision?: string; // opaque Remote catalog revision; round-trip only
 }
 
 export interface MemorySuggestionsView {
@@ -1041,7 +1047,180 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "remote" | "mcp" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+
+// Remote target bindings intentionally expose only Desktop-owned display and
+// connection metadata. Client ids, lease ids, SSH credentials, and AskPass
+// answers never cross this frontend contract.
+export interface RemoteHostInput {
+  id?: string;
+  alias: string;
+  label: string;
+  sshConfigPath?: string;
+}
+
+export interface RemoteHostView {
+  id: string;
+  alias: string;
+  label: string;
+  sshConfigPath?: string;
+}
+
+export type RemoteTargetState =
+  | "Disconnected"
+  | "LocalConnected"
+  | "RemoteConnecting"
+  | "RemoteConnected"
+  | "RemoteReconnecting"
+  | "Switching";
+
+export interface RemoteTargetStatusView {
+  state: RemoteTargetState;
+  hostId?: string;
+  hostLabel?: string;
+  failure?: string;
+  canReconnect: boolean;
+}
+
+// A bounded Desktop-owned lifecycle record. It intentionally has no argv,
+// stderr, transport payload, or credential-shaped fields.
+export interface RemoteConnectionLogView {
+  atMillis: number;
+  state: RemoteTargetState;
+  hostId?: string;
+  hostLabel?: string;
+  message?: string;
+}
+
+export type RemoteAskPassKind =
+  | "host_key_confirm"
+  | "host_key_changed"
+  | "password"
+  | "key_passphrase"
+  | "verification_code"
+  | "authentication";
+
+export interface RemoteAskPassView {
+  requestId: string;
+  kind: RemoteAskPassKind;
+  prompt: string;
+  hostLabel?: string;
+  secret: boolean;
+}
+
+// Opaque Remote filesystem references are deliberately separate from local
+// paths. displayPath is presentation-only; every browse/create call sends ref.
+export interface RemoteDirectoryView {
+  ref: string;
+  name: string;
+  displayPath: string;
+  parentRef?: string;
+}
+
+export interface RemoteWorkspaceBrowseInput {
+  directoryRef?: string;
+  typedPath?: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface RemoteWorkspacePageView {
+  directory: RemoteDirectoryView;
+  entries: RemoteDirectoryView[];
+  hasMore: boolean;
+  next?: string;
+}
+
+export interface RemoteCreateWorkspaceSessionInput {
+  primaryDirectoryRef: string;
+  additionalDirectoryRefs: string[];
+  topicTitle: string;
+}
+
+export interface RemoteWorkbenchStatusView {
+  hostId?: string;
+  workspaceName?: string;
+  workspaceDisplayPath?: string;
+  sessionAttached: boolean;
+  tabId?: string;
+  topicTitle?: string;
+}
+
+export interface RemoteHostFeatureView {
+  coreSession: boolean;
+  primaryFileQueries: boolean;
+  userShell: boolean;
+  jobCancel: boolean;
+  memory: boolean;
+  research: boolean;
+  mediaPreview: boolean;
+  attachments: boolean;
+  clipboardImages: boolean;
+  sftp: boolean;
+  localPathOperations: boolean;
+  gitWrite: boolean;
+  pty: boolean;
+  deliveryWorktree: boolean;
+}
+
+export interface RemoteHostCapabilitiesView {
+  hostConfig: boolean;
+  workspaceBrowse: boolean;
+  sessionCreate: boolean;
+  sessionAttach: boolean;
+  composerSubmit: boolean;
+  turnSteer: boolean;
+  turnCancel: boolean;
+  promptApprove: boolean;
+  promptAnswer: boolean;
+  features: RemoteHostFeatureView;
+  limits: Record<string, number>;
+}
+
+export interface RemoteHostConfigSummaryView {
+  available: boolean;
+  unavailableReason?: string;
+  defaultModel?: string;
+  models: string[];
+  collaborationModes: string[];
+  tokenModes: string[];
+  toolApprovalModes: string[];
+  revision?: string;
+  effectiveScopes: Array<{ name: string; active: boolean }>;
+  displayPaths: Array<{ scope: string; displayPath: string }>;
+  featureStates: Array<{ feature: string; available: boolean; summary?: string }>;
+  cliHints: Array<{ label: string; command: string }>;
+}
+
+export interface RemoteHostRuntimeSummaryView {
+  capabilities: RemoteHostCapabilitiesView;
+  config: RemoteHostConfigSummaryView;
+  catalog: RemoteSessionCatalogView;
+}
+
+export interface RemoteSessionCatalogView {
+  available: boolean;
+  mcpServers: RemoteSessionMCPServerView[];
+  skills: RemoteSessionSkillView[];
+  plugins: RemoteSessionPluginView[];
+}
+
+export interface RemoteSessionMCPServerView {
+  name: string;
+  status: "available" | "unavailable";
+  toolCount: number;
+}
+
+export interface RemoteSessionSkillView {
+  name: string;
+  description?: string;
+  scope: string;
+}
+
+export interface RemoteSessionPluginView {
+  name: string;
+  enabled: boolean;
+}
 
 /** Capability diagnostics report from App.CapabilityDiagnostics (capdiag.Report). */
 export interface CapabilityDiagnosticsReport {
@@ -1487,6 +1666,7 @@ export interface SettingsView {
   desktopThemeStyle: string;
   closeBehavior: string; // "background" | "quit"
   displayMode: string;   // "standard" | "compact"
+  historyPageTurns: number; // 1..200; Local/Remote history and attach page size
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
@@ -1507,6 +1687,7 @@ export interface DesktopStartupSettingsView {
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
   displayMode: string;   // "standard" | "compact"
+  historyPageTurns: number; // 1..200; Local/Remote history and attach page size
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup

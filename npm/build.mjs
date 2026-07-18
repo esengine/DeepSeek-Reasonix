@@ -7,6 +7,28 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 const STAGE = join(HERE, ".stage");
 
+function resolveSourceRevision() {
+  const githubSHA = process.env.GITHUB_SHA?.trim();
+  if (githubSHA) return githubSHA;
+  try {
+    const revision = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (!revision) return "";
+    const dirty = execFileSync("git", ["status", "--porcelain"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return `${revision}${dirty ? "+dirty" : ""}`;
+  } catch {
+    // An empty injection preserves buildinfo.Revision's Go VCS fallback.
+    return "";
+  }
+}
+
 const TARGETS = [
   { node: "darwin-arm64", goos: "darwin", goarch: "arm64" },
   { node: "darwin-x64", goos: "darwin", goarch: "amd64" },
@@ -25,6 +47,7 @@ if (!tag) {
 const version = tag.replace(/^(npm-)?v/, "");
 const binaryVersion = `v${version}`;
 const publish = process.argv.includes("--publish");
+const sourceRevision = resolveSourceRevision();
 
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
@@ -43,7 +66,7 @@ for (const t of TARGETS) {
       "build",
       "-trimpath",
       "-ldflags",
-      `-s -w -X main.version=${binaryVersion}`,
+      `-s -w -X main.version=${binaryVersion} -X reasonix/internal/buildinfo.SourceRevision=${sourceRevision}`,
       "-o",
       join(dir, "bin", exe),
       "./cmd/reasonix",

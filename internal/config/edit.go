@@ -327,6 +327,16 @@ func (c *Config) SetDesktopDisplayMode(mode string) error {
 	return nil
 }
 
+// SetDesktopHistoryPageTurns sets the common Local/Remote transcript page and
+// attach window. It is Desktop-only and never changes Host runtime behavior.
+func (c *Config) SetDesktopHistoryPageTurns(turns int) error {
+	if turns < DesktopHistoryPageTurnsMin || turns > DesktopHistoryPageTurnsMax {
+		return fmt.Errorf("desktop history page turns %d: must be in %d..%d", turns, DesktopHistoryPageTurnsMin, DesktopHistoryPageTurnsMax)
+	}
+	c.Desktop.HistoryPageTurns = turns
+	return nil
+}
+
 // SetDesktopStatusBarStyle sets the desktop status bar metric label style.
 // UI-only; it must not affect CLI output or provider-visible request data.
 func (c *Config) SetDesktopStatusBarStyle(style string) error {

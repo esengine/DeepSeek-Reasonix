@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, u
 import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, MessageCircle, Minus, Play, Plus, QrCode, RefreshCw, RotateCcw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
-import { app } from "../lib/bridge";
+import { app, onRemoteTargetState } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerRequiresKey } from "../lib/providerModels";
 import { useUpdater } from "../lib/useUpdater";
@@ -47,7 +47,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, RemoteTargetStatusView, SettingsTab, SettingsView } from "../lib/types";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -57,7 +57,7 @@ import { getSuccessPreference, setSuccessPreference, getAttentionPreference, set
 import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "subagents", "plugins", "memory", "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "remote", "mcp", "skills", "subagents", "plugins", "memory", "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
 export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
@@ -67,6 +67,7 @@ const PluginsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((modul
 const MemorySettingsPage = lazy(() => import("./MemoryPanel").then((module) => ({ default: module.MemorySettingsPage })));
 const SubagentsSettingsPage = lazy(() => import("./SubagentsPanel").then((module) => ({ default: module.SubagentsSettingsPage })));
 const DiagnosticsSettingsPage = lazy(() => import("./DiagnosticsSettingsPage").then((module) => ({ default: module.DiagnosticsSettingsPage })));
+const RemoteSettingsPage = lazy(() => import("./RemoteSettingsPage").then((module) => ({ default: module.RemoteSettingsPage })));
 const QRCodeSVG = lazy(() => import("qrcode.react").then((module) => ({ default: module.QRCodeSVG })));
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -105,6 +106,7 @@ export function SettingsPanel({
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [customMonoFontName, setCustomMonoFontNameState] = useState<string>(getCustomMonoFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
+  const [targetStatus, setTargetStatus] = useState<RemoteTargetStatusView | null>(null);
   const pendingSubagentCommandRef = useRef<string | null>(null);
   // Play the modal exit animation, then let the parent unmount us and focus
   // the composer with the selected slash command.
@@ -132,9 +134,37 @@ export function SettingsPanel({
     }
   }, []);
   useEffect(() => {
-    void reload();
     if (initialTab) setTab(initialTab === "providers" ? "models" : initialTab);
-  }, [initialTab, reload]);
+  }, [initialTab]);
+  useEffect(() => {
+    let active = true;
+    const applyTarget = (next: RemoteTargetStatusView) => {
+      if (!active) return;
+      setTargetStatus(next);
+      const remote = next.state !== "LocalConnected" && Boolean(next.hostId);
+      if (remote && remoteSettingsPanelIsHostLocal(tab)) {
+        setS(null);
+        setSettingsLoadFailed(false);
+        setLoadingSettings(false);
+        return;
+      }
+      void reload();
+    };
+    const statusRequest = typeof app.RemoteTargetStatus === "function"
+      ? app.RemoteTargetStatus()
+      : Promise.reject(new Error("Remote target status is unavailable"));
+    void statusRequest.then((next) => {
+      applyTarget(next);
+    }).catch(() => {
+      // Older backends are Local-only; keep existing Settings behavior.
+      if (active) void reload();
+    });
+    const off = onRemoteTargetState(applyTarget);
+    return () => {
+      active = false;
+      off();
+    };
+  }, [reload, tab]);
   useEffect(() => {
     if (!s) return;
     const nextTheme = normalizeThemePreference(s.desktopTheme);
@@ -219,7 +249,9 @@ export function SettingsPanel({
   // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, Plugins,
   // and Memory
   // load their own data and render regardless.
-  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
+  const remoteSelected = Boolean(targetStatus && targetStatus.state !== "LocalConnected" && targetStatus.hostId);
+  const remotePanelUnavailable = remoteSelected && remoteSettingsPanelIsHostLocal(tab);
+  const needsSettings = !remotePanelUnavailable && (tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates");
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
 
   return (
@@ -239,7 +271,7 @@ export function SettingsPanel({
                 onClick={() => setTab(id)}
               >
                 <span>{settingsTabLabel(id, t)}</span>
-                {s && <small>{settingsTabMeta(id, s, t)}</small>}
+                {s && <small>{remoteSelected && remoteSettingsPanelIsHostLocal(id) ? t("remote.settings.unavailableMeta") : settingsTabMeta(id, s, t)}</small>}
               </button>
             ))}
           </nav>
@@ -256,23 +288,25 @@ export function SettingsPanel({
               loadingSettings ? <div className="empty">{t("settings.loading")}</div> : null
             ) : (
               <>
-                {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} agentRunning={agentRunning} /></SettingsPageShell>}
-                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
-                {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
-                {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MCPServersSettingsPage /></Suspense></SettingsPageShell>}
-                {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage /></Suspense></SettingsPageShell>}
-                {tab === "subagents" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SubagentsSettingsPage s={s} onUseInChat={(command) => {
+                {remotePanelUnavailable && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><RemoteHostPanelUnavailable /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} agentRunning={agentRunning} remoteSelected={remoteSelected} /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
+                {tab === "remote" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><RemoteSettingsPage /></Suspense></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MCPServersSettingsPage /></Suspense></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage /></Suspense></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "subagents" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SubagentsSettingsPage s={s} onUseInChat={(command) => {
                   pendingSubagentCommandRef.current = command;
                   requestClose();
                 }} /></Suspense></SettingsPageShell>}
-                {tab === "plugins" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><PluginsSettingsPage /></Suspense></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "plugins" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><PluginsSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MemorySettingsPage /></Suspense></SettingsPageShell>}
-                {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
-                {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
-                {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
-                {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
+                {!remotePanelUnavailable && tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <AppearanceSection
@@ -357,6 +391,21 @@ function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; t
   );
 }
 
+function remoteSettingsPanelIsHostLocal(tab: SettingsTab): boolean {
+  return tab === "models" || tab === "providers" || tab === "bots" || tab === "mcp" || tab === "skills" || tab === "subagents" || tab === "plugins" || tab === "hooks" || tab === "diagnostics" || tab === "permissions" || tab === "sandbox" || tab === "network";
+}
+
+function RemoteHostPanelUnavailable() {
+  const t = useT();
+  return (
+    <section className="settings-section remote-host-panel-unavailable" role="status">
+      <div className="settings-section__title">{t("remote.settings.unavailableTitle")}</div>
+      <p>{t("remote.settings.unavailableBody")}</p>
+      <p>{t("remote.settings.unavailableHint")}</p>
+    </section>
+  );
+}
+
 function settingsPageKind(tab: SettingsTab): "form" | "manager" {
   switch (tab) {
     case "models":
@@ -365,6 +414,7 @@ function settingsPageKind(tab: SettingsTab): "form" | "manager" {
     case "subagents":
     case "plugins":
     case "memory":
+    case "remote":
       return "manager";
     default:
       return "form";
@@ -475,6 +525,8 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.providers");
     case "bots":
       return t("settings.tab.bots");
+    case "remote":
+      return t("settings.tab.remote");
     case "mcp":
       return t("settings.tab.mcp");
     case "skills":
@@ -514,6 +566,8 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
       return botSettingsMeta(s.bot, t);
+    case "remote":
+      return t("settings.tabSub.remote");
     case "mcp":
       return t("caps.connectorsTab");
     case "skills":
@@ -1279,6 +1333,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
     displayMode: normalizeDisplayMode(view.displayMode),
+    historyPageTurns: Number.isInteger(view.historyPageTurns) && view.historyPageTurns >= 1 && view.historyPageTurns <= 200 ? view.historyPageTurns : 60,
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     checkUpdates: view.checkUpdates !== false,
@@ -1412,7 +1467,7 @@ function thinkingModeLabel(mode: string, t: ReturnType<typeof useT>): string {
   }
 }
 
-function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agentRunning: boolean }) {
+function GeneralSection({ s, busy, apply, agentRunning, remoteSelected }: SectionProps & { agentRunning: boolean; remoteSelected: boolean }) {
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
@@ -1648,6 +1703,27 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.historyPageTurns")} hint={t("settings.historyPageTurnsHint")}>
+        <input
+          className="mem-input"
+          type="number"
+          min={1}
+          max={200}
+          step={1}
+          defaultValue={s.historyPageTurns}
+          key={s.historyPageTurns}
+          disabled={busy}
+          aria-label={t("settings.historyPageTurns")}
+          onBlur={(event) => {
+            const turns = Number(event.currentTarget.value);
+            if (!Number.isInteger(turns) || turns < 1 || turns > 200) {
+              event.currentTarget.value = String(s.historyPageTurns);
+              return;
+            }
+            if (turns !== s.historyPageTurns) void apply(() => app.SetDesktopHistoryPageTurns(turns));
+          }}
+        />
+      </SettingsField>
       <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")}>
         <div className="set-seg">
           {(["auto", "expanded"] as const).map((pref) => (
@@ -1661,7 +1737,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")}>
+      {!remoteSelected && <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")}>
         <div className="set-seg">
           {TOOL_APPROVAL_MODES.map((mode) => (
             <button
@@ -1674,8 +1750,8 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
             </button>
           ))}
         </div>
-      </SettingsField>
-      <SettingsField label={t("settings.autoPlan")}>
+      </SettingsField>}
+      {!remoteSelected && <SettingsField label={t("settings.autoPlan")}>
         <div className="set-seg">
           {AUTO_PLAN_MODES.map((mode) => (
             <button
@@ -1688,14 +1764,14 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
             </button>
           ))}
         </div>
-      </SettingsField>
-      <SettingsField label={t("settings.memoryCompiler")} hint={t("settings.memoryCompilerHint")}>
+      </SettingsField>}
+      {!remoteSelected && <SettingsField label={t("settings.memoryCompiler")} hint={t("settings.memoryCompilerHint")}>
         <ToggleSegment
           value={memoryCompilerEnabled}
           disabled={busy}
           onChange={(enabled) => void apply(() => app.SetMemoryCompilerEnabled(enabled))}
         />
-      </SettingsField>
+      </SettingsField>}
       <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} stacked>
         <div className={`settings-sound-editor${soundExpanded ? " settings-sound-editor--expanded" : ""}`}>
           <div className="settings-sound-editor__summary">

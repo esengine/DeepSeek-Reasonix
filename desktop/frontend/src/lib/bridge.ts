@@ -64,6 +64,17 @@ import type {
   ProviderPresetView,
   ProviderView,
   QuestionAnswer,
+  RemoteAskPassView,
+  RemoteConnectionLogView,
+  RemoteCreateWorkspaceSessionInput,
+  RemoteDirectoryView,
+  RemoteHostInput,
+  RemoteHostRuntimeSummaryView,
+  RemoteHostView,
+  RemoteTargetStatusView,
+  RemoteWorkbenchStatusView,
+  RemoteWorkspaceBrowseInput,
+  RemoteWorkspacePageView,
   ServerView,
   SessionMeta,
   SessionRecoveryFailedEvent,
@@ -136,6 +147,21 @@ export interface AppBindings {
   ToggleMaximiseMainWindow(): Promise<void>;
   IsMainWindowMaximised(): Promise<boolean>;
   CloseMainWindow(): Promise<void>;
+  // Remote target management. Host records and AskPass prompts are secret-free;
+  // credentials exist only in the single RespondRemoteAskPass call in flight.
+  RemoteHosts(): Promise<RemoteHostView[]>;
+  SaveRemoteHost(input: RemoteHostInput): Promise<RemoteHostView>;
+  DeleteRemoteHost(id: string): Promise<void>;
+  RemoteTargetStatus(): Promise<RemoteTargetStatusView>;
+  RemoteConnectionLogs(): Promise<RemoteConnectionLogView[]>;
+  ConnectRemoteHost(id: string): Promise<void>;
+  ReconnectRemoteTarget(): Promise<void>;
+  SwitchToLocalTarget(confirmed: boolean): Promise<void>;
+  RespondRemoteAskPass(requestId: string, value: string, cancelled: boolean): Promise<void>;
+  BrowseRemoteWorkspace(input: RemoteWorkspaceBrowseInput): Promise<RemoteWorkspacePageView>;
+  CreateRemoteWorkspaceSession(input: RemoteCreateWorkspaceSessionInput): Promise<RemoteWorkbenchStatusView>;
+  RemoteWorkbenchStatus(): Promise<RemoteWorkbenchStatusView>;
+  RemoteHostRuntimeSummary(): Promise<RemoteHostRuntimeSummaryView>;
   // ── Heartbeat ──
   HeartbeatListTasks(): Promise<unknown>;
   HeartbeatReloadTasks(): Promise<unknown>;
@@ -365,6 +391,7 @@ export interface AppBindings {
   SetDisplayMode(mode: string): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>;
+  SetDesktopHistoryPageTurns(turns: number): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
   SetDesktopLayoutStyle(style: string): Promise<void>;
@@ -508,6 +535,42 @@ export function onUpdaterProgress(cb: (p: UpdateProgress) => void): () => void {
   updaterListeners.add(cb);
   return () => {
     updaterListeners.delete(cb);
+  };
+}
+
+// Remote target state is separate from the Agent event stream because it is a
+// Desktop connection lifecycle concern and may change while no Session is open.
+export function onRemoteTargetState(cb: (status: RemoteTargetStatusView) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:target-state", (payload?: unknown) => cb((payload ?? {}) as RemoteTargetStatusView));
+  }
+  remoteTargetListeners.add(cb);
+  return () => {
+    remoteTargetListeners.delete(cb);
+  };
+}
+
+// AskPass values are never emitted back onto an event channel. The event only
+// carries a sanitized prompt; the response travels once through the bound call.
+export function onRemoteAskPass(cb: (prompt: RemoteAskPassView) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:askpass", (payload?: unknown) => cb((payload ?? {}) as RemoteAskPassView));
+  }
+  remoteAskPassListeners.add(cb);
+  return () => {
+    remoteAskPassListeners.delete(cb);
+  };
+}
+
+// Workbench state has its own lifecycle channel so Remote connection setup can
+// exist before an Agent session (and therefore before agent:event routing).
+export function onRemoteWorkbenchState(cb: (status: RemoteWorkbenchStatusView) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:workbench-state", (payload?: unknown) => cb((payload ?? {}) as RemoteWorkbenchStatusView));
+  }
+  remoteWorkbenchListeners.add(cb);
+  return () => {
+    remoteWorkbenchListeners.delete(cb);
   };
 }
 
@@ -767,9 +830,20 @@ async function withMockTabScope<T>(tabId: string, fn: () => Promise<T>): Promise
 // Updater progress has its own listener set so the browser dev mock can stream a
 // fake download/install flow through onUpdaterProgress.
 const updaterListeners = new Set<(p: UpdateProgress) => void>();
+const remoteTargetListeners = new Set<(status: RemoteTargetStatusView) => void>();
+const remoteAskPassListeners = new Set<(prompt: RemoteAskPassView) => void>();
+const remoteWorkbenchListeners = new Set<(status: RemoteWorkbenchStatusView) => void>();
 
 function emitUpdater(p: UpdateProgress) {
   updaterListeners.forEach((l) => l(p));
+}
+
+function emitRemoteTarget(status: RemoteTargetStatusView) {
+  remoteTargetListeners.forEach((listener) => listener({ ...status }));
+}
+
+function emitRemoteWorkbench(status: RemoteWorkbenchStatusView) {
+  remoteWorkbenchListeners.forEach((listener) => listener({ ...status }));
 }
 
 function delay(ms: number): Promise<void> {
@@ -971,6 +1045,57 @@ function makeMockApp(): AppBindings {
   let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
   let mockDesktopZoomFactor = 1.0;
+  let mockRemoteHostSequence = 2;
+  let mockRemoteHosts: RemoteHostView[] = [
+    { id: "mock-host-1", alias: "reasonix-dev", label: "Linux development Host" },
+  ];
+  let mockRemoteTargetStatus: RemoteTargetStatusView = {
+    state: "LocalConnected",
+    canReconnect: false,
+  };
+  let mockRemoteConnectionLogClock = Date.now();
+  let mockRemoteConnectionLogs: RemoteConnectionLogView[] = [
+    { atMillis: mockRemoteConnectionLogClock, state: "LocalConnected", message: "Local target selected" },
+  ];
+  const recordMockRemoteConnection = (status: RemoteTargetStatusView, message?: string) => {
+    mockRemoteConnectionLogClock += 1;
+    mockRemoteConnectionLogs = [...mockRemoteConnectionLogs.slice(-39), {
+      atMillis: mockRemoteConnectionLogClock,
+      state: status.state,
+      ...(status.hostId ? { hostId: status.hostId } : {}),
+      ...(status.hostLabel ? { hostLabel: status.hostLabel } : {}),
+      ...(message ? { message } : {}),
+    }];
+  };
+  let mockRemoteWorkbenchStatus: RemoteWorkbenchStatusView = { sessionAttached: false };
+  const mockRemoteDirectories: Record<string, { directory: RemoteDirectoryView; entries: RemoteDirectoryView[] }> = {
+    "remote-dir-home": {
+      directory: { ref: "remote-dir-home", name: "reasonix", displayPath: "/home/reasonix" },
+      entries: [
+        { ref: "remote-dir-projects", name: "projects", displayPath: "/home/reasonix/projects", parentRef: "remote-dir-home" },
+        { ref: "remote-dir-scratch", name: "scratch", displayPath: "/home/reasonix/scratch", parentRef: "remote-dir-home" },
+      ],
+    },
+    "remote-dir-projects": {
+      directory: { ref: "remote-dir-projects", name: "projects", displayPath: "/home/reasonix/projects", parentRef: "remote-dir-home" },
+      entries: [
+        { ref: "remote-dir-reasonix", name: "reasonix", displayPath: "/home/reasonix/projects/reasonix", parentRef: "remote-dir-projects" },
+        { ref: "remote-dir-web", name: "web", displayPath: "/home/reasonix/projects/web", parentRef: "remote-dir-projects" },
+      ],
+    },
+    "remote-dir-scratch": {
+      directory: { ref: "remote-dir-scratch", name: "scratch", displayPath: "/home/reasonix/scratch", parentRef: "remote-dir-home" },
+      entries: [],
+    },
+    "remote-dir-reasonix": {
+      directory: { ref: "remote-dir-reasonix", name: "reasonix", displayPath: "/home/reasonix/projects/reasonix", parentRef: "remote-dir-projects" },
+      entries: [],
+    },
+    "remote-dir-web": {
+      directory: { ref: "remote-dir-web", name: "web", displayPath: "/home/reasonix/projects/web", parentRef: "remote-dir-projects" },
+      entries: [],
+    },
+  };
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
@@ -1302,6 +1427,7 @@ function makeMockApp(): AppBindings {
     desktopThemeStyle: "graphite",
     closeBehavior: "background",
     displayMode: "compact",
+    historyPageTurns: 60,
     statusBarStyle: "text",
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     defaultToolApprovalMode: "auto",
@@ -1841,6 +1967,142 @@ function makeMockApp(): AppBindings {
       if (/Win/i.test(ua)) return "windows";
       if (/Mac/i.test(ua)) return "darwin";
       return "linux";
+    },
+    async RemoteHosts() {
+      return mockRemoteHosts.map((host) => ({ ...host }));
+    },
+    async SaveRemoteHost(input) {
+      const alias = input.alias.trim();
+      const label = input.label.trim();
+      const sshConfigPath = input.sshConfigPath?.trim() || undefined;
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/.test(alias)) {
+        throw new Error("invalid SSH Host alias");
+      }
+      if (!label) throw new Error("Host label is required");
+      if (mockRemoteHosts.some((host) => host.alias === alias && host.id !== input.id)) {
+        throw new Error("SSH Host alias is already saved");
+      }
+      if (input.id && !mockRemoteHosts.some((host) => host.id === input.id)) {
+        throw new Error("Remote Host is not saved");
+      }
+      const saved: RemoteHostView = {
+        id: input.id || `mock-host-${mockRemoteHostSequence++}`,
+        alias,
+        label,
+        ...(sshConfigPath ? { sshConfigPath } : {}),
+      };
+      mockRemoteHosts = input.id
+        ? mockRemoteHosts.map((host) => (host.id === input.id ? saved : host))
+        : [...mockRemoteHosts, saved];
+      return { ...saved };
+    },
+    async DeleteRemoteHost(id) {
+      if (mockRemoteTargetStatus.hostId === id && mockRemoteTargetStatus.state !== "LocalConnected" && mockRemoteTargetStatus.state !== "Disconnected") {
+        throw new Error("disconnect the Remote Host before deleting it");
+      }
+      mockRemoteHosts = mockRemoteHosts.filter((host) => host.id !== id);
+    },
+    async RemoteTargetStatus() {
+      return { ...mockRemoteTargetStatus };
+    },
+    async RemoteConnectionLogs() {
+      return mockRemoteConnectionLogs.map((entry) => ({ ...entry }));
+    },
+    async ConnectRemoteHost(id) {
+      const host = mockRemoteHosts.find((candidate) => candidate.id === id);
+      if (!host) throw new Error("Remote Host is not saved");
+      if (mockRemoteWorkbenchStatus.hostId !== id) {
+        mockRemoteWorkbenchStatus = { hostId: id, sessionAttached: false };
+      }
+      mockRemoteTargetStatus = {
+        state: "RemoteConnecting",
+        hostId: host.id,
+        hostLabel: host.label,
+        canReconnect: false,
+      };
+      recordMockRemoteConnection(mockRemoteTargetStatus, "Opening system OpenSSH connection");
+      emitRemoteTarget(mockRemoteTargetStatus);
+      await delay(180);
+      mockRemoteTargetStatus = { ...mockRemoteTargetStatus, state: "RemoteConnected" };
+      recordMockRemoteConnection(mockRemoteTargetStatus, "Remote protocol initialized");
+      emitRemoteTarget(mockRemoteTargetStatus);
+      emitRemoteWorkbench(mockRemoteWorkbenchStatus);
+    },
+    async ReconnectRemoteTarget() {
+      if (!mockRemoteTargetStatus.canReconnect || !mockRemoteTargetStatus.hostId) {
+        throw new Error("Remote target cannot be reconnected");
+      }
+      mockRemoteTargetStatus = { ...mockRemoteTargetStatus, state: "RemoteReconnecting", failure: undefined };
+      recordMockRemoteConnection(mockRemoteTargetStatus, "Reconnecting Remote target");
+      emitRemoteTarget(mockRemoteTargetStatus);
+      await delay(180);
+      mockRemoteTargetStatus = { ...mockRemoteTargetStatus, state: "RemoteConnected", canReconnect: false };
+      recordMockRemoteConnection(mockRemoteTargetStatus, "Remote subscription restored");
+      emitRemoteTarget(mockRemoteTargetStatus);
+    },
+    async SwitchToLocalTarget(confirmed) {
+      const remote = mockRemoteTargetStatus.state === "RemoteConnected" || mockRemoteTargetStatus.state === "RemoteReconnecting";
+      if (remote && !confirmed) throw new Error("switching from Remote requires confirmation");
+      mockRemoteTargetStatus = { ...mockRemoteTargetStatus, state: "Switching" };
+      recordMockRemoteConnection(mockRemoteTargetStatus, "Detaching Remote target");
+      emitRemoteTarget(mockRemoteTargetStatus);
+      await delay(120);
+      mockRemoteTargetStatus = { state: "LocalConnected", canReconnect: false };
+      recordMockRemoteConnection(mockRemoteTargetStatus, "Local target selected");
+      emitRemoteTarget(mockRemoteTargetStatus);
+    },
+    async RespondRemoteAskPass(requestId, _value, _cancelled) {
+      if (!requestId.trim()) throw new Error("AskPass request id is required");
+      // Deliberately do not inspect, store, log, or echo the answer.
+    },
+    async BrowseRemoteWorkspace(input) {
+      const typedPath = input.typedPath?.trim();
+      let ref = input.directoryRef?.trim() || "remote-dir-home";
+      if (typedPath) {
+        const match = Object.values(mockRemoteDirectories).find((item) => item.directory.displayPath === typedPath);
+        if (!match) throw new Error("Remote directory does not exist");
+        ref = match.directory.ref;
+      }
+      const found = mockRemoteDirectories[ref];
+      if (!found) throw new Error("Remote directory reference is stale");
+      const limit = Math.max(1, Math.min(input.limit ?? 100, 200));
+      const offset = input.cursor ? Number.parseInt(input.cursor, 10) : 0;
+      const entries = found.entries.slice(offset, offset + limit).map((entry) => ({ ...entry }));
+      const nextOffset = offset + entries.length;
+      const hasMore = nextOffset < found.entries.length;
+      return {
+        directory: { ...found.directory },
+        entries,
+        hasMore,
+        ...(hasMore ? { next: String(nextOffset) } : {}),
+      };
+    },
+    async CreateRemoteWorkspaceSession(input) {
+      if (mockRemoteTargetStatus.state !== "RemoteConnected" || !mockRemoteTargetStatus.hostId) {
+        throw new Error("Remote target is not connected");
+      }
+      const primary = mockRemoteDirectories[input.primaryDirectoryRef]?.directory;
+      if (!primary) throw new Error("Primary Remote directory reference is stale");
+      if (!input.topicTitle.trim()) throw new Error("Topic title is required");
+      for (const ref of input.additionalDirectoryRefs) {
+        if (!mockRemoteDirectories[ref]) throw new Error("Additional Remote directory reference is stale");
+      }
+      mockRemoteWorkbenchStatus = {
+        hostId: mockRemoteTargetStatus.hostId,
+        workspaceName: primary.name,
+        workspaceDisplayPath: primary.displayPath,
+        sessionAttached: true,
+        tabId: "mock-remote-tab-1",
+        topicTitle: input.topicTitle.trim(),
+      };
+      emitRemoteWorkbench(mockRemoteWorkbenchStatus);
+      return { ...mockRemoteWorkbenchStatus };
+    },
+    async RemoteWorkbenchStatus() {
+      return { ...mockRemoteWorkbenchStatus };
+    },
+    async RemoteHostRuntimeSummary() {
+      throw new Error("Remote Host runtime summary requires the Desktop SSH target");
     },
         async Submit(input) {
           cancelled = false;
@@ -3379,7 +3641,7 @@ function makeMockApp(): AppBindings {
       return this.SaveDoc(path, body);
     },
     async DesktopStartupSettings() {
-      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, statusBarStyle, statusBarItems, checkUpdates } = settings;
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, historyPageTurns, statusBarStyle, statusBarItems, checkUpdates } = settings;
       return JSON.parse(JSON.stringify({
         bot,
         desktopLanguage,
@@ -3387,6 +3649,7 @@ function makeMockApp(): AppBindings {
         desktopTheme,
         desktopThemeStyle,
         displayMode,
+        historyPageTurns,
         statusBarStyle,
         statusBarItems,
         checkUpdates,
@@ -3659,6 +3922,12 @@ function makeMockApp(): AppBindings {
         },
         async SetStatusBarItems(items: string[]) {
           settings.statusBarItems = normalizeStatusBarItems(items);
+        },
+        async SetDesktopHistoryPageTurns(turns: number) {
+          if (!Number.isInteger(turns) || turns < 1 || turns > 200) {
+            throw new Error("history page turns must be an integer in 1..200");
+          }
+          settings.historyPageTurns = turns;
         },
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
