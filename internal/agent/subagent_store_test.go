@@ -690,6 +690,46 @@ func testSubagentSpec(t *testing.T, name string) SubagentSpec {
 	}
 }
 
+func TestSubagentStoreContinuePreservesWorktreeIdentity(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "writer")
+	spec.WorkspaceRoot = "/tmp/reasonix-isolated-workspace"
+	spec.Isolation = "worktree"
+	spec.IsolationID = "iso-contract"
+	spec.WorktreeRoot = "/tmp/reasonix-isolated-worktree"
+	spec.SourceRoot = "/tmp/reasonix-source"
+	spec.WorktreeBranch = "reasonix/subagent-contract"
+	spec.BaseCommit = "base123"
+	spec.HeadCommit = "head456"
+
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.SaveCompleted(run); err != nil {
+		t.Fatalf("SaveCompleted: %v", err)
+	}
+	ref := run.Ref
+	run.Release()
+
+	continued, err := store.PrepareContinue(ref, spec)
+	if err != nil {
+		t.Fatalf("PrepareContinue: %v", err)
+	}
+	if continued.Meta.Isolation != spec.Isolation || continued.Meta.IsolationID != spec.IsolationID ||
+		continued.Meta.WorktreeRoot != spec.WorktreeRoot || continued.Meta.SourceRoot != spec.SourceRoot ||
+		continued.Meta.WorktreeBranch != spec.WorktreeBranch || continued.Meta.BaseCommit != spec.BaseCommit {
+		t.Fatalf("continued worktree identity changed: %+v", continued.Meta)
+	}
+	continued.Release()
+
+	mismatch := spec
+	mismatch.IsolationID = "iso-other"
+	if _, err := store.PrepareContinue(ref, mismatch); err == nil || !strings.Contains(err.Error(), "belongs to isolation") {
+		t.Fatalf("isolation mismatch error = %v, want structured identity rejection", err)
+	}
+}
+
 func saveTestBranchMeta(t *testing.T, sessionDir, id, parent string) {
 	t.Helper()
 	if err := SaveBranchMeta(filepath.Join(sessionDir, id+".jsonl"), BranchMeta{ParentID: parent}); err != nil {

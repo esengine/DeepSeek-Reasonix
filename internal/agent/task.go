@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
+	"reasonix/internal/worktree"
 )
 
 // DefaultTaskSystemPrompt steers a sub-agent toward focused, terse delivery —
@@ -77,12 +78,24 @@ var readOnlySubagentWorkflowTools = []string{
 const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
 
 // maxConcurrentBackgroundTasks bounds writer-capable background sub-agents per
-// session. They all mutate the same workspace (there is no worktree isolation),
-// so a wide fan-out risks conflicting concurrent writes — and feeds the failure
-// cascade where every "needs attention" notice tempts the model into spawning
-// yet more repair tasks. Further sub-tasks can run in the foreground, or start
-// once a running job is collected with wait.
+// session. The default still shares the parent workspace; callers can opt into
+// explicit worktree isolation when they need reviewable parallel writes. A wide
+// fan-out still risks failure cascades where every "needs attention" notice
+// tempts the model into spawning yet more repair tasks. Further sub-tasks can
+// run in the foreground, or start once a running job is collected with wait.
 const maxConcurrentBackgroundTasks = 3
+
+type SubagentIsolation string
+
+const (
+	SubagentIsolationNone     SubagentIsolation = "none"
+	SubagentIsolationWorktree SubagentIsolation = "worktree"
+)
+
+// SubagentRegistryFactory rebuilds the child registry for a concrete workspace
+// root. It lets file and shell tools bind to an isolated worktree while keeping
+// the canonical parent registry and ToolKind filtering rules.
+type SubagentRegistryFactory func(ctx context.Context, workspaceRoot string, names []string, childDepth, maxDepth int) (*tool.Registry, error)
 
 // AlwaysHiddenSubagentTools returns the tool names excluded from every
 // subagent's registry regardless of an explicit allowlist or delegation
@@ -207,32 +220,34 @@ func (readOnlyBash) ReadOnly() bool { return true }
 // parallel research across independent areas (the parallel-dispatch path picks
 // these up only when readOnly, which task is not).
 type TaskTool struct {
-	prov                provider.Provider
-	pricing             *provider.Pricing
-	parentReg           *tool.Registry
-	maxSteps            int
-	contextWindow       int
-	softCompactRatio    float64
-	toolResultSnipRatio float64
-	compactRatio        float64
-	compactForceRatio   float64
-	recentKeep          int
-	temperature         float64
-	archiveDir          string
-	keepPolicy          KeepPolicy
-	sysPrompt           string
-	gate                Gate
-	subagentModel       string
-	subagentEffort      string
-	resolveProvider     func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
-	transcripts         *SubagentStore
-	workspaceRoot       string
-	baseModel           string
-	baseEffort          string
-	identityProfile     func(modelRef, effort string) (string, string)
-	maxSubagentDepth    int
-	deliveryProfile     bool
-	workspaceLease      *workspacelease.Owner
+	prov                         provider.Provider
+	pricing                      *provider.Pricing
+	parentReg                    *tool.Registry
+	maxSteps                     int
+	contextWindow                int
+	softCompactRatio             float64
+	toolResultSnipRatio          float64
+	compactRatio                 float64
+	compactForceRatio            float64
+	recentKeep                   int
+	temperature                  float64
+	archiveDir                   string
+	keepPolicy                   KeepPolicy
+	sysPrompt                    string
+	gate                         Gate
+	subagentModel                string
+	subagentEffort               string
+	resolveProvider              func(modelRef, effort string) (provider.Provider, *provider.Pricing, int, error)
+	transcripts                  *SubagentStore
+	workspaceRoot                string
+	baseModel                    string
+	baseEffort                   string
+	identityProfile              func(modelRef, effort string) (string, string)
+	maxSubagentDepth             int
+	deliveryProfile              bool
+	workspaceLease               *workspacelease.Owner
+	worktreeManager              *worktree.Manager
+	subagentRegistryForWorkspace SubagentRegistryFactory
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -308,6 +323,15 @@ func (t *TaskTool) WithWorkspaceLease(owner *workspacelease.Owner) *TaskTool {
 	return t
 }
 
+// WithWorkspaceIsolation lets writer-capable subagents opt into a worktree
+// workspace root while preserving the canonical parent registry and filtering
+// contract. Passing nil keeps isolation unavailable.
+func (t *TaskTool) WithWorkspaceIsolation(manager *worktree.Manager, factory SubagentRegistryFactory) *TaskTool {
+	t.worktreeManager = manager
+	t.subagentRegistryForWorkspace = factory
+	return t
+}
+
 func (t *TaskTool) Name() string { return "task" }
 
 func (t *TaskTool) Description() string {
@@ -323,6 +347,7 @@ func (t *TaskTool) Schema() json.RawMessage {
   "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. ` + subagentToolBoundarySummary + `"},
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
   "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
+  "isolation":{"type":"string","enum":["none","worktree"],"description":"Optional filesystem isolation for writer subagents. Defaults to none. ` + string(SubagentIsolationWorktree) + ` creates a Git worktree resource; applying its diff back to the parent workspace is a separate explicit operation."},
   "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
   "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
   "continue_from":{"type":"string","description":"Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. If the ref belongs to an ancestor conversation, the framework continues a current-conversation copy."}
@@ -472,6 +497,17 @@ func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
 	return model, effort
 }
 
+func normalizeSubagentIsolation(raw string) (SubagentIsolation, error) {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case "", string(SubagentIsolationNone):
+		return SubagentIsolationNone, nil
+	case string(SubagentIsolationWorktree):
+		return SubagentIsolationWorktree, nil
+	default:
+		return "", fmt.Errorf("unsupported subagent isolation %q (expected %q or %q)", raw, SubagentIsolationNone, SubagentIsolationWorktree)
+	}
+}
+
 func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		Prompt          string   `json:"prompt"`
@@ -483,12 +519,17 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		Effort          string   `json:"effort"`
 		ContinueFrom    string   `json:"continue_from"`
 		ForkFrom        string   `json:"fork_from"`
+		Isolation       string   `json:"isolation"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Prompt == "" {
 		return "", fmt.Errorf("prompt is required")
+	}
+	isolation, err := normalizeSubagentIsolation(p.Isolation)
+	if err != nil {
+		return "", err
 	}
 
 	maxSteps := t.childMaxSteps(p.MaxSteps)
@@ -497,10 +538,18 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err != nil {
 		return "", err
 	}
-	subReg := t.buildSubReg(p.Tools, childDepth)
+	childWorkspaceRoot, isolationResource, err := t.resolveSubagentWorkspace(ctx, isolation, p.ContinueFrom, p.ForkFrom)
+	if err != nil {
+		return "", err
+	}
+	isolation = subagentIsolationFromResource(isolation, isolationResource)
+	subReg, err := t.buildSubRegForWorkspace(ctx, childWorkspaceRoot, p.Tools, childDepth)
+	if err != nil {
+		return "", err
+	}
 	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
 	parentID, parent, _, _ := CallContext(ctx)
-	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
+	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom, childWorkspaceRoot, isolation, isolationResource)
 	if err != nil {
 		return "", err
 	}
@@ -543,6 +592,9 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		parentSession := ParentSession(ctx)
 		backgroundEvidence := evidence.NewLedger()
+		// The background worker updates run metadata as it completes. Format the
+		// immutable launch reference before handing ownership to that goroutine.
+		backgroundReference := FormatSubagentReference(run)
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
@@ -555,7 +607,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 					err = errors.Join(panicErr, t.transcripts.SaveFailed(run))
 				}
 			}()
-			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
+			answer, err := t.runSubSession(jobCtx, p.Prompt, childWorkspaceRoot, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
 			if err != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
 			}
@@ -565,15 +617,15 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 			return FormatSubagentRunResult(answer, run, false), nil
 		})
 		releaseStart()
-		if run != nil && run.Ref != "" {
-			return fmt.Sprintf("Started background task %q (%s).\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, FormatSubagentReference(run)), nil
+		if backgroundReference != "" {
+			return fmt.Sprintf("Started background task %q (%s).\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, backgroundReference), nil
 		}
 		return fmt.Sprintf("Started background task %q (%s). It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label), nil
 	}
 
 	// Foreground: run synchronously, nesting events under this call.
 	defer run.Release()
-	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
+	answer, err := t.runSubSession(ctx, p.Prompt, childWorkspaceRoot, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
 	}
@@ -586,7 +638,7 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	return GuardSubagentHostDecisionText(answer), nil
 }
 
-func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom string) (*SubagentRun, error) {
+func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom string, workspaceRoot string, isolation SubagentIsolation, isolationResource worktree.Resource) (*SubagentRun, error) {
 	continueFrom = strings.TrimSpace(continueFrom)
 	legacyForkFrom = strings.TrimSpace(legacyForkFrom)
 	parentSession = strings.TrimSpace(parentSession)
@@ -608,17 +660,27 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 		}
 		return EphemeralSubagentRun(t.sysPrompt), nil
 	}
+	if strings.TrimSpace(workspaceRoot) == "" {
+		workspaceRoot = strings.TrimSpace(t.workspaceRoot)
+	}
 	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
 		Kind:             "task",
 		Name:             "task",
-		WorkspaceRoot:    t.workspaceRoot,
+		WorkspaceRoot:    workspaceRoot,
 		ParentSession:    parentSession,
 		ParentToolCallID: parentID,
 		SystemPrompt:     t.sysPrompt,
 		Registry:         subReg,
 		Model:            identityModel,
 		Effort:           identityEffort,
+		Isolation:        string(isolation),
+		IsolationID:      strings.TrimSpace(isolationResource.IsolationID),
+		WorktreeRoot:     strings.TrimSpace(isolationResource.WorktreeRoot),
+		SourceRoot:       strings.TrimSpace(isolationResource.SourceRoot),
+		WorktreeBranch:   strings.TrimSpace(isolationResource.Branch),
+		BaseCommit:       strings.TrimSpace(isolationResource.BaseCommit),
+		HeadCommit:       strings.TrimSpace(isolationResource.HeadCommit),
 	}
 	if continueFrom != "" {
 		return t.transcripts.PrepareContinue(continueFrom, spec)
@@ -651,10 +713,111 @@ func (t *TaskTool) effectiveEffortIdentity(effort string) string {
 	return strings.TrimSpace(t.baseEffort)
 }
 
+func (t *TaskTool) resolveSubagentWorkspace(ctx context.Context, requested SubagentIsolation, continueFrom, legacyForkFrom string) (string, worktree.Resource, error) {
+	parentRoot := strings.TrimSpace(t.workspaceRoot)
+	ref := strings.TrimSpace(continueFrom)
+	if ref == "" {
+		ref = strings.TrimSpace(legacyForkFrom)
+	}
+	if ref != "" && t != nil && t.transcripts != nil {
+		meta, err := t.transcripts.LoadMeta(ref)
+		if err == nil {
+			metaIsolation, err := normalizeSubagentIsolation(meta.Isolation)
+			if err != nil {
+				return "", worktree.Resource{}, fmt.Errorf("subagent reference %q has unsupported isolation metadata: %w", ref, err)
+			}
+			if requested != SubagentIsolationNone && requested != metaIsolation {
+				return "", worktree.Resource{}, fmt.Errorf("subagent reference %q uses isolation %q, requested %q", ref, metaIsolation, requested)
+			}
+			if metaIsolation == SubagentIsolationWorktree {
+				root := strings.TrimSpace(meta.WorktreeRoot)
+				if root == "" {
+					root = strings.TrimSpace(meta.WorkspaceRoot)
+				}
+				if root == "" {
+					return "", worktree.Resource{}, fmt.Errorf("subagent reference %q declares worktree isolation without a workspace root", ref)
+				}
+				return root, resourceFromSubagentMeta(meta), nil
+			}
+			root := strings.TrimSpace(meta.WorkspaceRoot)
+			if root == "" {
+				root = parentRoot
+			}
+			return root, worktree.Resource{}, nil
+		}
+	}
+	if requested != SubagentIsolationWorktree {
+		return parentRoot, worktree.Resource{}, nil
+	}
+	if t == nil || t.worktreeManager == nil {
+		return "", worktree.Resource{}, fmt.Errorf("subagent worktree isolation is not available in this runtime")
+	}
+	res, err := t.worktreeManager.Create(ctx, parentRoot, worktree.CreatePolicy{
+		Kind:        worktree.KindSubagent,
+		DirtyPolicy: worktree.DirtyPolicyReject,
+	})
+	if err != nil {
+		return "", worktree.Resource{}, err
+	}
+	return res.WorkspaceRoot, res, nil
+}
+
+func subagentIsolationFromResource(requested SubagentIsolation, res worktree.Resource) SubagentIsolation {
+	if strings.TrimSpace(res.IsolationID) != "" {
+		return SubagentIsolationWorktree
+	}
+	return requested
+}
+
+func resourceFromSubagentMeta(meta SubagentMeta) worktree.Resource {
+	return worktree.Resource{
+		IsolationID:   strings.TrimSpace(meta.IsolationID),
+		Kind:          worktree.KindSubagent,
+		WorkspaceRoot: strings.TrimSpace(meta.WorkspaceRoot),
+		WorktreeRoot:  strings.TrimSpace(meta.WorktreeRoot),
+		SourceRoot:    strings.TrimSpace(meta.SourceRoot),
+		Branch:        strings.TrimSpace(meta.WorktreeBranch),
+		BaseCommit:    strings.TrimSpace(meta.BaseCommit),
+		HeadCommit:    strings.TrimSpace(meta.HeadCommit),
+	}
+}
+
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
 // unavailable sub-agent tools), or every parent tool except those tools.
 func (t *TaskTool) buildSubReg(names []string, childDepth int) *tool.Registry {
 	return SubagentToolRegistryForDepth(t.parentReg, names, childDepth, t.maxDepth())
+}
+
+func (t *TaskTool) buildSubRegForWorkspace(ctx context.Context, workspaceRoot string, names []string, childDepth int) (*tool.Registry, error) {
+	workspaceRoot = strings.TrimSpace(workspaceRoot)
+	if workspaceRoot == "" || cleanPathEqual(workspaceRoot, t.workspaceRoot) || t.subagentRegistryForWorkspace == nil {
+		return t.buildSubReg(names, childDepth), nil
+	}
+	sub, err := t.subagentRegistryForWorkspace(ctx, workspaceRoot, names, childDepth, t.maxDepth())
+	if err != nil {
+		return nil, err
+	}
+	if sub == nil {
+		return nil, fmt.Errorf("subagent registry factory returned nil for workspace %q", workspaceRoot)
+	}
+	return sub, nil
+}
+
+func cleanPathEqual(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
+	}
+	aa, errA := filepath.Abs(a)
+	if errA == nil {
+		a = aa
+	}
+	bb, errB := filepath.Abs(b)
+	if errB == nil {
+		b = bb
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func (t *TaskTool) maxDepth() int {
@@ -851,12 +1014,12 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt, workspaceRoot string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int) (string, error) {
 	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth)
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
-	prompt = t.withWorkspaceContext(prompt)
+	prompt = t.withWorkspaceContextForRoot(prompt, workspaceRoot)
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
@@ -901,7 +1064,14 @@ func (t *TaskTool) withWorkspaceContext(prompt string) string {
 	if t == nil {
 		return prompt
 	}
-	ctx := subagentWorkspaceContext(t.workspaceRoot)
+	return t.withWorkspaceContextForRoot(prompt, t.workspaceRoot)
+}
+
+func (t *TaskTool) withWorkspaceContextForRoot(prompt, root string) string {
+	if t == nil {
+		return prompt
+	}
+	ctx := subagentWorkspaceContext(root)
 	if ctx == "" {
 		return prompt
 	}
@@ -930,13 +1100,31 @@ func FormatSubagentReference(run *SubagentRun) string {
 	fmt.Fprintf(&b, "Subagent reference: %s\n", run.Ref)
 	if strings.TrimSpace(run.ForkedFrom) != "" {
 		fmt.Fprintf(&b, "Forked from: %s\n", strings.TrimSpace(run.ForkedFrom))
+		appendSubagentIsolationReference(&b, run.Meta)
 		b.WriteString("The requested ref resolves to an ancestor conversation transcript, so the framework continues a copy owned by the current conversation. To continue this copied subagent transcript in a later call, pass ")
 		b.WriteString(run.Ref)
 		b.WriteString(" as `continue_from`. Start a fresh subagent when the next task is independent.")
 		return b.String()
 	}
+	appendSubagentIsolationReference(&b, run.Meta)
 	b.WriteString("To continue this same subagent transcript in a later call, pass this ref as `continue_from`. Start a fresh subagent when the next task is independent.")
 	return b.String()
+}
+
+func appendSubagentIsolationReference(b *strings.Builder, meta SubagentMeta) {
+	if b == nil || normalizeSubagentMetaIsolation(meta.Isolation) != string(SubagentIsolationWorktree) {
+		return
+	}
+	if strings.TrimSpace(meta.IsolationID) != "" {
+		fmt.Fprintf(b, "Worktree isolation: %s\n", strings.TrimSpace(meta.IsolationID))
+	}
+	if strings.TrimSpace(meta.WorktreeRoot) != "" {
+		fmt.Fprintf(b, "Workspace: %s\n", strings.TrimSpace(meta.WorktreeRoot))
+	}
+	if strings.TrimSpace(meta.WorktreeBranch) != "" {
+		fmt.Fprintf(b, "Branch: %s\n", strings.TrimSpace(meta.WorktreeBranch))
+	}
+	b.WriteString("Apply is explicit: review status/diff before merging this worktree back into the parent workspace.\n")
 }
 
 func FormatSubagentRunResult(answer string, run *SubagentRun, failed bool) string {

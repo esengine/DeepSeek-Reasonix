@@ -45,7 +45,7 @@ func ValidateSubagentProfileName(name string, occupied []string) error {
 // profile editors can round-trip without changing execution semantics.
 var subagentProfileManagedKeys = map[string]bool{
 	"name": true, "description": true, "color": true, "invocation": true,
-	"runas": true, "model": true, "effort": true, "allowed-tools": true,
+	"runas": true, "model": true, "effort": true, "isolation": true, "allowed-tools": true,
 }
 
 // ValidateEditableSubagentProfile verifies that a loaded skill is a manual

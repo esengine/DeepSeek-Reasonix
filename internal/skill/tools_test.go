@@ -76,10 +76,12 @@ func TestRunSkillSubagentNeedsRunner(t *testing.T) {
 
 func TestRunSkillSubagentRuns(t *testing.T) {
 	home := t.TempDir()
-	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\nisolation: worktree\n---\nbody")
 	var gotTask string
-	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
+	var gotOpts SubagentRunOptions
+	runner := func(_ context.Context, sk Skill, task string, opts SubagentRunOptions) (string, error) {
 		gotTask = task
+		gotOpts = opts
 		return "answer from " + sk.Name, nil
 	}
 	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
@@ -89,6 +91,9 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	}
 	if gotTask != "find X" {
 		t.Errorf("runner got task %q", gotTask)
+	}
+	if gotOpts.Isolation != "worktree" {
+		t.Errorf("runner isolation = %q, want worktree", gotOpts.Isolation)
 	}
 	if out != "answer from dig" {
 		t.Errorf("runner output not returned: %q", out)
@@ -177,6 +182,9 @@ func TestReadOnlySkillSubagentRunsWithoutContinuation(t *testing.T) {
 	}
 	if gotOpts.ContinueFrom != "" || gotOpts.ForkFrom != "" {
 		t.Fatalf("read_only_skill should not pass continuation opts, got %+v", gotOpts)
+	}
+	if gotOpts.Isolation != "" {
+		t.Fatalf("read_only_skill should not pass isolation opts, got %+v", gotOpts)
 	}
 	if out != "read-only answer from dig" {
 		t.Errorf("runner output not returned: %q", out)
@@ -408,7 +416,7 @@ func TestInstallSkill(t *testing.T) {
 	tl := NewInstallSkillTool(st, nil)
 
 	out, err := tl.Execute(context.Background(), json.RawMessage(
-		`{"name":"deploy","description":"ship it","body":"steps","runAs":"subagent","model":"deepseek-pro","effort":"max","allowedTools":["bash","read_file"]}`))
+		`{"name":"deploy","description":"ship it","body":"steps","runAs":"subagent","isolation":"worktree","model":"deepseek-pro","effort":"max","allowedTools":["bash","read_file"]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -436,8 +444,8 @@ func TestInstallSkill(t *testing.T) {
 	if !ok {
 		t.Fatal("installed skill not readable")
 	}
-	if sk.RunAs != RunSubagent || sk.Model != "deepseek-pro" || sk.Effort != "max" || len(sk.AllowedTools) != 2 {
-		t.Errorf("frontmatter not round-tripped: runAs=%s model=%q effort=%q tools=%v", sk.RunAs, sk.Model, sk.Effort, sk.AllowedTools)
+	if sk.RunAs != RunSubagent || sk.Isolation != "worktree" || sk.Model != "deepseek-pro" || sk.Effort != "max" || len(sk.AllowedTools) != 2 {
+		t.Errorf("frontmatter not round-tripped: runAs=%s isolation=%q model=%q effort=%q tools=%v", sk.RunAs, sk.Isolation, sk.Model, sk.Effort, sk.AllowedTools)
 	}
 	// Refuses overwrite.
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
@@ -457,10 +465,11 @@ func TestRenderSkillFileEmitsColorAndInvocationWhenSet(t *testing.T) {
 		Description: "a private helper",
 		Body:        "be helpful",
 		RunAs:       RunSubagent,
+		Isolation:   "worktree",
 		Color:       "amber",
 		Invocation:  "manual",
 	})
-	for _, want := range []string{"color: amber\n", "invocation: manual\n", "runAs: subagent\n"} {
+	for _, want := range []string{"color: amber\n", "invocation: manual\n", "runAs: subagent\n", "isolation: worktree\n"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("rendered content missing %q:\n%s", want, content)
 		}
@@ -475,8 +484,8 @@ func TestRenderSkillFileEmitsColorAndInvocationWhenSet(t *testing.T) {
 	if !ok {
 		t.Fatal("skill not readable after CreateWithContent")
 	}
-	if sk.Color != "amber" || sk.Invocation != "manual" {
-		t.Errorf("round-trip mismatch: color=%q invocation=%q", sk.Color, sk.Invocation)
+	if sk.Color != "amber" || sk.Invocation != "manual" || sk.Isolation != "worktree" {
+		t.Errorf("round-trip mismatch: color=%q invocation=%q isolation=%q", sk.Color, sk.Invocation, sk.Isolation)
 	}
 }
 
@@ -509,6 +518,7 @@ func TestRenderSkillFileEscapesYAMLMetacharacters(t *testing.T) {
 				Description: tc.desc,
 				Body:        "the body",
 				RunAs:       RunSubagent,
+				Isolation:   "worktree",
 				Invocation:  "manual",
 			})
 			if _, err := st.CreateWithContent("esc", ScopeGlobal, content); err != nil {
@@ -522,6 +532,9 @@ func TestRenderSkillFileEscapesYAMLMetacharacters(t *testing.T) {
 			// survive, never silently reset to their permissive defaults.
 			if sk.RunAs != RunSubagent {
 				t.Errorf("RunAs = %q, want subagent (isolation lost); content:\n%s", sk.RunAs, content)
+			}
+			if sk.Isolation != "worktree" {
+				t.Errorf("Isolation = %q, want worktree; content:\n%s", sk.Isolation, content)
 			}
 			if sk.Invocation != "manual" {
 				t.Errorf("Invocation = %q, want manual (autodiscovery re-enabled); content:\n%s", sk.Invocation, content)

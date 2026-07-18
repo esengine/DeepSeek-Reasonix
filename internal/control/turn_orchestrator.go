@@ -132,7 +132,11 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		c.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: toolEvent})
 		runCtx := agent.WithToolCallContext(ctx, callID, c.sink, c, planMode)
 		runCtx = agent.WithSubagentDepth(runCtx, 0)
-		answer, err := runner(runCtx, sk, input, skill.SubagentRunOptions{HostInitiated: true})
+		runOpts := skill.SubagentRunOptions{HostInitiated: true}
+		if !sk.ReadOnly {
+			runOpts.Isolation = sk.Isolation
+		}
+		answer, err := runner(runCtx, sk, input, runOpts)
 		if err != nil {
 			toolEvent.Err = err.Error()
 			c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: toolEvent})

@@ -25,11 +25,11 @@ var setupSubagentCommand = func(ctx context.Context, modelName string, maxStepsO
 
 const subagentUsageText = `usage:
   reasonix subagent list [--dir PATH]
-  reasonix subagent create <name> --description TEXT (--prompt TEXT | --prompt-file PATH) [--scope project|global] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--dir PATH]
-  reasonix subagent edit <name> [--description TEXT] [--prompt TEXT | --prompt-file PATH] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--dir PATH]
+  reasonix subagent create <name> --description TEXT (--prompt TEXT | --prompt-file PATH) [--scope project|global] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--isolation none|worktree] [--dir PATH]
+  reasonix subagent edit <name> [--description TEXT] [--prompt TEXT | --prompt-file PATH] [--model REF] [--effort LEVEL] [--tools a,b] [--color NAME] [--isolation none|worktree] [--dir PATH]
   reasonix subagent delete <name> --yes [--dir PATH]
-  reasonix subagent try <name> [--model REF] [--max-steps N] [--dir PATH] <task>
-  reasonix subagent run <name> [--model REF] [--max-steps N] [--dir PATH] <task>
+  reasonix subagent try <name> [--model REF] [--max-steps N] [--isolation none] [--dir PATH] <task>
+  reasonix subagent run <name> [--model REF] [--max-steps N] [--isolation none|worktree] [--dir PATH] <task>
 
 Use --prompt-file - or pipe stdin to read a system prompt from stdin.
 `
@@ -129,6 +129,7 @@ type subagentProfileFlags struct {
 	effort      optionalString
 	tools       optionalString
 	color       optionalString
+	isolation   optionalString
 	dir         string
 }
 
@@ -140,6 +141,7 @@ func addSubagentProfileFlags(fs *flag.FlagSet, values *subagentProfileFlags) {
 	fs.Var(&values.effort, "effort", "per-profile reasoning effort (empty clears on edit)")
 	fs.Var(&values.tools, "tools", "comma-separated allowed tools (empty means all tools)")
 	fs.Var(&values.color, "color", "profile color tag (empty clears on edit)")
+	fs.Var(&values.isolation, "isolation", "workspace isolation for writer subagents: none or worktree")
 	fs.StringVar(&values.dir, "dir", "", "project root")
 }
 
@@ -176,6 +178,11 @@ func subagentCreateCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "subagent create: --prompt or --prompt-file is required")
 		return 2
 	}
+	isolation, err := normalizeCLIIsolation(values.isolation.value)
+	if values.isolation.set && err != nil {
+		fmt.Fprintln(os.Stderr, "subagent create:", err)
+		return 2
+	}
 	store := newCLISubagentStore()
 	scope, err := profileCreateScope(*scopeText, store.HasProjectScope())
 	if err != nil {
@@ -186,7 +193,7 @@ func subagentCreateCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
 		return 1
 	}
-	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value)
+	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value, isolation)
 	path, err := store.CreateWithContent(name, scope, content)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
@@ -239,7 +246,7 @@ func subagentEditCommand(args []string) int {
 		return 2
 	}
 	description, body := sk.Description, sk.Body
-	model, effort, color := sk.Model, sk.Effort, sk.Color
+	model, effort, color, isolation := sk.Model, sk.Effort, sk.Color, sk.Isolation
 	tools := append([]string(nil), sk.AllowedTools...)
 	if values.description.set {
 		description = values.description.value
@@ -259,11 +266,19 @@ func subagentEditCommand(args []string) int {
 	if values.color.set {
 		color = values.color.value
 	}
+	if values.isolation.set {
+		next, err := normalizeCLIIsolation(values.isolation.value)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "subagent edit:", err)
+			return 2
+		}
+		isolation = next
+	}
 	if strings.TrimSpace(description) == "" || strings.TrimSpace(body) == "" {
 		fmt.Fprintln(os.Stderr, "subagent edit: description and prompt cannot be empty")
 		return 2
 	}
-	content := renderCLIProfile(sk.Name, description, body, model, effort, tools, color)
+	content := renderCLIProfile(sk.Name, description, body, model, effort, tools, color, isolation)
 	if err := store.UpdateContent(sk.Name, sk.Scope, content); err != nil {
 		fmt.Fprintln(os.Stderr, "subagent edit:", err)
 		return 1
@@ -322,6 +337,7 @@ func subagentRunCommand(args []string, readOnly bool) int {
 	fs := flag.NewFlagSet("subagent "+verb, flag.ContinueOnError)
 	model := fs.String("model", "", "default model reference")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds")
+	isolationFlag := fs.String("isolation", "", "workspace isolation for writer subagents: none or worktree")
 	dir := fs.String("dir", "", "project root")
 	if err := fs.Parse(rest); err != nil {
 		return 2
@@ -342,6 +358,15 @@ func subagentRunCommand(args []string, readOnly bool) int {
 		fmt.Fprintf(os.Stderr, "subagent %s: task is required\n", verb)
 		return 2
 	}
+	isolation, err := normalizeCLIIsolation(*isolationFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "subagent %s: %v\n", verb, err)
+		return 2
+	}
+	if readOnly && isolation == "worktree" {
+		fmt.Fprintf(os.Stderr, "subagent %s: read-only try does not support worktree isolation\n", verb)
+		return 2
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	ctrl, err := setupSubagentCommand(ctx, *model, *maxSteps, true, event.Discard, workspaceRoot)
@@ -350,7 +375,10 @@ func subagentRunCommand(args []string, readOnly bool) int {
 		return 1
 	}
 	defer ctrl.Close()
-	answer, err := ctrl.RunSubagentProfile(ctx, name, task, readOnly)
+	answer, err := ctrl.RunSubagentProfileWithOptions(ctx, name, task, control.RunSubagentProfileOptions{
+		ReadOnly:  readOnly,
+		Isolation: isolation,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "subagent %s: %v\n", verb, err)
 		return 1
@@ -429,7 +457,7 @@ func refuseSubagentNameCollision(skills []skill.Skill, name string) error {
 }
 
 func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) error {
-	if values.description.set || values.prompt.set || values.promptFile.set || values.tools.set || values.color.set {
+	if values.description.set || values.prompt.set || values.promptFile.set || values.tools.set || values.color.set || values.isolation.set {
 		return fmt.Errorf("built-in profile %q only supports --model and --effort overrides", sk.Name)
 	}
 	unlock := config.LockUserConfigEdits()
@@ -519,7 +547,18 @@ func resolveSubagentPrompt(prompt, promptFile optionalString) (string, bool, err
 
 func profileFlagsChanged(values subagentProfileFlags) bool {
 	return values.description.set || values.prompt.set || values.promptFile.set || values.model.set ||
-		values.effort.set || values.tools.set || values.color.set
+		values.effort.set || values.tools.set || values.color.set || values.isolation.set
+}
+
+func normalizeCLIIsolation(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if isolation := skill.ParseIsolation(raw); isolation != "" {
+		return isolation, nil
+	}
+	return "", fmt.Errorf("unsupported isolation %q; use none or worktree", raw)
 }
 
 func parseToolList(raw string) []string {
@@ -536,7 +575,7 @@ func parseToolList(raw string) []string {
 	return tools
 }
 
-func renderCLIProfile(name, description, prompt, model, effort string, tools []string, color string) string {
+func renderCLIProfile(name, description, prompt, model, effort string, tools []string, color string, isolation string) string {
 	return skill.RenderSkillFile(skill.SkillFileOptions{
 		Name:         strings.TrimSpace(name),
 		Description:  strings.TrimSpace(description),
@@ -546,6 +585,7 @@ func renderCLIProfile(name, description, prompt, model, effort string, tools []s
 		Effort:       strings.TrimSpace(effort),
 		AllowedTools: tools,
 		Color:        strings.TrimSpace(color),
+		Isolation:    strings.TrimSpace(isolation),
 		Invocation:   "manual",
 	})
 }

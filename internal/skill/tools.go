@@ -22,6 +22,7 @@ import (
 type SubagentRunOptions struct {
 	ContinueFrom string
 	ForkFrom     string
+	Isolation    string
 	// HostInitiated marks an explicit controller entry point such as
 	// /<subagent-skill>. It may still carry a synthetic call context for nested
 	// UI events, but that ephemeral event ID must not be persisted as though it
@@ -102,7 +103,11 @@ func (t *runSkillTool) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("run_skill: %w", err)
 	}
 	rawArgs := strings.TrimSpace(p.Arguments)
-	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+	opts := SubagentRunOptions{
+		ContinueFrom: strings.TrimSpace(p.Continue),
+		ForkFrom:     strings.TrimSpace(p.Fork),
+		Isolation:    sk.Isolation,
+	}
 	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
 		return "", fmt.Errorf("run_skill: continue_from and fork_from are mutually exclusive; pass only continue_from")
 	}
@@ -361,7 +366,11 @@ func (t *subagentSkillTool) Execute(ctx context.Context, args json.RawMessage) (
 	if t.runner == nil {
 		return "", fmt.Errorf("%s: no subagent runner is configured in this session", t.toolName)
 	}
-	opts := SubagentRunOptions{ContinueFrom: strings.TrimSpace(p.Continue), ForkFrom: strings.TrimSpace(p.Fork)}
+	opts := SubagentRunOptions{
+		ContinueFrom: strings.TrimSpace(p.Continue),
+		ForkFrom:     strings.TrimSpace(p.Fork),
+		Isolation:    sk.Isolation,
+	}
 	if opts.ContinueFrom != "" && opts.ForkFrom != "" {
 		return "", fmt.Errorf("%s: continue_from and fork_from are mutually exclusive; pass only continue_from", t.toolName)
 	}
@@ -467,6 +476,7 @@ func (*installSkillTool) Schema() json.RawMessage {
   "runAs":{"type":"string","enum":["inline","subagent"],"description":"inline (default) folds the body into the parent turn; subagent spawns an isolated child loop returning only its final answer (use for context-heavy work)."},
   "model":{"type":"string","description":"Optional model override for runAs=subagent (a configured provider/model name). Ignored otherwise."},
   "effort":{"type":"string","description":"Optional effort for runAs=subagent (e.g. high, max). Ignored otherwise."},
+  "isolation":{"type":"string","enum":["none","worktree"],"description":"Optional workspace isolation for runAs=subagent. Defaults to none; worktree creates a separate Git worktree and requires an explicit apply step."},
   "allowedTools":{"type":"array","items":{"type":"string"},"description":"Optional tool allowlist for runAs=subagent (e.g. ['read_file','grep'])."}
 },
 "required":["name","description","body"]
@@ -482,6 +492,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		RunAs        string   `json:"runAs"`
 		Model        string   `json:"model"`
 		Effort       string   `json:"effort"`
+		Isolation    string   `json:"isolation"`
 		AllowedTools []string `json:"allowedTools"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
@@ -526,6 +537,7 @@ func (t *installSkillTool) Execute(_ context.Context, args json.RawMessage) (str
 		RunAs:        runAs,
 		Model:        strings.TrimSpace(p.Model),
 		Effort:       strings.TrimSpace(p.Effort),
+		Isolation:    strings.TrimSpace(p.Isolation),
 		AllowedTools: p.AllowedTools,
 	})
 	path, err := t.store.CreateWithContent(name, scope, content)
@@ -557,6 +569,7 @@ type SkillFileOptions struct {
 	RunAs        RunAs
 	Model        string // subagent-only; ignored when RunAs != RunSubagent
 	Effort       string // subagent-only; ignored when RunAs != RunSubagent
+	Isolation    string // subagent-only; none | worktree; ignored when RunAs != RunSubagent
 	AllowedTools []string
 	Color        string // optional display tag; emitted regardless of RunAs
 	// Invocation, when "manual", keeps the written skill out of the pinned
@@ -579,6 +592,7 @@ type skillFileFrontmatter struct {
 	RunAs        string   `yaml:"runAs,omitempty"`
 	Model        string   `yaml:"model,omitempty"`
 	Effort       string   `yaml:"effort,omitempty"`
+	Isolation    string   `yaml:"isolation,omitempty"`
 	AllowedTools []string `yaml:"allowed-tools,omitempty,flow"`
 }
 
@@ -598,6 +612,7 @@ func RenderSkillFile(opts SkillFileOptions) string {
 		fm.RunAs = string(RunSubagent)
 		fm.Model = strings.TrimSpace(opts.Model)
 		fm.Effort = strings.TrimSpace(opts.Effort)
+		fm.Isolation = ParseIsolation(opts.Isolation)
 		for _, t := range opts.AllowedTools {
 			if t = strings.TrimSpace(t); t != "" {
 				fm.AllowedTools = append(fm.AllowedTools, t)
