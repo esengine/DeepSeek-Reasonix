@@ -633,6 +633,7 @@ export function Composer({
   }, []);
 
   const [workspaceRefs, setWorkspaceRefs] = useState<WorkspaceReference[]>([]);
+  const [forceRich, setForceRich] = useState(false);
   const [invocations, setInvocations] = useState<ComposerInvocation[]>([]);
   const [richSelection, setRichSelection] = useState<RichComposerSelection>({ start: 0, end: 0 });
   const [richSlashQuery, setRichSlashQuery] = useState<RichSlashQuery | null>(null);
@@ -1356,17 +1357,6 @@ export function Composer({
     setTextCaretEnd(next);
   };
 
-  const addWorkspaceReference = (ref: WorkspaceReference) => {
-    setWorkspaceRefs((prev) => {
-      const key = workspaceReferenceKey(ref);
-      if (prev.some((item) => workspaceReferenceKey(item) === key)) return prev;
-      const next = [...prev, ref];
-      workspaceRefsRef.current = next;
-      return next;
-    });
-    requestAnimationFrame(focusComposerInput);
-  };
-
   useEffect(() => {
     if (!insertRequest || insertRequest.id === consumedInsertIdByDraftRef.current[draftKey]) return;
     consumedInsertIdByDraftRef.current[draftKey] = insertRequest.id;
@@ -1394,6 +1384,7 @@ export function Composer({
       setText(next.text);
       setInvocations(next.invocations);
       setComposerSelection(selection.start + inserted.length);
+      setForceRich(true);
       return;
     }
     insertTextAtCaret(insertRequest.text);
@@ -1483,18 +1474,7 @@ export function Composer({
     return true;
   };
 
-  const addWorkspaceReferenceToDraft = (targetDraftKey: string, ref: WorkspaceReference) => {
-    if (targetDraftKey === activeDraftKeyRef.current) {
-      addWorkspaceReference(ref);
-      return;
-    }
-    const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
-    const key = workspaceReferenceKey(ref);
-    if (draft.workspaceRefs.some((item) => workspaceReferenceKey(item) === key)) return;
-    draft.workspaceRefs = [...draft.workspaceRefs, ref];
-    draftsBySessionRef.current[targetDraftKey] = draft;
-  };
-
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
   const clearSubmittedDraft = (targetDraftKey: string) => {
     if (targetDraftKey === activeDraftKeyRef.current) {
       textRef.current = "";
@@ -1516,6 +1496,7 @@ export function Composer({
       openPastedLabelsRef.current = [];
       setOpenPastedLabels([]);
       savedTextRef.current = "";
+      setForceRich(false);
       return;
     }
     const draft = cloneComposerDraft(draftsBySessionRef.current[targetDraftKey] ?? emptyComposerDraft());
@@ -1645,7 +1626,6 @@ export function Composer({
       warnImageInputFallback();
     }
     const currentAttachments = attachmentsRef.current;
-    const _unusedWorkspaceRefs = workspaceRefsRef.current;
     const inlineInvocationCount = trimmedDraft.invocations.filter((invocation) => invocation.command.kind === "skill").length;
     const subagentInvocationCount = trimmedDraft.invocations.filter((invocation) => invocation.command.kind === "subagent").length;
     if (goalModeOn && !activeGoal && trimmedDraft.invocations.length > 0) {
@@ -1841,8 +1821,8 @@ export function Composer({
         if (attachmentSeenInDraft(sourceDraftKey, key)) continue;
         const item = await app.AttachDropped(path);
         if (item.kind === "workspace") {
+          const atPath = formatWorkspaceReference(item.path, item.isDir);
           if (sourceDraftKey === activeDraftKeyRef.current) {
-            const atPath = formatWorkspaceReference(item.path, item.isDir);
             const sel = getComposerSelection();
             const currentText = textRef.current;
             const inserted = " " + atPath + " ";
@@ -1852,6 +1832,7 @@ export function Composer({
             setText(next.text);
             setInvocations(next.invocations);
             setComposerSelection(sel.start + inserted.length);
+            setForceRich(true);
           } else {
             const draft = cloneComposerDraft(draftsBySessionRef.current[sourceDraftKey] ?? emptyComposerDraft());
             draft.text += " " + atPath + " ";
@@ -2160,6 +2141,7 @@ export function Composer({
       setText(next.text);
       setInvocations(next.invocations);
       setComposerSelection(sel.start + inserted.length);
+      setForceRich(true);
       return;
     }
 
@@ -2410,6 +2392,7 @@ export function Composer({
       setText(next.text);
       setInvocations(next.invocations);
       setComposerSelection(sel.start + inserted.length);
+      setForceRich(true);
       return;
     }
     // A directory keeps the menu open (trailing "/"); a file completes it (space).
@@ -3589,7 +3572,7 @@ export function Composer({
           <div className="composer__input-row">
             <span className="composer__caret">{shellModeActive ? "$" : "›"}</span>
             <div className="composer__content" onMouseDown={focusComposerFromContentBlank}>
-              {invocations.length > 0 ? (
+              {invocations.length > 0 || forceRich ? (
                 <RichComposerInput
                   ref={richInputRef}
                   text={text}
