@@ -5,7 +5,7 @@ import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
 import { ComposerContextCard } from "./ComposerContextCard";
-import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
+import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, highlightRefsInText, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import type { DisplayAttachment } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { replaySubmitText } from "../lib/editReplay";
@@ -204,7 +204,7 @@ export function UserMessage({
   const invocationSegments = imSource ? [] : invocationSegmentsFromMessage(displayText, submitText, invocationMetadata);
   const hasInvocationSegments = invocationSegments.some((segment) => segment.type === "invocation");
   const orderedAttachments = sortDisplayAttachments(attachments);
-const cardAttachments = useMemo(() => orderedAttachments.filter((a) => a.source !== "workspace"), [orderedAttachments]);
+  const cardAttachments = orderedAttachments;
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
   const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
@@ -452,7 +452,7 @@ const cardAttachments = useMemo(() => orderedAttachments.filter((a) => a.source 
             {hasInvocationSegments && pasteBlocks.length === 0 ? (
               <div className="msg__text msg__rich-text">
                 {invocationSegments.map((segment, index) => segment.type === "text"
-                  ? <span key={`text:${segment.start}:${index}`}>{segment.content}</span>
+                  ? <span key={`text:${segment.start}:${index}`}>{highlightRefsInText(segment.content).map((s, j) => s.isRef ? <span key={j} className="ref-highlight">{s.text}</span> : s.text)}</span>
                   : (
                     <InvocationBadge
                       key={`invocation:${segment.invocation.name}:${segment.offset}:${index}`}
@@ -464,7 +464,7 @@ const cardAttachments = useMemo(() => orderedAttachments.filter((a) => a.source 
               </div>
             ) : displaySegments.map((seg, i) => {
               if (seg.type === "text") {
-                return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
+                return seg.content ? <div className="msg__text" key={`s${i}`}>{highlightRefsInText(seg.content).map((s, j) => s.isRef ? <span key={j} className="ref-highlight">{s.text}</span> : s.text)}</div> : null;
               }
               const expanded = Boolean(expandedPasteLabels[seg.block.label]);
               return (
@@ -500,10 +500,10 @@ const cardAttachments = useMemo(() => orderedAttachments.filter((a) => a.source 
                   className={`msg-attachment msg-attachment--${attachment.kind}`}
                   key={isImage ? undefined : `${attachment.path}:${index}`}
                   title={isImage ? undefined : attachment.path}
-                  onClick={isImage ? () => openImageViewer(attachment.path, attachment.name) : () => app.OpenWorkspacePath(attachment.path)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); isImage ? openImageViewer(attachment.path, attachment.name) : app.OpenWorkspacePath(attachment.path); } }}
+                  onClick={isImage ? () => openImageViewer(attachment.path, attachment.name) : undefined}
+                  role={isImage ? "button" : undefined}
+                  tabIndex={isImage ? 0 : undefined}
+                  onKeyDown={isImage ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openImageViewer(attachment.path, attachment.name); } } : undefined}
                 >
                   <span className={`msg-attachment__icon msg-attachment__icon--${attachment.kind}`} aria-hidden="true">
                     {isImage && imagePreviews[attachment.path] ? <img src={imagePreviews[attachment.path]} alt="" draggable={false} /> : attachmentIcon(attachment.kind)}

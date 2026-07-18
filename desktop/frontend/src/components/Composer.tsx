@@ -46,7 +46,7 @@ import {
 } from "./RichComposerInput";
 import { VirtualMenu } from "./VirtualMenu";
 import { activeFileReferenceToken, dirEntryMenuLabel, dirEntrySubmitPath } from "./FileReferenceMenu";
-import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToken";
+import { activeRefTokenRe, escapeRefPath, refTokenRe, unescapeRefPath } from "../lib/refToken";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import {
   formatSelectedTextContext,
@@ -772,6 +772,9 @@ export function Composer({
     nextPasteId.current = next.nextPasteId;
     historyIndexRef.current = next.historyIndex;
     savedTextRef.current = next.savedText;
+    if (refTokenRe().test(next.text)) {
+      setForceRich(true);
+    }
     pendingGuidanceRef.current = next.pendingGuidance;
     guidanceExpandedRef.current = next.guidanceExpanded;
     guidanceSendingIdRef.current = next.guidanceSendingId;
@@ -1371,6 +1374,7 @@ export function Composer({
       setInvocations(next.invocations);
       setComposerSelection(selection.start + inserted.length);
       setForceRich(true);
+      requestAnimationFrame(() => richInputRef.current?.focus());
       return;
     }
     insertTextAtCaret(insertRequest.text);
@@ -1460,7 +1464,6 @@ export function Composer({
     return true;
   };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
   const clearSubmittedDraft = (targetDraftKey: string) => {
     if (targetDraftKey === activeDraftKeyRef.current) {
       textRef.current = "";
@@ -1609,6 +1612,7 @@ export function Composer({
       warnImageInputFallback();
     }
     const currentAttachments = attachmentsRef.current;
+
     const inlineInvocationCount = trimmedDraft.invocations.filter((invocation) => invocation.command.kind === "skill").length;
     const subagentInvocationCount = trimmedDraft.invocations.filter((invocation) => invocation.command.kind === "subagent").length;
     if (goalModeOn && !activeGoal && trimmedDraft.invocations.length > 0) {
@@ -1816,6 +1820,7 @@ export function Composer({
             setInvocations(next.invocations);
             setComposerSelection(sel.start + inserted.length);
             setForceRich(true);
+            requestAnimationFrame(() => richInputRef.current?.focus());
           } else {
             const draft = cloneComposerDraft(draftsBySessionRef.current[sourceDraftKey] ?? emptyComposerDraft());
             draft.text += " " + atPath + " ";
@@ -1827,11 +1832,21 @@ export function Composer({
       } catch (err) {
         const reason = String(err?.toString?.() ?? err ?? "");
         console.warn("[composer] failed to attach dropped file:", reason);
-        if (/must be between 1 byte/.test(reason)) {
-          showToast(t("composer.attachDropEmptyFile"), "warn");
-        } else {
-          showToast(t("composer.attachDropFailed"), "warn");
-        }
+        const ATTACH_ERROR_MESSAGES: Record<string, string> = {
+          "no such file or directory": "File not found",
+          "permission denied": "Permission denied",
+          "attachment file is empty": "File is empty (0 bytes)",
+          "image file is empty": "File is empty (0 bytes)",
+          "path is a directory": "Path is a directory, not a file",
+          "must be between 1 byte and 25 MB": "File exceeds 25 MB limit",
+          "must be between 1 byte and 10 MB": "Image exceeds 10 MB limit",
+          "workspace is not ready": "Workspace is not ready, please wait",
+          "must not be a symlink": "Symbolic links are not allowed",
+          "no space left on device": "Disk is full, please free up space",
+        };
+        const matched = Object.keys(ATTACH_ERROR_MESSAGES).find((key) => reason.includes(key));
+        const msg = matched ? ATTACH_ERROR_MESSAGES[matched] : "Attach failed: " + reason;
+        showToast(msg, "warn");
         // non-fatal: a failed drop attach must not block normal text input
       } finally {
         updatePendingPasteForDraft(sourceDraftKey, -1);
@@ -2125,6 +2140,7 @@ export function Composer({
       setInvocations(next.invocations);
       setComposerSelection(sel.start + inserted.length);
       setForceRich(true);
+      requestAnimationFrame(() => richInputRef.current?.focus());
       return;
     }
 
@@ -2370,6 +2386,7 @@ export function Composer({
       setInvocations(next.invocations);
       setComposerSelection(sel.start + inserted.length);
       setForceRich(true);
+      requestAnimationFrame(() => richInputRef.current?.focus());
       return;
     }
     // A directory keeps the menu open (trailing "/"); a file completes it (space).
@@ -2936,6 +2953,28 @@ export function Composer({
   const submitEmpty = !text.trim() && attachments.length === 0 &&
     !invocations.some((invocation) => invocation.command.kind === "skill");
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
+  useEffect(() => {
+    const doc = document.documentElement;
+    const handler = (e: Event) => {
+      const dt = (e as unknown as { dataTransfer: DataTransfer | null }).dataTransfer;
+      if (!dt?.types.includes('Files')) return;
+      e.preventDefault();
+      dt.dropEffect = 'none';
+    };
+    const dropHandler = (e: Event) => {
+      const dt = (e as unknown as { dataTransfer: DataTransfer | null }).dataTransfer;
+      if (dt?.types.includes('Files')) {
+        e.preventDefault();
+      }
+    };
+    doc.addEventListener('dragover', handler);
+    doc.addEventListener('drop', dropHandler);
+    return () => {
+      doc.removeEventListener('dragover', handler);
+      doc.removeEventListener('drop', dropHandler);
+    };
+  }, []);
+
   const submitTooltip = running ? t("composer.queueGuidance") : t("composer.send");
   const composerPlaceholder = readOnly
     ? t("composer.readOnlyChannel")

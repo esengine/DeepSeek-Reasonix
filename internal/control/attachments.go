@@ -48,7 +48,10 @@ func SaveAttachmentBytes(origName string, raw []byte) (string, error) {
 }
 
 func SaveAttachmentBytesInRoot(root, origName string, raw []byte) (string, error) {
-	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("attachment file is empty (0 bytes)")
+	}
+	if len(raw) > maxFileAttachmentBytes {
 		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
 	}
 	ext := strings.ToLower(filepath.Ext(origName))
@@ -81,7 +84,10 @@ func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
 }
 
 func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error) {
-	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("image file is empty (0 bytes)")
+	}
+	if len(raw) > maxImageAttachmentBytes {
 		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
 	}
 	mime := detectedImageMime(raw)
@@ -134,7 +140,13 @@ func SaveImageFile(path string) (string, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("pasted image path must not be a symlink")
 	}
-	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, not a file")
+	}
+	if info.Size() <= 0 {
+		return "", fmt.Errorf("image file is empty (0 bytes)")
+	}
+	if info.Size() > maxImageAttachmentBytes {
 		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
 	}
 	f, err := os.Open(path)
@@ -153,7 +165,10 @@ func SaveImageFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("attachment file is empty (0 bytes)")
+	}
+	if len(raw) > maxImageAttachmentBytes {
 		return "", fmt.Errorf("pasted image must be between 1 byte and 10 MB")
 	}
 	if after, err := f.Stat(); err != nil {
@@ -172,7 +187,13 @@ func SaveAttachmentFile(path string) (string, error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("attachment path must not be a symlink")
 	}
-	if info.IsDir() || info.Size() <= 0 || info.Size() > maxFileAttachmentBytes {
+	if info.IsDir() {
+		return "", fmt.Errorf("path is a directory, not a file")
+	}
+	if info.Size() <= 0 {
+		return "", fmt.Errorf("attachment file is empty (0 bytes)")
+	}
+	if info.Size() > maxFileAttachmentBytes {
 		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
 	}
 	f, err := os.Open(path)
@@ -191,7 +212,10 @@ func SaveAttachmentFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
+	if len(raw) == 0 {
+		return "", fmt.Errorf("attachment file is empty (0 bytes)")
+	}
+	if len(raw) > maxFileAttachmentBytes {
 		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
 	}
 	if after, err := f.Stat(); err != nil {
@@ -310,7 +334,13 @@ func readAttachmentImage(path string) (raw []byte, mime string, err error) {
 	if info.Mode()&os.ModeSymlink != 0 {
 		return nil, "", fmt.Errorf("attachment path must not be a symlink")
 	}
-	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
+	if info.IsDir() {
+		return nil, "", fmt.Errorf("path is a directory, not a file")
+	}
+	if info.Size() <= 0 {
+		return nil, "", fmt.Errorf("image file is empty (0 bytes)")
+	}
+	if info.Size() > maxImageAttachmentBytes {
 		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
 	}
 	f, err := os.Open(clean)
@@ -329,7 +359,10 @@ func readAttachmentImage(path string) (raw []byte, mime string, err error) {
 	if err != nil {
 		return nil, "", err
 	}
-	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
+	if len(raw) == 0 {
+		return nil, "", fmt.Errorf("image file is empty (0 bytes)")
+	}
+	if len(raw) > maxImageAttachmentBytes {
 		return nil, "", fmt.Errorf("attachment image must be between 1 byte and 10 MB")
 	}
 	if after, err := f.Stat(); err != nil {

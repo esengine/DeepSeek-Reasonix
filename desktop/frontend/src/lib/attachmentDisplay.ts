@@ -1,4 +1,4 @@
-import { escapeRefPath, refTokenRe, unescapeRefPath } from "./refToken";
+import { escapeRefPath, refTokenRe } from "./refToken";
 
 const attachmentRefRe = /@(\.reasonix\/attachments\/[^\s]+)/g;
 const namedAttachmentRefRe = /(^|\s)@\[([^\]\r\n]+)\]\(([^)\s]+)\)/g;
@@ -107,18 +107,9 @@ export function parseAttachmentRefsForDisplay(text: string): { text: string; att
       attachments.push(displayAttachment(core, name));
       return lead + suffix;
     })
-    .replace(refTokenRe(), (_full, lead: string, token: string) => {
-      const { core, suffix } = splitTrailingPunctuation(token);
-      const path = unescapeRefPath(core);
-      if (!path || !isDisplayReference(path)) return _full;
-      const name = baseName(path) || "attachment";
-      const attachment = displayAttachment(path, name);
-      attachments.push(attachment);
-      return lead + suffix;
-    })
-    .replace(/[ \t]+([.,;!?)\]}，。；！？）】])/g, "$1")
+    .replace(/[ \t]+([.,;!?)\]}，。；！？）】])/g, " $1")
     .replace(/[ \t]{2,}/g, " ")
-    .trim();
+    .replace(/^\s+/, " ").replace(/\s+$/, " ");
   return { text: cleaned, attachments };
 }
 
@@ -159,11 +150,6 @@ function displayAttachment(path: string, name: string): DisplayAttachment {
   };
 }
 
-/**
- * Split text into segments, marking @-ref tokens so callers can render them
- * with visual highlighting. Uses refTokenRe() — the same regex the composer
- * uses to detect inline references — for consistent token boundaries.
- */
 export function highlightRefsInText(text: string): Array<{ text: string; isRef: boolean }> {
   const segments: Array<{ text: string; isRef: boolean }> = [];
   const re = refTokenRe();
