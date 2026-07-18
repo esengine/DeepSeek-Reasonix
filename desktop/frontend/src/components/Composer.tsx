@@ -109,7 +109,6 @@ type ComposerDraft = {
   text: string;
   invocations: ComposerInvocation[];
   attachments: Attachment[];
-  workspaceRefs: WorkspaceReference[];
   pastedBlocks: PastedBlock[];
   openPastedLabels: string[];
   sessionRefs: SessionReference[];
@@ -178,10 +177,6 @@ function sortComposerAttachments(items: Attachment[]): Attachment[] {
   });
 }
 
-function workspaceReferenceKey(ref: WorkspaceReference): string {
-  return `${ref.isDir ? "dir" : "file"}:${ref.path}`;
-}
-
 type PastChatToken = {
   from: number;
   query: string;
@@ -216,7 +211,6 @@ function emptyComposerDraft(): ComposerDraft {
     text: "",
     invocations: [],
     attachments: [],
-    workspaceRefs: [],
     pastedBlocks: [],
     openPastedLabels: [],
     sessionRefs: [],
@@ -248,7 +242,6 @@ function cloneComposerDraft(draft: ComposerDraft): ComposerDraft {
     text: draft.text,
     invocations: draft.invocations.map((invocation) => ({ ...invocation, command: { ...invocation.command } })),
     attachments: [...draft.attachments],
-    workspaceRefs: [...draft.workspaceRefs],
     pastedBlocks: [...draft.pastedBlocks],
     openPastedLabels: [...draft.openPastedLabels],
     sessionRefs: [...draft.sessionRefs],
@@ -632,7 +625,6 @@ export function Composer({
     setImageViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
   }, []);
 
-  const [workspaceRefs, setWorkspaceRefs] = useState<WorkspaceReference[]>([]);
   const [forceRich, setForceRich] = useState(false);
   const [invocations, setInvocations] = useState<ComposerInvocation[]>([]);
   const [richSelection, setRichSelection] = useState<RichComposerSelection>({ start: 0, end: 0 });
@@ -723,14 +715,12 @@ export function Composer({
   const textRef = useRef(text);
   const invocationsRef = useRef(invocations);
   const attachmentsRef = useRef(attachments);
-  const workspaceRefsRef = useRef(workspaceRefs);
   const openPastedLabelsRef = useRef(openPastedLabels);
   const sessionRefsRef = useRef(sessionRefs);
   const selectedTextRefsRef = useRef(selectedTextRefs);
   textRef.current = text;
   invocationsRef.current = invocations;
   attachmentsRef.current = attachments;
-  workspaceRefsRef.current = workspaceRefs;
   pastedBlocksRef.current = pastedBlocks;
   openPastedLabelsRef.current = openPastedLabels;
   sessionRefsRef.current = sessionRefs;
@@ -745,7 +735,6 @@ export function Composer({
     text: textRef.current,
     invocations: invocationsRef.current.map((invocation) => ({ ...invocation, command: { ...invocation.command } })),
     attachments: [...attachmentsRef.current],
-    workspaceRefs: [...workspaceRefsRef.current],
     pastedBlocks: [...pastedBlocksRef.current],
     openPastedLabels: [...openPastedLabelsRef.current],
     sessionRefs: [...sessionRefsRef.current],
@@ -766,7 +755,6 @@ export function Composer({
     textRef.current = next.text;
     invocationsRef.current = next.invocations;
     attachmentsRef.current = next.attachments;
-    workspaceRefsRef.current = next.workspaceRefs;
     openPastedLabelsRef.current = next.openPastedLabels;
     sessionRefsRef.current = next.sessionRefs;
     selectedTextRefsRef.current = next.selectedTextRefs;
@@ -774,7 +762,6 @@ export function Composer({
     setInvocations(next.invocations);
     setRichSlashQuery(null);
     setAttachments(next.attachments);
-    setWorkspaceRefs(next.workspaceRefs);
     pastedBlocksRef.current = next.pastedBlocks;
     setPastedBlocks(next.pastedBlocks);
     setOpenPastedLabels(next.openPastedLabels);
@@ -1347,7 +1334,6 @@ export function Composer({
 
   const replaceComposerText = (next: string) => {
     clearAttachments();
-    setWorkspaceRefs([]);
     setSessionRefs([]);
     selectedTextRefsRef.current = [];
     setSelectedTextRefs([]);
@@ -1485,8 +1471,6 @@ export function Composer({
       historyIndexRef.current = -1;
       setHistoryIndex(-1);
       clearAttachments();
-      workspaceRefsRef.current = [];
-      setWorkspaceRefs([]);
       sessionRefsRef.current = [];
       setSessionRefs([]);
       selectedTextRefsRef.current = [];
@@ -1503,7 +1487,6 @@ export function Composer({
     draft.text = "";
     draft.invocations = [];
     draft.attachments = [];
-    draft.workspaceRefs = [];
     draft.pastedBlocks = [];
     draft.openPastedLabels = [];
     draft.sessionRefs = [];
@@ -2215,12 +2198,6 @@ export function Composer({
 
   const activePastedBlocks = pastedBlocks.filter((block) => text.includes(block.label));
   const shellModeActive = text.trimStart().startsWith("!");
-
-  const removeWorkspaceReference = (target: WorkspaceReference) => {
-    const key = workspaceReferenceKey(target);
-    setWorkspaceRefs((prev) => prev.filter((ref) => workspaceReferenceKey(ref) !== key));
-    requestAnimationFrame(focusComposerInput);
-  };
 
   const togglePastedPreview = (label: string) => {
     setOpenPastedLabels((prev) => (prev.includes(label) ? prev.filter((x) => x !== label) : [...prev, label]));
@@ -2956,7 +2933,7 @@ export function Composer({
         return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
       })()
     : null;
-  const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0 &&
+  const submitEmpty = !text.trim() && attachments.length === 0 &&
     !invocations.some((invocation) => invocation.command.kind === "skill");
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
   const submitTooltip = running ? t("composer.queueGuidance") : t("composer.send");
@@ -3421,10 +3398,10 @@ export function Composer({
           </div>
         </div>
       )}
-      {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0 || selectedTextRefs.length > 0) && (
+      {(attachments.length > 0 || sessionRefs.length > 0 || selectedTextRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
           {sortComposerAttachments(attachments).map((a) => {
-            const imageOnly = Boolean(a.previewUrl) && attachments.every((item) => item.previewUrl) && workspaceRefs.length === 0 && sessionRefs.length === 0;
+            const imageOnly = Boolean(a.previewUrl) && attachments.every((item) => item.previewUrl) && sessionRefs.length === 0;
             return (
               <ComposerContextCard
                 key={a.path}
@@ -3440,17 +3417,6 @@ export function Composer({
               />
             );
           })}
-          {workspaceRefs.map((ref) => (
-            <ComposerContextCard
-              key={workspaceReferenceKey(ref)}
-              variant="workspace"
-              tooltipLabel={ref.displayPath ? formatWorkspaceReference(ref.displayPath, ref.isDir) : formatWorkspaceReference(ref.path, ref.isDir)}
-              removeLabel={t("composer.removeReference")}
-              onRemove={() => removeWorkspaceReference(ref)}
-              folder={Boolean(ref.isDir)}
-              label={ref.isDir ? `${baseName(ref.displayPath || ref.path)}/` : baseName(ref.displayPath || ref.path)}
-            />
-          ))}
           {sessionRefs.map((ref) => (
             <div
               className="composer-context__item composer-context__item--session"
