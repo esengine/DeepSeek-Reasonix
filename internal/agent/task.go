@@ -592,6 +592,9 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		parentSession := ParentSession(ctx)
 		backgroundEvidence := evidence.NewLedger()
+		// The background worker updates run metadata as it completes. Format the
+		// immutable launch reference before handing ownership to that goroutine.
+		backgroundReference := FormatSubagentReference(run)
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
@@ -614,8 +617,8 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 			return FormatSubagentRunResult(answer, run, false), nil
 		})
 		releaseStart()
-		if run != nil && run.Ref != "" {
-			return fmt.Sprintf("Started background task %q (%s).\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, FormatSubagentReference(run)), nil
+		if backgroundReference != "" {
+			return fmt.Sprintf("Started background task %q (%s).\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, backgroundReference), nil
 		}
 		return fmt.Sprintf("Started background task %q (%s). It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label), nil
 	}

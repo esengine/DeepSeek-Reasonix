@@ -136,7 +136,7 @@ func TestManagerApplyCleanPatchAndReportConflictWithoutPollution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sourceBytes) != "first writer\n" {
+	if strings.ReplaceAll(string(sourceBytes), "\r\n", "\n") != "first writer\n" {
 		t.Fatalf("source content after clean apply = %q", sourceBytes)
 	}
 
@@ -154,7 +154,7 @@ func TestManagerApplyCleanPatchAndReportConflictWithoutPollution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(sourceBytes) != "first writer\n" {
+	if strings.ReplaceAll(string(sourceBytes), "\r\n", "\n") != "first writer\n" {
 		t.Fatalf("conflicting apply polluted source content = %q", sourceBytes)
 	}
 	status := gitStatus(t, repo)
@@ -302,7 +302,12 @@ func TestManagerGCReclaimsSafeOrphanAndRetainsCommittedBranch(t *testing.T) {
 
 func runGitTest(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	baseArgs := []string{
+		"-c", "user.name=Reasonix Test",
+		"-c", "user.email=reasonix-test@example.invalid",
+		"-C", dir,
+	}
+	cmd := exec.Command("git", append(baseArgs, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
