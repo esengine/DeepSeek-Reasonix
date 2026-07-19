@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { ContextPanel } from "../components/ContextPanel";
+import { ProjectTree } from "../components/ProjectTree";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import { commitTargetScopedValue, workspaceScopeKeyForAuthority } from "../lib/targetAuthority";
@@ -16,6 +17,7 @@ import type {
   HistoryMessage,
   JobView,
   Meta,
+  ProjectNode,
   RemoteTargetStatusView,
   TabMeta,
   WireEvent,
@@ -866,6 +868,133 @@ ok(panelSummaryText().includes("22"), "ContextPanel renders the Remote request c
 
 await act(async () => {
   panelRoot.unmount();
+});
+
+// ProjectTree is a target-scoped projection even when there is no active tab.
+// A stable target identity change must issue a fresh catalog request, and an
+// empty response from the prior authority must never erase the Remote catalog.
+let treeCalls = 0;
+let treeLoader: () => Promise<ProjectNode[]> = async () => [];
+window.go.main.App = {
+  ListProjectTree: async () => {
+    treeCalls += 1;
+    return treeLoader();
+  },
+  Platform: async () => "windows",
+} as Partial<AppBindings> as AppBindings;
+
+const remoteCatalog = (label: string, topicId = ""): ProjectNode[] => [{
+  key: `project-${label}`,
+  kind: "project",
+  label,
+  root: "workspace-opaque",
+  children: topicId ? [{
+    key: `topic-${topicId}`,
+    kind: "topic",
+    label: `Topic ${topicId}`,
+    root: "workspace-opaque",
+    topicId,
+  }] : [],
+}];
+
+const openedTreeTopics: string[] = [];
+
+function ProjectTreeProbe({ targetIdentityGen }: { targetIdentityGen: number }) {
+  return (
+    <LocaleProvider>
+      <ProjectTree
+        targetIdentityGen={targetIdentityGen}
+        onOpenTopic={async (_scope, _workspaceRoot, topicId) => { openedTreeTopics.push(topicId); }}
+        onOpenProjectHistory={async () => {}}
+        onAddProject={async () => {}}
+        timeFilter="all"
+        onTimeFilterChange={() => {}}
+        localPathActionsEnabled={false}
+      />
+    </LocaleProvider>
+  );
+}
+
+const treeRoot = createRoot(rootElement);
+await act(async () => {
+  treeRoot.render(<ProjectTreeProbe targetIdentityGen={0} />);
+  await flushPromises();
+});
+await waitFor("initial Local empty catalog", () => treeCalls === 1);
+
+treeLoader = async () => remoteCatalog("Remote catalog without an active tab");
+await act(async () => {
+  treeRoot.render(<ProjectTreeProbe targetIdentityGen={1} />);
+  await flushPromises();
+});
+await waitFor("Remote catalog without active tab", () => document.body.textContent?.includes("Remote catalog without an active tab") === true);
+eq(treeCalls, 2, "stable target generation refreshes ProjectTree with no active tab");
+
+const staleEmptyTree = deferred<ProjectNode[]>();
+treeLoader = () => staleEmptyTree.promise;
+await act(async () => {
+  treeRoot.render(<ProjectTreeProbe targetIdentityGen={2} />);
+  await flushPromises();
+});
+await waitFor("stale Local empty catalog request", () => treeCalls === 3);
+ok(!document.body.textContent?.includes("Remote catalog without an active tab"), "target change hides the old ProjectTree catalog while the new request is pending");
+
+const currentRemoteTree = deferred<ProjectNode[]>();
+treeLoader = () => currentRemoteTree.promise;
+await act(async () => {
+  treeRoot.render(<ProjectTreeProbe targetIdentityGen={3} />);
+  await flushPromises();
+});
+await waitFor("current Remote catalog request", () => treeCalls === 4);
+await act(async () => {
+  currentRemoteTree.resolve(remoteCatalog("Current Remote catalog"));
+  await flushPromises();
+});
+await waitFor("current Remote catalog", () => document.body.textContent?.includes("Current Remote catalog") === true);
+await act(async () => {
+  staleEmptyTree.resolve([]);
+  await flushPromises();
+});
+ok(document.body.textContent?.includes("Current Remote catalog") === true, "late stale empty ProjectTree response cannot overwrite the new Remote catalog");
+
+treeLoader = async () => remoteCatalog("Interactive old-target catalog", "old-target-topic");
+await act(async () => {
+  treeRoot.render(<ProjectTreeProbe targetIdentityGen={4} />);
+  await flushPromises();
+});
+await waitFor("interactive old-target catalog", () => document.body.textContent?.includes("Interactive old-target catalog") === true);
+await act(async () => {
+  document.querySelector<HTMLButtonElement>(".project-tree__folder-main")?.click();
+  await flushPromises();
+});
+const oldTargetTopicButton = document.querySelector<HTMLButtonElement>(".project-tree__topic-main");
+ok(oldTargetTopicButton, "old target topic is available for delayed-click regression");
+act(() => {
+  oldTargetTopicButton.closest(".project-tree__topic")?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  oldTargetTopicButton.click();
+});
+
+const nextTargetCatalog = deferred<ProjectNode[]>();
+treeLoader = () => nextTargetCatalog.promise;
+await act(async () => {
+  // This probe deliberately keeps one component instance so the callback gate
+  // is exercised independently of App's targetIdentityGen key remount.
+  treeRoot.render(<ProjectTreeProbe targetIdentityGen={5} />);
+  await flushPromises();
+});
+ok(!document.body.textContent?.includes("Interactive old-target catalog"), "old target catalog is hidden synchronously during an interactive target change");
+await act(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+});
+eq(openedTreeTopics.length, 0, "delayed topic click cannot open an old target after generation changes");
+ok(document.querySelector(".project-tree__hover-card") === null, "delayed hover card cannot paint an old target after generation changes");
+await act(async () => {
+  nextTargetCatalog.resolve(remoteCatalog("Interactive current-target catalog"));
+  await flushPromises();
+});
+
+await act(async () => {
+  treeRoot.unmount();
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

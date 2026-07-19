@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowUp, Folder, FolderOpen, Loader2, Plus, Server, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { ArrowUp, Folder, FolderOpen, Loader2, Plus, X } from "lucide-react";
 
-import { app, onRemoteWorkbenchState } from "../lib/bridge";
+import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type {
   RemoteDirectoryView,
   RemoteTargetStatusView,
-  RemoteWorkbenchStatusView,
   RemoteWorkspaceBrowseInput,
   RemoteWorkspacePageView,
 } from "../lib/types";
@@ -31,35 +30,50 @@ export interface RemoteWorkspaceSetupProps {
 
 export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorkspaceSetupProps) {
   const t = useT();
-  const [workbench, setWorkbench] = useState<RemoteWorkbenchStatusView | null>(null);
   const [page, setPage] = useState<RemoteWorkspacePageView | null>(null);
   const [typedPath, setTypedPath] = useState("");
   const [primary, setPrimary] = useState<RemoteDirectoryView | null>(null);
   const [additional, setAdditional] = useState<RemoteDirectoryView[]>([]);
   const [topicTitle, setTopicTitle] = useState("");
-  const [loadingStatus, setLoadingStatus] = useState(false);
   const [browsing, setBrowsing] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [creatingAuthorityKey, setCreatingAuthorityKey] = useState<string | null>(null);
   const [browseError, setBrowseError] = useState("");
   const [createError, setCreateError] = useState("");
-  const [requested, setRequested] = useState(false);
+  const [requestedAuthorityKey, setRequestedAuthorityKey] = useState<string | null>(null);
   const browseSequence = useRef(0);
   const handledRequest = useRef(0);
 
   const connected = target?.state === "RemoteConnected";
   const hostId = target?.hostId;
+  const setupAuthorityKey = `${connected ? "connected" : "disconnected"}\u0000${hostId ?? ""}`;
+  const setupAuthorityRef = useRef(setupAuthorityKey);
+  const createSequence = useRef(0);
+  useLayoutEffect(() => {
+    if (setupAuthorityRef.current === setupAuthorityKey) return;
+    setupAuthorityRef.current = setupAuthorityKey;
+    // Invalidate a create completion at commit before passive effects or user
+    // interaction can run for the next Host/modal.
+    createSequence.current += 1;
+  }, [setupAuthorityKey]);
+  const requested = requestedAuthorityKey === setupAuthorityKey;
+  const creating = creatingAuthorityKey === setupAuthorityKey;
 
   useEffect(() => {
-    setRequested(false);
+    setRequestedAuthorityKey(null);
   }, [connected, hostId]);
 
   const browse = useCallback(async (input: RemoteWorkspaceBrowseInput, append = false) => {
     const sequence = ++browseSequence.current;
+    const authorityKey = setupAuthorityRef.current;
+    const canCommit = () => (
+      setupAuthorityRef.current === authorityKey &&
+      browseSequence.current === sequence
+    );
     setBrowsing(true);
     setBrowseError("");
     try {
       const next = await app.BrowseRemoteWorkspace({ ...input, limit: input.limit ?? BROWSE_LIMIT });
-      if (sequence !== browseSequence.current) return;
+      if (!canCommit()) return;
       setPage((current) => {
         if (!append || !current || current.directory.ref !== next.directory.ref) return next;
         const seen = new Set(current.entries.map((entry) => entry.ref));
@@ -70,15 +84,14 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
       });
       setTypedPath(next.directory.displayPath);
     } catch (cause) {
-      if (sequence === browseSequence.current) setBrowseError(errorText(cause));
+      if (canCommit()) setBrowseError(errorText(cause));
     } finally {
-      if (sequence === browseSequence.current) setBrowsing(false);
+      if (canCommit()) setBrowsing(false);
     }
   }, []);
 
   useEffect(() => {
     browseSequence.current += 1;
-    setWorkbench(null);
     setPage(null);
     setTypedPath("");
     setPrimary(null);
@@ -86,47 +99,23 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
     setTopicTitle("");
     setBrowseError("");
     setCreateError("");
-    setCreating(false);
+    setCreatingAuthorityKey(null);
 
-    if (!connected) {
-      setLoadingStatus(false);
-      setBrowsing(false);
-      return;
-    }
-
-    let active = true;
-    setLoadingStatus(true);
-    const offWorkbench = onRemoteWorkbenchState((next) => {
-      if (!active || (hostId && next.hostId && next.hostId !== hostId)) return;
-      setWorkbench(next);
-    });
-    void (async () => {
-      try {
-        const next = await app.RemoteWorkbenchStatus();
-        if (!active) return;
-        if (hostId && next.hostId && next.hostId !== hostId) {
-          throw new Error(t("remote.workspace.hostMismatch"));
-        }
-        setWorkbench(next);
-        if (!next.sessionAttached) await browse({}, false);
-      } catch (cause) {
-        if (active) setBrowseError(errorText(cause));
-      } finally {
-        if (active) setLoadingStatus(false);
-      }
-    })();
+    setBrowsing(false);
     return () => {
-      active = false;
       browseSequence.current += 1;
-      offWorkbench();
     };
-  }, [browse, connected, hostId, t]);
+  }, [connected, hostId]);
 
   useEffect(() => {
     if (!connected || requestSignal <= 0 || requestSignal === handledRequest.current) return;
     handledRequest.current = requestSignal;
+    // A repeated Add Project request for the same Host must not replace a
+    // create-pending modal with a cancellable one. The Host operation remains
+    // authoritative until it completes or the target itself changes.
+    if (creatingAuthorityKey === setupAuthorityKey) return;
     browseSequence.current += 1;
-    setRequested(true);
+    setRequestedAuthorityKey(setupAuthorityKey);
     setPage(null);
     setTypedPath("");
     setPrimary(null);
@@ -134,10 +123,9 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
     setTopicTitle("");
     setBrowseError("");
     setCreateError("");
-    setCreating(false);
-    setLoadingStatus(false);
+    setCreatingAuthorityKey(null);
     void browse({});
-  }, [browse, connected, requestSignal]);
+  }, [browse, connected, creatingAuthorityKey, requestSignal, setupAuthorityKey]);
 
   const submitTypedPath = useCallback((event: FormEvent) => {
     event.preventDefault();
@@ -163,20 +151,29 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
     event.preventDefault();
     const title = topicTitle.trim();
     if (!primary || !title || creating) return;
-    setCreating(true);
+    const request = {
+      authorityKey: setupAuthorityRef.current,
+      sequence: createSequence.current + 1,
+    };
+    createSequence.current = request.sequence;
+    const canCommit = () => (
+      setupAuthorityRef.current === request.authorityKey &&
+      createSequence.current === request.sequence
+    );
+    setCreatingAuthorityKey(request.authorityKey);
     setCreateError("");
     try {
-      const next = await app.CreateRemoteWorkspaceSession({
+      await app.CreateRemoteWorkspaceSession({
         primaryDirectoryRef: primary.ref,
         additionalDirectoryRefs: additional.map((entry) => entry.ref),
         topicTitle: title,
       });
-      setWorkbench(next);
-      setRequested(false);
+      if (!canCommit()) return;
+      setRequestedAuthorityKey(null);
     } catch (cause) {
-      setCreateError(errorText(cause));
+      if (canCommit()) setCreateError(errorText(cause));
     } finally {
-      setCreating(false);
+      if (canCommit()) setCreatingAuthorityKey(null);
     }
   }, [additional, creating, primary, topicTitle]);
 
@@ -184,18 +181,19 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
     if (creating) return;
     browseSequence.current += 1;
     setBrowsing(false);
-    setLoadingStatus(false);
-    setRequested(false);
+    setRequestedAuthorityKey(null);
   };
 
-  if (!connected || (workbench?.sessionAttached && !requested)) return null;
+  // Connection alone must never cover the existing Remote catalog. Workspace
+  // creation is an explicit Add Project action, cancellable until create begins.
+  if (!connected || !requested) return null;
 
   const currentIsPrimary = Boolean(page && primary && sameDirectory(primary, page.directory));
   const currentIsAdditional = Boolean(page && additional.some((entry) => sameDirectory(entry, page.directory)));
 
   return (
     <div className="management-modal-backdrop remote-workspace-backdrop">
-      <section className="management-modal remote-workspace-modal" role="dialog" aria-labelledby="remote-workspace-title">
+      <section className="management-modal remote-workspace-modal" role="dialog" aria-modal="true" aria-labelledby="remote-workspace-title">
         <header className="management-modal__head">
           <div>
             <div className="management-modal__title" id="remote-workspace-title">{t("remote.workspace.title")}</div>
@@ -203,11 +201,9 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
               {target?.hostLabel ? t("remote.workspace.host", { host: target.hostLabel }) : t("remote.workspace.description")}
             </div>
           </div>
-          {requested ? (
-            <button className="btn btn--small" type="button" aria-label={t("common.close")} disabled={creating} onClick={closeRequestedSetup}>
-              <X size={15} aria-hidden="true" />
-            </button>
-          ) : <Server size={19} aria-hidden="true" />}
+          <button className="btn btn--small" type="button" aria-label={t("common.close")} disabled={creating} onClick={closeRequestedSetup}>
+            <X size={15} aria-hidden="true" />
+          </button>
         </header>
 
         <div className="remote-workspace-modal__body">
@@ -233,7 +229,7 @@ export function RemoteWorkspaceSetup({ target, requestSignal = 0 }: RemoteWorksp
 
             {(browseError || createError) && <div className="banner banner--error remote-workspace-error" role="alert">{browseError || createError}</div>}
 
-            {(loadingStatus || browsing) && !page ? (
+            {browsing && !page ? (
               <div className="remote-workspace-loading"><Loader2 className="spin" size={18} aria-hidden="true" />{t("remote.workspace.loading")}</div>
             ) : page ? (
               <>

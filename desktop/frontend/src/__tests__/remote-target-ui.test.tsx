@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { RemoteSettingsPage } from "../components/RemoteSettingsPage";
 import { RemoteTargetSurfaces } from "../components/RemoteTargetSurfaces";
+import { RemoteWorkspaceSetup } from "../components/RemoteWorkspaceSetup";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
 import type {
@@ -437,8 +438,10 @@ console.log("\nRemote target UI");
 }
 
 // A connected Remote target with no attached Session exposes the real opaque-ref
-// directory workflow. It supports paging/navigation, a primary root, repeatable
-// additional roots, backend errors, and closes as soon as the workbench attaches.
+// directory workflow. A connected-but-unattached target leaves the catalog
+// reachable; only explicit Add Project opens the cancellable setup dialog.
+// The dialog supports paging/navigation, a primary root, repeatable additional
+// roots, backend errors, and closes as soon as creation succeeds.
 {
   const dom = installDOM();
   const target: RemoteTargetStatusView = {
@@ -497,8 +500,16 @@ console.log("\nRemote target UI");
   };
 
   const { root, rootElement } = render(React.createElement(RemoteTargetSurfaces));
-  await waitFor("Remote workspace setup", () => rootElement.textContent?.includes("Open a Remote workspace") === true);
-  ok(rootElement.querySelector(".remote-workspace-modal")?.getAttribute("role") === "dialog", "unattached Remote target opens the workspace setup dialog");
+  await waitFor("Remote connection surface", () => rootElement.textContent?.includes("Remote connected") === true);
+  ok(rootElement.querySelector(".remote-workspace-modal") === null, "unattached Remote target does not open a blocking workspace dialog automatically");
+  ok(browseInputs.length === 0, "unattached Remote target does not start workspace creation browsing without Add Project");
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 1 })));
+    await flush();
+  });
+  await waitFor("explicit Remote workspace setup", () => rootElement.textContent?.includes("Open a Remote workspace") === true);
+  ok(rootElement.querySelector(".remote-workspace-modal")?.getAttribute("role") === "dialog", "explicit Add Project opens Remote workspace setup");
   ok(browseInputs[0]?.limit === 100 && !browseInputs[0]?.directoryRef && !browseInputs[0]?.typedPath, "initial browse uses the Host default directory with a bounded page size");
 
   await act(async () => {
@@ -554,10 +565,10 @@ console.log("\nRemote target UI");
   ok(createInputs[1]?.primaryDirectoryRef === projects.ref, "Session create sends the opaque primary directory ref");
   ok(createInputs[1]?.additionalDirectoryRefs.length === 1 && createInputs[1]?.additionalDirectoryRefs[0] === scratch.ref, "Session create sends every selected additional opaque directory ref");
   ok(createInputs[1]?.topicTitle === "Remote V1 implementation", "Session create sends the trimmed Topic title");
-  ok(!rootElement.textContent?.includes("Open a Remote workspace"), "workbench-state attachment removes setup instead of rendering a second chat surface");
+  ok(!rootElement.textContent?.includes("Open a Remote workspace"), "successful Remote Session creation closes setup instead of rendering a second chat surface");
 
   await act(async () => {
-    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 1 })));
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 2 })));
     await flush();
   });
   await waitFor("explicit Remote workspace setup", () => rootElement.querySelector(".remote-workspace-modal") !== null);
@@ -571,7 +582,7 @@ console.log("\nRemote target UI");
   ok(rootElement.querySelector(".remote-workspace-modal") === null && workbench.sessionAttached, "closing explicit setup preserves the attached Remote Session");
 
   await act(async () => {
-    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 2 })));
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 3 })));
     await flush();
   });
   await waitFor("second explicit Remote workspace setup", () => rootElement.textContent?.includes("Use as primary") === true);
@@ -594,6 +605,223 @@ console.log("\nRemote target UI");
   await waitFor("concurrent create completion", () => rootElement.querySelector(".remote-workspace-modal") === null);
 
   await act(async () => root.unmount());
+  dom.close();
+}
+
+// Create is scoped to the exact connected Host and explicit setup request.
+// An old Host completion must not close or unlock a new Host's in-flight modal,
+// and an old Host error must not appear in the new Host setup.
+{
+  const dom = installDOM();
+  const hostA: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-create-a",
+    hostLabel: "Create Host A",
+    canReconnect: false,
+  };
+  const hostB: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-create-b",
+    hostLabel: "Create Host B",
+    canReconnect: false,
+  };
+  const hostC: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-create-c",
+    hostLabel: "Create Host C",
+    canReconnect: false,
+  };
+  const project: RemoteDirectoryView = { ref: "create-project", name: "project", displayPath: "/srv/project" };
+  const pendingCreates: Array<{
+    input: RemoteCreateWorkspaceSessionInput;
+    resolve: (value: RemoteWorkbenchStatusView) => void;
+    reject: (cause: Error) => void;
+  }> = [];
+
+  window.go = {
+    main: {
+      App: {
+        BrowseRemoteWorkspace: async () => ({ directory: project, entries: [], hasMore: false }),
+        CreateRemoteWorkspaceSession: async (input: RemoteCreateWorkspaceSessionInput) => new Promise<RemoteWorkbenchStatusView>((resolve, reject) => {
+          pendingCreates.push({ input, resolve, reject });
+        }),
+      } as Partial<AppBindings> as AppBindings,
+    },
+  };
+
+  const setup = (target: RemoteTargetStatusView, requestSignal: number) => (
+    React.createElement(LocaleProvider, null, React.createElement(RemoteWorkspaceSetup, { target, requestSignal }))
+  );
+  const { root, rootElement } = render(React.createElement(RemoteWorkspaceSetup, { target: hostA, requestSignal: 1 }));
+
+  const startCreate = async (title: string, expectedPending: number) => {
+    await waitFor(`${title} workspace browse`, () => rootElement.textContent?.includes("Use as primary") === true);
+    await act(async () => {
+      button(rootElement, "Use as primary").click();
+      await flush();
+    });
+    inputValue(rootElement.querySelector<HTMLInputElement>(".remote-workspace-topic input")!, title);
+    await act(async () => {
+      button(rootElement, "Create Remote session").click();
+      await flush();
+    });
+    await waitFor(`${title} create request`, () => pendingCreates.length === expectedPending);
+  };
+
+  await startCreate("Host A pending create", 1);
+  ok(rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled, "Host A setup locks close only after its create begins");
+
+  await act(async () => {
+    root.render(setup(hostA, 2));
+    await flush();
+  });
+  ok(
+    rootElement.querySelector(".remote-workspace-modal") !== null &&
+      rootElement.querySelector<HTMLInputElement>(".remote-workspace-topic input")?.value === "Host A pending create",
+    "same-Host Add Project request preserves the create-pending modal",
+  );
+  ok(rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled, "same-Host Add Project request cannot reopen Close while create is pending");
+  ok(pendingCreates.length === 1, "same-Host Add Project request cannot queue a second create");
+
+  await act(async () => {
+    root.render(setup(hostB, 3));
+    await flush();
+  });
+  await startCreate("Host B current create", 2);
+  ok(rootElement.textContent?.includes("Create Host B"), "Host switch renders the new Host setup while the old create is pending");
+  ok(rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled, "current Host B create keeps its own close control disabled");
+
+  await act(async () => {
+    pendingCreates[0].resolve({ hostId: hostA.hostId, sessionAttached: true, topicTitle: pendingCreates[0].input.topicTitle });
+    await flush();
+  });
+  ok(rootElement.querySelector(".remote-workspace-modal") !== null && rootElement.textContent?.includes("Create Host B"), "stale Host A success cannot close the Host B setup");
+  ok(rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled, "stale Host A finally cannot unlock the current Host B create");
+
+  await act(async () => {
+    pendingCreates[1].resolve({ hostId: hostB.hostId, sessionAttached: true, topicTitle: pendingCreates[1].input.topicTitle });
+    await flush();
+  });
+  await waitFor("current Host B create completion", () => rootElement.querySelector(".remote-workspace-modal") === null);
+
+  await act(async () => {
+    root.render(setup(hostB, 4));
+    await flush();
+  });
+  await startCreate("Host B stale error", 3);
+  await act(async () => {
+    root.render(setup(hostC, 5));
+    await flush();
+  });
+  await waitFor("Host C setup", () => rootElement.textContent?.includes("Create Host C") === true && rootElement.textContent?.includes("Use as primary") === true);
+  await act(async () => {
+    pendingCreates[2].reject(new Error("stale Host B lease error"));
+    await flush();
+  });
+  ok(!rootElement.textContent?.includes("stale Host B lease error"), "stale Host B error cannot paint the Host C setup");
+  ok(rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.disabled === false, "stale Host B finally cannot change Host C's idle close state");
+
+  await act(async () => {
+    rootElement.querySelector<HTMLButtonElement>('button[aria-label="Close"]')?.click();
+    await flush();
+    root.unmount();
+  });
+  dom.close();
+}
+
+// Browse commits require both their request sequence and committed setup
+// authority. Old Host success/error/finally cannot replace or unlock the new
+// Host's pending browser before its own response arrives.
+{
+  const dom = installDOM();
+  const browseHostA: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-browse-a",
+    hostLabel: "Browse Host A",
+    canReconnect: false,
+  };
+  const browseHostB: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-browse-b",
+    hostLabel: "Browse Host B",
+    canReconnect: false,
+  };
+  const browseHostC: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-browse-c",
+    hostLabel: "Browse Host C",
+    canReconnect: false,
+  };
+  const directoryA: RemoteDirectoryView = { ref: "browse-a", name: "a", displayPath: "/srv/host-a" };
+  const directoryB: RemoteDirectoryView = { ref: "browse-b", name: "b", displayPath: "/srv/host-b" };
+  const directoryC: RemoteDirectoryView = { ref: "browse-c", name: "c", displayPath: "/srv/host-c" };
+  const pendingBrowses: Array<{
+    resolve: (page: RemoteWorkspacePageView) => void;
+    reject: (cause: Error) => void;
+  }> = [];
+
+  window.go = {
+    main: {
+      App: {
+        BrowseRemoteWorkspace: async () => new Promise<RemoteWorkspacePageView>((resolve, reject) => {
+          pendingBrowses.push({ resolve, reject });
+        }),
+      } as Partial<AppBindings> as AppBindings,
+    },
+  };
+
+  const setup = (target: RemoteTargetStatusView, requestSignal: number) => (
+    React.createElement(LocaleProvider, null, React.createElement(RemoteWorkspaceSetup, { target, requestSignal }))
+  );
+  const { root, rootElement } = render(React.createElement(RemoteWorkspaceSetup, { target: browseHostA, requestSignal: 1 }));
+  await waitFor("Host A browse request", () => pendingBrowses.length === 1);
+
+  await act(async () => {
+    root.render(setup(browseHostB, 2));
+    await flush();
+  });
+  await waitFor("Host B browse request", () => pendingBrowses.length === 2 && rootElement.textContent?.includes("Browse Host B") === true);
+  ok(rootElement.querySelector(".remote-workspace-loading") !== null, "Host B browser remains loading while its current request is pending");
+
+  await act(async () => {
+    pendingBrowses[0].resolve({ directory: directoryA, entries: [], hasMore: false });
+    await flush();
+  });
+  ok(!rootElement.textContent?.includes(directoryA.displayPath), "stale Host A browse success cannot paint its directory into Host B");
+  ok(rootElement.querySelector(".remote-workspace-loading") !== null, "stale Host A browse finally cannot clear Host B's loading state");
+
+  await act(async () => {
+    pendingBrowses[1].resolve({ directory: directoryB, entries: [], hasMore: false });
+    await flush();
+  });
+  await waitFor("Host B directory", () => rootElement.querySelector<HTMLInputElement>('input[name="remote-workspace-path"]')?.value === directoryB.displayPath);
+
+  await act(async () => {
+    root.render(setup(browseHostB, 3));
+    await flush();
+  });
+  await waitFor("next Host B browse request", () => pendingBrowses.length === 3);
+  await act(async () => {
+    root.render(setup(browseHostC, 4));
+    await flush();
+  });
+  await waitFor("Host C browse request", () => pendingBrowses.length === 4 && rootElement.textContent?.includes("Browse Host C") === true);
+  await act(async () => {
+    pendingBrowses[2].reject(new Error("stale Host B browse error"));
+    await flush();
+  });
+  ok(!rootElement.textContent?.includes("stale Host B browse error"), "stale Host B browse error cannot paint Host C");
+  ok(rootElement.querySelector(".remote-workspace-loading") !== null, "stale Host B browse error/finally cannot unlock Host C loading");
+
+  await act(async () => {
+    pendingBrowses[3].resolve({ directory: directoryC, entries: [], hasMore: false });
+    await flush();
+  });
+  await waitFor("Host C directory", () => rootElement.querySelector<HTMLInputElement>('input[name="remote-workspace-path"]')?.value === directoryC.displayPath);
+
+  await act(async () => {
+    root.unmount();
+  });
   dom.close();
 }
 

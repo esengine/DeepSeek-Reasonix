@@ -2,7 +2,7 @@
 // It shows a tree of projects (each with expandable topics) plus a Global
 // section. Clicking a topic opens its tab; "+" next to a project creates a
 // new topic.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch } from "lucide-react";
@@ -15,6 +15,7 @@ import { getLocale, useT, type DictKey, type Translator } from "../lib/i18n";
 import { PROJECT_COLOR_OPTIONS, projectColorValue } from "../lib/projectColors";
 import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcuts";
 import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
+import { commitTargetScopedValue } from "../lib/targetAuthority";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
@@ -22,6 +23,7 @@ import { WorktreeBadge } from "./WorktreeBadge";
 type ProjectTreeVariant = "classic" | "workbench" | "creation";
 
 interface ProjectTreeProps {
+  targetIdentityGen: number;
   activeScope?: string;
   activeWorkspaceRoot?: string;
   activeTopicId?: string;
@@ -584,6 +586,7 @@ function projectColorLabel(t: Translator, color?: string): string {
 }
 
 export function ProjectTree({
+  targetIdentityGen,
   activeScope,
   activeWorkspaceRoot,
   activeTopicId,
@@ -611,7 +614,30 @@ export function ProjectTree({
   const { showToast } = useToast();
   const compactTopics = variant === "workbench";
   const creationTopics = variant === "creation";
-  const [tree, setTree] = useState<ProjectNode[]>([]);
+  const targetIdentityGenRef = useRef(targetIdentityGen);
+  const treeRequestSeqRef = useRef(0);
+  const treeCommittedRequestSeqRef = useRef(0);
+  useLayoutEffect(() => {
+    if (targetIdentityGenRef.current === targetIdentityGen) return;
+    targetIdentityGenRef.current = targetIdentityGen;
+    // Invalidate every request issued by the previous committed target before
+    // passive effects or user interaction can run for the next target.
+    treeRequestSeqRef.current += 1;
+  }, [targetIdentityGen]);
+  const [treeSnapshot, setTreeSnapshot] = useState<{ targetIdentityGen: number; nodes: ProjectNode[] }>({
+    targetIdentityGen,
+    nodes: [],
+  });
+  const tree = treeSnapshot.targetIdentityGen === targetIdentityGen ? treeSnapshot.nodes : [];
+  const setTree = useCallback((update: ProjectNode[] | ((current: ProjectNode[]) => ProjectNode[])): void => {
+    const currentTargetIdentityGen = targetIdentityGenRef.current;
+    setTreeSnapshot((current) => {
+      const currentNodes = current.targetIdentityGen === currentTargetIdentityGen ? current.nodes : [];
+      const nodes = typeof update === "function" ? update(currentNodes) : update;
+      if (current.targetIdentityGen === currentTargetIdentityGen && current.nodes === nodes) return current;
+      return { targetIdentityGen: currentTargetIdentityGen, nodes };
+    });
+  }, []);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [manuallyCollapsed, setManuallyCollapsed] = useState<Set<string>>(new Set());
   const [creatingProject, setCreatingProject] = useState<string | null>(null);
@@ -664,6 +690,14 @@ export function ProjectTree({
     setHoverCard((current) => (current === null ? current : null));
   }, []);
 
+  useEffect(() => {
+    if (clickTimerRef.current !== null) {
+      clearTimeout(clickTimerRef.current.timer);
+      clickTimerRef.current = null;
+    }
+    cancelHoverCard();
+  }, [cancelHoverCard, targetIdentityGen]);
+
   const toggleShowAllTopics = useCallback((key: string) => {
     setShowAllTopics((prev) => {
       const next = new Set(prev);
@@ -691,22 +725,36 @@ export function ProjectTree({
   }, []);
 
   const refresh = useCallback(async () => {
+    const request = {
+      targetIdentityGen,
+      requestSeq: treeRequestSeqRef.current + 1,
+    };
+    treeRequestSeqRef.current = request.requestSeq;
     try {
       const nodes = await app.ListProjectTree();
       const list = asArray(nodes);
-      setTree(list);
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        const collapsed = manuallyCollapsedRef.current;
-        for (const key of defaultExpandedProjectTreeKeys(list, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) {
-          if (!collapsed.has(key)) next.add(key);
-        }
-        return next;
-      });
+      commitTargetScopedValue(
+        request,
+        targetIdentityGenRef.current,
+        treeCommittedRequestSeqRef.current,
+        list,
+        (accepted) => {
+          treeCommittedRequestSeqRef.current = request.requestSeq;
+          setTreeSnapshot({ targetIdentityGen: request.targetIdentityGen, nodes: accepted });
+          setExpanded((prev) => {
+            const next = new Set(prev);
+            const collapsed = manuallyCollapsedRef.current;
+            for (const key of defaultExpandedProjectTreeKeys(accepted, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath)) {
+              if (!collapsed.has(key)) next.add(key);
+            }
+            return next;
+          });
+        },
+      );
     } catch {
       /* bridge unavailable */
     }
-  }, [activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath]);
+  }, [activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath, targetIdentityGen]);
 
   useEffect(() => {
     manuallyCollapsedRef.current = manuallyCollapsed;
@@ -1190,8 +1238,10 @@ export function ProjectTree({
 
   const scheduleHoverCard = useCallback((element: HTMLElement, rowKey: string, node: ProjectNode) => {
     if (hoverCardTimerRef.current !== null) window.clearTimeout(hoverCardTimerRef.current);
+    const scheduledTargetIdentityGen = targetIdentityGenRef.current;
     hoverCardTimerRef.current = window.setTimeout(() => {
       hoverCardTimerRef.current = null;
+      if (scheduledTargetIdentityGen !== targetIdentityGenRef.current) return;
       if (!element.isConnected) return;
       if (menuTopic || menuProject || editingTopic || editingProject || dragProjectRoot) return;
       const rect = element.getBoundingClientRect();
@@ -1422,8 +1472,10 @@ export function ProjectTree({
                 clickTimerRef.current = null;
                 if (projectTreeShouldSuppressOpenForRename(pending, nextClick)) return;
               }
+              const scheduledTargetIdentityGen = targetIdentityGenRef.current;
               const timer = setTimeout(() => {
                 if (clickTimerRef.current?.timer === timer) clickTimerRef.current = null;
+                if (scheduledTargetIdentityGen !== targetIdentityGenRef.current) return;
                 markNodeRead(node);
                 onOpenTopic(openRequest.scope, openRequest.workspaceRoot, openRequest.topicId, openRequest.sessionPath);
               }, 200);

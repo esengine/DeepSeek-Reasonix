@@ -3527,6 +3527,8 @@ export default function App() {
 
           <section className="sidebar__section sidebar__section--projects">
             <ProjectTree
+              key={targetIdentityGen}
+              targetIdentityGen={targetIdentityGen}
               activeScope={activeTab?.scope}
               activeWorkspaceRoot={activeTab?.workspaceRoot}
               activeTopicId={activeTab?.topicId}
