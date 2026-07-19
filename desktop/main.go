@@ -132,6 +132,10 @@ func main() {
 		zoomFactor = zf
 	}
 
+	// On Linux, cover JavaScriptCore's lazy signal-handler installation window.
+	// Other platforms provide a no-op implementation.
+	scheduleWebKitSignalHandlerRepair()
+
 	err := wails.Run(&options.App{
 		Title:     "Reasonix",
 		Width:     width,

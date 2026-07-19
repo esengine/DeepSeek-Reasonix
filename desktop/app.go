@@ -828,6 +828,10 @@ func (a *App) shutdown(context.Context) {
 // position and size, then calls WindowShow so the user never sees the default
 // size/position flash.
 func (a *App) domReady(_ context.Context) {
+	// JSC has installed its lazy signal handlers by this point. Restore the
+	// SA_ONSTACK flags required by Go; this is a no-op outside Linux.
+	repairWebKitSignalHandlers()
+
 	state, ok := loadWindowState()
 	if ok {
 		// Validate saved position against current screens. Wails v2 doesn't
