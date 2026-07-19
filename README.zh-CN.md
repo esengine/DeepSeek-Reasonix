@@ -116,6 +116,12 @@ provider key 的运行时 fallback，但仍会作为当前 workspace 范围内�
 
 ## 文档
 
+- **[架构与设计理念](./docs/ARCHITECTURE.zh-CN.md)** —— 按当前代码还原内核分层、
+  回合与工具执行链、缓存、安全、会话持久化、桌面身份模型和扩展边界。
+- **[维护接手指南](./docs/MAINTAINER_GUIDE.zh-CN.md)** —— 面向新维护者的阅读顺序、
+  纵向练习、构建测试矩阵、故障定位与 PR 检查清单。
+- **[扩展、服务与发布工程地图](./docs/ECOSYSTEM.zh-CN.md)** —— 区分本地内核、
+  Skills/MCP/plugin packages、官网、Workers、npm 与三条发布线。
 - **[CLI 命令参考](./docs/CLI.zh-CN.md)** —— 交互与一次性命令、结构化输出、
   会话恢复、权限模式和可搜索选择器。
 - **[指南](./docs/GUIDE.zh-CN.md)** —— 配置、权限与沙盒、插件(MCP)、斜杠命令、

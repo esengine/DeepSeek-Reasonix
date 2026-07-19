@@ -67,19 +67,12 @@ parallel_tasks(tasks=[
 
 每个子任务在独立 goroutine 中运行，工具调用会嵌套显示为独立卡片，结果聚合返回。
 
-### 任务依赖
+### 有依赖的任务
 
-如果子任务之间有依赖关系，可以用 `depends_on` 指定：
-
-```
-parallel_tasks(tasks=[
-  {prompt: "写一个加法函数到 add.py", description: "add"},
-  {prompt: "写一个乘法函数到 mul.py", description: "mul"},
-  {prompt: "在 main.py 中调用 add 和 mul", description: "main", depends_on: [0, 1]},
-])
-```
-
-独立任务（add、mul）先并发执行；main 等前两个完成后再启动。
+`parallel_tasks` 当前只接受 `prompt`、`description`、`tools`、`max_steps`、
+`model` 和 `effort`；同一批任务会一起并发启动，**不支持** `depends_on`。
+有先后依赖时，应拆成多个调用：先并发完成独立任务，父 agent 检查结果后，再调用 `task` 或
+下一批 `parallel_tasks` 完成依赖阶段。不要让并发子任务同时修改彼此依赖的文件。
 
 ## Prometheus 规划面试
 
@@ -134,7 +127,8 @@ parallel_tasks Execute()
 
 ## 相关代码
 
-- `internal/control/controller.go` — Goal 状态机、advanceGoalAfterTurn
+- `internal/control/goal.go` — Goal 状态与 readiness 规则
+- `internal/control/turn_orchestrator.go` — 回合结束后的 Goal 续跑与合成回合
 - `internal/control/input.go` — `/goal --strict` 命令解析
 - `internal/agent/parallel_tasks.go` — 并行调度工具
 - `internal/boot/boot.go` — 工具注册

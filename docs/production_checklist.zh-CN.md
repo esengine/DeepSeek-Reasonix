@@ -1,5 +1,9 @@
 # Reasonix v5 稳定版生产检查清单
 
+> **适用范围：**这是 PR #5217 对应的 **Memory v5 / execution compiler 子系统**冻结
+> 清单，不是整个 Reasonix `v1.x` 产品的发布清单。CLI、npm、桌面端、站点与服务发布请以
+> [`RELEASING.md`](RELEASING.md) 和当前 GitHub workflows 为准。
+
 Reasonix v5.9.9 已冻结为稳定发布候选版本。本清单是 PR #5217 以及后续 v5-stable 维护工作的发布门禁。
 
 ## 发布门禁

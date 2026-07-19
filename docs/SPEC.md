@@ -3,21 +3,29 @@
 > Reasonix is a coding agent: a thin harness driving multiple models, with **all
 > capabilities supplied by configuration and plugins**. This document is the
 > contract — code follows it. Change the contract first, then the code.
+> For an as-built tour of the current implementation, see
+> [`ARCHITECTURE.zh-CN.md`](ARCHITECTURE.zh-CN.md).
 
 ## 1. Design Principles
 
 1. **Config- and plugin-driven core.** The core knows only interfaces. Concrete
    models and tools are resolved by name from registries, declared in config, or
    injected by plugins. No hardcoded `switch model`.
-2. **Single static binary.** `CGO_ENABLED=0`; cross-compile with one command;
-   CLI works out of the box.
-3. **Lean dependencies.** Standard library by default. A third-party dependency
-   must be pure-Go, lightweight, and must not compromise the single-binary /
-   cross-platform / distribution story. TOML parsing is the one accepted dependency.
+2. **Static, cross-platform CLI kernel.** The root CLI builds with
+   `CGO_ENABLED=0` and cross-compiles with one command. The native Wails desktop
+   shell is intentionally isolated in a nested module and builds per OS.
+3. **Disciplined dependencies.** Dependencies must justify their runtime,
+   security, binary-size, and cross-platform cost. Root-kernel dependencies must
+   preserve the static CLI distribution story; Wails/CGO and web dependencies
+   stay in their own modules or surfaces.
 4. **Two extension tiers.** Compile-time built-ins (self-register via `init()`),
-   and runtime external plugins (stdio JSON-RPC subprocesses, MCP-compatible).
+   and runtime MCP-compatible external services over stdio or HTTP transports.
 5. **Interface-first & registry-based.** `Provider` and `Tool` are interfaces.
-6. **Evolve, don't over-engineer.**
+6. **One controller, many frontends.** CLI/TUI, HTTP/SSE, ACP/bot, and desktop
+   drive a transport-agnostic `control.Controller` and consume typed events.
+7. **Cache-first model contract.** Keep the system prompt, standing memory,
+   tool order, and tool schemas stable; transient state belongs in the turn tail.
+8. **Evolve, don't over-engineer.**
 
 Language: **English is the primary language for all code** — comments,
 user-facing strings, tool descriptions, system prompts, and this spec. The
@@ -27,29 +35,33 @@ README is bilingual (`README.md` English + `README.zh-CN.md`).
 
 ```
 reasonix/
-├── go.mod / go.sum          # module reasonix; require BurntSushi/toml
-├── Makefile                 # build / cross / vet / fmt / test
-├── README.md / README.zh-CN.md
-├── reasonix.example.toml         # sample config
-├── docs/SPEC.md             # this file
-├── cmd/reasonix/main.go          # entry; blank-imports built-in providers/tools
-├── cmd/reasonix-plugin-example/  # reference MCP stdio plugin (a runnable example)
-└── internal/
-    ├── cli/                 # subcommand routing, flags, assembly, exit codes
-    ├── config/              # TOML loading (flag > project > user > defaults)
-    ├── provider/            # Provider interface + types + kind→factory registry
-    │   └── openai/          # OpenAI-compatible impl; init() registers "openai"
-    ├── tool/                # Tool interface + Registry
-    │   └── builtin/         # read_file/write_file/edit_file/move_file/bash/ls/glob/grep
-    ├── permission/          # per-call Policy: allow/ask/deny rules → Decision
-    ├── command/             # custom slash commands loaded from .reasonix/commands/*.md
-    ├── plugin/              # stdio JSON-RPC (MCP) client; adapts remote tools
-    └── agent/               # Session + harness loop
+├── go.mod / go.sum              # static CLI/kernel module
+├── Makefile                     # root build / cross / vet / test + desktop test lanes
+├── cmd/reasonix/                # entry; blank-imports built-in providers/tools
+├── cmd/reasonix-plugin-example/ # reference MCP stdio plugin
+├── internal/
+│   ├── cli/                     # CLI/TUI and subcommand routing
+│   ├── boot/                    # shared composition root
+│   ├── control/                 # transport-neutral frontend ports and turn orchestration
+│   ├── agent/                   # Session, model/tool loop, compaction, sub-agents
+│   ├── provider/                # Provider interface, wire types, kind registry
+│   ├── tool/                    # Tool interface and per-run Registry
+│   ├── event/ + eventwire/      # typed runtime events and shared JSON contract
+│   ├── config/                  # user/project configuration and migration
+│   ├── plugin/ + skill/         # MCP runtime extensions and Markdown skills
+│   ├── permission/ + sandbox/   # authorization and OS confinement
+│   └── store/ + checkpoint/     # session artifact layout and rewind state
+├── desktop/                     # nested Wails/CGO Go module + React frontend
+├── site/                        # Astro website
+├── workers/                     # independent Cloudflare services
+└── npm/                         # npm distribution wrapper
 ```
 
-Dependency direction (acyclic): `cli → {agent, plugin, config} → {tool, provider}`.
-Built-in subpackages (`provider/openai`, `tool/builtin`) import their parent to
-self-register; parents never import children.
+Conceptual dependency direction is `frontends → boot → control/agent/domain
+services → leaf contracts`. Built-in subpackages (`provider/openai`,
+`provider/anthropic`, `tool/builtin`) import their parent to self-register;
+contract packages do not import concrete children. The Go compiler and package
+tests remain the authority for the exact acyclic import graph.
 
 ## 3. Core Abstractions
 
@@ -105,6 +117,7 @@ type Tool interface {
     Description() string
     Schema() json.RawMessage // JSON Schema for parameters
     Execute(ctx context.Context, args json.RawMessage) (string, error)
+    ReadOnly() bool // true only when there are no host-observable side effects
 }
 ```
 
@@ -115,6 +128,8 @@ type Tool interface {
 - Tool schemas are canonicalized on registry insertion. The built-in contract is
   documented in [`TOOL_CONTRACT.md`](TOOL_CONTRACT.md) and backed by tests that
   compare the documented surface against the same canonical schema path.
+- `ReadOnly` affects permission defaults and batch scheduling, not only UI
+  display. Only contiguous, known read-only calls may execute concurrently.
 - `Execute` parses raw JSON args itself. Errors are returned, not fatal — the
   agent feeds them back so the model can self-correct.
 
@@ -172,7 +187,10 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
 - `Run(ctx, input)` loop: build `Request` (with tool schemas) → `provider.Stream`
   → print text deltas live, collect complete tool calls → if none, done; else
   execute each tool (built-in or plugin) and append results → repeat, bounded by
-  `maxSteps`. `ctx` threads throughout (Ctrl-C aborts in-flight requests).
+  `maxSteps` when it is positive. A non-positive value leaves the loop without
+  that optional hard round cap; readiness, cancellation, context maintenance,
+  and other guards still apply. `ctx` threads throughout (Ctrl-C aborts
+  in-flight requests).
 - A `Runner` is anything with `Run(ctx, input) error`; both `Agent` and
   `Coordinator` satisfy it, so the CLI is agnostic to single- vs two-model mode.
 
