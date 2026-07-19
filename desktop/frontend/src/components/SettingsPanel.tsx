@@ -5627,8 +5627,9 @@ function ProviderEditor({
   const [keyDraft, setKeyDraft] = useState("");
   const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
   // Empty when unset so the placeholder (and its "0 = disabled" hint) reads instead
-  // of a bare "0"; saved back as 0.
-  const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  // of a bare "0"; saved back as 0. New providers start with 128000 (matching the
+  // TUI's hardcoded default for custom providers).
+  const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : (initial ? "" : "128000"));
   const [modelContextWindows, setModelContextWindows] = useState<Record<string, string>>(
     () => providerModelContextWindowDrafts(initial?.modelOverrides),
   );
@@ -5950,17 +5951,6 @@ function ProviderEditor({
           onChange={(e) => setBalanceUrl(e.target.value)}
         />
         <div className="mem-hint">{t("settings.balanceUrlHint")}</div>
-        <label className="set-label">{t("settings.providerContextWindow")}</label>
-        <input
-          className="mem-input"
-          inputMode="numeric"
-          min={0}
-          placeholder={t("settings.contextWindowPlaceholder")}
-          type="number"
-          value={ctx}
-          onChange={(e) => setCtx(e.target.value)}
-        />
-        <div className="mem-hint">{t("settings.contextWindowHint")}</div>
       </div>
     </details>
   );
@@ -6060,6 +6050,17 @@ function ProviderEditor({
       <label className="set-label">{t("settings.manualModels")}</label>
       <input className="mem-input" placeholder={t("settings.providerModels")} value={models} onChange={(e) => updateManualModels(e.target.value)} />
       <div className="mem-hint">{t("settings.manualModelsHint")}</div>
+      <label className="set-label">{t("settings.providerContextWindow")}</label>
+      <input
+        className="mem-input"
+        inputMode="numeric"
+        min={0}
+        placeholder={t("settings.contextWindowPlaceholder")}
+        type="number"
+        value={ctx}
+        onChange={(e) => setCtx(e.target.value)}
+      />
+      <div className="mem-hint">{t("settings.contextWindowHint")}</div>
       <ProviderEditorModelPicker
         candidates={modelCandidateNames}
         selectedModels={modelNames}
