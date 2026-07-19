@@ -244,6 +244,16 @@ func (c *client) WarnOnMissingToolCallReasoning() bool {
 	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model)
 }
 
+// AnchorEditStrictness returns Aggressive for DeepSeek models (known to
+// have anchor-accuracy issues with edit_file/multi_edit in long-context
+// sessions) and Default for others.
+func (c *client) AnchorEditStrictness() provider.AnchorEditLevel {
+	if c == nil || !c.deepseek {
+		return provider.AnchorEditDefault
+	}
+	return provider.AnchorEditAggressive
+}
+
 func expectsDeepSeekToolCallReasoning(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if !strings.Contains(model, "deepseek") || strings.Contains(model, "flash") {
