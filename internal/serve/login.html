@@ -82,7 +82,7 @@
     text-align: center;
   }
 </style>
-<script>(function(){var t='__THEME__';if(t==='auto'){t=window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark'}document.documentElement.setAttribute('data-theme',t)})();</script>
+<script>(function(){var k='theme-pref',c=function(t){document.documentElement.setAttribute('data-theme',t)};var p=localStorage.getItem(k);if(p){c(p)}else{var t='__THEME__';if(t==='auto'){t=window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark'}c(t)}})();</script>
 </head>
 <body>
 <div class="login-box">
