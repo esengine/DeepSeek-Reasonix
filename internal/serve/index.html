@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="__THEME__">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -29,6 +29,23 @@
   --heading:'Space Grotesk',var(--sans);
   --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:oklch(97% .005 280);--bg-2:oklch(93% .006 275);
+  --panel:oklch(90% .007 275);--panel-2:oklch(87% .008 275);
+  --card:oklch(95% .007 275);--card-hover:oklch(88% .008 275);
+  --border:oklch(85% .008 275);--border-strong:oklch(75% .01 275);
+  --fg:oklch(20% .004 280);--fg-2:oklch(40% .005 280);
+  --muted:oklch(55% .006 280);--muted-2:oklch(65% .006 280);
+  --accent:oklch(55% .18 38);--accent-soft:oklch(55% .18 38/.12);--accent-strong:oklch(48% .2 36);
+  --success:oklch(50% .16 145);--success-soft:oklch(50% .16 145/.12);
+  --warning:oklch(60% .16 85);--warning-soft:oklch(60% .16 85/.14);
+  --danger:oklch(52% .2 25);--danger-soft:oklch(52% .2 25/.14);
+  --violet:oklch(55% .16 295);--violet-soft:oklch(55% .16 295/.14);
+  --shadow-sm:0 1px 0 oklch(0% 0 0/.08);
+  --shadow-md:0 8px 24px -8px oklch(0% 0 0/.12);
+  --shadow-lg:0 24px 60px -16px oklch(0% 0 0/.18);
+  color-scheme:light;
 }
 html,body{height:100%;overflow:hidden}
 body{font:14px/1.6 var(--sans);color:var(--fg);background:var(--bg);-webkit-font-smoothing:antialiased}
@@ -588,6 +605,8 @@ input,textarea{font:inherit;color:inherit}
   </div>
 </div>
 <script>
+// ── theme ──
+(function(){var t='__THEME__';if(t==='auto'){t=window.matchMedia('(prefers-color-scheme:light)').matches?'light':'dark'}document.documentElement.setAttribute('data-theme',t)})();
 // ── i18n ──
 const __LANG_PREF = '__LANG__';
 const __LANG = (__LANG_PREF === 'zh' || __LANG_PREF === 'en') ? __LANG_PREF : ((navigator.language || '').startsWith('zh') ? 'zh' : 'en');
