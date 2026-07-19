@@ -531,19 +531,19 @@ export function ThemeGallery({
       };
       const saved = await app.SaveThemePack(input);
       showToast(t("settings.themeLibrary.saved", { name: saved.name }), "info");
-      setEditor(null);
-      await reload();
-      setTab("user");
-      setSelected(selectionFromPack(saved));
       if (activate) {
-        // Activate the theme — this applies the new base style and pack.
-        // Do NOT call cancelThemePreview here: it would restore the original
-        // theme from the snapshot, overwriting what activateThemePack just applied.
+        // Commit activation before unmounting the editor. ThemeEditorInline's
+        // cleanup cancels any remaining preview, so closing it earlier would
+        // briefly restore the old snapshot while reload() is in flight.
         const view = await activateThemePack(saved.id);
         onExperienceChange(view);
       } else {
         cancelThemePreview();
       }
+      setEditor(null);
+      await reload();
+      setTab("user");
+      setSelected(selectionFromPack(saved));
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error");
     } finally {

@@ -19,6 +19,7 @@ import {
 } from "../lib/themePack";
 import { applyTheme, getThemeStyle } from "../lib/theme";
 import { BASE_STYLE_PREVIEW_PALETTES, themePreviewPalette } from "../lib/themePreviewPalette";
+import { themePreviewPaneAlpha } from "../components/ThemePreviewSurface";
 import {
   activateThemePack,
   applyExperienceToDOM,
@@ -159,6 +160,16 @@ const draft = draftPackView({
   backgroundUrl: "/__reasonix_theme_asset/preview-pack/deadbeef/background.png",
 });
 
+const tokenOnlyPreview = draftPackView({
+  id: "token-only-preview",
+  name: "Token Only Preview",
+  baseStyle: "graphite",
+  tokens: { dark: { accent: "#ff0000" } },
+  recipes: { density: "comfortable", corners: "soft" },
+});
+ok(themePreviewPaneAlpha(tokenOnlyPreview, "home") === 1, "token-only preview keeps opaque panes");
+ok(themePreviewPaneAlpha(draft, "home") === 0.5, "background preview applies configured pane opacity");
+
 applyThemePack(draft);
 ok(attrs.get("data-theme-pack") === "preview-pack", "sets data-theme-pack");
 ok(attrs.get("data-theme-has-bg") === "true", "marks background present");
@@ -218,6 +229,16 @@ ok(isPreviewActive(), "activation failure keeps preview reversible");
 cancelGlobalPreview();
 ok(!attrs.has("data-theme-pack") && getThemeStyle() === "graphite", "cancel restores appearance after activation failure");
 delete testWindow.go;
+
+// Save-and-apply must commit the preview before editor unmount cleanup can
+// restore the old snapshot while the gallery reload is in flight.
+const saveEditorStart = gallerySource.indexOf("const saveEditor = async");
+const saveEditorEnd = gallerySource.indexOf("if (immersive && selectedPack)", saveEditorStart);
+const saveEditorSource = gallerySource.slice(saveEditorStart, saveEditorEnd);
+ok(
+  saveEditorSource.indexOf("await activateThemePack(saved.id)") < saveEditorSource.indexOf("setEditor(null)"),
+  "save-and-apply activates before editor unmount",
+);
 
 // Restore-default must restore config baseStyle, not leave pack baseStyle.
 setBaseAppearance("dark", "graphite");
