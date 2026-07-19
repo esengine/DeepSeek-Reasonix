@@ -667,6 +667,31 @@ func (a *App) publishRemoteWorkbenchChanged() {
 	a.emitProjectTreeChanged()
 }
 
+// publishRemoteWorkbenchReattachReady commits the frontend projection for an
+// atomic reattach only while the RuntimeAPI generation that produced it is
+// still authoritative. The ready batch shares TargetManager's dispatch lock
+// with StateSink so an older Host cannot publish rebuilt/ready after a newer
+// target state has already been queued.
+func (a *App) publishRemoteWorkbenchReattachReady(expected TargetManagerSnapshot) bool {
+	if a == nil || a.remote.manager == nil {
+		return false
+	}
+	manager := a.remote.manager
+	manager.stateDispatchMu.Lock()
+	current := manager.Snapshot()
+	if !remoteWorkbenchTargetMatches(current, expected) {
+		manager.stateDispatchMu.Unlock()
+		return false
+	}
+	a.remote.workbenchMu.RLock()
+	status := remoteWorkbenchStatusLocked(a.remote.workbench, current)
+	a.remote.workbenchMu.RUnlock()
+	a.enqueueRemoteWorkbenchReady(status)
+	manager.stateDispatchMu.Unlock()
+	a.emitProjectTreeChanged()
+	return true
+}
+
 // applyRemoteTargetState is called from TargetManager's ordered state sink. It
 // only updates memory and schedules I/O; it never calls back into the manager on
 // the sink stack.
@@ -772,7 +797,7 @@ func (a *App) reattachRemoteWorkbench(expected TargetManagerSnapshot) {
 			break
 		}
 	}
-	a.publishRemoteWorkbenchChanged()
+	a.publishRemoteWorkbenchReattachReady(expected)
 }
 
 func (a *App) remoteConnectedRuntime() (runtimeapi.RuntimeAPI, TargetDescriptor, error) {

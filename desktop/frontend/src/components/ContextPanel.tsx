@@ -20,6 +20,9 @@ interface ContextPanelProps {
   turnCost?: number;
   balance?: BalanceInfo;
   sessionGen?: number;
+  // Changes when the Desktop switches Local/Remote authority even if the
+  // projected tab and session generation collide.
+  targetIdentityGen?: number;
   refreshKey?: number;
   // Monotonic counter bumped by EVERY usage event (executor and subagent).
   // The executor-gated `usage` prop freezes during sub-agent runs, which used
@@ -319,6 +322,7 @@ export function ContextPanel({
   turnCost,
   balance,
   sessionGen,
+  targetIdentityGen,
   refreshKey,
   usageSeq,
 }: ContextPanelProps) {
@@ -340,7 +344,7 @@ export function ContextPanel({
     } catch {
       /* bridge unavailable */
     }
-  }, [tabId]);
+  }, [tabId, targetIdentityGen]);
 
   useEffect(() => {
     refreshSeq.current += 1;

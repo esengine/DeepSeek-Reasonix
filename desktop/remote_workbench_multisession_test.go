@@ -1354,6 +1354,220 @@ func TestRemoteWorkbenchReconnectsEveryOpenSessionIndependently(t *testing.T) {
 	}
 }
 
+func TestRemoteWorkbenchReattachReadyPrecedesNewerTargetState(t *testing.T) {
+	targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_reattach_ready_a", Label: "Reattach ready A"}
+	targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_reattach_ready_b", Label: "Reattach ready B"}
+	runtimeA, refs := remoteWorkbenchV1Fixture()
+	runtimeB := newRemoteWorkbenchV1TestRuntime()
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		if sameTarget(target, targetB) {
+			return &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}, nil
+		}
+		return nil, errors.New("unexpected target switch")
+	})
+	app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+	for _, ref := range refs {
+		if _, err := app.attachRemoteWorkbenchSession(ref, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expected := manager.Snapshot()
+	app.remote.workbenchMu.Lock()
+	for _, session := range app.remote.workbench.Sessions {
+		session.AttachedGeneration = 0
+		session.ReattachGeneration = expected.Generation
+	}
+	activeTabID := app.remote.workbench.ActiveTabID
+	app.remote.workbenchMu.Unlock()
+
+	type observedEvent struct {
+		name     string
+		hostID   string
+		attached bool
+		tabID    string
+	}
+	var eventsMu sync.Mutex
+	var events []observedEvent
+	baseline := make(chan struct{})
+	barrier := make(chan struct{})
+	setRemoteWorkbenchTestEmitter(app, func(_ context.Context, name string, payload ...interface{}) {
+		event := observedEvent{name: name}
+		if len(payload) != 0 {
+			switch value := payload[0].(type) {
+			case RemoteWorkbenchStatusView:
+				event.hostID = value.HostID
+				event.attached = value.SessionAttached
+				event.tabID = value.TabID
+			case string:
+				event.tabID = value
+			}
+		}
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+		if name == "test:reattach-ready-baseline" {
+			close(baseline)
+		}
+		if name == "test:reattach-ready-barrier" {
+			close(barrier)
+		}
+	})
+	app.emitRuntimeEvent("test:reattach-ready-baseline")
+	waitSignal(t, baseline, "initial reattach-ready event queue barrier")
+	eventsMu.Lock()
+	events = nil
+	eventsMu.Unlock()
+
+	var switchMu sync.Mutex
+	switched := false
+	var switchErr error
+	app.projectTreeChangedHook = func() {
+		switchMu.Lock()
+		if switched {
+			switchMu.Unlock()
+			return
+		}
+		switched = true
+		switchMu.Unlock()
+		switchErr = manager.Switch(context.Background(), targetB, SwitchTargetOptions{})
+	}
+
+	app.reattachRemoteWorkbench(expected)
+	if switchErr != nil {
+		t.Fatal(switchErr)
+	}
+	app.emitRuntimeEvent("test:reattach-ready-barrier")
+	waitSignal(t, barrier, "reattach ready event queue barrier")
+
+	eventsMu.Lock()
+	got := append([]observedEvent(nil), events...)
+	eventsMu.Unlock()
+	index := func(match func(observedEvent) bool) int {
+		for i, event := range got {
+			if match(event) {
+				return i
+			}
+		}
+		return -1
+	}
+	aState := index(func(event observedEvent) bool {
+		return event.name == remoteWorkbenchStateEvent && event.hostID == targetA.ID && event.attached && event.tabID == activeTabID
+	})
+	aRebuilt := index(func(event observedEvent) bool { return event.name == "runtime:rebuilt" && event.tabID == activeTabID })
+	aReady := index(func(event observedEvent) bool { return event.name == "agent:ready" && event.tabID == activeTabID })
+	bState := index(func(event observedEvent) bool {
+		return event.name == remoteWorkbenchStateEvent && event.hostID == targetB.ID && !event.attached
+	})
+	if aState < 0 || aRebuilt < 0 || aReady < 0 || bState < 0 {
+		t.Fatalf("missing ordered reattach events: %#v", got)
+	}
+	if !(aState < aRebuilt && aRebuilt < aReady && aReady < bState) {
+		t.Fatalf("reattach ready crossed newer StateSink: state=%d rebuilt=%d ready=%d newState=%d events=%#v", aState, aRebuilt, aReady, bState, got)
+	}
+}
+
+func TestRemoteWorkbenchReattachDoesNotPublishReadyAfterNewerTargetWins(t *testing.T) {
+	targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_reattach_lost_a", Label: "Reattach lost A"}
+	targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_reattach_won_b", Label: "Reattach won B"}
+	fixture, refs := remoteWorkbenchV1Fixture()
+	runtimeA := newRemoteSessionCreateGateTestRuntime()
+	runtimeA.remoteWorkbenchV1TestRuntime = fixture
+	runtimeB := newRemoteWorkbenchV1TestRuntime()
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		if sameTarget(target, targetB) {
+			return &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}, nil
+		}
+		return nil, errors.New("unexpected target switch")
+	})
+	app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+	for _, ref := range refs {
+		if _, err := app.attachRemoteWorkbenchSession(ref, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	expected := manager.Snapshot()
+	app.remote.workbenchMu.Lock()
+	for _, session := range app.remote.workbench.Sessions {
+		session.AttachedGeneration = 0
+		session.ReattachGeneration = expected.Generation
+	}
+	activeTabID := app.remote.workbench.ActiveTabID
+	app.remote.workbenchMu.Unlock()
+
+	type observedEvent struct {
+		name   string
+		hostID string
+		tabID  string
+	}
+	var eventsMu sync.Mutex
+	var events []observedEvent
+	baseline := make(chan struct{})
+	barrier := make(chan struct{})
+	setRemoteWorkbenchTestEmitter(app, func(_ context.Context, name string, payload ...interface{}) {
+		event := observedEvent{name: name}
+		if len(payload) != 0 {
+			switch value := payload[0].(type) {
+			case RemoteWorkbenchStatusView:
+				event.hostID = value.HostID
+				event.tabID = value.TabID
+			case string:
+				event.tabID = value
+			}
+		}
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+		if name == "test:reattach-lost-baseline" {
+			close(baseline)
+		}
+		if name == "test:reattach-lost-barrier" {
+			close(barrier)
+		}
+	})
+	// Initial attach ready events were queued before the recording emitter was
+	// installed. Drain them so this assertion covers only the superseded
+	// reattach attempt below.
+	app.emitRuntimeEvent("test:reattach-lost-baseline")
+	waitSignal(t, baseline, "initial attach event queue barrier")
+	eventsMu.Lock()
+	events = nil
+	eventsMu.Unlock()
+
+	runtimeA.blockAttach = true
+	done := make(chan struct{})
+	go func() {
+		app.reattachRemoteWorkbench(expected)
+		close(done)
+	}()
+	waitSignal(t, runtimeA.attachStarted, "blocked Host A reattach")
+	if err := manager.Switch(context.Background(), targetB, SwitchTargetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	runtimeA.releaseAttachment()
+	waitSignal(t, done, "superseded Host A reattach")
+	app.emitRuntimeEvent("test:reattach-lost-barrier")
+	waitSignal(t, barrier, "superseded reattach event queue barrier")
+
+	eventsMu.Lock()
+	got := append([]observedEvent(nil), events...)
+	eventsMu.Unlock()
+	bState := -1
+	for index, event := range got {
+		if event.name == remoteWorkbenchStateEvent && event.hostID == targetB.ID {
+			bState = index
+		}
+	}
+	if bState < 0 {
+		t.Fatalf("newer Host B state was not published: %#v", got)
+	}
+	for index := bState + 1; index < len(got); index++ {
+		event := got[index]
+		if event.tabID == activeTabID && (event.name == "runtime:rebuilt" || event.name == "agent:ready") {
+			t.Fatalf("superseded Host A published %s after Host B won: %#v", event.name, got)
+		}
+	}
+}
+
 func TestRemoteWorkbenchReconnectFailureIsScopedToOneSession(t *testing.T) {
 	target := TargetDescriptor{Kind: TargetRemote, ID: "host_reconnect_partial", Label: "Host reconnect partial"}
 	rt, refs := remoteWorkbenchV1Fixture()

@@ -97,6 +97,11 @@ import {
   type ToolApprovalMode,
 } from "./lib/types";
 import { workspaceCreationRoute } from "./lib/workspaceTargetRouting";
+import {
+  commitTargetScopedValue,
+  workspaceScopeKeyForAuthority,
+  type TargetScopedRequest,
+} from "./lib/targetAuthority";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
 import {
@@ -1002,6 +1007,7 @@ export default function App() {
   const {
     state,
     activeTabId,
+    targetIdentityGen,
     sendToTab,
     recoverDeliveryToTab,
     runShellForTab,
@@ -1056,7 +1062,27 @@ export default function App() {
   const [runtimeTransitionsByTab, setRuntimeTransitionsByTab] = useState<Record<string, true>>({});
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const userPlanModeByTabRef = useRef<UserPlanModeIntents>({});
-  const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
+  const [tabMetasSnapshot, setTabMetasSnapshot] = useState<{ targetIdentityGen: number; tabs: TabMeta[] }>({
+    targetIdentityGen,
+    tabs: [],
+  });
+  const tabMetasTargetIdentityGenRef = useRef(targetIdentityGen);
+  const tabMetasRequestSeqRef = useRef(0);
+  const tabMetasCommittedRequestSeqRef = useRef(0);
+  if (tabMetasTargetIdentityGenRef.current !== targetIdentityGen) {
+    tabMetasTargetIdentityGenRef.current = targetIdentityGen;
+    tabMetasRequestSeqRef.current += 1;
+  }
+  const tabMetas = tabMetasSnapshot.targetIdentityGen === targetIdentityGen ? tabMetasSnapshot.tabs : [];
+  const setTabMetas = useCallback((update: TabMeta[] | ((current: TabMeta[]) => TabMeta[])): void => {
+    const currentTargetIdentityGen = tabMetasTargetIdentityGenRef.current;
+    setTabMetasSnapshot((current) => {
+      const currentTabs = current.targetIdentityGen === currentTargetIdentityGen ? current.tabs : [];
+      const tabs = typeof update === "function" ? update(currentTabs) : update;
+      if (current.targetIdentityGen === currentTargetIdentityGen && current.tabs === tabs) return current;
+      return { targetIdentityGen: currentTargetIdentityGen, tabs };
+    });
+  }, []);
   const [tabOrderIds, setTabOrderIds] = useState<string[]>([]);
   const [tabRevealSignal, setTabRevealSignal] = useState(0);
   const [transcriptRevealSignal, setTranscriptRevealSignal] = useState(0);
@@ -1468,14 +1494,15 @@ export default function App() {
   const composerSessionKey = useMemo(() => {
     return composerDraftKeyForTab(activeTab, activeTabId);
   }, [activeTab, activeTabId]);
-  const workspaceScopeKey = [
-    activeTabId ?? "",
-    activeTab?.sessionPath ?? "",
-    state.meta?.sessionPath ?? "",
-    state.meta?.cwd ?? "",
-    state.sessionGen,
+  const workspaceScopeKey = workspaceScopeKeyForAuthority({
+    targetIdentityGen,
+    activeTabId,
+    tabSessionPath: activeTab?.sessionPath,
+    metaSessionPath: state.meta?.sessionPath,
+    cwd: state.meta?.cwd,
+    sessionGen: state.sessionGen,
     workspaceControllerEpoch,
-  ].join("\u0000");
+  });
   const sidebarImDetailConnection = useMemo(
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
@@ -2007,11 +2034,33 @@ export default function App() {
     await steerForTab(sourceTabId, text.trim());
   }, [activeTabId, steerForTab, t]);
 
-  const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
+  const refreshTabMetas = useCallback(async (): Promise<TabMeta[] | undefined> => {
+    const request: TargetScopedRequest = {
+      targetIdentityGen: tabMetasTargetIdentityGenRef.current,
+      requestSeq: tabMetasRequestSeqRef.current + 1,
+    };
+    tabMetasRequestSeqRef.current = request.requestSeq;
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
-    setTabMetas(tabs);
-    return tabs;
+    const accepted = commitTargetScopedValue(
+      request,
+      tabMetasTargetIdentityGenRef.current,
+      tabMetasCommittedRequestSeqRef.current,
+      tabs,
+      (nextTabs) => {
+        tabMetasCommittedRequestSeqRef.current = request.requestSeq;
+        setTabMetasSnapshot({ targetIdentityGen: request.targetIdentityGen, tabs: nextTabs });
+      },
+    );
+    return accepted ? tabs : undefined;
   }, []);
+  useEffect(() => {
+    setTabMetasSnapshot((current) => (
+      current.targetIdentityGen === targetIdentityGen && current.tabs.length === 0
+        ? current
+        : { targetIdentityGen, tabs: [] }
+    ));
+    setTabOrderIds([]);
+  }, [targetIdentityGen]);
   const seedActiveTabMeta = useCallback((tab: TabMeta): void => {
     setTabMetas((current) => {
       const seeded = { ...tab, active: true };
@@ -2035,6 +2084,7 @@ export default function App() {
       window.setTimeout(() => {
         setProjectRevision((value) => value + 1);
         refreshTabMetas().then((tabs) => {
+          if (!tabs) return;
           if (!turnTabId) return;
           const tab = tabs.find((item) => item.id === turnTabId);
           const baseProfile = tab ? composerProfileFromTab(tab) : defaultComposerProfile;
@@ -2070,7 +2120,7 @@ export default function App() {
     void refreshTabMetas();
     const id = window.setInterval(() => void refreshTabMetas(), 2000);
     return () => window.clearInterval(id);
-  }, [refreshTabMetas]);
+  }, [refreshTabMetas, targetIdentityGen]);
 
   useEffect(() => {
     return onProjectTreeChanged(() => {
@@ -2504,6 +2554,7 @@ export default function App() {
   }, [closeTransientOverlays, enqueueTabSwitch, tabMetas]);
 
   const handleTabClose = useCallback(async (id: string) => {
+    const closeTargetIdentityGen = tabMetasTargetIdentityGenRef.current;
     closeTransientOverlays();
     setComposerProfilesByTab((current) => {
       if (!(id in current)) return current;
@@ -2522,18 +2573,23 @@ export default function App() {
       const nextActiveId = remaining[nextIndex]?.id;
       return remaining.map((tab) => ({ ...tab, active: tab.id === nextActiveId }));
     });
-    await closeTab(id);
+    const closed = await closeTab(id);
+    if (!closed || tabMetasTargetIdentityGenRef.current !== closeTargetIdentityGen) return;
     await refreshTabMetas();
     setTabRevealSignal((signal) => signal + 1);
   }, [activeTabId, closeTab, closeTransientOverlays, refreshTabMetas]);
 
   const handleTabsClose = useCallback(async (ids: string[], nextActiveTabId?: string) => {
+    const closeTargetIdentityGen = tabMetasTargetIdentityGenRef.current;
+    const closeTargetIsCurrent = () => tabMetasTargetIdentityGenRef.current === closeTargetIdentityGen;
     closeTransientOverlays();
     const currentIds = tabMetas.map((tab) => tab.id);
     const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
     if (targets.length === 0) return;
     for (const id of targets) {
-      await closeTab(id);
+      if (!closeTargetIsCurrent()) return;
+      const closed = await closeTab(id);
+      if (!closed || !closeTargetIsCurrent()) return;
     }
     if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
       const selected = tabMetas.find((tab) => tab.id === nextActiveTabId);
@@ -2823,11 +2879,14 @@ export default function App() {
   const navigationRunningRef = useRef(false);
   const navigationPendingRef = useRef<PendingDesktopNavigationRequest | null>(null);
   const runNavigationRequest = useCallback(async (request: PendingDesktopNavigationRequest) => {
-    const latest = () => request.seq === navigationSeqRef.current;
+    const navigationTargetIdentityGen = targetIdentityGen;
+    const latest = () => (
+      request.seq === navigationSeqRef.current &&
+      tabMetasTargetIdentityGenRef.current === navigationTargetIdentityGen
+    );
     const refreshLatestTabMetas = async (): Promise<TabMeta[]> => {
-      const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
-      if (latest()) setTabMetas(tabs);
-      return tabs;
+      const tabs = await refreshTabMetas();
+      return tabs ?? [];
     };
     const openTopicTarget = async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string): Promise<TabMeta> => {
       if (singleSurfaceLayout) return activateTopic(scope, workspaceRoot, topicId, sessionPath || "");
@@ -2934,6 +2993,7 @@ export default function App() {
       setTabRevealSignal((value) => value + 1);
       setTranscriptRevealSignal((value) => value + 1);
     } catch (err: any) {
+      if (err instanceof Error && err.name === "TargetProjectionSupersededError") return;
       if (!latest()) return;
       if (request.kind === "topic" || request.kind === "blank") {
         console.warn("desktop navigation failed", err);
@@ -2963,7 +3023,7 @@ export default function App() {
         showToast(err?.message || String(err));
       }
     }
-  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
+  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, refreshTabMetas, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t, targetIdentityGen]);
 
   const enqueueNavigation = useCallback((input: DesktopNavigationInput): Promise<void> => enqueueNavigationRequest(
     { seqRef: navigationSeqRef, runningRef: navigationRunningRef, pendingRef: navigationPendingRef },
@@ -3208,6 +3268,7 @@ export default function App() {
   const refreshProjectsAndTabs = useCallback(async () => {
     setProjectRevision((value) => value + 1);
     const tabs = await refreshTabMetas();
+    if (!tabs) return;
     if (activeTabId && !tabs.some((tab) => tab.id === activeTabId)) {
       await syncActiveTab(false);
     }
@@ -4140,6 +4201,7 @@ export default function App() {
                   turnCost={state.turnCost}
                   balance={state.balance}
                   sessionGen={state.sessionGen}
+                  targetIdentityGen={targetIdentityGen}
                   refreshKey={dockRefreshKey}
                   usageSeq={state.usageSeq}
                 />

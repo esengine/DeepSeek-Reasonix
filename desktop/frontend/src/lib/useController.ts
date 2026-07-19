@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
-import { app, onEvent, onReady, onRuntimeRebuilt } from "./bridge";
+import { app, onEvent, onReady, onRemoteTargetState, onRuntimeRebuilt } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { createRafBatch } from "./rafBatch";
@@ -32,6 +32,7 @@ import type {
   TabMeta,
   TokenMode,
   ToolApprovalMode,
+  RemoteTargetStatusView,
   WireApproval,
   WireAsk,
   WireEvent,
@@ -55,6 +56,17 @@ export type HydrateReason = "switch-tab" | "new-session" | "resume-session" | "o
 type SyncActiveTabOptions = {
   preserveCachedHistory?: boolean;
 };
+
+// Transitional target states deliberately have no identity: they still own the
+// projection of the last stable target until the TargetManager commits its next
+// Local/Remote authority. Reconnects to the same Remote Host therefore preserve
+// live state, while Local <-> Remote and Remote A <-> Remote B transitions do not.
+export function stableTargetIdentity(status: RemoteTargetStatusView): string | undefined {
+  if (status.state === "LocalConnected") return "local";
+  if (status.state !== "RemoteConnected") return undefined;
+  const hostId = status.hostId?.trim();
+  return hostId ? `remote:${hostId}` : undefined;
+}
 
 const DEFAULT_HISTORY_PAGE_TURNS = 60;
 
@@ -1717,24 +1729,38 @@ function settingSwitchNoticeText(
   return t(keys.failed, { err: msg });
 }
 
-async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
+async function refreshMetaForTab(
+  tabId: string,
+  dispatchTo: (tabId: string, action: Action) => void,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
   try {
-    dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
-    dispatchTo(tabId, { type: "context", context: await app.ContextUsageForTab(tabId) });
-    dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
+    const meta = await app.MetaForTab(tabId);
+    if (!isCurrent()) return;
+    dispatchTo(tabId, { type: "meta", meta });
+    const context = await app.ContextUsageForTab(tabId);
+    if (!isCurrent()) return;
+    dispatchTo(tabId, { type: "context", context });
+    const effort = await app.EffortForTab(tabId);
+    if (!isCurrent()) return;
+    dispatchTo(tabId, { type: "effort", effort });
   } catch {
     /* ignore */
   }
 }
 
-async function refreshMetaOnlyForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<Meta | undefined> {
+async function refreshMetaOnlyForTab(tabId: string): Promise<Meta | undefined> {
   try {
-    const meta = await app.MetaForTab(tabId);
-    dispatchTo(tabId, { type: "meta", meta });
-    return meta;
+    return await app.MetaForTab(tabId);
   } catch {
     return undefined;
   }
+}
+
+function targetProjectionSuperseded(): never {
+  const err = new Error("target projection changed while navigation was pending");
+  err.name = "TargetProjectionSupersededError";
+  throw err;
 }
 
 export function replayPendingPromptsForActiveTab(activeTabId: string | undefined, replay: () => Promise<void> = () => app.ReplayPendingPrompts()): void {
@@ -1755,6 +1781,14 @@ export function useController() {
   // Invalidates async navigation completions even for ABA switches where the
   // visible tab ID eventually returns to the original value.
   const activeNavigationSeqRef = useRef(0);
+  // Target identity is orthogonal to tab/session ids: Local and a Remote Host
+  // may legitimately project the same opaque ids. Epoch-gate hydrations so an
+  // old authority cannot refill state after a target transition clears it.
+  const targetIdentityRef = useRef<string | undefined>(undefined);
+  const targetProjectionEpochRef = useRef(0);
+  const targetProjectionAttemptedRef = useRef(false);
+  const targetHydrationRequiredRef = useRef(false);
+  const [targetIdentityGen, setTargetIdentityGen] = useState(0);
   // A render-triggering counter so that mutations to a non-active tab's state still
   // cause a re-render when that tab becomes active.
   const [, setVersion] = useState(0);
@@ -1849,6 +1883,7 @@ export function useController() {
     }
 
     const promise = (async () => {
+      const targetProjectionEpoch = targetProjectionEpochRef.current;
       const seq = bumpSessionLoadSeq(tabId);
       const hydrateStartedAt = Date.now();
       const skipHistory = Boolean(
@@ -1859,7 +1894,8 @@ export function useController() {
       dispatchTo(tabId, { type: "hydrate_start", reason, placeholderItems: options.placeholderItems });
       if (reset && sessionLoadCurrent(tabId, seq)) dispatchTo(tabId, { type: "reset" });
 
-      const stillCurrent = () => sessionLoadCurrent(tabId, seq);
+      const stillCurrent = () =>
+        targetProjectionEpochRef.current === targetProjectionEpoch && sessionLoadCurrent(tabId, seq);
       const requiresVisibleTab = reason === "startup" || reason === "switch-tab" || reason === "open-topic";
       const stillVisible = () => !requiresVisibleTab || activeTabIdRef.current === tabId;
       const noteFailure = (label: string, err: unknown) => {
@@ -1959,7 +1995,7 @@ export function useController() {
       addBreadcrumb("tab.hydrate", `ancillary ${reason} ${tabId} ms=${Date.now() - ancillaryStartedAt}`);
       app.BalanceForTab(tabId)
         .then((balance) => {
-          if (sessionLoadCurrent(tabId, seq) && stillVisible()) dispatchTo(tabId, { type: "balance", balance });
+          if (stillCurrent() && stillVisible()) dispatchTo(tabId, { type: "balance", balance });
         })
         .catch((err) => { noteFailure("balance", err); });
     })();
@@ -1976,8 +2012,11 @@ export function useController() {
   }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent]);
 
   const loadOlderHistory = useCallback(async (tabId?: string): Promise<void> => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     const targetTabId = tabId || activeTabIdRef.current;
     if (!targetTabId) return;
+    if (!targetIsCurrent()) return;
     const state = statesRef.current.get(targetTabId);
     if (!state?.historyHasOlder || state.historyOlderLoading || state.running) return;
     const beforeTurn = state.historyStartTurn;
@@ -1985,7 +2024,10 @@ export function useController() {
     dispatchTo(targetTabId, { type: "history_older_start" });
     const startedAt = Date.now();
     try {
-      const page = await app.HistoryPageForTab(targetTabId, beforeTurn, await configuredHistoryPageTurns());
+      const pageTurns = await configuredHistoryPageTurns();
+      if (!targetIsCurrent()) return;
+      const page = await app.HistoryPageForTab(targetTabId, beforeTurn, pageTurns);
+      if (!targetIsCurrent()) return;
       const current = statesRef.current.get(targetTabId);
       if (!current || current.historyStartTurn !== beforeTurn || (current.meta?.sessionPath ?? "") !== sessionPath) {
         dispatchTo(targetTabId, { type: "history_older_error" });
@@ -1997,6 +2039,7 @@ export function useController() {
         `history older ${targetTabId} messages=${asArray(page.messages).length} turns=${page.startTurn}-${page.endTurn}/${page.totalTurns} ms=${Date.now() - startedAt}`,
       );
     } catch (err) {
+      if (!targetIsCurrent()) return;
       dispatchTo(targetTabId, { type: "history_older_error" });
       addBreadcrumb("tab.hydrate", `history older failed ${targetTabId}: ${errorMessage(err)}`);
     }
@@ -2027,6 +2070,33 @@ export function useController() {
     }
     bump();
   }, [bump]);
+
+  const invalidateFrontendTargetProjection = useCallback(() => {
+    targetProjectionEpochRef.current += 1;
+    targetHydrationRequiredRef.current = true;
+    setTargetIdentityGen((generation) => generation + 1);
+    beginActiveNavigation();
+
+    for (const timer of cancelReconcileTimers.current.values()) window.clearTimeout(timer);
+    cancelReconcileTimers.current.clear();
+    for (const timer of stalePromptReconcileTimers.current.values()) window.clearTimeout(timer);
+    stalePromptReconcileTimers.current.clear();
+
+    // Keep per-tab counters monotonic so any already-resolving history or
+    // checkpoint request is rejected even when the next target reuses its id.
+    for (const [tabId, seq] of sessionLoadSeq.current) sessionLoadSeq.current.set(tabId, seq + 1);
+    for (const [tabId, seq] of checkpointRefreshSeq.current) checkpointRefreshSeq.current.set(tabId, seq + 1);
+    sessionLoadInFlight.current.clear();
+    backendActivationPromises.current.clear();
+    statesRef.current.clear();
+    lastTurnActivityAtByTab.current.clear();
+    backendActiveTabIdRef.current = undefined;
+    readyMetaReconcileSeq.current += 1;
+    readyMetaReconcileActive.current = undefined;
+    setActiveTabId(undefined);
+    activeTabIdRef.current = undefined;
+    bump();
+  }, [beginActiveNavigation, bump]);
 
   // snapshotAt is the promptEventClock() reading taken immediately before
   // initiating the backend call that produced `tab`. The reducer uses it to
@@ -2074,8 +2144,11 @@ export function useController() {
   }, []);
 
   const syncActiveTabFromBackend = useCallback(async (reset = false, guard = false, options: SyncActiveTabOptions = {}): Promise<string | undefined> => {
+    targetProjectionAttemptedRef.current = true;
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
     const snapshotAt = promptEventClock();
     const active = await activeTabFromBackend();
+    if (targetProjectionEpochRef.current !== targetProjectionEpoch) return undefined;
     if (!active) return undefined;
     // When guard is true, skip if the frontend already settled on a
     // different tab while we were fetching — this prevents fire-and-forget
@@ -2095,6 +2168,7 @@ export function useController() {
       preserveCachedHistory,
       sessionPath: active.sessionPath,
     });
+    if (targetProjectionEpochRef.current !== targetProjectionEpoch) return undefined;
     if (reset) dispatchRuntimeStatusForTab(active.id, active, snapshotAt);
     return active.id;
   }, [activeTabFromBackend, beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
@@ -2107,16 +2181,23 @@ export function useController() {
     previousTabId: string,
     expectedTabId?: string,
   ): Promise<string | undefined> => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = activeNavigationSeqRef.current;
+    const projectionIsCurrent = () => (
+      targetProjectionEpochRef.current === targetProjectionEpoch &&
+      activeNavigationSeqRef.current === navigationSeq
+    );
     if (!previousTabId || activeTabIdRef.current !== previousTabId) return undefined;
     const snapshotAt = promptEventClock();
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
+    if (!projectionIsCurrent()) return undefined;
     const active = tabs.find((tab) => tab.active) ?? tabs[0];
     if (!active || active.id === previousTabId) return undefined;
     if (expectedTabId && active.id !== expectedTabId) return undefined;
     if (tabs.some((tab) => tab.id === previousTabId)) return undefined;
     // Re-check after the awaited authority read. A user navigation that moved
     // away in the meantime wins and the replacement remains a background tab.
-    if (activeTabIdRef.current !== previousTabId) return undefined;
+    if (!projectionIsCurrent() || activeTabIdRef.current !== previousTabId) return undefined;
 
     beginActiveNavigation();
     discardFrontendTabState(previousTabId);
@@ -2126,6 +2207,7 @@ export function useController() {
     dispatchTo(active.id, { type: "optimistic_meta", meta: metaFromTab(active, statesRef.current.get(active.id)?.meta) });
     dispatchRuntimeStatusForTab(active.id, active, snapshotAt);
     await loadSessionDataForTab(active.id, true, "new-session", { sessionPath: active.sessionPath });
+    if (targetProjectionEpochRef.current !== targetProjectionEpoch) return undefined;
     return active.id;
   }, [beginActiveNavigation, confirmBackendActiveTab, discardFrontendTabState, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
 
@@ -2133,9 +2215,12 @@ export function useController() {
     tabId: string,
     options: { hydrateSessionData?: boolean } = {},
   ): Promise<TabMeta[] | undefined> => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     const hydrateSessionData = options.hydrateSessionData ?? true;
     const snapshotAt = promptEventClock();
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
+    if (!targetIsCurrent()) return undefined;
     const tab = tabs.find((candidate) => candidate.id === tabId);
     if (!tab) return undefined;
     const local = statesRef.current.get(tabId);
@@ -2144,18 +2229,19 @@ export function useController() {
     const missedTurnDone = Boolean(local?.running && !foregroundRunning);
     if (hydrateSessionData && (needsInitialLoad || missedTurnDone)) {
       await loadSessionDataForTab(tabId, missedTurnDone, "startup");
-      return tabs;
+      return targetIsCurrent() ? tabs : undefined;
     }
     const [jobs, effort, balance] = await Promise.all([
       app.JobsForTab(tabId).catch(() => undefined),
       app.EffortForTab(tabId).catch(() => undefined),
       app.BalanceForTab(tabId).catch(() => undefined),
     ]);
+    if (!targetIsCurrent()) return undefined;
     if (jobs) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
     if (effort) dispatchTo(tabId, { type: "effort", effort });
     if (balance) dispatchTo(tabId, { type: "balance", balance });
     return tabs;
-  }, [dispatchRuntimeStatusForTab, loadSessionDataForTab]);
+  }, [dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab]);
 
   // Authoritative backstop for the prompt-freshness heuristic: after the reducer
   // rejects a stale idle snapshot, refetch backend state once. If the backend
@@ -2198,8 +2284,71 @@ export function useController() {
   }, [clearCancelReconcileTimer, reconcileTabRuntime]);
 
   useEffect(() => {
-    const textBatch = createRafBatch<{ tabId: string; e: WireEvent }>((batch) => {
-      for (const { tabId, e } of batch) dispatchTo(tabId, { type: "event", e });
+    let disposed = false;
+    let targetEventSeq = 0;
+    const hydrateTargetProjection = (completeWithoutReady: boolean) => {
+      const targetProjectionEpoch = targetProjectionEpochRef.current;
+      void syncActiveTabFromBackend(true, true, { preserveCachedHistory: false }).then((tabId) => {
+        if (
+          disposed ||
+          !tabId ||
+          targetProjectionEpochRef.current !== targetProjectionEpoch ||
+          !completeWithoutReady
+        ) return;
+        targetHydrationRequiredRef.current = false;
+      });
+    };
+    const observeTargetStatus = (status: RemoteTargetStatusView) => {
+      if (status.state === "RemoteReconnecting") {
+        // Keep the last atomic Remote snapshot visible during transport loss,
+        // but require the ordered reattach-ready snapshot to replace it even
+        // though the stable Host identity itself did not change.
+        targetProjectionEpochRef.current += 1;
+        for (const [tabId, seq] of sessionLoadSeq.current) sessionLoadSeq.current.set(tabId, seq + 1);
+        for (const [tabId, seq] of checkpointRefreshSeq.current) checkpointRefreshSeq.current.set(tabId, seq + 1);
+        sessionLoadInFlight.current.clear();
+        readyMetaReconcileSeq.current += 1;
+        readyMetaReconcileActive.current = undefined;
+        targetHydrationRequiredRef.current = true;
+        return;
+      }
+      const nextIdentity = stableTargetIdentity(status);
+      if (!nextIdentity) return;
+      const previousIdentity = targetIdentityRef.current;
+      const hasProjection =
+        targetProjectionAttemptedRef.current ||
+        Boolean(activeTabIdRef.current) ||
+        statesRef.current.size > 0;
+      targetIdentityRef.current = nextIdentity;
+      if (previousIdentity === nextIdentity) return;
+      if (previousIdentity === undefined && !hasProjection) {
+        // App starts its independent ListTabs projection at mount. Advancing an
+        // App-visible authority generation on the first stable binding rejects
+        // a pre-binding Local response when a Remote target wins the status
+        // query/event race, without forcing an otherwise empty controller reset.
+        targetProjectionEpochRef.current += 1;
+        lastTurnActivityAtByTab.current.clear();
+        setTargetIdentityGen((generation) => generation + 1);
+        return;
+      }
+
+      // Apply any queued deltas to the old authority before throwing that
+      // projection away; otherwise the RAF callback could recreate them after
+      // a same-id target transition.
+      textBatch.drain();
+      invalidateFrontendTargetProjection();
+      // Local is ready to hydrate as soon as LocalConnected commits. Remote
+      // waits for its ordered workbench rebuilt/ready sequence; querying before
+      // reattach could only expose an incomplete projection and duplicate I/O.
+      if (nextIdentity === "local") hydrateTargetProjection(true);
+    };
+
+    const textBatch = createRafBatch<{ tabId: string; e: WireEvent; targetProjectionEpoch: number }>((batch) => {
+      for (const { tabId, e, targetProjectionEpoch } of batch) {
+        if (targetProjectionEpochRef.current === targetProjectionEpoch) {
+          dispatchTo(tabId, { type: "event", e });
+        }
+      }
     });
     const off = onEvent((e) => {
       // Untagged compatibility events belong to the tab that the backend has
@@ -2208,6 +2357,11 @@ export function useController() {
       // leaks the previous session's approval/ask gate into the new composer.
       const targetTabId = e.tabId || backendActiveTabIdRef.current || activeTabIdRef.current;
       if (!targetTabId) return;
+      const eventTargetProjectionEpoch = targetProjectionEpochRef.current;
+      const eventTargetIsCurrent = () => targetProjectionEpochRef.current === eventTargetProjectionEpoch;
+      const dispatchEventResult = (action: Action) => {
+        if (eventTargetIsCurrent()) dispatchTo(targetTabId, action);
+      };
       if (
         e.kind === "turn_started" ||
         e.kind === "text" ||
@@ -2220,7 +2374,7 @@ export function useController() {
         lastTurnActivityAtByTab.current.set(targetTabId, Date.now());
       }
       if (e.kind === "text" || e.kind === "reasoning") {
-        textBatch.push({ tabId: targetTabId, e });
+        textBatch.push({ tabId: targetTabId, e, targetProjectionEpoch: eventTargetProjectionEpoch });
       } else {
         textBatch.drain();
         dispatchTo(targetTabId, { type: "event", e });
@@ -2228,24 +2382,39 @@ export function useController() {
       if (e.kind === "turn_done") {
         if (!e.err) {
           app.HistoryCheckpointTurnsForTab(targetTabId)
-            .then((turns) => dispatchTo(targetTabId, { type: "history_checkpoint_turns", turns: asArray(turns) }))
+            .then((turns) => dispatchEventResult({ type: "history_checkpoint_turns", turns: asArray(turns) }))
             .catch(() => {});
         }
         app
           .ContextUsageForTab(targetTabId)
-          .then((context) => dispatchTo(targetTabId, { type: "context", context }))
+          .then((context) => dispatchEventResult({ type: "context", context }))
           .catch(() => {});
-        app.BalanceForTab(targetTabId).then((balance) => dispatchTo(targetTabId, { type: "balance", balance })).catch(() => {});
-        app.EffortForTab(targetTabId).then((effort) => dispatchTo(targetTabId, { type: "effort", effort })).catch(() => {});
+        app.BalanceForTab(targetTabId).then((balance) => dispatchEventResult({ type: "balance", balance })).catch(() => {});
+        app.EffortForTab(targetTabId).then((effort) => dispatchEventResult({ type: "effort", effort })).catch(() => {});
         void refreshCheckpoints(targetTabId);
-        void refreshMetaForTab(targetTabId, dispatchTo);
+        void refreshMetaForTab(targetTabId, dispatchTo, eventTargetIsCurrent);
       }
       if (e.kind === "turn_done" || e.kind === "notice") {
-        app.JobsForTab(targetTabId).then((jobs) => dispatchTo(targetTabId, { type: "jobs", jobs: asArray(jobs) })).catch(() => {});
+        app.JobsForTab(targetTabId).then((jobs) => dispatchEventResult({ type: "jobs", jobs: asArray(jobs) })).catch(() => {});
       }
+    });
+    const offTarget = onRemoteTargetState((status) => {
+      targetEventSeq += 1;
+      observeTargetStatus(status);
     });
 
     const offReady = onReady((readyTabId) => {
+      if (targetHydrationRequiredRef.current) {
+        const targetProjectionEpoch = targetProjectionEpochRef.current;
+        void syncActiveTabFromBackend(true, true, { preserveCachedHistory: false }).then((tabId) => {
+          if (
+            !disposed &&
+            tabId &&
+            targetProjectionEpochRef.current === targetProjectionEpoch
+          ) targetHydrationRequiredRef.current = false;
+        });
+        return;
+      }
       const activeId = activeTabIdRef.current;
       if (readyTabId && activeId && readyTabId !== activeId) {
         void adoptBackendSessionReplacement(activeId, readyTabId).then((adopted) => {
@@ -2275,7 +2444,21 @@ export function useController() {
       }
     });
 
-    void syncActiveTabFromBackend(false, true);
+    // Establish the target identity before the first tab projection. If the
+    // binding is absent in an older/mock backend, retain the existing startup
+    // behavior. Subscribing first closes the query/event gap.
+    void (async () => {
+      const queryEventSeq = targetEventSeq;
+      try {
+        const status = await app.RemoteTargetStatus();
+        if (targetEventSeq === queryEventSeq) observeTargetStatus(status);
+      } catch {
+        // Compatibility with Local-only and older test bindings.
+      }
+      if (!disposed && !targetProjectionAttemptedRef.current) {
+        void syncActiveTabFromBackend(false, true);
+      }
+    })();
     // The event subscription is live now, so ask the backend to re-emit any
     // approval/ask prompt that was already blocking a tab before this load —
     // otherwise a session left mid-confirmation shows "waiting" with no modal
@@ -2283,6 +2466,7 @@ export function useController() {
     void app.ReplayPendingPrompts().catch(() => {});
 
     return () => {
+      disposed = true;
       textBatch.drain();
       for (const timer of cancelReconcileTimers.current.values()) {
         window.clearTimeout(timer);
@@ -2293,10 +2477,11 @@ export function useController() {
       }
       stalePromptReconcileTimers.current.clear();
       off();
+      offTarget();
       offReady();
       offRebuilt();
     };
-  }, [adoptBackendSessionReplacement, dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+  }, [adoptBackendSessionReplacement, dispatchTo, invalidateFrontendTargetProjection, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
 
   // Keep shared all-source telemetry live between turn boundaries. Delivery
   // mode can complete dozens of provider requests inside one UI turn, while
@@ -2309,10 +2494,12 @@ export function useController() {
     const tabId = activeTabId;
     const usageSeq = activeState.usageSeq;
     if (!tabId || usageSeq <= 0 || !activeState.turnActive) return;
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
 
     let cancelled = false;
     void app.ContextUsageForTab(tabId).then((context) => {
       if (cancelled || activeTabIdRef.current !== tabId) return;
+      if (targetProjectionEpochRef.current !== targetProjectionEpoch) return;
       if (statesRef.current.get(tabId)?.usageSeq !== usageSeq) return;
       dispatchTo(tabId, { type: "context", context });
     }).catch(() => {});
@@ -2335,13 +2522,18 @@ export function useController() {
 
     let cancelled = false;
     let timer: number | undefined;
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
     const seq = readyMetaReconcileSeq.current + 1;
     readyMetaReconcileSeq.current = seq;
     readyMetaReconcileActive.current = { tabId, seq };
 
     const stillCurrent = () => {
       const active = readyMetaReconcileActive.current;
-      return !cancelled && active?.tabId === tabId && active.seq === seq && activeTabIdRef.current === tabId;
+      return !cancelled &&
+        targetProjectionEpochRef.current === targetProjectionEpoch &&
+        active?.tabId === tabId &&
+        active.seq === seq &&
+        activeTabIdRef.current === tabId;
     };
 
     const schedule = (attempt: number) => {
@@ -2354,8 +2546,9 @@ export function useController() {
       if (!stillCurrent()) return;
       const current = statesRef.current.get(tabId);
       if (!current?.meta || current.meta.ready || current.meta.startupErr || current.backendActivationPending) return;
-      const nextMeta = await refreshMetaOnlyForTab(tabId, dispatchTo);
+      const nextMeta = await refreshMetaOnlyForTab(tabId);
       if (!stillCurrent()) return;
+      if (nextMeta) dispatchTo(tabId, { type: "meta", meta: nextMeta });
       if (nextMeta?.ready || nextMeta?.startupErr || attempt + 1 >= STARTUP_READY_META_RECONCILE_ATTEMPTS) return;
       schedule(attempt + 1);
     };
@@ -2628,8 +2821,11 @@ export function useController() {
   }, [activeTabId, resumeGoalForTab]);
 
   const newSession = useCallback(async () => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     const tabId = activeTabId;
     if (tabId) await waitForTabReady(tabId);
+    if (!targetIsCurrent()) return;
     if (tabId) {
       addBreadcrumb("session.new", `click ${tabId}`);
       bumpCheckpointRefreshSeq(tabId);
@@ -2639,24 +2835,31 @@ export function useController() {
       addBreadcrumb("session.new", `visible-reset ${tabId}`);
     }
     try {
+      if (!targetIsCurrent()) return;
       if (tabId) await app.NewSessionForTab(tabId);
       else await app.NewSession();
+      if (!targetIsCurrent()) return;
       addBreadcrumb("session.new", `backend-done ${tabId ?? ""}`);
     } catch (err) {
+      if (!targetIsCurrent()) return;
       if (tabId) {
         dispatchTo(tabId, { type: "hydrate_error", reason: "new-session", error: errorMessage(err) });
         void loadSessionDataForTab(tabId, true, "new-session").then(() => {
-          dispatchTo(tabId, { type: "local_notice", level: "warn", text: `New session failed: ${errorMessage(err)}` });
+          if (targetIsCurrent()) {
+            dispatchTo(tabId, { type: "local_notice", level: "warn", text: `New session failed: ${errorMessage(err)}` });
+          }
         });
       }
       return; // backend refused (workspace starting / failed) — keep the transcript
     }
+    if (!targetIsCurrent()) return;
     invalidateCache();
     if (tabId) {
       // The SnapshotUpdate may have landed before the RPC continuation or may
       // arrive later. This immediate authority check shortens the first case;
       // ready/rebuilt handlers remain the durable path for the second.
       if (await adoptBackendSessionReplacement(tabId)) return;
+      if (!targetIsCurrent()) return;
       // An event-driven adoption may have completed while the RPC continuation
       // was awaiting ListTabs. Never recreate the retired old-tab state.
       if (!statesRef.current.has(tabId)) return;
@@ -2664,29 +2867,38 @@ export function useController() {
     if (tabId) {
       dispatchTo(tabId, { type: "history", messages: [] });
       dispatchTo(tabId, { type: "hydrate_done" });
-      void refreshMetaForTab(tabId, dispatchTo);
-      app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
+      void refreshMetaForTab(tabId, dispatchTo, targetIsCurrent);
+      app.ContextUsageForTab(tabId).then((context) => {
+        if (targetIsCurrent()) dispatchTo(tabId, { type: "context", context });
+      }).catch(() => {});
       void refreshCheckpoints(tabId);
     }
   }, [activeTabId, adoptBackendSessionReplacement, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, waitForTabReady]);
 
   const clearSession = useCallback(async () => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     const tabId = activeTabId;
     if (tabId) await waitForTabReady(tabId);
+    if (!targetIsCurrent()) return;
     if (tabId) {
       bumpCheckpointRefreshSeq(tabId);
       bumpSessionLoadSeq(tabId);
     }
     try {
+      if (!targetIsCurrent()) return;
       if (tabId) await app.ClearSessionForTab(tabId);
       else await app.ClearSession();
+      if (!targetIsCurrent()) return;
     } catch {
-      if (tabId) void loadSessionDataForTab(tabId);
+      if (targetIsCurrent() && tabId) void loadSessionDataForTab(tabId);
       return;
     }
+    if (!targetIsCurrent()) return;
     invalidateCache();
     if (tabId) {
       if (await adoptBackendSessionReplacement(tabId)) return;
+      if (!targetIsCurrent()) return;
       if (!statesRef.current.has(tabId)) return;
     }
     if (tabId) {
@@ -2700,54 +2912,68 @@ export function useController() {
   const listSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListSessions().catch(() => [])), []);
   const listTrashedSessions = useCallback(async (): Promise<SessionMeta[]> => asArray<SessionMeta>(await app.ListTrashedSessions().catch(() => [])), []);
   const resumeSession = useCallback(async (path: string, tabId?: string) => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     const targetTabId = tabId || activeTabId;
     if (!targetTabId) return;
     beginActiveNavigation();
     if (tabId) await waitForTabReady(tabId);
     else if (!(await waitForBackendActiveTab(targetTabId))) return;
+    if (!targetIsCurrent()) return;
     const seq = bumpSessionLoadSeq(targetTabId);
     dispatchTo(targetTabId, { type: "hydrate_start", reason: "resume-session" });
     let page: HistoryPage;
     try {
+      const pageTurns = await configuredHistoryPageTurns();
+      if (!targetIsCurrent() || !sessionLoadCurrent(targetTabId, seq)) return;
       page = tabId
-        ? await app.ResumeSessionPageForTab(tabId, path, await configuredHistoryPageTurns())
-        : await app.ResumeSessionPage(path, await configuredHistoryPageTurns());
+        ? await app.ResumeSessionPageForTab(tabId, path, pageTurns)
+        : await app.ResumeSessionPage(path, pageTurns);
     } catch (err) {
-      if (sessionLoadCurrent(targetTabId, seq)) {
+      if (targetIsCurrent() && sessionLoadCurrent(targetTabId, seq)) {
         dispatchTo(targetTabId, { type: "hydrate_error", reason: "resume-session", error: errorMessage(err) });
         dispatchTo(targetTabId, { type: "local_notice", level: "warn", text: `${t("history.failedOpenSession")}: ${errorMessage(err)}` });
       }
       return;
     }
-    if (!sessionLoadCurrent(targetTabId, seq)) return;
+    if (!targetIsCurrent() || !sessionLoadCurrent(targetTabId, seq)) return;
     dispatchTo(targetTabId, { type: "reset" });
     dispatchTo(targetTabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(targetTabId, { type: "hydrate_done" });
-    app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
+    app.ContextUsageForTab(targetTabId).then((context) => {
+      if (targetIsCurrent()) dispatchTo(targetTabId, { type: "context", context });
+    }).catch(() => {});
     void refreshCheckpoints(targetTabId);
   }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string) => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     if (!tabId) return;
     beginActiveNavigation();
     await waitForTabReady(tabId);
+    if (!targetIsCurrent()) return;
     const seq = bumpSessionLoadSeq(tabId);
     dispatchTo(tabId, { type: "hydrate_start", reason: "resume-session" });
     let page: HistoryPage;
     try {
-      page = await app.OpenChannelSessionPageForTab(tabId, path, await configuredHistoryPageTurns());
+      const pageTurns = await configuredHistoryPageTurns();
+      if (!targetIsCurrent() || !sessionLoadCurrent(tabId, seq)) return;
+      page = await app.OpenChannelSessionPageForTab(tabId, path, pageTurns);
     } catch (err) {
-      if (sessionLoadCurrent(tabId, seq)) {
+      if (targetIsCurrent() && sessionLoadCurrent(tabId, seq)) {
         dispatchTo(tabId, { type: "hydrate_error", reason: "resume-session", error: errorMessage(err) });
         dispatchTo(tabId, { type: "local_notice", level: "warn", text: `${t("history.failedOpenSession")}: ${errorMessage(err)}` });
       }
       return;
     }
-    if (!sessionLoadCurrent(tabId, seq)) return;
+    if (!targetIsCurrent() || !sessionLoadCurrent(tabId, seq)) return;
     dispatchTo(tabId, { type: "reset" });
     dispatchTo(tabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(tabId, { type: "hydrate_done" });
-    app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
+    app.ContextUsageForTab(tabId).then((context) => {
+      if (targetIsCurrent()) dispatchTo(tabId, { type: "context", context });
+    }).catch(() => {});
     void refreshCheckpoints(tabId);
   }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForTabReady]);
 
@@ -2912,7 +3138,13 @@ export function useController() {
 
   // Tab management: switch preserves per-tab state; open creates it.
   const switchTab = useCallback(async (tabId: string, optimisticTab?: TabMeta): Promise<TabMeta[] | undefined> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => (
+      targetIsCurrent() &&
+      activeNavigationSeqRef.current === navigationSeq
+    );
     const startedAt = Date.now();
     const previousTabId = activeTabIdRef.current;
     const targetSessionPath = optimisticTab?.sessionPath ?? statesRef.current.get(tabId)?.meta?.sessionPath;
@@ -2930,11 +3162,12 @@ export function useController() {
     addBreadcrumb("tab.switch", `active-rendered ${tabId} ms=${Date.now() - startedAt}`);
     const backendActivation = app.SetActiveTab(tabId)
       .then(async () => {
-        if (activeTabIdRef.current !== tabId) {
+        if (!targetIsCurrent()) return false;
+        if (!projectionIsCurrent() || activeTabIdRef.current !== tabId) {
           const currentTabId = activeTabIdRef.current;
           if (currentTabId) {
             await app.SetActiveTab(currentTabId).then(() => {
-              if (activeTabIdRef.current === currentTabId) confirmBackendActiveTab(currentTabId);
+              if (targetIsCurrent() && activeTabIdRef.current === currentTabId) confirmBackendActiveTab(currentTabId);
             }).catch((err) => {
               addBreadcrumb("tab.switch", `set-active-stale-reassert-failed ${currentTabId}: ${errorMessage(err)}`);
             });
@@ -2947,6 +3180,7 @@ export function useController() {
         return true;
       })
       .catch((err) => {
+        if (!projectionIsCurrent()) return false;
         dispatchTo(tabId, { type: "backend_activation_done" });
         dispatchTo(tabId, { type: "hydrate_error", reason: "switch-tab", error: errorMessage(err) });
         if (previousTabId && activeTabIdRef.current === tabId) {
@@ -2959,8 +3193,9 @@ export function useController() {
     trackBackendActivation(tabId, backendActivation);
     const backendSwitch = backendActivation
       .then(async (activated) => {
-        if (!activated) return undefined;
+        if (!activated || !projectionIsCurrent()) return undefined;
         const tabs = await reconcileTabRuntime(tabId, { hydrateSessionData: false });
+        if (!projectionIsCurrent()) return undefined;
         void loadSessionDataForTab(tabId, false, "switch-tab", {
           skipHistory: hasCachedLiveTurn(statesRef.current.get(tabId)),
           preserveCachedHistory,
@@ -2969,16 +3204,22 @@ export function useController() {
         return tabs;
       })
       .catch((err) => {
-        dispatchTo(tabId, { type: "hydrate_error", reason: "switch-tab", error: errorMessage(err) });
+        if (projectionIsCurrent()) {
+          dispatchTo(tabId, { type: "hydrate_error", reason: "switch-tab", error: errorMessage(err) });
+        }
         return undefined;
       });
     return backendSwitch;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, trackBackendActivation]);
 
   const openProjectTab = useCallback(async (workspaceRoot: string, topicId: string): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const meta = await app.OpenProjectTab(workspaceRoot, topicId);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
     const isNewTab = !prevState;
@@ -2993,15 +3234,19 @@ export function useController() {
       preserveCachedHistory,
       sessionPath: meta.sessionPath,
     });
-    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    if (isNewTab) void load.then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined).catch(() => {});
     else void load;
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const openGlobalTab = useCallback(async (topicId: string): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const meta = await app.OpenGlobalTab(topicId);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
     const isNewTab = !prevState;
@@ -3016,15 +3261,19 @@ export function useController() {
       preserveCachedHistory,
       sessionPath: meta.sessionPath,
     });
-    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    if (isNewTab) void load.then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined).catch(() => {});
     else void load;
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const openTopicSession = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath: string): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const meta = await app.OpenTopicSession(scope, workspaceRoot, topicId, sessionPath);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
     const isNewTab = !prevState;
@@ -3039,15 +3288,19 @@ export function useController() {
       preserveCachedHistory,
       sessionPath: meta.sessionPath,
     });
-    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    if (isNewTab) void load.then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined).catch(() => {});
     else void load;
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const activateTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath = ""): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const meta = await app.ActivateTopic(scope, workspaceRoot, topicId, sessionPath);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     // Save previous tab's items so the new tab can use them as a placeholder
     // during loading, avoiding a blank/Welcome flash before history arrives.
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
@@ -3060,7 +3313,7 @@ export function useController() {
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
     void loadSessionDataForTab(meta.id, true, "open-topic", { placeholderItems: prevItems })
-      .then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false }))
+      .then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined)
       .catch(() => {});
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
@@ -3068,9 +3321,13 @@ export function useController() {
   // Ensure a blank tab exists for the given scope — reuses an existing one
   // or creates a new tab, then loads its session data.
   const ensureBlankTab = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const meta = await app.EnsureBlankTab(scope, workspaceRoot);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     const isNewTab = !statesRef.current.has(meta.id);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
@@ -3078,15 +3335,19 @@ export function useController() {
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
     const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic");
-    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    if (isNewTab) void load.then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined).catch(() => {});
     else void load;
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const ensureBlankSurface = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const meta = await app.EnsureBlankSurface(scope, workspaceRoot);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     for (const id of Array.from(statesRef.current.keys())) {
       if (id !== meta.id) statesRef.current.delete(id);
     }
@@ -3096,15 +3357,19 @@ export function useController() {
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
     void loadSessionDataForTab(meta.id, true, "open-topic")
-      .then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false }))
+      .then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined)
       .catch(() => {});
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const createDeliveryWorktree = useCallback(async (workspaceRoot: string): Promise<DeliveryWorktreeOpenResult> => {
-    beginActiveNavigation();
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const navigationSeq = beginActiveNavigation();
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
+    const projectionIsCurrent = () => targetIsCurrent() && activeNavigationSeqRef.current === navigationSeq;
     const snapshotAt = promptEventClock();
     const result = await app.CreateDeliveryWorktree(workspaceRoot);
+    if (!projectionIsCurrent()) targetProjectionSuperseded();
     const meta = result.tab;
     const isNewTab = !statesRef.current.has(meta.id);
     setActiveTabId(meta.id);
@@ -3113,20 +3378,27 @@ export function useController() {
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
     const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic");
-    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    if (isNewTab) void load.then(() => targetIsCurrent() ? reconcileTabRuntime(meta.id, { hydrateSessionData: false }) : undefined).catch(() => {});
     else void load;
     return result;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
-  const closeTab = useCallback(async (tabId: string) => {
+  const closeTab = useCallback(async (tabId: string): Promise<boolean> => {
+    const targetProjectionEpoch = targetProjectionEpochRef.current;
+    const targetIsCurrent = () => targetProjectionEpochRef.current === targetProjectionEpoch;
     if (tabId === activeTabIdRef.current) beginActiveNavigation();
     try {
+      if (!targetIsCurrent()) return false;
       await app.CloseTab(tabId);
+      if (!targetIsCurrent()) return false;
       statesRef.current.delete(tabId);
       bump();
-      if (tabId === activeTabId) await syncActiveTabFromBackend(false);
-    } catch { /* ignore */ }
-  }, [activeTabId, beginActiveNavigation, bump, syncActiveTabFromBackend]);
+      if (tabId === activeTabIdRef.current) await syncActiveTabFromBackend(false);
+      return targetIsCurrent();
+    } catch {
+      return false;
+    }
+  }, [beginActiveNavigation, bump, syncActiveTabFromBackend]);
 
   const reorderTabs = useCallback(async (tabIds: string[]) => {
     try {
@@ -3137,6 +3409,7 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
+    targetIdentityGen,
     send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, answerQuestion, setControllerMode,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,

@@ -295,7 +295,8 @@ ok(
 
 ok(
   /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
-    /const workspaceScopeKey = \[/.test(appSource) &&
+    /const workspaceScopeKey = workspaceScopeKeyForAuthority\(\{/.test(appSource) &&
+    /targetIdentityGen,/.test(appSource) &&
     /activeTab\?\.sessionPath/.test(appSource) &&
     /state\.meta\?\.sessionPath/.test(appSource) &&
     /state\.meta\?\.cwd/.test(appSource) &&
@@ -316,16 +317,22 @@ ok(
   /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
     /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
     /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
-    /const latest = \(\) => request\.seq === navigationSeqRef\.current;/.test(appSource) &&
+    /const latest = \(\) => \([\s\S]*request\.seq === navigationSeqRef\.current[\s\S]*tabMetasTargetIdentityGenRef\.current === navigationTargetIdentityGen/.test(navigationBlock) &&
     /return activateTopic\(scope, workspaceRoot, topicId/.test(appSource) &&
     /return openTopicSession\(scope, workspaceRoot, topicId/.test(appSource) &&
     /return openGlobalTab\(topicId\)/.test(appSource) &&
     /return openProjectTab\(workspaceRoot, topicId\)/.test(appSource) &&
     /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
     !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
-    /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
+    /const latest = \(\) => \([\s\S]*tabMetasTargetIdentityGenRef\.current === navigationTargetIdentityGen/.test(navigationBlock) &&
+    /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*const tabs = await refreshTabMetas\(\);[\s\S]*return tabs \?\? \[\];/.test(navigationBlock) &&
     /if \(!latest\(\)\) return;[\s\S]*seedActiveTabMeta\(openedTab\);[\s\S]*void refreshLatestTabMetas\(\);/.test(navigationBlock),
   "desktop navigation coalesces pending requests, ignores stale results, and seeds active tab metadata before background refresh",
+);
+
+ok(
+  /const handleTabsClose = useCallback\(async[\s\S]*const closeTargetIdentityGen = tabMetasTargetIdentityGenRef\.current;[\s\S]*for \(const id of targets\) \{[\s\S]*if \(!closeTargetIsCurrent\(\)\) return;[\s\S]*const closed = await closeTab\(id\);[\s\S]*if \(!closed \|\| !closeTargetIsCurrent\(\)\) return;/.test(appSource),
+  "multi-tab close aborts before issuing destructive calls against a new target authority",
 );
 
 ok(
