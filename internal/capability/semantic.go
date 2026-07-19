@@ -195,6 +195,7 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 				Usage:       usage,
 				Pricing:     r.Pricing,
 				UsageSource: event.UsageSourceCapabilityRouter,
+				UsageModel:  r.Provider.Name(),
 			})
 		}
 	}

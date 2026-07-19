@@ -1179,7 +1179,7 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 		}
 	}
 	if usage != nil && usage.TotalTokens > 0 && s.bc != nil {
-		s.bc.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: s.titlePrice, UsageSource: event.UsageSourceTitle})
+		s.bc.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: s.titlePrice, UsageSource: event.UsageSourceTitle, UsageModel: s.titleProv.Name()})
 	}
 	title := strings.TrimSpace(text.String())
 	if len(title) >= 2 && ((title[0] == '"' && title[len(title)-1] == '"') || (title[0] == '\'' && title[len(title)-1] == '\'')) {

@@ -288,6 +288,7 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	}
 
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
+	m.emitIfActive(parentSession, lifecycleEvent(parentSession, id, kind, Running))
 
 	m.wg.Add(1)
 	if m.stalledWarning > 0 {
@@ -632,6 +633,7 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 	}
 	if shouldEmit {
 		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
+		m.sink.Emit(lifecycleEvent(parentSession, id, kind, st))
 	}
 }
 
@@ -1601,6 +1603,17 @@ func (m *Manager) emitTeardownTimeout(action string, result TeardownResult) {
 		}
 	}
 	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Background job teardown timed out.", Detail: b.String()})
+	for _, job := range result.TimedOut {
+		m.sink.Emit(event.Event{Kind: event.BackgroundJobLifecycle, BackgroundJob: event.BackgroundJob{
+			ID: job.ID, Kind: job.Kind, Status: "drain_timeout",
+		}})
+	}
+}
+
+func lifecycleEvent(parentSession, id, kind string, status Status) event.Event {
+	return event.Event{Kind: event.BackgroundJobLifecycle, BackgroundJob: event.BackgroundJob{
+		ID: id, Kind: kind, Status: string(status), SessionID: strings.TrimSpace(parentSession),
+	}}
 }
 
 func (m *Manager) removeTempRoot() {

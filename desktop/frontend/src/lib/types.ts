@@ -20,7 +20,8 @@ export type EventKind =
   | "mcp_surface_ready"
   | "retrying"
   | "steer"
-  | "guardian_assessment";
+  | "guardian_assessment"
+  | "background_job_lifecycle";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -84,6 +85,13 @@ export interface WireUsage {
   costUsd?: number;
 }
 
+export interface WireBackgroundJob {
+  id: string;
+  kind: string;
+  status: string;
+  sessionId?: string;
+}
+
 export interface WireApproval {
   id: string;
   tool: string;
@@ -118,6 +126,7 @@ export interface WireGuardian {
   rationale?: string;
   duration_ms?: number;
   usage?: WireUsage;
+  backgroundJob?: WireBackgroundJob;
 }
 
 export interface WireAskOption {

@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
+	"reasonix/internal/usageledger"
 )
 
 type runOutputFormat string
@@ -33,23 +34,25 @@ func parseRunOutputFormat(value string) (runOutputFormat, error) {
 	}
 }
 
-type runResultUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-}
+type runResultUsage = usageledger.Tokens
 
 type runResult struct {
-	Type         string         `json:"type"`
-	Subtype      string         `json:"subtype"`
-	IsError      bool           `json:"is_error"`
-	DurationMS   int64          `json:"duration_ms"`
-	NumTurns     int            `json:"num_turns"`
-	Result       string         `json:"result"`
-	SessionID    string         `json:"session_id,omitempty"`
-	TotalCostUSD float64        `json:"total_cost_usd"`
-	Usage        runResultUsage `json:"usage"`
+	SchemaVersion           int                               `json:"schema_version"`
+	Type                    string                            `json:"type"`
+	Subtype                 string                            `json:"subtype"`
+	IsError                 bool                              `json:"is_error"`
+	DurationMS              int64                             `json:"duration_ms"`
+	NumTurns                int                               `json:"num_turns"`
+	Result                  string                            `json:"result"`
+	SessionID               string                            `json:"session_id,omitempty"`
+	UsageIsIncomplete       bool                              `json:"usage_is_incomplete"`
+	CostIsPartial           bool                              `json:"cost_is_partial"`
+	TotalCostUSD            *float64                          `json:"total_cost_usd,omitempty"`
+	TotalCostUSDTicks       *int64                            `json:"total_cost_usd_ticks,omitempty"`
+	ModelUsage              map[string]usageledger.ModelUsage `json:"modelUsage"`
+	IncompleteReasons       []string                          `json:"incomplete_reasons,omitempty"`
+	OpenBackgroundSubagents int                               `json:"open_background_subagents,omitempty"`
+	Usage                   runResultUsage                    `json:"usage"`
 }
 
 type runOutputSink struct {
@@ -58,14 +61,13 @@ type runOutputSink struct {
 	out     io.Writer
 	encoder *json.Encoder
 	final   string
-	usage   runResultUsage
-	cost    float64
+	ledger  *usageledger.Ledger
 	turns   int
 	err     error
 }
 
 func newRunOutputSink(out io.Writer, format runOutputFormat) *runOutputSink {
-	return &runOutputSink{format: format, out: out, encoder: json.NewEncoder(out)}
+	return &runOutputSink{format: format, out: out, encoder: json.NewEncoder(out), ledger: usageledger.New()}
 }
 
 func (s *runOutputSink) Emit(e event.Event) {
@@ -74,15 +76,7 @@ func (s *runOutputSink) Emit(e event.Event) {
 	if e.Kind == event.Message {
 		s.final = e.Text
 	}
-	if e.Kind == event.Usage && e.Usage != nil {
-		s.usage.InputTokens += e.Usage.PromptTokens
-		s.usage.OutputTokens += e.Usage.CompletionTokens
-		s.usage.CacheReadInputTokens += e.Usage.CacheHitTokens
-		s.usage.CacheCreationInputTokens += e.Usage.CacheMissTokens
-		if e.Pricing != nil {
-			s.cost += e.Pricing.Cost(e.Usage)
-		}
-	}
+	s.ledger.Add(e)
 	if e.Kind == event.TurnDone {
 		s.turns++
 	}
@@ -115,15 +109,23 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 	if turns == 0 && runErr == nil {
 		turns = 1
 	}
+	projection := s.ledger.Projection()
 	return s.encoder.Encode(runResult{
-		Type:         "result",
-		Subtype:      subtype,
-		IsError:      runErr != nil,
-		DurationMS:   time.Since(started).Milliseconds(),
-		NumTurns:     turns,
-		Result:       resultText,
-		SessionID:    sessionID,
-		TotalCostUSD: s.cost,
-		Usage:        s.usage,
+		SchemaVersion:           2,
+		Type:                    "result",
+		Subtype:                 subtype,
+		IsError:                 runErr != nil,
+		DurationMS:              time.Since(started).Milliseconds(),
+		NumTurns:                turns,
+		Result:                  resultText,
+		SessionID:               sessionID,
+		UsageIsIncomplete:       projection.UsageIsIncomplete,
+		CostIsPartial:           projection.CostIsPartial,
+		TotalCostUSD:            projection.TotalCostUSD,
+		TotalCostUSDTicks:       projection.TotalCostUSDTicks,
+		ModelUsage:              projection.ModelUsage,
+		IncompleteReasons:       projection.IncompleteReasons,
+		OpenBackgroundSubagents: projection.OpenBackgroundSubagents,
+		Usage:                   projection.Usage,
 	})
 }
