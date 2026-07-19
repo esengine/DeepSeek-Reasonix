@@ -4651,7 +4651,11 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 		// flight) would park again and start after teardown.
 		c.closed = true
 		c.parkedTurns = nil
+		c.running = false
+		c.finishing = false
+		c.canceling = false
 		c.mu.Unlock()
+		c.approval.clearAll()
 		if fireSessionEnd && started {
 			c.hooks.SessionEnd(context.Background(), "other")
 		}
