@@ -152,7 +152,7 @@ func TestOpacityClamped(t *testing.T) {
 	if bg.TaskOpacity > 1 {
 		t.Fatalf("task opacity not clamped: %v", bg.TaskOpacity)
 	}
-	if bg.PaneOpacity != 0.72 {
+	if bg.PaneOpacity == nil || *bg.PaneOpacity != 0.72 {
 		t.Fatalf("pane opacity default: %v", bg.PaneOpacity)
 	}
 	if bg.FocusX != 1 || bg.FocusY != 0 {
@@ -171,8 +171,57 @@ func TestOpacityClamped(t *testing.T) {
 	if sbg.Opacity > 1 {
 		t.Fatalf("scene opacity not clamped: %v", sbg.Opacity)
 	}
-	if sbg.PaneOpacity != 0.80 {
+	if sbg.PaneOpacity == nil || *sbg.PaneOpacity != 0.80 {
 		t.Fatalf("scene pane opacity default: %v", sbg.PaneOpacity)
+	}
+
+	// Explicit zero is a valid value and must not be confused with an omitted
+	// field, which preserves the legacy defaults above.
+	bg, err = normalizeThemeBackground(&ThemePackBackground{
+		Image: "bg.png", SafeArea: "center", PaneOpacity: themePackFloat64(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bg.PaneOpacity == nil || *bg.PaneOpacity != 0 {
+		t.Fatalf("explicit zero pane opacity changed: %v", bg.PaneOpacity)
+	}
+	sbg, err = normalizeThemeSceneBackground(&ThemePackSceneBackground{
+		Image: "task.png", SafeArea: "center", PaneOpacity: themePackFloat64(0),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sbg.PaneOpacity == nil || *sbg.PaneOpacity != 0 {
+		t.Fatalf("explicit zero scene pane opacity changed: %v", sbg.PaneOpacity)
+	}
+}
+
+func TestPaneOpacityExplicitZeroJSONRoundTrip(t *testing.T) {
+	raw := []byte(`{
+		"schemaVersion": 2,
+		"id": "zero-pane",
+		"name": "Zero Pane",
+		"baseStyle": "graphite",
+		"background": {"image": "home.webp", "safeArea": "center", "paneOpacity": 0},
+		"taskBackground": {"image": "task.webp", "safeArea": "center", "paneOpacity": 0}
+	}`)
+	m, err := parseThemePackManifest(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Background == nil || m.Background.PaneOpacity == nil || *m.Background.PaneOpacity != 0 {
+		t.Fatalf("home pane opacity did not preserve zero: %+v", m.Background)
+	}
+	if m.TaskBackground == nil || m.TaskBackground.PaneOpacity == nil || *m.TaskBackground.PaneOpacity != 0 {
+		t.Fatalf("task pane opacity did not preserve zero: %+v", m.TaskBackground)
+	}
+	encoded, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(encoded, []byte(`"paneOpacity":0`)); got != 2 {
+		t.Fatalf("explicit zero missing after marshal: count=%d json=%s", got, encoded)
 	}
 }
 

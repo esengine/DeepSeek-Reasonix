@@ -19,6 +19,7 @@ import {
 } from "../lib/themePack";
 import { applyTheme, getThemeStyle } from "../lib/theme";
 import { BASE_STYLE_PREVIEW_PALETTES, themePreviewPalette } from "../lib/themePreviewPalette";
+import { activateThemePack, cancelGlobalPreview, isPreviewActive, startGlobalPreview } from "../lib/themeExperience";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const packSource = readFileSync(resolve(testDir, "../lib/themePack.ts"), "utf8");
@@ -180,6 +181,34 @@ ok(attrs.get("data-theme-pack") === "preview-pack", "preview applies pack");
 cancelThemePreview();
 ok(!attrs.has("data-theme-pack"), "cancel restores cleared pack");
 
+// A failed persistent activation must keep the preview snapshot reversible.
+clearThemePack();
+applyTheme("dark", "graphite", { persist: false });
+startGlobalPreview(draft);
+const testWindow = window as typeof window & {
+  go?: { main?: { App?: { ActivateThemePack: (id: string) => Promise<void> } } };
+};
+testWindow.go = {
+  main: {
+    App: {
+      async ActivateThemePack() {
+        throw new Error("activation failed");
+      },
+    },
+  },
+};
+let activationRejected = false;
+try {
+  await activateThemePack(draft.id);
+} catch {
+  activationRejected = true;
+}
+ok(activationRejected, "activation failure surfaces to caller");
+ok(isPreviewActive(), "activation failure keeps preview reversible");
+cancelGlobalPreview();
+ok(!attrs.has("data-theme-pack") && getThemeStyle() === "graphite", "cancel restores appearance after activation failure");
+delete testWindow.go;
+
 // Restore-default must restore config baseStyle, not leave pack baseStyle.
 setBaseAppearance("dark", "graphite");
 applyTheme("dark", "graphite", { persist: false });
@@ -218,6 +247,14 @@ ok(
   /data-theme-has-bg="true"\][^}]*\.layout\s*\{[^}]*background:\s*transparent/s.test(stylesSource),
   "layout background transparent when theme has background",
 );
+const transparencyStart = stylesSource.indexOf("Extended pane transparency");
+const transparencyEnd = stylesSource.indexOf("Density recipe consumers", transparencyStart);
+const transparencySlice = stylesSource.slice(transparencyStart, transparencyEnd);
+const unguardedTransparencySelectors = transparencySlice
+  .split("\n")
+  .filter((line) => line.includes(":root[data-theme-pack]") && !line.includes('[data-theme-has-bg="true"]'));
+ok(unguardedTransparencySelectors.length === 0, "token-only packs keep opaque layout surfaces");
+ok(stylesSource.includes(':root[data-theme-has-bg="true"] .theme-bg'), "background layer only displays for packs with backgrounds");
 
 // Unmount must cancel preview.
 ok(librarySource.includes("cancelThemePreview()"), "ThemeLibrary cleanup cancels preview");

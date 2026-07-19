@@ -101,26 +101,26 @@ type ThemePackRecipes struct {
 
 // ThemePackBackground is an optional local background image with focus/safe area.
 type ThemePackBackground struct {
-	Image           string  `json:"image,omitempty"`
-	FocusX          float64 `json:"focusX"`
-	FocusY          float64 `json:"focusY"`
-	SafeArea        string  `json:"safeArea,omitempty"` // left|right|center
-	HomeOpacity     float64 `json:"homeOpacity"`
-	TaskOpacity     float64 `json:"taskOpacity"`
-	OverlayStrength float64 `json:"overlayStrength"`
-	PaneOpacity     float64 `json:"paneOpacity"` // home scene pane transparency (0=clear, 1=opaque)
+	Image           string   `json:"image,omitempty"`
+	FocusX          float64  `json:"focusX"`
+	FocusY          float64  `json:"focusY"`
+	SafeArea        string   `json:"safeArea,omitempty"` // left|right|center
+	HomeOpacity     float64  `json:"homeOpacity"`
+	TaskOpacity     float64  `json:"taskOpacity"`
+	OverlayStrength float64  `json:"overlayStrength"`
+	PaneOpacity     *float64 `json:"paneOpacity,omitempty"` // home scene pane transparency (0=clear, 1=opaque)
 }
 
 // ThemePackSceneBackground optionally overrides the task/workspace scene.
 // V1 packs omit it and continue using Background with TaskOpacity.
 type ThemePackSceneBackground struct {
-	Image           string  `json:"image,omitempty"`
-	FocusX          float64 `json:"focusX"`
-	FocusY          float64 `json:"focusY"`
-	SafeArea        string  `json:"safeArea,omitempty"` // left|right|center
-	Opacity         float64 `json:"opacity"`
-	OverlayStrength float64 `json:"overlayStrength"`
-	PaneOpacity     float64 `json:"paneOpacity"` // task scene pane transparency (0=clear, 1=opaque)
+	Image           string   `json:"image,omitempty"`
+	FocusX          float64  `json:"focusX"`
+	FocusY          float64  `json:"focusY"`
+	SafeArea        string   `json:"safeArea,omitempty"` // left|right|center
+	Opacity         float64  `json:"opacity"`
+	OverlayStrength float64  `json:"overlayStrength"`
+	PaneOpacity     *float64 `json:"paneOpacity,omitempty"` // task scene pane transparency (0=clear, 1=opaque)
 }
 
 // ThemeDesktopState is the versioned active-theme pointer (not config.toml).
@@ -221,6 +221,10 @@ func defaultThemePackRecipes() ThemePackRecipes {
 	return ThemePackRecipes{Density: "comfortable", Corners: "soft"}
 }
 
+func themePackFloat64(value float64) *float64 {
+	return &value
+}
+
 func defaultThemePackBackground() ThemePackBackground {
 	return ThemePackBackground{
 		FocusX:          0.5,
@@ -229,7 +233,7 @@ func defaultThemePackBackground() ThemePackBackground {
 		HomeOpacity:     1,
 		TaskOpacity:     0.28,
 		OverlayStrength: 0.62,
-		PaneOpacity:     0.72,
+		PaneOpacity:     themePackFloat64(0.72),
 	}
 }
 
@@ -240,7 +244,7 @@ func defaultThemePackTaskBackground() ThemePackSceneBackground {
 		SafeArea:        "center",
 		Opacity:         0.28,
 		OverlayStrength: 0.62,
-		PaneOpacity:     0.80,
+		PaneOpacity:     themePackFloat64(0.80),
 	}
 }
 
@@ -418,8 +422,8 @@ func normalizeThemeBackground(in *ThemePackBackground) (*ThemePackBackground, er
 	out.HomeOpacity = clampFloat(in.HomeOpacity, 0, 1, 1)
 	out.TaskOpacity = clampFloat(in.TaskOpacity, 0, 1, 0.28)
 	out.OverlayStrength = clampFloat(in.OverlayStrength, 0, 1, 0.62)
-	if in.PaneOpacity > 0 {
-		out.PaneOpacity = clampFloat(in.PaneOpacity, 0, 1, 0.50)
+	if in.PaneOpacity != nil {
+		out.PaneOpacity = themePackFloat64(clampFloat(*in.PaneOpacity, 0, 1, 0.50))
 	}
 	// Empty image means token-only pack — drop background block.
 	if out.Image == "" {
@@ -458,8 +462,8 @@ func normalizeThemeSceneBackground(in *ThemePackSceneBackground) (*ThemePackScen
 	}
 	out.Opacity = clampFloat(in.Opacity, 0, 1, 0.28)
 	out.OverlayStrength = clampFloat(in.OverlayStrength, 0, 1, 0.62)
-	if in.PaneOpacity > 0 {
-		out.PaneOpacity = clampFloat(in.PaneOpacity, 0, 1, 0.68)
+	if in.PaneOpacity != nil {
+		out.PaneOpacity = themePackFloat64(clampFloat(*in.PaneOpacity, 0, 1, 0.68))
 	}
 	if out.Image == "" {
 		return nil, nil

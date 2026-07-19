@@ -150,11 +150,11 @@ export async function activateBaseStyle(style: ThemeStyle): Promise<ThemeExperie
 }
 
 export async function activateThemePack(id: string): Promise<ThemeExperienceView> {
-  // Clear preview snapshot FIRST without restoring original theme,
-  // so cancelThemePreview() inside endPreviewIfAny() won't overwrite
-  // the theme we're about to apply.
-  clearPreviewSnapshotOnly();
   await app.ActivateThemePack(id);
+  // Commit the preview only after persistence succeeds. If activation fails,
+  // the snapshot must remain available so Back/Cancel can restore the prior
+  // appearance.
+  clearPreviewSnapshotOnly();
   endPreviewIfAny();
   const view = await loadThemeExperience();
   applyExperienceToDOM(view);
