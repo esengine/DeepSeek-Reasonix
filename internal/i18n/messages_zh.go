@@ -497,6 +497,7 @@ var Chinese = Messages{
   reasonix run [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] [--output-format FORMAT] <task>
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI 代码审查（基于本地 diff）
   reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  通过 HTTP+SSE 提供服务（支持可选认证）
+  reasonix node [--addr HOST:PORT] [--id NODE_ID]       多会话移动 Node（WebSocket 远程 Runtime）
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    配置自动计划模式

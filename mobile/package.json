@@ -1,0 +1,27 @@
+{
+  "name": "reasonix-mobile",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx src/backend/session-backend.test.ts && tsx src/protocol/protocol.test.ts && tsx src/lib/paired-nodes.test.ts && tsx src/lib/approval.test.ts"
+  },
+  "dependencies": {
+    "lucide-react": "^0.525.0",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "tsx": "^4.22.4",
+    "typescript": "^5.8.0",
+    "vite": "^8.0.16"
+  }
+}

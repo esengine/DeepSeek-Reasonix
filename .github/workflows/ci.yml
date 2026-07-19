@@ -270,6 +270,56 @@ jobs:
             .github/workflows/release-desktop.yml
           bash scripts/release-workflows.test.sh
 
+  # Mobile foundation: Go protocol/mobilecore/node packages plus the Capacitor
+  # React shell (typecheck, unit tests, production Vite build). Native
+  # iOS/Android packaging and gomobile bind land in a later workflow stage.
+  mobile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: gofmt (mobile packages)
+        run: |
+          unformatted=$(gofmt -l internal/mobileprotocol internal/mobilecore internal/node internal/cli/node.go)
+          if [ -n "$unformatted" ]; then
+            echo "These mobile Go files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet (mobile packages)
+        run: go vet ./internal/mobileprotocol ./internal/mobilecore ./internal/node
+
+      - name: test (mobile packages)
+        run: go test ./internal/mobileprotocol ./internal/mobilecore ./internal/node
+
+      - name: Install mobile frontend deps
+        working-directory: mobile
+        run: npm ci
+
+      - name: Mobile typecheck
+        working-directory: mobile
+        run: npm run typecheck
+
+      - name: Mobile test
+        working-directory: mobile
+        run: npm test
+
+      - name: Mobile build
+        working-directory: mobile
+        run: npm run build
+
   # The site/ auth client has security-sensitive redirect-validation logic
   # (safeNext) covered by node:test unit tests. Those tests use only Node
   # builtins, so no `npm install` is needed — run them directly on every PR so

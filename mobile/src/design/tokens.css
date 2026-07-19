@@ -1,0 +1,172 @@
+/*
+ * Reasonix mobile design tokens — brand + platform chrome.
+ * Brand: industrial charcoal, warm copper accent, independent semantics.
+ * Platform: data-platform=ios|android|web adjusts radius, list, chrome.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --rx-bg: #0b0d11;
+  --rx-bg-soft: #12151b;
+  --rx-bg-elev: #191d26;
+  --rx-bg-elev-2: #222833;
+  --rx-bg-grouped: #0b0d11;
+  --rx-bg-grouped-cell: #191d26;
+  --rx-border: #343a48;
+  --rx-border-soft: #272c38;
+  --rx-separator: rgba(255, 255, 255, 0.08);
+  --rx-hairline: rgba(255, 255, 255, 0.06);
+
+  /* Text */
+  --rx-fg: #f2f3f5;
+  --rx-fg-dim: #b8bdc8;
+  --rx-fg-faint: #818794;
+  --rx-fg-link: #d97757;
+
+  /* Accent — warm copper */
+  --rx-accent: #d97757;
+  --rx-accent-strong: #e58a6b;
+  --rx-accent-soft: rgba(217, 119, 87, 0.14);
+  --rx-accent-fg: #1a0f0a;
+  --rx-accent-tint: rgba(217, 119, 87, 0.12);
+
+  /* Semantic */
+  --rx-success: #3fae7a;
+  --rx-info: #4b8fd4;
+  --rx-warning: #d4a017;
+  --rx-danger: #d94b4b;
+
+  /* Layout defaults (overridden per platform) */
+  --rx-radius: 10px;
+  --rx-radius-sm: 8px;
+  --rx-radius-lg: 14px;
+  --rx-radius-pill: 999px;
+  --rx-touch: 44px;
+  --rx-list-inset: 16px;
+  --rx-bar-height: 48px;
+  --rx-tab-height: 52px;
+  --rx-nav-height: calc(var(--rx-tab-height) + env(safe-area-inset-bottom, 0px));
+  --rx-safe-top: env(safe-area-inset-top, 0px);
+  --rx-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --rx-safe-left: env(safe-area-inset-left, 0px);
+  --rx-safe-right: env(safe-area-inset-right, 0px);
+  --rx-keyboard-inset: 0px;
+
+  /* Type — follows system Dynamic Type via root font-size when possible */
+  --rx-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Roboto, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Helvetica Neue",
+    Arial, sans-serif;
+  --rx-font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --rx-font-scale: 1;
+  --rx-text-2xs: calc(11px * var(--rx-font-scale));
+  --rx-text-sm: calc(13px * var(--rx-font-scale));
+  --rx-text-md: calc(15px * var(--rx-font-scale));
+  --rx-text-lg: calc(17px * var(--rx-font-scale));
+  --rx-text-xl: calc(22px * var(--rx-font-scale));
+  --rx-text-display: calc(28px * var(--rx-font-scale));
+  --rx-title-weight: 700;
+  --rx-bar-weight: 600;
+
+  /* Motion */
+  --rx-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --rx-ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --rx-dur-fast: 120ms;
+  --rx-dur-mid: 180ms;
+  --rx-dur-slow: 260ms;
+
+  --rx-shadow-bar: 0 -0.5px 0 var(--rx-hairline);
+  --rx-shadow-sheet: 0 -8px 32px rgba(0, 0, 0, 0.45);
+  --rx-elevation-1: none;
+  --rx-fab-size: 56px;
+}
+
+/* —— iOS chrome —— */
+[data-platform="ios"] {
+  --rx-radius: 12px;
+  --rx-radius-sm: 10px;
+  --rx-radius-lg: 16px;
+  --rx-touch: 44px;
+  --rx-list-inset: 16px;
+  --rx-bar-height: 44px;
+  --rx-tab-height: 49px;
+  --rx-bg-grouped: #000000;
+  --rx-bg-grouped-cell: #1c1c1e;
+  --rx-title-weight: 700;
+  --rx-text-display: calc(34px * var(--rx-font-scale));
+}
+
+/* —— Android / Material-ish chrome —— */
+[data-platform="android"],
+[data-platform="web"] {
+  --rx-radius: 12px;
+  --rx-radius-sm: 8px;
+  --rx-radius-lg: 16px;
+  --rx-touch: 48px;
+  --rx-list-inset: 0px;
+  --rx-bar-height: 56px;
+  --rx-tab-height: 56px;
+  --rx-bg-grouped: var(--rx-bg);
+  --rx-bg-grouped-cell: var(--rx-bg);
+  --rx-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --rx-title-weight: 500;
+  --rx-text-display: calc(24px * var(--rx-font-scale));
+}
+
+/* —— Light theme —— */
+[data-theme="light"] {
+  color-scheme: light;
+  --rx-bg: #f2f2f7;
+  --rx-bg-soft: #e5e5ea;
+  --rx-bg-elev: #ffffff;
+  --rx-bg-elev-2: #f7f7fa;
+  --rx-bg-grouped: #f2f2f7;
+  --rx-bg-grouped-cell: #ffffff;
+  --rx-border: #c6c6c8;
+  --rx-border-soft: #d1d1d6;
+  --rx-separator: rgba(60, 60, 67, 0.18);
+  --rx-hairline: rgba(60, 60, 67, 0.12);
+  --rx-fg: #000000;
+  --rx-fg-dim: #3a3a3c;
+  --rx-fg-faint: #8e8e93;
+  --rx-accent: #c45f3d;
+  --rx-accent-strong: #d97757;
+  --rx-accent-soft: rgba(196, 95, 61, 0.12);
+  --rx-accent-fg: #fff8f5;
+  --rx-accent-tint: rgba(196, 95, 61, 0.1);
+  --rx-success: #1f8a57;
+  --rx-info: #2b6cb0;
+  --rx-warning: #b8860b;
+  --rx-danger: #c53030;
+  --rx-shadow-sheet: 0 -8px 32px rgba(0, 0, 0, 0.12);
+  --rx-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="light"][data-platform="ios"] {
+  --rx-bg: #f2f2f7;
+  --rx-bg-grouped: #f2f2f7;
+  --rx-bg-grouped-cell: #ffffff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --rx-dur-fast: 0ms;
+    --rx-dur-mid: 0ms;
+    --rx-dur-slow: 0ms;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --rx-border: #9aa1b0;
+    --rx-fg-faint: #a8afbc;
+    --rx-separator: rgba(255, 255, 255, 0.22);
+  }
+  [data-theme="light"] {
+    --rx-border: #4a5160;
+    --rx-fg-faint: #3a4050;
+    --rx-separator: rgba(0, 0, 0, 0.28);
+  }
+}

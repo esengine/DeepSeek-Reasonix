@@ -43,6 +43,12 @@ node_modules/
 .pnpm-store/
 .npm/
 
+# Mobile (Capacitor) build output — native projects generated locally
+/mobile/dist/
+/mobile/ios/
+/mobile/android/
+/mobile/.capacitor/
+
 # Project-local Reasonix state; keep the checked-in review command.
 /.reasonix/*
 !/.reasonix/commands/

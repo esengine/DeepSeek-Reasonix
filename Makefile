@@ -2,7 +2,7 @@ VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOEXE := $(shell go env GOEXE)
 
-.PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times hooks cross clean
+.PHONY: build vet fmt test mobile-test mobile-ci desktop-test desktop-test-short desktop-test-times hooks cross clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
@@ -16,6 +16,16 @@ fmt:
 
 test:
 	go test ./...
+
+# Focused mobile foundation packages (protocol, mobilecore, node hub).
+mobile-test:
+	go test ./internal/mobileprotocol ./internal/mobilecore ./internal/node
+
+# Mirror .github/workflows/ci.yml mobile job (Go + React shell).
+mobile-ci:
+	go vet ./internal/mobileprotocol ./internal/mobilecore ./internal/node
+	go test ./internal/mobileprotocol ./internal/mobilecore ./internal/node
+	cd mobile && npm ci && npm run typecheck && npm test && npm run build
 
 desktop-test:
 	cd desktop && go test .
