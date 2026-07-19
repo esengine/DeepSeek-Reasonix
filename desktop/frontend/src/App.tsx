@@ -164,9 +164,9 @@ import {
   normalizeThemePreference,
   normalizeThemeStyleForTheme,
   readLegacyThemePreference,
-  applyConversationWidth,
   type Theme,
 } from "./lib/theme";
+import { applyConversationWidth } from "./lib/conversationWidth";
 import { applyThemePack, applyThemeScene, clearThemePack, setBaseAppearance } from "./lib/themePack";
 import { ThemeBackground } from "./components/ThemeBackground";
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
@@ -1318,7 +1318,7 @@ export default function App() {
       const nextTheme = normalizeThemePreference(settings.desktopTheme);
       const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
       applyTheme(nextTheme, nextStyle, { persist: false });
-      applyConversationWidth(settings.conversationWidth === "full" ? "full" : "standard");
+      applyConversationWidth(settings.conversationWidth);
       // Config appearance is the restore target for clearThemePack / restore-default.
       setBaseAppearance(nextTheme, nextStyle);
       const nextLayoutStyle = normalizeDesktopLayoutStyle(settings.desktopLayoutStyle);

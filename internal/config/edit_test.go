@@ -205,6 +205,37 @@ func TestDesktopLayoutStyleNormalizes(t *testing.T) {
 	}
 }
 
+func TestDesktopConversationWidthNormalizes(t *testing.T) {
+	if got := Default().DesktopConversationWidth(); got != "standard" {
+		t.Fatalf("default desktop conversation width = %q, want standard", got)
+	}
+
+	for _, tt := range []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "standard", false},
+		{"standard", "standard", false},
+		{" FULL ", "full", false},
+		{"wide", "standard", true},
+	} {
+		c := Default()
+		if err := c.SetDesktopConversationWidth(tt.in); (err != nil) != tt.wantErr {
+			t.Fatalf("SetDesktopConversationWidth(%q) err = %v, wantErr %v", tt.in, err, tt.wantErr)
+		}
+		if got := c.DesktopConversationWidth(); got != tt.want {
+			t.Fatalf("DesktopConversationWidth(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+
+	c := Default()
+	c.Desktop.ConversationWidth = " FULL "
+	if got := c.DesktopConversationWidth(); got != "full" {
+		t.Fatalf("manually edited conversation width = %q, want full", got)
+	}
+}
+
 func TestDesktopExternalOpenerValidation(t *testing.T) {
 	c := Default()
 	if got := c.DesktopExternalOpener(); got != "" {

@@ -13,6 +13,7 @@ import { initFontFamily } from "./lib/fontFamily";
 import { initTextSize } from "./lib/textSize";
 import { initTypographyPreferences } from "./lib/typographyPreferences";
 import { initTheme } from "./lib/theme";
+import { initConversationWidth } from "./lib/conversationWidth";
 import "./styles.css";
 
 // Install first so startup/runtime failures paint a useful error instead of a
@@ -41,6 +42,7 @@ function initTypographyPlatform() {
 
 initTypographyPlatform();
 initTheme();
+initConversationWidth();
 initTextSize();
 initFontFamily();
 initTypographyPreferences();

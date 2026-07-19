@@ -1131,6 +1131,40 @@ func TestRenderTOMLPreservesDesktopDisplayMode(t *testing.T) {
 	}
 }
 
+func TestRenderTOMLConversationWidthRoundTrip(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopConversationWidth("full"); err != nil {
+		t.Fatalf("SetDesktopConversationWidth: %v", err)
+	}
+	rendered := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(rendered, `conversation_width = "full"`) {
+		t.Fatalf("rendered user config missing conversation_width:\n%s", rendered)
+	}
+	if project := RenderTOMLForScope(c, RenderScopeProject); strings.Contains(project, "conversation_width") {
+		t.Fatalf("project config leaked user-only conversation_width:\n%s", project)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+	if got.DesktopConversationWidth() != "full" {
+		t.Fatalf("conversation_width after round trip = %q, want full", got.DesktopConversationWidth())
+	}
+
+	if err := c.SetDesktopConversationWidth("standard"); err != nil {
+		t.Fatalf("reset conversation width: %v", err)
+	}
+	if rendered := RenderTOMLForScope(c, RenderScopeUser); strings.Contains(rendered, "conversation_width") {
+		t.Fatalf("default conversation_width should be omitted:\n%s", rendered)
+	}
+
+	c.Desktop.ConversationWidth = " FULL "
+	if rendered := RenderTOMLForScope(c, RenderScopeUser); !strings.Contains(rendered, `conversation_width = "full"`) {
+		t.Fatalf("manually edited full width was not normalized:\n%s", rendered)
+	}
+}
+
 func TestRenderTOMLDefaultStepsOmitted(t *testing.T) {
 	isolateUserConfigHome(t)
 	out := RenderTOML(Default())

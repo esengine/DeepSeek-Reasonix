@@ -369,7 +369,7 @@ func (c *Config) SetDesktopMetrics(enabled bool) error {
 }
 
 // SetDesktopConversationWidth sets the max transcript width preference.
-// standard = 960px fixed; full = 90% of parent container.
+// standard = 960px fixed; full = 90% of the parent, with a 960px floor.
 // An empty value resets to standard.
 func (c *Config) SetDesktopConversationWidth(width string) error {
 	switch strings.ToLower(strings.TrimSpace(width)) {

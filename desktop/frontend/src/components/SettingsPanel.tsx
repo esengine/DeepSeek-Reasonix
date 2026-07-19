@@ -8,15 +8,19 @@ import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderM
 import { useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
-  getConversationWidth,
   getTheme,
   getThemeStyle,
   normalizeThemePreference,
   normalizeThemeStyleForTheme,
-  type ConversationWidth,
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
+import {
+  applyConversationWidth,
+  getCachedConversationWidth,
+  normalizeConversationWidth,
+  type ConversationWidth,
+} from "../lib/conversationWidth";
 import { applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
 import { snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
 import {
@@ -100,7 +104,7 @@ export function SettingsPanel({
   const [warning, setWarning] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
-  const [convWidth, setConvWidth] = useState<ConversationWidth>(() => getConversationWidth());
+  const [conversationWidth, setConversationWidth] = useState<ConversationWidth>(() => getCachedConversationWidth());
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [zoomPct, setZoomPct] = useState<number>(zoomToPercent(getRestartZoom()));
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
@@ -144,7 +148,8 @@ export function SettingsPanel({
     const nextStyle = normalizeThemeStyleForTheme(s.desktopThemeStyle, nextTheme);
     setThemeState(nextTheme);
     setThemeStyleState(nextStyle);
-  }, [s?.desktopTheme, s?.desktopThemeStyle]);
+    setConversationWidth(applyConversationWidth(s.conversationWidth));
+  }, [s?.conversationWidth, s?.desktopTheme, s?.desktopThemeStyle]);
   useEffect(() => {
     if (desktopPlatform !== "windows") return;
     let cancelled = false;
@@ -281,7 +286,7 @@ export function SettingsPanel({
                     <AppearanceOverview
                       theme={theme}
                       themeStyle={themeStyle}
-                      convWidth={convWidth}
+                      conversationWidth={conversationWidth}
                       textSize={textSize}
                       showDisplayZoom={desktopPlatform === "windows"}
                       zoomPct={zoomPct}
@@ -297,8 +302,9 @@ export function SettingsPanel({
                         if (pack) applyThemePack(pack);
                         void apply(() => app.SetDesktopAppearance(nextTheme, themeStyle));
                       }}
-                      onConvWidth={(width) => {
-                        setConvWidth(width);
+                      onConversationWidth={(width) => {
+                        applyConversationWidth(width);
+                        setConversationWidth(width);
                         void apply(() => app.SetDesktopConversationWidth(width));
                       }}
                       onThemeStyle={(style) => {
@@ -1297,6 +1303,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     displayMode: normalizeDisplayMode(view.displayMode),
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
+    conversationWidth: normalizeConversationWidth(view.conversationWidth),
     checkUpdates: view.checkUpdates !== false,
   };
 }

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy, Images, LockKeyhole, Minus, Plus, RotateCcw } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT, type DictKey } from "../lib/i18n";
-import { THEME_STYLES, type ConversationWidth, type Theme, type ThemeStyle, isThemeStyle } from "../lib/theme";
+import { THEME_STYLES, type Theme, type ThemeStyle, isThemeStyle } from "../lib/theme";
+import type { ConversationWidth } from "../lib/conversationWidth";
 import { TEXT_SIZES, type TextSize } from "../lib/textSize";
 import { type FontFamily, type MonoFontFamily } from "../lib/fontFamily";
 import { DEFAULT_ZOOM, MIN_ZOOM, MAX_ZOOM, ZOOM_STEP, zoomToPercent, type ZoomLevel } from "../lib/dpiScale";
@@ -83,7 +84,7 @@ function monoFontFamilyLabel(font: MonoFontFamily, t: ReturnType<typeof useT>): 
 export function AppearanceOverview({
   theme,
   themeStyle,
-  convWidth,
+  conversationWidth,
   textSize,
   showDisplayZoom,
   zoomPct,
@@ -93,7 +94,7 @@ export function AppearanceOverview({
   customMonoFontName,
   onTheme,
   onThemeStyle,
-  onConvWidth,
+  onConversationWidth,
   onTextSize,
   onRestartZoom,
   onFontFamily,
@@ -103,7 +104,7 @@ export function AppearanceOverview({
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
-  convWidth: ConversationWidth;
+  conversationWidth: ConversationWidth;
   textSize: TextSize;
   showDisplayZoom: boolean;
   zoomPct: number;
@@ -113,7 +114,7 @@ export function AppearanceOverview({
   customMonoFontName: string;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
-  onConvWidth: (width: ConversationWidth) => void;
+  onConversationWidth: (width: ConversationWidth) => void;
   onTextSize: (size: TextSize) => void;
   onRestartZoom: (zoom: ZoomLevel) => Promise<void>;
   onFontFamily: (font: FontFamily) => void;
@@ -397,18 +398,18 @@ export function AppearanceOverview({
             <button
               type="button"
               role="radio"
-              aria-checked={convWidth === "standard"}
-              className={`set-seg__btn${convWidth === "standard" ? " set-seg__btn--on" : ""}`}
-              onClick={() => onConvWidth("standard")}
+              aria-checked={conversationWidth === "standard"}
+              className={`set-seg__btn${conversationWidth === "standard" ? " set-seg__btn--on" : ""}`}
+              onClick={() => onConversationWidth("standard")}
             >
               {t("settings.conversationWidthStandard")} (960px)
             </button>
             <button
               type="button"
               role="radio"
-              aria-checked={convWidth === "full"}
-              className={`set-seg__btn${convWidth === "full" ? " set-seg__btn--on" : ""}`}
-              onClick={() => onConvWidth("full")}
+              aria-checked={conversationWidth === "full"}
+              className={`set-seg__btn${conversationWidth === "full" ? " set-seg__btn--on" : ""}`}
+              onClick={() => onConversationWidth("full")}
             >
               {t("settings.conversationWidthFull")} (90%)
             </button>

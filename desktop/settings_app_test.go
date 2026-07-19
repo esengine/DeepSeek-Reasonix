@@ -1056,6 +1056,46 @@ func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	}
 }
 
+func TestSetDesktopConversationWidthPersistsToUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if got := app.Settings().ConversationWidth; got != "standard" {
+		t.Fatalf("Settings().ConversationWidth default = %q, want standard", got)
+	}
+	if got := app.DesktopStartupSettings().ConversationWidth; got != "standard" {
+		t.Fatalf("DesktopStartupSettings().ConversationWidth default = %q, want standard", got)
+	}
+	if err := app.SetDesktopConversationWidth("full"); err != nil {
+		t.Fatalf("SetDesktopConversationWidth: %v", err)
+	}
+	if got := app.Settings().ConversationWidth; got != "full" {
+		t.Fatalf("Settings().ConversationWidth = %q, want full", got)
+	}
+	if got := app.DesktopStartupSettings().ConversationWidth; got != "full" {
+		t.Fatalf("DesktopStartupSettings().ConversationWidth = %q, want full", got)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.DesktopConversationWidth(); got != "full" {
+		t.Fatalf("persisted conversation width = %q, want full", got)
+	}
+
+	if err := app.SetDesktopConversationWidth("wide"); err == nil {
+		t.Fatal("SetDesktopConversationWidth(wide) unexpectedly succeeded")
+	}
+	if got := config.LoadForEdit(config.UserConfigPath()).DesktopConversationWidth(); got != "full" {
+		t.Fatalf("invalid update changed persisted conversation width to %q", got)
+	}
+
+	raw, err := json.Marshal(app.DesktopStartupSettings())
+	if err != nil {
+		t.Fatalf("marshal DesktopStartupSettings: %v", err)
+	}
+	if !strings.Contains(string(raw), `"conversationWidth":"full"`) {
+		t.Fatalf("startup bridge payload omitted conversationWidth: %s", raw)
+	}
+}
+
 func TestSetDefaultToolApprovalModePersistsToUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

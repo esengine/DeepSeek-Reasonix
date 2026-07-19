@@ -124,8 +124,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		fmt.Fprintf(&b, "expand_thinking = %v   # desktop: show reasoning text expanded by default; false = collapsed\n", c.Desktop.ExpandThinking)
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
-		if c.Desktop.ConversationWidth == "full" {
-			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", c.Desktop.ConversationWidth)
+		if width := c.DesktopConversationWidth(); width == "full" {
+			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)
 		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {

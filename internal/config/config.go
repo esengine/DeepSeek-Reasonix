@@ -332,6 +332,15 @@ func (c *Config) DesktopDisplayMode() string {
 	}
 }
 
+// DesktopConversationWidth returns the normalized desktop conversation width.
+// Unknown and missing values fall back to standard for backward compatibility.
+func (c *Config) DesktopConversationWidth() string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.ConversationWidth), "full") {
+		return "full"
+	}
+	return "standard"
+}
+
 // NormalizeToolApprovalMode returns the canonical desktop/session tool approval
 // posture. Unknown or missing values fall back to ask for safety.
 func NormalizeToolApprovalMode(mode string) string {

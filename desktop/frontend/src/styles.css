@@ -209,6 +209,8 @@
   --motion-rise: 4px; /* enter-from translateY for popovers/menus */
 
   --radius: 9px;
+  --maxw: 960px;
+  --maxw-inner: 100%;
   --mono: var(--font-mono);
   --sans: var(--font-ui);
   --font-sans: var(--font-ui);
@@ -3341,7 +3343,7 @@ a[href] {
   overflow: hidden;
 }
 .warm-turn__body > * {
-  max-width: var(--maxw);
+  max-width: var(--maxw-inner);
   margin-left: auto;
   margin-right: auto;
 }
@@ -3462,7 +3464,7 @@ a[href] {
 }
 .readonly-batch__body > *,
 .turn-collapse__body > * {
-  max-width: var(--maxw);
+  max-width: var(--maxw-inner);
   margin-left: auto;
   margin-right: auto;
   margin-bottom: 6px;
@@ -24738,7 +24740,6 @@ body > .mermaid-diagram--fullscreen {
    color tokens, not spacing, positioning, density, or component geometry.
    ------------------------------------------------------------------------- */
 :root[data-theme-style] {
-  --maxw: 960px;
   --chrome-panel-control-size: 30px;
   --app-graphite-hairline: rgba(20, 22, 28, 0.12);
   --app-graphite-hairline-strong: rgba(20, 22, 28, 0.22);

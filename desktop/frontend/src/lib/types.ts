@@ -1487,7 +1487,7 @@ export interface SettingsView {
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
-  conversationWidth: string; // "standard" | "full"
+  conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
 }
 
 export interface DesktopStartupSettingsView {
@@ -1501,7 +1501,7 @@ export interface DesktopStartupSettingsView {
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
   safeMode?: boolean; // recovery startup with external integrations disabled
-  conversationWidth: string; // "standard" | "full"
+  conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
 }
 
 export type ExternalOpenerKind = "file-manager" | "editor" | "terminal";
