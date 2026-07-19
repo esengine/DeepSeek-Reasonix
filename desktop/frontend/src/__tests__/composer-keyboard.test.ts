@@ -5,11 +5,13 @@
 import {
   canUsePromptHistory,
   composerEnterAction,
+  insertComposerNewline,
   isFnKeyEvent,
   promptHistoryDirectionFromEvent,
   type PromptHistoryDirection,
 } from "../lib/composerKeyboard";
 import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcuts";
+import type { ComposerInvocation } from "../lib/invocationDisplay";
 
 let passed = 0;
 let failed = 0;
@@ -90,6 +92,22 @@ eq(composerEnterAction({ key: "Enter", shiftKey: true }, "linux"), "newline-nati
 resetCustomShortcuts();
 eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "reset restores plain-Enter send");
 eq(composerEnterAction({ key: "Enter", shiftKey: true }, "darwin"), "newline-native", "reset restores the Shift+Enter default");
+
+const boundaryInvocations: ComposerInvocation[] = [
+  { id: "first", offset: 0, command: { name: "first", description: "First skill", kind: "skill" } },
+  { id: "second", offset: 0, command: { name: "second", description: "Second subagent", kind: "subagent" } },
+];
+const newlineAfterFirst = insertComposerNewline("task", boundaryInvocations, {
+  start: 0,
+  end: 0,
+  afterInvocationId: "first",
+});
+eq(newlineAfterFirst.text, "\ntask", "custom newline updates the composer text");
+eq(
+  JSON.stringify(newlineAfterFirst.invocations.map((invocation) => [invocation.id, invocation.offset])),
+  JSON.stringify([["first", 0], ["second", 1]]),
+  "custom newline stays after the invocation at the caret boundary",
+);
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

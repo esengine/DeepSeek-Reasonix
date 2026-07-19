@@ -1,4 +1,5 @@
 import { matchesShortcut, type ShortcutPlatform } from "./keyboardShortcuts";
+import { replaceInvocationTextRange, type ComposerInvocation } from "./invocationDisplay";
 
 export type PromptHistoryDirection = "up" | "down";
 
@@ -29,6 +30,27 @@ export function composerEnterAction(event: ComposerEnterKeyLike, platform: Short
   // breaks the line — the WeChat/DingTalk-style layout users expect there.
   if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) return "newline-insert";
   return "none";
+}
+
+export interface ComposerSelectionLike {
+  start: number;
+  end: number;
+  afterInvocationId?: string;
+}
+
+export function insertComposerNewline(
+  text: string,
+  invocations: ComposerInvocation[],
+  selection: ComposerSelectionLike,
+): { text: string; invocations: ComposerInvocation[] } {
+  return replaceInvocationTextRange(
+    text,
+    invocations,
+    selection.start,
+    selection.end,
+    "\n",
+    selection.afterInvocationId,
+  );
 }
 
 export interface PromptHistoryKeyLike {

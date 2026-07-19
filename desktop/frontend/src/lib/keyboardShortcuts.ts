@@ -51,6 +51,7 @@ export type ShortcutDefinition = {
   preventDefault?: boolean;
   allowInEditable?: boolean;
   configurable?: boolean;
+  allowedKeys?: readonly string[];
 };
 
 const SHORTCUTS_STORAGE_KEY = "reasonix.customShortcuts";
@@ -100,6 +101,7 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.composerSend",
     defaults: allPlatforms({ key: "Enter" }),
     allowInEditable: true,
+    allowedKeys: ["Enter"],
   },
   {
     action: "composer.newline",
@@ -108,6 +110,7 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.composerNewline",
     defaults: allPlatforms({ key: "Enter", shift: true }),
     allowInEditable: true,
+    allowedKeys: ["Enter"],
   },
   {
     action: "selection.addToChat",
@@ -434,6 +437,13 @@ export function shortcutConflict(
     if (definition.action === action) return false;
     return sameCombo(resolvedShortcutCombo(definition.action, platform), combo);
   }) ?? null;
+}
+
+export function shortcutAcceptsCombo(action: ShortcutAction, combo: ShortcutCombo): boolean {
+  const allowedKeys = shortcutDefinition(action).allowedKeys;
+  if (!allowedKeys || allowedKeys.length === 0) return true;
+  const key = normalizeCombo(combo).key;
+  return allowedKeys.some((allowedKey) => normalizeKey(allowedKey) === key);
 }
 
 export function useGlobalShortcut(

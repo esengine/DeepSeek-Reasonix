@@ -8,6 +8,7 @@ import {
   formatShortcutComboParts,
   isCloseTabShortcut,
   matchesShortcut,
+  shortcutAcceptsCombo,
   shortcutConflict,
   type ShortcutPlatform,
 } from "../lib/keyboardShortcuts";
@@ -110,6 +111,10 @@ for (const platform of ["darwin", "windows", "linux"] satisfies ShortcutPlatform
 }
 eq(shortcutConflict("app.newSession", { key: "Enter", shift: true }, "darwin")?.action, "composer.newline", "rebinding another action onto Shift+Enter conflicts with the newline chord");
 eq(shortcutConflict("composer.newline", { key: "Enter" }, "darwin")?.action, "composer.send", "rebinding the newline chord onto plain Enter conflicts with the send chord");
+eq(shortcutAcceptsCombo("composer.send", { key: "Enter", ctrl: true }), true, "composer send accepts modified Enter");
+eq(shortcutAcceptsCombo("composer.newline", { key: "Enter", alt: true }), true, "composer newline accepts modified Enter");
+eq(shortcutAcceptsCombo("composer.send", { key: "s", ctrl: true }), false, "composer send rejects non-Enter keys");
+eq(shortcutAcceptsCombo("app.newSession", { key: "s", ctrl: true }), true, "unrestricted shortcuts still accept other keys");
 eq(formatShortcutCombo(defaultShortcutCombo("composer.newline", "darwin"), "darwin"), "⇧Enter", "formats the mac newline chord");
 eq(formatShortcutCombo(defaultShortcutCombo("composer.newline", "windows"), "windows"), "Shift+Enter", "formats the Windows newline chord");
 

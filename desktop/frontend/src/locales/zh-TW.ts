@@ -900,6 +900,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.shortcutsReset": "重置",
   "settings.shortcutsRecording": "按下組合鍵",
   "settings.shortcutsConflict": "{action} 與 {conflict} 衝突，請換一個快捷鍵。",
+  "settings.shortcutsEnterOnly": "{action} 僅支援 Enter 與可選修飾鍵的組合。",
   "settings.closeBehavior": "關閉視窗時",
   "settings.closeBehavior.background": "保持背景執行",
   "settings.closeBehavior.quit": "退出 Reasonix",

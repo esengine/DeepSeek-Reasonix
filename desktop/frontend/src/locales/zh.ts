@@ -1206,6 +1206,7 @@ export const zh: Record<DictKey, string> = {
   "settings.shortcutsReset": "重置",
   "settings.shortcutsRecording": "按下组合键",
   "settings.shortcutsConflict": "{action} 与 {conflict} 冲突，请换一个快捷键。",
+  "settings.shortcutsEnterOnly": "{action} 仅支持 Enter 与可选修饰键的组合。",
   "settings.closeBehavior": "关闭窗口时",
   "settings.closeBehavior.background": "保持后台运行",
   "settings.closeBehavior.quit": "退出 Reasonix",

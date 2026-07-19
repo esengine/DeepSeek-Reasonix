@@ -43,6 +43,7 @@ import {
   resetCustomShortcuts,
   resolvedShortcutCombo,
   saveCustomShortcut,
+  shortcutAcceptsCombo,
   shortcutConflict,
   shortcutDefinitions,
   type ShortcutAction,
@@ -567,6 +568,7 @@ export function ShortcutsSection() {
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
+  const [unsupportedAction, setUnsupportedAction] = useState<ShortcutAction | null>(null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
 
@@ -576,13 +578,20 @@ export function ShortcutsSection() {
     if (!combo) return;
     event.preventDefault();
     event.stopPropagation();
+    if (!shortcutAcceptsCombo(action, combo)) {
+      setConflict(null);
+      setUnsupportedAction(action);
+      return;
+    }
     const conflictDefinition = shortcutConflict(action, combo, platform);
     if (conflictDefinition) {
+      setUnsupportedAction(null);
       setConflict({ action, conflictAction: conflictDefinition.action });
       return;
     }
     saveCustomShortcut(action, combo);
     setConflict(null);
+    setUnsupportedAction(null);
     setRecording(null);
     setRevision((value) => value + 1);
   };
@@ -600,6 +609,7 @@ export function ShortcutsSection() {
           onClick={() => {
             resetCustomShortcuts();
             setConflict(null);
+            setUnsupportedAction(null);
             setRecording(null);
             setRevision((value) => value + 1);
           }}
@@ -614,6 +624,13 @@ export function ShortcutsSection() {
             {t("settings.shortcutsConflict", {
               action: t(definitions.find((definition) => definition.action === conflict.action)?.labelKey ?? "settings.tab.shortcuts"),
               conflict: t(definitions.find((definition) => definition.action === conflict.conflictAction)?.labelKey ?? "settings.tab.shortcuts"),
+            })}
+          </div>
+        )}
+        {unsupportedAction && (
+          <div className="shortcuts-settings__conflict" role="alert">
+            {t("settings.shortcutsEnterOnly", {
+              action: t(definitions.find((definition) => definition.action === unsupportedAction)?.labelKey ?? "settings.tab.shortcuts"),
             })}
           </div>
         )}
@@ -633,12 +650,14 @@ export function ShortcutsSection() {
                 <button
                   className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}${definition.configurable === false ? " shortcuts-settings__key--locked" : ""}`}
                   type="button"
+                  data-shortcut-action={definition.action}
                   disabled={definition.configurable === false}
                   aria-label={isRecording ? t("settings.shortcutsRecording") : display}
                   aria-pressed={isRecording}
                   onClick={(event) => {
                     setRecording(definition.action);
                     setConflict(null);
+                    setUnsupportedAction(null);
                     // WebKit (the desktop WKWebView) does not focus buttons on
                     // click, and the recorder listens for keys on the button —
                     // without this the recorder never receives any keydown.
@@ -658,6 +677,7 @@ export function ShortcutsSection() {
                   onClick={() => {
                     saveCustomShortcut(definition.action, null);
                     setConflict(null);
+                    setUnsupportedAction(null);
                     setRecording(null);
                     setRevision((value) => value + 1);
                   }}

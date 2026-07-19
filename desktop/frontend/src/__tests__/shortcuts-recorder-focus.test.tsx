@@ -128,6 +128,38 @@ async function main() {
     resetCustomShortcuts();
     await flushPromises();
   });
+  const sendButton = container.querySelector<HTMLButtonElement>('[data-shortcut-action="composer.send"]');
+  ok(Boolean(sendButton), "composer send recorder renders");
+  if (!sendButton) throw new Error("no composer send recorder");
+
+  await act(async () => {
+    sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await flushPromises();
+  });
+  await act(async () => {
+    sendButton.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await flushPromises();
+  });
+  ok(sendButton.classList.contains("shortcuts-settings__key--recording"), "non-Enter key keeps the composer recorder active");
+  ok(!loadCustomShortcuts()["composer.send"], "non-Enter key is not saved for composer send");
+  ok(Boolean(container.querySelector('[role="alert"]')), "non-Enter key shows an Enter-only validation message");
+
+  await act(async () => {
+    sendButton.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true }),
+    );
+    await flushPromises();
+  });
+  const savedSend = loadCustomShortcuts()["composer.send"];
+  ok(!sendButton.classList.contains("shortcuts-settings__key--recording"), "Ctrl+Enter completes composer shortcut recording");
+  ok(Boolean(savedSend && savedSend.key === "Enter" && savedSend.ctrl), "Ctrl+Enter is saved for composer send");
+
+  await act(async () => {
+    resetCustomShortcuts();
+    await flushPromises();
+  });
   await act(async () => {
     root.unmount();
   });

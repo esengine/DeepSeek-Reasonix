@@ -1204,6 +1204,7 @@ export const en = {
   "settings.shortcutsReset": "Reset",
   "settings.shortcutsRecording": "Press keys",
   "settings.shortcutsConflict": "{action} conflicts with {conflict}. Choose another shortcut.",
+  "settings.shortcutsEnterOnly": "{action} only supports Enter with optional modifier keys.",
   "settings.closeBehavior": "When closing window",
   "settings.closeBehavior.background": "Keep running",
   "settings.closeBehavior.quit": "Quit Reasonix",

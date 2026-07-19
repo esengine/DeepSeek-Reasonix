@@ -5,7 +5,7 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
-import { canUsePromptHistory, composerEnterAction, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
+import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
@@ -1328,7 +1328,7 @@ export function Composer({
 
   const insertNewlineAtCaret = () => {
     const selection = getComposerSelection();
-    const updated = replaceInvocationTextRange(textRef.current, invocationsRef.current, selection.start, selection.end, "\n");
+    const updated = insertComposerNewline(textRef.current, invocationsRef.current, selection);
     textRef.current = updated.text;
     invocationsRef.current = updated.invocations;
     setText(updated.text);
