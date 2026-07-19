@@ -644,6 +644,7 @@ export const en = {
   "imageViewer.title": "Image preview",
   "composer.attachImageFailed": "Image paste failed",
   "composer.attachFileFailed": "File attach failed",
+  "composer.attachDropEmptyFile": "File is empty (0 bytes), cannot attach",
   "composer.attachDropFailed": "Dropped file attach failed",
   "composer.pasteImageFailed": "Could not read clipboard image",
   "composer.imageInputUnsupported": "Current model will not receive images directly. Use an image-capable model or an OCR/vision MCP tool to inspect the attached path.",

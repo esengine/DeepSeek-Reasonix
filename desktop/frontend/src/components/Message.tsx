@@ -5,7 +5,7 @@ import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
 import { ComposerContextCard } from "./ComposerContextCard";
-import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
+import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, highlightRefsInText, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import type { DisplayAttachment } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
 import { replaySubmitText } from "../lib/editReplay";
@@ -204,6 +204,7 @@ export function UserMessage({
   const invocationSegments = imSource ? [] : invocationSegmentsFromMessage(displayText, submitText, invocationMetadata);
   const hasInvocationSegments = invocationSegments.some((segment) => segment.type === "invocation");
   const orderedAttachments = sortDisplayAttachments(attachments);
+  const cardAttachments = orderedAttachments;
   const sourceLabel = imSource ? imSourceLabel(imSource, t) : "";
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
   const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
@@ -451,7 +452,7 @@ export function UserMessage({
             {hasInvocationSegments && pasteBlocks.length === 0 ? (
               <div className="msg__text msg__rich-text">
                 {invocationSegments.map((segment, index) => segment.type === "text"
-                  ? <span key={`text:${segment.start}:${index}`}>{segment.content}</span>
+                  ? <span key={`text:${segment.start}:${index}`}>{highlightRefsInText(segment.content).map((s, j) => s.isRef ? <span key={j} className="ref-highlight">{s.text}</span> : s.text)}</span>
                   : (
                     <InvocationBadge
                       key={`invocation:${segment.invocation.name}:${segment.offset}:${index}`}
@@ -463,7 +464,7 @@ export function UserMessage({
               </div>
             ) : displaySegments.map((seg, i) => {
               if (seg.type === "text") {
-                return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
+                return seg.content ? <div className="msg__text" key={`s${i}`}>{highlightRefsInText(seg.content).map((s, j) => s.isRef ? <span key={j} className="ref-highlight">{s.text}</span> : s.text)}</div> : null;
               }
               const expanded = Boolean(expandedPasteLabels[seg.block.label]);
               return (
@@ -490,9 +491,9 @@ export function UserMessage({
           </>
         )}
         {failed && <div className="msg__send-failed">{t("msg.sendFailed")}</div>}
-        {orderedAttachments.length > 0 && (
+        {cardAttachments.length > 0 && (
           <div className="msg-attachments" aria-label={t("msg.attachments")}>
-            {orderedAttachments.map((attachment, index) => {
+            {cardAttachments.map((attachment, index) => {
               const isImage = attachment.kind === "image";
               const el = (
                 <div
@@ -510,9 +511,7 @@ export function UserMessage({
                   <span className="msg-attachment__main">
                     <span className="msg-attachment__name">{attachment.name}</span>
                     <span className="msg-attachment__meta">
-                      {attachment.kind === "folder"
-                        ? t("msg.folderReference")
-                        : `${attachment.ext || t("msg.fileAttachment")} · ${attachment.source === "workspace" ? t("msg.workspaceReference") : attachment.kind === "image" ? t("msg.imageAttachment") : t("msg.fileAttachment")}`}
+                      {attachment.path}
                     </span>
                   </span>
                 </div>

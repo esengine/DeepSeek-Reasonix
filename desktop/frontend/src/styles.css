@@ -6099,6 +6099,20 @@ body > .mermaid-diagram--fullscreen {
   display: block;
   width: 6px;
 }
+
+/* ── command / ref highlighting ─────────────────────────────────── */
+.composer-cmd-highlight {
+  color: var(--accent);
+}
+.ref-highlight {
+  color: var(--accent);
+}
+.ref-highlight--clickable {
+  cursor: pointer;
+}
+.ref-highlight--clickable:hover {
+  text-decoration: underline;
+}
 .composer__input::placeholder {
   color: var(--fg-faint);
 }
