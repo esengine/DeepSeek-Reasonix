@@ -2,20 +2,23 @@
 
 > 冻结基线：[`REMOTE_ARCHITECTURE.zh-CN.md`](./REMOTE_ARCHITECTURE.zh-CN.md)
 >
-> 最后更新：2026-07-18
+> 最后更新：2026-07-20
 >
 > 状态原则：只记录已经落地并由测试证明的内容；计划、接口草案和未运行的测试不计为完成。
 
 ## 当前阶段
 
-阶段 7：当前环境可执行的 Remote V1 实现与自动化验收已完成。RMT-046 也已完成：Host 条目使用
-`mode=direct/config`；默认 direct 保存 `destination=username@host` 与独立 port，config 保存
-alias/sshConfigPath，v1 store 旧条目迁移为 config 并继续兼容。真实 Windows Desktop → 普通 Linux
-Host 与外部 SSH 实机验收仍待执行；当前 WSL systemd user service 已完成本页记录的真实 lifecycle
-复验，但不能替代普通物理机或 VM Linux Host 的验收。2026-07-18
-收到的模型标签、Session 显示/新增可见性和 Remote 新建项目误开本地 picker 三项缺陷已经完成真实
-修复、完整 Desktop/frontend 回归、变更面 race/E2E 以及协调跨平台编译，证据记录在阶段 7 缺陷修复
-复验小节。
+阶段 9：clean `91fd2029` 协调候选已经完成 Windows Wails 与 Linux amd64 双端构建、WSL Host lifecycle
+部署、三方 Build ID/SHA256 一致性、全量/定向/race/frontend 门禁和 config-backed System OpenSSH 真实
+attach/reconnect。阶段 8 的 clean `89a55a52` 与 dirty 工作树身份冲突已由两个本地提交 `0167f7f39`、
+`91fd20297` 解决；下方阶段 8 仍作为历史证据保留，阶段 9 是当前权威状态。
+
+原生 `91fd2029` Desktop 已使用既有 `reasonix-wsl` config 连接到同身份 daemon，显示 Remote
+capabilities 并浏览 Linux `/home/taibai`；连接进程是 System32 `ssh.exe`。但本轮 computer-use 在继续附加
+Session 前连续两次返回 `failed to activate captured window`，按安全规范停止输入，因此导致本提交的
+Remote → Local → 同一 Remote 投影复验尚未取得原生点击式闭环证据，不能宣告整个 Remote V1 实机目标
+完成。`/clear` 的最终 transcript 删除仍需动作发生时确认，未执行；密码、2FA、Host Key changed 与外部
+物理 Linux 仍属于人工矩阵。direct/no-config 已被用户后续“使用现有 config”指令覆盖，不是本轮阻塞。
 
 开始实现前的工作树与架构一致性预检已经完成。预检时，分支
 `codex/remote-feature` 相对 `origin/main-v2` 只有冻结架构文档提交，且不存在
@@ -806,23 +809,30 @@ active/running，lingering enabled。SSH 登录环境使用的 `/home/taibai/.lo
 
 ## 尚未完成内容
 
-当前环境可执行的代码、协议、CLI、daemon、Desktop backend/frontend、RMT-046 与自动化验收已完成。
-以下仅为必须在对应外部实机环境逐项执行并记录的人工验收，不得伪称已经完成：
+阶段 7 已完成当时环境内可执行的代码、协议、CLI、daemon、Desktop backend/frontend、RMT-046 与自动化
+验收；阶段 8 补齐 Windows OpenSSH → WSL 的 config/public-key 实机闭环，阶段 9 又形成并部署 clean
+`91fd2029` 协调候选。以下仅列截至阶段 9 仍需在对应候选或外部实机环境逐项执行并记录的验收，不得伪称
+已经完成：
 
 1. 当前 WSL Linux Host 已完成
    `restart → status/doctor → logs → stop/start → uninstall/install` 全链路；仍需在独立物理机或 VM 的
    普通 Linux 登录/SSH 会话中重复该流程，覆盖非 WSL 的 PAM、session bus 与 lingering 环境差异。
-2. 在 Windows Desktop 与外部 Linux Host 上使用同一提交协调构建，分别验证直接
-   `username@host` + port 与高级 alias/config、known_hosts、首次 Host Key、密码、密钥、密钥口令、
-   keyboard-interactive/2FA，以及 Host Key changed fail closed。
-3. 在该实机闭环逐项走 V1 工作台能力，并验证运行中 SSH 断线重连、pending Approval/Ask 恢复、
-   Desktop 重启、daemon 崩溃重启、第二客户端 `HOST_BUSY` 和 Build ID mismatch。
-4. 在原生 Windows 上启动已生成的 Wails 应用并完成人工交互验收。
+2. `reasonix-wsl` 的高级 alias/config、既有 known_hosts 与公钥认证已实机通过；仍需验证首次 Host Key、
+   Host Key changed，以及密码、密钥口令和 keyboard-interactive/2FA 矩阵。direct/no-config 被用户本轮
+   “使用现有 config”指令覆盖，不列为当前完成阻塞。
+3. 阶段 8 的 V1 基本工作台路径、运行中 SSH 断线恢复、第二客户端 `HOST_BUSY` 与 Build ID mismatch 已
+   实机通过；91fd 的跨 target projection 复验单列于下一项。仍需验证 pending Approval/Ask、Desktop
+   重启和 daemon 崩溃重启等恢复矩阵。
+4. clean `91fd2029` 已完成原生 Windows 启动、config 连接、Host capabilities 与 Linux 目录浏览；仍需在
+   computer-use 可稳定激活窗口后完成 Remote → Local → 同一 Remote projection、创建进行中 close gate 与
+   `/clear` 最终删除。无控制台已有 runtime probe 和本轮 GUI 观察证据，但单次观察不扩写成高速闪现测试。
 
 ## 真实阻塞
 
-当前没有架构、产品或代码阻塞；RMT-046 已实现并通过当前环境自动化门禁，协调构建也已部署到
-当前 WSL Host 并完成上述 lifecycle 复验。系统默认 `/usr/bin/go` 为
+当前没有架构冻结项、代码或协调候选身份阻塞；clean `91fd2029` 已完成双端构建、部署与自动化门禁。
+本目标剩余的当前环境门禁是 Windows GUI 自动化窗口无法稳定激活；`/clear` 本地删除另受动作时确认约束，
+未获确认前不会执行，也不会用相邻测试冒充。系统默认
+`/usr/bin/go` 为
 Go 1.18.1，无法解析仓库的 Go 版本和 `toolchain` 指令；已在 `/tmp` 使用项目要求的 Go 1.26.5
 工具链解决，不构成阻塞。
 
@@ -832,7 +842,279 @@ inner/outer UID 映射在 private socket 认证阶段失败；相同命令在原
 沙箱边界，不是 Host 或 `XDG_RUNTIME_DIR` 尾斜杠缺陷。已撤销针对该误判的实验性环境改写，产品代码
 不携带 sandbox 特判，所有 lifecycle 证据均来自原生 WSL namespace。
 
-另外两项环境边界保持不变：当前任务没有可靠的 Windows GUI 点击自动化通道/外部 SSH 实机闭环；
-Linux Wails 缺少上述原生开发包。自动化已经覆盖 CLI manager/probe、精确 systemctl argv/顺序、真实
-Unix socket 与生产 daemon、文件事务、SSH argv/AskPass/transport、Windows 交叉编译及故障分支。
-剩余实机人工验收不能据此跳过，也不能伪称已经实机通过。
+当前已有 Windows OpenSSH → WSL 的 config 实机闭环；仍无外部物理 Linux 闭环。Windows GUI 自动化通道
+本轮因窗口激活失败而不可用，Linux Wails 仍缺少上述原生开发包。自动化已经覆盖 CLI manager/probe、
+精确 systemctl argv/顺序、真实 Unix socket 与生产 daemon、文件事务、SSH argv/AskPass/transport、
+Windows 交叉编译及故障分支。剩余实机人工验收不能据此跳过，也不能伪称已经实机通过。
+
+## 阶段 8：原生 Windows OpenSSH → WSL 收口（2026-07-18—2026-07-19，历史记录）
+
+本节记录 `codex/remote-feature` 在 `89a55a5208d3e86e98ac237d7a49cd27e7c8eb28` 上启动的
+原生 Windows 收口工作，并覆盖上方阶段 7 对“当前阻塞”和 Windows GUI 自动化条件的历史描述。
+工作目录为 `D:\reasonix`；`site/package-lock.json`、`_go-learn/`、`developer-portal/` 未被修改、
+清理或覆盖。
+
+### Windows OpenSSH、既有 config 与 Host lifecycle 实机证据
+
+- 实际 resolver 路径：`C:\Windows\System32\OpenSSH\ssh.exe`。
+- 实际版本：`OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2`；原生测试已启动该绝对路径执行
+  `ssh.exe -V`。
+- `Test-NetConnection 127.0.0.1 -Port 22` 成功，证明 Windows 到 WSL sshd 的 TCP 路径可达。
+- 初次未显式使用用户 config 的探测真实到达 sshd，但因没有命中已有认证配置而返回
+  `Permission denied (publickey,password).`。用户随后明确要求查找并使用现有连接配置；只读取
+  `C:\Users\ppoo2\.ssh\config` 的非秘密连接设置后，确认其中已有 alias `reasonix-wsl`。没有读取、
+  输出或修改任何私钥正文、密码、口令或认证响应。
+- 目标附件中的早期环境快照还把“Windows `.ssh` 只有 `known_hosts`、没有私钥、ssh-agent 不可用、
+  Linux `authorized_keys` 不存在”列为已知状态；当前 config 已明确引用可工作的身份文件，且 BatchMode
+  公钥认证成功，因此这些描述至少不能继续作为当前事实。没有时间戳证据可证明早期快照与当前状态之间
+  何时变化，本节只记录可复验的当前结果；没有读取身份文件正文，也没有为追溯该推断而读取或修改
+  `authorized_keys`。
+- 以 `-F C:\Users\ppoo2\.ssh\config`、`BatchMode=yes`、`StrictHostKeyChecking=yes`、禁用 TTY、转发、
+  local command 与 remote-command override 的安全参数连接 `reasonix-wsl`，真实
+  `Windows ssh.exe → WSL sshd` 非交互认证 PASS。部署前远端 `reasonix version` 为
+  `reasonix desktop-v1.17.12-264-g276a52fa`，证明先前失败是未使用既有 config，而不是仍需新增认证授权。
+- clean `89a55a52` Linux CLI 先上传到唯一临时路径并在远端核对 SHA256；随后备份旧登录 CLI，并把
+  已校验的临时文件原子替换为 `/home/taibai/.local/bin/reasonix`。managed binary 没有被手工复制或
+  替换；部署后只通过新 CLI 执行 `reasonix remote restart`，再执行 `status` 与 `doctor`。
+- lifecycle 实机结果为 restart PASS、服务 enabled/active，`doctor` 11/11 PASS；部署后
+  `reasonix version` 为 `reasonix desktop-v1.17.13-10-g89a55a520`。登录 CLI 与 managed binary 的
+  SHA256 均为 `146d981ddddfa9890efa6ed49998849712e429e2ee222bee1c686ff047033f56`，CLI、installed、daemon
+  的完整 Build ID 均与下节冻结身份一致。
+
+### 固定提交的协调构建
+
+两个固定身份协调基线产物均来自同一个只读 `git archive` 干净快照，而不是当前工作树；Build ID 为：
+
+```text
+productVersion: desktop-v1.17.13-10-g89a55a520
+sourceRevision: 89a55a5208d3e86e98ac237d7a49cd27e7c8eb28
+protocolVersion: 1
+schemaHash: sha256:5d7a9582b014e88f6787c41b577b467610abbfac23ffa3ce61d839fe2e315c48
+```
+
+```text
+D:\reasonix\bin\reasonix-linux-amd64-89a55a52
+sha256 146d981ddddfa9890efa6ed49998849712e429e2ee222bee1c686ff047033f56
+
+D:\reasonix\desktop\build\bin\reasonix-desktop-89a55a52.exe
+sha256 37313db0c2bc720c2c6efce8cfb849f2dbf78a234944ffd9cd32885abb9d7213
+```
+
+`go version -m` 核对了两个产物的 `linux/amd64`、`windows/amd64` 模块身份；二进制只读扫描也核对了
+完整 productVersion、sourceRevision 与 schemaHash。上节实机部署及 lifecycle 已确认登录 PATH CLI、
+managed binary、运行中 daemon 三方为该身份。固定 Desktop 的 SHA256 为
+`37313db0c2bc720c2c6efce8cfb849f2dbf78a234944ffd9cd32885abb9d7213`。
+
+### 本轮原生 Windows 自动化与实现收紧
+
+- System OpenSSH resolver 原生测试验证默认解析结果为存在的 System32 绝对路径，并可执行 `-V`。
+- Windows SSH transport 使用 `CREATE_SUSPENDED → Job Object assign → resume`，context cancel、live
+  `Close` 与正常 `Wait` 均只有一个 Job handle 所有者。测试真实派生并持有后代进程句柄，逐一证明父、
+  后代均退出且父进程被 Wait 回收；Job Object 无法建立时会在恢复 `ssh.exe` 前 fail closed，不再静默
+  降级为只杀父进程。
+- `TestRemoteSSHProcessHasNoConsoleAtRuntime` 以隐藏的 `CREATE_NEW_CONSOLE` 子进程作正控，原生
+  `GetConsoleWindow` 返回非零；同一 probe 经生产 `newRemoteSSHProcess → CREATE_SUSPENDED → Job Object →
+  resume` 路径启动时返回零。focused normal 与 race 均 PASS。这是当前工作树的原生进程级“没有分配
+  console”证据，不属于 clean `89a55a52`，也不等价于 GUI 点击式“绝无闪窗”复验。
+- Remote Session 创建 admission 与 final native close 在同一 mutex 下线性化；创建结果未知期间关闭被
+  阻止，background hide 不能撤销另一条已建立的 final close，受阻的 force/system quit 标记不会污染
+  后续普通关闭。
+- 修正 Windows 上 Host 返回的 workspace 内绝对路径显示与安全 command 显示边界；外部绝对路径、
+  Windows drive path、反斜杠和 shell 控制字符仍 fail closed。
+- 两个旧 frontend 测试显式固定 `navigator.language=en-US`，避免 Node 26 在中文 Windows 上自动选择
+  `zh-CN` 后用英文文案断言；pending-prompt 测试也会等待上一场景的 debounce 计时器排空。均为测试
+  夹具确定性修复，没有修改产品语言或 prompt 行为。
+- 新增 Windows-only、默认跳过的真实 SSH 集成测试。只有显式设置
+  `REASONIX_REMOTE_SSH_INTEGRATION=1` 并提供 SSH executable、config、known_hosts 与 Host alias 的绝对路径后
+  才会读取配置和发起连接；默认运行在检查这些值之前立即 SKIP。本次实机明确传入
+  `C:\Windows\System32\OpenSSH\ssh.exe`；另有 resolver 测试独立核对默认值确为该 System32 路径。夹具先用
+  protected DACL 且不共享 delete
+  的目录 handle 固定临时路径，复制公开 known_hosts，并通过 wrapper `Include` 使用现有 config，同时强制
+  BatchMode/publickey-only。IdentityFile 仍只由 OpenSSH 按现有 config 读取；测试不读取、复制或输出私钥。
+- clean `89a55a52` 源码 archive 仅叠加上述测试夹具后，真实链路先严格拒绝错误 revision
+  （`VERSION_MISMATCH`，无 fallback/recovery）；正确身份随后创建唯一 disposable Topic/Session、原子订阅并
+  启动无模型 Shell。收到 before marker 后取消首个生产 SSH transport并保存 `LastSeq`；gap marker 在断线
+  期间产生。重连保持同一 lease/HostEpoch、generation 递增，重订阅返回 `boundarySeq > saved LastSeq` 的
+  atomic snapshot，其中保留 before/gap 与 active operation；之后事件严格从 `N+1` 连续推进至
+  after/result/done。最后 close/trash/purge Session、delete Topic、detach，所有清理均 PASS；最终实机用例
+  34.15s。输出不含 raw stderr 或不透明身份值。
+- 该用例是 system OpenSSH + transport-neutral client/protocol 的机器证据；它显式调用 reconnect/subscribe，
+  不把 Desktop workbench 自动恢复或 GUI tree 伪写成已由本用例断言。
+
+最终文件上的本地门禁：
+
+```text
+cd D:\reasonix\desktop
+go test -count=1 ./...                                      # PASS
+go test -race -count=1 -run '<Remote/SSH/TargetManager>' .  # PASS
+
+cd D:\reasonix
+go test -count=1 <proc/ACP/rpcwire/RuntimeAPI/Remote packages>  # PASS
+go test -race -count=1 <同上 Remote 相关 packages>              # PASS
+go run ./cmd/remote-protocol-gen -check                         # PASS
+
+cd desktop/frontend
+pnpm typecheck && pnpm test:typecheck && pnpm test && pnpm build # PASS
+```
+
+最终 Desktop 全量复跑完成并 PASS（主包 284.467s）。此前一次复跑曾在 Windows 系统
+`CreateProcess` 内出现原生 access violation，没有 Go 测试断言失败；随后 System OpenSSH resolver 与
+cancel/live Close/normal Wait 三条真实 Job Object 用例连续 20 轮全部通过，带最近测试跟踪的主包全量也
+越过原崩溃点完成。该单次系统异常未复现，不作为产品测试通过的替代证据。
+
+Wails 2.12.0 在最终工作树上重新生成 bindings 并完成 Windows amd64 application compile；另有 Linux
+amd64 CLI 交叉编译用于证明当前改动的双平台可编译性。两者使用明确的 `+dirty` 验证身份并单独命名，
+不会冒充或覆盖上方固定 `89a55a52` 的协调产物，也不会用于严格 Build ID 实机闭环。
+
+在加入 OpenSSH `HideWindow` 修复后，又以不带 `-clean`/`-nsis` 的直接 Wails 构建生成唯一验证文件
+`D:\reasonix\desktop\build\bin\reasonix-desktop-89a55a52-dirty-hidewindow.exe`；其 SHA256 为
+`bf5b4d66953c2df25f819da199a32bb0cd81d8ff31cb20ca027c7dc93d8dc2e0`。其 Build ID 为
+`desktop-v1.17.13-10-g89a55a520+dirty`、
+`89a55a5208d3e86e98ac237d7a49cd27e7c8eb28+dirty`、protocol `1`、
+`sha256:5d7a9582b014e88f6787c41b577b467610abbfac23ffa3ce61d839fe2e315c48`；`go version -m` 还核对了
+`-H windowsgui`。该构建证明当前源码可形成 Windows GUI 产物，但不能替代上方固定基线；本轮 Computer
+Use 通道连续两次无法激活既有 Reasonix 窗口（`failed to activate captured window`），按自动化安全规范
+停止输入，因此尚未取得该 dirty 构建的原生点击式“无控制台闪窗”复验证据。
+
+### 固定 Desktop 原生 GUI 与真实 SSH 闭环
+
+- 旧 Desktop 进程 PID 23924 已先终止，再启动上方 SHA256 固定的 clean `89a55a52` Desktop。Host 保存为
+  config 模式，alias 为 `reasonix-wsl` 并显式使用现有 config；连接成功。实际子进程为
+  `C:\Windows\System32\OpenSSH\ssh.exe`，真实链路为
+  `ssh.exe → sshd → reasonix remote attach --stdio → daemon`。可见连接生命周期日志保持结构化，不含
+  SSH argv、raw stderr、私钥路径或认证秘密。
+- Host 目录浏览器真实展示 `/home/taibai`，并成功创建 topic `Remote V1 config loop 2026-07-18`。首次创建后单个
+  Session 折叠为一个父项；执行 `/new` 后显示同一父项和两个 Session 子项。模型显示为
+  `deepseek-v4-pro`，没有再把 `Topic` 误显示为模型。
+- 手工终止 GUI 的子 `ssh.exe` 后，daemon 的 `MainPID=3673786` 与
+  `ActiveEnterTimestampMonotonic=115161621990` 均未改变，证明 transport 断开没有重启或杀死 Host
+  daemon。GUI 自动重连后恢复同一个 topic、Session tree 与 `deepseek-v4-pro` 模型。
+- GUI 持有 lease 时，另一个由 clean `89a55a52` 客户端发起的真实连接收到 `HOST_BUSY`。随后上述 opt-in
+  自动化在 GUI 释放 lease 后独立完成真实断线与同 lease/HostEpoch 恢复，并机器断言断线期间 seq gap、
+  atomic snapshot 与 snapshot 后连续 `N+1`；GUI 则实机观察到重连后同一 topic、Session tree 与模型恢复。
+  两类证据互补，但 opt-in 测试显式调用 client reconnect/resubscribe，没有直接断言 Desktop workbench 的
+  自动恢复或 GUI tree。
+- `/clear` 已走到最终本地 transcript 删除确认框；该删除动作需要发生时的用户明确确认，当前未获确认，
+  因此已取消且不能记作完成。此后 dirty GUI 复验又因 Computer Use 无法激活窗口而停止，两者是不同边界。
+  固定 clean Desktop 的原生运行还观察到 OpenSSH 控制台窗口意外弹出；当前工作树已设置 `HideWindow`，
+  并以有正控的 Windows runtime probe 证明生产 Job Object 路径未分配 console。该修复尚未进入固定
+  `89a55a52` 基线，故不能把固定基线写成已复验通过。
+- 目标原文要求 direct/no-config 路径；用户本轮随后明确要求“找到并使用”已有 config，故本节按该最新
+  明确指令验证 config 模式。该覆盖不等于 direct 模式也已实机通过。
+
+### 阶段 8 时点的候选身份冲突与未完成矩阵（历史）
+
+以下是阶段 8 结束时的历史判断：对已验证的 `reasonix-wsl` config/public-key 路径，SSH 认证授权已不再是
+外部前置；当时仍存在 clean `89a55a52` 不含 Windows Job Object、native close gate、Windows path 与
+`HideWindow` 修复，而验证产物只能诚实标记 `+dirty` 的候选冲突。该冲突后来由用户授权的本地提交
+`0167f7f39` 与 `91fd20297`、以及阶段 9 的 clean 双端协调构建彻底解决；本段不得再解释为当前阻塞。
+
+以下结果仍保持“未完成/未通过”，不能由 mock、`net.Pipe` 或相邻证据替代：
+
+1. `/clear` 最终确认与删除结果，以及创建进行中关闭保护的固定候选 GUI 实机复验。
+2. OpenSSH 控制台窗口修复进入一个 clean 协调候选后的原生 GUI 复验；当前已有工作树实现及 normal/race
+   原生 runtime handle 证明，但固定 `89a55a52` Desktop 仍会弹窗。
+3. Desktop workbench 自动恢复与 GUI tree 的机器级联动断言，以及 pending Approval/Ask、Desktop restart、
+   daemon crash、密码、密钥口令、keyboard-interactive/2FA、Host Key changed 和外部物理 Linux 人工矩阵。
+   真实 seq gap/snapshot/`N+1` 与 Build ID mismatch 已由 opt-in 自动化 PASS，不再列为未完成。
+4. direct/no-config 模式的原生 Windows 实机闭环；本轮用户明确覆盖为已有 config 模式，只完成了后者。
+
+## 阶段 9：clean `91fd2029` 协调候选（2026-07-20，当前权威状态）
+
+本节覆盖阶段 8 的“89a clean 与 dirty 工作树候选冲突”结论。用户已明确允许建立双端和本地提交；实现
+先形成 `0167f7f39277803112273343e50b4b529dda30c9`（Windows lifecycle、Remote workbench 与真实 SSH
+夹具），再形成 `91fd202971cdde5b793d674a8699f25938ac521b`（跨 target authority 的 backend reattach
+顺序与 frontend projection/hydration 隔离）。两个提交都只保存在本地分支，没有 push、PR 或发布。
+
+### 当前协调身份与双端产物
+
+Desktop、SSH 登录 CLI、managed binary 与运行中 daemon 使用同一 Build ID：
+
+```text
+productVersion: desktop-v1.17.13-12-g91fd20297
+sourceRevision: 91fd202971cdde5b793d674a8699f25938ac521b
+protocolVersion: 1
+schemaHash: sha256:5d7a9582b014e88f6787c41b577b467610abbfac23ffa3ce61d839fe2e315c48
+```
+
+```text
+D:\reasonix\desktop\build\bin\reasonix-desktop-91fd202971cdde5b793d674a8699f25938ac521b.exe
+size 53138944 bytes
+sha256 e7cade050299100cb8b0be48c12fcc1121289de053518ba71e5d6470b441c6ac
+
+/home/taibai/DeepSeek-Reasonix/bin/reasonix-linux-amd64-91fd202971cdde5b793d674a8699f25938ac521b
+size 30982306 bytes
+sha256 b85617a7c8e25bd83171cf2073785a4a5bd434893a8908abbecc11a1cb2b8fe0
+```
+
+Windows 产物是 PE32+ GUI subsystem，Go 1.26.5、Wails 2.12.0、windows/amd64、CGO disabled、
+trimpath；Linux 产物是静态、stripped、x86-64 ELF，Go 1.26.5、CGO disabled、trimpath，VCS revision
+精确为 `91fd202971cdde5b793d674a8699f25938ac521b` 且 `vcs.modified=false`。两个产物的版本、revision 与
+冻结 schema 均已通过内嵌字符串、
+`go version -m` 或 CLI `version/status` 交叉核对。
+
+### WSL lifecycle 部署与保护边界
+
+- `reasonix-wsl` 对应仓库 `/home/taibai/DeepSeek-Reasonix` 以 fast-forward 到达同一 `91fd2029`；部署前后
+  Git 状态均只含必须保护的 `site/package-lock.json`、`_go-learn/`、`developer-portal/`，状态摘要与
+  lockfile SHA256 前后不变。
+- 旧 `0167f7f39` 登录 CLI 已备份为
+  `/home/taibai/.local/bin/reasonix.backup-0167f7f39277803112273343e50b4b529dda30c9-pre91fd202971cd`。
+  新 CLI 经同目录临时文件、version/hash 校验、fsync 与原子 rename 安装；没有手工替换运行进程或 managed
+  binary。
+- 只通过新 CLI 执行 `reasonix remote restart`，结果 `completed`。稳定后登录 CLI、
+  `/home/taibai/.reasonix/remote/bin/reasonix` 和 `/proc/<MainPID>/exe` 三者 SHA256 都是上方 Linux SHA，
+  CLI/installed/daemon Build ID 完全一致。
+- `reasonix remote status --json` 无 diagnostics；`reasonix remote doctor` healthy，11/11 PASS。systemd user
+  service enabled、active/running、Result=success；socket `/run/user/1000/reasonix/remote.sock` 为 uid 1000、
+  mode `0600`。
+
+### 当前提交上的自动化门禁
+
+- `remote-protocol-gen -check` PASS；Windows Wails application build 与 Linux static CLI build PASS。
+- frontend `typecheck`、`test:typecheck`、完整测试集和 production build PASS；新增的 target authority
+  regression 41/41 PASS。该回归覆盖旧 Local 异步 hydration、history/reconcile/poll/RAF 回调、相同
+  tab/session id 碰撞、ContextPanel cache 与 `/new`/`/clear` projection generation 等边界。
+- backend reattach 顺序与 target authority 定向集普通测试 `count=20` PASS，Windows race `count=10` PASS；
+  覆盖 open session 独立恢复、ordered ready、旧 generation 不得发布 ready、新 target 赢得提交及 scoped
+  reconnect failure。
+- `D:\reasonix\desktop` 上 `go test -count=1 -timeout 20m ./...` 在原生权限环境全部 PASS：主包
+  284.545s，`cmd/sign`、`cmd/update-helper`、`cmd/windows-resource`、`internal/update` 也全部 PASS。同一命令
+  先在 sandbox 内仅因用户 Temp `Access is denied` 与 lease lock 文件权限失败；原生命令没有测试断言失败。
+- 当前 HEAD 的 `internal/acp`、`internal/rpcwire`、`internal/runtimeapi`、`internal/runtimeservice` 普通测试
+  全部 PASS；使用现有 UCRT64 GCC 临时启用 CGO 后，四包 Windows race 也全部 PASS。普通/race 总耗时分别
+  40.645s、53.815s。
+- `git diff --check` PASS。`desktop/window_controls.go` 仍显示 phantom `.M`，但 index、HEAD 与工作树 blob
+  相同且 raw diff 为空；没有对它执行格式化、覆盖或广域 staging。
+
+### 真实 config-backed OpenSSH 闭环
+
+- 继续使用 `C:\Windows\System32\OpenSSH\ssh.exe`（OpenSSH_for_Windows_9.5p2）和既有
+  `C:\Users\ppoo2\.ssh\config` alias `reasonix-wsl`；安全解析结果为 `taibai@127.0.0.1:22`、
+  `IdentitiesOnly=yes`。IdentityFile 只由 OpenSSH 自行读取，测试与记录均不读取、复制或输出私钥正文。
+- 当前 `91fd2029` 上 opt-in `TestRemoteSSHConfigAttachReconnectIntegration` 真实执行
+  `System32 ssh.exe → WSL sshd → reasonix remote attach --stdio → daemon`，39.150s PASS。用例先断言错误
+  revision 被 `VERSION_MISMATCH` 严格拒绝，再验证正确 initialize、disposable Topic/Session、无模型 Shell、
+  断线期间 seq gap、同 lease/HostEpoch 且 generation 递增的重连、atomic snapshot、snapshot 后连续 `N+1`
+  以及最终清理。
+- 首次重跑误把测试包 linker symbol 写成 `main.version`，正确 daemon 因测试 peer 未得到预期身份而严格返回
+  `VERSION_MISMATCH`；改用实际 test package symbol `reasonix/desktop.version` 后即得到上述 PASS。这是夹具
+  注入错误及 fail-closed 证据，不是产品 mismatch 缺陷，也没有使用 force、降级或 fallback。
+
+### 原生 `91fd2029` GUI 已证实与剩余边界
+
+- 启动前没有旧 `reasonix-desktop` 进程；原生启动的唯一窗口来自上方精确 SHA 的 91fd executable。
+- Remote Hosts 中选中既有 config 条目 `reasonix-wsl` 后成功到达 `Remote connected`。Windows 只读进程
+  核对显示当前子进程为 `C:\Windows\System32\OpenSSH\ssh.exe`，其父进程就是该 91fd Desktop；没有读取
+  SSH argv。连接生命周期 UI 只展示结构化 target 状态，未显示 raw stderr、凭据或私钥路径。
+- GUI 展示 Host 报告的 Remote V1 capabilities，并由 Linux directory browser 返回 `/home/taibai` 与
+  `/home/taibai/DeepSeek-Reasonix`；观察期间没有出现独立 OpenSSH console。另有带正控的 Windows runtime
+  probe 证明生产 SSH Job Object 路径没有分配 console，但单次 GUI 观察不能扩写成高速摄像式“绝无闪现”。
+- 在准备附加 Session 并复跑导致 `91fd2029` 的 Remote → Local → 同一 Remote 场景时，computer-use 对当前
+  窗口连续两次返回 `failed to activate captured window`。按自动化安全规范已停止继续输入。因此当前候选的
+  header、transcript、ContextPanel metrics、模型和 Session tree 在该转换后同时归属 Remote 的原生点击式
+  复验仍未完成；41/41 frontend regression 与 backend ordered-ready 测试是强机器证据，但不冒充该 GUI
+  结果。
+- `/clear` 最终本地 transcript 删除仍未执行，因为破坏性 UI 动作需要动作发生时的用户确认。pending
+  Approval/Ask、Desktop/daemon crash 恢复、密码、密钥口令、keyboard-interactive/2FA、Host Key changed
+  和外部物理 Linux 继续列为人工矩阵；这些不由 config-backed WSL 闭环或 mock 代替。
