@@ -396,6 +396,27 @@ func TestNewSessionPathSanitizesSlashes(t *testing.T) {
 	}
 }
 
+func TestNewSessionPathSanitizesWindowsReservedPunctuation(t *testing.T) {
+	dir := t.TempDir()
+	path := NewSessionPath(dir, `nemotron-3-nano:30b<>"|?*`)
+	base := filepath.Base(path)
+	if strings.ContainsAny(base, `:<>"|?*`) {
+		t.Fatalf("filename contains Windows-reserved punctuation: %s", base)
+	}
+	if !strings.Contains(base, "nemotron-3-nano-30b") {
+		t.Fatalf("colon should be replaced without hiding the model hint: %s", base)
+	}
+
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save session with sanitized model filename: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat saved session: %v", err)
+	}
+}
+
 func TestNewSessionPathEmptyModel(t *testing.T) {
 	path := NewSessionPath("/dir", "")
 	if !strings.Contains(path, "session") {
