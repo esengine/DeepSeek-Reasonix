@@ -210,7 +210,7 @@ var Chinese = Messages{
 	MouseCopiedHint:              "已复制到剪贴板",
 	ClipboardCopyOSC52Hint:       "已通过 OSC 52 请求复制 — 可能需要终端授权",
 	ClipboardCopyFallbackHint:    "系统剪贴板不可用 — 已回退到 OSC 52",
-	ClipboardTextPasteRemoteHint: "SSH 下右键粘贴无法读取本地剪贴板 — 请使用终端粘贴快捷键或 /mouse",
+	ClipboardTextPasteRemoteHint: "SSH 下鼠标粘贴无法读取本地剪贴板或 PRIMARY 选区 — 请使用终端粘贴快捷键或 /mouse",
 	ClipboardTextPasteFailedFmt:  "粘贴文本失败：%v",
 	ClipboardImagePastingHint:    "正在粘贴图片…",
 	ClipboardImagePasteFailedFmt: "粘贴图片失败：%v",

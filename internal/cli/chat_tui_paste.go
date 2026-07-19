@@ -13,6 +13,7 @@ import (
 	"github.com/atotto/clipboard"
 
 	"reasonix/internal/control"
+	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
 )
 
@@ -156,6 +157,7 @@ func (m *chatTUI) beginClipboardImagePaste() tea.Cmd {
 var (
 	readTmuxPasteBuffer       = readTmuxBuffer
 	readPrimaryPasteSelection = readPrimarySelection
+	newPasteCommand           = exec.Command
 )
 
 // pasteMiddleClick returns a tea.Cmd that reads from the selection owner for the
@@ -165,11 +167,17 @@ var (
 // here instead of unexpectedly switching to the desktop PRIMARY selection.
 func pasteMiddleClick() tea.Cmd {
 	return func() tea.Msg {
-		reader := readPrimaryPasteSelection
 		if os.Getenv("TMUX") != "" {
-			reader = readTmuxPasteBuffer
+			text, err := readTmuxPasteBuffer()
+			if err != nil || text == "" {
+				return nil
+			}
+			return tea.PasteMsg{Content: text}
 		}
-		text, err := reader()
+		if remoteClipboardSession() {
+			return clipboardTextPasteMsg{remote: true}
+		}
+		text, err := readPrimaryPasteSelection()
 		if err != nil || text == "" {
 			return nil
 		}
@@ -181,7 +189,9 @@ func pasteMiddleClick() tea.Cmd {
 // environment variable identifies the correct server socket, just as the tmux
 // client command does for an interactive shell inside the pane.
 func readTmuxBuffer() (string, error) {
-	out, err := exec.Command("tmux", "save-buffer", "-").Output()
+	cmd := newPasteCommand("tmux", "save-buffer", "-")
+	cmd.Env = secrets.ProcessEnv()
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("read tmux paste buffer: %w", err)
 	}
@@ -193,14 +203,15 @@ func readTmuxBuffer() (string, error) {
 func readPrimarySelection() (string, error) {
 	// Match the order used by SaveClipboardImage: Wayland tool first, then X11.
 	for _, args := range [][]string{
-		{"wl-paste", "--primary", "--no-newline"},
+		{"wl-paste", "--primary", "--type", "text", "--no-newline"},
 		{"xclip", "-selection", "primary", "-o"},
 		{"xsel", "--output", "--primary"},
 	} {
-		cmd := exec.Command(args[0], args[1:]...)
+		cmd := newPasteCommand(args[0], args[1:]...)
+		cmd.Env = secrets.ProcessEnv()
 		out, err := cmd.Output()
 		if err == nil {
-			return strings.TrimRight(string(out), "\n\r"), nil
+			return string(out), nil
 		}
 	}
 	return "", fmt.Errorf("no primary selection tool found (need wl-paste, xclip, or xsel)")

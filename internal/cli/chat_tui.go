@@ -897,6 +897,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Middle-click pastes tmux's current buffer when tmux owns the pane;
 		// otherwise it follows the X11/Wayland PRIMARY-selection convention.
 		if msg.Button == tea.MouseMiddle {
+			if m.hideComposer() {
+				return m, nil
+			}
 			cmds = append(cmds, pasteMiddleClick())
 			return m, finalize(m, cmds)
 		}
