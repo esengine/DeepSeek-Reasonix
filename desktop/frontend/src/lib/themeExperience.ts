@@ -38,6 +38,16 @@ export function getCachedThemeExperience(): ThemeExperienceView | null {
   return experienceCache;
 }
 
+/**
+ * Return the configured base style that React owners should mirror.
+ * An active pack's effectiveStyle is intentionally excluded: it is a live DOM
+ * override, not the persisted base appearance restored when the pack is cleared.
+ */
+export function configuredBaseStyleForSync(view: ThemeExperienceView): ThemeStyle | null {
+  if (!view.safeMode && view.activePack) return null;
+  return (isThemeStyle(view.baseStyle) ? view.baseStyle : "graphite") as ThemeStyle;
+}
+
 export async function loadThemeExperience(): Promise<ThemeExperienceView> {
   // Prefer the unified API; fall back for older shells / partial mocks.
   const api = app as typeof app & {

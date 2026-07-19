@@ -12,6 +12,7 @@ import {
   activateBaseStyle,
   applyExperienceToDOM,
   cancelGlobalPreview,
+  configuredBaseStyleForSync,
   disableThemePack,
   loadThemeExperience,
   restoreGraphiteAppearance,
@@ -257,12 +258,11 @@ export function AppearanceOverview({
         initialCreateBaseStyle={galleryIntent === "copy-base" ? baseStyle : undefined}
         onExperienceChange={(exp) => {
           setExperience(exp);
-          // Sync React state for base style only.
-          // activateThemePack → applyExperienceToDOM already applied the correct
-          // theme+style to the DOM. We must NOT call onTheme here because it
-          // reads `themeStyle` from its closure (stale React state), and calling
-          // applyTheme(nextTheme, OLD_style) would briefly revert the base style.
-          if (isThemeStyle(exp.effectiveStyle)) onThemeStyle(exp.effectiveStyle as ThemeStyle);
+          // Keep the configured base style separate from an active pack's live
+          // effective style. applyExperienceToDOM already owns the pack override;
+          // mirroring it through onThemeStyle would corrupt the restore snapshot.
+          const configuredStyle = configuredBaseStyleForSync(exp);
+          if (configuredStyle) onThemeStyle(configuredStyle);
         }}
         onBack={() => {
           cancelGlobalPreview();

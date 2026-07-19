@@ -33,6 +33,8 @@ export function ThemePreviewSurface({
     const paneAlpha = scene === "home"
       ? pack?.background?.paneOpacity ?? 0.50
       : pack?.taskBackground?.paneOpacity ?? pack?.background?.paneOpacity ?? 0.68;
+    const boundedPaneAlpha = Math.min(1, Math.max(0, paneAlpha));
+    const paneCardOffset = scene === "home" ? 0.26 : 0.14;
     return {
       ["--tp-bg" as string]: palette.bg,
       ["--tp-panel" as string]: palette.panel,
@@ -48,7 +50,8 @@ export function ThemePreviewSurface({
       ["--tp-focus-y" as string]: `${focusY * 100}%`,
       ["--tp-bg-opacity" as string]: String(opacity),
       ["--tp-overlay" as string]: String(overlay),
-      ["--tp-pane-alpha" as string]: String(paneAlpha),
+      ["--tp-pane-shell-pct" as string]: `${Math.min((boundedPaneAlpha + 0.08) * 100, 100)}%`,
+      ["--tp-pane-card-pct" as string]: `${Math.min((boundedPaneAlpha + paneCardOffset) * 100, 100)}%`,
     } as CSSProperties;
   }, [pack, mode, scene]);
 

@@ -32456,13 +32456,13 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--chat-bg, var(--bg)) calc(var(--theme-pane-alpha, 0.72) * 100%), transparent) !important;
 }
 
-/* Home: high-opacity elements — fixed for content clarity */
+/* Home: card elements — controlled by the paneOpacity card tier */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-card,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__action-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__icon-btn {
-  background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-card-pct, 88%), transparent) !important;
 }
 
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-change-scope__head {
@@ -32488,13 +32488,13 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--chat-bg, var(--bg)) calc(var(--theme-pane-task-alpha, 0.80) * 100%), transparent) !important;
 }
 
-/* Task: high-opacity elements — fixed for content clarity */
+/* Task: card elements — controlled by the paneOpacity card tier */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-card,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__action-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__icon-btn {
-  background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-card-pct, 88%), transparent) !important;
 }
 
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-change-scope__head {
@@ -33225,7 +33225,7 @@ body > .mermaid-diagram--fullscreen {
   min-height: 160px;
 }
 .theme-preview-surface__side {
-  background: color-mix(in srgb, var(--tp-sidebar) calc((var(--tp-pane-alpha, 0.72) + 0.06) * 100%), transparent);
+  background: color-mix(in srgb, var(--tp-sidebar) var(--tp-pane-shell-pct, 80%), transparent);
   border-right: 1px solid color-mix(in srgb, var(--tp-border) 70%, transparent);
   padding: 10px 8px; display: flex; flex-direction: column; gap: 8px;
 }
@@ -33242,7 +33242,7 @@ body > .mermaid-diagram--fullscreen {
 .theme-preview-surface__main { padding: 14px; display: flex; align-items: center; justify-content: center; }
 .theme-preview-surface__card {
   width: min(220px, 90%);
-  background: color-mix(in srgb, var(--tp-panel) calc((var(--tp-pane-alpha, 0.72) + 0.20) * 100%), transparent);
+  background: color-mix(in srgb, var(--tp-panel) var(--tp-pane-card-pct, 88%), transparent);
   border: 1px solid color-mix(in srgb, var(--tp-border) 80%, transparent);
   border-radius: var(--tp-radius, 10px); padding: 12px; display: flex; flex-direction: column; gap: 8px;
 }

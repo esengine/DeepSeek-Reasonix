@@ -446,8 +446,6 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
     // Clamp to 100% to prevent color-mix from receiving values > 100%.
     root.style.setProperty("--theme-pane-shell-pct", `${Math.min((homePane + 0.08) * 100, 100)}%`);
     root.style.setProperty("--theme-pane-card-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
-    root.style.setProperty("--theme-pane-inner-pct", `${Math.min((homePane + 0.22) * 100, 100)}%`);
-    root.style.setProperty("--theme-pane-composer-pct", `${Math.min((homePane + 0.08) * 100, 100)}%`);
     // Legacy aliases keep V1 tests and third-party diagnostics stable.
     root.style.setProperty("--theme-bg-image", `url("${cssUrlEscape(homeUrl)}")`);
     root.style.setProperty("--theme-bg-focus-x", `${clamp01(home.focusX) * 100}%`);
@@ -475,8 +473,6 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
   root.style.setProperty("--theme-pane-task-alpha", String(taskPane));
   root.style.setProperty("--theme-pane-task-shell-pct", `${Math.min((taskPane + 0.08) * 100, 100)}%`);
   root.style.setProperty("--theme-pane-task-card-pct", `${Math.min((taskPane + 0.14) * 100, 100)}%`);
-  root.style.setProperty("--theme-pane-task-inner-pct", `${Math.min((taskPane + 0.12) * 100, 100)}%`);
-  root.style.setProperty("--theme-pane-task-composer-pct", `${Math.min((taskPane + 0.06) * 100, 100)}%`);
   const safe = taskSource?.safeArea === "left" || taskSource?.safeArea === "right" ? taskSource.safeArea : "center";
   root.setAttribute("data-theme-safe-area", safe);
   root.setAttribute("data-theme-has-bg", "true");
@@ -502,10 +498,6 @@ function clearBackgroundCSSVars(root: HTMLElement): void {
   root.style.removeProperty("--theme-pane-task-shell-pct");
   root.style.removeProperty("--theme-pane-card-pct");
   root.style.removeProperty("--theme-pane-task-card-pct");
-  root.style.removeProperty("--theme-pane-inner-pct");
-  root.style.removeProperty("--theme-pane-task-inner-pct");
-  root.style.removeProperty("--theme-pane-composer-pct");
-  root.style.removeProperty("--theme-pane-task-composer-pct");
   root.removeAttribute("data-theme-safe-area");
   root.removeAttribute("data-theme-has-bg");
 }

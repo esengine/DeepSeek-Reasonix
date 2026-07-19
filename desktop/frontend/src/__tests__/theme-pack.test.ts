@@ -19,7 +19,14 @@ import {
 } from "../lib/themePack";
 import { applyTheme, getThemeStyle } from "../lib/theme";
 import { BASE_STYLE_PREVIEW_PALETTES, themePreviewPalette } from "../lib/themePreviewPalette";
-import { activateThemePack, cancelGlobalPreview, isPreviewActive, startGlobalPreview } from "../lib/themeExperience";
+import {
+  activateThemePack,
+  applyExperienceToDOM,
+  cancelGlobalPreview,
+  configuredBaseStyleForSync,
+  isPreviewActive,
+  startGlobalPreview,
+} from "../lib/themeExperience";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const packSource = readFileSync(resolve(testDir, "../lib/themePack.ts"), "utf8");
@@ -147,6 +154,7 @@ const draft = draftPackView({
     homeOpacity: 1,
     taskOpacity: 0.2,
     overlayStrength: 0.5,
+    paneOpacity: 0.50,
   },
   backgroundUrl: "/__reasonix_theme_asset/preview-pack/deadbeef/background.png",
 });
@@ -160,12 +168,14 @@ ok((styleEl as { textContent: string }).textContent.includes("--r:14px"), "appli
 
 const twoSceneDraft = draftPackView({
   ...draft,
-  taskBackground: { focusX: 0.8, focusY: 0.3, safeArea: "right", opacity: 0.35, overlayStrength: 0.7 },
+  taskBackground: { focusX: 0.8, focusY: 0.3, safeArea: "right", opacity: 0.35, overlayStrength: 0.7, paneOpacity: 0.68 },
   taskBackgroundUrl: "/__reasonix_theme_asset/preview-pack/deadbeef/background-task.png",
 });
 applyThemePack(twoSceneDraft);
 ok(styleProps.get("--theme-bg-task-image")?.includes("background-task.png") === true, "sets independent task image var");
 ok(styleProps.get("--theme-bg-task-opacity") === "0.35", "sets independent task opacity");
+ok(styleProps.get("--theme-pane-card-pct") === "76%", "computes home card pane opacity");
+ok(styleProps.get("--theme-pane-task-card-pct") === "82%", "computes task card pane opacity");
 ok(attrs.get("data-theme-safe-area") === "right", "task background controls safe area");
 
 applyThemeScene("task");
@@ -226,6 +236,25 @@ clearThemePack();
 ok(!attrs.has("data-theme-pack"), "clear removes data-theme-pack");
 ok(getThemeStyle() === "graphite", "clear restores config graphite style");
 
+// React owners must not replace the configured base style with a pack's
+// effective style. Direct reset entry points depend on this restore snapshot.
+const activeAuroraExperience = {
+  themeMode: "dark" as const,
+  baseStyle: "graphite" as const,
+  effectiveStyle: "aurora" as const,
+  activeThemeId: aurora.id,
+  activePack: aurora,
+  safeMode: false,
+};
+applyExperienceToDOM(activeAuroraExperience);
+ok(configuredBaseStyleForSync(activeAuroraExperience) === null, "active pack effective style is not mirrored as configured base");
+clearThemePack();
+ok(getThemeStyle() === "graphite", "direct reset still restores configured base after experience sync");
+ok(
+  configuredBaseStyleForSync({ ...activeAuroraExperience, activeThemeId: undefined, activePack: null, baseStyle: "slate", effectiveStyle: "slate" }) === "slate",
+  "inactive experience still synchronizes a newly selected base style",
+);
+
 // Density recipe must land in overlay CSS and have stylesheet consumers.
 ok((styleEl as { textContent: string }).textContent.includes("--theme-density-pad") || packSource.includes("--theme-density-pad:6px"), "compact density vars defined in pack builder");
 const compactDraft = draftPackView({
@@ -254,6 +283,9 @@ const unguardedTransparencySelectors = transparencySlice
   .split("\n")
   .filter((line) => line.includes(":root[data-theme-pack]") && !line.includes('[data-theme-has-bg="true"]'));
 ok(unguardedTransparencySelectors.length === 0, "token-only packs keep opaque layout surfaces");
+ok(stylesSource.includes("var(--theme-pane-card-pct, 88%)"), "home cards consume pane opacity tier");
+ok(stylesSource.includes("var(--theme-pane-task-card-pct, 88%)"), "task cards consume pane opacity tier");
+ok(stylesSource.includes("var(--tp-pane-card-pct, 88%)"), "preview cards consume the same pane opacity tier");
 ok(stylesSource.includes(':root[data-theme-has-bg="true"] .theme-bg'), "background layer only displays for packs with backgrounds");
 
 // Unmount must cancel preview.
