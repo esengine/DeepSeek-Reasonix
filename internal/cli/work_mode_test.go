@@ -11,9 +11,36 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
 )
+
+func TestRuntimeProfileDisplayLocalizesLabels(t *testing.T) {
+	defer i18n.DetectLanguage("en")
+	for _, tt := range []struct {
+		lang                        string
+		economy, balanced, delivery string
+	}{
+		{lang: "en", economy: "economy", balanced: "balanced", delivery: "delivery"},
+		{lang: "zh", economy: "轻量", balanced: "均衡", delivery: "交付"},
+		{lang: "zh-TW", economy: "輕量", balanced: "均衡", delivery: "交付"},
+	} {
+		t.Run(tt.lang, func(t *testing.T) {
+			i18n.DetectLanguage(tt.lang)
+			for profile, want := range map[string]string{
+				boot.TokenModeEconomy:  tt.economy,
+				boot.TokenModeFull:     tt.balanced,
+				"balanced":             tt.balanced,
+				boot.TokenModeDelivery: tt.delivery,
+			} {
+				if got := runtimeProfileDisplay(profile); got != want {
+					t.Errorf("runtimeProfileDisplay(%q) = %q, want %q", profile, got, want)
+				}
+			}
+		})
+	}
+}
 
 func TestRenderWorkModesShowsAllOptionsAndCurrent(t *testing.T) {
 	out := renderWorkModes(100, boot.TokenModeFull)

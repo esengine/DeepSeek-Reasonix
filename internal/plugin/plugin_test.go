@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -510,10 +511,26 @@ func TestMCPApprovalPolicyDoesNotChangeProviderSchemas(t *testing.T) {
 	configured := makeSchemas(Spec{
 		Name: "admin", DefaultToolsApprovalMode: "writes",
 		ToolApprovalModes: map[string]string{"wipe": "prompt"},
-		ApprovalsReviewer: "auto_review",
+		ApprovalsReviewer: "auto_review", ImplicitApproval: true, AutoTrust: true,
 	})
 	if !bytes.Equal(baseline, configured) {
 		t.Fatalf("provider schemas changed with local approval policy:\nbaseline=%s\nconfigured=%s", baseline, configured)
+	}
+}
+
+func TestUserAuthorizedMCPDefaultsToDirectApprovalWithoutChangingOverrides(t *testing.T) {
+	spec := Spec{Name: "user-server", ImplicitApproval: true}
+	if got := spec.ToolApprovalMode("write"); got != tool.MCPApprovalApprove {
+		t.Fatalf("implicit user approval mode = %q, want approve", got)
+	}
+	spec.ToolApprovalModes = map[string]string{"write": "prompt"}
+	if got := spec.ToolApprovalMode("write"); got != tool.MCPApprovalPrompt {
+		t.Fatalf("explicit per-tool policy = %q, want prompt", got)
+	}
+	spec.ToolApprovalModes = nil
+	spec.DefaultToolsApprovalMode = "writes"
+	if got := spec.ToolApprovalMode("write"); got != tool.MCPApprovalWrites {
+		t.Fatalf("explicit server policy = %q, want writes", got)
 	}
 }
 
@@ -709,6 +726,23 @@ func TestStartAvailableKeepsGoodServers(t *testing.T) {
 	failures := host.Failures()
 	if len(failures) != 1 || failures[0].Name != "bad" {
 		t.Fatalf("failures = %+v, want bad", failures)
+	}
+}
+
+func TestRecordFailurePreservesReverificationAction(t *testing.T) {
+	host := NewHost()
+	host.RecordFailure(Spec{Name: "changed", Type: "stdio"}, fmt.Errorf("connect changed MCP: %w", &identityChangedError{server: "changed"}))
+	host.RecordFailure(Spec{Name: "ordinary", Type: "stdio"}, errors.New("connection refused"))
+
+	failures := host.Failures()
+	if len(failures) != 2 {
+		t.Fatalf("failures = %+v, want two", failures)
+	}
+	if !failures[0].RequiresReverification {
+		t.Fatalf("identity drift failure = %+v, want re-verification action", failures[0])
+	}
+	if failures[1].RequiresReverification {
+		t.Fatalf("ordinary failure = %+v, must remain retryable", failures[1])
 	}
 }
 
@@ -1143,8 +1177,7 @@ func TestHelperProcess(t *testing.T) {
 		return
 	}
 	defer os.Exit(0)
-	helperProcessNumber := incrementHelperCounter(os.Getenv("GO_WANT_HELPER_START_COUNT"))
-	toolsListCount := 0
+	incrementHelperCounter(os.Getenv("GO_WANT_HELPER_START_COUNT"))
 
 	var initDelay time.Duration
 	if ms := os.Getenv("GO_WANT_HELPER_INIT_MS"); ms != "" {
@@ -1179,22 +1212,10 @@ func TestHelperProcess(t *testing.T) {
 		var result any
 		switch req.Method {
 		case "initialize":
-			for _, key := range []string{
-				"GO_WANT_HELPER_INIT_WRITE_WORKSPACE",
-				"GO_WANT_HELPER_INIT_WRITE_HOME",
-				"GO_WANT_HELPER_INIT_WRITE_STATE",
-			} {
-				if path := strings.TrimSpace(os.Getenv(key)); path != "" {
-					_ = os.WriteFile(path, []byte("initialize write"), 0o600)
-				}
-			}
 			if initDelay > 0 {
 				time.Sleep(initDelay)
 			}
 			caps := map[string]any{}
-			if os.Getenv("GO_WANT_HELPER_EMPTY_FIRST_TOOLS") == "1" {
-				caps["tools"] = map[string]any{}
-			}
 			if os.Getenv("GO_WANT_HELPER_PROMPTS") == "1" {
 				caps["prompts"] = map[string]any{}
 			}
@@ -1215,15 +1236,6 @@ func TestHelperProcess(t *testing.T) {
 				"arguments":   []map[string]any{},
 			}}}
 		case "tools/list":
-			toolsListCount++
-			if os.Getenv("GO_WANT_HELPER_EMPTY_FIRST_TOOLS") == "1" && toolsListCount == 1 {
-				result = map[string]any{"tools": []map[string]any{}}
-				break
-			}
-			messageType := "string"
-			if os.Getenv("GO_WANT_HELPER_DRIFT_ON_SECOND") == "1" && helperProcessNumber > 1 {
-				messageType = "integer"
-			}
 			result = map[string]any{"tools": []map[string]any{{
 				"name":        "zed",
 				"description": "Sorted after echo.",
@@ -1233,7 +1245,7 @@ func TestHelperProcess(t *testing.T) {
 				"description": "Echo back the message.",
 				"inputSchema": map[string]any{
 					"type":       "object",
-					"properties": map[string]any{"msg": map[string]any{"type": messageType}},
+					"properties": map[string]any{"msg": map[string]any{"type": "string"}},
 					"required":   []string{"z", "msg"},
 				},
 			}}}
@@ -1294,12 +1306,12 @@ func findToolByName(tools []tool.Tool, name string) tool.Tool {
 	return nil
 }
 
-func TestStdioWriterUsesFreshOneShotProcess(t *testing.T) {
+func TestStdioWriterPreservesPersistentProcessByDefault(t *testing.T) {
 	stateDir := t.TempDir()
 	startCount := filepath.Join(t.TempDir(), "starts")
 	callCount := filepath.Join(t.TempDir(), "calls")
 	spec := Spec{
-		Name: "writer-lane", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
+		Name: "stateful-writer", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
 		Env: map[string]string{
 			"GO_WANT_HELPER_PROCESS":     "1",
 			"GO_WANT_HELPER_START_COUNT": startCount,
@@ -1314,7 +1326,7 @@ func TestStdioWriterUsesFreshOneShotProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer host.Close()
-	writer := findToolByName(tools, "mcp__writer-lane__echo")
+	writer := findToolByName(tools, "mcp__stateful-writer__echo")
 	if writer == nil {
 		t.Fatalf("writer tool missing from %v", toolNames(tools))
 	}
@@ -1324,36 +1336,11 @@ func TestStdioWriterUsesFreshOneShotProcess(t *testing.T) {
 	if _, err := writer.Execute(ctx, json.RawMessage(`{"msg":"two","z":"ok"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if got := readHelperCounter(t, startCount); got != 3 {
-		t.Fatalf("process starts = %d, want one reader plus two one-shot writers", got)
+	if got := readHelperCounter(t, startCount); got != 1 {
+		t.Fatalf("process starts = %d, want one persistent MCP process", got)
 	}
 	if got := readHelperCounter(t, callCount); got != 2 {
-		t.Fatalf("tool calls = %d, want exactly one per writer process", got)
-	}
-}
-
-func TestStdioOneShotWriterWaitsForDynamicToolRegistration(t *testing.T) {
-	spec := Spec{
-		Name: "dynamic-writer", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
-		Env: map[string]string{
-			"GO_WANT_HELPER_PROCESS":           "1",
-			"GO_WANT_HELPER_EMPTY_FIRST_TOOLS": "1",
-		},
-		StateDir: t.TempDir(),
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	host, tools, err := StartAll(ctx, []Spec{spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer host.Close()
-	writer := findToolByName(tools, "mcp__dynamic-writer__echo")
-	if writer == nil {
-		t.Fatalf("writer tool missing from %v", toolNames(tools))
-	}
-	if _, err := writer.Execute(ctx, json.RawMessage(`{"msg":"ready","z":"ok"}`)); err != nil {
-		t.Fatalf("dynamic one-shot writer call: %v", err)
+		t.Fatalf("tool calls = %d, want two calls on the persistent process", got)
 	}
 }
 
@@ -1367,98 +1354,6 @@ func TestValidateMCPToolNamesRejectsAmbiguousLists(t *testing.T) {
 				t.Fatalf("validateMCPToolNames(%+v) succeeded", tools)
 			}
 		})
-	}
-}
-
-func TestStdioWriterSchemaDriftBlocksBeforeToolCall(t *testing.T) {
-	startCount := filepath.Join(t.TempDir(), "starts")
-	callCount := filepath.Join(t.TempDir(), "calls")
-	spec := Spec{
-		Name: "writer-drift", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
-		Env: map[string]string{
-			"GO_WANT_HELPER_PROCESS":         "1",
-			"GO_WANT_HELPER_START_COUNT":     startCount,
-			"GO_WANT_HELPER_CALL_COUNT":      callCount,
-			"GO_WANT_HELPER_DRIFT_ON_SECOND": "1",
-		},
-		StateDir: t.TempDir(),
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	host, tools, err := StartAll(ctx, []Spec{spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer host.Close()
-	writer := findToolByName(tools, "mcp__writer-drift__echo")
-	if writer == nil {
-		t.Fatalf("writer tool missing from %v", toolNames(tools))
-	}
-	if _, err := writer.Execute(ctx, json.RawMessage(`{"msg":"blocked","z":"ok"}`)); err == nil || !strings.Contains(err.Error(), "blocked before execution") {
-		t.Fatalf("schema drift error = %v", err)
-	}
-	if got := readHelperCounter(t, startCount); got != 2 {
-		t.Fatalf("process starts = %d, want reader plus revalidation writer", got)
-	}
-	if got := readHelperCounter(t, callCount); got != 0 {
-		t.Fatalf("tool calls = %d, want 0 after drift", got)
-	}
-}
-
-func TestStdioReaderSandboxBlocksInitializeSideEffects(t *testing.T) {
-	if !sandbox.Available() {
-		t.Skip("OS sandbox backend unavailable")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("home directory unavailable: %v", err)
-	}
-	workspace, err := os.MkdirTemp(home, ".reasonix-mcp-workspace-")
-	if err != nil {
-		t.Skipf("cannot create workspace fixture: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(workspace) })
-	outside, err := os.MkdirTemp(home, ".reasonix-mcp-home-")
-	if err != nil {
-		t.Skipf("cannot create home fixture: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(outside) })
-	stateDir, err := os.MkdirTemp(home, ".reasonix-mcp-state-")
-	if err != nil {
-		t.Skipf("cannot create state fixture: %v", err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(stateDir) })
-
-	workspaceWrite := filepath.Join(workspace, "initialize-write")
-	homeWrite := filepath.Join(outside, "initialize-write")
-	stateWrite := filepath.Join(stateDir, "tmp", "initialize-write")
-	spec := Spec{
-		Name: "reader-sandbox", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"}, Dir: workspace,
-		Env: map[string]string{
-			"GO_WANT_HELPER_PROCESS":              "1",
-			"GO_WANT_HELPER_INIT_WRITE_WORKSPACE": workspaceWrite,
-			"GO_WANT_HELPER_INIT_WRITE_HOME":      homeWrite,
-			"GO_WANT_HELPER_INIT_WRITE_STATE":     stateWrite,
-		},
-		StateDir: stateDir,
-		ReaderSandbox: sandbox.Spec{
-			Mode: "enforce", WriteRoots: []string{stateDir}, ReadRoots: []string{workspace, home}, AppContainerWriteRoots: []string{stateDir}, Network: true, MinimalWrites: true,
-		},
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	host, _, err := StartAll(ctx, []Spec{spec})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer host.Close()
-	for _, path := range []string{workspaceWrite, homeWrite} {
-		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("reader initialize escaped into %s: stat error %v", path, err)
-		}
-	}
-	if body, err := os.ReadFile(stateWrite); err != nil || string(body) != "initialize write" {
-		t.Fatalf("reader private state write = %q, %v; want allowed", body, err)
 	}
 }
 
@@ -1528,7 +1423,7 @@ func TestOfficialIdentityIsStableAcrossWorkspaceIsolationRoots(t *testing.T) {
 	}
 }
 
-func TestWorkspaceIdentityTracksForbiddenReadRoots(t *testing.T) {
+func TestWorkspaceIdentityIgnoresHostPolicyChanges(t *testing.T) {
 	base := Spec{
 		Name: "custom", Command: os.Args[0], ConfigSource: "workspace_config",
 		ReaderSandbox: sandbox.Spec{Mode: "enforce", ForbidReadRoots: []string{"/secret/a"}},
@@ -1543,8 +1438,8 @@ func TestWorkspaceIdentityTracksForbiddenReadRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a == b {
-		t.Fatal("forbidden-read policy change did not alter workspace identity")
+	if a != b {
+		t.Fatal("host sandbox policy change altered stable server identity")
 	}
 }
 
@@ -1603,6 +1498,121 @@ func TestIdentityDriftBlocksBeforeProcessStart(t *testing.T) {
 	}
 }
 
+func TestUserAuthorizedIdentityChangeRefreshesWithoutAnotherPrompt(t *testing.T) {
+	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
+	if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, "user-refresh", "user_config", "old-identity", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	spec := Spec{
+		Name: "user-refresh", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}, TrustManager: manager,
+		ConfigSource: "user_config", AutoTrust: true, ImplicitApproval: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	host, _, err := StartAll(ctx, []Spec{spec})
+	if err != nil {
+		t.Fatalf("user-authorized refresh: %v", err)
+	}
+	defer host.Close()
+	identity, err := specIdentityFingerprint(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	has, changed, err := manager.IdentityChanged(spec.Name, spec.ConfigSource, identity)
+	if err != nil || !has || changed {
+		t.Fatalf("refreshed user receipt = (has=%v changed=%v err=%v)", has, changed, err)
+	}
+}
+
+func TestProjectLaunchApprovalBlocksBeforeProcessStart(t *testing.T) {
+	redirectCache(t)
+	startCount := filepath.Join(t.TempDir(), "starts")
+	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
+	spec := Spec{
+		Name: "project-server", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS":     "1",
+			"GO_WANT_HELPER_START_COUNT": startCount,
+		},
+		TrustManager: manager, ConfigSource: "project_config", RequireLaunchApproval: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, _, err := StartAll(ctx, []Spec{spec}); err == nil || !strings.Contains(err.Error(), "until the user authorizes") {
+		t.Fatalf("unauthorized project start error = %v", err)
+	}
+	if got := readHelperCounter(t, startCount); got != 0 {
+		t.Fatalf("unauthorized project starts = %d, want 0", got)
+	}
+	inspection, err := InspectSpec(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inspection.RequiresLaunchApproval || inspection.Security.TrustState != mcptrust.TrustUntrusted {
+		t.Fatalf("launch inspection = %+v", inspection)
+	}
+	if got := readHelperCounter(t, startCount); got != 0 {
+		t.Fatalf("inspection started unauthorized project %d times", got)
+	}
+	if err := SetSpecTrust(ctx, spec, "workspace"); err != nil {
+		t.Fatal(err)
+	}
+	if got := readHelperCounter(t, startCount); got != 1 {
+		t.Fatalf("authorized preflight starts = %d, want 1", got)
+	}
+	host, _, err := StartAll(ctx, []Spec{spec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.Close()
+	if got := readHelperCounter(t, startCount); got != 2 {
+		t.Fatalf("post-authorization starts = %d, want 2", got)
+	}
+}
+
+func TestLegacyPolicyCoupledIdentityAndWorkspaceSourceMigrate(t *testing.T) {
+	workspace := t.TempDir()
+	secret := t.TempDir()
+	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), workspace)
+	spec := Spec{
+		Name: "legacy-policy", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
+		Env:          map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		ConfigSource: "project_config", TrustManager: manager, RequireLaunchApproval: true,
+		ReaderSandbox: sandbox.Spec{Mode: "enforce", ReadRoots: []string{workspace}, ForbidReadRoots: []string{secret}},
+		WriterSandbox: sandbox.Spec{Mode: "enforce", WriteRoots: []string{workspace}},
+	}
+	identity, err := buildSpecIdentity(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyIdentity := identity
+	legacyIdentity.ConfigSource = "workspace_config"
+	legacyFPs := mcptrust.LegacyIdentityFingerprints(legacyIdentity)
+	if len(legacyFPs) == 0 {
+		t.Fatal("missing legacy fingerprints")
+	}
+	if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, spec.Name, "workspace_config", legacyFPs[0], "", nil); err != nil {
+		t.Fatal(err)
+	}
+	currentFP, err := mcptrust.IdentityFingerprint(identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := start(ctx, ctx, spec)
+	if err != nil {
+		t.Fatalf("legacy receipt should migrate before the project launch gate: %v", err)
+	}
+	client.close()
+	has, changed, err := manager.IdentityChanged(spec.Name, spec.ConfigSource, currentFP)
+	if err != nil || !has || changed {
+		t.Fatalf("migrated identity = (has=%v changed=%v err=%v)", has, changed, err)
+	}
+}
+
 // TestReadOnlyOverrideDoesNotChangeModelVisibleSchema locks the cache invariant
 // behind the backward-compatible MCP read-only override: classification may
 // change ReadOnly, but must not alter the provider-visible name or input schema.
@@ -1656,7 +1666,7 @@ func TestReadOnlyOverrideDoesNotChangeModelVisibleSchema(t *testing.T) {
 	}
 }
 
-func TestReaderIntentRefusesWriterLanePromotionAfterRevocation(t *testing.T) {
+func TestReaderIntentRefusesDispatchAfterRevocation(t *testing.T) {
 	stateDir := t.TempDir()
 	startCount := filepath.Join(t.TempDir(), "starts")
 	callCount := filepath.Join(t.TempDir(), "calls")
@@ -1702,7 +1712,7 @@ func TestReaderIntentRefusesWriterLanePromotionAfterRevocation(t *testing.T) {
 
 	// A concurrent revocation (catalog refresh, trust re-evaluation) lands
 	// after the authorization: the reader-authorized call must refuse instead
-	// of promoting itself into the one-shot writer lane or issuing tools/call.
+	// of issuing tools/call.
 	rt.client.toolsMu.Lock()
 	rt.readOnly, rt.readOnlyTrusted = false, false
 	rt.client.toolsMu.Unlock()
@@ -1729,16 +1739,16 @@ func TestReaderIntentRefusesWriterLanePromotionAfterRevocation(t *testing.T) {
 		t.Fatalf("stale fingerprint call reached tools/call: calls=%d", got)
 	}
 
-	// Without reader intent the ordinary writer path is unchanged: the
-	// approved writer spawns its one-shot lane exactly as before.
+	// Without reader intent the ordinary writer path remains on the persistent
+	// connection.
 	rt.client.toolsMu.Lock()
 	rt.readOnly, rt.readOnlyTrusted = false, false
 	rt.client.toolsMu.Unlock()
 	if _, _, err := rt.ExecuteWithImages(ctx, json.RawMessage(`{"msg":"writer","z":"ok"}`)); err != nil {
 		t.Fatalf("approved writer call failed: %v", err)
 	}
-	if got := readHelperCounter(t, startCount); got != 2 {
-		t.Fatalf("writer call starts = %d, want reader process plus one one-shot writer", got)
+	if got := readHelperCounter(t, startCount); got != 1 {
+		t.Fatalf("writer call starts = %d, want one persistent process", got)
 	}
 	if got := readHelperCounter(t, callCount); got != 2 {
 		t.Fatalf("writer call count = %d, want 2", got)

@@ -43,8 +43,36 @@ func legacySpecIdentityFingerprint(s Spec) (string, bool) {
 		return "", false
 	}
 	identity.URL = legacyURL
-	fp, err := mcptrust.IdentityFingerprint(identity)
-	return fp, err == nil
+	fingerprints := mcptrust.LegacyIdentityFingerprints(identity)
+	if len(fingerprints) == 0 {
+		return "", false
+	}
+	return fingerprints[0], true
+}
+
+func legacySpecIdentityFingerprints(s Spec) []string {
+	identity, err := buildSpecIdentity(context.Background(), s)
+	if err != nil {
+		return nil
+	}
+	out := mcptrust.LegacyIdentityFingerprints(identity)
+	if legacyURL := legacyNormalizeIdentityURL(s.URL); identity.URL != "" && legacyURL != normalizeIdentityURL(s.URL) {
+		identity.URL = legacyURL
+		out = append(out, mcptrust.LegacyIdentityFingerprints(identity)...)
+	}
+	return compactFingerprints(out)
+}
+
+func compactFingerprints(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" && !seen[value] {
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func buildSpecIdentity(ctx context.Context, s Spec) (mcptrust.Identity, error) {
@@ -120,7 +148,7 @@ func buildSpecIdentity(ctx context.Context, s Spec) (mcptrust.Identity, error) {
 }
 
 // MCPStateDir returns a stable, server-scoped host directory outside the
-// workspace. MCP sandboxes permit writes only here in the reader lane.
+// workspace for state that must survive across calls and sessions.
 func MCPStateDir(reasonixHome, workspace, server string) string {
 	if strings.TrimSpace(reasonixHome) == "" {
 		return ""
@@ -322,15 +350,14 @@ func capabilityOf(s Spec, raw mcpTool, schema []byte) mcptrust.Capability {
 // fingerprint upgrades in place when nothing else drifted.
 func managerEvaluate(manager *mcptrust.Manager, s Spec, identity string, capabilities []mcptrust.Capability) (mcptrust.Evaluation, error) {
 	eval, err := managerEvaluateOnce(manager, s, identity, capabilities)
-	if err != nil || !eval.IdentityChanged {
+	if err != nil {
 		return eval, err
 	}
-	legacy, ok := legacySpecIdentityFingerprint(s)
-	if !ok {
-		return eval, nil
+	migrated, migErr := migrateLegacyIdentity(s, identity, capabilities)
+	if migErr != nil {
+		return eval, migErr
 	}
-	migrated, migErr := manager.MigrateIdentityFingerprint(s.Name, trustConfigSource(s), legacy, identity, capabilities)
-	if migErr != nil || !migrated {
+	if !migrated {
 		return eval, nil
 	}
 	return managerEvaluateOnce(manager, s, identity, capabilities)
@@ -342,16 +369,23 @@ func managerEvaluate(manager *mcptrust.Manager, s Spec, identity string, capabil
 // exist yet, so the drift comparison is deliberately skipped (nil): the
 // receipt's tool snapshot is untouched and the post-handshake evaluation
 // still performs the full capability drift check against it.
-func migrateLegacyIdentity(s Spec, identity string) bool {
+func migrateLegacyIdentity(s Spec, identity string, capabilities []mcptrust.Capability) (bool, error) {
 	if s.TrustManager == nil {
-		return false
+		return false, nil
 	}
-	legacy, ok := legacySpecIdentityFingerprint(s)
-	if !ok {
-		return false
+	legacy := legacySpecIdentityFingerprints(s)
+	if len(legacy) == 0 {
+		return false, nil
 	}
-	migrated, err := s.TrustManager.MigrateIdentityFingerprint(s.Name, trustConfigSource(s), legacy, identity, nil)
-	return err == nil && migrated
+	currentSource := trustConfigSource(s)
+	return s.TrustManager.MigrateIdentityFingerprints(
+		s.Name,
+		currentSource,
+		[]string{currentSource, "workspace_config"},
+		legacy,
+		identity,
+		capabilities,
+	)
 }
 
 func managerEvaluateOnce(manager *mcptrust.Manager, s Spec, identity string, capabilities []mcptrust.Capability) (mcptrust.Evaluation, error) {
@@ -379,6 +413,9 @@ func evaluateSpecTrust(s Spec, identity string, capabilities []mcptrust.Capabili
 		return mcptrust.Evaluation{State: mcptrust.TrustUntrusted, TrustedReaders: trusted}, nil
 	}
 	configSource := trustConfigSource(s)
+	if _, err := migrateLegacyIdentity(s, identity, capabilities); err != nil {
+		return untrustedEvaluation(), err
+	}
 	if s.OfficialCatalogEntryID != "" && mcpcatalog.RuntimeEntryRevoked(s.OfficialCatalogEntryID) {
 		return untrustedEvaluation(), nil
 	}
@@ -398,6 +435,12 @@ func evaluateSpecTrust(s Spec, identity string, capabilities []mcptrust.Capabili
 	if !hasReceipt {
 		if s.OfficialCatalogEntryID != "" {
 			if err := manager.TrustOfficial(s.Name, configSource, identity, s.OfficialCatalogEntryID, capabilities, s.OfficialReaderNames); err != nil {
+				return untrustedEvaluation(), err
+			}
+			return managerEvaluate(manager, s, identity, capabilities)
+		}
+		if s.AutoTrust {
+			if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, s.Name, configSource, identity, "", capabilities); err != nil {
 				return untrustedEvaluation(), err
 			}
 			return managerEvaluate(manager, s, identity, capabilities)
@@ -428,6 +471,12 @@ func evaluateSpecTrust(s Spec, identity string, capabilities []mcptrust.Capabili
 	eval, err := managerEvaluate(manager, s, identity, capabilities)
 	if err != nil {
 		return untrustedEvaluation(), err
+	}
+	if s.AutoTrust && (eval.IdentityChanged || len(eval.ChangedTools) > 0) {
+		if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, s.Name, configSource, identity, "", capabilities); err != nil {
+			return untrustedEvaluation(), err
+		}
+		return managerEvaluate(manager, s, identity, capabilities)
 	}
 	return eval, nil
 }

@@ -77,6 +77,16 @@ type Messages struct {
 	ChatStatusIdle                         string // shortcuts hint when idle
 	ChatStatusYoloIdle                     string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusCycleHint                    string // plan-toggle shortcut hint shown when no modal prompt owns the status row
+	ChatStatusCycleHintCompact             string // readable shortcut hint used by the persistent footer
+	ChatTurnReceiptLabel                   string // compact per-turn usage receipt attached to the completed assistant response
+	ChatStatusModelLabel                   string
+	ChatStatusEffortLabel                  string
+	ChatStatusWorkLabel                    string
+	ChatStatusCacheLabel                   string
+	ChatStatusContextLabel                 string
+	ChatStatusCompactLabel                 string
+	ChatStatusJobsLabel                    string
+	ChatStatusBalanceLabel                 string
 	ChatStatusCacheNowFmt                  string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt                  string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval                 string // shortcuts hint while a plan is pending
@@ -165,27 +175,33 @@ type Messages struct {
 	CompactionManual  string // trigger label: user ran /compact
 
 	// chat TUI slash commands.
-	SlashCompactDone    string // "/compact" succeeded
-	SlashCompactFailed  string // "/compact" errored, prefixed before the underlying error
-	SlashNewDone        string // "/new" succeeded
-	SlashNewFailed      string // "/new" errored
-	SlashClearPrompt    string // "/clear" destructive confirmation prompt
-	SlashClearDone      string // "/clear" succeeded
-	SlashClearFailed    string // "/clear" errored
-	SlashClsDone        string // "/cls" succeeded
-	SlashTodoCleared    string // "/todo" dismissed the pinned task list
-	SlashUnavailable    string // the command is configured off (no callback wired)
-	SlashUnknown        string // shown when the user types an unrecognised "/cmd"
-	SlashHelp           string // listed commands
-	SlashPromptEmpty    string // an MCP prompt returned no text to send
-	SlashMCPNone        string // /mcp when no MCP servers are connected
-	CtrlCQuitHint       string // shown on first Ctrl+C while idle; second press exits
-	CompHintSlash       string // key hint footer under the slash-command menu
-	CompHintFile        string // key hint footer under the @ file/resource menu
-	MouseCopiedHint     string // transient status-line hint after a mouse/Ctrl+C selection copy
-	MouseCaptureOnHint  string // "/mouse" turned in-app mouse handling back on
-	MouseCaptureOffHint string // "/mouse" released mouse capture to the terminal
-	MouseCaptureTag     string // persistent status-line marker while mouse capture is off
+	SlashCompactDone             string // "/compact" succeeded
+	SlashCompactFailed           string // "/compact" errored, prefixed before the underlying error
+	SlashNewDone                 string // "/new" succeeded
+	SlashNewFailed               string // "/new" errored
+	SlashClearPrompt             string // "/clear" destructive confirmation prompt
+	SlashClearDone               string // "/clear" succeeded
+	SlashClearFailed             string // "/clear" errored
+	SlashClsDone                 string // "/cls" succeeded
+	SlashTodoCleared             string // "/todo" dismissed the pinned task list
+	SlashUnavailable             string // the command is configured off (no callback wired)
+	SlashUnknown                 string // shown when the user types an unrecognised "/cmd"
+	SlashHelp                    string // listed commands
+	SlashPromptEmpty             string // an MCP prompt returned no text to send
+	SlashMCPNone                 string // /mcp when no MCP servers are connected
+	CtrlCQuitHint                string // shown on first Ctrl+C while idle; second press exits
+	CompHintSlash                string // key hint footer under the slash-command menu
+	CompHintFile                 string // key hint footer under the @ file/resource menu
+	MouseCopiedHint              string // transient status-line hint after a mouse/Ctrl+C selection copy
+	ClipboardCopyOSC52Hint       string // copy was sent through OSC 52 because the session is remote
+	ClipboardCopyFallbackHint    string // native clipboard failed and copy fell back to OSC 52
+	ClipboardTextPasteRemoteHint string // right-click paste cannot read the user's local clipboard over SSH
+	ClipboardTextPasteFailedFmt  string // text clipboard read failed, one %v
+	ClipboardImagePastingHint    string // shown while an image is being read from the system clipboard
+	ClipboardImagePasteFailedFmt string // image clipboard read failed, one %v
+	MouseCaptureOnHint           string // "/mouse" turned in-app mouse handling back on
+	MouseCaptureOffHint          string // "/mouse" released mouse capture to the terminal
+	MouseCaptureTag              string // persistent status-line marker while mouse capture is off
 
 	// shell execution (! prefix).
 	ShellExecEmpty      string // bare "!" with no command
@@ -229,7 +245,6 @@ type Messages struct {
 	CmdMouse            string // /mouse
 	CmdAutoPlan         string // /auto-plan
 	CmdReasonLang       string // /reasoning-language
-	CmdMemoryV5         string // /memory-v5
 	CmdHelp             string // /help
 	CmdTodo             string // /todo
 	CmdQuit             string // /quit (also accepts /exit as hidden alias)
@@ -300,6 +315,9 @@ type Messages struct {
 	WorkModeStatusFmt         string
 	WorkModeListHeaderFmt     string
 	WorkModeListHint          string
+	WorkModeEconomyLabel      string
+	WorkModeBalancedLabel     string
+	WorkModeDeliveryLabel     string
 	WorkModeEconomyDesc       string
 	WorkModeBalancedDesc      string
 	WorkModeDeliveryDesc      string

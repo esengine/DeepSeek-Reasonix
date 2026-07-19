@@ -231,7 +231,6 @@ func (m *metricsAggregator) observeSettingsSnapshot(c *config.Config) {
 	m.inc("settings_close_behavior", c.DesktopCloseBehavior())
 	m.inc("settings_display_mode", c.DesktopDisplayMode())
 	m.inc("settings_auto_plan", desktopAutoPlanMode(c.Agent.AutoPlan))
-	m.inc("settings_memory_compiler", boolBucket(c.MemoryCompilerEnabled()))
 	m.inc("settings_status_bar_style", c.DesktopStatusBarStyle())
 	m.inc("settings_status_bar_items_count", statusBarItemsCountBucket(len(c.DesktopStatusBarItems())))
 	m.inc("settings_check_updates", boolBucket(c.DesktopCheckUpdates()))
@@ -306,71 +305,10 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.CompactionDone:
 		m.inc("compaction", "total")
-	case event.MemoryCompilerStatsEvent:
-		m.observeMemoryCompilerStats(e.MemoryCompiler)
 	case event.Notice:
 		if e.Text == "No visible answer was produced; asking the assistant to respond again." || strings.HasPrefix(e.Detail, "empty final answer blocked") {
 			m.inc("empty_final", "total")
 		}
-	}
-}
-
-func (m *metricsAggregator) observeMemoryCompilerStats(s *event.MemoryCompilerStats) {
-	if s == nil {
-		return
-	}
-	m.inc("memory_compiler_turn", "total")
-	m.inc("memory_compiler_injected", boolBucket(s.Injected))
-	m.inc("memory_compiler_useful_ir", boolBucket(s.UsefulIR))
-	m.inc("memory_compiler_compiled_tokens", tokenSizeBucket(s.CompiledTokens))
-	m.inc("memory_compiler_ir_overhead_tokens", tokenSizeBucket(s.IROverheadTokens))
-	m.inc("memory_compiler_memory_refs", countBucket(s.MemoryReferences))
-	m.inc("memory_compiler_constraints", countBucket(s.Constraints))
-	m.inc("memory_compiler_risk_notes", countBucket(s.RiskNotes))
-	m.inc("memory_compiler_execution_steps", countBucket(s.ExecutionSteps))
-	m.inc("memory_compiler_nodes", memorySizeBucket(s.TotalNodes))
-	m.inc("memory_compiler_high_signal_nodes", memorySizeBucket(s.HighSignalNodes))
-	m.inc("memory_compiler_tool_result_nodes", memorySizeBucket(s.ToolResultNodes))
-	m.inc("memory_compiler_decisions", memorySizeBucket(s.DecisionNodes))
-	m.inc("memory_compiler_strategies", memorySizeBucket(s.StrategyCount))
-	m.inc("memory_compiler_learnings", memorySizeBucket(s.LearningCount))
-}
-
-func tokenSizeBucket(n int) string {
-	if n <= 0 {
-		return "t_0"
-	}
-	switch {
-	case n <= 250:
-		return "t_1_250"
-	case n <= 750:
-		return "t_251_750"
-	case n <= 1500:
-		return "t_751_1500"
-	case n <= 3000:
-		return "t_1501_3000"
-	default:
-		return "t_3001_plus"
-	}
-}
-
-func memorySizeBucket(n int) string {
-	if n <= 0 {
-		return "n_0"
-	}
-	switch {
-	case n <= 5:
-		return "n_1_5"
-	case n <= 20:
-		return "n_6_20"
-	case n <= 50:
-		return "n_21_50"
-	case n <= 100:
-		return "n_51_100"
-	case n <= 300:
-		return "n_101_300"
-	default:
-		return "n_301_plus"
 	}
 }
 

@@ -49,6 +49,7 @@ func mergeInstalledPluginPackages(cfg *Config, root string) []string {
 				Headers:   pluginPackageWorkspaceMap(pkg.Root, root, srv.Headers),
 				AutoStart: srv.AutoStart,
 				Tier:      srv.Tier,
+				Source:    MCPSourcePluginPackage,
 			}
 			if existing, ok := pluginEntryByName(cfg.Plugins, name); ok {
 				if owner, packageOwned := cfg.pluginPackageOwners[name]; packageOwned && pluginPackageEntriesEqual(existing, entry) {

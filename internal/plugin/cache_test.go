@@ -298,7 +298,6 @@ func TestSpecFingerprintIgnoresHostLocalTrustAndIsolation(t *testing.T) {
 	changed.ReaderSandbox = sandbox.Spec{Mode: "enforce", Network: true, WriteRoots: []string{"/host/state"}, MinimalWrites: true}
 	changed.WriterSandbox = sandbox.Spec{Mode: "enforce", WriteRoots: []string{"/workspace"}, MinimalWrites: true}
 	changed.StateDir = "/host/state"
-	changed.OneShot = true
 	if got, want := SpecFingerprint(changed), SpecFingerprint(base); got != want {
 		t.Fatalf("host-local security state changed provider cache fingerprint: %q != %q", got, want)
 	}

@@ -1,9 +1,9 @@
 name: Release desktop
 
-# Desktop (Wails) release line. Tag namespace `desktop-v<semver>` triggers this —
-# plain `v<semver>` tags are the CLI release (release.yml) and intentionally do NOT
-# trigger here (GitHub glob `v*` does not match `desktop-v*`). Bump with:
-#   git tag desktop-vX.Y.Z && git push origin desktop-vX.Y.Z
+# Desktop (Wails) release line. Stable releases are called by
+# release-stable.yml after its single GitHub environment approval. Direct tag
+# pushes are retained only for desktop prereleases so they can still ship
+# independently.
 #
 # Wails cannot cross-compile a CGO/WebKit binary, so build/ fans out to one native
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
@@ -11,14 +11,15 @@ name: Release desktop
 # release and mirrored to R2 (the updater reads R2 first, then the crash worker
 # release gateway; stable desktop releases own GitHub's repository-wide "latest").
 #
-# The same build/sign/manifest pipeline serves two channels. A `desktop-v*` tag
-# (or manual stable dispatch) publishes a GitHub release and moves R2's latest/
-# pointer. A manual `channel: canary` dispatch builds with -X main.channel=canary
+# The same build/sign/manifest pipeline serves two channels. An orchestrated
+# `desktop-v*` tag (or manual stable recovery) publishes a GitHub release and
+# moves R2's latest/ pointer. A manual `channel: canary` dispatch builds with
+# -X main.channel=canary
 # and uploads only to R2's canary/ pointer — no GitHub release, so canary never
 # shows on the releases page and never touches latest/.
 on:
   push:
-    tags: ["desktop-v*"]
+    tags: ["desktop-v*-*"]
   workflow_dispatch:
     inputs:
       channel:
@@ -34,16 +35,87 @@ on:
         description: "canary: intended next stable version, e.g. 1.5.0"
         required: false
         type: string
+  workflow_call:
+    inputs:
+      channel:
+        description: "Release channel selected by the approved orchestrator"
+        required: true
+        type: string
+      tag:
+        description: "Existing desktop tag to publish"
+        required: false
+        default: ""
+        type: string
+      base_version:
+        description: "Base version used for canary builds"
+        required: false
+        default: ""
+        type: string
+      approved_cli_tag:
+        description: "Stable CLI tag recorded by the approved orchestrator"
+        required: true
+        type: string
+      approved_sha:
+        description: "Immutable commit recorded by the approved orchestrator"
+        required: true
+        type: string
+      orchestrated:
+        description: "True only when called by release-stable.yml after approval"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write # create the release and upload artifacts
 
 jobs:
+  orchestration-guard:
+    name: verify approved orchestrator
+    if: ${{ inputs.orchestrated }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify caller and approved release ref
+        env:
+          ACTUAL_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-stable.yml@{1}', github.repository, github.ref) }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          CALLER_SHA: ${{ github.sha }}
+          APPROVED_CLI_TAG: ${{ inputs.approved_cli_tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERIFY_RELEASE_CHECKOUT: false
+        run: |
+          bash scripts/verify-release-authorization.sh
+          bash scripts/verify-release-tag.sh
+
+  release-gate:
+    name: approve standalone desktop release
+    if: ${{ !inputs.orchestrated && !(github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: echo "Approved standalone desktop release $RELEASE_TAG"
+
   cache-guard:
     name: cache hit guard
+    needs: [orchestration-guard, release-gate]
+    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && ((github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') || needs.release-gate.result == 'success'))) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -56,6 +128,7 @@ jobs:
   build:
     name: build (${{ matrix.name }})
     needs: cache-guard
+    if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     permissions:
       contents: read # checkout only; the publish job holds contents: write
       actions: read # SignPath reads run details + downloads the unsigned artifact
@@ -79,6 +152,8 @@ jobs:
         shell: bash # desktop-build.sh is bash; windows runners default to pwsh otherwise
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -140,7 +215,11 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" >/dev/null
           # Prepend the signing keychain to the search list so codesign / find-identity see it.
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          existing_keychains=()
+          while IFS= read -r keychain; do
+            [ -n "$keychain" ] && existing_keychains+=("$keychain")
+          done < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"//; s/"[[:space:]]*$//')
+          security list-keychains -d user -s "$KEYCHAIN" "${existing_keychains[@]}"
           echo "$APPLE_API_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           rm -f "$RUNNER_TEMP/cert.p12"
 
@@ -174,8 +253,9 @@ jobs:
       # the manifest SHA must be computed over the signed build. SignPath pulls the file
       # from the Actions artifact API, so it must be uploaded first. Canary signs with the
       # test certificate; stable/rc sign with the Foundation release certificate, but only
-      # once SIGNPATH_RELEASE_SIGNING_READY is set — until that cert clears CSR-pending,
-      # stable ships unsigned instead of failing the whole release on an invalid policy.
+      # once SIGNPATH_RELEASE_SIGNING_READY is set. The release-signing policy verifies the
+      # trusted GitHub origin and intentionally retains its manual approval process as a
+      # second-party control. Each Windows architecture can require its own confirmation.
       - name: Upload unsigned installer for SignPath
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (steps.ver.outputs.channel == 'canary' || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
         id: unsigned-installer
@@ -198,8 +278,8 @@ jobs:
           github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
           github-token: ${{ github.token }}
           wait-for-completion: true
-          # The policy uses an approval process — leave headroom for a human to approve
-          # the request (the approver gets an email on submit) before the job gives up.
+          # Leave headroom for the manual SignPath confirmation, origin verification,
+          # malware scanning, and signing.
           wait-for-completion-timeout-in-seconds: 1800
           output-artifact-directory: signed
 
@@ -223,12 +303,15 @@ jobs:
   publish:
     name: publish release
     needs: build
+    if: ${{ always() && !cancelled() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
-    # Stable publishes go through the `release` environment (esengine must
-    # approve); canary uses the open `canary` environment so maintainers self-serve.
-    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') && 'canary' || 'release' }}
+    # The stable caller has already passed the single GitHub release approval.
+    # Direct prereleases/manual stable recovery pass release-gate; canaries run
+    # free. Windows signing retains its separate SignPath confirmations.
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -270,6 +353,13 @@ jobs:
         if: steps.ver.outputs.channel != 'canary'
         run: node scripts/release-notes.mjs render --version "${{ steps.ver.outputs.version }}" --output /tmp/release-notes.md
 
+      - name: Revalidate approved release ref
+        if: ${{ inputs.orchestrated }}
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+        run: bash scripts/verify-release-tag.sh
+
       - name: Publish GitHub release
         if: steps.ver.outputs.channel != 'canary'
         env:
@@ -301,11 +391,13 @@ jobs:
       contents: write # gh release download + compatibility manifest upload
       actions: write # dispatch pages.yml to re-bake the site version
     # Skip cleanly when R2 isn't configured; GitHub release still works as fallback.
-    if: ${{ github.repository_owner == 'esengine' }}
+    if: ${{ always() && !cancelled() && needs.publish.result == 'success' && github.repository_owner == 'esengine' }}
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
 
       - name: Resolve version
         id: ver
@@ -317,6 +409,13 @@ jobs:
           IN_BASE_VERSION: ${{ inputs.base_version }}
           REF_NAME: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
+
+      - name: Revalidate approved release ref
+        if: ${{ inputs.orchestrated }}
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+        run: bash scripts/verify-release-tag.sh
 
       # Canary has no GitHub release — pull the signed dist from the workflow
       # artifact. Stable pulls from the published release.

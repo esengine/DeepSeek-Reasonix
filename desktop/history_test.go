@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"reasonix/internal/agent"
@@ -309,6 +311,8 @@ func TestHistoryForTabRestoresPlannerDisplayAfterReload(t *testing.T) {
 	tab.sink.Emit(event.Event{Kind: event.Text, Text: "planner visible plan", Source: event.UsageSourcePlanner})
 	tab.sink.Emit(event.Event{Kind: event.Message, Text: "planner visible plan", Reasoning: "planner thinking\n", Source: event.UsageSourcePlanner})
 	tab.sink.Emit(event.Event{Kind: event.TurnStarted})
+	tab.sink.Emit(event.Event{Kind: event.Text, Text: "executor kept working", Source: event.UsageSourceExecutor})
+	tab.sink.Emit(event.Event{Kind: event.Message, Text: "executor kept working", Source: event.UsageSourceExecutor})
 	tab.sink.Emit(event.Event{Kind: event.TurnDone})
 	waitForAutosaveIdle(t, tab)
 
@@ -327,6 +331,190 @@ func TestHistoryForTabRestoresPlannerDisplayAfterReload(t *testing.T) {
 	}
 	if got[4].Role != "assistant" || got[4].Content != "executor kept working" {
 		t.Fatalf("executor answer missing after reload: %+v", got[4])
+	}
+}
+
+type cancelledDisplayRunner struct {
+	session *agent.Session
+	sink    event.Sink
+	started chan struct{}
+}
+
+type blockingPlannerProvider struct {
+	started chan struct{}
+}
+
+func (p *blockingPlannerProvider) Name() string { return "blocking-planner" }
+
+func (p *blockingPlannerProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	close(p.started)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (r *cancelledDisplayRunner) Run(ctx context.Context, input string) error {
+	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	r.session.Add(provider.Message{Role: provider.RoleAssistant, ReasoningContent: "checking settings\n", ToolCalls: []provider.ToolCall{{
+		ID: "call_1", Name: "read_file", Arguments: `{"path":"settings.json"}`,
+	}}})
+	r.session.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "partial settings"})
+	r.sink.Emit(event.Event{Kind: event.Reasoning, Text: "checking settings\n", Source: event.UsageSourceExecutor})
+	r.sink.Emit(event.Event{Kind: event.ToolDispatch, Source: event.UsageSourceExecutor, Tool: event.Tool{
+		ID: "call_1", Name: "read_file", Args: `{"path":"settings.json"}`, ReadOnly: true,
+	}})
+	r.sink.Emit(event.Event{Kind: event.ToolResult, Source: event.UsageSourceExecutor, Tool: event.Tool{
+		ID: "call_1", Name: "read_file", Output: "partial settings", Err: "cancelled",
+	}})
+	close(r.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestHistoryForTabRestoresCancelledExecutorDisplayAfterReload(t *testing.T) {
+	dir := t.TempDir()
+	path := agent.NewSessionPath(dir, "test-model")
+	sess := agent.NewSession("system")
+	app := &App{tabs: map[string]*WorkspaceTab{}, activeTabID: "cancelled_tab"}
+	tab := &WorkspaceTab{ID: "cancelled_tab", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	runner := &cancelledDisplayRunner{session: sess, sink: tab.sink, started: make(chan struct{})}
+	ag := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Runner: runner, Executor: ag, SessionDir: dir, SessionPath: path, Sink: tab.sink})
+	tab.Ctrl = ctrl
+	app.tabs[tab.ID] = tab
+
+	ctrl.Send("continue setup")
+	select {
+	case <-runner.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled turn did not start")
+	}
+	ctrl.Cancel()
+	waitNotRunning(t, ctrl)
+	waitForAutosaveIdle(t, tab)
+
+	if got := ctrl.History(); len(got) != 2 {
+		t.Fatalf("model transcript length = %d, want system + user only: %+v", len(got), got)
+	}
+	got := app.HistoryForTab(tab.ID)
+	if len(got) != 5 {
+		t.Fatalf("history length = %d, want system + user + assistant + tool + notice: %+v", len(got), got)
+	}
+	if got[1].Role != "user" || got[1].Content != "continue setup" {
+		t.Fatalf("cancelled turn user missing after reload: %+v", got[1])
+	}
+	if got[2].Role != "assistant" || got[2].Reasoning != "checking settings\n" || len(got[2].ToolCalls) != 1 || got[2].ToolCalls[0].Name != "read_file" {
+		t.Fatalf("cancelled assistant display missing after reload: %+v", got[2])
+	}
+	if got[3].Role != "tool" || got[3].ToolName != "read_file" || got[3].Content != "partial settings" || got[3].ToolResultError != "partial settings" {
+		t.Fatalf("cancelled tool display missing after reload: %+v", got[3])
+	}
+	if got[4].Role != "notice" || got[4].Code != event.NoticeCodeCancelledTurn {
+		t.Fatalf("cancelled turn context notice missing after reload: %+v", got[4])
+	}
+}
+
+func TestHistoryForTabRestoresPlannerDisplayWhenCancelledBeforeExecutorStarts(t *testing.T) {
+	dir := t.TempDir()
+	path := agent.NewSessionPath(dir, "test-model")
+	app := &App{tabs: map[string]*WorkspaceTab{}, activeTabID: "planner_cancelled_tab"}
+	tab := &WorkspaceTab{ID: "planner_cancelled_tab", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	executorSession := agent.NewSession("system")
+	executor := agent.New(stubProvider{}, tool.NewRegistry(), executorSession, agent.Options{}, tab.sink)
+	planner := &blockingPlannerProvider{started: make(chan struct{})}
+	runner := agent.NewCoordinator(planner, agent.NewSession("planner system"), nil, nil, agent.Options{}, executor, 0, tab.sink, nil)
+	ctrl := control.New(control.Options{Runner: runner, Executor: executor, SessionDir: dir, SessionPath: path, Sink: tab.sink})
+	defer ctrl.Close()
+	ctrl.SetPlanMode(true)
+	tab.Ctrl = ctrl
+	app.tabs[tab.ID] = tab
+
+	ctrl.Send("new question")
+	select {
+	case <-planner.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("planner did not start")
+	}
+	ctrl.Cancel()
+	waitNotRunning(t, ctrl)
+	waitForAutosaveIdle(t, tab)
+
+	canonical := ctrl.History()
+	if len(canonical) != 2 || canonical[1].Role != provider.RoleUser || canonical[1].Content != "new question" {
+		t.Fatalf("canonical history = %+v, want system + prefix-free current user", canonical)
+	}
+	visible := app.HistoryForTab(tab.ID)
+	if len(visible) != 4 {
+		t.Fatalf("visible history length = %d, want system + user + planner phase + notice: %+v", len(visible), visible)
+	}
+	if visible[1].Role != "user" || visible[1].Content != "new question" {
+		t.Fatalf("cancelled planner user missing after reload: %+v", visible[1])
+	}
+	if visible[2].Role != "phase" || !strings.Contains(visible[2].Content, "planning") {
+		t.Fatalf("cancelled planner display missing after reload: %+v", visible[2])
+	}
+	if visible[3].Role != "notice" || visible[3].Code != event.NoticeCodeCancelledTurn {
+		t.Fatalf("cancelled planner context notice missing after reload: %+v", visible[3])
+	}
+}
+
+func TestCancelledExecutorDisplayFollowsDetachedAndReattachedRuntime(t *testing.T) {
+	dir := t.TempDir()
+	path := agent.NewSessionPath(dir, "test-model")
+	app := &App{tabs: map[string]*WorkspaceTab{}, detachedSessions: map[string]*WorkspaceTab{}, activeTabID: "source_tab"}
+	source := &WorkspaceTab{ID: "source_tab", Scope: "global", Ready: true, SessionPath: path, disabledMCP: map[string]ServerView{}}
+	source.sink = &tabEventSink{tabID: source.ID, app: app}
+	sess := agent.NewSession("system")
+	runner := &cancelledDisplayRunner{session: sess, sink: source.sink, started: make(chan struct{})}
+	executor := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Runner: runner, Executor: executor, SessionDir: dir, SessionPath: path, Sink: source.sink})
+	defer ctrl.Close()
+	source.Ctrl = ctrl
+	app.tabs[source.ID] = source
+
+	ctrl.Send("continue setup")
+	select {
+	case <-runner.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled turn did not start")
+	}
+	if !app.detachRuntimeForReplacement(source) {
+		t.Fatal("running session could not be detached")
+	}
+	key := sessionRuntimeKey(path)
+	detached := app.detachedSessions[key]
+	if detached == nil {
+		t.Fatal("detached runtime missing")
+	}
+	target := &WorkspaceTab{ID: "reattached_tab", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
+	app.mu.Lock()
+	delete(app.tabs, source.ID)
+	app.tabs[target.ID] = target
+	delete(app.detachedSessions, key)
+	applyRuntimeTab(target, detached, path, app.ctx, app)
+	app.activeTabID = target.ID
+	app.mu.Unlock()
+	target.sink.Emit(event.Event{Kind: event.Text, Text: "after reattach", Source: event.UsageSourceExecutor})
+
+	ctrl.Cancel()
+	waitNotRunning(t, ctrl)
+	waitForAutosaveIdle(t, target)
+	visible := app.HistoryForTab(target.ID)
+	var sawBefore, sawAfter, sawNotice bool
+	for _, message := range visible {
+		if message.Role == "assistant" && message.Reasoning == "checking settings\n" {
+			sawBefore = true
+		}
+		if message.Role == "assistant" && message.Content == "after reattach" {
+			sawAfter = true
+		}
+		if message.Role == "notice" && message.Code == event.NoticeCodeCancelledTurn {
+			sawNotice = true
+		}
+	}
+	if !sawBefore || !sawAfter || !sawNotice {
+		t.Fatalf("reattached cancelled history lost display state: before=%v after=%v notice=%v history=%+v", sawBefore, sawAfter, sawNotice, visible)
 	}
 }
 

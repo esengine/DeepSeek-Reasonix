@@ -1,7 +1,9 @@
 import { downloadPaneFromURL } from "./download-link.js";
+import { initTheme } from "./theme.js";
 
 // Reasonix site — vanilla interactions
 (function () {
+  initTheme();
   const motionOK = () =>
     document.body.dataset.motion === "rich" &&
     !window.matchMedia("(prefers-reduced-motion: reduce)").matches;

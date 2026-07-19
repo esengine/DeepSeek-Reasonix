@@ -1,25 +1,90 @@
 name: Release
 
-# CLI binary line. Tag namespace `v<semver>` triggers this — it builds the
-# release archives + checksums, publishes the GitHub release, and updates the
-# Homebrew cask. npm is a SEPARATE line (release-npm.yml, `npm-v*`) so an npm
-# prerelease can ship without forcing the stable cask, and vice versa; desktop is
-# `desktop-v*` (release-desktop.yml). A prerelease `v*-rc*` still builds archives
-# and a prerelease GitHub release, but goreleaser auto-skips the cask upload
+# CLI binary line. Stable releases are called by release-stable.yml after its
+# single GitHub `release`-environment approval. Direct tag pushes are retained
+# only for CLI prereleases so they can still ship independently; those runs keep
+# their own approval gate. goreleaser auto-skips the cask upload for prereleases
 # (brew has no prerelease channel — see .goreleaser.yaml).
 on:
   push:
-    tags: ['v*']
+    tags: ['v*-*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing CLI tag to publish (for example v1.18.0-rc.1)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        description: "Existing CLI tag selected by the approved release orchestrator"
+        required: true
+        type: string
+      approved_cli_tag:
+        description: "Stable CLI tag recorded by the approved orchestrator"
+        required: true
+        type: string
+      approved_sha:
+        description: "Immutable commit recorded by the approved orchestrator"
+        required: true
+        type: string
+      orchestrated:
+        description: "True only when called by release-stable.yml after approval"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write # create the release and upload archives
 
 jobs:
+  orchestration-guard:
+    name: verify approved orchestrator
+    if: ${{ inputs.orchestrated }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify caller and approved release ref
+        env:
+          ACTUAL_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-stable.yml@{1}', github.repository, github.ref) }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          CALLER_SHA: ${{ github.sha }}
+          APPROVED_CLI_TAG: ${{ inputs.approved_cli_tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERIFY_RELEASE_CHECKOUT: false
+        run: |
+          bash scripts/verify-release-authorization.sh
+          bash scripts/verify-release-tag.sh
+
+  release-gate:
+    name: approve standalone CLI release
+    if: ${{ !inputs.orchestrated }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: echo "Approved standalone CLI release $RELEASE_TAG"
+
   cache-guard:
     name: cache hit guard
+    needs: [orchestration-guard, release-gate]
+    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -29,16 +94,16 @@ jobs:
   goreleaser:
     name: archives + checksums + homebrew tap
     needs: cache-guard
+    if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # CLI stable release (archives + GitHub release + Homebrew cask). It does not
-    # claim GitHub's repository-wide Latest badge; that belongs to desktop so the
-    # repository homepage points users at the installable app. Gated on the
-    # `release` environment so only esengine can approve it going public.
-    environment: release
+    # The stable caller has already passed the single GitHub release approval.
+    # Standalone prereleases pass release-gate above. This job therefore must not
+    # add a second GitHub environment approval.
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -47,7 +112,15 @@ jobs:
         with:
           node-version: "22"
       - name: Render reviewed release notes
-        run: node scripts/release-notes.mjs render --version "${{ github.ref_name }}" --output /tmp/release-notes.md
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/release-notes.mjs render --version "$RELEASE_TAG" --output /tmp/release-notes.md
+      - name: Revalidate approved release ref
+        if: ${{ inputs.orchestrated }}
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+        run: bash scripts/verify-release-tag.sh
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
@@ -55,17 +128,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # workflow_dispatch recovery runs have a branch-shaped GITHUB_REF even
+          # though checkout is on the release tag. Pin GoReleaser explicitly, and
+          # avoid ambiguity from the three release tags sharing one commit.
+          GORELEASER_CURRENT_TAG: ${{ inputs.tag || github.ref_name }}
 
       - name: Publish product release notes
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: gh release edit "$TAG" --notes-file /tmp/release-notes.md
 
       - name: Attach desktop manifest compatibility asset
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
@@ -107,7 +184,7 @@ jobs:
       # cover the release CDN propagating the freshly uploaded asset.
       - name: Smoke public compatibility manifest
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
         run: |
           set -euo pipefail
@@ -143,18 +220,18 @@ jobs:
       # step only guards runs that happen; this guard catches the run that
       # DIDN'T.
       #
-      # Two distinct states, two responses (the runs race: both workflows wait
-      # on the release environment independently, and npm dist-tags propagate
+      # Two distinct states, two responses (the approved orchestrator starts the
+      # CLI and npm reusable workflows concurrently, and npm dist-tags propagate
       # asynchronously, so "tag pushed but latest not moved yet" is a NORMAL
       # mid-release state, not a failure):
       #   - npm-v<version> tag missing  -> hard fail. This is the #5822 gap:
       #     nobody pushed the npm release at all.
       #   - tag pushed, latest lagging  -> poll briefly, then WARN and pass.
-      #     The npm run may still be awaiting its own environment approval;
-      #     release-npm.yml's verify step owns asserting the dist-tag lands.
+      #     The npm job may still be publishing; release-npm.yml's verify step
+      #     owns asserting the dist-tag lands.
       - name: Check npm latest dist-tag freshness
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           case "$TAG" in
@@ -180,5 +257,5 @@ jobs:
             echo "npm latest -> ${got:-<unreadable>}, want >= $version (attempt $attempt)"
             sleep 10
           done
-          echo "::warning::npm-v$version is pushed but npm 'latest' is still ${got:-<unreadable>} — the npm publish run is likely awaiting release-environment approval or still propagating. Approve/monitor the release-npm run; its verify step asserts the dist-tag lands."
+          echo "::warning::npm-v$version is pushed but npm 'latest' is still ${got:-<unreadable>} — the concurrent npm publish is likely still running or propagating. Monitor the npm job; its verify step asserts the dist-tag lands."
           exit 0

@@ -61,7 +61,7 @@ credentials_store = "auto"   # 旧兼容字段；provider key 保存在 .env
 
 [ui]
 theme = "auto"
-cursor_shape = "underline"   # CLI/TUI 输入光标：underline|block|bar
+cursor_shape = "bar"         # CLI/TUI 输入光标：underline|block|bar
 
 [desktop]
 provider_access = ["deepseek"]
@@ -85,8 +85,8 @@ command = "example-mcp-server"
 不要把 API key 的真实值写进 `config.toml`。这个文件是普通配置：可以查看、编辑、
 迁移，也可以在常规脱敏后用于诊断。密钥值属于下面的全局 `.env`。
 
-`[ui].cursor_shape` 只影响 CLI/TUI 的输入框。默认值 `underline` 用来避免终端块状光标在
-CJK 双宽字符上造成视觉覆盖；如果偏好其它形状，可以设为 `block` 或 `bar`。
+`[ui].cursor_shape` 只影响 CLI/TUI 的输入框。默认值 `bar` 清晰可见，同时不会覆盖
+CJK 双宽字符；如果偏好其它形状，可以设为 `block` 或 `underline`。
 
 ### 自定义 provider 的 `api_key_env` 命名
 

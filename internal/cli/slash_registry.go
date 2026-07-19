@@ -49,7 +49,6 @@ func builtinSlashSpecs() []builtinSlashSpec {
 		{name: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
 		{name: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true, showInHelp: true},
 		{name: "/reasoning-language", insert: "/reasoning-language ", hint: i18n.M.CmdReasonLang, descend: true, showInHelp: true},
-		{name: "/memory-v5", insert: "/memory-v5 ", hint: i18n.M.CmdMemoryV5, descend: true},
 		{name: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
 		{name: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true, showInHelp: true},
 		{name: "/help", insert: "/help", hint: i18n.M.CmdHelp, showInHelp: true},

@@ -87,7 +87,9 @@ func specsToEntries(specs map[string]mcpServerSpec, skip map[string]bool) []Plug
 	sort.Strings(names)
 	entries := make([]PluginEntry, 0, len(names))
 	for _, name := range names {
-		entries = append(entries, pluginEntryFromMCPSpec(name, specs[name]))
+		entry := pluginEntryFromMCPSpec(name, specs[name])
+		entry.Source = MCPSourceProjectMCPJSON
+		entries = append(entries, entry)
 	}
 	return entries
 }
@@ -154,6 +156,9 @@ func loadLegacyMCP(path string) []PluginEntry {
 		have[pe.Name] = true
 		pe, _ = NormalizePluginCommandLine(pe)
 		entries = append(entries, pe)
+	}
+	for i := range entries {
+		entries[i].Source = MCPSourceLegacyUser
 	}
 	return entries
 }

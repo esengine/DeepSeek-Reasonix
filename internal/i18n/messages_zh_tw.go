@@ -47,7 +47,17 @@ var ChineseTraditional = Messages{
 	ChatStatusCancellingFmt:                "%s 正在停止… (%d 秒 · Ctrl+C 退出)",
 	ChatStatusIdle:                         "就緒",
 	ChatStatusYoloIdle:                     "已跳過核准",
-	ChatStatusCycleHint:                    "shift+tab 循環詢問/自動/計畫 · ctrl+y yolo",
+	ChatStatusCycleHint:                    "Shift+Tab 循環詢問/自動/計畫 · Ctrl+Y YOLO",
+	ChatStatusCycleHintCompact:             "Shift+Tab 詢問/自動/計畫 · Ctrl+Y YOLO",
+	ChatTurnReceiptLabel:                   "本輪",
+	ChatStatusModelLabel:                   "模型",
+	ChatStatusEffortLabel:                  "強度",
+	ChatStatusWorkLabel:                    "模式",
+	ChatStatusCacheLabel:                   "快取",
+	ChatStatusContextLabel:                 "上下文",
+	ChatStatusCompactLabel:                 "壓縮",
+	ChatStatusJobsLabel:                    "任務",
+	ChatStatusBalanceLabel:                 "餘額",
 	ChatStatusCacheNowFmt:                  "本次命中 %s",
 	ChatStatusCacheAvgFmt:                  "平均 %s",
 	ChatStatusPlanApproval:                 "Enter/y 核准並執行 · n/Esc 繼續規劃 · PgUp/PgDn 捲動",
@@ -136,7 +146,7 @@ var ChineseTraditional = Messages{
 	SlashUnavailable:   "當前建構不支援該命令",
 	SlashUnknown:       "未知命令",
 	SlashTodoCleared:   "已清除任務清單",
-	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切換模型）· /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /memory · /memory-v5 · /migrate · /remember · /quit · /help · 以及 skills（/init、/explore …）",
+	SlashHelp:          "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切換模型）· /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /memory · /migrate · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 個可用",
@@ -188,6 +198,12 @@ var ChineseTraditional = Messages{
 	CompHintSlash:                "↑/↓ 移動 · Tab/Enter 選中 · Esc 關閉",
 	CompHintFile:                 "↑/↓ 移動 · Tab/Enter 進入資料夾或選中檔案 · Esc 關閉",
 	MouseCopiedHint:              "已複製到剪貼簿",
+	ClipboardCopyOSC52Hint:       "已透過 OSC 52 請求複製 — 可能需要終端授權",
+	ClipboardCopyFallbackHint:    "系統剪貼簿無法使用 — 已改用 OSC 52",
+	ClipboardTextPasteRemoteHint: "SSH 下右鍵貼上無法讀取本機剪貼簿 — 請使用終端貼上快捷鍵或 /mouse",
+	ClipboardTextPasteFailedFmt:  "貼上文字失敗：%v",
+	ClipboardImagePastingHint:    "正在貼上圖片…",
+	ClipboardImagePasteFailedFmt: "貼上圖片失敗：%v",
 	MouseCaptureOnHint:           "滑鼠接管已開啟 — 應用內拖拽選取/捲軸/滾輪生效",
 	MouseCaptureOffHint:          "滑鼠接管已關閉 — 由終端原生處理選取與右鍵選單",
 	MouseCaptureTag:              "終端原生滑鼠",
@@ -227,7 +243,6 @@ var ChineseTraditional = Messages{
 	CmdMouse:            "切換滑鼠接管（關閉後由終端原生處理選取/右鍵）",
 	CmdAutoPlan:         "設定自動計畫模式",
 	CmdReasonLang:       "設定可見思考語言",
-	CmdMemoryV5:         "切換 Memory v5",
 	CmdHelp:             "檢視命令列表",
 	CmdTodo:             "清除任務清單",
 	CmdQuit:             "退出會話",
@@ -290,6 +305,9 @@ var ChineseTraditional = Messages{
 	WorkModeStatusFmt:         "工作 %s",
 	WorkModeListHeaderFmt:     "工作模式（目前：%s）",
 	WorkModeListHint:          "使用 /work-mode economy|balanced|delivery 切換（/profile 為相容別名）",
+	WorkModeEconomyLabel:      "輕量",
+	WorkModeBalancedLabel:     "均衡",
+	WorkModeDeliveryLabel:     "交付",
 	WorkModeEconomyDesc:       "降低 Token 消耗，按需連接可選工具來源",
 	WorkModeBalancedDesc:      "完整工具面，由模型判斷所需工作量",
 	WorkModeDeliveryDesc:      "強調完整驗證與交付，增強 skill 與插件呼叫",
@@ -430,7 +448,6 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config auto-plan [off|on]                    設定自動計畫模式
-  reasonix config memory-v5 [off|observe|compact|on|status]  設定 Memory v5
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
   reasonix subagent <list|create|edit|delete|try|run>   管理和執行隔離子智慧體 profile

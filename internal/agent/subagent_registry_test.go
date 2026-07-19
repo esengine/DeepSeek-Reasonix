@@ -37,6 +37,7 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 		"task",
 		"read_only_task",
 		"parallel_tasks",
+		"fleet",
 		"run_skill",
 		"read_only_skill",
 		"read_skill",
@@ -64,6 +65,7 @@ func TestSubagentToolRegistryFiltersUnavailableToolsAndWrapsBash(t *testing.T) {
 		"task",
 		"read_only_task",
 		"parallel_tasks",
+		"fleet",
 		"run_skill",
 		"read_only_skill",
 		"install_skill",
@@ -213,6 +215,7 @@ func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 	parent.Add(subagentRegistryTool{name: "read_only_task"})
 	parent.Add(subagentRegistryTool{name: "read_only_skill", readOnly: true})
 	parent.Add(subagentRegistryTool{name: "parallel_tasks"})
+	parent.Add(subagentRegistryTool{name: "fleet"})
 	parent.Add(subagentRegistryTool{name: "wait"})
 	parent.Add(subagentRegistryTool{
 		name:   "bash",
@@ -226,14 +229,14 @@ func TestTaskToolBuildSubRegUsesSubagentToolRegistry(t *testing.T) {
 			t.Fatalf("first-layer subagent registry should expose %q; got %v", exposed, firstLayer.Names())
 		}
 	}
-	for _, hidden := range []string{"parallel_tasks", "wait"} {
+	for _, hidden := range []string{"parallel_tasks", "fleet", "wait"} {
 		if _, ok := firstLayer.Get(hidden); ok {
 			t.Fatalf("first-layer subagent registry should hide %q; got %v", hidden, firstLayer.Names())
 		}
 	}
 
 	sub := task.buildSubReg(nil, 2)
-	for _, hidden := range []string{"task", "read_only_task", "read_only_skill", "parallel_tasks", "wait"} {
+	for _, hidden := range []string{"task", "read_only_task", "read_only_skill", "parallel_tasks", "fleet", "wait"} {
 		if _, ok := sub.Get(hidden); ok {
 			t.Fatalf("depth-limited subagent registry should hide %q; got %v", hidden, sub.Names())
 		}

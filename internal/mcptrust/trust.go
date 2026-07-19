@@ -126,9 +126,22 @@ type LauncherLock struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 
+// LaunchGrant is the pre-execution consent for repository-controlled MCP
+// configuration. It is separate from capability receipts because a server must
+// not be started merely to discover its tools before the user approves launch.
+type LaunchGrant struct {
+	Scope                Scope     `json:"scope"`
+	WorkspaceFingerprint string    `json:"workspace_fingerprint,omitempty"`
+	Server               string    `json:"server"`
+	ConfigSource         string    `json:"config_source"`
+	IdentityFingerprint  string    `json:"identity_fingerprint"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
 type State struct {
 	Version         int            `json:"version"`
 	Receipts        []Receipt      `json:"receipts,omitempty"`
+	LaunchGrants    []LaunchGrant  `json:"launch_grants,omitempty"`
 	LauncherLocks   []LauncherLock `json:"launcher_locks,omitempty"`
 	OfficialDenials []string       `json:"official_denials,omitempty"`
 	LegacyImports   []string       `json:"legacy_imports,omitempty"`
@@ -155,8 +168,9 @@ type Manager struct {
 	path                 string
 	workspaceFingerprint string
 
-	mu      sync.Mutex
-	session []Receipt
+	mu            sync.Mutex
+	session       []Receipt
+	sessionLaunch []LaunchGrant
 }
 
 var managerRegistry struct {
@@ -203,6 +217,54 @@ func WorkspaceFingerprint(workspace string) string {
 }
 
 func IdentityFingerprint(identity Identity) (string, error) {
+	identity = normalizeIdentity(identity, runtime.GOOS == "windows")
+	// Runtime confinement is deliberately not part of server identity. Tightening
+	// Reasonix's own sandbox, changing workspace roots, or moving a config between
+	// equivalent source labels must not invalidate trust in unchanged server code.
+	payload := struct {
+		Server, Transport, CommandPath, CommandSHA256, Dir, URL string
+		Args, EnvKeys, HeaderKeys                               []string
+		PackageDigest, LauncherDigest                           string
+	}{
+		identity.Server, identity.Transport, identity.CommandPath, identity.CommandSHA256,
+		identity.Dir, identity.URL, identity.Args, identity.EnvKeys, identity.HeaderKeys,
+		identity.PackageDigest, identity.LauncherDigest,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return digestBytes(body), nil
+}
+
+// LegacyIdentityFingerprints returns the policy-coupled identity variants used
+// by the first trust-receipt rollout. Callers use them only for exact digest
+// migration; new receipts always use IdentityFingerprint above.
+func LegacyIdentityFingerprints(identity Identity) []string {
+	variants := make([]Identity, 0, 4)
+	for _, source := range compactStrings([]string{identity.ConfigSource, "workspace_config"}) {
+		withSource := identity
+		withSource.ConfigSource = source
+		variants = append(variants, withSource)
+		withoutForbid := withSource
+		withoutForbid.ForbidReadRoots = nil
+		variants = append(variants, withoutForbid)
+	}
+	out := make([]string, 0, len(variants)*2)
+	seen := map[string]bool{}
+	for _, variant := range variants {
+		for _, insensitive := range []bool{runtime.GOOS == "windows", false} {
+			fp, err := legacyIdentityFingerprint(variant, insensitive)
+			if err == nil && fp != "" && !seen[fp] {
+				seen[fp] = true
+				out = append(out, fp)
+			}
+		}
+	}
+	return out
+}
+
+func normalizeIdentity(identity Identity, envCaseInsensitive bool) Identity {
 	identity.Server = strings.TrimSpace(identity.Server)
 	identity.Transport = normalizeTransport(identity.Transport)
 	identity.CommandPath = canonicalPath(identity.CommandPath)
@@ -215,11 +277,16 @@ func IdentityFingerprint(identity Identity) (string, error) {
 	identity.Args = append([]string(nil), identity.Args...)
 	// Environment names are case-sensitive on Unix and case-insensitive on
 	// Windows. Header names are case-insensitive on every supported platform.
-	identity.EnvKeys = cleanStrings(identity.EnvKeys, runtime.GOOS == "windows")
+	identity.EnvKeys = cleanStrings(identity.EnvKeys, envCaseInsensitive)
 	identity.HeaderKeys = cleanStrings(identity.HeaderKeys, true)
 	identity.WriteRoots = canonicalPaths(identity.WriteRoots)
 	identity.ReadRoots = canonicalPaths(identity.ReadRoots)
 	identity.ForbidReadRoots = canonicalPaths(identity.ForbidReadRoots)
+	return identity
+}
+
+func legacyIdentityFingerprint(identity Identity, envCaseInsensitive bool) (string, error) {
+	identity = normalizeIdentity(identity, envCaseInsensitive)
 	body, err := json.Marshal(identity)
 	if err != nil {
 		return "", err
@@ -307,6 +374,76 @@ func (m *Manager) TrustOfficial(server, configSource, identityFingerprint, catal
 	return m.trust(ScopeGlobal, SourceOfficialCatalog, server, configSource, identityFingerprint, catalogEntryID, capabilities, readers)
 }
 
+// TrustLaunch records the user's consent to start one exact project-provided
+// server identity. Session grants stay in memory; workspace grants are persisted.
+func (m *Manager) TrustLaunch(scope Scope, server, configSource, identityFingerprint string) error {
+	if scope != ScopeSession && scope != ScopeWorkspace {
+		return fmt.Errorf("invalid MCP launch grant scope %q", scope)
+	}
+	grant := LaunchGrant{
+		Scope: scope, Server: strings.TrimSpace(server), ConfigSource: strings.TrimSpace(configSource),
+		IdentityFingerprint: strings.TrimSpace(identityFingerprint), CreatedAt: time.Now().UTC(),
+	}
+	if grant.Server == "" || grant.ConfigSource == "" || grant.IdentityFingerprint == "" {
+		return fmt.Errorf("MCP launch grant requires server, config source, and identity")
+	}
+	if scope == ScopeWorkspace {
+		grant.WorkspaceFingerprint = m.workspaceFingerprint
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if scope == ScopeSession {
+		m.sessionLaunch = upsertLaunchGrant(m.sessionLaunch, grant)
+		return nil
+	}
+	m.sessionLaunch = removeLaunchGrantSlot(m.sessionLaunch, grant.Server, grant.ConfigSource, m.workspaceFingerprint)
+	return m.updatePersistent(func(state *State) {
+		state.LaunchGrants = upsertLaunchGrant(state.LaunchGrants, grant)
+	})
+}
+
+// LaunchAuthorized checks consent without starting the server. A matching
+// capability receipt from an earlier version also counts as consent so the new
+// launch gate does not re-prompt already trusted projects.
+func (m *Manager) LaunchAuthorized(server, configSource, identityFingerprint string) (authorized, changed bool, err error) {
+	server = strings.TrimSpace(server)
+	configSource = strings.TrimSpace(configSource)
+	identityFingerprint = strings.TrimSpace(identityFingerprint)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state, err := m.Load()
+	if err != nil {
+		return false, false, err
+	}
+	changed = false
+	for _, grant := range append(append([]LaunchGrant(nil), m.sessionLaunch...), state.LaunchGrants...) {
+		if grant.Server != server || grant.ConfigSource != configSource {
+			continue
+		}
+		if grant.Scope != ScopeSession && grant.WorkspaceFingerprint != m.workspaceFingerprint {
+			continue
+		}
+		if grant.IdentityFingerprint == identityFingerprint {
+			return true, false, nil
+		}
+		changed = true
+	}
+	receipts := append(append([]Receipt(nil), m.session...), state.Receipts...)
+	for _, receipt := range receipts {
+		if receipt.Server != server || receipt.ConfigSource != configSource {
+			continue
+		}
+		if receipt.Scope != ScopeGlobal && receipt.WorkspaceFingerprint != m.workspaceFingerprint {
+			continue
+		}
+		if receipt.IdentityFingerprint == identityFingerprint {
+			return true, false, nil
+		}
+		changed = true
+	}
+	return false, changed, nil
+}
+
 func (m *Manager) trust(scope Scope, source Source, server, configSource, identityFingerprint, catalogEntryID string, capabilities []Capability, selectedReaders map[string]bool) error {
 	if !validScope(scope) {
 		return fmt.Errorf("invalid MCP trust scope %q", scope)
@@ -328,6 +465,9 @@ func (m *Manager) trust(scope Scope, source Source, server, configSource, identi
 	if scope == ScopeSession {
 		m.session = upsertReceipt(m.session, receipt)
 		return nil
+	}
+	if scope == ScopeWorkspace {
+		m.session = removeReceiptSlot(m.session, receipt.Server, receipt.ConfigSource, m.workspaceFingerprint)
 	}
 	return m.updatePersistent(func(state *State) {
 		state.Receipts = upsertReceipt(state.Receipts, receipt)
@@ -385,8 +525,10 @@ func (m *Manager) Revoke(server string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.session = removeReceipts(m.session, server, m.workspaceFingerprint)
+	m.sessionLaunch = removeLaunchGrants(m.sessionLaunch, server, m.workspaceFingerprint)
 	return m.updatePersistent(func(state *State) {
 		state.Receipts = removeReceipts(state.Receipts, server, m.workspaceFingerprint)
+		state.LaunchGrants = removeLaunchGrants(state.LaunchGrants, server, m.workspaceFingerprint)
 	})
 }
 
@@ -668,26 +810,46 @@ func (m *Manager) evaluate(server, configSource, identityFingerprint string, cap
 // from demanding a redundant re-trust. Remove together with the legacy URL
 // fingerprint calculator (see docs/MIGRATING.md).
 func (m *Manager) MigrateIdentityFingerprint(server, configSource, legacyFingerprint, currentFingerprint string, capabilities []Capability) (bool, error) {
+	return m.MigrateIdentityFingerprints(server, configSource, []string{configSource}, []string{legacyFingerprint}, currentFingerprint, capabilities)
+}
+
+// MigrateIdentityFingerprints upgrades receipts from a bounded set of legacy
+// source labels and identity digests. It is used when runtime provenance becomes
+// more precise (for example workspace_config -> user_config/project_mcp_json)
+// without treating that host-only classification change as a new server.
+func (m *Manager) MigrateIdentityFingerprints(server, configSource string, legacySources, legacyFingerprints []string, currentFingerprint string, capabilities []Capability) (bool, error) {
 	server = strings.TrimSpace(server)
 	configSource = strings.TrimSpace(configSource)
-	legacyFingerprint = strings.TrimSpace(legacyFingerprint)
 	currentFingerprint = strings.TrimSpace(currentFingerprint)
-	if server == "" || legacyFingerprint == "" || currentFingerprint == "" || legacyFingerprint == currentFingerprint {
+	sourceSet := map[string]bool{}
+	for _, source := range legacySources {
+		if source = strings.TrimSpace(source); source != "" {
+			sourceSet[source] = true
+		}
+	}
+	fingerprintSet := map[string]bool{}
+	for _, fingerprint := range legacyFingerprints {
+		if fingerprint = strings.TrimSpace(fingerprint); fingerprint != "" && fingerprint != currentFingerprint {
+			fingerprintSet[fingerprint] = true
+		}
+	}
+	if server == "" || configSource == "" || currentFingerprint == "" || len(sourceSet) == 0 || len(fingerprintSet) == 0 {
 		return false, nil
 	}
 	upgrade := func(receipts []Receipt) bool {
 		changed := false
 		for i := range receipts {
 			r := &receipts[i]
-			if r.Server != server || r.ConfigSource != configSource {
+			if r.Server != server || !sourceSet[r.ConfigSource] {
 				continue
 			}
 			if r.Scope != ScopeGlobal && r.WorkspaceFingerprint != m.workspaceFingerprint {
 				continue
 			}
-			if r.IdentityFingerprint != legacyFingerprint || receiptCapabilitiesChanged(*r, capabilities) {
+			if !fingerprintSet[r.IdentityFingerprint] || receiptCapabilitiesChanged(*r, capabilities) {
 				continue
 			}
+			r.ConfigSource = configSource
 			r.IdentityFingerprint = currentFingerprint
 			r.LastVerifiedAt = time.Now().UTC()
 			changed = true
@@ -864,6 +1026,7 @@ func normalizeState(state *State) {
 		state.Version = StoreVersion
 	}
 	state.Receipts = dedupeReceipts(state.Receipts)
+	state.LaunchGrants = dedupeLaunchGrants(state.LaunchGrants)
 	for i := range state.Receipts {
 		r := &state.Receipts[i]
 		sort.Slice(r.Tools, func(i, j int) bool { return r.Tools[i].RawName < r.Tools[j].RawName })
@@ -885,8 +1048,40 @@ func normalizeState(state *State) {
 		}
 		return a.Locator < b.Locator
 	})
+	sort.Slice(state.LaunchGrants, func(i, j int) bool {
+		a, b := state.LaunchGrants[i], state.LaunchGrants[j]
+		if a.Server != b.Server {
+			return a.Server < b.Server
+		}
+		if a.Scope != b.Scope {
+			return a.Scope < b.Scope
+		}
+		return a.ConfigSource < b.ConfigSource
+	})
 	state.OfficialDenials = cleanStrings(state.OfficialDenials, false)
 	state.LegacyImports = cleanStrings(state.LegacyImports, false)
+}
+
+func upsertLaunchGrant(grants []LaunchGrant, grant LaunchGrant) []LaunchGrant {
+	for i := range grants {
+		if sameLaunchGrantKey(grants[i], grant) {
+			grants[i] = grant
+			return grants
+		}
+	}
+	return append(grants, grant)
+}
+
+func dedupeLaunchGrants(grants []LaunchGrant) []LaunchGrant {
+	out := make([]LaunchGrant, 0, len(grants))
+	for _, grant := range grants {
+		out = upsertLaunchGrant(out, grant)
+	}
+	return out
+}
+
+func sameLaunchGrantKey(a, b LaunchGrant) bool {
+	return a.Scope == b.Scope && a.WorkspaceFingerprint == b.WorkspaceFingerprint && a.Server == b.Server && a.ConfigSource == b.ConfigSource
 }
 
 func upsertReceipt(receipts []Receipt, receipt Receipt) []Receipt {
@@ -941,6 +1136,39 @@ func removeReceipts(receipts []Receipt, server, workspaceFP string) []Receipt {
 	out := receipts[:0]
 	for _, receipt := range receipts {
 		if receipt.Server == server && (receipt.Scope == ScopeGlobal || receipt.WorkspaceFingerprint == workspaceFP) {
+			continue
+		}
+		out = append(out, receipt)
+	}
+	return out
+}
+
+func removeLaunchGrants(grants []LaunchGrant, server, workspaceFP string) []LaunchGrant {
+	out := grants[:0]
+	for _, grant := range grants {
+		if grant.Server == server && (grant.Scope == ScopeSession || grant.WorkspaceFingerprint == workspaceFP) {
+			continue
+		}
+		out = append(out, grant)
+	}
+	return out
+}
+
+func removeLaunchGrantSlot(grants []LaunchGrant, server, configSource, workspaceFP string) []LaunchGrant {
+	out := grants[:0]
+	for _, grant := range grants {
+		if grant.Server == server && grant.ConfigSource == configSource && (grant.Scope == ScopeSession || grant.WorkspaceFingerprint == workspaceFP) {
+			continue
+		}
+		out = append(out, grant)
+	}
+	return out
+}
+
+func removeReceiptSlot(receipts []Receipt, server, configSource, workspaceFP string) []Receipt {
+	out := receipts[:0]
+	for _, receipt := range receipts {
+		if receipt.Server == server && receipt.ConfigSource == configSource && receipt.Scope == ScopeSession && receipt.WorkspaceFingerprint == workspaceFP {
 			continue
 		}
 		out = append(out, receipt)
@@ -1121,7 +1349,7 @@ func acquireFileLock(path string, wait time.Duration) (func(), error) {
 			}
 			return func() { removeOwnedFileLock(path, owner) }, nil
 		}
-		if !errors.Is(err, os.ErrExist) {
+		if !errors.Is(err, os.ErrExist) && !trustLockContention(err) {
 			return nil, err
 		}
 		if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > 30*time.Second {

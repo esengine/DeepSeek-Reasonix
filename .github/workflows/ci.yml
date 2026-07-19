@@ -260,6 +260,16 @@ jobs:
           version: v2.12.2
           args: --timeout=5m
 
+      - name: release workflow contracts
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \
+            -ignore 'label "windows-11-arm" is unknown' \
+            .github/workflows/release-stable.yml \
+            .github/workflows/release.yml \
+            .github/workflows/release-npm.yml \
+            .github/workflows/release-desktop.yml
+          bash scripts/release-workflows.test.sh
+
   # The site/ auth client has security-sensitive redirect-validation logic
   # (safeNext) covered by node:test unit tests. Those tests use only Node
   # builtins, so no `npm install` is needed — run them directly on every PR so

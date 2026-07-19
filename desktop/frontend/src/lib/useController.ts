@@ -750,7 +750,7 @@ function applyEvent(s: State, e: WireEvent): State {
     if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, live: undefined };
     return s;
   }
-  if (e.kind === "memory_compiler_stats" || e.kind === "mcp_surface_ready") {
+  if (e.kind === "mcp_surface_ready") {
     // Background-only events must not confirm an optimistic user bubble.
     return s;
   }
@@ -1424,6 +1424,7 @@ const noticeCodeKeys: Record<string, DictKey> = {
   tool_budget: "notice.toolBudget",
   loop_guard: "notice.loopGuard",
   workspace_lease: "notice.workspaceLease",
+  cancelled_turn_display: "notice.cancelledTurnDisplay",
 };
 
 // localizedNoticeText localizes a notice's main copy by its stable code first,
@@ -2943,9 +2944,20 @@ export function useController() {
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const activateTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath = ""): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const navigationSeq = beginActiveNavigation();
     const snapshotAt = promptEventClock();
     const meta = await app.ActivateTopic(scope, workspaceRoot, topicId, sessionPath);
+    if (activeNavigationSeqRef.current !== navigationSeq) {
+      // A newer navigation started while the backend processed this
+      // activation. Applying the stale result would flip the visible tab
+      // away from the user's last click and — worse — the single-surface
+      // prune below deletes every other tab's cached state, blanking the
+      // surface the user is actually looking at. Last click wins: hand the
+      // meta back for bookkeeping and leave the visible state to the newer
+      // navigation.
+      addBreadcrumb("topic.activate", `stale ${meta.id} seq=${navigationSeq} current=${activeNavigationSeqRef.current}`);
+      return meta;
+    }
     // Save previous tab's items so the new tab can use them as a placeholder
     // during loading, avoiding a blank/Welcome flash before history arrives.
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
@@ -3042,6 +3054,13 @@ export function useController() {
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, setModel, setEffort, setTokenMode,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createDeliveryWorktree, closeTab, reorderTabs,
+    // Invalidate in-flight navigation completions (activateTopic's stale
+    // guard) from outside the hook. The App-level navigation queue must call
+    // this at ENQUEUE time: a queued click does not run — and so does not
+    // advance this epoch — until the running request finishes, which would
+    // let the running stale activation pass the guard and prune the state of
+    // the surface the user just clicked.
+    noteNavigationIntent: beginActiveNavigation,
     syncActiveTab: syncActiveTabFromBackend,
   };
 }

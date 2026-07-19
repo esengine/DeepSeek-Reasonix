@@ -85,11 +85,11 @@ func TestUICursorShapeNormalizes(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"", "underline"},
+		{"", "bar"},
 		{"UNDERLINE", "underline"},
 		{" block ", "block"},
 		{"bar", "bar"},
-		{"unknown", "underline"},
+		{"unknown", "bar"},
 	} {
 		c.UI.CursorShape = tt.in
 		if got := c.UICursorShape(); got != tt.want {
@@ -398,47 +398,6 @@ func TestLoadForEditMissingDesktopApprovalDefaultsAuto(t *testing.T) {
 	}
 }
 
-func TestSetMemoryCompilerEnabled(t *testing.T) {
-	c := Default()
-	if err := c.SetMemoryCompilerEnabled(false); err != nil {
-		t.Fatalf("SetMemoryCompilerEnabled(false): %v", err)
-	}
-	if c.MemoryCompilerEnabled() {
-		t.Fatal("memory compiler explicit false = true, want false")
-	}
-	if err := c.SetMemoryCompilerEnabled(true); err != nil {
-		t.Fatalf("SetMemoryCompilerEnabled(true): %v", err)
-	}
-	if !c.MemoryCompilerEnabled() {
-		t.Fatal("memory compiler explicit true = false, want true")
-	}
-}
-
-func TestSetMemoryCompilerVerbosity(t *testing.T) {
-	c := Default()
-	if err := c.SetMemoryCompilerVerbosity("compact"); err != nil {
-		t.Fatalf("SetMemoryCompilerVerbosity(compact): %v", err)
-	}
-	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityCompact {
-		t.Fatalf("memory compiler verbosity = %q, want compact", got)
-	}
-	if err := c.SetMemoryCompilerVerbosity("on"); err != nil {
-		t.Fatalf("SetMemoryCompilerVerbosity(on): %v", err)
-	}
-	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityCompact {
-		t.Fatalf("memory compiler verbosity after on = %q, want compact", got)
-	}
-	if err := c.SetMemoryCompilerVerbosity("observe"); err != nil {
-		t.Fatalf("SetMemoryCompilerVerbosity(observe): %v", err)
-	}
-	if got := c.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityObserve {
-		t.Fatalf("memory compiler verbosity = %q, want observe", got)
-	}
-	if err := c.SetMemoryCompilerVerbosity("verbose"); err == nil {
-		t.Fatal("expected error for invalid memory compiler verbosity")
-	}
-}
-
 func TestSetUIShortcutLayout(t *testing.T) {
 	c := Default()
 	if got := c.UIShortcutLayout(); got != "classic" {
@@ -733,6 +692,7 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 		BaseURL:           "https://proxy.example.com/v1",
 		Models:            []string{"deepseek-v4-flash", "plain-chat"},
 		Default:           "plain-chat",
+		ContextWindow:     131_072,
 		ReasoningProtocol: ReasoningProtocolOpenAI,
 		SupportedEfforts:  []string{"low", "medium", "high"},
 		ModelOverrides: map[string]ProviderModelOverride{
@@ -741,6 +701,7 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 				SupportedEfforts:  []string{"high", "max"},
 				DefaultEffort:     "max",
 				Vision:            &visionOff,
+				ContextWindow:     1_000_000,
 			},
 		},
 	}}}
@@ -759,6 +720,9 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	if EffectiveVision(deepseek) {
 		t.Fatalf("vision override false should disable image input")
 	}
+	if deepseek.ContextWindow != 1_000_000 {
+		t.Fatalf("deepseek context window = %d, want per-model override", deepseek.ContextWindow)
+	}
 
 	plain, ok := c.ResolveModel("gateway/plain-chat")
 	if !ok {
@@ -766,6 +730,9 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	}
 	if protocol := ReasoningProtocolForEntry(plain); protocol != ReasoningProtocolOpenAI {
 		t.Fatalf("plain protocol = %q, want provider-level openai", protocol)
+	}
+	if plain.ContextWindow != 131_072 {
+		t.Fatalf("plain context window = %d, want inherited provider value", plain.ContextWindow)
 	}
 }
 
@@ -1116,13 +1083,15 @@ func TestSaveToRoundTrips(t *testing.T) {
 }
 
 func TestSaveToScopesUserAndProjectFiles(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	home := isolateUserConfigHome(t)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
 	c := Default()
 	c.Desktop.Theme = "dark"
 	c.Desktop.ThemeStyle = "graphite"
 	c.Desktop.CloseBehavior = "background"
 
 	userPath := UserConfigPath()
+	requireTestPathWithin(t, home, userPath)
 	if err := c.SaveTo(userPath); err != nil {
 		t.Fatalf("SaveTo user config: %v", err)
 	}
@@ -1406,6 +1375,182 @@ protect_sensitive_files = true
 	}
 	if again {
 		t.Fatal("migration should be a no-op after deprecated keys are removed")
+	}
+}
+
+func TestMigrateLegacyMemoryCompilerForRoot(t *testing.T) {
+	isolateUserConfigHome(t)
+	root := t.TempDir()
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte(`[agent]
+memory_compiler = { enabled = true, verbosity = "compact" }
+temperature = 0.4
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`[agent]
+memory_compiler = { enabled = false }
+reasoning_language = "zh"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := MigrateLegacyMemoryCompilerForRoot(root)
+	if err != nil {
+		t.Fatalf("MigrateLegacyMemoryCompilerForRoot: %v", err)
+	}
+	if !changed {
+		t.Fatal("first migration should remove deprecated memory_compiler keys")
+	}
+	for _, path := range []string{userPath, projectPath} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "memory_compiler") {
+			t.Fatalf("deprecated memory_compiler remains in %s:\n%s", path, raw)
+		}
+	}
+	userRaw, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(userRaw), "temperature = 0.4") {
+		t.Fatalf("migration removed an active agent setting:\n%s", userRaw)
+	}
+	projectRaw, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(projectRaw), `reasoning_language = "zh"`) {
+		t.Fatalf("migration removed an unrelated project setting:\n%s", projectRaw)
+	}
+
+	again, err := MigrateLegacyMemoryCompilerForRoot(root)
+	if err != nil {
+		t.Fatalf("second migration: %v", err)
+	}
+	if again {
+		t.Fatal("migration should be a no-op after deprecated keys are removed")
+	}
+}
+
+// TestMigrateLegacyMemoryCompilerKeepsMultilineSystemPrompt reproduces the
+// review finding: a multiline system_prompt quoting a `memory_compiler = ...`
+// example line must survive the retired-key migration byte-for-byte.
+func TestMigrateLegacyMemoryCompilerKeepsMultilineSystemPrompt(t *testing.T) {
+	isolateUserConfigHome(t)
+	root := t.TempDir()
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	original := `[agent]
+system_prompt = """
+You are Reasonix. Historical config example:
+memory_compiler = { enabled = true, verbosity = "compact" }
+Keep answers short.
+"""
+temperature = 0.2
+`
+	if err := os.WriteFile(userPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := MigrateLegacyMemoryCompilerForRoot(root)
+	if err != nil {
+		t.Fatalf("MigrateLegacyMemoryCompilerForRoot: %v", err)
+	}
+	if changed {
+		t.Fatal("migration must not rewrite a config whose only memory_compiler text lives inside a multiline string")
+	}
+	raw, err := os.ReadFile(userPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != original {
+		t.Fatalf("multiline system_prompt was modified:\n--- got ---\n%s\n--- want ---\n%s", raw, original)
+	}
+}
+
+// TestStripTOMLKeyLinesPreservesMultilineStrings pins the shared stripper used
+// by every retired-config-key migration: lines inside TOML multiline strings
+// are never treated as section headers or key assignments, while real retired
+// keys outside strings are still removed.
+func TestStripTOMLKeyLinesPreservesMultilineStrings(t *testing.T) {
+	cases := []struct {
+		name        string
+		raw         string
+		section     string
+		keys        []string
+		wantChanged bool
+		wantSame    bool   // raw must round-trip unchanged
+		wantKept    string // substring that must survive
+		wantGone    string // substring that must be removed
+	}{
+		{
+			name:    "multiline basic string keeps quoted example",
+			raw:     "[agent]\nsystem_prompt = \"\"\"\nmemory_compiler = { enabled = true }\n\"\"\"\n",
+			section: "agent", keys: []string{"memory_compiler"},
+			wantChanged: false, wantSame: true,
+		},
+		{
+			name:    "multiline literal string keeps quoted example",
+			raw:     "[agent]\nsystem_prompt = '''\nmemory_compiler = { enabled = true }\n'''\n",
+			section: "agent", keys: []string{"memory_compiler"},
+			wantChanged: false, wantSame: true,
+		},
+		{
+			name:    "section header inside multiline string does not switch sections",
+			raw:     "[agent]\nsystem_prompt = \"\"\"\n[secrets]\nredact_tool_output = true\n\"\"\"\n",
+			section: "secrets", keys: []string{"redact_tool_output"},
+			wantChanged: false, wantSame: true,
+		},
+		{
+			name:    "real key next to a multiline string is still removed",
+			raw:     "[agent]\nsystem_prompt = \"\"\"\nmemory_compiler = { enabled = true }\n\"\"\"\nmemory_compiler = { enabled = true, verbosity = \"compact\" }\n",
+			section: "agent", keys: []string{"memory_compiler"},
+			wantChanged: true,
+			wantKept:    "system_prompt = \"\"\"\nmemory_compiler = { enabled = true }\n\"\"\"",
+			wantGone:    "verbosity",
+		},
+		{
+			name:    "single-line triple-quoted value does not open a multiline state",
+			raw:     "[agent]\nsystem_prompt = \"\"\"one line\"\"\"\nmax_steps = 40\n",
+			section: "agent", keys: []string{"max_steps", "planner_max_steps"},
+			wantChanged: true,
+			wantKept:    "system_prompt = \"\"\"one line\"\"\"",
+			wantGone:    "max_steps",
+		},
+		{
+			name:    "comment containing triple quotes does not open a multiline state",
+			raw:     "[plugins]\n# docs say \"\"\" starts a multiline string\ntier = 2\n",
+			section: "plugins", keys: []string{"tier"},
+			wantChanged: true,
+			wantKept:    "# docs say \"\"\" starts a multiline string",
+			wantGone:    "tier = 2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, changed := stripTOMLKeyLines(tc.raw, tc.section, tc.keys...)
+			if changed != tc.wantChanged {
+				t.Fatalf("changed = %v, want %v\n--- got ---\n%s", changed, tc.wantChanged, got)
+			}
+			if tc.wantSame && got != tc.raw {
+				t.Fatalf("content was modified:\n--- got ---\n%s\n--- want ---\n%s", got, tc.raw)
+			}
+			if tc.wantKept != "" && !strings.Contains(got, tc.wantKept) {
+				t.Fatalf("expected content was removed:\n--- got ---\n%s\n--- want kept ---\n%s", got, tc.wantKept)
+			}
+			if tc.wantGone != "" && strings.Contains(got, tc.wantGone) {
+				t.Fatalf("retired key survived:\n--- got ---\n%s\n--- want gone ---\n%s", got, tc.wantGone)
+			}
+		})
 	}
 }
 

@@ -57,7 +57,7 @@ read/diff 证据。
 会在进程启动前拦截），放行后连接并返回实时工具目录。MCP 工具名规则仍为精确匹配，
 `mcp__github__*` 不是工具名通配规则。
 
-`ask`, `explore`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,

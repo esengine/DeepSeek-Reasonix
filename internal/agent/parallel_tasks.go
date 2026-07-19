@@ -155,6 +155,23 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		go func() {
 			defer wg.Done()
 			nested := subSinkFor(subID, sink)
+			// Session scheduler bounds total concurrency for parallel_tasks the
+			// same way as fleet (read-only slots; no write claims).
+			releaseSlot, slotErr := p.taskTool.acquireSlot(ctx, AcquireRequest{
+				Writer: false,
+				Nested: SubagentDepth(ctx) > 0,
+				Label:  label,
+			})
+			if slotErr != nil {
+				sink.Emit(event.Event{
+					Kind: event.ToolResult,
+					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: slotErr.Error()},
+				})
+				doneCh <- subResult{index: idx, err: slotErr}
+				return
+			}
+			defer releaseSlot()
+
 			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
 			childDepth, depthErr := p.taskTool.nextSubagentDepth(ctx)
 			if depthErr != nil {
@@ -179,6 +196,8 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				return
 			}
 
+			// Ordinary parallel_tasks (no profile) keep the concise read-only
+			// default system prompt — profile-aware batches use fleet instead.
 			sess := NewSession(DefaultReadOnlyTaskSystemPrompt)
 			opts := p.taskTool.subagentOptions(ctx, max, pricing, ctxWin, childDepth)
 			// Same contract as runSubSession: capture the pristine task before

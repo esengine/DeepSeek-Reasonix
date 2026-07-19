@@ -57,8 +57,8 @@ const ld = {
     <div class="wrap">
       <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">DeepSeek-native · built for your terminal · MIT</span><span class="l-zh">DeepSeek 原生 · 为终端而生 · MIT</span></div>
       <h1 class="reveal" style="--d:0.06s">
-        <span class="l-en">A <span class="grad">DeepSeek</span>-native agent<br />for your terminal.</span>
-        <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 Agent。</span>
+        <span class="l-en">A <span class="grad">DeepSeek</span>-native agent<br />for your <span class="tt">terminal</span>.</span>
+        <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 <span class="tt">Agent</span>。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
         <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, or local browser UI.</span>
@@ -127,7 +127,7 @@ const ld = {
         <div class="feat reveal" style="--d:0.1s">
           <span class="tag">06 / cli + web</span>
           <h3><span class="l-en">Terminal or browser</span><span class="l-zh">终端或浏览器</span></h3>
-          <p><span class="l-en">Use <code>reasonix</code> in the terminal, or run <code>reasonix serve</code> for a local browser UI with approvals, Goal, todos, and balance.</span><span class="l-zh">在终端使用 <code>reasonix</code>,或运行 <code>reasonix serve</code> 打开本地浏览器 UI,包含审批、Goal、Todo 与余额。</span></p>
+          <p><span class="l-en">Use <code>reasonix</code> in a full-screen TUI with a responsive localized footer, verified local text copy, terminal-native text paste, and explicit image paste; or run <code>reasonix serve</code> for a local browser UI.</span><span class="l-zh">在全屏 TUI 中使用 <code>reasonix</code>，获得响应式本地化底栏、可验证的本地文本复制、终端原生文本粘贴和独立图片粘贴；也可运行 <code>reasonix serve</code> 打开本地浏览器 UI。</span></p>
           <code class="feat-chip">$ reasonix serve --auth token</code>
         </div>
       </div>
@@ -249,34 +249,12 @@ const ld = {
 
     <div class="dl reveal" style="--d:0.14s">
       <div class="dl-tabs" role="tablist">
-        <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
+        <button class="dl-tab active" type="button" data-pane="desktop" role="tab"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
+        <button class="dl-tab" type="button" data-pane="npm" role="tab">npm</button>
         <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
-        <button class="dl-tab" type="button" data-pane="desktop" role="tab"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
       </div>
 
-      <div class="dl-pane active" data-pane="npm">
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
-        <div class="chan">
-          <div class="chan-row rec">
-            <code>npm i -g reasonix</code><span class="v">v<span class="rxv">{goVer}</span></span>
-            <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
-            <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
-          </div>
-          <div class="chan-row">
-            <code>npm i -g reasonix@0.53.2</code><span class="v">v0.53.2</span>
-            <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
-            <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
-          </div>
-        </div>
-        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
-      </div>
-
-      <div class="dl-pane" data-pane="brew">
-        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
-        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
-      </div>
-
-      <div class="dl-pane" data-pane="desktop">
+      <div class="dl-pane active" data-pane="desktop">
         <div class="os-grid">
           <div class="os-card" data-os="mac">
             <h4>macOS</h4>
@@ -314,6 +292,28 @@ const ld = {
           <button type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button>
           <a href={`${base}/docs/#macos-quarantine`}><span class="l-en">When to use this →</span><span class="l-zh">查看适用场景 →</span></a>
         </div>
+      </div>
+
+      <div class="dl-pane" data-pane="npm">
+        <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
+        <div class="chan">
+          <div class="chan-row rec">
+            <code>npm i -g reasonix</code><span class="v">v<span class="rxv">{goVer}</span></span>
+            <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
+            <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
+          </div>
+          <div class="chan-row">
+            <code>npm i -g reasonix@0.53.2</code><span class="v">v0.53.2</span>
+            <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
+            <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
+          </div>
+        </div>
+        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
+      </div>
+
+      <div class="dl-pane" data-pane="brew">
+        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
+        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
       </div>
     </div>
   </section>

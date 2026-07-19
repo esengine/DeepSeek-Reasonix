@@ -68,7 +68,7 @@ dedicated `mcp_connect__<server>` identity, so an exact rule such as
 approval and returns the live tool directory. MCP tool rules remain exact;
 `mcp__github__*` is not a tool-name glob.
 
-`ask`, `explore`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,

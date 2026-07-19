@@ -117,9 +117,6 @@ func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
 
 	sessions := loadSuggestionSessions(sessionDir, suggestionSessionLimit)
 	view.Memories = suggestMemories(set, sessions)
-	// Stable Memory v5 execution learnings join the same candidate list and
-	// the same explicit-confirmation flow as history-derived suggestions.
-	view.Memories = append(view.Memories, suggestCompilerMemories(workspaceRoot, set, view.Memories)...)
 	view.Skills = suggestSkills(workspaceRoot, ctrl.AllSkills(), sessions)
 	return view
 }

@@ -209,9 +209,33 @@ single-key shortcuts.
 | `Shift+Tab` | Cycle `Ask → Auto → Plan → Ask`. |
 | `Ctrl+Y` | Toggle YOLO independently of the composer-mode cycle. |
 
-The footer shows the active composer mode. See
+The responsive footer keeps interaction state on the left and, when space
+allows, places model, effort, and work mode on the right. Its second row shows
+available repository and session telemetry such as cache hit rate, context use,
+compaction headroom, background jobs, and balance. `ready` means the composer is
+idle; that slot changes when a picker, approval, image paste, shell mode, or
+other interaction needs attention. Narrow terminals move or compact complete
+groups instead of cutting labels in half. Visible labels and work-mode values
+follow `/language`.
+
+Use `/theme auto|light|dark` to select the terminal background mode, or choose a
+named accent from `/theme`. Both composer borders, the insertion cursor,
+selection, scrollbar, and footer use the active CLI theme. See
 [Keyboard shortcuts](./GUIDE.md#keyboard-shortcuts) for transcript navigation,
 multiline input, rewind, and clipboard controls.
+
+Clipboard actions are deliberately split by content type. Local transcript
+and composer selections use the native system clipboard and report success only
+after that write completes; SSH falls back to an explicitly labelled OSC 52
+request. Text paste remains the terminal's bracketed-paste action (`Cmd+V` on
+macOS and the terminal's configured shortcut elsewhere). While Reasonix owns the
+mouse in a local session, right-click with no selection reads clipboard text
+through the same paste path; right-click with a selection copies it. Over SSH,
+use the terminal paste shortcut because the remote process cannot read the local
+clipboard; `/mouse` restores the terminal's native right-click menu. Image paste
+is application-owned: use `Ctrl+V` on macOS/Linux, `Alt+V` on Windows, or
+`/paste-image`; the footer shows `Pasting image…` until the attachment token is
+ready.
 
 ## In-session commands
 
@@ -226,6 +250,9 @@ the displayed list matches the commands the TUI accepts.
 | `/resume` | Search recent sessions and switch to one. |
 | `/status` | Show model, effort, cache, Git, background jobs, and profile or balance details. |
 | `/work-mode [economy\|balanced\|delivery]` | View or change the runtime profile; `/profile` is an alias. |
+| `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |
+| `/paste-image` | Read a clipboard image and insert an editable attachment token. |
+| `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling. |
 | `/effort` | View or change reasoning effort. |
 | `/output-style` | Select an answer style. |
 | `/verbose` | Toggle expanded reasoning display. |

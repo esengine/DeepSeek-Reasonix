@@ -16,8 +16,15 @@ func isolateUserConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	for _, key := range []string{"REASONIX_HOME", "REASONIX_STATE_HOME", "REASONIX_CACHE_HOME"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	}
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
 	return home
 }
@@ -990,6 +997,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 				SupportedEfforts:  []string{"high", "max"},
 				DefaultEffort:     "high",
 				Vision:            boolPtr(false),
+				ContextWindow:     262_144,
 			},
 		},
 	}}
@@ -1004,7 +1012,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	if !strings.Contains(rendered, `auth_header = true`) {
 		t.Fatalf("rendered TOML missing auth_header:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) {
+	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) || !strings.Contains(rendered, `context_window = 262144`) {
 		t.Fatalf("rendered TOML missing model overrides:\n%s", rendered)
 	}
 
@@ -1030,8 +1038,26 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 		t.Fatalf("extra_body metadata after round trip = %+v", p.ExtraBody["metadata"])
 	}
 	ov := p.ModelOverrides["deepseek-v4-flash"]
-	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision {
+	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision || ov.ContextWindow != 262_144 {
 		t.Fatalf("model override after round trip = %+v", ov)
+	}
+
+	// Older releases do not know context_window inside model_overrides, but their
+	// TOML decoder must still accept a config written by this release.
+	type legacyModelOverride struct {
+		ReasoningProtocol string   `toml:"reasoning_protocol"`
+		SupportedEfforts  []string `toml:"supported_efforts"`
+		DefaultEffort     string   `toml:"default_effort"`
+		Vision            *bool    `toml:"vision"`
+	}
+	type legacyProvider struct {
+		ModelOverrides map[string]legacyModelOverride `toml:"model_overrides"`
+	}
+	var legacy struct {
+		Providers []legacyProvider `toml:"providers"`
+	}
+	if _, err := toml.Decode(rendered, &legacy); err != nil {
+		t.Fatalf("legacy config shape cannot read per-model context window: %v", err)
 	}
 }
 

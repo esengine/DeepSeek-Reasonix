@@ -647,6 +647,40 @@ func TestOnDemandModelNameMatchesPluginCanonicalName(t *testing.T) {
 	}
 }
 
+func TestOnDemandMCPToolUsesSharedApprovalResolution(t *testing.T) {
+	host := plugin.NewHost()
+	defer host.Close()
+	specs := []plugin.Spec{
+		{Name: "user", Type: "stdio", Command: "reasonix-test-definitely-missing-binary", ImplicitApproval: true},
+		{Name: "scoped", Type: "stdio", Command: "reasonix-test-definitely-missing-binary", ImplicitApproval: true,
+			ToolApprovalModes: map[string]string{"wipe": "prompt"}},
+		{Name: "project", Type: "stdio", Command: "reasonix-test-definitely-missing-binary"},
+	}
+	tl := NewUseCapabilityTool(context.Background(), host, specs, tool.NewRegistry(), capability.NewLedger(), nil, nil)
+	cases := []struct{ id, want string }{
+		// A user-configured server carries implicit approval; the delivery
+		// on-demand path must resolve it to direct approval exactly like the
+		// direct MCP tool path, not fall back to the global posture.
+		{"mcp-tool:user/write", tool.MCPApprovalApprove},
+		{"mcp-tool:scoped/wipe", tool.MCPApprovalPrompt},
+		{"mcp-tool:project/write", tool.MCPApprovalAuto},
+	}
+	for _, tc := range cases {
+		resolved, err := tl.ResolveCall(context.Background(),
+			json.RawMessage(`{"action":"call","capability_id":"`+tc.id+`"}`))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.id, err)
+		}
+		policy, ok := resolved.Target.(tool.MCPApprovalPolicy)
+		if !ok {
+			t.Fatalf("%s: resolved target %T does not expose an MCP approval policy", tc.id, resolved.Target)
+		}
+		if got := policy.MCPApprovalMode(); got != tc.want {
+			t.Fatalf("%s: on-demand approval mode = %q, want %q (plugin.Spec.ToolApprovalMode parity)", tc.id, got, tc.want)
+		}
+	}
+}
+
 func TestProxyCallAuditCountsOnAgentPath(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "mcp__github__search_issues", readOnly: true})

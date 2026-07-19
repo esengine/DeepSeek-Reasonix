@@ -115,21 +115,40 @@ func pasteClipboardImage() tea.Cmd {
 	}
 }
 
-func pasteClipboard() tea.Cmd {
+type clipboardTextPasteMsg struct {
+	text   string
+	err    error
+	remote bool
+}
+
+var readNativeClipboardText = clipboard.ReadAll
+
+// pasteClipboardText backs the captured-mouse right-click path. Keyboard text
+// paste still arrives from the terminal as a bracketed tea.PasteMsg; this read
+// is deliberately text-only so right-click never probes for an image first.
+func pasteClipboardText() tea.Cmd {
 	return func() tea.Msg {
-		path, imageErr := control.SaveClipboardImage()
-		if imageErr == nil {
-			return clipboardPasteMsg{path: path}
+		if remoteClipboardSession() {
+			return clipboardTextPasteMsg{remote: true}
 		}
-		text, textErr := clipboard.ReadAll()
-		if textErr == nil && text != "" {
-			return clipboardPasteMsg{text: text}
-		}
-		if textErr != nil {
-			return clipboardPasteMsg{err: fmt.Errorf("%v; text paste failed: %w", imageErr, textErr)}
-		}
-		return clipboardPasteMsg{err: imageErr}
+		text, err := readNativeClipboardText()
+		return clipboardTextPasteMsg{text: text, err: err}
 	}
+}
+
+func imagePasteShortcut(keyName, goos string) bool {
+	if goos == "windows" {
+		return keyName == "alt+v"
+	}
+	return keyName == "ctrl+v"
+}
+
+func (m *chatTUI) beginClipboardImagePaste() tea.Cmd {
+	if m.clipboardImagePending {
+		return nil
+	}
+	m.clipboardImagePending = true
+	return pasteClipboardImage()
 }
 
 func (m *chatTUI) attachPastedImages(text string) bool {

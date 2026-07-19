@@ -177,6 +177,30 @@ func TestTrustScopesAndFineGrainedDrift(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTrustSupersedesStaleSessionLaunchAndReceipt(t *testing.T) {
+	m := NewManager(filepath.Join(t.TempDir(), StateFilename), "/workspace")
+	if err := m.TrustLaunch(ScopeSession, "srv", "project_config", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Trust(ScopeSession, SourceUser, "srv", "project_config", "old", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.TrustLaunch(ScopeWorkspace, "srv", "project_config", "current"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Trust(ScopeWorkspace, SourceUser, "srv", "project_config", "current", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	authorized, changed, err := m.LaunchAuthorized("srv", "project_config", "current")
+	if err != nil || !authorized || changed {
+		t.Fatalf("workspace launch authorization = (authorized=%v changed=%v err=%v)", authorized, changed, err)
+	}
+	has, changed, err := m.IdentityChanged("srv", "project_config", "current")
+	if err != nil || !has || changed {
+		t.Fatalf("workspace receipt = (has=%v changed=%v err=%v)", has, changed, err)
+	}
+}
+
 func TestSessionTrustIsNotPersisted(t *testing.T) {
 	path := filepath.Join(t.TempDir(), StateFilename)
 	m := NewManager(path, "/workspace")

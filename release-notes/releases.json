@@ -2,6 +2,353 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.17.15",
+      "date": "2026-07-18",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.17.15",
+        "zh": "Reasonix 1.17.15"
+      },
+      "summary": {
+        "en": "This release adds the new official Desktop theme experience, makes long-running chats and session switching more reliable, restores persistent MCP sessions, and polishes the CLI workflow.",
+        "zh": "本次发布带来全新的 Desktop 官方主题体验，提升长任务与会话切换的可靠性，恢复 MCP 持久会话，并集中打磨 CLI 工作流。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli",
+        "agent",
+        "mcp",
+        "provider"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Theme Pack guide",
+            "zh": "主题包指南"
+          },
+          "body": {
+            "en": "Create, validate, import, export, and share Theme Pack V2 themes.",
+            "zh": "创建、校验、导入、导出和分享 Theme Pack V2 主题。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8a36da8db87fc688d854f59b6897268995190bf7/docs/THEME_PACK.md"
+        },
+        {
+          "title": {
+            "en": "Theme Pack guide (Chinese)",
+            "zh": "主题包指南（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for creating and distributing Theme Pack V2 themes.",
+            "zh": "中文指南：创建和分发 Theme Pack V2 主题。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8a36da8db87fc688d854f59b6897268995190bf7/docs/THEME_PACK.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "CLI guide",
+            "zh": "CLI 指南"
+          },
+          "body": {
+            "en": "Reference for the composer, clipboard shortcuts, model picker, and responsive status footer.",
+            "zh": "输入区、剪贴板快捷键、模型选择器和响应式状态栏参考。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8a36da8db87fc688d854f59b6897268995190bf7/docs/CLI.md"
+        },
+        {
+          "title": {
+            "en": "CLI guide (Chinese)",
+            "zh": "CLI 指南（中文）"
+          },
+          "body": {
+            "en": "Chinese reference for the updated CLI workflow.",
+            "zh": "更新后 CLI 工作流的中文参考。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/8a36da8db87fc688d854f59b6897268995190bf7/docs/CLI.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Official themes and Theme Pack V2",
+            "zh": "官方主题与 Theme Pack V2"
+          },
+          "body": {
+            "en": "Desktop now ships eight official themes, a unified gallery, reversible previews, and a custom editor with independent light, dark, home, and workspace scenes.",
+            "zh": "Desktop 现内置八套官方主题、统一主题画廊、可撤销预览，以及支持独立明暗配色和主页/工作区场景的自定义编辑器。"
+          },
+          "refs": [
+            6614
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Long runs and session switching stay responsive",
+            "zh": "长任务与会话切换更可靠"
+          },
+          "body": {
+            "en": "Stalled proxy error bodies no longer freeze retries, while faster session snapshots and stale-activation guards prevent switch lag and content loss.",
+            "zh": "代理错误正文卡住时不再冻结重试；更快的会话快照与过期激活防护减少切换卡顿和内容丢失。"
+          },
+          "refs": [
+            6613
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Persistent MCP sessions return",
+            "zh": "MCP 持久会话恢复"
+          },
+          "body": {
+            "en": "Compatible trust receipts migrate safely, stdio servers reuse one process across calls, and Desktop provides a direct re-verification path when server identity changes.",
+            "zh": "兼容的信任回执会安全迁移，stdio 服务器可跨调用复用同一进程；服务器身份变化时，Desktop 提供直接的重新验证入口。"
+          },
+          "refs": [
+            6612,
+            6605
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "A calmer, more capable CLI",
+            "zh": "更从容、更完整的 CLI"
+          },
+          "body": {
+            "en": "The composer scrolls long drafts, clipboard actions distinguish text from images, the status footer adapts to narrow terminals, and model selection completes reliably.",
+            "zh": "输入区可滚动长草稿，剪贴板操作区分文本与图片，状态栏会适配窄终端，模型选择也能可靠完成。"
+          },
+          "refs": [
+            6591,
+            6585
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Simpler agent execution",
+            "zh": "更简洁的 Agent 执行链"
+          },
+          "body": {
+            "en": "The retired Memory v5 execution compiler is removed, and DeepSeek reasoning-only completions that explicitly stop no longer trigger unnecessary extra thinking rounds.",
+            "zh": "已退役的 Memory v5 执行编译器被移除；DeepSeek 明确结束的仅推理响应也不再触发多余的重复思考。"
+          },
+          "refs": [
+            6615,
+            6618
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Official and custom Desktop themes",
+              "zh": "Desktop 官方与自定义主题"
+            },
+            "body": {
+              "en": "Added eight bundled themes, six semantic base styles, a theme gallery, a custom editor, and hardened Theme Pack V2 import/export.",
+              "zh": "新增八套内置主题、六种语义基础样式、主题画廊、自定义编辑器，以及经过安全加固的 Theme Pack V2 导入导出。"
+            },
+            "refs": [
+              6614
+            ]
+          },
+          {
+            "title": {
+              "en": "Website dark mode",
+              "zh": "官网深色模式"
+            },
+            "body": {
+              "en": "reasonix.io now supports system, light, and dark themes, uses the prefix-cache block as a shared visual motif, and presents frequent patch releases in a compact changelog layout.",
+              "zh": "reasonix.io 现支持跟随系统、浅色和深色主题，以前缀缓存方块统一视觉母题，并用更紧凑的更新日志展示高频补丁版本。"
+            },
+            "refs": [
+              6627
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Responsive CLI composer and status footer",
+              "zh": "响应式 CLI 输入区与状态栏"
+            },
+            "body": {
+              "en": "Long drafts scroll inside the composer, copy and paste report clearer outcomes, and complete status groups reflow instead of clipping on narrow terminals.",
+              "zh": "长草稿会在输入区内滚动，复制粘贴反馈更明确，窄终端下完整状态分组会重排而不是被截断。"
+            },
+            "refs": [
+              6591
+            ]
+          },
+          {
+            "title": {
+              "en": "Historical timestamps and simpler navigation",
+              "zh": "历史时间戳与更简洁的导航"
+            },
+            "body": {
+              "en": "Reloaded user messages recover their original send time, while project search, session search, and Trash replace the duplicated standalone History entry.",
+              "zh": "重新加载的用户消息会恢复原始发送时间；项目搜索、会话搜索和回收站取代了重复的独立“历史”入口。"
+            },
+            "refs": [
+              6586
+            ]
+          },
+          {
+            "title": {
+              "en": "One approval for stable publication",
+              "zh": "稳定版发布只需一次审批"
+            },
+            "body": {
+              "en": "CLI, npm, and Desktop stable publishers now validate one atomic tag set and fan out after a single protected GitHub approval.",
+              "zh": "CLI、npm 与 Desktop 稳定发布现在会校验同一组原子标签，并在一次受保护的 GitHub 审批后并行执行。"
+            },
+            "refs": [
+              6626
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Retry freezes and session-switch data loss",
+              "zh": "重试卡死与会话切换丢内容"
+            },
+            "body": {
+              "en": "Non-responsive error bodies are bounded, no-op snapshots avoid repeated rewrites, and out-of-order Desktop activations can no longer replace the most recently selected session.",
+              "zh": "无响应的错误正文现在有明确边界；无变化快照不再反复重写；乱序完成的 Desktop 激活也不会覆盖最近选择的会话。"
+            },
+            "refs": [
+              6613
+            ]
+          },
+          {
+            "title": {
+              "en": "MCP trust, persistence, and re-verification",
+              "zh": "MCP 信任、持久连接与重新验证"
+            },
+            "body": {
+              "en": "Compatible trust state migrates, authorized servers connect without duplicate prompts, stdio sessions persist across calls, and identity drift exposes a dedicated re-verification action.",
+              "zh": "兼容的信任状态会自动迁移；已授权服务器无需重复确认；stdio 会话可跨调用保持；身份漂移时会显示专用的重新验证操作。"
+            },
+            "refs": [
+              6612,
+              6605
+            ]
+          },
+          {
+            "title": {
+              "en": "Model switching from the quick picker",
+              "zh": "快速选择器模型切换"
+            },
+            "body": {
+              "en": "Choosing a model or provider from the CLI picker now starts and completes the controller switch instead of leaving input permanently blocked.",
+              "zh": "从 CLI 选择器选择模型或 Provider 后，现在会真正启动并完成控制器切换，不再永久阻塞输入。"
+            },
+            "refs": [
+              6585
+            ]
+          },
+          {
+            "title": {
+              "en": "DeepSeek reasoning-only completion",
+              "zh": "DeepSeek 仅推理完成响应"
+            },
+            "body": {
+              "en": "A non-empty reasoning stream ending with finish_reason=stop is accepted as complete instead of triggering up to three unnecessary retries.",
+              "zh": "包含推理内容并以 finish_reason=stop 结束的响应会被正确视为完成，不再触发最多三次多余重试。"
+            },
+            "refs": [
+              6618
+            ]
+          },
+          {
+            "title": {
+              "en": "Generated content stays byte-preserving",
+              "zh": "生成内容保持原样"
+            },
+            "body": {
+              "en": "Secret-shaped identifiers in code, tool output, transcripts, recovery branches, and job artifacts are no longer rewritten by heuristic redaction.",
+              "zh": "代码、工具输出、会话记录、恢复分支和任务产物中形似密钥的标识符不再被启发式脱敏误改。"
+            },
+            "refs": [
+              6583
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows external openers and workspace preference",
+              "zh": "Windows 外部打开与工作区偏好"
+            },
+            "body": {
+              "en": "Desktop discovers App Paths installations, launches shells without reparsing metacharacters, chooses renderable terminal icons, and restores the workspace panel's open state.",
+              "zh": "Desktop 现在可发现 App Paths 安装项，启动 Shell 时不再重新解析路径元字符，选择可渲染的终端图标，并恢复工作区面板的展开状态。"
+            },
+            "refs": [
+              6588
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "Memory v5 settings retire automatically",
+            "zh": "Memory v5 设置会自动退役"
+          },
+          "body": {
+            "en": "No manual migration is required. A stale [agent].memory_compiler setting is removed once during startup, while legacy transcripts and citations remain readable.",
+            "zh": "无需手动迁移。旧的 [agent].memory_compiler 设置会在启动时一次性移除，历史会话与引用仍可正常读取。"
+          },
+          "refs": [
+            6615
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "title": {
+            "en": "Scrub transcripts before sharing",
+            "zh": "分享会话前请主动脱敏"
+          },
+          "body": {
+            "en": "Ordinary model and tool content is now stored verbatim in private local files. If a tool prints a real credential, run reasonix doctor redact-sessions or review the files before sharing them.",
+            "zh": "普通模型与工具内容现在会原样写入私有本地文件。如果工具输出了真实凭据，分享前请运行 reasonix doctor redact-sessions 或人工检查相关文件。"
+          },
+          "refs": [
+            6583
+          ]
+        },
+        {
+          "title": {
+            "en": "Persistent MCP process boundary",
+            "zh": "MCP 持久进程边界"
+          },
+          "body": {
+            "en": "A persistent stdio server uses its normal writer sandbox for all RPCs. Plan-mode filtering, tool policy, explicit deny rules, and destructive-action approval still apply at dispatch time.",
+            "zh": "持久 stdio 服务器的所有 RPC 共用其常规写入者沙箱；Plan 模式过滤、工具策略、显式拒绝规则和破坏性操作审批仍会在分发时生效。"
+          },
+          "refs": [
+            6612
+          ]
+        }
+      ],
+      "contributors": [
+        "SivanCola",
+        "billycat",
+        "xianyu-sheng"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.15",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.14...desktop-v1.17.15",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.14",
       "date": "2026-07-16",
       "channel": "stable",

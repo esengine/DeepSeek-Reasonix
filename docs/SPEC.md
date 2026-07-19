@@ -91,9 +91,9 @@ type Config struct {
   one vendor expose several models without re-declaring the endpoint/key. A
   **model reference** (`default_model`, the `--model` flag, the desktop switcher)
   resolves via `Config.ResolveModel`, which accepts a provider name (→ its default
-  model), a bare model name, or an explicit `provider/model`. `context_window` /
-  `price` are per-provider, so models that need distinct values stay separate
-  single-`model` entries.
+  model), a bare model name, or an explicit `provider/model`. `context_window` is
+  the provider-wide fallback; `model_overrides.<model>.context_window` can replace
+  it for one model. Per-model `prices` use model IDs as keys.
 - Streaming tool-call deltas are accumulated by index inside the provider; only
   complete `ToolCall`s are emitted.
 
@@ -141,6 +141,18 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   and `headers` so secrets come from the environment, not the config file.
 - Lifecycle: `initialize` → `notifications/initialized` → `tools/list`;
   invocation via `tools/call {name, arguments}`.
+- A stdio server uses one persistent transport for initialize, reads, and
+  writes, preserving state such as browser sessions across tool calls. The
+  process uses the server's writer sandbox because process confinement cannot
+  change per RPC; read-only eligibility and destructive approval remain local
+  dispatch gates rather than separate process sandboxes.
+- Configuration provenance is runtime metadata. User config, legacy user MCP,
+  and verified plugin-package servers are authorized by installation: the host
+  records their current trust snapshot automatically and ordinary calls default
+  to direct approval. Project `reasonix.toml` and `.mcp.json` servers require a
+  session/workspace launch grant for the exact stable identity before any
+  process or network transport is created. Existing receipts count as launch
+  grants for backward compatibility; identity changes invalidate the grant.
 - Each remote tool is adapted to the `Tool` interface and injected into the run
   registry, namespaced `mcp__<server>__<tool>` (spaces normalised to `_`) to
   match Claude Code and avoid clashes.
@@ -196,6 +208,9 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   pruning still leaves the prompt above the threshold does summary compaction
   run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
   may proceed even when the fold economics would normally skip it.
+- A positive `model_overrides.<model>.context_window` replaces the provider-wide
+  value after model resolution. Missing or zero model overrides inherit the
+  provider value; provider-level `context_window = 0` disables compaction.
 - Tool-result snip/prune never removes messages, so assistant `tool_calls` and
   tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
   and the recent tail is not rewritten. Snipped results can later be upgraded to
@@ -305,7 +320,8 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - **MCP approval policy.** Installed MCP tools may set a server default and raw
   tool overrides using `auto|prompt|writes|approve`. Precedence is explicit deny,
   `destructiveHint`, raw-tool mode, server default, then global Ask/Auto/YOLO.
-  `auto` delegates to the ordinary permission decision; `prompt` reviews every
+  A user-authorized server with no explicit MCP approval fields defaults to
+  `approve`; project-provided servers retain `auto`. `auto` delegates to the ordinary permission decision; `prompt` reviews every
   call; `writes` reviews writers only; and `approve` allows ordinary calls.
   `approvals_reviewer = "user"` uses the interactive user, while `auto_review`
   sends the calls that need review (`prompt`, writer hits under `writes`, and
@@ -501,10 +517,19 @@ refused so an editor cannot silently flatten or discard rich Skill content.
 Built-in profiles support configuration overrides but have no writable file.
 
 Effective model and effort precedence is: per-profile
-`agent.subagent_models` / `agent.subagent_efforts`, profile frontmatter,
-`agent.subagent_model` / `agent.subagent_effort`, then executor/default model
-configuration. See [Subagent profiles](./SUBAGENT_PROFILES.md) for the user-facing
-command and file-format contract.
+`agent.subagent_models` / `agent.subagent_efforts`, this call's `model` /
+`effort` on `task`/`fleet`, profile frontmatter, `agent.subagent_model` /
+`agent.subagent_effort`, then executor/default model configuration.
+
+`task` accepts optional `profile` and `write_paths`. `fleet` dispatches 2–64
+profile-aware tasks under a session scheduler
+(`agent.max_subagent_concurrency`, default 6; `agent.max_parallel_writers`,
+default 3). Profile names are resolved at runtime from the Skill store and
+must never enter tool schemas or the parent system prompt. Custom and named
+built-in profile bodies are the full child system prompt (no implicit
+concise default). `parallel_tasks` remains the compatible read-only batch
+API on the same scheduler. See [Subagent profiles](./SUBAGENT_PROFILES.md)
+for the user-facing command and file-format contract.
 
 ## 4. Data Types (`internal/provider`)
 
@@ -549,8 +574,7 @@ Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
 and the OS keyring are not provider-key runtime fallbacks. Project `.env` still
 feeds workspace-scoped, non-provider `${VAR}` expansion for MCP/plugin settings
-without importing provider keys or Reasonix control variables. Project
-`reasonix.toml` does not override the user-level Memory v5 compiler switch.
+without importing provider keys or Reasonix control variables.
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
@@ -558,12 +582,11 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 
 [ui]
 # shortcut_layout = "desktop"       # classic|desktop; compatibility setting
-# cursor_shape = "underline"        # CLI/TUI textarea cursor: underline|block|bar
+# cursor_shape = "bar"              # CLI/TUI textarea cursor: underline|block|bar
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
 temperature       = 0.0
-memory_compiler = { enabled = true, verbosity = "observe" }   # user/global only; observe|compact; CLI: reasonix config memory-v5 off|observe|compact|on|status
 reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # plan_mode_allowed_tools = ["mcp__legacy__reader"]   # legacy MCP read-only trust alias; does not change Plan availability
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
@@ -584,6 +607,7 @@ models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
+# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.
 
@@ -637,7 +661,6 @@ args    = []
 # default_tools_approval_mode = "auto"   # auto|prompt|writes|approve
 # tools = { "delete_all" = { approval_mode = "prompt" } }
 # approvals_reviewer = "user"            # user|auto_review
-
 # [[plugins]]                   # a remote MCP server over Streamable HTTP
 # name    = "stripe"
 # type    = "http"             # "stdio" (default) | "http" | "sse"
@@ -662,7 +685,7 @@ explicit controls for one-off and unattended execution.
 `reasonix setup` writes this default config so the CLI is usable out of the box.
 
 `[ui].cursor_shape` is normalized to `underline`, `block`, or `bar`; empty or
-unknown values fall back to `underline`. It applies to the Bubble Tea CLI/TUI
+unknown values fall back to `bar`. It applies to the Bubble Tea CLI/TUI
 textarea only, while desktop and browser inputs keep their platform-native
 cursor behavior.
 

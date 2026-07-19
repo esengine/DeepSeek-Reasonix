@@ -128,7 +128,7 @@ type UIConfig struct {
 	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
-	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
+	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -215,18 +215,17 @@ func (c *Config) UIShortcutLayout() string {
 	}
 }
 
-// UICursorShape normalizes ui.cursor_shape. Defaults to "underline" to avoid
-// block-cursor visual corruption with CJK wide characters in the textarea
-// (Bubble Tea real-cursor + CJK column-counting drift). Valid values:
-// "block", "underline", "bar".
+// UICursorShape normalizes ui.cursor_shape. The slim "bar" default stays
+// visible without covering CJK wide characters. Valid values are "block",
+// "underline", and "bar".
 func (c *Config) UICursorShape() string {
 	switch strings.ToLower(strings.TrimSpace(c.UI.CursorShape)) {
 	case "block":
 		return "block"
-	case "bar":
-		return "bar"
-	default:
+	case "underline":
 		return "underline"
+	default:
+		return "bar"
 	}
 }
 
@@ -1050,6 +1049,14 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	// MaxSubagentConcurrency bounds how many sub-agents (task, fleet items,
+	// profile skills, nested children) may run at once in one session.
+	// 0 means the default (6). Values outside 1–32 are clamped on load.
+	MaxSubagentConcurrency int `toml:"max_subagent_concurrency"`
+	// MaxParallelWriters bounds concurrent writer-capable sub-agents that
+	// declare non-overlapping write_paths. 0 means the default (3). Must not
+	// exceed MaxSubagentConcurrency after normalization.
+	MaxParallelWriters int `toml:"max_parallel_writers"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -1085,53 +1092,6 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
-	// MemoryCompiler controls the v5 execution-memory compiler. Missing configs
-	// default to enabled so users get the self-improving planner unless they opt
-	// out explicitly.
-	MemoryCompiler MemoryCompilerConfig `toml:"memory_compiler"`
-}
-
-// MemoryCompilerConfig controls the v5 execution-memory compiler.
-type MemoryCompilerConfig struct {
-	Enabled   *bool  `toml:"enabled"`
-	Verbosity string `toml:"verbosity"`
-}
-
-const (
-	MemoryCompilerVerbosityObserve = "observe"
-	MemoryCompilerVerbosityCompact = "compact"
-)
-
-// MemoryCompilerEnabled reports whether the v5 execution-memory compiler should
-// participate in future turns. Missing config defaults to true.
-func (c *Config) MemoryCompilerEnabled() bool {
-	if c == nil || c.Agent.MemoryCompiler.Enabled == nil {
-		return true
-	}
-	return *c.Agent.MemoryCompiler.Enabled
-}
-
-// MemoryCompilerVerbosity reports how much Memory v5 state should be injected
-// into model-facing turns. The default observes and learns without prompt
-// injection, so Memory v5 IR is not provider-visible unless opted in.
-func (c *Config) MemoryCompilerVerbosity() string {
-	if c == nil {
-		return MemoryCompilerVerbosityObserve
-	}
-	return NormalizeMemoryCompilerVerbosity(c.Agent.MemoryCompiler.Verbosity)
-}
-
-// NormalizeMemoryCompilerVerbosity accepts current and legacy spellings for the
-// Memory v5 injection mode.
-func NormalizeMemoryCompilerVerbosity(v string) string {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "", "observe", "observed", "silent", "minimal", "none":
-		return MemoryCompilerVerbosityObserve
-	case "compact", "inject", "injected", "contract", "on":
-		return MemoryCompilerVerbosityCompact
-	default:
-		return MemoryCompilerVerbosityObserve
-	}
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -1209,6 +1169,10 @@ type ProviderModelOverride struct {
 	SupportedEfforts  []string `toml:"supported_efforts"`
 	DefaultEffort     string   `toml:"default_effort"`
 	Vision            *bool    `toml:"vision"`
+	// ContextWindow overrides the provider-wide context budget for this model.
+	// Zero inherits ProviderEntry.ContextWindow so existing configurations keep
+	// their current compaction behavior.
+	ContextWindow int `toml:"context_window"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
@@ -1354,6 +1318,9 @@ func (e *ProviderEntry) applyModelOverride() {
 	if ov.Vision != nil {
 		e.visionOverride = ov.Vision
 	}
+	if ov.ContextWindow > 0 {
+		e.ContextWindow = ov.ContextWindow
+	}
 }
 
 func (e *ProviderEntry) modelOverrideForModel(model string) (ProviderModelOverride, bool) {
@@ -1473,6 +1440,27 @@ type MCPToolPolicy struct {
 	ApprovalMode string `toml:"approval_mode" json:"approval_mode"`
 }
 
+// MCPConfigSource records where a merged MCP entry came from. It is runtime
+// provenance only and is never serialized back into TOML or .mcp.json.
+type MCPConfigSource string
+
+const (
+	MCPSourceUnknown        MCPConfigSource = ""
+	MCPSourceUserConfig     MCPConfigSource = "user_config"
+	MCPSourceProjectConfig  MCPConfigSource = "project_config"
+	MCPSourceProjectMCPJSON MCPConfigSource = "project_mcp_json"
+	MCPSourceLegacyUser     MCPConfigSource = "legacy_user_config"
+	MCPSourcePluginPackage  MCPConfigSource = "plugin_package"
+)
+
+func (s MCPConfigSource) UserAuthorized() bool {
+	return s == MCPSourceUserConfig || s == MCPSourceLegacyUser || s == MCPSourcePluginPackage
+}
+
+func (s MCPConfigSource) RequiresLaunchApproval() bool {
+	return s == MCPSourceProjectConfig || s == MCPSourceProjectMCPJSON
+}
+
 // PluginEntry declares an external MCP server. Type selects the transport:
 // "stdio" (default) launches Command/Args/Env as a subprocess; "http"
 // (a.k.a. streamable-http) and "sse" connect to a remote URL with optional
@@ -1499,7 +1487,9 @@ type PluginEntry struct {
 	// audited readers. Third-party readOnlyHint alone is not a Plan-mode trust
 	// boundary.
 	TrustedReadOnlyTools []string `toml:"trusted_read_only_tools"`
-	// DefaultToolsApprovalMode is auto|prompt|writes|approve. Empty is auto.
+	// DefaultToolsApprovalMode is auto|prompt|writes|approve. Empty uses the
+	// source-aware runtime default (direct for user-authorized servers, auto for
+	// project-provided servers).
 	DefaultToolsApprovalMode string `toml:"default_tools_approval_mode"`
 	// Tools overrides approval policy by raw server-local tool name.
 	Tools map[string]MCPToolPolicy `toml:"tools"`
@@ -1518,7 +1508,8 @@ type PluginEntry struct {
 	//                  swap happens once the spawn finishes.
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier         string `toml:"tier"`
+	Tier         string          `toml:"tier"`
+	Source       MCPConfigSource `toml:"-" json:"-"`
 	expansionEnv map[string]string
 }
 
@@ -1591,14 +1582,16 @@ func Default() *Config {
 			SystemPrompt: DefaultSystemPrompt,
 			// Normal interactive execution has no configurable total round cap. It
 			// is bounded by adaptive progress guards and context compaction instead.
-			MaxSteps:            0,
-			PlannerMaxSteps:     0,
-			AutoPlan:            "off",
-			SoftCompactRatio:    0.5,
-			ToolResultSnipRatio: 0.6,
-			CompactRatio:        0.8,
-			CompactForceRatio:   0.9,
-			MaxSubagentDepth:    2,
+			MaxSteps:               0,
+			PlannerMaxSteps:        0,
+			AutoPlan:               "off",
+			SoftCompactRatio:       0.5,
+			ToolResultSnipRatio:    0.6,
+			CompactRatio:           0.8,
+			CompactForceRatio:      0.9,
+			MaxSubagentDepth:       2,
+			MaxSubagentConcurrency: 6,
+			MaxParallelWriters:     3,
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix` prompts before writers. Users add

@@ -3531,11 +3531,11 @@ func TestSetModelForTabReattachesDetachedRuntime(t *testing.T) {
 		Ctrl:           oldCtrl,
 		Ready:          true,
 		model:          "old/old-model",
-		sessionLease:   lease,
 		disabledMCP:    map[string]ServerView{},
 		SharedHostKey:  "detached-host",
 		ActivityStatus: "",
 	}
+	detached.adoptSessionLease(lease)
 	tab := &WorkspaceTab{
 		ID:          "tab_a",
 		Scope:       "global",
@@ -6891,7 +6891,7 @@ func TestCapabilitiesIncludesInstalledPlugins(t *testing.T) {
 	}
 }
 
-func TestDesktopSharedHostBackgroundMCPAutoConnectsOnBoot(t *testing.T) {
+func TestDesktopSharedHostProjectMCPWaitsForLaunchApproval(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping background MCP boot integration test in short mode")
 	}
@@ -6927,11 +6927,15 @@ url = %q
 	defer ctrl.Close()
 
 	deadline := time.Now().Add(3 * time.Second)
-	for !sharedHost.HasClient("h") && time.Now().Before(deadline) {
+	for len(sharedHost.Failures()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(25 * time.Millisecond)
 	}
-	if !sharedHost.HasClient("h") {
-		t.Fatalf("background MCP did not auto-connect; connecting=%v failures=%+v", sharedHost.ConnectingServers(), sharedHost.Failures())
+	if sharedHost.HasClient("h") {
+		t.Fatal("project MCP connected before launch approval")
+	}
+	failures := sharedHost.Failures()
+	if len(failures) != 1 || !failures[0].RequiresReverification || !strings.Contains(failures[0].Error, "until the user authorizes") {
+		t.Fatalf("project MCP failure = %+v", failures)
 	}
 
 	app := NewApp()
@@ -6949,8 +6953,34 @@ url = %q
 	app.activeTabID = "test"
 
 	view := app.MCPServers()
-	if len(view) != 1 || view[0].Name != "h" || view[0].Status != "connected" || view[0].StartIntent != "automatic" || view[0].RuntimeState != "ready" || view[0].Tools != 1 {
-		t.Fatalf("MCPServers() = %+v, want h connected automatic ready with one tool", view)
+	if len(view) != 1 || view[0].Name != "h" || view[0].Status != "failed" || view[0].RuntimeState != "issue" || !view[0].RequiresLaunchApproval || !view[0].RequiresReverification {
+		t.Fatalf("MCPServers() = %+v, want project h awaiting launch approval", view)
+	}
+}
+
+func TestProjectMCPLaunchApprovalViewOnlyShowsWhileBlocked(t *testing.T) {
+	entry := config.PluginEntry{Name: "project", Source: config.MCPSourceProjectConfig}
+	connected := withPluginConfig(ServerView{Name: entry.Name, Status: "connected"}, entry)
+	if connected.RequiresLaunchApproval {
+		t.Fatalf("connected project MCP still requires launch approval: %+v", connected)
+	}
+	// The static governance flag must survive a successful authorization so the
+	// UI can keep a revoke entry for the persistent grant.
+	if !connected.LaunchApprovalGoverned {
+		t.Fatalf("connected project MCP lost launch governance flag: %+v", connected)
+	}
+
+	blocked := withPluginConfig(ServerView{
+		Name: entry.Name, Status: "failed", RequiresReverification: true,
+	}, entry)
+	if !blocked.RequiresLaunchApproval || !blocked.LaunchApprovalGoverned {
+		t.Fatalf("blocked project MCP lost launch approval action: %+v", blocked)
+	}
+
+	user := withPluginConfig(ServerView{Name: "user", Status: "connected"},
+		config.PluginEntry{Name: "user", Source: config.MCPSourceUserConfig})
+	if user.LaunchApprovalGoverned || user.RequiresLaunchApproval {
+		t.Fatalf("user-config MCP must not be launch-gate governed: %+v", user)
 	}
 }
 

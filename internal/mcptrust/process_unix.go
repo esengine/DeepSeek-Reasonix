@@ -11,3 +11,5 @@ func trustLockProcessAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || err == syscall.EPERM
 }
+
+func trustLockContention(error) bool { return false }

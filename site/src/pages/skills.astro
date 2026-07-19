@@ -38,7 +38,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
           <button data-sort="trending" role="tab"><span class="l-en">Trending</span><span class="l-zh">趋势</span></button>
           <button data-sort="installs" role="tab"><span class="l-en">Top</span><span class="l-zh">最热</span></button>
         </div>
-        <a class="btn btn-dark reg-publish" id="publish-open" href="#publish">
+        <a class="btn btn-dark reg-publish-cta" id="publish-open" href="#publish">
           <span class="l-en">Publish</span><span class="l-zh">发布</span>
         </a>
       </div>
@@ -154,7 +154,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
       background: var(--bg-soft); border-radius: 999px; padding: 0 18px;
       border: 1px solid transparent; transition: border-color .2s, background .2s;
     }
-    .reg-search:focus-within { background: #fff; border-color: var(--line); box-shadow: var(--shadow-1); }
+    .reg-search:focus-within { background: var(--card); border-color: var(--line); box-shadow: var(--shadow-1); }
     .reg-search svg { width: 18px; height: 18px; fill: var(--ink-3); flex: none; }
     .reg-search input {
       border: none; background: none; outline: none; width: 100%;
@@ -167,7 +167,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
       transition: background .2s, color .2s, box-shadow .2s;
     }
     .reg-tabs button:hover { color: var(--ink); }
-    .reg-tabs button.active { background: #fff; color: var(--accent); box-shadow: var(--shadow-1); }
+    .reg-tabs button.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-1); }
 
     .reg-body { padding: 36px 0 96px; }
     .reg-cols { display: grid; grid-template-columns: 1fr 320px; gap: 32px; align-items: start; }
@@ -183,9 +183,9 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
     .pkg-card:hover { box-shadow: var(--shadow-2); border-color: transparent; transform: translateY(-2px); }
     .pkg-top { display: flex; align-items: center; gap: 8px; }
     .pkg-kind { font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); background: var(--accent-soft); padding: 4px 9px; border-radius: 999px; }
-    .pkg-kind.mcp { color: oklch(0.5 0.16 300); background: color-mix(in oklch, oklch(0.5 0.16 300) 9%, white); }
+    .pkg-kind.mcp { color: oklch(0.5 0.16 300); background: color-mix(in oklch, oklch(0.5 0.16 300) 9%, var(--card)); }
     .pkg-badge { font-size: 11px; font-weight: 600; padding: 4px 9px; border-radius: 999px; }
-    .pkg-badge.verified { color: oklch(0.5 0.13 155); background: color-mix(in oklch, oklch(0.5 0.13 155) 10%, white); }
+    .pkg-badge.verified { color: oklch(0.5 0.13 155); background: color-mix(in oklch, oklch(0.5 0.13 155) 10%, var(--card)); }
     .pkg-badge.community { color: var(--ink-3); background: var(--bg-soft); }
     .pkg-stars { margin-left: auto; font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
     .pkg-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; overflow-wrap: anywhere; }
@@ -202,13 +202,13 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
     .pkg-install code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pkg-install button {
       margin-left: auto; flex: none; font-family: var(--font-sans); font-size: 12px; font-weight: 600;
-      background: #fff; color: var(--accent); border: none; cursor: pointer; padding: 6px 13px;
+      background: var(--card); color: var(--accent); border: none; cursor: pointer; padding: 6px 13px;
       border-radius: 999px; box-shadow: var(--shadow-1); transition: background .2s, color .2s;
     }
     .pkg-install button.copied { background: oklch(0.55 0.14 155); color: #fff; }
     .pkg-meta { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
-    .pkg-skel, .feed-skel { display: none; border-radius: var(--radius); background: linear-gradient(100deg, var(--bg-soft) 30%, oklch(0.94 0.004 247) 50%, var(--bg-soft) 70%); background-size: 200% 100%; animation: sheen 1.2s linear infinite; }
+    .pkg-skel, .feed-skel { display: none; border-radius: var(--radius); background: linear-gradient(100deg, var(--bg-soft) 30%, var(--line) 50%, var(--bg-soft) 70%); background-size: 200% 100%; animation: sheen 1.2s linear infinite; }
     .pkg-skel { height: 168px; }
     .feed-skel { height: 44px; border-radius: 12px; margin-bottom: 10px; }
     @keyframes sheen { to { background-position: -200% 0; } }
@@ -238,13 +238,13 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
     .acct-name { font-size: 14px; font-weight: 600; color: var(--ink); text-decoration: none; }
     .acct-name:hover { color: var(--accent); }
     .acct-logout { font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--ink-2); background: var(--bg-soft); border: none; cursor: pointer; padding: 8px 14px; border-radius: 999px; transition: background .2s, color .2s; }
-    .acct-logout:hover { color: var(--ink); background: oklch(0.94 0.004 247); }
-    .acct-warn { font-size: 11px; font-weight: 600; color: oklch(0.52 0.15 60); background: color-mix(in oklch, oklch(0.7 0.16 60) 16%, white); padding: 3px 9px; border-radius: 999px; text-decoration: none; }
+    .acct-logout:hover { color: var(--ink); background: var(--line); }
+    .acct-warn { font-size: 11px; font-weight: 600; color: oklch(0.52 0.15 60); background: color-mix(in oklch, oklch(0.7 0.16 60) 16%, var(--card)); padding: 3px 9px; border-radius: 999px; text-decoration: none; }
     .reg-review { padding: 8px 0 40px; }
     .review-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
     .review-count { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
     .review-list { display: flex; flex-direction: column; gap: 12px; }
-    .review-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: color-mix(in oklch, oklch(0.7 0.16 60) 6%, white); border: 1px solid color-mix(in oklch, oklch(0.7 0.16 60) 30%, white); border-radius: var(--radius-sm); padding: 14px 16px; }
+    .review-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: color-mix(in oklch, oklch(0.7 0.16 60) 6%, var(--card)); border: 1px solid color-mix(in oklch, oklch(0.7 0.16 60) 30%, var(--card)); border-radius: var(--radius-sm); padding: 14px 16px; }
     .review-row .rv-main { flex: 1; min-width: 0; }
     .review-row .rv-name { font-size: 15px; font-weight: 600; }
     .review-row .rv-name .scope { color: var(--ink-3); font-weight: 500; }
@@ -254,7 +254,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
     .rv-btn { font-family: var(--font-sans); font-size: 13px; font-weight: 600; border: none; cursor: pointer; padding: 8px 14px; border-radius: 999px; transition: background .2s, color .2s, box-shadow .2s; }
     .rv-btn.approve { background: oklch(0.55 0.13 155); color: #fff; }
     .rv-btn.reject { background: var(--bg-soft); color: oklch(0.5 0.18 25); }
-    .rv-btn.verify { background: #fff; color: var(--accent); box-shadow: var(--shadow-1); }
+    .rv-btn.verify { background: var(--card); color: var(--accent); box-shadow: var(--shadow-1); }
     .rv-btn:disabled { opacity: .5; cursor: default; }
     .review-empty { font-size: 14px; color: var(--ink-3); padding: 28px 0; }
 
@@ -273,7 +273,7 @@ const desc = "Browse, publish, and install community skills and MCP servers for 
       background: var(--bg-soft); border: 1px solid transparent; border-radius: var(--radius-sm);
       padding: 11px 14px; outline: none; transition: border-color .2s, background .2s;
     }
-    .pub-form input:focus, .pub-form select:focus { background: #fff; border-color: var(--accent); }
+    .pub-form input:focus, .pub-form select:focus { background: var(--card); border-color: var(--accent); }
     .pub-actions { display: flex; align-items: center; gap: 16px; margin-top: 4px; }
     .pub-msg { font-size: 13.5px; color: var(--ink-2); }
     .pub-msg.err { color: oklch(0.55 0.18 25); }

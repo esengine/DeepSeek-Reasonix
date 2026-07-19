@@ -18,6 +18,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
       <div class="eyebrow">404</div>
       <h1><span class="l-en">This page went <span class="grad">cold.</span></span><span class="l-zh">这一页<span class="grad">冷掉了</span>。</span></h1>
       <p class="sub"><span class="l-en">The page you're looking for doesn't exist — but the session is still warm.</span><span class="l-zh">你找的页面不存在——但会话还热着。</span></p>
+      <div class="cold-blocks" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="new"></i></div>
       <div class="hero-cta">
         <a class="btn btn-dark" href={`${base}/`}><span class="l-en">Back to home</span><span class="l-zh">回到首页</span></a>
         <a class="btn btn-ghost" href={`${base}/docs/`}><span class="l-en">Read the docs</span><span class="l-zh">查看文档</span></a>

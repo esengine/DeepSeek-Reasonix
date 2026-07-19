@@ -30,8 +30,11 @@ const memoryCompilerExecutionOpen = "<memory-compiler-execution>"
 var reMemoryCompilerExecution = regexp.MustCompile(`(?s)<memory-compiler-execution>\s*(.*?)\s*</memory-compiler-execution>`)
 
 // ContainsMemoryCompilerExecution reports whether content includes a Memory v5
-// execution contract. Callers that prepare user-facing or replayable text should
-// unwrap it before display and avoid treating the raw contract as user-authored.
+// execution contract. The Memory v5 compiler was removed, but transcripts
+// recorded by releases up to v1.17.x may still carry injected contracts in
+// persisted user messages, so display paths keep unwrapping them. Callers that
+// prepare user-facing or replayable text should unwrap the block before display
+// and avoid treating the raw contract as user-authored.
 func ContainsMemoryCompilerExecution(content string) bool {
 	return strings.Contains(content, memoryCompilerExecutionOpen)
 }
@@ -41,13 +44,14 @@ func ContainsMemoryCompilerExecution(content string) bool {
 // titles. The blocks are sent in user turns so they never affect the stable
 // prompt prefix, but they should not become user-facing text later.
 //
-// The Memory v5 <memory-compiler-execution> block is handled differently from
-// the prepended transient blocks: it does not prefix the user's prompt, it
-// REPLACES the whole turn (Agent.Run swaps the compiled contract in for the
-// original input, keeping the user's text only in the contract's source_event
-// field). Dropping it like a prefix block would leave an empty string, so we
-// unwrap it to the original prompt instead — otherwise sessions whose first
-// turn was compiled would show a blank history/sidebar preview (#5307).
+// The legacy Memory v5 <memory-compiler-execution> block (written by releases
+// up to v1.17.x before the compiler was removed) is handled differently from
+// the prepended transient blocks: it did not prefix the user's prompt, it
+// REPLACED the whole turn, keeping the user's text only in the contract's
+// source_event field. Dropping it like a prefix block would leave an empty
+// string, so we unwrap it to the original prompt instead — otherwise old
+// sessions whose first turn was compiled would show a blank history/sidebar
+// preview (#5307).
 func StripTransientUserBlocks(content string) string {
 	s := unwrapMemoryCompilerExecution(content)
 	for {

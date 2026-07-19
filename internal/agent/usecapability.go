@@ -494,10 +494,7 @@ func (o *onDemandMCPTool) MCPDestructiveHint() bool {
 }
 
 func (o *onDemandMCPTool) MCPApprovalMode() string {
-	if mode := strings.TrimSpace(o.spec.ToolApprovalModes[o.raw]); mode != "" {
-		return tool.NormalizeMCPApprovalMode(mode)
-	}
-	return tool.NormalizeMCPApprovalMode(o.spec.DefaultToolsApprovalMode)
+	return o.spec.ToolApprovalMode(o.raw)
 }
 
 func (o *onDemandMCPTool) MCPApprovalReviewer() string {

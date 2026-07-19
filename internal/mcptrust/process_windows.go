@@ -2,7 +2,11 @@
 
 package mcptrust
 
-import "golang.org/x/sys/windows"
+import (
+	"errors"
+
+	"golang.org/x/sys/windows"
+)
 
 const trustLockStillActiveExitCode = 259
 
@@ -19,4 +23,13 @@ func trustLockProcessAlive(pid int) bool {
 	defer windows.CloseHandle(handle)
 	var code uint32
 	return windows.GetExitCodeProcess(handle, &code) == nil && code == trustLockStillActiveExitCode
+}
+
+// trustLockContention reports transient Windows name/handle races while one
+// owner removes the exclusive-create lock and another tries to create it.
+// OpenFile can surface those races as access or sharing violations instead of
+// os.ErrExist, so callers must retry them within the normal lock deadline.
+func trustLockContention(err error) bool {
+	return errors.Is(err, windows.ERROR_ACCESS_DENIED) ||
+		errors.Is(err, windows.ERROR_SHARING_VIOLATION)
 }

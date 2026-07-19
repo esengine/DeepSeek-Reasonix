@@ -236,6 +236,11 @@ console.log("\nuse controller meta");
     "workspace lease contention uses its stable localized notice code",
   );
   eq(
+    localizedNoticeText("reworded cancelled-turn copy", "cancelled_turn_display"),
+    "This turn was interrupted. Partial output is kept for reference but is not included in the model's next-turn history; inspect the workspace before continuing or reverting changes.",
+    "cancelled turn history explains the model-context boundary",
+  );
+  eq(
     localizedNoticeText("Tool round limit reached; asking the assistant to summarize progress.", "unknown_future_code"),
     "Tool round limit reached; asking the assistant to summarize progress.",
     "an unknown notice code falls back to exact-text matching",

@@ -268,7 +268,7 @@ func (lt *lazyTool) MCPApprovalMode() string {
 	if lt.shared == nil {
 		return tool.MCPApprovalAuto
 	}
-	return lt.shared.spec.toolApprovalMode(lt.rawName)
+	return lt.shared.spec.ToolApprovalMode(lt.rawName)
 }
 func (lt *lazyTool) MCPApprovalReviewer() string {
 	if lt.shared == nil {

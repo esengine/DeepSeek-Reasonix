@@ -14,16 +14,6 @@ func TestDefaultReasoningLanguageAuto(t *testing.T) {
 	}
 }
 
-func TestDefaultMemoryCompilerEnabled(t *testing.T) {
-	cfg := Default()
-	if !cfg.MemoryCompilerEnabled() {
-		t.Fatal("default memory compiler = false, want true")
-	}
-	if got := cfg.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityObserve {
-		t.Fatalf("default memory compiler verbosity = %q, want observe", got)
-	}
-}
-
 func TestDefaultDesktopAppearanceAutoGraphite(t *testing.T) {
 	cfg := Default()
 	if got := cfg.DesktopTheme(); got != "auto" {

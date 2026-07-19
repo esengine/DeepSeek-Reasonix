@@ -51,6 +51,29 @@ This is a real isolated subagent run, not prompt text inserted into the parent
 agent. The parent conversation retains the task and the child's final answer,
 not the child's full working context.
 
+The parent model can also select a profile at call time without listing profile
+names in the tool schema (prompt-cache stability):
+
+```text
+task(profile="doc-rewriter", prompt="rewrite docs/01.md", write_paths=["docs/01.md"])
+fleet(tasks=[
+  {profile="doc-rewriter", prompt="rewrite docs/01.md", write_paths=["docs/01.md"]},
+  {profile="doc-rewriter", prompt="rewrite docs/02.md", write_paths=["docs/02.md"]}
+])
+```
+
+- `profile` on `task` / `fleet` items resolves a `runAs: subagent` Skill by name
+  (explicit names may call `invocation: manual` profiles).
+- The profile body becomes the **full** child system prompt — no implicit
+  concise default is stacked on top.
+- `write_paths` declares non-overlapping write targets so parallel writers can
+  share one workspace. Writer tasks that omit `write_paths` claim the whole
+  workspace (serializing against every other writer claim). In `fleet`,
+  multiple whole-workspace claims or any path overlap fail preflight and start
+  nothing.
+- Session defaults: `agent.max_subagent_concurrency = 6`,
+  `agent.max_parallel_writers = 3` (both configurable 1–32; writers ≤ total).
+
 For scripts and other headless use, choose an explicit command:
 
 ```bash
@@ -113,6 +136,7 @@ invocation: manual
 runAs: subagent
 model: deepseek-pro
 effort: high
+read-only: true
 allowed-tools: [read_file, grep, bash]
 ---
 You are a focused code reviewer. Inspect the requested changes and return only
@@ -121,7 +145,9 @@ actionable findings, ordered by severity.
 
 `invocation: manual` prevents automatic discovery in the model's pinned Skill
 index; users can still invoke the profile explicitly. `allowed-tools` is a
-profile-level allowlist, not a way to bypass permissions.
+profile-level allowlist, not a way to bypass permissions. `read-only: true`
+forces the read-only tool registry (writer tools stripped); omitted/`false`
+keeps the legacy writable default.
 
 You may hand-author richer `runAs: subagent` Skills, including custom Skill
 paths and extra frontmatter. They can be listed and invoked, but the profile
@@ -142,9 +168,10 @@ lowest priority:
 
 1. per-profile entries in `agent.subagent_models` and
    `agent.subagent_efforts`;
-2. the profile's `model` and `effort` frontmatter;
-3. `agent.subagent_model` and `agent.subagent_effort` defaults;
-4. the configured executor/default model and its default effort.
+2. this call's `model` / `effort` arguments on `task` or `fleet`;
+3. the profile's `model` and `effort` frontmatter;
+4. `agent.subagent_model` and `agent.subagent_effort` defaults;
+5. the configured executor/default model and its default effort.
 
 For example:
 

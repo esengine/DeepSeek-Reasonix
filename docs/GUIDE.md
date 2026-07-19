@@ -55,7 +55,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
-# cursor_shape = "underline"       # block|underline|bar; CLI/TUI text cursor
+# cursor_shape = "bar"             # block|underline|bar; CLI/TUI text cursor
 
 [agent]
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
@@ -65,6 +65,8 @@ reasoning_language = "auto"      # visible reasoning text: auto|zh|en
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 # max_subagent_depth = 2              # nested delegation depth; set 1 for the old single-layer boundary
+# max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
+# max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
 auto_plan = "off"                  # user-level only; off|on; off keeps plan mode manual
 # auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
 tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
@@ -136,29 +138,6 @@ Most day-to-day settings belong in `config.toml` or the global Reasonix `.env`
 described above. The variables below are process-level advanced switches; set
 them before launching Reasonix. Project `.env` files are not a runtime source for
 Reasonix control variables.
-
-`REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true` enables the optional LLM
-task/chat classifier for Memory v5. By default it is disabled, and Reasonix uses
-the local heuristic classifier without extra provider calls. When enabled, cache
-misses may send a small classifier request through the configured provider before
-deciding whether a user input is task-like or conversational; this can add a
-little latency, provider usage, and token cost. The classifier result is cached
-per session for a short time. Only the exact trimmed value `true` enables it;
-unset, `false`, `1`, and `TRUE` keep the default heuristic path.
-
-```bash
-REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true reasonix
-```
-
-For development runs, prefix the command that starts the process, for example:
-
-```bash
-REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true wails dev -forcebuild
-```
-
-Packaged desktop apps launched from the OS app launcher may not inherit variables
-from your interactive terminal; start the app from an environment-managed launcher
-when you intentionally want this advanced switch enabled.
 
 ## Serve web frontend
 
@@ -292,7 +271,16 @@ For Anthropic-compatible services, such as some coding-plan endpoints, choose
 | Model capability mode | Which reasoning request protocol Reasonix should use for this provider. | Keep **Auto-detect** unless the gateway is misdetected or the model docs require a specific reasoning format. |
 | Thinking override | Provider-specific override for `thinking.type`. | Keep **Auto** unless the backend documents `enabled`, `disabled`, or `adaptive`. Unsupported values can make some OpenAI-compatible gateways reject the request. |
 | Balance URL | Optional endpoint for wallet/balance lookup. | Set it when the provider exposes a balance endpoint and you want the desktop status bar to show it. |
-| Context window | The maximum number of tokens this provider keeps in context. `0` means provider default. | Set it when the model's real context size differs from Reasonix's default or built-in metadata. |
+| Context window | The provider-wide token budget Reasonix uses for automatic context cleanup. `0` disables automatic compaction. | Set it to the provider's model context limit; use a per-model override below when selected models differ. |
+
+Each selected model also has an optional **Context window** input. Leave it blank
+to inherit the provider-wide value, or enter a positive token count to override
+that value for this model. This avoids premature compaction for long-context
+models and provider errors for shorter-context models sharing the same endpoint.
+Use the context-window limit from the model documentation, not the maximum output
+tokens. For example, 128K commonly means `128000`; if the provider documents
+`131072`, use that exact value. Values below 16384 show a non-blocking warning
+because they can trigger frequent compaction and reduce cache hit rates.
 
 Model capability mode options:
 
@@ -355,16 +343,17 @@ trust model are documented in [the Chinese desktop hooks guide](./DESKTOP_HOOKS.
 Shortcuts are documented by client because users usually look for the keys that
 work in the surface they are using. Desktop keeps its Plan toggle, while the CLI
 cycles Ask, Auto, and Plan with `Shift+Tab`. `Ctrl/Cmd+Y` controls YOLO, and
-paste stays on the platform paste key.
+desktop paste stays on the platform paste key. In the CLI, terminal-native text
+paste and application-owned image paste use separate shortcuts.
 
 `[ui].shortcut_layout` is still accepted for old configs, but the shortcut
 behavior below is unified across layouts.
 
 For CLI/TUI text input, `[ui].cursor_shape` accepts `underline`, `block`, or
-`bar`. The default is `underline` because terminal block cursors can visually
-cover double-width CJK characters in some mixed-language input. Set it to
-`block` to keep the old terminal-style cursor, or `bar` for a thin insertion
-cursor. This setting does not change desktop or web text fields.
+`bar`. The default is `bar`: it remains easy to locate without covering
+double-width CJK characters in mixed-language input. Set it to `block` for a
+traditional terminal cursor or `underline` for a lower-profile cursor. This
+setting does not change desktop or web text fields.
 
 ### Desktop GUI
 
@@ -414,6 +403,22 @@ Menus and controls:
 
 ### CLI / TUI
 
+The composer uses theme-coloured top and bottom borders and a slim bar cursor by
+default. Long drafts grow to the available maximum height; once they overflow,
+wheel events inside the composer scroll the draft without moving the insertion
+cursor, while wheel events in the transcript keep scrolling the conversation.
+Use `/theme auto|light|dark` to select the background mode, or `/theme <style>`
+to select one of the named accent palettes shown by bare `/theme`.
+
+The responsive footer keeps the active Ask/Auto/Plan or YOLO posture and current
+interaction state on the left. On wider terminals, model, effort, and work mode
+stay together on the right; a second row shows available Git identity, cache hit
+rate, context use, compaction headroom, jobs, and balance. `ready` is the idle
+composer state, not a model-health check. Pickers, approvals, image paste, shell
+mode, and other active interactions replace it. Narrow terminals move, wrap, or
+compact whole groups; labels and displayed work-mode values follow `/language`,
+while `/work-mode` command arguments remain the stable English identifiers.
+
 Chat and transcript shortcuts:
 
 | Key or command | What it does | Notes |
@@ -426,12 +431,15 @@ Chat and transcript shortcuts:
 | `Ctrl+L` or `/cls` | Clears only the visible transcript | The LLM context, session file, tools, memory, and plugins stay loaded. Use `/clear` when you want to discard the conversation context. |
 | `Esc` | Backs out of the current action | It un-sends a just-submitted turn before any reply, cancels a running turn, or clears non-empty input. |
 | Double `Esc` on an empty idle composer | Opens the rewind picker | Same entry point as `/rewind`. |
-| Transcript text selection | Copies transcript text | The full-screen TUI enables mouse reporting, so drag in the transcript to select text in-app; releasing the mouse copies it automatically, and `Ctrl+C`/`Super+C`/`Meta+C` or right-clicking the active selection copy it again. |
+| Transcript text selection | Copies transcript text | Releasing an in-app drag writes through the verified native clipboard path in a local session (`pbcopy` on macOS, the available Wayland/X11 tool on Linux, or the Windows clipboard). SSH falls back to OSC 52 and labels the fallback instead of claiming native success. `Ctrl+C`/`Super+C`/`Meta+C` or right-clicking the active selection copies it again. |
+| Composer text selection | Selects, copies, or replaces draft text | Releasing an in-app drag copies the selection through the same verified clipboard path as transcript text. Typing or pasting replaces the selection; arrow keys collapse it. |
+| Right-click with no active selection | Pastes clipboard text locally | In a local session with in-app mouse capture on, Reasonix reads text only and routes it through the normal bracketed-paste handling. Over SSH, use the terminal paste shortcut because the remote process cannot read the local clipboard; `/mouse` restores the terminal's native right-click menu. Right-click with an active selection still copies that selection. |
 | `/mouse` | Toggles in-app mouse capture | Off hands the mouse back to your terminal, restoring its native click-drag selection and right-click context menu, at the cost of in-app drag-select, the transcript scrollbar, and wheel-scroll. Set `REASONIX_DISABLE_MOUSE=1` to start every session with it off. |
-| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
+| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
 | `Ctrl+D` | Quits the TUI | Immediate quit. |
-| `Ctrl+V`, `Ctrl+Shift+V`, `Meta+V`, or `Super+V` | Pastes clipboard content | The CLI tries an image first, then falls back to text or file references. |
-| `/paste-image` | Pastes a clipboard image | Use it when you want image-only paste or the terminal handles text paste itself. |
+| Your terminal's text-paste shortcut | Pastes text | Text stays on the terminal's bracketed-paste path (`Cmd+V` on macOS, commonly `Ctrl+Shift+V` on Linux, and the terminal's configured shortcut elsewhere). Reasonix consumes the resulting paste event and never probes for an image first. |
+| `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |
+| `/paste-image` | Pastes a clipboard image | Command form of the same image-only action. |
 | A line starting with `!` | Runs a shell command directly | The command runs locally without asking the model. |
 
 Mode and display shortcuts:
@@ -442,6 +450,7 @@ Mode and display shortcuts:
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
 | `/work-mode [economy|balanced|delivery]` | Shows or switches the current session's work mode | `/profile` is a compatibility alias. Switching rebuilds the runtime atomically, preserves the conversation and approval posture, and is blocked while work is active. |
+| `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
 | `/goal <objective>`, `/goal --research <objective>`, `/goal --simple <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle; clearly long-horizon goals automatically enable AutoResearch. Ordinary prompts with strong AutoResearch signals are also upgraded into Goal. |
@@ -563,8 +572,26 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 `stdio` (default) launches a local subprocess (`command`/`args`/`env`); `http`
 (Streamable HTTP) connects to a remote `url` with optional static `headers`
 (`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
-of the file). Tools surface to the model as `mcp__<server>__<tool>`; a tool
-declaring MCP's `readOnlyHint: true` joins parallel dispatch and the ordinary
+of the file).
+
+The normal setup path is intentionally one step: adding a server in Desktop or
+the user config means you authorize that server, so it connects immediately,
+trusts its current capability snapshot, and ordinary calls do not need another
+MCP-specific approval setting. Explicit deny rules still win, destructive tools
+still require a fresh human decision, and Plan/read-only sub-agents still expose
+only eligible tool identities. Repository-controlled `reasonix.toml` and
+`.mcp.json` entries are different: Reasonix shows one launch confirmation for
+the exact command or endpoint before starting it, and asks again if that
+identity changes.
+
+stdio servers keep one process for initialize, reads, and writes, so stateful
+servers such as browsers retain sessions and open pages. Because an OS sandbox
+is fixed when a process starts, this shared process uses the server's normal
+writer sandbox for every call; `readOnlyHint` and read-only sub-agent filtering
+are dispatch policy, not a second per-call process sandbox.
+
+Tools surface to the model as `mcp__<server>__<tool>`. A tool declaring MCP's
+`readOnlyHint: true` joins parallel dispatch and the ordinary
 permission reader-default. Because the annotation is supplied by a third-party
 server, it is accepted by the main Plan workflow only as ordinary permission
 classification; it does not grant access to the dedicated planner or read-only
@@ -601,7 +628,9 @@ approvals_reviewer = "auto_review"     # user|auto_review
 trusted_read_only_tools = ["issue_read", "pull_request_read"]
 ```
 
-`auto` delegates to the global Ask/Auto/YOLO permission posture; `prompt`
+For a user-authorized server, omitting these advanced approval fields permits
+ordinary calls directly. If a field is present, `auto` delegates to the global
+Ask/Auto/YOLO permission posture; `prompt`
 reviews every call; `writes` reviews only writer-classified calls; and `approve`
 allows ordinary calls. Explicit deny rules always win, and `destructiveHint`
 always forces a new review. A raw-tool `tools` entry overrides the server
@@ -672,7 +701,7 @@ convenient.
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
 `/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
-`/memory`, `/memory-v5`, `/goal`, `/output-style`, `/sandbox`, `/language`,
+`/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
 `/auto-plan`, `/reasoning-language`, `/help`) run
 locally — `/help` lists them all. Built-in **skills** such as `/init`,
 `/explore`, `/test`, and `/reasonix-guide` also appear in the slash menu and via
@@ -737,47 +766,14 @@ Guardian review cannot answer for the user; non-interactive runs refuse these
 tools instead of auto-approving them.
 Retrieval keeps the top BM25 result while trimming weak common-word matches, and
 0-result responses suggest narrower, more distinctive follow-up searches.
-Memory v5 is enabled by default across the CLI/TUI, `reasonix serve`, and the
-desktop app because they all share the same local controller. It records local,
-project-scoped execution traces and compiler state under Reasonix home, then
-compiles the next user turn into a compact execution contract only when prior
-outcomes produce actionable constraints. Early turns may only write traces and
-inject nothing. The default `verbosity = "observe"` keeps this as local learning
-and content-free metrics only; it does not send `<memory-compiler-execution>` to
-the provider-visible user turn. Opt into `verbosity = "compact"` (or the legacy
-`on` command) when you explicitly want compact execution-contract injection,
-including selected compact memory references in the provider-visible user turn.
-Memory v5 never bypasses memory approvals and never mutates the cache-stable
-system prompt, provider prefix, or tool schemas.
-
-Toggle future turns with `/memory-v5 off|observe|compact|on|status` inside an
-interactive session, or with `reasonix config memory-v5 off|observe|compact|on|status`
-from a shell/script.
-Desktop users can also use Settings → General → Memory v5. Settings → Updates →
-Share aggregate quality metrics controls the optional aggregate upload. When
-enabled, that upload may include only anonymous
-count/size buckets such as injection on/off, compiled-token bucket, IR-overhead
-bucket, memory-reference count, constraint/risk/step counts, and memory-graph
-size buckets. It never includes memory text, prompts, tool outputs, file paths,
-IDs, keys, base URLs, or file contents.
-
-CLI/TUI and `reasonix serve` use the same user/global config. Project
-`reasonix.toml` files cannot override this user/global setting. The CLI command
-updates this underlying config; advanced users may also edit it manually under
-Reasonix home:
-
-```toml
-[agent]
-memory_compiler = { enabled = true, verbosity = "observe" }
-```
-
-The CLI can use Memory v5 for local turns, but it does not run the desktop
-aggregate metrics upload pipeline. When `reasonix run --metrics <path>` is used,
-the JSON also includes content-free `memory_compiler_*` summary fields and a
-`memory_compiler_turn_details` array with per-turn injection state, compiled token
-and IR-overhead estimates, referenced-memory/constraint/risk/step counts, and
-current memory-graph counts.
-For implementation details, see
+The Memory v5 execution compiler has been removed. Earlier releases (up to
+v1.17.x) could compile a user turn into a `<memory-compiler-execution>` contract
+and store local compiler state; current releases never do either, the
+`[agent].memory_compiler` config key is retired (a one-time migration removes it
+from existing configs), and transcripts recorded by those older releases still
+display normally — the original prompt is recovered from the legacy contract
+block for previews and history.
+For implementation details of session memory retrieval, see
 [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md).
 
 ```markdown
@@ -926,6 +922,7 @@ the strict read-only entrances:
 | --- | --- |
 | `read_only_task` | Isolated read-only research child from the main session |
 | `parallel_tasks` (read-only) | Concurrent read-only research children |
+| `fleet` with `read_only: true` | Parallel profile-aware batch (forced read-only per item) |
 | `read_only_skill` | The same isolation driving an existing skill |
 | `reasonix review` (CLI) | Read-only review of a diff or branch |
 | Desktop preview/review subagents | Read-only desktop analysis surfaces |
@@ -992,8 +989,7 @@ inputs and falls back to the heuristic if classification fails. Use
 only; `agent.auto_plan` in a project `reasonix.toml` is ignored. The visible
 reasoning language uses a similar shape: `/reasoning-language auto|zh|en` in the
 session, or `reasonix config reasoning-language auto|zh|en` in a shell/script.
-Memory v5 uses `/memory-v5 off|observe|compact|on|status` or
-`reasonix config memory-v5 off|observe|compact|on|status` and is user-level only. Pass `--local`
+Pass `--local`
 to the reasoning-language shell command only when you intentionally want a
 project-local override.
 

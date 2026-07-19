@@ -60,6 +60,18 @@ func SessionEventLog(sessionPath string) string {
 	return sessionStem(sessionPath) + ".events.jsonl"
 }
 
+// SessionEventLogDamaged is the salvage sidecar for event-log bytes that tail
+// repair would otherwise discard (<id>.events.jsonl.damaged). It must NOT end
+// in .jsonl: older binaries scanning a shared session directory classify any
+// non-excluded .jsonl file as a primary transcript and would resurrect the
+// damaged bytes as a phantom session.
+func SessionEventLogDamaged(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return SessionEventLog(sessionPath) + ".damaged"
+}
+
 // SessionEventIndex is the listing/checkpoint index for the event log
 // (<id>.event-index.json). It contains derived offsets and digests, not the
 // transcript body.
@@ -147,6 +159,7 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionMeta(sessionPath),
 		SessionGoalState(sessionPath),
 		SessionEventLog(sessionPath),
+		SessionEventLogDamaged(sessionPath),
 		SessionEventIndex(sessionPath),
 		SessionConflictLog(sessionPath),
 	}

@@ -172,6 +172,91 @@ func TestForceSaveLeavesLegacyEventTranscriptUntouched(t *testing.T) {
 	}
 }
 
+// TestRepairPreservesDamagedTailBytes locks in the #6607 content-loss fix:
+// bytes the tail repair truncates away — including intact turns buried behind
+// an out-of-order record, the dual-writer shape — must be salvaged to the
+// .damaged sidecar instead of discarded forever.
+func TestRepairPreservesDamagedTailBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	sessionWithTurns(t, path, 2)
+
+	logPath := store.SessionEventLog(path)
+	// An out-of-order append (as an interleaving second writer would leave)
+	// followed by a torn partial record: replay stops before both, and repair
+	// truncates both away.
+	buried := `{"schema_version":1,"type":"append","message_index":99,"messages":[{"role":"user","content":"buried turn"}],"created_at":"2026-01-01T00:00:00Z"}` + "\n"
+	torn := `{"schema_version":1,"type":"ap`
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	if _, err := f.Write([]byte(buried + torn)); err != nil {
+		t.Fatalf("write damaged tail: %v", err)
+	}
+	f.Close()
+
+	// The healing save truncates the tail; preservation must run first.
+	resumed, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	resumed.Add(provider.Message{Role: provider.RoleUser, Content: "after damage"})
+	if err := resumed.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after damage: %v", err)
+	}
+
+	salvaged, err := os.ReadFile(store.SessionEventLogDamaged(path))
+	if err != nil {
+		t.Fatalf("read damaged sidecar: %v", err)
+	}
+	if !strings.Contains(string(salvaged), "buried turn") {
+		t.Fatalf("salvage sidecar is missing the buried turn:\n%s", salvaged)
+	}
+	if !strings.Contains(string(salvaged), `"damaged_tail":true`) {
+		t.Fatalf("salvage sidecar is missing the incident header:\n%s", salvaged)
+	}
+	// The log itself must be healed: replay to the end, no damage, and the
+	// buried record must not leak back into the transcript.
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession after heal: %v", err)
+	}
+	if reloaded.eventLogDamaged {
+		t.Fatal("event log still damaged after healing save")
+	}
+	for _, m := range reloaded.Messages {
+		if m.Content == "buried turn" {
+			t.Fatal("truncated record leaked back into the transcript")
+		}
+	}
+
+	// A second incident appends to the sidecar instead of overwriting the
+	// first salvage.
+	f, err = os.OpenFile(store.SessionEventLog(path), os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("reopen log: %v", err)
+	}
+	if _, err := f.Write([]byte(`{"schema_version":1,"type":"append","message_index":77,"messages":[{"role":"user","content":"second incident"}],"created_at":"2026-01-01T00:00:00Z"}` + "\n")); err != nil {
+		t.Fatalf("write second damage: %v", err)
+	}
+	f.Close()
+	resumed2, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession second incident: %v", err)
+	}
+	resumed2.Add(provider.Message{Role: provider.RoleUser, Content: "after second"})
+	if err := resumed2.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot second incident: %v", err)
+	}
+	salvaged, err = os.ReadFile(store.SessionEventLogDamaged(path))
+	if err != nil {
+		t.Fatalf("read damaged sidecar after second incident: %v", err)
+	}
+	if !strings.Contains(string(salvaged), "buried turn") || !strings.Contains(string(salvaged), "second incident") {
+		t.Fatalf("salvage sidecar must keep both incidents:\n%s", salvaged)
+	}
+}
+
 func TestReplayStopsAtBrokenAppendChain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	sessionWithTurns(t, path, 1)

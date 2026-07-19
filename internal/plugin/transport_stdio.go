@@ -46,7 +46,6 @@ type stdioTransport struct {
 
 	waitOnce    sync.Once
 	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
-	cleanupDir  string
 }
 
 func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
@@ -73,21 +72,16 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	processSandbox := s.ReaderSandbox
-	if s.OneShot {
-		processSandbox = s.WriterSandbox
-	}
+	// A stateful stdio process cannot switch its OS sandbox after launch. Keep
+	// one process in the server's normal writer sandbox; local permission, Plan,
+	// read-only-child, and destructive-call gates still decide which tools may
+	// be dispatched over the shared transport.
+	processSandbox := s.WriterSandbox
 	processSandbox.MinimalWrites = true
-	processSandbox, env, cleanupDir, err := prepareMCPPrivateState(s, processSandbox, env)
+	processSandbox, env, err = prepareMCPPrivateState(s, processSandbox, env)
 	if err != nil {
 		return nil, err
 	}
-	cleanupOnFailure := cleanupDir
-	defer func() {
-		if cleanupOnFailure != "" {
-			_ = os.RemoveAll(cleanupOnFailure)
-		}
-	}()
 	argv, _ := sandbox.CommandArgs(processSandbox, append([]string{exe}, effectiveLaunchArgs(s)...))
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	proc.HideWindow(cmd)
@@ -128,41 +122,27 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 		stderr:      stderr,
 		pending:     map[int]chan rpcResponse{},
 		releaseSlot: releaseSlot,
-		cleanupDir:  cleanupDir,
 	}
-	cleanupOnFailure = ""
 	releaseSlot = nil // ownership transferred to t; close() releases it
 	go t.readLoop()
 	return t, nil
 }
 
-func prepareMCPPrivateState(s Spec, processSandbox sandbox.Spec, env []string) (sandbox.Spec, []string, string, error) {
+func prepareMCPPrivateState(s Spec, processSandbox sandbox.Spec, env []string) (sandbox.Spec, []string, error) {
 	root := strings.TrimSpace(s.StateDir)
 	if root == "" {
-		return processSandbox, env, "", nil
+		return processSandbox, env, nil
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return processSandbox, env, "", err
+		return processSandbox, env, err
 	}
 	privateRoot := root
-	cleanupDir := ""
-	if s.OneShot {
-		var err error
-		privateRoot, err = os.MkdirTemp(root, "writer-call-")
-		if err != nil {
-			return processSandbox, env, "", err
-		}
-		cleanupDir = privateRoot
-	}
 	tmpDir := filepath.Join(privateRoot, "tmp")
 	cacheDir := filepath.Join(privateRoot, "cache")
 	stateDir := filepath.Join(privateRoot, "state")
 	for _, dir := range []string{tmpDir, cacheDir, stateDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			if cleanupDir != "" {
-				_ = os.RemoveAll(cleanupDir)
-			}
-			return processSandbox, env, "", err
+			return processSandbox, env, err
 		}
 	}
 	for key, value := range map[string]string{
@@ -176,7 +156,7 @@ func prepareMCPPrivateState(s Spec, processSandbox sandbox.Spec, env []string) (
 	}
 	processSandbox.WriteRoots = append(processSandbox.WriteRoots, root, privateRoot)
 	processSandbox.AppContainerWriteRoots = append(processSandbox.AppContainerWriteRoots, root, privateRoot)
-	return processSandbox, env, cleanupDir, nil
+	return processSandbox, env, nil
 }
 
 var stdioShellPATH = cachedShellPATH(defaultStdioShellPATH)
@@ -661,11 +641,6 @@ func waitWithBudget(wait func(), budget time.Duration) {
 // blocking forever) and reaps it under a budget so one wedged server can never
 // stall a boot or a turn teardown.
 func (t *stdioTransport) close() {
-	defer func() {
-		if t.cleanupDir != "" {
-			_ = os.RemoveAll(t.cleanupDir)
-		}
-	}()
 	if t.releaseSlot != nil {
 		t.releaseSlot() // idempotent; frees the bounded CodeGraph instance slot
 	}

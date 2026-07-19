@@ -1,3 +1,5 @@
+import type { ProviderModelOverrideView } from "./types";
+
 export function mergedFetchedProviderModels(current: string[], fetched: string[], options: { preserveCurated?: boolean } = {}): string[] {
   const saved = uniqueStrings(current);
   if (options.preserveCurated && saved.length > 0) return saved;
@@ -14,6 +16,58 @@ export function inferredVisionModels(models: string[]): string[] {
 
 export function providerDefaultModel(currentDefault: string, models: string[]): string {
   return currentDefault && models.includes(currentDefault) ? currentDefault : models[0] ?? "";
+}
+
+export function providerModelContextWindowDrafts(overrides: ProviderModelOverrideView[] | null | undefined): Record<string, string> {
+  const drafts: Record<string, string> = {};
+  for (const override of overrides ?? []) {
+    const model = override.model.trim();
+    const contextWindow = normalizedContextWindow(override.contextWindow);
+    if (model && contextWindow > 0) drafts[model] = String(contextWindow);
+  }
+  return drafts;
+}
+
+export function providerModelContextWindowIsSmall(value: unknown): boolean {
+  const contextWindow = normalizedContextWindow(value);
+  return contextWindow > 0 && contextWindow < 16_384;
+}
+
+export function mergeProviderModelContextWindows(
+  overrides: ProviderModelOverrideView[] | null | undefined,
+  models: string[],
+  drafts: Record<string, string>,
+): ProviderModelOverrideView[] {
+  const existing = new Map((overrides ?? []).map((override) => [override.model.trim(), override]));
+  const merged: ProviderModelOverrideView[] = [];
+  for (const model of uniqueStrings(models)) {
+    const previous = existing.get(model);
+    const parsedContextWindow = normalizedContextWindow(drafts[model]);
+    const override: ProviderModelOverrideView = {
+      model,
+      reasoningProtocol: previous?.reasoningProtocol ?? "",
+      supportedEfforts: previous?.supportedEfforts ?? [],
+      defaultEffort: previous?.defaultEffort ?? "",
+      vision: previous?.vision ?? null,
+      contextWindow: Math.max(parsedContextWindow, 0),
+    };
+    if (
+      override.reasoningProtocol.trim()
+      || override.supportedEfforts.length > 0
+      || override.defaultEffort.trim()
+      || override.vision != null
+      || (override.contextWindow ?? 0) > 0
+    ) {
+      merged.push(override);
+    }
+  }
+  return merged;
+}
+
+function normalizedContextWindow(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.min(Math.trunc(parsed), Number.MAX_SAFE_INTEGER);
 }
 
 export function providerRequiresKey(provider: { requiresKey?: boolean; apiKeyEnv?: string }): boolean {

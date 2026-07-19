@@ -1,16 +1,25 @@
+/* Palette unified with the global.css base tokens; --release-paper keeps the
+   ledger identity. Dark flips for base tokens live in global.css. */
 :root {
+  --release-backdrop: var(--bg-soft);
   --release-paper: #fbfaf7;
-  --release-ink: #20242d;
-  --release-blue: #2f6fe4;
-  --release-blue-soft: #eaf1ff;
+  --release-ink: var(--ink);
+  --release-blue: var(--accent);
+  --release-blue-soft: var(--accent-soft);
   --release-orange: #d97732;
   --release-green: #178b67;
 }
 
+:root[data-theme="dark"] {
+  --release-paper: var(--card);
+  --release-orange: oklch(0.76 0.13 60);
+  --release-green: oklch(0.76 0.13 160);
+}
+
 body {
   background:
-    linear-gradient(90deg, transparent 0 49.94%, rgba(47, 111, 228, 0.025) 50%, transparent 50.06%),
-    #f3f5f8;
+    linear-gradient(90deg, transparent 0 49.94%, color-mix(in oklch, var(--accent) 2.5%, transparent) 50%, transparent 50.06%),
+    var(--release-backdrop);
 }
 
 .release-stage {
@@ -57,7 +66,30 @@ body {
   transform: rotate(-12deg);
 }
 
-.release-rail nav { display: grid; gap: 7px; }
+.release-rail nav { display: grid; gap: 18px; }
+.release-rail__group { display: grid; gap: 7px; }
+.release-rail__minor {
+  margin: 0 0 2px 10px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.release-rail__more summary {
+  margin: 2px 10px 6px;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+.release-rail__more summary::-webkit-details-marker { display: none; }
+.release-rail__more summary:hover { color: var(--release-blue); }
+.release-rail__more .when-open { display: none; }
+.release-rail__more[open] .when-open { display: inline; }
+.release-rail__more[open] .when-closed { display: none; }
 
 .release-version-link {
   display: grid;
@@ -73,12 +105,12 @@ body {
 .release-version-link:hover {
   transform: translateX(2px);
   border-color: var(--line);
-  background: rgba(255,255,255,.68);
+  background: color-mix(in oklch, var(--card) 68%, transparent);
 }
 
 .release-version-link.active {
   border-color: color-mix(in srgb, var(--release-blue) 22%, transparent);
-  background: #fff;
+  background: var(--card);
   color: var(--release-blue);
   box-shadow: 0 8px 24px rgba(35, 55, 92, .08);
 }
@@ -111,10 +143,10 @@ body {
 .release-paper {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid rgba(41, 50, 70, .11);
+  border: 1px solid var(--line);
   border-radius: 20px;
   background:
-    linear-gradient(rgba(47, 111, 228, .035) 1px, transparent 1px) 0 0 / 100% 34px,
+    linear-gradient(color-mix(in oklch, var(--accent) 3.5%, transparent) 1px, transparent 1px) 0 0 / 100% 34px,
     var(--release-paper);
   box-shadow: 0 28px 80px -42px rgba(24, 35, 60, .38);
 }
@@ -123,8 +155,8 @@ body {
   position: relative;
   padding: 58px 62px 52px;
   background:
-    radial-gradient(circle at 90% 5%, rgba(47, 111, 228, .14), transparent 28%),
-    linear-gradient(180deg, rgba(255,255,255,.88), rgba(251,250,247,.92));
+    radial-gradient(circle at 90% 5%, color-mix(in oklch, var(--accent) 14%, transparent), transparent 28%),
+    linear-gradient(180deg, color-mix(in oklch, var(--card) 88%, transparent), color-mix(in oklch, var(--release-paper) 92%, transparent));
 }
 
 .release-hero::after {
@@ -167,7 +199,7 @@ body {
   padding: 5px 9px;
   border: 1px solid color-mix(in srgb, var(--release-blue) 18%, var(--line));
   border-radius: 999px;
-  background: rgba(255,255,255,.72);
+  background: color-mix(in oklch, var(--card) 72%, transparent);
   color: var(--ink-2);
   font-size: 11px;
   font-weight: 600;
@@ -178,13 +210,18 @@ body {
   padding: 20px 24px;
   border-left: 3px solid var(--release-blue);
   border-radius: 0 12px 12px 0;
-  background: rgba(47, 111, 228, .055);
+  background: color-mix(in oklch, var(--accent) 5.5%, transparent);
   color: var(--ink-2);
   font-size: 17px;
   line-height: 1.72;
 }
 
 .release-hero__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+
+/* compact hero for patch releases whose title is just the version */
+.release-hero--compact { padding: 42px 62px 38px; }
+.release-hero--compact h1 { margin-top: 22px; font-size: clamp(30px, 3.6vw, 42px); }
+.release-lede { margin: 22px 0 0; max-width: 640px; color: var(--ink-2); font-size: 16.5px; line-height: 1.7; }
 
 .release-section { padding: 52px 62px 0; scroll-margin-top: 100px; }
 .release-section__head { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
@@ -213,7 +250,7 @@ body {
   padding: 22px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: rgba(255,255,255,.72);
+  background: color-mix(in oklch, var(--card) 72%, transparent);
   color: inherit;
   text-decoration: none;
   transition: transform .2s, border-color .2s, box-shadow .2s;
@@ -231,7 +268,7 @@ body {
   padding: 24px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: rgba(255,255,255,.68);
+  background: color-mix(in oklch, var(--card) 68%, transparent);
 }
 .release-highlight__index { color: color-mix(in srgb, var(--release-blue) 48%, var(--ink-3)); font-family: var(--font-mono); font-size: 12px; padding-top: 4px; }
 .release-highlight__kind { margin-bottom: 7px; color: var(--release-blue); font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
@@ -243,7 +280,7 @@ body {
   padding: 3px 7px;
   border-radius: 6px;
   background: var(--release-blue-soft);
-  color: #2456b8;
+  color: var(--release-blue);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 600;
@@ -254,7 +291,7 @@ body {
 .release-change-list article {
   padding: 20px 22px;
   border-top: 2px solid color-mix(in srgb, var(--release-blue) 42%, var(--line));
-  background: rgba(255,255,255,.46);
+  background: color-mix(in oklch, var(--card) 46%, transparent);
 }
 .release-change-list p { margin-top: 8px; font-size: 14px; }
 
@@ -266,16 +303,16 @@ body {
   padding: 18px 20px;
   border: 1px solid color-mix(in srgb, var(--release-blue) 22%, var(--line));
   border-radius: 12px;
-  background: color-mix(in srgb, var(--release-blue-soft) 56%, white);
+  background: color-mix(in srgb, var(--release-blue-soft) 56%, var(--card));
 }
-.release-notice--warning { border-color: color-mix(in srgb, var(--release-orange) 32%, var(--line)); background: color-mix(in srgb, #fff0e5 66%, white); }
+.release-notice--warning { border-color: color-mix(in srgb, var(--release-orange) 32%, var(--line)); background: color-mix(in srgb, var(--release-orange) 12%, var(--card)); }
 .release-notice__icon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--release-blue); color: white; font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
 .release-notice--warning .release-notice__icon { background: var(--release-orange); }
 .release-notice p { margin-top: 6px; font-size: 14px; }
 
 .release-thanks > p { margin-bottom: 14px; }
 .release-thanks > div { display: flex; flex-wrap: wrap; gap: 8px; }
-.release-thanks a { padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.7); color: var(--ink-2); font-family: var(--font-mono); font-size: 11px; text-decoration: none; }
+.release-thanks a { padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; background: color-mix(in oklch, var(--card) 70%, transparent); color: var(--ink-2); font-family: var(--font-mono); font-size: 11px; text-decoration: none; }
 .release-thanks a:hover { color: var(--release-blue); border-color: color-mix(in srgb, var(--release-blue) 34%, var(--line)); }
 
 .release-download {
@@ -286,7 +323,7 @@ body {
   justify-content: space-between;
   gap: 26px;
   border-radius: 16px;
-  background: var(--release-ink);
+  background: #20242d;
 }
 .release-download h2 { max-width: 480px; color: #fff; font-size: 28px; }
 .release-download__kicker { margin-bottom: 7px; color: #91b8ff !important; font-size: 11px !important; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -323,7 +360,7 @@ body {
   color: var(--ink-3);
   font-size: 12px;
 }
-.release-footer > span { margin-left: auto; color: #686b70; }
+.release-footer > span { margin-left: auto; color: var(--ink-3); }
 .release-footer > a:last-child { color: var(--ink-2); text-decoration: none; }
 
 @media (max-width: 1180px) {
@@ -345,7 +382,7 @@ body {
     padding: 10px 12px;
     border: 1px solid var(--line);
     border-radius: 12px;
-    background: #fff;
+    background: var(--card);
     color: var(--ink-2);
     font-size: 12px;
     font-weight: 700;
@@ -353,6 +390,7 @@ body {
   .release-mobile-switcher select { min-width: 130px; padding: 7px 28px 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); color: var(--ink); font: inherit; }
   .release-paper { width: min(720px, 100%); margin: 0 auto; border-radius: 15px; }
   .release-hero { padding: 38px 28px 34px; }
+  .release-hero--compact { padding: 30px 28px 28px; }
   .release-hero::after { left: 28px; right: 28px; }
   .release-hero__version { margin-top: 36px; }
   .release-section { padding: 40px 28px 0; }

@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/provider"
 )
 
 func (m *chatTUI) showBranchTree() {
@@ -145,9 +146,8 @@ func (m *chatTUI) replayActiveBranch(title string) {
 	if title != "" {
 		m.commitLine(dim("  -- " + title + " --"))
 	}
-	contentW := transcriptContentWidth(m.width, m.nativeScrollback)
-	m.commitLine(strings.TrimRight(renderTUIBanner(m.label, "", contentW), "\n"))
-	for _, section := range replaySectionsFor(m.ctrl.History(), contentW, m.renderer) {
-		m.commitLine(strings.TrimRight(section, "\n"))
-	}
+	m.commitTranscriptSource(transcriptSource{
+		kind:    transcriptSourceReplayBundle,
+		history: append([]provider.Message(nil), m.ctrl.History()...),
+	})
 }

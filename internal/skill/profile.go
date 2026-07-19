@@ -12,7 +12,7 @@ import (
 
 var reservedSubagentSlashNames = map[string]bool{
 	"new": true, "clear": true, "compact": true, "model": true, "provider": true,
-	"effort": true, "memory": true, "memory-v5": true, "migrate": true, "migration": true,
+	"effort": true, "memory": true, "migrate": true, "migration": true,
 	"goal": true, "remember": true, "mcp": true, "hooks": true, "plugin": true, "plugins": true,
 	"theme": true, "skill": true, "skills": true, "reload-cmd": true, "tree": true,
 	"branch": true, "switch": true, "rewind": true, "plan-exec": true, "prometheus": true,
@@ -45,7 +45,7 @@ func ValidateSubagentProfileName(name string, occupied []string) error {
 // profile editors can round-trip without changing execution semantics.
 var subagentProfileManagedKeys = map[string]bool{
 	"name": true, "description": true, "color": true, "invocation": true,
-	"runas": true, "model": true, "effort": true, "allowed-tools": true,
+	"runas": true, "model": true, "effort": true, "read-only": true, "allowed-tools": true,
 }
 
 // ValidateEditableSubagentProfile verifies that a loaded skill is a manual

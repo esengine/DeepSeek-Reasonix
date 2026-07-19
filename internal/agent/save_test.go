@@ -21,6 +21,278 @@ func touch(path string, t time.Time) error {
 	return os.Chtimes(path, t, t)
 }
 
+// TestSnapshotUpToDateFastPath locks in the #6607 switch-lag fix: a snapshot
+// of a session that has not changed since its last save to the same path must
+// be a pure in-memory no-op — no serialize, no digest, no disk access. The
+// desktop snapshots defensively on every tab/session switch, and on large
+// transcripts the redundant full-save work is seconds of UI freeze.
+func TestSnapshotUpToDateFastPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("initial SaveSnapshot: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false right after a successful save")
+	}
+	if s.snapshotUpToDate(filepath.Join(t.TempDir(), "other.jsonl")) {
+		t.Fatal("snapshotUpToDate = true for a different path")
+	}
+
+	// Deterministic proof the disk is untouched: scribble on the event log and
+	// snapshot again. The fast path skips entirely, so the scribble survives; a
+	// full save would detect and repair/truncate it.
+	logPath := store.SessionEventLog(path)
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	if _, err := f.Write([]byte("{torn")); err != nil {
+		t.Fatalf("scribble: %v", err)
+	}
+	f.Close()
+	before, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("no-op SaveSnapshot: %v", err)
+	}
+	after, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log after no-op save: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("no-op snapshot touched the disk — fast path did not fire")
+	}
+
+	// Any transcript change re-arms the full path, which heals the scribble
+	// and persists the new turn.
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "again"})
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true after Add")
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after Add: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false after the follow-up save")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded.eventLogDamaged {
+		t.Fatal("follow-up save left the log damaged")
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "again" {
+		t.Fatalf("reloaded tail = %q, want %q", got, "again")
+	}
+	// A load-adopted baseline must NOT arm the fast path: the ledger can lag
+	// the transcript after an interrupted save, and the first save after a
+	// load is the one that heals it (see
+	// TestSameContentSaveHealsStaleLedgerDigest).
+	if loaded.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true for a freshly loaded session")
+	}
+
+	// A pending rewrite (compaction/rewind) also disarms the fast path.
+	s.Replace(append([]provider.Message(nil), loaded.Messages[:2]...))
+	s.IncrementRewrite()
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true with a pending rewrite")
+	}
+}
+
+func TestSaveSnapshotBoundsCrossProcessFileLockWait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	lock, err := tryTakeSessionLockFile(store.SessionLockFile(path))
+	if err != nil {
+		t.Fatalf("take competing session lock: %v", err)
+	}
+	defer lock.Unlock()
+
+	prevWait, prevPoll := sessionFileLockWait, sessionFileLockPollInterval
+	sessionFileLockWait = 40 * time.Millisecond
+	sessionFileLockPollInterval = 5 * time.Millisecond
+	defer func() {
+		sessionFileLockWait = prevWait
+		sessionFileLockPollInterval = prevPoll
+	}()
+
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "must stay in memory"})
+	started := time.Now()
+	err = s.SaveSnapshot(path)
+	if !errors.Is(err, ErrSessionFileLockHeld) {
+		t.Fatalf("SaveSnapshot error = %v, want ErrSessionFileLockHeld", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("SaveSnapshot waited %v for a held cross-process lock; want a bounded failure", elapsed)
+	}
+	if got := s.Snapshot(); len(got) != 2 || got[1].Content != "must stay in memory" {
+		t.Fatalf("failed save changed in-memory transcript: %+v", got)
+	}
+}
+
+func TestSaveSnapshotSucceedsWhenCrossProcessFileLockReleasesBeforeDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	lock, err := tryTakeSessionLockFile(store.SessionLockFile(path))
+	if err != nil {
+		t.Fatalf("take competing session lock: %v", err)
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		lock.Unlock()
+		close(released)
+	}()
+	t.Cleanup(func() { <-released })
+
+	prevWait, prevPoll := sessionFileLockWait, sessionFileLockPollInterval
+	sessionFileLockWait = 500 * time.Millisecond
+	sessionFileLockPollInterval = 5 * time.Millisecond
+	defer func() {
+		sessionFileLockWait = prevWait
+		sessionFileLockPollInterval = prevPoll
+	}()
+
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "save after transient lock"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after transient lock: %v", err)
+	}
+	select {
+	case <-released:
+	default:
+		t.Fatal("SaveSnapshot returned before the competing lock was released")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := loaded.Snapshot(); len(got) != 2 || got[1].Content != "save after transient lock" {
+		t.Fatalf("persisted transcript = %+v", got)
+	}
+}
+
+func TestSaveShutdownRecoveryBranchBypassesHeldOriginalFileLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "persisted"})
+	if err := base.SaveSnapshot(path); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	current, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "unsaved shutdown tail"})
+	lock, err := tryTakeSessionLockFile(store.SessionLockFile(path))
+	if err != nil {
+		t.Fatalf("take competing session lock: %v", err)
+	}
+	defer lock.Unlock()
+
+	prevWait, prevPoll := sessionFileLockWait, sessionFileLockPollInterval
+	sessionFileLockWait = 40 * time.Millisecond
+	sessionFileLockPollInterval = 5 * time.Millisecond
+	defer func() {
+		sessionFileLockWait = prevWait
+		sessionFileLockPollInterval = prevPoll
+	}()
+
+	saveErr := current.SaveSnapshot(path)
+	if !errors.Is(saveErr, ErrSessionFileLockHeld) {
+		t.Fatalf("SaveSnapshot error = %v, want ErrSessionFileLockHeld", saveErr)
+	}
+	info, err := current.SaveShutdownRecoveryBranch(RecoveryBranchOptions{
+		OriginalPath: path,
+		Reason:       "shutdown session file lock timeout",
+	})
+	if err != nil {
+		t.Fatalf("SaveShutdownRecoveryBranch: %v", err)
+	}
+	if info.Path == path {
+		t.Fatalf("shutdown recovery path = original path %q", path)
+	}
+	if !info.Meta.Recovered || info.Meta.RecoveryReason != "shutdown session file lock timeout" {
+		t.Fatalf("shutdown recovery meta = %+v", info.Meta)
+	}
+	recovered, err := LoadSession(info.Path)
+	if err != nil {
+		t.Fatalf("load shutdown recovery: %v", err)
+	}
+	if got := recovered.Snapshot(); len(got) != 3 || got[2].Content != "unsaved shutdown tail" {
+		t.Fatalf("shutdown recovery transcript = %+v", got)
+	}
+	original, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload original session: %v", err)
+	}
+	if got := original.Snapshot(); len(got) != 2 {
+		t.Fatalf("held original transcript changed: %+v", got)
+	}
+}
+
+// TestRepairedSessionArmsFastPath (#6613 review P2): a session loaded with a
+// damaged event log — or carrying a load-time normalization repair — must
+// re-arm the snapshot no-op fast path once a successful save persists the
+// repair. Before the fix the flags were never cleared, so a repaired session
+// paid a full serialize + digest on every defensive snapshot until restart.
+func TestRepairedSessionArmsFastPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	sessionWithTurns(t, path, 2)
+
+	// Tear the event log so the next load marks it damaged.
+	logPath := store.SessionEventLog(path)
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	if _, err := f.Write([]byte(`{"schema_version":1,"type":"ap`)); err != nil {
+		t.Fatalf("write torn tail: %v", err)
+	}
+	f.Close()
+
+	s, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !s.eventLogDamaged {
+		t.Fatal("test setup: session should load damaged")
+	}
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true for a damaged, unsaved session")
+	}
+
+	// The healing save persists the repair; the fast path must arm afterwards.
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "heal"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("healing SaveSnapshot: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false after the healing save — repaired session never re-arms the fast path")
+	}
+
+	// A pending normalization repair also disarms, and a successful save that
+	// lands it re-arms.
+	s.normalizedDirty = true
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true with a pending normalization repair")
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot with normalization flag: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false after the save persisted the normalization repair")
+	}
+}
+
 // TestSaveLoadRoundTrip is the contract `reasonix --resume` depends on: a
 // session written to disk reloads byte-for-byte, including tool calls and
 // reasoning content (which the model wants to keep across resumes for cache
@@ -912,7 +1184,7 @@ func TestSaveSnapshotAllowsExactAppendFromStaleRevisionBaseline(t *testing.T) {
 	}
 
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
-	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, 0)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0)
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot exact append from stale revision baseline: %v", err)
 	}
@@ -960,7 +1232,7 @@ func TestSaveSnapshotAllowsCompatibleSystemAppendFromStaleRevisionBaseline(t *te
 	msgs[0] = provider.Message{Role: provider.RoleSystem, Content: "sys v2"}
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "two"})
 	s.Replace(msgs)
-	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, 0)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0)
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot compatible-system append from stale baseline: %v", err)
 	}
@@ -2194,6 +2466,13 @@ func TestReconcileOverlongMigratesDiagnosticSidecars(t *testing.T) {
 		[]byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The salvage sidecar holds raw session bytes; orphaning it under the
+	// retired stem would leave unreachable transcript content behind (#6613
+	// review follow-up).
+	if err := os.WriteFile(store.SessionEventLogDamaged(oldPath),
+		[]byte(`{"damaged_tail":true}`+"\ntorn bytes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := ReconcileSessionSidecars(dir); err != nil {
 		t.Fatalf("ReconcileSessionSidecars: %v", err)
@@ -2206,10 +2485,13 @@ func TestReconcileOverlongMigratesDiagnosticSidecars(t *testing.T) {
 	if _, err := os.Stat(store.SessionEventLog(newPath)); err != nil {
 		t.Fatalf("event log not migrated with the rename: %v", err)
 	}
+	if _, err := os.Stat(store.SessionEventLogDamaged(newPath)); err != nil {
+		t.Fatalf("damaged salvage sidecar not migrated with the rename: %v", err)
+	}
 	if _, err := os.Stat(store.SessionConflictLog(newPath)); err != nil {
 		t.Fatalf("conflict log not migrated with the rename: %v", err)
 	}
-	for _, gone := range []string{oldPath, store.SessionEventLog(oldPath), store.SessionConflictLog(oldPath)} {
+	for _, gone := range []string{oldPath, store.SessionEventLog(oldPath), store.SessionEventLogDamaged(oldPath), store.SessionConflictLog(oldPath)} {
 		if _, err := os.Stat(gone); !os.IsNotExist(err) {
 			t.Fatalf("%s still present under the retired stem (err=%v)", filepath.Base(gone), err)
 		}

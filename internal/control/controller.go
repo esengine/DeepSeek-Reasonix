@@ -44,7 +44,6 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
-	"reasonix/internal/memorycompiler"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
@@ -746,6 +745,7 @@ func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.Cancel
 // finishing directly into running.
 func (c *Controller) finishGuardedTurn(err error) {
 	c.mu.Lock()
+	cancelRequested := c.canceling
 	c.running = false
 	c.finishing = true
 	c.cancel = nil
@@ -771,7 +771,7 @@ func (c *Controller) finishGuardedTurn(err error) {
 		c.mu.Unlock()
 		c.spawnGuardedTurn(ctx, cancel, next)
 	}()
-	done := event.Event{Kind: event.TurnDone, Err: err, Outcome: turnOutcome(err)}
+	done := event.Event{Kind: event.TurnDone, Err: err, Cancelled: cancelRequested, Outcome: turnOutcome(err)}
 	var readinessErr *agent.FinalReadinessError
 	if errors.As(err, &readinessErr) {
 		done.Readiness = &event.FinalReadiness{Attempts: readinessErr.Attempts, Missing: append([]string(nil), readinessErr.Missing...)}
@@ -2158,26 +2158,6 @@ func (c *Controller) SetReasoningLanguage(lang string) {
 	}
 }
 
-// SetMemoryCompilerEnabled updates the Memory v5 runtime for subsequent turns
-// without rebuilding the controller or changing the stable provider prefix.
-func (c *Controller) SetMemoryCompilerEnabled(enabled bool) {
-	if c == nil || c.executor == nil {
-		return
-	}
-	var rt *memorycompiler.Runtime
-	if enabled {
-		rt = memorycompiler.New(config.MemoryCompilerDir(c.workspaceRoot))
-	}
-	c.executor.SetMemoryCompiler(rt)
-}
-
-func (c *Controller) SetMemoryCompilerVerbosity(verbosity string) {
-	if c == nil || c.executor == nil {
-		return
-	}
-	c.executor.SetMemoryCompilerVerbosity(verbosity)
-}
-
 // PlanMode reports whether outgoing turns currently receive the plan-mode
 // marker. Frontends use it after Compose because auto-plan may flip the mode.
 func (c *Controller) PlanMode() bool {
@@ -3298,7 +3278,16 @@ func (c *Controller) maybeColdResumePrune(path string) {
 // path, so a misconfigured deployment surfaces instead of dropping data.
 // Called after every turn so a crash loses at most one in-flight prompt.
 func (c *Controller) Snapshot() error {
-	return c.snapshot(false, false)
+	return c.snapshot(false, false, false)
+}
+
+// SnapshotForShutdown performs the final session snapshot and, only when the
+// compatibility file lock remains held for the full bounded wait, persists the
+// in-memory transcript to a distinct recovery branch before teardown proceeds.
+// Other snapshot errors retain their normal behavior and remain visible to the
+// caller.
+func (c *Controller) SnapshotForShutdown() error {
+	return c.snapshot(false, false, true)
 }
 
 // SnapshotActivity writes the active conversation and marks the session as
@@ -3306,14 +3295,14 @@ func (c *Controller) Snapshot() error {
 // transcript; switch/close snapshots should call Snapshot so they do not reorder
 // recent-session pickers.
 func (c *Controller) SnapshotActivity() error {
-	return c.snapshot(true, false)
+	return c.snapshot(true, false, false)
 }
 
 // SnapshotRewrite persists an intentional history rewrite, such as rewind or
 // manual compaction. Ordinary autosave paths should use Snapshot so stale
 // controllers cannot overwrite a newer transcript.
 func (c *Controller) SnapshotRewrite() error {
-	return c.snapshot(false, true)
+	return c.snapshot(false, true, false)
 }
 
 // midTurnSnapshotInterval is atomic (nanoseconds) so a test shrinking it
@@ -3334,14 +3323,14 @@ func (c *Controller) autosaveWhileRunning(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := c.snapshot(false, false); err != nil {
+			if err := c.snapshot(false, false, false); err != nil {
 				slog.Warn("controller: mid-turn snapshot", "err", err)
 			}
 		}
 	}
 }
 
-func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
+func (c *Controller) snapshot(markActivity, forceRewrite, shutdownRecovery bool) error {
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
 
@@ -3396,22 +3385,43 @@ func (c *Controller) snapshot(markActivity, forceRewrite bool) error {
 		}
 	}
 	if err != nil {
+		if shutdownRecovery && errors.Is(err, agent.ErrSessionFileLockHeld) {
+			recoveredPath, recoverErr := c.recoverShutdownSnapshot(path, err)
+			if recoverErr != nil {
+				return recoverErr
+			}
+			path = recoveredPath
+			s = c.executor.Session()
+			err = nil
+		}
+	}
+	if err != nil {
 		if !errors.Is(err, agent.ErrSessionSnapshotConflict) {
 			return err
 		}
 		recoveredPath, outcome, recoverErr := c.recoverSnapshotConflict(path, err, forceRewrite)
 		if recoverErr != nil {
-			return recoverErr
+			if shutdownRecovery && errors.Is(recoverErr, agent.ErrSessionFileLockHeld) {
+				recoveredPath, recoverErr = c.recoverShutdownSnapshot(path, recoverErr)
+				if recoverErr != nil {
+					return recoverErr
+				}
+				path = recoveredPath
+				s = c.executor.Session()
+			} else {
+				return recoverErr
+			}
+		} else {
+			if outcome == conflictDropped {
+				return nil
+			}
+			// Whatever recovery did — adopted the disk transcript, force-saved
+			// the depth-capped branch, or forked — the rewrite baseline lives on
+			// the session object and was advanced by the save that succeeded, so
+			// there is nothing to re-anchor here.
+			path = recoveredPath
+			s = c.executor.Session()
 		}
-		if outcome == conflictDropped {
-			return nil
-		}
-		// Whatever recovery did — adopted the disk transcript, force-saved
-		// the depth-capped branch, or forked — the rewrite baseline lives on
-		// the session object and was advanced by the save that succeeded, so
-		// there is nothing to re-anchor here.
-		path = recoveredPath
-		s = c.executor.Session()
 	}
 	// Persist guardian session so the prefix cache stays warm after restart.
 	if c.guardianSess != nil {
@@ -3611,8 +3621,49 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 		}
 		return "", conflictDropped, fmt.Errorf("recover stale session snapshot: %w", err)
 	}
-	recoveryInfo := SessionRecoveryInfo{
+	if err := c.commitRecoveredSession(path, reason, info); err != nil {
+		return "", conflictDropped, err
+	}
+	appendSnapshotConflictDiagnostic(path, mode, "forked_recovery_branch", saveErr, info.Path, info.Existing)
+	slog.Warn("controller: snapshot conflict; forked recovery branch",
+		append(logAttrs, "recovery", info.Path, "existing", info.Existing)...)
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		Text: "session changed on disk; unsaved local transcript was saved as a conflict copy"})
+	return info.Path, conflictForkedBranch, nil
+}
+
+func (c *Controller) recoverShutdownSnapshot(path string, saveErr error) (string, error) {
+	if c.executor == nil || strings.TrimSpace(path) == "" {
+		return "", saveErr
+	}
+	const reason = "shutdown session file lock timeout"
+	req := SessionRecoveryRequest{OriginalPath: path, Reason: reason, Mode: "shutdown"}
+	meta := agent.BranchMeta{}
+	if c.sessionRecoveryMeta != nil {
+		meta = c.sessionRecoveryMeta(req)
+	}
+	info, err := c.executor.Session().SaveShutdownRecoveryBranch(agent.RecoveryBranchOptions{
 		OriginalPath: path,
+		Reason:       reason,
+		BranchMeta:   meta,
+	})
+	if err != nil {
+		return "", fmt.Errorf("save shutdown recovery branch: %w", err)
+	}
+	if err := c.commitRecoveredSession(path, reason, info); err != nil {
+		return "", err
+	}
+	appendSnapshotConflictDiagnostic(path, "shutdown", "forked_file_lock_recovery", saveErr, info.Path, info.Existing)
+	slog.Warn("controller: shutdown snapshot lock timed out; forked recovery branch",
+		"path", path, "recovery", info.Path, "existing", info.Existing)
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		Text: "session file stayed busy during shutdown; unsaved transcript was saved as a recovery copy"})
+	return info.Path, nil
+}
+
+func (c *Controller) commitRecoveredSession(originalPath, reason string, info agent.RecoveryBranchInfo) error {
+	recoveryInfo := SessionRecoveryInfo{
+		OriginalPath: originalPath,
 		RecoveryPath: info.Path,
 		Existing:     info.Existing,
 		Reason:       reason,
@@ -3620,7 +3671,7 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 	}
 	if c.onSessionRecovered != nil {
 		if err := c.onSessionRecovered(recoveryInfo); err != nil {
-			return "", conflictDropped, fmt.Errorf("commit recovered session: %w", err)
+			return fmt.Errorf("commit recovered session: %w", err)
 		}
 	}
 	c.mu.Lock()
@@ -3629,13 +3680,8 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 	c.mu.Unlock()
 	c.setActiveJobSession(info.Path)
 	c.rebindCheckpoints(info.Path)
-	c.transplantInFlightTurnMarker(path, info.Path)
-	appendSnapshotConflictDiagnostic(path, mode, "forked_recovery_branch", saveErr, info.Path, info.Existing)
-	slog.Warn("controller: snapshot conflict; forked recovery branch",
-		append(logAttrs, "recovery", info.Path, "existing", info.Existing)...)
-	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-		Text: "session changed on disk; unsaved local transcript was saved as a conflict copy"})
-	return info.Path, conflictForkedBranch, nil
+	c.transplantInFlightTurnMarker(originalPath, info.Path)
+	return nil
 }
 
 func (c *Controller) adoptDiskSession(path string) bool {
@@ -3738,7 +3784,7 @@ func (c *Controller) recoverInterruptedTurn(path string) {
 		} else {
 			c.stripTurnMessagesAfter(marker.StartMessageIndex)
 		}
-		if err := c.snapshot(false, true); err != nil {
+		if err := c.snapshot(false, true, false); err != nil {
 			slog.Warn("controller: post-interrupted-turn snapshot", "err", err)
 		}
 	}
@@ -3789,14 +3835,26 @@ func (c *Controller) stripTurnMessagesAfter(idx int) {
 // stripCancelledVisibleTurnMessagesAfter removes assistant/tool remnants from a
 // cancelled visible turn while preserving the real user prompt that started it.
 func (c *Controller) stripCancelledVisibleTurnMessagesAfter(idx int) {
+	c.stripCancelledVisibleTurnMessagesAfterWithFallback(idx, provider.Message{})
+}
+
+// stripCancelledVisibleTurnMessagesAfterWithFallback also covers coordinator
+// cancellation before the executor has appended the visible user message. The
+// orchestrator owns that input, so it supplies the exact message rather than
+// letting cancellation infer the current turn from older transcript history.
+func (c *Controller) stripCancelledVisibleTurnMessagesAfterWithFallback(idx int, fallback provider.Message) {
 	if c.executor == nil {
 		return
 	}
 	msgs := c.executor.Session().Snapshot()
-	if len(msgs) <= idx {
-		return
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(msgs) {
+		idx = len(msgs)
 	}
 	next := append([]provider.Message{}, msgs[:idx]...)
+	keptUser := false
 	for _, m := range msgs[idx:] {
 		if m.Role != provider.RoleUser {
 			continue
@@ -3807,8 +3865,21 @@ func (c *Controller) stripCancelledVisibleTurnMessagesAfter(idx int) {
 		if _, ok := agent.SteerText(m.Content); ok {
 			continue
 		}
+		m.Content = StripComposePrefixes(m.Content)
 		next = append(next, m)
+		keptUser = true
 		break
+	}
+	if !keptUser && fallback.Role == provider.RoleUser {
+		fallback.Content = StripComposePrefixes(fallback.Content)
+		if strings.TrimSpace(fallback.Content) != "" {
+			fallback.Images = append([]string(nil), fallback.Images...)
+			next = append(next, fallback)
+			keptUser = true
+		}
+	}
+	if !keptUser && len(msgs) <= idx {
+		return
 	}
 	c.replaceSessionAfterCancel(next)
 }
@@ -4230,6 +4301,10 @@ func (c *Controller) HookRunner() *hook.Runner { return c.hooks }
 // of tools the server exposed. A save failure after a successful connect is
 // reported but non-fatal: the server still works this session.
 func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
+	// AddMCPServer is an explicit user action. Mark the live entry with the same
+	// provenance it will receive when the saved user config is loaded next time,
+	// so /mcp add is add-and-use in the current session too.
+	e.Source = config.MCPSourceUserConfig
 	n, err := c.connectMCPServer(e)
 	if err != nil {
 		return 0, err
@@ -4258,6 +4333,7 @@ func (c *Controller) ConnectMCPServer(e config.PluginEntry) (int, error) {
 // overrides scoped to the workspace, and connects it live via the mcp manager.
 func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 	exp := e.ExpandedPlugin()
+	configSource := strings.TrimSpace(string(exp.Source))
 	spec := plugin.ApplyKnownOverrides(plugin.Spec{
 		Name:                     exp.Name,
 		Type:                     exp.Type,
@@ -4273,6 +4349,10 @@ func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 		DefaultToolsApprovalMode: exp.DefaultToolsApprovalMode,
 		ToolApprovalModes:        controllerMCPToolApprovalModes(exp.Tools),
 		ApprovalsReviewer:        exp.ApprovalsReviewer,
+		ConfigSource:             configSource,
+		AutoTrust:                exp.Source.UserAuthorized(),
+		ImplicitApproval:         exp.Source.UserAuthorized(),
+		RequireLaunchApproval:    exp.Source.RequiresLaunchApproval(),
 	}, c.WorkspaceRoot())
 	if c.mcpConfigureSpec != nil {
 		c.mcpConfigureSpec(&spec)

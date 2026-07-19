@@ -167,6 +167,8 @@ import {
   applyConversationWidth,
   type Theme,
 } from "./lib/theme";
+import { applyThemePack, applyThemeScene, clearThemePack, setBaseAppearance } from "./lib/themePack";
+import { ThemeBackground } from "./components/ThemeBackground";
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveLiveWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
@@ -1043,6 +1045,7 @@ export default function App() {
     reorderTabs,
     openTopicSession,
     activateTopic,
+    noteNavigationIntent,
     syncActiveTab,
     ensureBlankTab,
     ensureBlankSurface,
@@ -1316,6 +1319,8 @@ export default function App() {
       const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
       applyTheme(nextTheme, nextStyle, { persist: false });
       applyConversationWidth(settings.conversationWidth === "full" ? "full" : "standard");
+      // Config appearance is the restore target for clearThemePack / restore-default.
+      setBaseAppearance(nextTheme, nextStyle);
       const nextLayoutStyle = normalizeDesktopLayoutStyle(settings.desktopLayoutStyle);
       setDesktopLayoutStyle(nextLayoutStyle);
       applyLayoutStyleDefaults(nextLayoutStyle);
@@ -1347,6 +1352,27 @@ export default function App() {
       hydrateDisplayMode(settings.displayMode);
       setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
       setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
+      // Load unified theme experience after base appearance so pack tokens win.
+      if (settings.safeMode === true) {
+        clearThemePack();
+      } else {
+        try {
+          const { loadThemeExperience, applyExperienceToDOM } = await import("./lib/themeExperience");
+          const exp = await loadThemeExperience();
+          if (cancelled) return;
+          applyExperienceToDOM(exp);
+        } catch (err) {
+          console.warn("theme experience load failed", err);
+          try {
+            const active = await app.GetActiveThemePack();
+            if (cancelled) return;
+            if (active?.pack) applyThemePack(active.pack);
+            else clearThemePack();
+          } catch {
+            clearThemePack();
+          }
+        }
+      }
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
@@ -1793,6 +1819,11 @@ export default function App() {
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
+
+  // Theme pack scene: home when the session is empty, task once content exists.
+  useEffect(() => {
+    applyThemeScene(sessionHasContent ? "task" : "home");
+  }, [sessionHasContent]);
   const getSessionMarkdown = useCallback(
     () => sessionItemsToMarkdown(sessionTitle, state.items, state.live),
     [sessionTitle, state.items, state.live],
@@ -1961,6 +1992,16 @@ export default function App() {
         if (!arg) {
           const cur = getTheme();
           notice(t("settings.themeCurrent", { theme: cur, style: getThemeStyle(cur) }));
+          return;
+        }
+        if (arg === "reset" || arg === "default" || arg === "clear") {
+          try {
+            await app.ResetThemePack();
+            clearThemePack();
+            notice(t("settings.themeReset"));
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), "error");
+          }
           return;
         }
         if (isThemeMode(arg)) {
@@ -2954,11 +2995,20 @@ export default function App() {
     }
   }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
 
-  const enqueueNavigation = useCallback((input: DesktopNavigationInput): Promise<void> => enqueueNavigationRequest(
-    { seqRef: navigationSeqRef, runningRef: navigationRunningRef, pendingRef: navigationPendingRef },
-    input,
-    runNavigationRequest,
-  ), [runNavigationRequest]);
+  const enqueueNavigation = useCallback((input: DesktopNavigationInput): Promise<void> => {
+    // Invalidate any in-flight activation's stale apply at ENQUEUE time. The
+    // queue serializes requests, so a click made while another request runs
+    // only advances the controller's navigation epoch when it eventually
+    // starts — too late: the running request's ActivateTopic would resolve,
+    // pass the controller-local guard, flip the visible tab, and prune the
+    // newer surface's cached state (#6613 review).
+    noteNavigationIntent();
+    return enqueueNavigationRequest(
+      { seqRef: navigationSeqRef, runningRef: navigationRunningRef, pendingRef: navigationPendingRef },
+      input,
+      runNavigationRequest,
+    );
+  }, [noteNavigationIntent, runNavigationRequest]);
 
   const openBlankSession = useCallback((scope: string, workspaceRoot: string): Promise<void> =>
     enqueueNavigation({ kind: "blank", scope, workspaceRoot: scope === "project" ? workspaceRoot : "" }),
@@ -3049,6 +3099,22 @@ export default function App() {
       { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
       { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
       { id: "cmd-appearance", group: t("palette.group.commands"), title: t("palette.cmd.appearance"), icon: <Palette size={15} />, compact: true, keywords: ["theme", "appearance", "外观", "主题"], run: () => setSettingsTarget("appearance") },
+      {
+        id: "cmd-theme-reset",
+        group: t("palette.group.commands"),
+        title: t("settings.themeLibrary.reset"),
+        icon: <Palette size={15} />,
+        compact: true,
+        keywords: ["theme", "reset", "default", "恢复默认", "主题"],
+        run: () => {
+          void app.ResetThemePack()
+            .then(() => {
+              clearThemePack();
+              notice(t("settings.themeReset"));
+            })
+            .catch((err) => showToast(err instanceof Error ? err.message : String(err), "error"));
+        },
+      },
       { id: "cmd-memory", group: t("palette.group.commands"), title: t("palette.cmd.memory"), icon: <Brain size={15} />, compact: true, keywords: ["memory", "记忆"], run: () => setSettingsTarget("memory") },
       { id: "cmd-models", group: t("palette.group.commands"), title: t("palette.cmd.models"), icon: <Cpu size={15} />, compact: true, keywords: ["model", "模型"], run: () => setSettingsTarget("models") },
     ];
@@ -3294,6 +3360,7 @@ export default function App() {
         !sidebarWorkbench && !sidebarCreation ? "app--classic" : "",
       ].filter(Boolean).join(" ")}
     >
+      <ThemeBackground />
       <div
         ref={layoutRef}
         className={[

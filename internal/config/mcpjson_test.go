@@ -45,6 +45,9 @@ func TestLoadMCPJSON(t *testing.T) {
 	if fs.Command != "npx" || len(fs.Args) != 3 || fs.Env["FOO"] != "bar" {
 		t.Errorf("filesystem decoded wrong: %+v", fs)
 	}
+	if fs.Source != MCPSourceProjectMCPJSON {
+		t.Errorf("filesystem source = %q, want project .mcp.json", fs.Source)
+	}
 	st := got[1]
 	if st.Type != "http" || st.URL != "https://mcp.stripe.com" ||
 		st.Headers["Authorization"] != "Bearer ${STRIPE_KEY}" {
@@ -549,11 +552,16 @@ func TestLoadMergesPluginsAcrossTOMLSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := map[string]bool{}
+	sources := map[string]MCPConfigSource{}
 	for _, p := range cfg.Plugins {
 		names[p.Name] = true
+		sources[p.Name] = p.Source
 	}
 	if !names["globalmcp"] || !names["projectmcp"] {
 		t.Fatalf("a project reasonix.toml [[plugins]] dropped the global config's server; got %+v", cfg.Plugins)
+	}
+	if sources["globalmcp"] != MCPSourceUserConfig || sources["projectmcp"] != MCPSourceProjectConfig {
+		t.Fatalf("plugin provenance = %+v", sources)
 	}
 }
 

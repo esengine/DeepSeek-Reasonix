@@ -271,13 +271,3 @@ Settings > Updates > "Share aggregate quality metrics", or by setting
 `metrics = false` under `[desktop]`. These metrics are anonymous signal/bucket
 counts and preference buckets; they never include conversations, prompts, keys,
 paths, base URLs, or file contents.
-
-When Memory v5 is enabled, the same aggregate metrics pipeline may include only
-content-free count/size buckets such as injection on/off, compiled-token bucket,
-IR-overhead bucket, memory-reference count, constraint/risk/step counts, and
-memory-graph size buckets. It never uploads memory text, tool outputs, prompts,
-file paths, IDs, keys, base URLs, or file contents. The Memory v5 runtime itself
-is controlled from Settings > General > "Memory v5" and shares the user/global
-`agent.memory_compiler.enabled` setting with the CLI/TUI and `reasonix serve`;
-CLI users can also run `/memory-v5 off|observe|compact|on|status` in a session
-or `reasonix config memory-v5 off|observe|compact|on|status` from a shell.

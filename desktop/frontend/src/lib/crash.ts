@@ -56,6 +56,10 @@ export type CrashPayload = {
   stack?: string;
   componentStack?: string;
   topFrame?: string;
+  // Optional, non-display grouping context for otherwise opaque WebView errors.
+  // It is deliberately restricted to build/view/breadcrumb categories and never
+  // contains breadcrumb messages, tab IDs, paths, or user content.
+  fingerprintHint?: string;
   buildCommit: string;
   channel: string;
   language: string;
@@ -114,6 +118,7 @@ const LONG_TASK_PROMPT_MS = 800;
 // user-visible jank, so the cumulative prompt only fires past half of that budget spent blocked.
 const LONG_TASK_TOTAL_PROMPT_MS = 3_000;
 const EVENT_LOOP_LAG_PROMPT_MS = 1_200;
+const EVENT_LOOP_LAG_CONSECUTIVE_SAMPLES = 2;
 const STARTUP_GRACE_MS = 15_000;
 const PROMPT_COOLDOWN_MS = 10 * 60_000;
 const MAX_LAG_SAMPLES = 60;
@@ -450,6 +455,19 @@ export function shouldPromptForLongTasks(summary: { count: number; totalMs: numb
   return summary.maxMs >= LONG_TASK_PROMPT_MS || (summary.count >= 3 && summary.totalMs >= LONG_TASK_TOTAL_PROMPT_MS);
 }
 
+export function shouldPromptForEventLoopLag(
+  samples: readonly number[],
+  longTask?: { count: number; totalMs: number; maxMs: number },
+): boolean {
+  const recent = samples.slice(-EVENT_LOOP_LAG_CONSECUTIVE_SAMPLES);
+  const sustained =
+    recent.length === EVENT_LOOP_LAG_CONSECUTIVE_SAMPLES &&
+    recent.every((sample) => sample >= EVENT_LOOP_LAG_PROMPT_MS);
+  const current = samples.length ? samples[samples.length - 1] : 0;
+  const corroborated = current >= EVENT_LOOP_LAG_PROMPT_MS && Boolean(longTask && shouldPromptForLongTasks(longTask));
+  return sustained || corroborated;
+}
+
 type TaskAttributionLike = {
   containerType?: string;
   containerName?: string;
@@ -573,6 +591,23 @@ export function buildCrashPayload(label: string, err: unknown, extra?: string): 
     breadcrumbs: snapshotBreadcrumbs(),
     occurredAt: new Date().toISOString(),
   };
+}
+
+export function opaqueScriptFingerprintHint(
+  rawView = currentView(),
+  breadcrumbs = snapshotBreadcrumbs(),
+  buildCommit = currentBuildCommit(),
+): string {
+  const view = rawView
+    .replace(/[?#].*$/, "")
+    .replace(/\b[0-9a-f]{8,}\b/gi, "_")
+    .replace(/\/\d+(?=\/|$)/g, "/_");
+  const categories = breadcrumbs
+    .slice(-8)
+    .map((crumb) => crumb.cat?.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_") ?? "")
+    .filter(Boolean)
+    .join(">");
+  return clip(`build:${buildCommit.slice(0, 16)}|view:${view}|cats:${categories || "none"}`, 300);
 }
 
 function sendButton(
@@ -724,7 +759,17 @@ function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
 export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
   if (e.defaultPrevented) return false;
   if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message))) return false;
+  if (globalCrashEventMessages(e).some((message) => /Minified React error #520\b/.test(message))) return false;
   return true;
+}
+
+export function isOpaqueScriptErrorEvent(e: GlobalCrashEventLike): boolean {
+  return (
+    (e.error === undefined || e.error === null) &&
+    typeof e.message === "string" &&
+    e.message.trim() === OPAQUE_SCRIPT_ERROR_MESSAGE &&
+    globalScriptErrorLocation(e) === ""
+  );
 }
 
 function globalScriptErrorLocation(e: GlobalCrashEventLike): string {
@@ -902,14 +947,19 @@ export function installPerformancePressureMonitor() {
     if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused(), now - focusedSince)) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
-    if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
+    if (shouldPromptForEventLoopLag(lagSamples, longTaskSummary(now))) {
+      promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
+    }
     maybePromptForHeapPressure();
   }, 1000);
 }
 
 export function installGlobalCrashHandlers() {
   window.addEventListener("error", (e) => {
-    if (shouldReportGlobalCrashEvent(e)) reportCrash("window.error", globalCrashReportReason(e));
+    if (!shouldReportGlobalCrashEvent(e)) return;
+    const payload = buildCrashPayload("window.error", globalCrashReportReason(e));
+    if (isOpaqueScriptErrorEvent(e)) payload.fingerprintHint = opaqueScriptFingerprintHint();
+    paint(payload);
   });
   window.addEventListener("unhandledrejection", (e) => {
     if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);

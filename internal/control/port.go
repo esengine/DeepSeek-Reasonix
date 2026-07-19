@@ -182,6 +182,7 @@ type Status interface {
 // state.
 type SessionPersistence interface {
 	Snapshot() error
+	SnapshotForShutdown() error
 	SnapshotActivity() error
 	SessionCache() (hit, miss int)
 	BeginDestroySession(sessionPath string) SessionDestroyHandle
@@ -205,8 +206,6 @@ type Input interface {
 type Settings interface {
 	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
-	SetMemoryCompilerEnabled(enabled bool)
-	SetMemoryCompilerVerbosity(verbosity string)
 	SetDisplayRecorder(fn func(content, display string))
 }
 

@@ -120,6 +120,8 @@ func redactSessionCandidate(path string) bool {
 		return true
 	case strings.HasSuffix(name, ".events.jsonl"):
 		return true
+	case strings.HasSuffix(name, ".events.jsonl.damaged"):
+		return true
 	case strings.HasSuffix(name, ".guardian.jsonl"):
 		return true
 	case strings.HasSuffix(name, ".goal-state.json"):
@@ -138,6 +140,8 @@ func redactionSessionPath(path string) string {
 		return path
 	case strings.HasSuffix(path, ".jsonl.meta"):
 		return strings.TrimSuffix(path, ".meta")
+	case strings.HasSuffix(path, ".events.jsonl.damaged"):
+		return strings.TrimSuffix(path, ".events.jsonl.damaged") + ".jsonl"
 	case strings.HasSuffix(path, ".events.jsonl"):
 		return strings.TrimSuffix(path, ".events.jsonl") + ".jsonl"
 	case strings.HasSuffix(path, ".goal-state.json"):
@@ -167,6 +171,14 @@ func redactSessionArtifact(path string, dryRun bool) (changed int64, bytesRewrit
 	switch {
 	case store.IsSessionTranscriptName(name), strings.HasSuffix(name, ".guardian.jsonl"):
 		return redactSessionTranscript(path, dryRun)
+	case strings.HasSuffix(name, ".events.jsonl.damaged"):
+		// The salvage sidecar holds raw bytes tail repair truncated away —
+		// undecodable by definition, so format-aware masking is impossible,
+		// and raw-byte masking cannot guarantee a secret split by JSON
+		// escapes is even recognized. This explicit privacy scrub follows the
+		// event-log precedent (torn bytes are compacted away regardless of
+		// content): delete the sidecar outright. Privacy wins over forensics.
+		return removeDamagedSalvage(path, dryRun)
 	case strings.HasSuffix(name, ".events.jsonl"):
 		anchor := strings.TrimSuffix(path, ".events.jsonl") + ".jsonl"
 		if _, statErr := os.Stat(anchor); statErr == nil {
@@ -389,6 +401,29 @@ func redactJSONValue(v any) (any, bool) {
 	default:
 		return v, false
 	}
+}
+
+// removeDamagedSalvage deletes an .events.jsonl.damaged salvage sidecar. See
+// the dispatch comment: damaged bytes cannot be masked reliably, so the scrub
+// removes them entirely.
+func removeDamagedSalvage(path string, dryRun bool) (int64, int64, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	if info.IsDir() {
+		return 0, 0, nil
+	}
+	if dryRun {
+		return 1, 0, nil
+	}
+	if err := os.Remove(path); err != nil {
+		return 0, 0, err
+	}
+	return 1, 0, nil
 }
 
 // redactPlainTextFile masks raw bytes — safe only for non-JSON artifacts

@@ -50,7 +50,17 @@ var English = Messages{
 	ChatStatusCancellingFmt:                "%s stopping… (%ds · Ctrl+C exits)",
 	ChatStatusIdle:                         "ready",
 	ChatStatusYoloIdle:                     "tool approvals skipped",
-	ChatStatusCycleHint:                    "shift+tab ask/auto/plan · ctrl+y yolo",
+	ChatStatusCycleHint:                    "Shift+Tab ask/auto/plan · Ctrl+Y YOLO",
+	ChatStatusCycleHintCompact:             "Shift+Tab ask/auto/plan · Ctrl+Y YOLO",
+	ChatTurnReceiptLabel:                   "TURN",
+	ChatStatusModelLabel:                   "MODEL",
+	ChatStatusEffortLabel:                  "EFFORT",
+	ChatStatusWorkLabel:                    "WORK",
+	ChatStatusCacheLabel:                   "CACHE",
+	ChatStatusContextLabel:                 "CTX",
+	ChatStatusCompactLabel:                 "COMPACT",
+	ChatStatusJobsLabel:                    "JOBS",
+	ChatStatusBalanceLabel:                 "BAL",
 	ChatStatusCacheNowFmt:                  "turn hit %s",
 	ChatStatusCacheAvgFmt:                  "avg %s",
 	ChatStatusPlanApproval:                 "Enter/y approves & executes · n/Esc keeps planning · PgUp/PgDn/Ctrl+Home/End scrolls",
@@ -145,7 +155,7 @@ var English = Messages{
 	SlashUnavailable:   "command unavailable in this build",
 	SlashUnknown:       "unknown command",
 	SlashTodoCleared:   "task list dismissed",
-	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /memory · /memory-v5 · /migrate · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
+	SlashHelp:          "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /memory · /migrate · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
 	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
@@ -197,6 +207,12 @@ var English = Messages{
 	CompHintSlash:                "↑/↓ move · Tab/Enter select · Esc close",
 	CompHintFile:                 "↑/↓ move · Tab/Enter open folder or pick file · Esc close",
 	MouseCopiedHint:              "copied to clipboard",
+	ClipboardCopyOSC52Hint:       "copy sent via OSC 52 — terminal permission may be required",
+	ClipboardCopyFallbackHint:    "native clipboard unavailable — copy sent via OSC 52",
+	ClipboardTextPasteRemoteHint: "right-click paste cannot read your local clipboard over SSH — use the terminal paste shortcut or /mouse",
+	ClipboardTextPasteFailedFmt:  "paste text failed: %v",
+	ClipboardImagePastingHint:    "Pasting image…",
+	ClipboardImagePasteFailedFmt: "paste image failed: %v",
 	MouseCaptureOnHint:           "mouse capture on — in-app drag-select/scrollbar/wheel active",
 	MouseCaptureOffHint:          "mouse capture off — your terminal now handles selection and right-click",
 	MouseCaptureTag:              "native mouse",
@@ -240,7 +256,6 @@ var English = Messages{
 	CmdMouse:            "toggle in-app mouse capture (off = native terminal selection/right-click)",
 	CmdAutoPlan:         "configure automatic plan mode",
 	CmdReasonLang:       "set visible reasoning language",
-	CmdMemoryV5:         "toggle Memory v5",
 	CmdHelp:             "list commands",
 	CmdTodo:             "dismiss the task list",
 	CmdQuit:             "exit the session",
@@ -309,6 +324,9 @@ var English = Messages{
 	WorkModeStatusFmt:         "work %s",
 	WorkModeListHeaderFmt:     "work modes (current: %s)",
 	WorkModeListHint:          "switch with /work-mode economy|balanced|delivery (/profile is an alias)",
+	WorkModeEconomyLabel:      "economy",
+	WorkModeBalancedLabel:     "balanced",
+	WorkModeDeliveryLabel:     "delivery",
 	WorkModeEconomyDesc:       "lower token use; optional tool sources connect on demand",
 	WorkModeBalancedDesc:      "full tool surface; model decides how much work is needed",
 	WorkModeDeliveryDesc:      "complete, verified delivery; stronger skill and plugin use",
@@ -481,7 +499,6 @@ Usage:
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
   reasonix config auto-plan [off|on]                    configure automatic plan mode
-  reasonix config memory-v5 [off|observe|compact|on|status]  configure Memory v5
   reasonix config reasoning-language [auto|zh|en]        configure visible reasoning language
   reasonix mcp <add|remove|list|import>                 manage MCP servers in reasonix.toml
   reasonix subagent <list|create|edit|delete|try|run>   manage and run isolated subagent profiles

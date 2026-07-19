@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -312,6 +313,18 @@ func repairSessionEventLogTail(sessionPath string) error {
 	if replay.lastGoodEnd >= replay.size {
 		return nil
 	}
+	// Salvage the bytes the truncation below discards. A torn tail is usually
+	// one partial record, but replay also stops at a buried undecodable or
+	// out-of-order record (e.g. two runtimes interleaving appends on one log) —
+	// then everything past it, including intact turns, would be silently and
+	// permanently lost (#6607). Preservation is best-effort: it must not block
+	// the repair (the log has to become appendable again either way), and its
+	// most likely failure — a full disk — is the same condition that tears
+	// tails in the first place.
+	if preserveErr := preserveDamagedEventLogTail(sessionPath, path, replay.lastGoodEnd, replay.size); preserveErr != nil {
+		slog.Warn("session: could not preserve damaged event log tail; truncating anyway",
+			"path", path, "from", replay.lastGoodEnd, "size", replay.size, "err", preserveErr)
+	}
 	if err := os.Truncate(path, replay.lastGoodEnd); err != nil {
 		return err
 	}
@@ -333,6 +346,44 @@ func repairSessionEventLogTail(sessionPath string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// preserveDamagedEventLogTail appends the about-to-be-truncated byte range of
+// the event log to the .damaged salvage sidecar, prefixed with a one-line JSON
+// header recording when and where the bytes came from. The sidecar is a
+// forensic artifact for recovery, never replayed by the loader, and is removed
+// with the session's other sidecars on delete.
+func preserveDamagedEventLogTail(sessionPath, logPath string, from, to int64) error {
+	if to <= from {
+		return nil
+	}
+	src, err := os.Open(logPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	if _, err := src.Seek(from, io.SeekStart); err != nil {
+		return err
+	}
+	dst, err := os.OpenFile(store.SessionEventLogDamaged(sessionPath), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	header := fmt.Sprintf("{\"damaged_tail\":true,\"preserved_at\":%q,\"log_offset\":%d,\"bytes\":%d}\n",
+		time.Now().UTC().Format(time.RFC3339), from, to-from)
+	if _, err := dst.WriteString(header); err != nil {
+		dst.Close()
+		return err
+	}
+	if _, err := io.CopyN(dst, src, to-from); err != nil && !errors.Is(err, io.EOF) {
+		dst.Close()
+		return err
+	}
+	if _, err := dst.WriteString("\n"); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
 }
 
 func appendSessionEvent(sessionPath string, rec sessionEventRecord, sync bool) error {

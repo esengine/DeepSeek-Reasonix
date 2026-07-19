@@ -186,7 +186,7 @@ func subagentCreateCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
 		return 1
 	}
-	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value)
+	content := renderCLIProfile(name, values.description.value, prompt, values.model.value, values.effort.value, parseToolList(values.tools.value), values.color.value, false)
 	path, err := store.CreateWithContent(name, scope, content)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "subagent create:", err)
@@ -263,7 +263,7 @@ func subagentEditCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, "subagent edit: description and prompt cannot be empty")
 		return 2
 	}
-	content := renderCLIProfile(sk.Name, description, body, model, effort, tools, color)
+	content := renderCLIProfile(sk.Name, description, body, model, effort, tools, color, sk.ReadOnly)
 	if err := store.UpdateContent(sk.Name, sk.Scope, content); err != nil {
 		fmt.Fprintln(os.Stderr, "subagent edit:", err)
 		return 1
@@ -536,7 +536,7 @@ func parseToolList(raw string) []string {
 	return tools
 }
 
-func renderCLIProfile(name, description, prompt, model, effort string, tools []string, color string) string {
+func renderCLIProfile(name, description, prompt, model, effort string, tools []string, color string, readOnly bool) string {
 	return skill.RenderSkillFile(skill.SkillFileOptions{
 		Name:         strings.TrimSpace(name),
 		Description:  strings.TrimSpace(description),
@@ -545,6 +545,7 @@ func renderCLIProfile(name, description, prompt, model, effort string, tools []s
 		Model:        strings.TrimSpace(model),
 		Effort:       strings.TrimSpace(effort),
 		AllowedTools: tools,
+		ReadOnly:     readOnly,
 		Color:        strings.TrimSpace(color),
 		Invocation:   "manual",
 	})

@@ -20,6 +20,15 @@ const MaxRetries = 10
 
 const maxBackoff = 15 * time.Second
 
+// errorBodyReadTimeout bounds how long draining a non-OK response body may
+// block. Proxies and gateways under load (502/524 storms) can send headers and
+// then stall the body on a half-open connection; http.Client has no Timeout
+// and ResponseHeaderTimeout no longer applies once headers arrive, so without
+// this deadline the retry loop blocks in io.ReadAll indefinitely with no
+// user-visible progress — the turn looks frozen until the process is killed
+// (#6607). A var, not a const, so tests can shrink it.
+var errorBodyReadTimeout = 10 * time.Second
+
 // maxAuthRetries bounds how many times a 401/403 is retried for a key that has
 // authenticated before: a transient server-side rejection (quota/gateway/rate)
 // usually clears in a couple of attempts, whereas a key that never worked is a
@@ -149,6 +158,25 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 	return 0
 }
 
+// readErrorBody drains a non-OK response body under a hard deadline and
+// returns up to the first 4 KiB for the error message. Context cancellation
+// already unblocks the read (the transport aborts body reads when the request
+// context is canceled); the timer covers the case nobody cancels — a half-open
+// upstream that sent headers and then went silent. Closing the body from the
+// timer goroutine is the documented way to unblock an in-flight Read; it
+// tears down the connection, which is the right call for a stalled peer.
+func readErrorBody(resp *http.Response) []byte {
+	timer := time.AfterFunc(errorBodyReadTimeout, func() { resp.Body.Close() })
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	// Drain the rest so a healthy connection can be reused; the timer still
+	// arms this read, so a body that stalls after the first 4 KiB cannot
+	// wedge the retry loop either.
+	_, _ = io.Copy(io.Discard, resp.Body)
+	timer.Stop()
+	resp.Body.Close()
+	return msg
+}
+
 // SendWithRetry POSTs a streaming request built by newReq and returns the OK
 // response. It retries the connection+header phase up to MaxRetries times on
 // transient network errors and retryable statuses with capped exponential
@@ -195,10 +223,8 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			return resp, nil
 		}
 
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		msg := readErrorBody(resp)
 		retryAfter = parseRetryAfter(resp)
-		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			authErr := &AuthError{Provider: opts.Provider, KeyEnv: opts.KeyEnv, KeySource: opts.KeySource, Status: resp.StatusCode, HasKey: opts.KeyPresent, Body: strings.TrimSpace(string(msg))}

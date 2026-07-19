@@ -38,6 +38,9 @@ type SubagentProfileInput struct {
 	Model        string   `json:"model"`
 	Effort       string   `json:"effort"`
 	AllowedTools []string `json:"allowedTools"`
+	// ReadOnly, when true, writes frontmatter read-only: true. Omitted/false
+	// keeps the legacy writable default for older profiles.
+	ReadOnly bool `json:"readOnly"`
 	// Scope is "project" or "global" (empty defaults to global on create).
 	Scope string `json:"scope"`
 }
@@ -118,6 +121,7 @@ func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) 
 		Model:        strings.TrimSpace(input.Model),
 		Effort:       strings.TrimSpace(input.Effort),
 		AllowedTools: input.AllowedTools,
+		ReadOnly:     input.ReadOnly,
 		Color:        strings.TrimSpace(input.Color),
 		Invocation:   "manual",
 	})
@@ -196,6 +200,7 @@ func (a *App) UpdateSubagentProfile(name, scope string, input SubagentProfileInp
 		Model:        strings.TrimSpace(input.Model),
 		Effort:       strings.TrimSpace(input.Effort),
 		AllowedTools: input.AllowedTools,
+		ReadOnly:     input.ReadOnly,
 		Color:        strings.TrimSpace(input.Color),
 		Invocation:   "manual",
 	})

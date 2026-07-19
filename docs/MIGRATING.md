@@ -106,6 +106,17 @@ and DeepSeek prefix-cache–oriented design.
   servers, or on first evaluation otherwise — when nothing else changed; the read-only
   legacy fingerprint calculator is scheduled for removal two minor releases
   after this rollout.
+- **MCP setup is now add-and-use.** Servers added by the user (Desktop, user
+  config, legacy user import, or an installed verified plugin package) connect
+  with an automatic trust snapshot and permit ordinary calls when no explicit
+  MCP approval policy is configured. Repository `reasonix.toml` / `.mcp.json`
+  servers instead require one pre-launch confirmation for their exact stable
+  identity, before a subprocess or network request exists. Older receipts and
+  the former `workspace_config` source migrate automatically when server code
+  and capabilities are unchanged. Host sandbox/read/write-root policy changes
+  no longer invalidate server identity.
+- **stdio MCP connections are persistent.** This fixes stateful servers that
+  lost browser/session state when writer calls received a fresh process.
 - **Plan mode and permission policy are now independent**: Plan directs the
   model to plan first. Ordinary built-in and Bash calls still use the active
   Ask/Auto/YOLO rules and Sandbox, while installed MCP and proxy-resolved MCP
@@ -124,7 +135,7 @@ and DeepSeek prefix-cache–oriented design.
   planner/read-only sub-agent trust. Tools without the hint remain
   writer-classified. New optional MCP-local fields
   (`default_tools_approval_mode`, `tools.<raw>.approval_mode`, and
-  `approvals_reviewer`) default to the previous behavior when absent. MCP tools
+  `approvals_reviewer`) override the new source-aware default when present. MCP tools
   declaring `destructiveHint: true` require a fresh human approval on every
   call — the configured reviewer is never consulted for them — and
   non-interactive sessions fail closed.

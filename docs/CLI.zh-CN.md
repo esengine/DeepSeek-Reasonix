@@ -197,8 +197,23 @@ reasonix -p "同时更新两个项目" \
 | `Shift+Tab` | 按 `Ask → Auto → Plan → Ask` 循环。 |
 | `Ctrl+Y` | 独立切换 YOLO，不进入安全模式循环。 |
 
-底部状态栏会显示当前权限模式。Transcript 导航、多行输入、rewind 和剪贴板操作见
-[快捷键](./GUIDE.zh-CN.md#快捷键)。
+响应式底栏左侧显示当前交互状态；空间足够时，右侧显示模型、推理强度和工作模式。第二行按
+可用性显示仓库与会话遥测，例如缓存命中率、上下文占用、压缩余量、后台任务和余额。
+“就绪”表示输入框当前空闲；进入选择器、审批、图片粘贴、shell 模式等需要用户关注的状态
+时，这个位置会切换。窄终端会移动或压缩完整信息组，不会从中间截断标签。可见标签和工作
+模式值会跟随 `/language`。
+
+使用 `/theme auto|light|dark` 选择终端背景模式，也可以从 `/theme` 列出的命名配色中选择
+强调色。输入框上下边线、插入光标、选区、滚动条和底栏都会使用当前 CLI 主题。Transcript
+导航、多行输入、rewind 和剪贴板操作见[快捷键](./GUIDE.zh-CN.md#快捷键)。
+
+剪贴板操作按内容类型明确分开。本地 transcript 和输入框选区写入系统剪贴板，并且只有写入
+成功后才提示完成；SSH 会回退到明确标记的 OSC 52 请求。文本粘贴继续走终端的
+bracketed-paste 动作（macOS 通常为 `Cmd+V`，其它平台使用终端自身配置）。Reasonix 接管
+本地会话的鼠标时，没有选区的右键会读取剪贴板文本并走同一粘贴路径，有选区时右键优先复制。
+SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键；`/mouse` 可恢复终端原生右键菜单。
+图片粘贴由 Reasonix 接管：macOS/Linux 使用 `Ctrl+V`，Windows 使用 `Alt+V`，也可运行
+`/paste-image`；附件标记准备完成前，底栏会显示“正在粘贴图片…”。
 
 ## 会话内命令
 
@@ -212,6 +227,9 @@ reasonix -p "同时更新两个项目" \
 | `/resume` | 搜索最近会话并切换。 |
 | `/status` | 显示模型、effort、cache、Git、后台任务，以及工作模式或余额信息。 |
 | `/work-mode [economy\|balanced\|delivery]` | 查看或切换运行时工作模式；`/profile` 是别名。 |
+| `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
+| `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
+| `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理。 |
 | `/effort` | 查看或切换 reasoning effort。 |
 | `/output-style` | 选择回答风格。 |
 | `/verbose` | 切换详细 reasoning 显示。 |

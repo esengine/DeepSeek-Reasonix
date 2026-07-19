@@ -16,15 +16,6 @@ var (
 	// only counts with a leading separator (DB_PWD, MYSQL-PWD), so the POSIX
 	// PWD / OLDPWD working-directory variables never match.
 	secretKeyNamePattern = regexp.MustCompile(`(?i)((^|[_-])(api[_-]?key|access[_-]?key|private[_-]?key|secret|token|password|passwd)([_-]|$)|[_-]pwd([_-]|$))`)
-	// keyValuePattern mirrors secretKeyNamePattern for KEY=value / key: value
-	// text: PWD requires a prefixed separator so "PWD=/home/user" stays intact.
-	// The optional auth-scheme group keeps schemes like "Basic"/"Digest" out of
-	// the value capture, so the credential after the scheme word is what gets
-	// masked (an uncaptured scheme would itself be swallowed as the value,
-	// leaving the real credential in the clear right behind it). The separator
-	// group tolerates quotes around the key and before the value so JSON bodies
-	// ("access_token":"...") match, not just env/header text.
-	keyValuePattern = regexp.MustCompile(`(?i)\b([A-Z0-9_.-]*(?:API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD)[A-Z0-9_.-]*|[A-Z0-9_.-]+[_-]PWD[A-Z0-9_.-]*|AUTHORIZATION)\b(['"]?\s*[:=]\s*['"]?)((?:Bearer|Basic|Digest|Negotiate|NTLM|Token|Bot|ApiKey)\s+)?(['"]?)([^'"\s,;]+)(['"]?)`)
 	// cookieHeaderPattern captures Cookie/Set-Cookie header values so every
 	// name=value pair gets its value masked; attribute flags without a value
 	// (HttpOnly, Secure) pass through untouched.
@@ -153,22 +144,7 @@ func Redact(s string) string {
 	if s == "" {
 		return s
 	}
-	s = keyValuePattern.ReplaceAllStringFunc(s, func(match string) string {
-		parts := keyValuePattern.FindStringSubmatch(match)
-		if len(parts) != 7 {
-			return redactedValue
-		}
-		key := parts[1]
-		sep := parts[2]
-		scheme := parts[3]
-		quote := parts[4]
-		value := parts[5]
-		endQuote := parts[6]
-		if strings.EqualFold(key, "authorization") {
-			return key + sep + scheme + quote + redactedValue + endQuote
-		}
-		return key + sep + scheme + quote + mask(value) + endQuote
-	})
+	s = redactKeyValues(s)
 	s = cookieHeaderPattern.ReplaceAllStringFunc(s, func(match string) string {
 		parts := cookieHeaderPattern.FindStringSubmatch(match)
 		if len(parts) != 4 {
@@ -187,6 +163,114 @@ func Redact(s string) string {
 		s = rx.ReplaceAllStringFunc(s, mask)
 	}
 	return s
+}
+
+func redactKeyValues(s string) string {
+	var out strings.Builder
+	last := 0
+	for sep := 0; sep < len(s); sep++ {
+		if s[sep] != ':' && s[sep] != '=' {
+			continue
+		}
+		keyEnd := sep
+		for keyEnd > 0 && asciiSpace(s[keyEnd-1]) {
+			keyEnd--
+		}
+		if keyEnd > 0 && (s[keyEnd-1] == '\'' || s[keyEnd-1] == '"') {
+			keyEnd--
+		}
+		keyStart := keyEnd
+		for keyStart > 0 && credentialKeyByte(s[keyStart-1]) {
+			keyStart--
+		}
+		key := s[keyStart:keyEnd]
+		if !credentialTextKeySensitive(key) {
+			continue
+		}
+
+		valueStart := sep + 1
+		for valueStart < len(s) && asciiSpace(s[valueStart]) {
+			valueStart++
+		}
+		if valueStart < len(s) && (s[valueStart] == '\'' || s[valueStart] == '"') {
+			valueStart++
+		}
+		schemeStart := valueStart
+		for valueStart < len(s) && credentialKeyByte(s[valueStart]) {
+			valueStart++
+		}
+		if valueStart < len(s) && asciiSpace(s[valueStart]) && authorizationScheme(s[schemeStart:valueStart]) {
+			for valueStart < len(s) && asciiSpace(s[valueStart]) {
+				valueStart++
+			}
+			if valueStart < len(s) && (s[valueStart] == '\'' || s[valueStart] == '"') {
+				valueStart++
+			}
+		} else {
+			valueStart = schemeStart
+		}
+
+		valueEnd := valueStart
+		for valueEnd < len(s) && !asciiSpace(s[valueEnd]) && s[valueEnd] != '\'' && s[valueEnd] != '"' && s[valueEnd] != ',' && s[valueEnd] != ';' {
+			valueEnd++
+		}
+		if valueEnd == valueStart {
+			continue
+		}
+		if last == 0 {
+			out.Grow(len(s))
+		}
+		out.WriteString(s[last:valueStart])
+		if authorizationKey(key) {
+			out.WriteString(redactedValue)
+		} else {
+			out.WriteString(mask(s[valueStart:valueEnd]))
+		}
+		last = valueEnd
+		sep = valueEnd - 1
+	}
+	if last == 0 {
+		return s
+	}
+	out.WriteString(s[last:])
+	return out.String()
+}
+
+func credentialKeyByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_' || b == '-' || b == '.'
+}
+
+func asciiSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f'
+}
+
+func authorizationKey(key string) bool {
+	upper := strings.ToUpper(key)
+	return upper == "AUTHORIZATION" || strings.HasSuffix(upper, "-AUTHORIZATION") || strings.HasSuffix(upper, "_AUTHORIZATION") || strings.HasSuffix(upper, ".AUTHORIZATION")
+}
+
+func credentialTextKeySensitive(key string) bool {
+	upper := strings.ToUpper(key)
+	compact := strings.NewReplacer("_", "", "-", "").Replace(upper)
+	return authorizationKey(key) ||
+		strings.Contains(compact, "APIKEY") ||
+		strings.Contains(compact, "ACCESSKEY") ||
+		strings.Contains(compact, "PRIVATEKEY") ||
+		strings.Contains(upper, "SECRET") ||
+		strings.Contains(upper, "TOKEN") ||
+		strings.Contains(upper, "PASSWORD") ||
+		strings.Contains(upper, "PASSWD") ||
+		strings.Contains(upper, "_PWD") ||
+		strings.Contains(upper, "-PWD")
+}
+
+func authorizationScheme(s string) bool {
+	switch strings.ToLower(s) {
+	case "bearer", "basic", "digest", "negotiate", "ntlm", "token", "bot", "apikey":
+		return true
+	default:
+		return false
+	}
 }
 
 func mask(value string) string {

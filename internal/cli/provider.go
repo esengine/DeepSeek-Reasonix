@@ -144,8 +144,14 @@ func (m chatTUI) handleQuickPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	switch kind {
 	case quickPickerModel, quickPickerProviderModel:
 		m.runModelSubcommand("/model " + choice.ID)
+		if m.pendingModelSwitch != nil {
+			return m, m.pendingModelSwitch
+		}
 	case quickPickerProvider:
 		m.switchToProvider(choice.ID)
+		if m.pendingModelSwitch != nil {
+			return m, m.pendingModelSwitch
+		}
 	}
 	return m, nil
 }

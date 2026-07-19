@@ -810,12 +810,11 @@ func TestSetCredentialRejectsInvalidInput(t *testing.T) {
 }
 
 func TestProjectConfigCannotOverrideCredentialStoreMode(t *testing.T) {
-	home := t.TempDir()
+	home := isolateUserConfigHome(t)
 	project := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "")
 	os.Unsetenv("REASONIX_CREDENTIALS_STORE")
+	requireTestPathWithin(t, home, UserConfigPath())
 	if err := os.MkdirAll(filepath.Dir(UserConfigPath()), 0o755); err != nil {
 		t.Fatal(err)
 	}

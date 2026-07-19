@@ -11,7 +11,7 @@ default_model = "deepseek"   # a provider name (→ its default model) or "provi
 theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can override per run
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
-# cursor_shape = "underline"   # block|underline|bar; text input cursor shape; default underline to avoid CJK rendering artifacts
+# cursor_shape = "bar"   # block|underline|bar; text input cursor shape; slim default avoids covering CJK characters
 
 [desktop]
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
@@ -29,7 +29,6 @@ ask_request = true   # notify when a question is waiting
 # system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
 temperature       = 0.0
 auto_plan         = "off"   # user-level only; ignored in project reasonix.toml
-memory_compiler = { enabled = true }   # user-level only; Memory v5 execution compiler
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
 # auto_plan_classifier = "deepseek-flash"   # optional; only used for borderline tasks
 # plan_mode_allowed_tools = ["mcp__legacy__reader"]   # legacy MCP read-only trust alias; does not change Plan availability
@@ -41,6 +40,8 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # planner_model = "deepseek-pro"   # optional: enable two-model collaboration
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
+# max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)
+# max_parallel_writers = 3       # concurrent writers with non-overlapping write_paths
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .reasonix/output-styles/<name>.md ; empty = default
 
@@ -61,6 +62,8 @@ models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"   # optional; defaults to the first of `models`
 api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
+# Optional per-model context budgets. Omitted models inherit context_window.
+# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
 # Official DeepSeek providers seed RMB prices by default.
 # Set prices explicitly only when you want to pin a currency/rate.
 # prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
@@ -68,7 +71,8 @@ context_window = 1000000
 effort      = "high"
 
 # A single-model provider still works (use `model = "..."`) — pick this form when
-# a model needs its own base_url / context_window / price.
+# a model needs its own base_url. Use model_overrides when models share an endpoint
+# but need distinct context windows or capability settings.
 
 # Custom /effort levels for a provider. When supported_efforts is set, the
 # /effort command exposes these levels; default_effort is what "/effort auto"

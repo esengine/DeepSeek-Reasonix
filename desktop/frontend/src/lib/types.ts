@@ -20,7 +20,6 @@ export type EventKind =
   | "mcp_surface_ready"
   | "retrying"
   | "steer"
-  | "memory_compiler_stats"
   | "guardian_assessment";
 
 export interface WireCompaction {
@@ -154,23 +153,6 @@ export interface MemoryCitation {
   kind?: string;
 }
 
-export interface MemoryCompilerStats {
-  injected: boolean;
-  usefulIR: boolean;
-  compiledTokens: number;
-  irOverheadTokens: number;
-  memoryReferences: number;
-  constraints: number;
-  riskNotes: number;
-  executionSteps: number;
-  totalNodes: number;
-  highSignalNodes: number;
-  toolResultNodes: number;
-  decisionNodes: number;
-  strategyCount: number;
-  learningCount: number;
-}
-
 export interface WireEvent {
   kind: EventKind;
   text?: string;
@@ -179,7 +161,6 @@ export interface WireEvent {
   code?: string;
   reasoning?: string;
   memoryCitations?: MemoryCitation[];
-  memoryCompiler?: MemoryCompilerStats;
   level?: "info" | "warn";
   tool?: WireTool;
   usage?: WireUsage;
@@ -728,6 +709,7 @@ export interface ServerView {
   resources: number;
   hasTools?: boolean;
   error?: string;
+  requiresReverification?: boolean;
   toolList?: MCPToolView[];
   trustedReadOnlyTools?: string[];
   callTimeoutSeconds?: number;
@@ -735,6 +717,8 @@ export interface ServerView {
   defaultToolsApprovalMode?: MCPApprovalMode;
   toolPolicies?: Record<string, MCPToolPolicy>;
   approvalsReviewer?: MCPApprovalsReviewer;
+  requiresLaunchApproval?: boolean;
+  launchApprovalGoverned?: boolean;
   authStatus?: "none" | "possible" | "required" | string;
   authUrl?: string;
   authConfigured?: boolean;
@@ -782,6 +766,7 @@ export interface MCPTrustInspectionView {
   readers: string[];
   writers: string[];
   destructive: string[];
+  requiresLaunchApproval?: boolean;
 }
 
 export interface MCPCatalogRefreshView {
@@ -800,6 +785,7 @@ export interface SkillView {
   model?: string;
   effort?: string;
   allowedTools?: string[];
+  readOnly?: boolean;
   color?: string;
   invocation?: string;
   invocationMode?: string;
@@ -848,6 +834,7 @@ export interface SubagentProfileInput {
   model?: string;
   effort?: string;
   allowedTools?: string[];
+  readOnly?: boolean;
   scope?: "project" | "global";
 }
 export interface PluginView {
@@ -1196,6 +1183,7 @@ export interface ProviderModelOverrideView {
   supportedEfforts: string[];
   defaultEffort: string;
   vision?: boolean | null;
+  contextWindow?: number;
 }
 
 // BalanceInfo is the wallet-balance readout (desktop/app.go Balance). available
@@ -1254,6 +1242,8 @@ export interface AgentView {
   maxSteps: number;
   plannerMaxSteps: number;
   maxSubagentDepth: number;
+  maxSubagentConcurrency: number;
+  maxParallelWriters: number;
   systemPrompt: string;
   coldResumePrune: boolean;
   reasoningLanguage: string; // "auto" | "zh" | "en"
@@ -1493,7 +1483,6 @@ export interface SettingsView {
   checkUpdates: boolean; // check for new versions on startup
   telemetry: boolean; // anonymous launch ping (install id + version + OS)
   metrics: boolean; // aggregate desktop metrics (anonymous signal/bucket counts)
-  memoryCompilerEnabled: boolean; // Memory v5 execution compiler
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;

@@ -1,3 +1,4 @@
+import "./lib/compat";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
@@ -10,6 +11,7 @@ import { LocaleProvider } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
 import { initFontFamily } from "./lib/fontFamily";
 import { initTextSize } from "./lib/textSize";
+import { initTypographyPreferences } from "./lib/typographyPreferences";
 import { initTheme } from "./lib/theme";
 import "./styles.css";
 
@@ -41,6 +43,7 @@ initTypographyPlatform();
 initTheme();
 initTextSize();
 initFontFamily();
+initTypographyPreferences();
 
 // Pre-warm font fallback stacks so the first frame doesn't flicker between the
 // browser default font and the app's configured typeface. Inserting a hidden span

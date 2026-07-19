@@ -1231,6 +1231,9 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 func spawnCommand(ctx context.Context, command string, argv ...[]string) (*exec.Cmd, error) {
 	if len(argv) > 0 && argv[0] != nil {
 		if runtime.GOOS == "windows" {
+			if cmd, matched := windowsBatchArgvCommand(ctx, command, argv[0]); matched {
+				return cmd, nil
+			}
 			if shell, args, matched, err := windowsPOSIXShellArgvInvocation(command, argv[0]); matched {
 				if err != nil {
 					return nil, err
@@ -1247,6 +1250,9 @@ func spawnCommand(ctx context.Context, command string, argv ...[]string) (*exec.
 		return exec.CommandContext(ctx, powershell, args...), nil
 	}
 	if runtime.GOOS == "windows" {
+		if cmd, matched := windowsBatchCommand(ctx, command); matched {
+			return cmd, nil
+		}
 		if shell, args, matched, err := windowsPOSIXShellInvocation(command); matched {
 			if err != nil {
 				return nil, err

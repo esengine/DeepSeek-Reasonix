@@ -14,7 +14,6 @@ type Event struct {
 	Code            string           `json:"code,omitempty"`
 	Reasoning       string           `json:"reasoning,omitempty"`
 	MemoryCitations []MemoryCitation `json:"memoryCitations,omitempty"`
-	MemoryCompiler  *MemoryCompiler  `json:"memoryCompiler,omitempty"`
 	Level           string           `json:"level,omitempty"`
 	Tool            *Tool            `json:"tool,omitempty"`
 	Usage           *Usage           `json:"usage,omitempty"`
@@ -76,25 +75,6 @@ func ToWire(e event.Event) Event {
 				w.Usage.CostUSD = cost
 			}
 		}
-	case event.MemoryCompilerStatsEvent:
-		if m := e.MemoryCompiler; m != nil {
-			w.MemoryCompiler = &MemoryCompiler{
-				Injected:         m.Injected,
-				UsefulIR:         m.UsefulIR,
-				CompiledTokens:   m.CompiledTokens,
-				IROverheadTokens: m.IROverheadTokens,
-				MemoryReferences: m.MemoryReferences,
-				Constraints:      m.Constraints,
-				RiskNotes:        m.RiskNotes,
-				ExecutionSteps:   m.ExecutionSteps,
-				TotalNodes:       m.TotalNodes,
-				HighSignalNodes:  m.HighSignalNodes,
-				ToolResultNodes:  m.ToolResultNodes,
-				DecisionNodes:    m.DecisionNodes,
-				StrategyCount:    m.StrategyCount,
-				LearningCount:    m.LearningCount,
-			}
-		}
 	case event.ApprovalRequest:
 		w.Approval = &Approval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject, Reason: e.Approval.Reason, Fresh: e.Approval.Fresh}
 		if e.Approval.MCPTrust != nil {
@@ -137,24 +117,6 @@ type MemoryCitation struct {
 	LineEnd   int    `json:"lineEnd,omitempty"`
 	Note      string `json:"note,omitempty"`
 	Kind      string `json:"kind,omitempty"`
-}
-
-// MemoryCompiler is the JSON form of content-free Memory v5 usage metrics.
-type MemoryCompiler struct {
-	Injected         bool `json:"injected"`
-	UsefulIR         bool `json:"usefulIR"`
-	CompiledTokens   int  `json:"compiledTokens"`
-	IROverheadTokens int  `json:"irOverheadTokens"`
-	MemoryReferences int  `json:"memoryReferences"`
-	Constraints      int  `json:"constraints"`
-	RiskNotes        int  `json:"riskNotes"`
-	ExecutionSteps   int  `json:"executionSteps"`
-	TotalNodes       int  `json:"totalNodes"`
-	HighSignalNodes  int  `json:"highSignalNodes"`
-	ToolResultNodes  int  `json:"toolResultNodes"`
-	DecisionNodes    int  `json:"decisionNodes"`
-	StrategyCount    int  `json:"strategyCount"`
-	LearningCount    int  `json:"learningCount"`
 }
 
 // ToWireMemoryCitations converts local memory references into frontend JSON.
@@ -380,24 +342,23 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 }
 
 var kindNames = map[event.Kind]string{
-	event.TurnStarted:              "turn_started",
-	event.Reasoning:                "reasoning",
-	event.Text:                     "text",
-	event.Message:                  "message",
-	event.ToolDispatch:             "tool_dispatch",
-	event.ToolResult:               "tool_result",
-	event.Usage:                    "usage",
-	event.Notice:                   "notice",
-	event.Phase:                    "phase",
-	event.ApprovalRequest:          "approval_request",
-	event.AskRequest:               "ask_request",
-	event.TurnDone:                 "turn_done",
-	event.CompactionStarted:        "compaction_started",
-	event.CompactionDone:           "compaction_done",
-	event.ToolProgress:             "tool_progress",
-	event.MCPSurfaceReady:          "mcp_surface_ready",
-	event.Retrying:                 "retrying",
-	event.Steer:                    "steer",
-	event.MemoryCompilerStatsEvent: "memory_compiler_stats",
-	event.GuardianAssessment:       "guardian_assessment",
+	event.TurnStarted:        "turn_started",
+	event.Reasoning:          "reasoning",
+	event.Text:               "text",
+	event.Message:            "message",
+	event.ToolDispatch:       "tool_dispatch",
+	event.ToolResult:         "tool_result",
+	event.Usage:              "usage",
+	event.Notice:             "notice",
+	event.Phase:              "phase",
+	event.ApprovalRequest:    "approval_request",
+	event.AskRequest:         "ask_request",
+	event.TurnDone:           "turn_done",
+	event.CompactionStarted:  "compaction_started",
+	event.CompactionDone:     "compaction_done",
+	event.ToolProgress:       "tool_progress",
+	event.MCPSurfaceReady:    "mcp_surface_ready",
+	event.Retrying:           "retrying",
+	event.Steer:              "steer",
+	event.GuardianAssessment: "guardian_assessment",
 }
