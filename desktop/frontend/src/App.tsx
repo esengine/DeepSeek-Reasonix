@@ -289,25 +289,48 @@ type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string }
 type WorkspaceInsertTarget = "composer" | "planRevision";
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
-function WindowsWindowControls() {
+function useWindowsMaximised(enabled: boolean): readonly [boolean, () => void] {
   const [maximised, setMaximised] = useState(false);
+  const syncGenerationRef = useRef(0);
 
   const syncMaximised = useCallback(() => {
+    if (!enabled) return;
+    const generation = ++syncGenerationRef.current;
     void app.IsMainWindowMaximised()
-      .then(setMaximised)
-      .catch(() => setMaximised(false));
-  }, []);
+      .then((value) => {
+        if (generation === syncGenerationRef.current) setMaximised(value);
+      })
+      .catch(() => {
+        if (generation === syncGenerationRef.current) setMaximised(false);
+      });
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      syncGenerationRef.current += 1;
+      setMaximised(false);
+      return;
+    }
     syncMaximised();
     window.addEventListener("resize", syncMaximised);
     window.addEventListener("focus", syncMaximised);
     return () => {
+      syncGenerationRef.current += 1;
       window.removeEventListener("resize", syncMaximised);
       window.removeEventListener("focus", syncMaximised);
     };
-  }, [syncMaximised]);
+  }, [enabled, syncMaximised]);
 
+  return [maximised, syncMaximised] as const;
+}
+
+function WindowsWindowControls({
+  maximised,
+  syncMaximised,
+}: {
+  maximised: boolean;
+  syncMaximised: () => void;
+}) {
   const toggleMaximise = useCallback(() => {
     void app.ToggleMaximiseMainWindow()
       .then(() => window.setTimeout(syncMaximised, 80))
@@ -1178,7 +1201,9 @@ export default function App() {
   const transientOverlayDismissSignal = useOverlayStore((s) => s.transientOverlayDismissSignal);
   const setTransientOverlayDismissSignal = useOverlayStore((s) => s.setTransientOverlayDismissSignal);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
-  useWailsResizeFix(desktopPlatform === "windows");
+  const windowsFramelessChrome = desktopPlatform === "windows";
+  const [mainWindowMaximised, syncMainWindowMaximised] = useWindowsMaximised(windowsFramelessChrome);
+  useWailsResizeFix(windowsFramelessChrome, mainWindowMaximised);
   const [statusBarStyle, setStatusBarStyle] = useState<"icon" | "text">("text");
   const [statusBarItems, setStatusBarItems] = useState<StatusBarItemId[]>(() => [...DEFAULT_STATUS_BAR_ITEMS]);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
@@ -3256,15 +3281,16 @@ export default function App() {
   const topicbarCanRename = !sidebarImDetailConnection && Boolean(activeTab?.topicId);
   const topicbarTitleEditSize = Math.min(56, Math.max(4, topicTitleDraft.length || topicbarTitle.length || 1));
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const windowsFramelessChrome = desktopPlatform === "windows";
   const handleWindowsTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!windowsFramelessChrome) return;
     const target = event.target as HTMLElement | null;
     if (!target?.closest(".app-chrome, .topicbar, .workbench-dock__tools")) return;
     if (target.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
     event.preventDefault();
-    void app.ToggleMaximiseMainWindow();
-  }, [windowsFramelessChrome]);
+    void app.ToggleMaximiseMainWindow()
+      .then(() => window.setTimeout(syncMainWindowMaximised, 80))
+      .catch(() => undefined);
+  }, [syncMainWindowMaximised, windowsFramelessChrome]);
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
   const appChromeHidden = sidebarWorkbench || sidebarCreation;
@@ -4198,7 +4224,12 @@ export default function App() {
         resetKey={activeTabId ?? ""}
         onAddToChat={addSelectedTextToComposer}
       />
-      {windowsFramelessChrome && <WindowsWindowControls />}
+      {windowsFramelessChrome && (
+        <WindowsWindowControls
+          maximised={mainWindowMaximised}
+          syncMaximised={syncMainWindowMaximised}
+        />
+      )}
     </div>
     </ShellExpandProvider>
   );
