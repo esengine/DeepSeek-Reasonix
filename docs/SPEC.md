@@ -154,13 +154,19 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   process uses the server's writer sandbox because process confinement cannot
   change per RPC; read-only eligibility and destructive approval remain local
   dispatch gates rather than separate process sandboxes.
-- Configuration provenance is runtime metadata. User config, legacy user MCP,
-  and verified plugin-package servers are authorized by installation: the host
-  records their current trust snapshot automatically and ordinary calls default
-  to direct approval. Project `reasonix.toml` and `.mcp.json` servers require a
-  session/workspace launch grant for the exact stable identity before any
-  process or network transport is created. Existing receipts count as launch
-  grants for backward compatibility; identity changes invalidate the grant.
+- Configuration provenance is runtime metadata. Explicit installation from the
+  user config, Desktop, `/mcp add`, or `install_source` is authorization: the
+  host connects the server immediately when installation happens in a live
+  session, records a durable exact command/endpoint launch grant for
+  project-scoped installs, and calls default to direct approval.
+  Project `reasonix.toml` and `.mcp.json` servers that are only
+  discovered from the repository require one durable launch confirmation before
+  any process or network transport is created. Confirmation records the exact
+  identity without a temporary initialize/tools-list preflight, so the normal
+  runtime starts the server only once; matching grants reconnect automatically
+  and identity changes require confirmation again. During the compatibility
+  window, an exact old workspace receipt may migrate only into this launch
+  grant; its former tool-level authority is ignored.
 - Each remote tool is adapted to the `Tool` interface and injected into the run
   registry, namespaced `mcp__<server>__<tool>` (spaces normalised to `_`) to
   match Claude Code and avoid clashes.
@@ -326,20 +332,26 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   hard block in *every* mode: the tool never executes and the model receives a
   "blocked" result it can adapt to (the same shape as a plan-mode refusal).
 - **MCP approval policy.** Installed MCP tools may set a server default and raw
-  tool overrides using `auto|prompt|writes|approve`. Precedence is explicit deny,
-  `destructiveHint`, raw-tool mode, server default, then global Ask/Auto/YOLO.
+  tool overrides using `auto|prompt|writes|approve`. A raw-tool mode overrides
+  the server or source-aware default; explicit deny still wins, `approve`
+  permits the call directly, and `destructiveHint` requires a fresh review for
+  every remaining mode before global Ask/Auto/YOLO is considered.
   A user-authorized server with no explicit MCP approval fields defaults to
-  `approve`; project-provided servers retain `auto`. `auto` delegates to the ordinary permission decision; `prompt` reviews every
-  call; `writes` reviews writers only; and `approve` allows ordinary calls.
+  `approve`; repository-provided servers retain `auto` until their exact launch
+  is authorized, then the same source-aware default applies. `auto` delegates
+  to the ordinary permission decision; `prompt` reviews every call; `writes`
+  reviews writers only; and `approve` allows all calls directly.
   `approvals_reviewer = "user"` uses the interactive user, while `auto_review`
   sends the calls that need review (`prompt`, writer hits under `writes`, and
   `auto` calls the global posture would Ask about) to the session Guardian; a
   successful allow/deny verdict is final. A missing, timed-out, failed, or
   indeterminate reviewer degrades to fresh human approval — a prompt that
   Auto/YOLO, the approved-plan window, and session grants cannot answer — and
-  non-interactive sessions fail closed. A destructive call always requires a
-  fresh human approval on every invocation: no reviewer, session grant, or
-  Auto/YOLO posture can authorize it. All of this is local metadata and is
+  non-interactive sessions fail closed. For `auto`, `prompt`, and `writes`, a
+  destructive call requires fresh human approval on every invocation: no
+  reviewer, session grant, or Auto/YOLO posture can authorize it. An effective
+  `approve` mode represents the user's install/authorization decision and
+  permits destructive calls directly. All of this is local metadata and is
   absent from provider-visible tool schemas.
 - **Relationship to plan mode.** Plan mode (§3.4) is a plan-first collaboration
   workflow, not an all-tools read-only mode. Before Permissions/Sandbox, the
@@ -351,11 +363,11 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   Ordinary built-in and Bash calls then use the same Ask/Auto/YOLO, explicit
   `ask`/`deny`, and Sandbox path as Standard mode; blocked MCP writers regain
   their normal approval flow after Plan exits. A third-party MCP `readOnlyHint` affects ordinary permission and dispatch
-  classification, but it does not grant trust to the dedicated planner or
+  classification, but it does not grant access to the dedicated planner or
   read-only sub-agent registries; use a locally audited
   `trusted_read_only_tools` entry for those. The legacy
   `[agent].plan_mode_allowed_tools` field is still decoded and can act as a
-  concrete MCP read-only trust alias, while `plan_mode_read_only_commands` is
+  concrete MCP read-only compatibility alias, while `plan_mode_read_only_commands` is
   retained for config/session round trips. Neither field grants or revokes calls
   in the main Plan workflow. `read_only_task` and `read_only_skill` remain strict
   read-only capabilities with their own tool registry and safe foreground Bash;
@@ -596,7 +608,7 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
 temperature       = 0.0
 reasoning_language = "auto"       # visible reasoning text: auto|zh|en
-# plan_mode_allowed_tools = ["mcp__legacy__reader"]   # legacy MCP read-only trust alias; does not change Plan availability
+# plan_mode_allowed_tools = ["mcp__legacy__reader"]   # legacy MCP read-only alias; does not change Plan availability
 # plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
 # planner_model = "deepseek-pro"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills

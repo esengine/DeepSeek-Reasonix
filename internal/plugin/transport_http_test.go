@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"reasonix/internal/mcptrust"
 	"reasonix/internal/tool"
 )
 
@@ -321,66 +319,4 @@ func names(ts []tool.Tool) []string {
 		out[i] = t.Name()
 	}
 	return out
-}
-
-// TestHTTPStartMigratesLegacyURLReceiptBeforeIdentityBlock covers the real
-// eager/cache-miss startup chain: the pre-start identity gate must migrate a
-// receipt still carrying the legacy URL fingerprint instead of blocking the
-// server, credential rotation must keep starting, and a genuine resource
-// scope change must still block before any network handshake.
-func TestHTTPStartMigratesLegacyURLReceiptBeforeIdentityBlock(t *testing.T) {
-	redirectCache(t)
-	srv := mcpHTTPServer(t, false)
-	defer srv.Close()
-
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), t.TempDir())
-	spec := Spec{
-		Name: "h", Type: "http",
-		URL:          srv.URL + "?access_token=first&workspace=alpha",
-		Headers:      map[string]string{"Authorization": "Bearer secret"},
-		ConfigSource: "workspace_config", TrustManager: manager,
-	}
-	legacyFP, ok := legacySpecIdentityFingerprint(spec)
-	if !ok {
-		t.Fatal("legacy identity fingerprint unavailable for credential-bearing URL")
-	}
-	caps := []mcptrust.Capability{{RawName: "greet", ModelName: "mcp__h__greet", ReadOnly: true}}
-	if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, "h", "workspace_config", legacyFP, "", caps); err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	host, tools, err := StartAll(ctx, []Spec{spec})
-	if err != nil {
-		t.Fatalf("eager start with a legacy receipt was blocked: %v", err)
-	}
-	defer host.Close()
-	if len(tools) != 1 || tools[0].Name() != "mcp__h__greet" {
-		t.Fatalf("tools = %v, want [mcp__h__greet]", names(tools))
-	}
-	current, err := specIdentityFingerprint(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, changed, err := manager.IdentityChanged("h", "workspace_config", current); err != nil || changed {
-		t.Fatalf("receipt did not migrate at the pre-start gate: changed=%v err=%v", changed, err)
-	}
-
-	// Credential rotation keeps the migrated identity and keeps starting.
-	rotated := spec
-	rotated.URL = srv.URL + "?access_token=second&workspace=alpha"
-	host2, _, err := StartAll(ctx, []Spec{rotated})
-	if err != nil {
-		t.Fatalf("credential rotation blocked startup: %v", err)
-	}
-	host2.Close()
-
-	// A moved resource scope is a genuine identity change and must still block
-	// before any process or network startup.
-	moved := spec
-	moved.URL = srv.URL + "?access_token=first&workspace=beta"
-	if _, _, err := StartAll(ctx, []Spec{moved}); err == nil || !strings.Contains(err.Error(), "identity changed") {
-		t.Fatalf("workspace change start = %v, want identity-changed block", err)
-	}
 }

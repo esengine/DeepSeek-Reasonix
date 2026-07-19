@@ -37,7 +37,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
 	"reasonix/internal/mcpcatalog"
-	"reasonix/internal/mcptrust"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/memory"
 	"reasonix/internal/migration"
 	"reasonix/internal/netclient"
@@ -481,13 +481,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	pluginSpecOptions := PluginSpecOptions{
 		DefaultCallTimeout:   time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
 		PlanModeAllowedTools: cfg.Agent.PlanModeAllowedTools,
-		TrustManager:         mcptrust.ForWorkspace(config.ReasonixHomeDir(), root),
+		LaunchManager:        mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
 		ConfigSource:         "workspace_config",
 		StateHome:            config.ReasonixHomeDir(),
 		WriterRoots:          writeRoots,
 		ForbidReadRoots:      forbidReadRoots,
 		Network:              cfg.Sandbox.Network,
-		OfficialServers:      LoadOfficialMCPTrust(ctx, cfg),
+		OfficialServers:      LoadVerifiedMCPPackages(ctx, cfg),
 	}
 	autoStartEntries := cfg.AutoStartPlugins()
 	eagerEntries, bgEntries := partitionByTier(autoStartEntries)
@@ -499,12 +499,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		extraPlugins = nil
 	}
 	extraSpecs := applyDefaultMCPCallTimeout(
-		applyPlanModeAllowedMCPToolTrust(applyKnownPluginOverrides(extraPlugins, root), cfg.Agent.PlanModeAllowedTools),
+		applyPlanModeAllowedMCPReaders(applyKnownPluginOverrides(extraPlugins, root), cfg.Agent.PlanModeAllowedTools),
 		pluginSpecOptions.DefaultCallTimeout,
 	)
 	for i := range extraSpecs {
-		if extraSpecs[i].TrustManager == nil {
-			extraSpecs[i].TrustManager = pluginSpecOptions.TrustManager
+		if extraSpecs[i].LaunchManager == nil {
+			extraSpecs[i].LaunchManager = pluginSpecOptions.LaunchManager
 		}
 		if strings.TrimSpace(extraSpecs[i].ConfigSource) == "" {
 			extraSpecs[i].ConfigSource = "host_session"
@@ -1181,8 +1181,25 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				if opts.Stderr != nil {
 					spec.Stderr = opts.Stderr
 				}
+				// Applying an install plan is already an explicit user decision.
+				// Project-scoped installs retain project provenance, but record the
+				// exact durable launch grant now so neither this connection nor the
+				// next session asks the user to authorize the same install again.
+				launchAuthorized := false
+				if spec.RequireLaunchApproval {
+					if err := plugin.AuthorizeSpecLaunch(ctx, spec); err != nil {
+						return installsource.MCPConnectResult{}, err
+					}
+					launchAuthorized = true
+				}
 				tools, err := pluginHost.Add(ctx, spec)
 				if err != nil {
+					// The install did not complete, so do not retain consent for a
+					// server that never connected. Replacement rollback reauthorizes
+					// the previous project entry before reconnecting it.
+					if launchAuthorized && spec.LaunchManager != nil {
+						_ = spec.LaunchManager.Revoke(spec.Name)
+					}
 					return installsource.MCPConnectResult{}, err
 				}
 				reg.RemovePrefix(plugin.ToolPrefix(spec.Name))
@@ -1194,6 +1211,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				disconnect := func() {
 					if prefix, ok := pluginHost.Remove(spec.Name); ok {
 						reg.RemovePrefix(prefix)
+					}
+					if spec.LaunchManager != nil {
+						_ = spec.LaunchManager.Revoke(spec.Name)
 					}
 				}
 				return installsource.MCPConnectResult{
@@ -1580,12 +1600,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			if spec == nil {
 				return
 			}
-			spec.TrustManager = pluginSpecOptions.TrustManager
+			spec.LaunchManager = pluginSpecOptions.LaunchManager
 			if strings.TrimSpace(spec.ConfigSource) == "" {
 				spec.ConfigSource = pluginSpecOptions.ConfigSource
 			}
 			applyMCPIsolation(spec, root, pluginSpecOptions)
-			applyOfficialMCPTrust(spec, pluginSpecOptions)
+			applyVerifiedMCPPackage(spec, pluginSpecOptions)
 		},
 		WorkspaceRoot:          root,
 		ExternalFolderToolRefs: readPathResolver,
@@ -1630,7 +1650,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ctrlOpts.Classifier = classifier
 	}
 	ctrl := control.New(ctrlOpts)
-	refreshMCPCatalogInBackground(pluginHost)
+	refreshMCPPackageRevocationsInBackground(pluginHost)
 	if tokenDelivery {
 		var router *capability.SemanticRouter
 		// Prefer agent.subagent_models["capability-router"] when configured.
@@ -1651,7 +1671,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	return ctrl, nil
 }
 
-var mcpCatalogRefreshState struct {
+var mcpPackageRevocationRefresh struct {
 	sync.Mutex
 	running bool
 	last    time.Time
@@ -1659,40 +1679,40 @@ var mcpCatalogRefreshState struct {
 	hosts   map[*plugin.Host]struct{}
 }
 
-func refreshMCPCatalogInBackground(host *plugin.Host) {
+func refreshMCPPackageRevocationsInBackground(host *plugin.Host) {
 	if host == nil {
 		return
 	}
-	mcpCatalogRefreshState.Lock()
-	if !mcpCatalogRefreshState.last.IsZero() && time.Since(mcpCatalogRefreshState.last) < 6*time.Hour {
-		index := mcpCatalogRefreshState.index
-		mcpCatalogRefreshState.Unlock()
+	mcpPackageRevocationRefresh.Lock()
+	if !mcpPackageRevocationRefresh.last.IsZero() && time.Since(mcpPackageRevocationRefresh.last) < 6*time.Hour {
+		index := mcpPackageRevocationRefresh.index
+		mcpPackageRevocationRefresh.Unlock()
 		host.ApplyCatalogRevocations(index.RevokedEntryIDs())
 		return
 	}
-	if mcpCatalogRefreshState.hosts == nil {
-		mcpCatalogRefreshState.hosts = map[*plugin.Host]struct{}{}
+	if mcpPackageRevocationRefresh.hosts == nil {
+		mcpPackageRevocationRefresh.hosts = map[*plugin.Host]struct{}{}
 	}
-	mcpCatalogRefreshState.hosts[host] = struct{}{}
-	if mcpCatalogRefreshState.running {
-		mcpCatalogRefreshState.Unlock()
+	mcpPackageRevocationRefresh.hosts[host] = struct{}{}
+	if mcpPackageRevocationRefresh.running {
+		mcpPackageRevocationRefresh.Unlock()
 		return
 	}
-	mcpCatalogRefreshState.running = true
-	mcpCatalogRefreshState.Unlock()
+	mcpPackageRevocationRefresh.running = true
+	mcpPackageRevocationRefresh.Unlock()
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		result, err := (mcpcatalog.Loader{CacheDir: config.CacheDir()}).Load(ctx, true)
-		mcpCatalogRefreshState.Lock()
-		hosts := mcpCatalogRefreshState.hosts
-		mcpCatalogRefreshState.hosts = map[*plugin.Host]struct{}{}
-		mcpCatalogRefreshState.running = false
+		mcpPackageRevocationRefresh.Lock()
+		hosts := mcpPackageRevocationRefresh.hosts
+		mcpPackageRevocationRefresh.hosts = map[*plugin.Host]struct{}{}
+		mcpPackageRevocationRefresh.running = false
 		if err == nil {
-			mcpCatalogRefreshState.last = time.Now()
-			mcpCatalogRefreshState.index = result.Index
+			mcpPackageRevocationRefresh.last = time.Now()
+			mcpPackageRevocationRefresh.index = result.Index
 		}
-		mcpCatalogRefreshState.Unlock()
+		mcpPackageRevocationRefresh.Unlock()
 		if err != nil {
 			slog.Warn("refresh signed MCP catalog", "err", err)
 			return
@@ -2216,16 +2236,16 @@ func PluginSpecsForRoot(entries []config.PluginEntry, workspaceRoot string) []pl
 type PluginSpecOptions struct {
 	DefaultCallTimeout   time.Duration
 	PlanModeAllowedTools []string
-	TrustManager         *mcptrust.Manager
+	LaunchManager        *mcplaunch.Manager
 	ConfigSource         string
 	StateHome            string
 	WriterRoots          []string
 	ForbidReadRoots      []string
 	Network              bool
-	OfficialServers      map[string]OfficialMCPTrust
+	OfficialServers      map[string]VerifiedMCPPackage
 }
 
-type OfficialMCPTrust struct {
+type VerifiedMCPPackage struct {
 	CatalogEntryID  string
 	Readers         []string
 	PackageDigest   string
@@ -2253,7 +2273,7 @@ func PluginSpecsForRootWithOptions(entries []config.PluginEntry, workspaceRoot s
 	for i, e := range entries {
 		specs[i] = pluginSpecFromEntryWithOptions(e, workspaceRoot, opts)
 	}
-	return applyPlanModeAllowedMCPToolTrust(specs, opts.PlanModeAllowedTools)
+	return applyPlanModeAllowedMCPReaders(specs, opts.PlanModeAllowedTools)
 }
 
 func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, opts PluginSpecOptions) plugin.Spec {
@@ -2277,18 +2297,17 @@ func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, 
 		DefaultToolsApprovalMode: e.DefaultToolsApprovalMode,
 		ToolApprovalModes:        mcpToolApprovalModes(e.Tools),
 		ApprovalsReviewer:        e.ApprovalsReviewer,
-		TrustManager:             opts.TrustManager,
+		LaunchManager:            opts.LaunchManager,
 		ConfigSource:             configSource,
-		AutoTrust:                e.Source.UserAuthorized(),
 		ImplicitApproval:         e.Source.UserAuthorized(),
 		RequireLaunchApproval:    e.Source.RequiresLaunchApproval(),
 	}, workspaceRoot)
 	applyMCPIsolation(&spec, workspaceRoot, opts)
-	applyOfficialMCPTrust(&spec, opts)
+	applyVerifiedMCPPackage(&spec, opts)
 	return spec
 }
 
-func applyOfficialMCPTrust(spec *plugin.Spec, opts PluginSpecOptions) {
+func applyVerifiedMCPPackage(spec *plugin.Spec, opts PluginSpecOptions) {
 	if spec == nil {
 		return
 	}
@@ -2302,7 +2321,6 @@ func applyOfficialMCPTrust(spec *plugin.Spec, opts PluginSpecOptions) {
 		spec.PackageRoot = official.PackageRoot
 		spec.VerifiedVersion = official.Version
 		spec.CatalogSequence = official.CatalogSequence
-		spec.AutoTrust = true
 		spec.ImplicitApproval = true
 		spec.RequireLaunchApproval = false
 		spec.ReaderSandbox.Network = official.Network
@@ -2310,11 +2328,10 @@ func applyOfficialMCPTrust(spec *plugin.Spec, opts PluginSpecOptions) {
 	}
 }
 
-// LoadOfficialMCPTrust resolves verified installed package metadata against the
-// signed catalog. Frontends use the same helper as boot so inspect/revoke never
-// silently downgrade an official server to an unrelated custom-server spec.
-func LoadOfficialMCPTrust(ctx context.Context, cfg *config.Config) map[string]OfficialMCPTrust {
-	out := map[string]OfficialMCPTrust{}
+// LoadVerifiedMCPPackages resolves installed package metadata against the
+// signed catalog so every runtime uses the same verified package policy.
+func LoadVerifiedMCPPackages(ctx context.Context, cfg *config.Config) map[string]VerifiedMCPPackage {
+	out := map[string]VerifiedMCPPackage{}
 	if cfg == nil {
 		return out
 	}
@@ -2342,7 +2359,7 @@ func LoadOfficialMCPTrust(ctx context.Context, cfg *config.Config) map[string]Of
 				if server.Name != configured.Name {
 					continue
 				}
-				out[configured.Name] = OfficialMCPTrust{
+				out[configured.Name] = VerifiedMCPPackage{
 					CatalogEntryID: entry.ID, Readers: append([]string(nil), server.Readers...),
 					PackageDigest: entry.PackageSHA256, PackageRoot: pluginpkg.ResolveRoot(home, installed.Root), Version: entry.Version,
 					CatalogSequence: result.Index.Sequence, Network: server.Network, Transport: server.Transport,
@@ -2455,7 +2472,7 @@ func applyDefaultMCPCallTimeout(specs []plugin.Spec, timeout time.Duration) []pl
 	return out
 }
 
-func applyPlanModeAllowedMCPToolTrust(specs []plugin.Spec, allowedTools []string) []plugin.Spec {
+func applyPlanModeAllowedMCPReaders(specs []plugin.Spec, allowedTools []string) []plugin.Spec {
 	if len(specs) == 0 || len(allowedTools) == 0 {
 		return specs
 	}

@@ -1370,15 +1370,14 @@ func strictReadOnlyExecutionRegistry(reg *tool.Registry) *tool.Registry {
 		if !ok || !target.ReadOnly() || planModeUntrustedReadOnly(target) || mcpDestructiveHint(target) {
 			continue
 		}
-		// An installed MCP reader needs a positive trust authority (receipts),
-		// not a server hint carried through the no-TrustManager compatibility
-		// path: strict children fail closed without a trust store.
+		// An installed MCP reader needs an explicit local or signed package
+		// declaration, not a server hint carried through a compatibility path.
 		if isInstalledMCPTool(target) {
-			if authority, ok := target.(tool.ReadOnlyExecutionTrustAuthority); !ok || !authority.ReadOnlyExecutionTrustAuthority() {
+			if authority, ok := target.(tool.ReadOnlyExecutionAuthority); !ok || !authority.ReadOnlyExecutionAuthority() {
 				continue
 			}
 		}
-		if mutation, ok := target.(tool.ReadOnlyExecutionHostMutation); ok && mutation.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsTrustedMCPStartup(target) {
+		if mutation, ok := target.(tool.ReadOnlyExecutionHostMutation); ok && mutation.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsMCPStartup(target) {
 			continue
 		}
 		filtered.Add(target)

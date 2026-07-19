@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/tool"
 )
 
@@ -21,6 +23,35 @@ type destructiveLazyTarget struct {
 type mutableLazyTarget struct {
 	name  string
 	calls int
+}
+
+func TestLazyAuthorizedProjectPlaceholderUsesDirectApproval(t *testing.T) {
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), t.TempDir())
+	spec := Spec{
+		Name: "project-http", Type: "http", URL: "https://mcp.example.com/mcp",
+		ConfigSource: "project_config", LaunchManager: manager, RequireLaunchApproval: true,
+	}
+	if err := AuthorizeSpecLaunch(context.Background(), spec); err != nil {
+		t.Fatalf("AuthorizeSpecLaunch: %v", err)
+	}
+	cs := &CachedSchema{Tools: []CachedTool{{
+		Name: "write", Description: "Write data.", Schema: json.RawMessage(`{"type":"object"}`),
+	}}}
+	host := NewHost()
+	defer host.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tools := LazyToolset(spec, cs, host, tool.NewRegistry(), ctx, false)
+	if len(tools) != 1 {
+		t.Fatalf("lazy tools = %d, want 1", len(tools))
+	}
+	policy, ok := tools[0].(tool.MCPApprovalPolicy)
+	if !ok {
+		t.Fatalf("lazy project tool %T does not expose MCP approval policy", tools[0])
+	}
+	if got := policy.MCPApprovalMode(); got != tool.MCPApprovalApprove {
+		t.Fatalf("lazy authorized project approval = %q, want direct approval", got)
+	}
 }
 
 func (t *mutableLazyTarget) Name() string            { return t.name }

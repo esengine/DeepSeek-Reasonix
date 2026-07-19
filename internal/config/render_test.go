@@ -543,7 +543,7 @@ func TestRenderTOMLDocumentsPlanModeAllowedTools(t *testing.T) {
 	if !strings.Contains(rendered, `plan_mode_allowed_tools = ["custom_reader"]`) {
 		t.Fatalf("rendered config should preserve plan_mode_allowed_tools:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "legacy MCP read-only trust aliases") || !strings.Contains(rendered, "does not change Plan availability") {
+	if !strings.Contains(rendered, "legacy MCP read-only aliases") || !strings.Contains(rendered, "does not change Plan availability") {
 		t.Fatalf("rendered config should document legacy plan_mode_allowed_tools semantics:\n%s", rendered)
 	}
 
@@ -577,7 +577,7 @@ func TestRenderTOMLPreservesLegacyPluginReadOnlyOverrides(t *testing.T) {
 	if !strings.Contains(rendered, `trusted_read_only_tools = ["issue_read", "pull_request_read"]`) {
 		t.Fatalf("rendered config should preserve trusted_read_only_tools:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "local Plan/read-only-research trust for audited raw MCP reader names") {
+	if !strings.Contains(rendered, "explicit Plan/read-only-research declaration for audited raw MCP reader names") {
 		t.Fatalf("rendered config should document the legacy trusted_read_only_tools semantics:\n%s", rendered)
 	}
 

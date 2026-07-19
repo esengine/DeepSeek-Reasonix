@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -741,6 +742,47 @@ Authorization = "Bearer ${TOML_TOKEN}"
 	}
 	if !strings.Contains(string(mcpRaw), "access_token=json") {
 		t.Fatalf(".mcp.json collision entry should be left untouched:\n%s", mcpRaw)
+	}
+}
+
+func TestClearPluginAuthenticationInSourceForRootDoesNotFollowWorkingDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	write := func(root, token string) {
+		t.Helper()
+		raw := fmt.Sprintf(`[[plugins]]
+name = "dida"
+type = "http"
+url = "https://example.test/mcp?access_token=%s&workspace=main"
+`, token)
+		if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(raw), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(rootA, "root-a")
+	write(rootB, "root-b")
+	t.Chdir(rootB)
+
+	updated, changed, source, err := ClearPluginAuthenticationInSourceForRoot(rootA, "dida")
+	if err != nil {
+		t.Fatalf("ClearPluginAuthenticationInSourceForRoot: %v", err)
+	}
+	if !changed || updated.URL != "https://example.test/mcp?workspace=main" {
+		t.Fatalf("updated = %+v, changed = %v", updated, changed)
+	}
+	if want := filepath.Join(rootA, "reasonix.toml"); !samePath(source, want) {
+		t.Fatalf("source = %q, want %q", source, want)
+	}
+	rootBRaw, err := os.ReadFile(filepath.Join(rootB, "reasonix.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rootBRaw), "access_token=root-b") {
+		t.Fatalf("non-target workspace was modified:\n%s", rootBRaw)
 	}
 }
 

@@ -393,7 +393,7 @@ type Options struct {
 	// MCPDefaultCallTimeout is the global MCP call cap used by hot-connected
 	// servers when they do not declare a server- or tool-specific override.
 	MCPDefaultCallTimeout time.Duration
-	// MCPConfigureSpec injects host-local trust and isolation policy into every
+	// MCPConfigureSpec injects host-local launch and isolation policy into every
 	// hot-connected server without persisting that state in project config.
 	MCPConfigureSpec func(*plugin.Spec)
 	// WorkspaceRoot is the project root checkpoint restores are confined to ("" =
@@ -4350,7 +4350,6 @@ func (c *Controller) connectMCPServer(e config.PluginEntry) (int, error) {
 		ToolApprovalModes:        controllerMCPToolApprovalModes(exp.Tools),
 		ApprovalsReviewer:        exp.ApprovalsReviewer,
 		ConfigSource:             configSource,
-		AutoTrust:                exp.Source.UserAuthorized(),
 		ImplicitApproval:         exp.Source.UserAuthorized(),
 		RequireLaunchApproval:    exp.Source.RequiresLaunchApproval(),
 	}, c.WorkspaceRoot())
@@ -4874,9 +4873,9 @@ func (g gateApprover) ApproveMCP(ctx context.Context, toolName, subject string, 
 	if !forced && g.c.approval.preApproved(toolName, subject, args) {
 		return true, "", nil
 	}
-	// A destructive MCP call always requires a fresh user decision. This check
-	// deliberately precedes Guardian/auto_review so no reviewer, session grant,
-	// Auto, or YOLO posture can authorize it.
+	// A destructive MCP call routed here by the permission gate requires a fresh
+	// user decision. This check deliberately precedes Guardian/auto_review so no
+	// reviewer, session grant, Auto, or YOLO posture can authorize it.
 	if destructive {
 		return g.ApproveFresh(ctx, toolName, subject, args)
 	}
@@ -5585,44 +5584,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 }
 
 func (c *Controller) approvalRequestEvent(approval event.Approval) event.Event {
-	approval.MCPTrust = c.mcpTrustApprovalPayload(approval.Tool)
 	return event.Event{Kind: event.ApprovalRequest, Approval: approval}
-}
-
-func (c *Controller) mcpTrustApprovalPayload(toolName string) *event.MCPTrust {
-	registry := c.mcp.registry()
-	if registry == nil {
-		return nil
-	}
-	installed, ok := registry.Get(toolName)
-	if !ok {
-		return nil
-	}
-	meta, ok := installed.(interface{ MCPServerName() string })
-	if !ok || strings.TrimSpace(meta.MCPServerName()) == "" {
-		return nil
-	}
-	host := c.mcp.hostRef()
-	if host == nil {
-		return nil
-	}
-	inspection, err := host.InspectTrust(meta.MCPServerName())
-	if err != nil {
-		return nil
-	}
-	security := inspection.Security
-	payload := &event.MCPTrust{
-		Server: security.Name, TrustState: string(security.TrustState), TrustSource: string(security.TrustSource),
-		TrustScope: string(security.TrustScope), IsolationState: string(security.IsolationState),
-		IsolationReason: security.IsolationReason, IdentityChanged: security.IdentityChanged,
-		ChangedTools: append([]string{}, security.ChangedTools...), Readers: append([]string{}, inspection.Readers...),
-		Writers: append([]string{}, inspection.Writers...), Destructive: append([]string{}, inspection.Destructive...),
-		ToolChanges: make([]event.MCPToolChange, 0, len(security.ToolChanges)),
-	}
-	for _, change := range security.ToolChanges {
-		payload.ToolChanges = append(payload.ToolChanges, event.MCPToolChange{Name: change.Name, Kind: change.Kind})
-	}
-	return payload
 }
 
 func (c *Controller) emitRememberResult(r RememberResult) {

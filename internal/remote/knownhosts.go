@@ -22,6 +22,38 @@ type HostKeyQuestion struct {
 	Fingerprint string // ssh.FingerprintSHA256(key)
 }
 
+// KnownHostLocation identifies the OpenSSH record that conflicts with a
+// presented host key. It is intentionally structured so desktop clients can
+// keep machine-local paths out of the primary error message while still
+// exposing the exact record in an explicit security-details view.
+type KnownHostLocation struct {
+	Filename string
+	Line     int
+}
+
+// HostKeyMismatchError describes a presented key that contradicts an existing
+// known_hosts record. It unwraps to ErrHostKeyMismatch so callers can retain
+// the existing fail-closed classification without parsing error strings.
+type HostKeyMismatchError struct {
+	Host                 string
+	PresentedFingerprint string
+	Locations            []KnownHostLocation
+}
+
+func (e *HostKeyMismatchError) Error() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s for %s: presented %s; known_hosts records a different key",
+		ErrHostKeyMismatch, e.Host, e.PresentedFingerprint)
+	for _, location := range e.Locations {
+		if location.Filename != "" {
+			fmt.Fprintf(&b, " (%s:%d)", location.Filename, location.Line)
+		}
+	}
+	return b.String()
+}
+
+func (e *HostKeyMismatchError) Unwrap() error { return ErrHostKeyMismatch }
+
 // HostKeyPrompt is called for an unknown host key. Returning (true, nil)
 // accepts and persists it (trust on first use); (false, nil) rejects; a
 // non-nil error aborts the dial. A nil prompt means strict mode: unknown hosts
@@ -84,8 +116,7 @@ func (p *HostKeyPolicy) Callback(ctx context.Context, host string) (ssh.HostKeyC
 			if len(keyErr.Want) > 0 {
 				// A different key is on record for this host: hard fail, never
 				// promptable. Name the file:line so the user can inspect it.
-				return fmt.Errorf("%w for %s: presented %s; known_hosts records a different key%s",
-					ErrHostKeyMismatch, host, ssh.FingerprintSHA256(key), knownHostsLocations(keyErr))
+				return newHostKeyMismatchError(host, ssh.FingerprintSHA256(key), keyErr)
 			}
 			// len(Want)==0 => host unknown. Fall through to TOFU.
 		}
@@ -168,14 +199,12 @@ func (p *HostKeyPolicy) managedPath() string {
 	return defaultManagedKnownHosts()
 }
 
-func knownHostsLocations(e *knownhosts.KeyError) string {
-	var b strings.Builder
+func newHostKeyMismatchError(host, presented string, e *knownhosts.KeyError) error {
+	locations := make([]KnownHostLocation, 0, len(e.Want))
 	for _, k := range e.Want {
-		if k.Filename != "" {
-			fmt.Fprintf(&b, " (%s:%d)", k.Filename, k.Line)
-		}
+		locations = append(locations, KnownHostLocation{Filename: k.Filename, Line: k.Line})
 	}
-	return b.String()
+	return &HostKeyMismatchError{Host: host, PresentedFingerprint: presented, Locations: locations}
 }
 
 func asKeyError(err error, target **knownhosts.KeyError) bool {

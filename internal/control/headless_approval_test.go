@@ -109,12 +109,16 @@ func TestHeadlessYoloOnlyBypassesAutoMCPPolicy(t *testing.T) {
 		destructive bool
 	}{
 		{mode: "prompt"},
-		{mode: "approve", destructive: true},
 	} {
 		allow, reason, err := yolo.CheckMCP(context.Background(), "mcp__srv__write", "srv/write", nil, false, tc.destructive, tc.mode, "auto_review")
 		if err != nil || allow || !strings.Contains(reason, "non-interactive") {
 			t.Fatalf("mode=%s destructive=%v result=(%v,%q,%v), want fail closed", tc.mode, tc.destructive, allow, reason, err)
 		}
+	}
+
+	allow, reason, err := yolo.CheckMCP(context.Background(), "mcp__srv__write", "srv/write", nil, false, true, "approve", "auto_review")
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("approve destructive result=(%v,%q,%v), want allow without reviewer", allow, reason, err)
 	}
 }
 

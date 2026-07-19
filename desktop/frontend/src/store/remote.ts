@@ -16,12 +16,28 @@ import type {
 
 export type RemoteExplorerTab = "files" | "ports" | "server";
 
+export type RemoteStatusPopoverRequest = {
+  hostId: string;
+  nonce: number;
+};
+
+export class RemoteConnectionTimeoutError extends Error {
+  readonly hostId: string;
+
+  constructor(hostId: string) {
+    super(`Timed out connecting to ${hostId}`);
+    this.name = "RemoteConnectionTimeoutError";
+    this.hostId = hostId;
+  }
+}
+
 export type RemoteState = {
   hosts: RemoteHostView[];
   statuses: Record<string, RemoteConnectionStatus>;
   forwards: Record<string, RemoteForwardView[]>;
   servers: Record<string, RemoteServerView>;
   pendingFingerprint: RemoteFingerprintView | null;
+  statusPopoverRequest: RemoteStatusPopoverRequest | null;
   explorerOpen: boolean;
   explorerHostId: string | null;
   explorerTab: RemoteExplorerTab;
@@ -33,6 +49,8 @@ export type RemoteState = {
   setForwards: (hostId: string, forwards: RemoteForwardView[]) => void;
   setServer: (s: RemoteServerView) => void;
   clearPendingFingerprint: (expected?: RemoteFingerprintView) => void;
+  requestStatusPopover: (hostId: string) => void;
+  clearStatusPopoverRequest: (expected: RemoteStatusPopoverRequest) => void;
   openExplorer: (hostId: string) => void;
   closeExplorer: () => void;
   setExplorerTab: (tab: RemoteExplorerTab) => void;
@@ -44,6 +62,7 @@ export const useRemoteStore = create<RemoteState>((set) => ({
   forwards: {},
   servers: {},
   pendingFingerprint: null,
+  statusPopoverRequest: null,
   explorerOpen: false,
   explorerHostId: null,
   explorerTab: "files",
@@ -95,6 +114,22 @@ export const useRemoteStore = create<RemoteState>((set) => ({
       return { pendingFingerprint: null };
     }),
 
+  requestStatusPopover: (hostId) =>
+    set((state) => ({
+      statusPopoverRequest: {
+        hostId,
+        nonce: (state.statusPopoverRequest?.nonce ?? 0) + 1,
+      },
+    })),
+
+  clearStatusPopoverRequest: (expected) =>
+    set((state) => (
+      state.statusPopoverRequest?.hostId === expected.hostId &&
+      state.statusPopoverRequest.nonce === expected.nonce
+        ? { statusPopoverRequest: null }
+        : state
+    )),
+
   openExplorer: (hostId) => set({ explorerOpen: true, explorerHostId: hostId }),
   closeExplorer: () => set({ explorerOpen: false }),
   setExplorerTab: (tab) => set({ explorerTab: tab }),
@@ -121,6 +156,6 @@ export function waitForRemoteConnection(hostId: string, timeoutMs = 60_000): Pro
       if (connected(status?.state)) finish();
       else if (status?.state === "stopped" && status.error) finish(new Error(status.error));
     });
-    const timer = setTimeout(() => finish(new Error(`Timed out connecting to ${hostId}`)), timeoutMs);
+    const timer = setTimeout(() => finish(new RemoteConnectionTimeoutError(hostId)), timeoutMs);
   });
 }

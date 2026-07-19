@@ -826,6 +826,9 @@ func TestApplyRemoteMCPURLConnectsAndPersists(t *testing.T) {
 	if len(stub.connected) != 1 || stub.connected[0].Name != "example" {
 		t.Fatalf("connected = %+v", stub.connected)
 	}
+	if stub.connected[0].Source != config.MCPSourceProjectConfig {
+		t.Fatalf("project install live source = %q, want %q", stub.connected[0].Source, config.MCPSourceProjectConfig)
+	}
 	if resp.Actions[0].RiskLevel != RiskHigh {
 		t.Errorf("auth headers should produce RiskHigh, got %q", resp.Actions[0].RiskLevel)
 	}
@@ -858,6 +861,9 @@ func TestApplyRemoteMCPURLDefaultsGlobal(t *testing.T) {
 	userCfg := config.LoadForEdit(config.UserConfigPath())
 	if p, ok := findPlugin(userCfg.Plugins, "global-default"); !ok || p.URL != "https://global.example.com/mcp" {
 		t.Fatalf("global config plugins = %+v, want global-default", userCfg.Plugins)
+	}
+	if len(stub.connected) != 1 || stub.connected[0].Source != config.MCPSourceUserConfig {
+		t.Fatalf("global install live source = %+v, want source %q", stub.connected, config.MCPSourceUserConfig)
 	}
 	projectCfg := config.LoadForEdit(filepath.Join(project, "reasonix.toml"))
 	if _, ok := findPlugin(projectCfg.Plugins, "global-default"); ok {

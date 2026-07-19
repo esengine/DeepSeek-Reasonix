@@ -22,7 +22,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
-	"reasonix/internal/mcptrust"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
@@ -70,7 +70,7 @@ type Spec struct {
 	// annotations.readOnlyHint. It preserves known and legacy compatibility
 	// overrides; normal MCP classification should rely on server metadata.
 	ReadOnlyToolNames map[string]bool
-	// ReadOnlyModelToolNames marks trusted model-visible MCP tool names
+	// ReadOnlyModelToolNames marks explicitly declared model-visible MCP tool names
 	// ("mcp__<server>__<tool>") as read-only. This supports user-level
 	// declarations such as agent.plan_mode_allowed_tools without reverse-parsing
 	// normalized MCP tool names back into raw server-local names.
@@ -85,13 +85,12 @@ type Spec struct {
 	// legacy behavior: Guardian reviews ordinary Ask decisions, while destructive
 	// calls still require the user.
 	ApprovalsReviewer string
-	// TrustManager owns host-local MCP trust receipts for the active workspace.
+	// LaunchManager owns exact project launch grants and mutable launcher locks.
 	// It never contributes to SpecFingerprint or provider-visible tool schemas.
-	TrustManager *mcptrust.Manager
+	LaunchManager *mcplaunch.Manager
 	// ConfigSource disambiguates otherwise identical server names coming from
 	// workspace config, a host transport, or a verified plugin package.
 	ConfigSource           string
-	AutoTrust              bool
 	ImplicitApproval       bool
 	RequireLaunchApproval  bool
 	OfficialCatalogEntryID string
@@ -101,21 +100,21 @@ type Spec struct {
 	VerifiedVersion        string
 	CatalogSequence        uint64
 	// LaunchArgs and launcher metadata are host-local immutable resolutions for
-	// mutable package launchers. They never contribute to SpecFingerprint or the
+	// mutable package launchers. LauncherIdentityArgs is the same exact package
+	// resolution without an automatically injected offline/no-install flag: that
+	// enforcement-only flag changes process invocation but not the server identity
+	// the user approved. These fields never contribute to SpecFingerprint or the
 	// provider-visible tool surface; Args remains the user's stable config.
 	LaunchArgs              []string
+	LauncherIdentityArgs    []string
 	LauncherLocator         string
 	LauncherResolvedVersion string
 	LauncherDigest          string
-	// ReaderSandbox and WriterSandbox describe the host isolation policy used
-	// for trust evaluation. The persistent stdio process runs with WriterSandbox
+	// ReaderSandbox and WriterSandbox describe host isolation. The persistent stdio process runs with WriterSandbox
 	// so one stateful session is preserved across reads and writes.
 	ReaderSandbox sandbox.Spec
 	WriterSandbox sandbox.Spec
 	StateDir      string
-	// AllowIdentityDriftPreflight is set only by explicit user verification.
-	// Ordinary/lazy starts stop a changed server before creating its process.
-	AllowIdentityDriftPreflight bool
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
 	// raw name before namespacing. For example, StripRawPrefix="server_" turns
 	// "server_search" into "search", yielding "mcp__search__search" instead of
@@ -129,9 +128,9 @@ type Spec struct {
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a
 // request and returns its result (correlating by id internally); notify sends a
-// fire-and-forget notification; close releases resources. Server-initiated
-// messages (notifications, requests like roots/list) are ignored — Reasonix is a
-// tools/prompts/resources consumer, not a sampling/roots provider (see SPEC §9).
+// fire-and-forget notification; close releases resources. Server notifications
+// are ignored. Transports answer ping requests and reject unsupported client
+// capabilities such as roots or sampling with JSON-RPC method-not-found.
 type transport interface {
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
 	notify(ctx context.Context, method string, params any) error
@@ -573,10 +572,6 @@ type Client struct {
 	transport string // declared transport type, for /mcp status ("stdio"/"http")
 
 	identityFingerprint string
-	capabilities        []mcptrust.Capability
-	trustEvaluation     mcptrust.Evaluation
-	trustErr            error
-	isolationState      mcptrust.IsolationState
 
 	// Prompts and resources discovered during StartAll, stored here so the
 	// parallel startup can collect them per-client before merging into Host.
@@ -610,37 +605,6 @@ type ToolInfo struct {
 	ReadOnlyHint    bool
 	DestructiveHint bool
 	SchemaError     string
-	TrustedReader   bool
-}
-
-// SecurityStatus is host-local MCP trust state. It is intentionally exposed
-// only to local status/UI surfaces and never added to model-visible schemas or
-// the stable system-prompt prefix.
-type SecurityStatus struct {
-	Name            string
-	TrustState      mcptrust.TrustState
-	TrustSource     mcptrust.Source
-	TrustScope      mcptrust.Scope
-	IdentityChanged bool
-	ChangedTools    []string
-	ToolChanges     []mcptrust.ToolChange
-	Identity        string
-	TrustError      string
-	IsolationState  mcptrust.IsolationState
-	IsolationReason string
-	CatalogSequence uint64
-	VerifiedVersion string
-}
-
-// TrustInspection is the secret-free review payload shown before a user grants
-// session or workspace trust. It contains names and safety classes, never args,
-// environment/header values, URLs, or credentials.
-type TrustInspection struct {
-	Security               SecurityStatus
-	Readers                []string
-	Writers                []string
-	Destructive            []string
-	RequiresLaunchApproval bool
 }
 
 // ServerStatus summarises one connected server for the /mcp command.
@@ -654,20 +618,64 @@ type ServerStatus struct {
 	ToolList  []ToolInfo
 }
 
+// AuthorizeSpecLaunch records durable consent for an explicitly user-installed
+// project MCP without starting it a second time. The normal project discovery
+// path still requires a user action; install_source calls this only while
+// applying a plan the user already requested. Reuse an existing launcher lock
+// when one exists, but do not add a second network/version-resolution step to an
+// explicit install: the durable grant follows the exact configured command or
+// endpoint and future changes still invalidate it.
+func AuthorizeSpecLaunch(ctx context.Context, spec Spec) error {
+	return authorizeSpecLaunch(ctx, spec, false)
+}
+
+// AuthorizeProjectSpecLaunch records the one durable launch confirmation used
+// for repository-discovered MCP configuration. Mutable package launchers are
+// resolved and locked, but the MCP server itself is not started: the caller can
+// connect it exactly once after this function returns.
+func AuthorizeProjectSpecLaunch(ctx context.Context, spec Spec) error {
+	return authorizeSpecLaunch(ctx, spec, true)
+}
+
+func authorizeSpecLaunch(ctx context.Context, spec Spec, lockMutableLauncher bool) error {
+	if !spec.RequireLaunchApproval {
+		return nil
+	}
+	manager := spec.LaunchManager
+	if manager == nil {
+		return fmt.Errorf("MCP launch authorization store is unavailable")
+	}
+	var prepared Spec
+	var launcherLock *mcplaunch.LauncherLock
+	var err error
+	if lockMutableLauncher {
+		prepared, launcherLock, err = preparePersistentLauncher(ctx, spec)
+	} else {
+		prepared, err = applyStoredLauncherLock(spec)
+	}
+	if err != nil {
+		return err
+	}
+	identity, err := specIdentityFingerprint(ctx, prepared)
+	if err != nil {
+		return err
+	}
+	if launcherLock != nil {
+		// Store the resolution before the grant so a failed state write cannot
+		// leave an authorization whose exact launcher identity is unavailable.
+		if err := manager.PutLauncherLock(*launcherLock); err != nil {
+			return err
+		}
+	}
+	return manager.Authorize(prepared.Name, launchConfigSource(prepared), identity)
+}
+
 // Failure records one MCP server that was configured but could not connect.
 type Failure struct {
 	Name                   string
 	Transport              string
 	Error                  string
-	RequiresReverification bool
-}
-
-type identityChangedError struct {
-	server string
-}
-
-func (e *identityChangedError) Error() string {
-	return fmt.Sprintf("MCP server %q identity changed; blocked before process or network startup and requires explicit re-verification", e.server)
+	RequiresLaunchApproval bool
 }
 
 type launchApprovalError struct {
@@ -682,10 +690,9 @@ func (e *launchApprovalError) Error() string {
 	return fmt.Sprintf("project-provided MCP server %q is blocked before process or network startup until the user authorizes it", e.server)
 }
 
-func requiresReverification(err error) bool {
-	var identityTarget *identityChangedError
+func requiresLaunchApproval(err error) bool {
 	var launchTarget *launchApprovalError
-	return errors.As(err, &identityTarget) || errors.As(err, &launchTarget)
+	return errors.As(err, &launchTarget)
 }
 
 // Servers returns a status summary per connected server, in connection order.
@@ -718,284 +725,9 @@ func (h *Host) Servers() []ServerStatus {
 	return out
 }
 
-// SecurityStatuses returns one host-local trust summary per connected server.
-func (h *Host) SecurityStatuses() []SecurityStatus {
-	h.mu.RLock()
-	clients := append([]*Client(nil), h.clients...)
-	h.mu.RUnlock()
-	out := make([]SecurityStatus, 0, len(clients))
-	for _, c := range clients {
-		c.toolsMu.Lock()
-		status := c.securityStatusLocked()
-		c.toolsMu.Unlock()
-		out = append(out, status)
-	}
-	return out
-}
-
-// InspectTrust returns the already-observed initialize/tools-list snapshot for
-// one connected server. It never invokes an MCP tool.
-func (h *Host) InspectTrust(name string) (TrustInspection, error) {
-	c := h.client(name)
-	if c == nil {
-		return TrustInspection{}, fmt.Errorf("MCP server %q is not connected; run its preflight first", name)
-	}
-	c.toolsMu.Lock()
-	defer c.toolsMu.Unlock()
-	out := TrustInspection{Security: c.securityStatusLocked()}
-	for _, cap := range c.capabilities {
-		switch {
-		case cap.Destructive:
-			out.Destructive = append(out.Destructive, cap.RawName)
-		case cap.ReadOnly:
-			out.Readers = append(out.Readers, cap.RawName)
-		default:
-			out.Writers = append(out.Writers, cap.RawName)
-		}
-	}
-	sort.Strings(out.Readers)
-	sort.Strings(out.Writers)
-	sort.Strings(out.Destructive)
-	return out, nil
-}
-
-// InspectSpec performs initialize/tools-list in a temporary connection and
-// closes it without invoking any tool. Callers use this for an unconnected
-// server before presenting the trust decision.
-func InspectSpec(ctx context.Context, spec Spec) (TrustInspection, error) {
-	var err error
-	spec, err = applyStoredLauncherLock(spec)
-	if err != nil {
-		return TrustInspection{}, err
-	}
-	identity, err := specIdentityFingerprint(ctx, spec)
-	if err != nil {
-		return TrustInspection{}, err
-	}
-	if spec.TrustManager != nil {
-		if _, err := migrateLegacyIdentity(spec, identity, nil); err != nil {
-			return TrustInspection{}, err
-		}
-	}
-	if spec.RequireLaunchApproval {
-		if spec.TrustManager == nil {
-			return TrustInspection{}, fmt.Errorf("MCP trust store is unavailable")
-		}
-		authorized, changed, err := spec.TrustManager.LaunchAuthorized(spec.Name, trustConfigSource(spec), identity)
-		if err != nil {
-			return TrustInspection{}, err
-		}
-		if !authorized {
-			state := mcptrust.TrustUntrusted
-			if changed {
-				state = mcptrust.TrustChanged
-			}
-			return TrustInspection{
-				Security: SecurityStatus{
-					Name:            spec.Name,
-					TrustState:      state,
-					IdentityChanged: changed,
-					Identity:        identity,
-					IsolationState:  isolationStateForSpec(spec),
-				},
-				RequiresLaunchApproval: true,
-			}, nil
-		}
-	}
-	spec.AllowIdentityDriftPreflight = true
-	client, err := start(ctx, ctx, spec)
-	if err != nil {
-		return TrustInspection{}, err
-	}
-	defer client.close()
-	if _, err := client.listTools(ctx); err != nil {
-		return TrustInspection{}, err
-	}
-	client.toolsMu.Lock()
-	defer client.toolsMu.Unlock()
-	out := TrustInspection{Security: client.securityStatusLocked()}
-	for _, cap := range client.capabilities {
-		switch {
-		case cap.Destructive:
-			out.Destructive = append(out.Destructive, cap.RawName)
-		case cap.ReadOnly:
-			out.Readers = append(out.Readers, cap.RawName)
-		default:
-			out.Writers = append(out.Writers, cap.RawName)
-		}
-	}
-	sort.Strings(out.Readers)
-	sort.Strings(out.Writers)
-	sort.Strings(out.Destructive)
-	return out, nil
-}
-
-// SetSpecTrust preflights an unconnected server, then records trust for the
-// exact observed identity/capability snapshot. Revoke is local and does not
-// start the server.
-func SetSpecTrust(ctx context.Context, spec Spec, decision string) error {
-	manager := spec.TrustManager
-	if manager == nil {
-		return fmt.Errorf("MCP trust store is unavailable")
-	}
-	decision = strings.ToLower(strings.TrimSpace(decision))
-	if decision == "revoke" {
-		if spec.OfficialCatalogEntryID != "" {
-			if err := manager.DenyOfficial(spec.OfficialCatalogEntryID); err != nil {
-				return err
-			}
-		}
-		return manager.Revoke(spec.Name)
-	}
-	if decision != "session" && decision != "workspace" {
-		return fmt.Errorf("invalid MCP trust decision %q", decision)
-	}
-	var launcherLock *mcptrust.LauncherLock
-	if decision == "workspace" {
-		if err := validatePersistentTransportTrust(spec); err != nil {
-			return err
-		}
-		var err error
-		spec, launcherLock, err = preparePersistentLauncher(ctx, spec)
-		if err != nil {
-			return fmt.Errorf("persistent trust is unavailable; use session trust or make the launcher immutable: %w", err)
-		}
-	}
-	spec, err := applyStoredLauncherLock(spec)
-	if err != nil {
-		return err
-	}
-	identity, err := specIdentityFingerprint(ctx, spec)
-	if err != nil {
-		return err
-	}
-	if spec.RequireLaunchApproval {
-		scope := mcptrust.ScopeSession
-		if decision == "workspace" {
-			scope = mcptrust.ScopeWorkspace
-		}
-		if err := manager.TrustLaunch(scope, spec.Name, trustConfigSource(spec), identity); err != nil {
-			return err
-		}
-	}
-	spec.AllowIdentityDriftPreflight = true
-	client, err := start(ctx, ctx, spec)
-	if err != nil {
-		return err
-	}
-	defer client.close()
-	tools, err := client.listTools(ctx)
-	if err != nil {
-		return err
-	}
-	client.toolsMu.Lock()
-	identity = client.identityFingerprint
-	capabilities := append([]mcptrust.Capability(nil), client.capabilities...)
-	cache := CachedSchema{
-		SpecHash: SpecFingerprint(spec),
-		Capabilities: map[string]bool{
-			"tools": client.hasTools, "prompts": client.hasPrompts, "resources": client.hasResources,
-		},
-	}
-	client.toolsMu.Unlock()
-	// cacheableToolsOf snapshots each tool's security state under this same
-	// client's toolsMu, so it must run outside the critical section above.
-	cache.Tools = cacheableToolsOf(tools)
-	// Persist the exact preflight snapshot before granting trust. A cache without
-	// a receipt is inert, while a receipt without its schema would force a strict
-	// read-only child to start the process merely to rediscover classification.
-	if err := SaveCachedSchema(spec.Name, cache); err != nil {
-		return fmt.Errorf("cache MCP trust preflight: %w", err)
-	}
-	if launcherLock != nil {
-		if err := manager.PutLauncherLock(*launcherLock); err != nil {
-			return err
-		}
-	}
-	var trustErr error
-	switch decision {
-	case "session":
-		trustErr = manager.Trust(mcptrust.ScopeSession, mcptrust.SourceUser, spec.Name, trustConfigSource(spec), identity, "", capabilities)
-	case "workspace":
-		trustErr = manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, spec.Name, trustConfigSource(spec), identity, "", capabilities)
-	}
-	if trustErr != nil {
-		return trustErr
-	}
-	return manager.AllowOfficial(spec.OfficialCatalogEntryID)
-}
-
-// SetTrust grants or revokes host-local trust for the connected server's exact
-// identity and capability snapshot. Writer tools remain approval-gated.
-func (h *Host) SetTrust(name, decision string) error {
-	c := h.client(name)
-	if c == nil {
-		return fmt.Errorf("MCP server %q is not connected; run its preflight first", name)
-	}
-	c.toolsMu.Lock()
-	defer c.toolsMu.Unlock()
-	manager := c.spec.TrustManager
-	if manager == nil {
-		return fmt.Errorf("MCP trust store is unavailable")
-	}
-	switch strings.ToLower(strings.TrimSpace(decision)) {
-	case "session":
-		if err := manager.Trust(mcptrust.ScopeSession, mcptrust.SourceUser, c.name, trustConfigSource(c.spec), c.identityFingerprint, "", c.capabilities); err != nil {
-			return err
-		}
-		if err := manager.AllowOfficial(c.spec.OfficialCatalogEntryID); err != nil {
-			return err
-		}
-	case "workspace":
-		if err := validatePersistentTransportTrust(c.spec); err != nil {
-			return err
-		}
-		if _, mutable := mutableLauncherLocator(c.spec); mutable && strings.TrimSpace(c.spec.LauncherDigest) == "" {
-			return fmt.Errorf("MCP server %q uses a mutable launcher; reconnect it through trust preflight so an exact local lock can be created", c.name)
-		}
-		if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, c.name, trustConfigSource(c.spec), c.identityFingerprint, "", c.capabilities); err != nil {
-			return err
-		}
-		if err := manager.AllowOfficial(c.spec.OfficialCatalogEntryID); err != nil {
-			return err
-		}
-	case "revoke":
-		if err := manager.DenyOfficial(c.spec.OfficialCatalogEntryID); err != nil {
-			return err
-		}
-		if err := manager.Revoke(c.name); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("invalid MCP trust decision %q", decision)
-	}
-	eval, err := managerEvaluate(manager, c.spec, c.identityFingerprint, c.capabilities)
-	if err != nil {
-		return err
-	}
-	c.applyTrustEvaluationLocked(eval)
-	return nil
-}
-
-func (c *Client) applyTrustEvaluationLocked(eval mcptrust.Evaluation) {
-	c.trustEvaluation = eval
-	c.trustErr = nil
-	for _, adapter := range c.toolAdapters {
-		remote, ok := adapter.(*remoteTool)
-		if !ok {
-			continue
-		}
-		remote.readOnlyTrusted = eval.TrustedReaders[remote.rawName]
-		remote.readOnly = remote.readOnlyTrusted
-	}
-	for i := range c.tools {
-		c.tools[i].TrustedReader = eval.TrustedReaders[c.tools[i].Name]
-	}
-}
-
 // ApplyCatalogRevocations immediately removes official reader authority from
-// already-connected servers. Future lazy starts also consult mcpcatalog's
-// runtime revocation set before creating an official receipt.
+// already-connected servers. Future lazy starts consult the same in-memory
+// revocation set before accepting signed reader declarations.
 func (h *Host) ApplyCatalogRevocations(revoked map[string]bool) {
 	if len(revoked) == 0 {
 		return
@@ -1009,36 +741,13 @@ func (h *Host) ApplyCatalogRevocations(revoked map[string]bool) {
 			continue
 		}
 		client.toolsMu.Lock()
-		manager := client.spec.TrustManager
-		if manager != nil {
-			if err := manager.RevokeOfficial(entryID); err != nil {
-				client.trustErr = err
-				client.toolsMu.Unlock()
-				continue
+		for _, adapter := range client.toolAdapters {
+			if remote, ok := adapter.(*remoteTool); ok {
+				remote.readOnlyTrusted = false
 			}
 		}
-		client.applyTrustEvaluationLocked(untrustedEvaluation())
 		client.toolsMu.Unlock()
 	}
-}
-
-func (c *Client) securityStatusLocked() SecurityStatus {
-	eval := c.trustEvaluation
-	status := SecurityStatus{
-		Name: c.name, TrustState: eval.State, TrustSource: eval.Source,
-		TrustScope: eval.Scope, IdentityChanged: eval.IdentityChanged,
-		ChangedTools: append([]string(nil), eval.ChangedTools...),
-		ToolChanges:  append([]mcptrust.ToolChange(nil), eval.ToolChanges...),
-		Identity:     c.identityFingerprint, IsolationState: c.isolationState,
-		CatalogSequence: c.spec.CatalogSequence, VerifiedVersion: c.spec.VerifiedVersion,
-	}
-	if c.isolationState == mcptrust.IsolationUnavailableUnconfined {
-		status.IsolationReason = sandbox.BackendUnavailableReason()
-	}
-	if c.trustErr != nil {
-		status.TrustError = c.trustErr.Error()
-	}
-	return status
 }
 
 // Failures returns configured MCP servers that failed to connect.
@@ -1074,7 +783,7 @@ func (h *Host) RecordFailure(s Spec, err error) {
 	}
 	f := Failure{
 		Name: s.Name, Transport: tt, Error: summarizeFailureError(err),
-		RequiresReverification: requiresReverification(err),
+		RequiresLaunchApproval: requiresLaunchApproval(err),
 	}
 	for i := range h.failures {
 		if h.failures[i].Name == s.Name {
@@ -1083,6 +792,13 @@ func (h *Host) RecordFailure(s Spec, err error) {
 		}
 	}
 	h.failures = append(h.failures, f)
+}
+
+// RecordLaunchApprovalRequired keeps an intentionally disconnected project MCP
+// visible as awaiting authorization. This is used after an explicit launch
+// revocation, where no failed connection attempt exists to create the status.
+func (h *Host) RecordLaunchApprovalRequired(s Spec) {
+	h.RecordFailure(s, &launchApprovalError{server: s.Name})
 }
 
 // ClearFailure drops a recorded startup/connection failure for status UIs.
@@ -1440,47 +1156,9 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.TrustManager != nil {
-		configSource := trustConfigSource(s)
-		hasCurrent, currentChanged, checkErr := s.TrustManager.IdentityChanged(s.Name, configSource, identity)
-		if checkErr != nil {
-			return nil, checkErr
-		}
-		hasLegacySource := false
-		if configSource != "workspace_config" {
-			hasLegacySource, checkErr = s.TrustManager.HasReceipt(s.Name, "workspace_config")
-			if checkErr != nil {
-				return nil, checkErr
-			}
-		}
-		if currentChanged || (!hasCurrent && hasLegacySource) {
-			if _, migrateErr := migrateLegacyIdentity(s, identity, nil); migrateErr != nil {
-				return nil, migrateErr
-			}
-		}
-	}
-	if s.RequireLaunchApproval {
-		if s.TrustManager == nil {
-			return nil, fmt.Errorf("MCP trust store is unavailable")
-		}
-		authorized, changed, checkErr := s.TrustManager.LaunchAuthorized(s.Name, trustConfigSource(s), identity)
-		if checkErr != nil {
-			return nil, checkErr
-		}
-		if !authorized {
-			return nil, &launchApprovalError{server: s.Name, changed: changed}
-		}
-	}
-	if s.TrustManager != nil && !s.AllowIdentityDriftPreflight {
-		if _, changed, checkErr := s.TrustManager.IdentityChanged(s.Name, trustConfigSource(s), identity); checkErr != nil {
-			return nil, checkErr
-		} else if changed && !s.AutoTrust {
-			// A receipt that exactly matches this spec's legacy URL fingerprint
-			// migrated above instead of blocking: eager and cache-miss servers
-			// must reach the credential-aware rollout too, not only paths that
-			// get as far as a post-handshake evaluation.
-			return nil, &identityChangedError{server: s.Name}
-		}
+	s, err = applyEstablishedLaunchGrant(s, identity)
+	if err != nil {
+		return nil, err
 	}
 	t, err := newTransport(lifeCtx, s)
 	if err != nil {
@@ -1490,12 +1168,33 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	if tt == "" {
 		tt = "stdio"
 	}
-	c := &Client{name: s.Name, t: t, spec: s, transport: tt, identityFingerprint: identity, isolationState: isolationStateForSpec(s)}
+	c := &Client{name: s.Name, t: t, spec: s, transport: tt, identityFingerprint: identity}
 	if err := c.initialize(callCtx); err != nil {
 		c.close()
 		return nil, err
 	}
 	return c, nil
+}
+
+func applyEstablishedLaunchGrant(s Spec, identity string) (Spec, error) {
+	if !s.RequireLaunchApproval {
+		return s, nil
+	}
+	if s.LaunchManager == nil {
+		return s, fmt.Errorf("MCP launch authorization store is unavailable")
+	}
+	authorized, changed, err := s.LaunchManager.LaunchAuthorized(s.Name, launchConfigSource(s), identity)
+	if err != nil {
+		return s, err
+	}
+	if !authorized {
+		return s, &launchApprovalError{server: s.Name, changed: changed}
+	}
+	// A matching exact-identity launch grant is the user's authorization for
+	// this project server. Calls proceed like an explicit install;
+	// explicit policies still override the source-aware approval default.
+	s.ImplicitApproval = true
+	return s, nil
 }
 
 // newTransport builds the transport for a spec's declared type. Empty / unknown
@@ -1648,8 +1347,8 @@ type mcpTool struct {
 	InputSchema  json.RawMessage `json:"inputSchema"`
 	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 	// Annotations carries MCP's optional tool hints. readOnlyHint controls reader
-	// classification; destructiveHint requires a fresh human approval even when
-	// another hint claims the tool is read-only.
+	// classification; destructiveHint remains destructive even when another hint
+	// claims the tool is read-only. Approval policy is applied separately.
 	Annotations *struct {
 		ReadOnlyHint    bool `json:"readOnlyHint"`
 		DestructiveHint bool `json:"destructiveHint"`
@@ -1699,7 +1398,6 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 
 	toolInfos := make([]ToolInfo, 0, len(out))
 	tools := make([]tool.Tool, 0, len(out))
-	capabilities := make([]mcptrust.Capability, 0, len(out))
 	normalizedSchemas := make(map[string]json.RawMessage, len(out))
 	for _, t := range out {
 		schema, err := normalizeAndValidateToolSchema(t.InputSchema)
@@ -1707,9 +1405,7 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 			continue
 		}
 		normalizedSchemas[t.Name] = schema
-		capabilities = append(capabilities, capabilityOf(c.spec, t, schema))
 	}
-	eval, evalErr := c.evaluateTrust(capabilities)
 	for _, t := range out {
 		readOnlyHint := t.Annotations != nil && t.Annotations.ReadOnlyHint
 		destructiveHint := t.Annotations != nil && t.Annotations.DestructiveHint
@@ -1726,8 +1422,9 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 		if c.spec.StripRawPrefix != "" {
 			visibleName = strings.TrimPrefix(visibleName, c.spec.StripRawPrefix)
 		}
-		trusted := eval.TrustedReaders[t.Name]
-		info.TrustedReader = trusted
+		capability := capabilityOf(c.spec, t, schema)
+		readOnly := capability.ReadOnly
+		trusted := trustedReaderForSpec(c.spec, capability)
 		toolInfos = append(toolInfos, info)
 		tools = append(tools, &remoteTool{
 			client:                c,
@@ -1736,9 +1433,9 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 			desc:                  t.Description,
 			schema:                schema,
 			outputSchema:          t.OutputSchema,
-			capabilityFingerprint: capabilityFingerprint(capabilityOf(c.spec, t, schema)),
-			declaredReadOnly:      capabilityOf(c.spec, t, schema).ReadOnly,
-			readOnly:              trusted,
+			capabilityFingerprint: capabilityFingerprint(capability),
+			declaredReadOnly:      capability.ReadOnly,
+			readOnly:              readOnly,
 			readOnlyTrusted:       trusted,
 			destructive:           destructiveHint,
 		})
@@ -1746,20 +1443,9 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 	sort.SliceStable(toolInfos, func(i, j int) bool { return toolInfos[i].Name < toolInfos[j].Name })
 	sortedTools := sortToolsByName(tools)
 	c.tools = toolInfos
-	c.capabilities = append([]mcptrust.Capability(nil), capabilities...)
-	c.trustEvaluation = eval
-	c.trustErr = evalErr
 	c.toolAdapters = append([]tool.Tool(nil), sortedTools...)
 	c.toolsListed = true
 	return append([]tool.Tool(nil), sortedTools...), nil
-}
-
-func (c *Client) evaluateTrust(capabilities []mcptrust.Capability) (mcptrust.Evaluation, error) {
-	return evaluateSpecTrust(c.spec, c.identityFingerprint, capabilities)
-}
-
-func untrustedEvaluation() mcptrust.Evaluation {
-	return mcptrust.Evaluation{State: mcptrust.TrustUntrusted, TrustedReaders: map[string]bool{}}
 }
 
 func normalizeAndValidateToolSchema(raw json.RawMessage) (json.RawMessage, error) {
@@ -1947,8 +1633,9 @@ type remoteTool struct {
 	// readOnlyTrusted is true only when local configuration, not the server hint,
 	// classified the tool as read-only.
 	readOnlyTrusted bool
-	// destructive is the MCP destructiveHint. It always requires a fresh human
-	// approval and takes precedence over a conflicting readOnlyHint.
+	// destructive is the MCP destructiveHint. It takes precedence over a
+	// conflicting readOnlyHint; the effective MCP approval mode decides whether
+	// it needs a fresh review.
 	destructive bool
 }
 
@@ -1962,12 +1649,12 @@ func (t *remoteTool) MCPServerName() string {
 }
 func (t *remoteTool) MCPRawToolName() string { return t.rawName }
 
-// ReadOnlyExecutionTrustAuthority reports whether this adapter's reader
-// classification comes from a real trust store. Without a TrustManager the
+// ReadOnlyExecutionAuthority reports whether this adapter's reader
+// classification comes from explicit local or signed package policy. Without a LaunchManager the
 // compatibility path derives readers from server hints, which must never
 // satisfy the strict read-only boundary.
-func (t *remoteTool) ReadOnlyExecutionTrustAuthority() bool {
-	return t.client != nil && t.client.spec.TrustManager != nil
+func (t *remoteTool) ReadOnlyExecutionAuthority() bool {
+	return t.client != nil && t.client.spec.LaunchManager != nil
 }
 
 func (t *remoteTool) MCPCapabilityFingerprint() string {
@@ -2037,16 +1724,16 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 			return "", nil, fmt.Errorf("invalid args: %w", err)
 		}
 	}
-	_, readOnly, _, destructive, fingerprint := t.securitySnapshot()
+	_, readOnly, trusted, destructive, fingerprint := t.securitySnapshot()
 	if intent, ok := tool.ReaderExecutionIntentFrom(ctx); ok {
 		// Final, linearizable check for a reader-authorized call: the snapshot
-		// above and every trust mutation (catalog revocations, live security
+		// above and every authority mutation (catalog revocations, live security
 		// reconciliation) serialize on the owning client's toolsMu. A call that
-		// was approved as a non-destructive reader must never execute after trust
+		// was approved as a non-destructive reader must never execute after authority
 		// changed — state drift here returns an actionable error instead of
 		// dispatching.
-		if !readOnly || destructive || (intent.CapabilityFingerprint != "" && fingerprint != "" && fingerprint != intent.CapabilityFingerprint) {
-			return "", nil, fmt.Errorf("MCP server %q no longer classifies tool %q as a trusted reader; the call was blocked before dispatch — re-verify the server and request fresh approval before retrying", t.client.name, t.rawName)
+		if !readOnly || !trusted || destructive || (intent.CapabilityFingerprint != "" && fingerprint != "" && fingerprint != intent.CapabilityFingerprint) {
+			return "", nil, fmt.Errorf("MCP server %q no longer classifies tool %q as an allowed reader; the call was blocked before dispatch — retry from a parent session or update the explicit read-only policy", t.client.name, t.rawName)
 		}
 	}
 	res, err := t.client.call(ctx, "tools/call", map[string]any{

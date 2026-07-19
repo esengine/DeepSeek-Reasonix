@@ -803,7 +803,15 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 // user config. Source priority mirrors Load(): project TOML, user TOML, then the
 // project .mcp.json entry if TOML did not define that server.
 func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, error) {
-	if path := pluginTOMLSourcePath(name); path != "" {
+	return ClearPluginAuthenticationInSourceForRoot(".", name)
+}
+
+// ClearPluginAuthenticationInSourceForRoot clears auth material in the source
+// that owns name for the supplied workspace. The root is explicit so a desktop
+// action cannot drift to another project's reasonix.toml or .mcp.json after the
+// user switches tabs while the action is waiting on a lifecycle lock.
+func ClearPluginAuthenticationInSourceForRoot(root, name string) (PluginEntry, bool, string, error) {
+	if path := pluginTOMLSourcePathForRoot(root, name); path != "" {
 		cfg := LoadForEdit(path)
 		updated, changed, err := cfg.ClearPluginAuthentication(name)
 		if err != nil {
@@ -816,15 +824,15 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 		}
 		return updated, changed, path, nil
 	}
-	updated, changed, err := clearMCPJSONAuthentication(mcpJSONFile, name)
+	mcpPath := mcpJSONFile
+	if resolved := resolveRoot(root); resolved != "." {
+		mcpPath = filepath.Join(resolved, mcpJSONFile)
+	}
+	updated, changed, err := clearMCPJSONAuthentication(mcpPath, name)
 	if err != nil {
 		return PluginEntry{}, false, "", err
 	}
-	return updated, changed, mcpJSONFile, nil
-}
-
-func pluginTOMLSourcePath(name string) string {
-	return pluginTOMLSourcePathForRoot(".", name)
+	return updated, changed, mcpPath, nil
 }
 
 func pluginTOMLSourcePathForRoot(root, name string) string {

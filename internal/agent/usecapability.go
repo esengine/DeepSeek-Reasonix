@@ -10,7 +10,6 @@ import (
 
 	"reasonix/internal/capability"
 	"reasonix/internal/event"
-	"reasonix/internal/mcptrust"
 	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
@@ -365,32 +364,30 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 			destructive = entry.Destructive
 		}
 	}
+	readOnly := false
 	trustedReader := false
 	capabilityFingerprint := ""
-	trustReason := ""
-	if cached, found, trustErr := plugin.CachedToolTrustForSpec(ctx, spec, raw); trustErr != nil {
-		trustReason = trustErr.Error()
-	} else if found {
+	if cached, found := plugin.CachedToolSafetyForSpec(spec, raw); found {
 		destructive = destructive || cached.Destructive
+		readOnly = cached.ReadOnly
 		trustedReader = cached.TrustedReader
 		capabilityFingerprint = cached.CapabilityFingerprint
-	} else if spec.TrustManager == nil {
+	} else if spec.LaunchManager == nil {
 		// Compatibility for direct library users that have no host trust store.
-		trustedReader = spec.ReadOnlyToolNames[raw] || spec.ReadOnlyModelToolNames[modelName]
+		readOnly = spec.ReadOnlyToolNames[raw] || spec.ReadOnlyModelToolNames[modelName]
+		trustedReader = readOnly
 	}
 	lazy := &onDemandMCPTool{proxy: t, spec: spec, server: server, raw: raw, modelName: modelName, destructive: destructive}
+	lazy.readOnly = readOnly
 	lazy.readOnlyTrusted = trustedReader
 	lazy.capabilityFingerprint = capabilityFingerprint
-	lazy.trustReason = trustReason
-	// Strict read-only execution requires a positive receipt authority: the
-	// hint/legacy compatibility path above keeps its historical classification
-	// for ordinary sessions but cannot admit tools into a strict child.
-	lazy.trustAuthority = spec.TrustManager != nil
+	// Strict read-only execution requires host-local policy authority. A server
+	// hint alone keeps ordinary approval smooth but cannot admit a strict child.
+	lazy.readerAuthority = spec.LaunchManager != nil
 	base.Target = lazy
 	base.TargetName = modelName
-	// Conservative: an unstarted tool counts as a writer unless the user
-	// explicitly trusted it read-only in config (spec-level trust, the same
-	// source live remote tools honor).
+	// Cached server hints control ordinary approval. Strict read-only execution
+	// additionally requires an explicit local or signed reader declaration.
 	base.ReadOnly = lazy.ReadOnly()
 	if len(args) == 0 {
 		base.Args = json.RawMessage(`{}`)
@@ -448,10 +445,10 @@ type onDemandMCPTool struct {
 	// destructive comes from the schema cache when available. A live promotion
 	// is detected in Execute and deferred to a fresh-approved retry.
 	destructive           bool
+	readOnly              bool
 	readOnlyTrusted       bool
 	capabilityFingerprint string
-	trustReason           string
-	trustAuthority        bool
+	readerAuthority       bool
 }
 
 func (o *onDemandMCPTool) Name() string { return o.modelName }
@@ -463,23 +460,19 @@ func (o *onDemandMCPTool) Description() string {
 func (o *onDemandMCPTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 
 func (o *onDemandMCPTool) ReadOnly() bool {
-	return o.readOnlyTrusted
+	return o.readOnly
 }
 
-// ReadOnly is true only after the cached snapshot matches an established local
-// receipt, never from an unauthenticated server hint.
-func (o *onDemandMCPTool) PlanModeUntrustedReadOnly() bool { return false }
+func (o *onDemandMCPTool) PlanModeUntrustedReadOnly() bool {
+	return o.readOnly && !o.readOnlyTrusted
+}
 
 func (o *onDemandMCPTool) ReadOnlyExecutionHostMutation() bool { return true }
 
-func (o *onDemandMCPTool) ReadOnlyExecutionTrustAuthority() bool { return o.trustAuthority }
+func (o *onDemandMCPTool) ReadOnlyExecutionAuthority() bool { return o.readerAuthority }
 
 func (o *onDemandMCPTool) ReadOnlyExecutionBlockReason() string {
-	reason := "start this MCP capability; ask the parent session to trust, re-review, or execute it"
-	if strings.TrimSpace(o.trustReason) != "" {
-		reason += " (local verification failed: " + o.trustReason + ")"
-	}
-	return reason
+	return "start this MCP capability from a parent session or explicitly allow it as a read-only tool"
 }
 
 // MCPServerName/MCPRawToolName expose the deferred target for audit and
@@ -519,16 +512,11 @@ func (o *onDemandMCPTool) Execute(ctx context.Context, args json.RawMessage) (st
 		}
 		return "", fmt.Errorf("%s", msg)
 	}
-	for _, status := range o.proxy.host.SecurityStatuses() {
-		if status.Name == o.server && status.TrustState == mcptrust.TrustChanged {
-			return "", fmt.Errorf("MCP server %q security attributes changed; the current call was blocked before tools/call and requires parent-session re-verification", o.server)
-		}
-	}
 	if live, ok := target.(tool.MCPCapabilityFingerprint); ok && o.capabilityFingerprint != "" && live.MCPCapabilityFingerprint() != "" && live.MCPCapabilityFingerprint() != o.capabilityFingerprint {
-		return "", fmt.Errorf("MCP server %q changed the security schema for tool %q; the current call was blocked before tools/call and requires parent-session re-verification", o.server, o.raw)
+		return "", fmt.Errorf("MCP server %q changed the security schema for tool %q; the current call was blocked before tools/call — retry so current policy is applied", o.server, o.raw)
 	}
 	if o.readOnlyTrusted && (!target.ReadOnly() || planModeUntrustedReadOnly(target)) {
-		return "", fmt.Errorf("MCP server %q no longer exposes tool %q as a trusted reader; the current call was blocked before tools/call and requires parent-session re-verification", o.server, o.raw)
+		return "", fmt.Errorf("MCP server %q no longer exposes tool %q as an allowed reader; the current call was blocked before tools/call — retry so current policy is applied", o.server, o.raw)
 	}
 	if annotations, ok := target.(tool.MCPAnnotations); ok && annotations.MCPDestructiveHint() && !o.destructive {
 		return "", destructiveMCPDiscoveryError(o.server, o.raw)
@@ -537,7 +525,7 @@ func (o *onDemandMCPTool) Execute(ctx context.Context, args json.RawMessage) (st
 }
 
 func destructiveMCPDiscoveryError(server, rawTool string) error {
-	return fmt.Errorf("MCP server %q marks tool %q as destructive; retry so Reasonix can request fresh approval before execution", server, rawTool)
+	return fmt.Errorf("MCP server %q marks tool %q as destructive; retry so Reasonix can apply the current approval policy before execution", server, rawTool)
 }
 
 func (t *UseCapabilityTool) ensureServerTools(ctx context.Context, server string) ([]tool.Tool, error) {

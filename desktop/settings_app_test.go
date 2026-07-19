@@ -1454,6 +1454,50 @@ func TestLoadDesktopUserConfigViewKeepsLegacyBotConfigMigrationInMemory(t *testi
 	}
 }
 
+func TestLoadDesktopUserConfigForRootDoesNotFollowActiveTab(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userPath := config.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("default_model = \"local/m1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetRoot := t.TempDir()
+	activeRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(targetRoot, "reasonix.toml"), []byte("[bot]\nenabled = true\nmodel = \"target\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeRoot, "reasonix.toml"), []byte("[bot]\nenabled = true\nmodel = \"active\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{
+		"active": {ID: "active", Scope: "project", WorkspaceRoot: activeRoot, Ready: true},
+	}
+	app.activeTabID = "active"
+
+	cfg, _, err := app.loadDesktopUserConfigForViewForRoot(targetRoot)
+	if err != nil {
+		t.Fatalf("loadDesktopUserConfigForViewForRoot: %v", err)
+	}
+	if !cfg.Bot.Enabled || cfg.Bot.Model != "target" {
+		t.Fatalf("root-specific view followed active tab: bot = %+v", cfg.Bot)
+	}
+
+	unlock := config.LockUserConfigEdits()
+	_, _, err = app.loadDesktopUserConfigForEditForRoot(targetRoot)
+	unlock()
+	if err != nil {
+		t.Fatalf("loadDesktopUserConfigForEditForRoot: %v", err)
+	}
+	migrated := config.LoadForEditWithoutCredentials(userPath)
+	if !migrated.Bot.Enabled || migrated.Bot.Model != "target" {
+		t.Fatalf("root-specific edit migrated the active tab instead: bot = %+v", migrated.Bot)
+	}
+}
+
 func TestSetBotSettingsPreservesFeishuOutboundMediaRoots(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	root := t.TempDir()

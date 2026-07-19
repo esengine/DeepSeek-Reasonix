@@ -16,7 +16,7 @@ import (
 	"reasonix/internal/capability"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
-	"reasonix/internal/mcptrust"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
@@ -87,9 +87,9 @@ func (layeredReadOnlyMCPBoundaryTarget) MCPApprovalMode() string     { return "a
 func (layeredReadOnlyMCPBoundaryTarget) MCPApprovalReviewer() string { return "user" }
 func (t layeredReadOnlyMCPBoundaryTarget) MCPDestructiveHint() bool  { return t.destructive }
 
-// The fake models a receipt-backed reader: a real trust store stands behind
+// The fake models a explicitly declared reader: explicit local launch policy stands behind
 // its classification unless the case is explicitly the untrusted server hint.
-func (t layeredReadOnlyMCPBoundaryTarget) ReadOnlyExecutionTrustAuthority() bool {
+func (t layeredReadOnlyMCPBoundaryTarget) ReadOnlyExecutionAuthority() bool {
 	return !t.untrusted
 }
 
@@ -262,7 +262,7 @@ func TestReadOnlyExecutionDoesNotStartUntrustedUnconnectedMCP(t *testing.T) {
 	}
 }
 
-func receiptReaderMCPServer(t *testing.T, schemaDrift *atomic.Bool, toolCalls *atomic.Int32) *httptest.Server {
+func explicitReaderMCPServer(t *testing.T, schemaDrift *atomic.Bool, toolCalls *atomic.Int32) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var request struct {
@@ -280,7 +280,7 @@ func receiptReaderMCPServer(t *testing.T, schemaDrift *atomic.Bool, toolCalls *a
 		var result any
 		switch request.Method {
 		case "initialize":
-			result = map[string]any{"protocolVersion": "2024-11-05", "serverInfo": map[string]any{"name": "receipt-reader", "version": "1"}}
+			result = map[string]any{"protocolVersion": "2024-11-05", "serverInfo": map[string]any{"name": "explicit-reader", "version": "1"}}
 		case "tools/list":
 			schemaType := "string"
 			if schemaDrift != nil && schemaDrift.Load() {
@@ -300,22 +300,36 @@ func receiptReaderMCPServer(t *testing.T, schemaDrift *atomic.Bool, toolCalls *a
 	}))
 }
 
-func TestReadOnlyExecutionStartsReceiptMatchedUnconnectedMCPReader(t *testing.T) {
+func cacheExplicitReaderSchema(t *testing.T, spec plugin.Spec) {
+	t.Helper()
+	err := plugin.SaveCachedSchema(spec.Name, plugin.CachedSchema{
+		SpecHash: plugin.SpecFingerprint(spec),
+		Tools: []plugin.CachedTool{{
+			Name: "search", Description: "search",
+			Schema:   json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`),
+			ReadOnly: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadOnlyExecutionStartsExplicitUnconnectedMCPReader(t *testing.T) {
 	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
 	var toolCalls atomic.Int32
-	server := receiptReaderMCPServer(t, nil, &toolCalls)
+	server := explicitReaderMCPServer(t, nil, &toolCalls)
 	defer server.Close()
 
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), t.TempDir())
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), t.TempDir())
 	spec := plugin.Spec{
-		Name: "receipt-reader", Type: "http", URL: server.URL,
-		TrustManager: manager, ConfigSource: "workspace_config",
+		Name: "explicit-reader", Type: "http", URL: server.URL,
+		LaunchManager: manager, ConfigSource: "workspace_config",
+		ReadOnlyToolNames: map[string]bool{"search": true},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := plugin.SetSpecTrust(ctx, spec, "session"); err != nil {
-		t.Fatal(err)
-	}
+	cacheExplicitReaderSchema(t, spec)
 
 	host := plugin.NewHost()
 	defer host.Close()
@@ -325,7 +339,7 @@ func TestReadOnlyExecutionStartsReceiptMatchedUnconnectedMCPReader(t *testing.T)
 	a := New(nil, reg, NewSession("sys"), Options{ReadOnlyExecution: true}, event.Discard)
 	out := a.executeOne(ctx, provider.ToolCall{
 		ID: "trusted-lazy-1", Name: "use_capability",
-		Arguments: `{"action":"call","capability_id":"mcp-tool:receipt-reader/search","arguments":{}}`,
+		Arguments: `{"action":"call","capability_id":"mcp-tool:explicit-reader/search","arguments":{}}`,
 	})
 	if out.blocked || out.errMsg != "" || !strings.Contains(out.output, "reader result") {
 		t.Fatalf("trusted lazy reader outcome = %+v", out)
@@ -335,23 +349,22 @@ func TestReadOnlyExecutionStartsReceiptMatchedUnconnectedMCPReader(t *testing.T)
 	}
 }
 
-func TestReadOnlyExecutionBlocksReceiptSchemaDriftBeforeToolCall(t *testing.T) {
+func TestReadOnlyExecutionBlocksCachedSchemaDriftBeforeToolCall(t *testing.T) {
 	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
 	var schemaDrift atomic.Bool
 	var toolCalls atomic.Int32
-	server := receiptReaderMCPServer(t, &schemaDrift, &toolCalls)
+	server := explicitReaderMCPServer(t, &schemaDrift, &toolCalls)
 	defer server.Close()
 
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), t.TempDir())
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), t.TempDir())
 	spec := plugin.Spec{
-		Name: "receipt-reader", Type: "http", URL: server.URL,
-		TrustManager: manager, ConfigSource: "workspace_config",
+		Name: "explicit-reader", Type: "http", URL: server.URL,
+		LaunchManager: manager, ConfigSource: "workspace_config",
+		ReadOnlyToolNames: map[string]bool{"search": true},
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := plugin.SetSpecTrust(ctx, spec, "session"); err != nil {
-		t.Fatal(err)
-	}
+	cacheExplicitReaderSchema(t, spec)
 	schemaDrift.Store(true)
 
 	host := plugin.NewHost()
@@ -362,9 +375,9 @@ func TestReadOnlyExecutionBlocksReceiptSchemaDriftBeforeToolCall(t *testing.T) {
 	a := New(nil, reg, NewSession("sys"), Options{ReadOnlyExecution: true}, event.Discard)
 	out := a.executeOne(ctx, provider.ToolCall{
 		ID: "drifted-lazy-1", Name: "use_capability",
-		Arguments: `{"action":"call","capability_id":"mcp-tool:receipt-reader/search","arguments":{}}`,
+		Arguments: `{"action":"call","capability_id":"mcp-tool:explicit-reader/search","arguments":{}}`,
 	})
-	if out.errMsg == "" || !strings.Contains(out.output, "requires parent-session re-verification") {
+	if out.errMsg == "" || !strings.Contains(out.output, "changed the security schema") {
 		t.Fatalf("drifted lazy reader outcome = %+v", out)
 	}
 	if got := toolCalls.Load(); got != 0 {
@@ -910,8 +923,8 @@ func TestCapabilityGateAppliesToReadOnlyTasks(t *testing.T) {
 func TestStrictReadOnlyFailsClosedWithoutTrustAuthority(t *testing.T) {
 	host := plugin.NewHost()
 	defer host.Close()
-	// No TrustManager: the compatibility path still classifies the config
-	// reader for ordinary permissions, but it carries no receipt authority.
+	// No LaunchManager: the compatibility path still classifies the config
+	// reader for ordinary permissions, but it carries no explicit reader authority.
 	specs := []plugin.Spec{{
 		Name:              "lazy",
 		Type:              "stdio",
@@ -926,7 +939,7 @@ func TestStrictReadOnlyFailsClosedWithoutTrustAuthority(t *testing.T) {
 	if !resolved.ReadOnly {
 		t.Fatal("compatibility classification should still resolve read-only for ordinary sessions")
 	}
-	if readOnlyExecutionAllowsTrustedMCPStartup(resolved.Target) {
+	if readOnlyExecutionAllowsMCPStartup(resolved.Target) {
 		t.Fatal("hint/config-classified reader without a trust store must not start hosts in strict mode")
 	}
 	reg := tool.NewRegistry()

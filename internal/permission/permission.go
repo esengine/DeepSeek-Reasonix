@@ -545,20 +545,24 @@ func (g *Gate) CheckFresh(ctx context.Context, toolName, subject string, args js
 }
 
 // CheckMCP applies MCP-local approval policy. Precedence is explicit deny,
-// destructive fresh review, per-tool/server mode, then the ordinary global
-// permission posture. Local prompt/writes decisions require an MCPApprover and
-// therefore fail closed in headless and sub-agent sessions.
+// explicit approval, destructive fresh review, the remaining per-tool/server
+// modes, then the ordinary global permission posture. Local prompt/writes
+// decisions require an MCPApprover and therefore fail closed in headless and
+// sub-agent sessions.
 func (g *Gate) CheckMCP(ctx context.Context, toolName, subject string, args json.RawMessage, readOnly, destructive bool, mode, reviewer string) (bool, string, error) {
 	if g.Policy.ExplicitlyDenies(toolName, args) {
 		return false, "denied by permission policy — this tool/command is on the deny list. Do not retry it; choose another approach or stop and explain.", nil
+	}
+
+	effectiveMode := normalizeMCPApprovalMode(mode)
+	if effectiveMode == "approve" {
+		return true, "", nil
 	}
 	if destructive {
 		return g.approveMCP(ctx, toolName, subject, args, true, true, reviewer)
 	}
 
-	switch normalizeMCPApprovalMode(mode) {
-	case "approve":
-		return true, "", nil
+	switch effectiveMode {
 	case "prompt":
 		return g.approveMCP(ctx, toolName, subject, args, false, true, reviewer)
 	case "writes":

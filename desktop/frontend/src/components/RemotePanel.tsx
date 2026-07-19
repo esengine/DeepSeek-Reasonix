@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { isRemoteDegradedWarning, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { useOverlayStore } from "../store/overlays";
 import { useRemoteStore, type RemoteExplorerTab } from "../store/remote";
 import type { RemoteDirEntry, RemoteForwardView } from "../lib/types";
@@ -24,6 +25,8 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
   if (!hostId) return null;
   const connected = status?.state === "connected" || status?.state === "degraded";
   const busy = status?.state === "connecting" || status?.state === "reconnecting" || status?.state === "pending_hostkey";
+  const terminalFailure = isRemoteTerminalFailure(status);
+  const degradedWarning = isRemoteDegradedWarning(status);
   const target = host ? `${host.user ? `${host.user}@` : ""}${host.host}${host.port && host.port !== 22 ? `:${host.port}` : ""}` : hostId;
 
   return (
@@ -53,10 +56,10 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
         </div>
       </header>
 
-      {status?.error && (
-        <div className="remote-panel__error-banner" role="alert">
-          <strong>{t("remote.status.failed")}</strong>
-          <span>{status.error}</span>
+      {(terminalFailure || degradedWarning) && status && (
+        <div className={`remote-panel__error-banner ${degradedWarning ? "remote-panel__error-banner--warning" : ""}`} role="alert">
+          <strong>{t(degradedWarning ? "remote.status.degraded" : "remote.status.failed")}</strong>
+          <span>{t(remoteConnectionErrorSummaryKey(status), { host: host?.label || hostId })}</span>
         </div>
       )}
 

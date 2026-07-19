@@ -90,22 +90,6 @@ export interface WireApproval {
   subject: string;
   reason?: string;
   fresh?: boolean;
-  mcpTrust?: WireMCPTrust;
-}
-
-export interface WireMCPTrust {
-  server: string;
-  trustState: string;
-  trustSource?: string;
-  trustScope?: string;
-  isolationState: string;
-  isolationReason?: string;
-  identityChanged?: boolean;
-  changedTools: string[];
-  toolChanges: MCPToolTrustChangeView[];
-  readers: string[];
-  writers: string[];
-  destructive: string[];
 }
 
 export interface WireGuardian {
@@ -709,7 +693,6 @@ export interface ServerView {
   resources: number;
   hasTools?: boolean;
   error?: string;
-  requiresReverification?: boolean;
   toolList?: MCPToolView[];
   trustedReadOnlyTools?: string[];
   callTimeoutSeconds?: number;
@@ -718,19 +701,10 @@ export interface ServerView {
   toolPolicies?: Record<string, MCPToolPolicy>;
   approvalsReviewer?: MCPApprovalsReviewer;
   requiresLaunchApproval?: boolean;
-  launchApprovalGoverned?: boolean;
   authStatus?: "none" | "possible" | "required" | string;
   authUrl?: string;
   authConfigured?: boolean;
   managedByPlugin?: string;
-  trustState?: "official" | "workspace" | "session" | "changed" | "untrusted" | string;
-  trustSource?: "user" | "official_catalog" | "legacy_import" | string;
-  trustScope?: "session" | "workspace" | "global" | string;
-  isolationState?: "enforced" | "unavailable_unconfined" | "not_applicable" | string;
-  isolationReason?: string;
-  identityChanged?: boolean;
-  changedTools?: string[];
-  toolChanges?: MCPToolTrustChangeView[];
   catalogSequence?: number;
   verifiedVersion?: string;
 }
@@ -745,35 +719,6 @@ export interface MCPToolView {
   readOnlyHint?: boolean;
   destructiveHint?: boolean;
   schemaError?: string;
-  trustedReader?: boolean;
-}
-
-export interface MCPToolTrustChangeView {
-  name: string;
-  kind: "added" | "reader_to_writer" | "reader_to_destructive" | "writer_to_reader" | "safety_changed" | "name_changed" | "schema_changed" | string;
-}
-
-export interface MCPTrustInspectionView {
-  name: string;
-  trustState: string;
-  trustSource?: string;
-  trustScope?: string;
-  isolationState: string;
-  isolationReason?: string;
-  identityChanged?: boolean;
-  changedTools: string[];
-  toolChanges?: MCPToolTrustChangeView[];
-  readers: string[];
-  writers: string[];
-  destructive: string[];
-  requiresLaunchApproval?: boolean;
-}
-
-export interface MCPCatalogRefreshView {
-  source: string;
-  sequence: number;
-  offline: boolean;
-  stale?: boolean;
 }
 export interface SkillView {
   name: string;
@@ -1084,10 +1029,22 @@ export interface RemoteFingerprintView {
   sha256: string;
 }
 
+export interface RemoteKnownHostLocation {
+  path: string;
+  line: number;
+}
+
+export interface RemoteConnectionErrorDetails {
+  code: "connection_failed" | "auth_failed" | "host_key_rejected" | "host_key_mismatch";
+  presentedSha256?: string;
+  knownHostRecords?: RemoteKnownHostLocation[];
+}
+
 export interface RemoteConnectionStatus {
   hostId: string;
   state: RemoteConnState;
   error?: string;
+  errorDetails?: RemoteConnectionErrorDetails;
   fingerprint?: RemoteFingerprintView;
   attempt?: number;
 }

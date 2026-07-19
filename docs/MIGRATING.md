@@ -99,22 +99,17 @@ and DeepSeek prefix-cache–oriented design.
   longer shipped as an internal MCP server.
 - **Plan mode** + `complete_step` (evidence-backed step sign-off).
 - **MCP identity and schema-cache URLs are credential-aware**: userinfo and
-  credential query values (token, api_key, password, ...) no longer enter the
-  host-local identity or cache fingerprints, so rotating a credential keeps
-  existing trust. Receipts and caches written by earlier builds migrate
-  automatically — at the pre-start identity check for eager and cache-miss
-  servers, or on first evaluation otherwise — when nothing else changed; the read-only
-  legacy fingerprint calculator is scheduled for removal two minor releases
-  after this rollout.
+  credential query values (token, api_key, password, ...) do not enter the
+  host-local identity or cache fingerprints, so credential rotation keeps an
+  unchanged project launch authorization. An exact old workspace receipt can
+  migrate once into that launch grant; its tool snapshot is ignored.
 - **MCP setup is now add-and-use.** Servers added by the user (Desktop, user
   config, legacy user import, or an installed verified plugin package) connect
-  with an automatic trust snapshot and permit ordinary calls when no explicit
+  immediately and permit all calls when no explicit
   MCP approval policy is configured. Repository `reasonix.toml` / `.mcp.json`
   servers instead require one pre-launch confirmation for their exact stable
-  identity, before a subprocess or network request exists. Older receipts and
-  the former `workspace_config` source migrate automatically when server code
-  and capabilities are unchanged. Host sandbox/read/write-root policy changes
-  no longer invalidate server identity.
+  identity, before a subprocess or network request exists. Host sandbox,
+  read-root, and write-root policy changes do not invalidate server identity.
 - **stdio MCP connections are persistent.** This fixes stateful servers that
   lost browser/session state when writer calls received a fresh process.
 - **Plan mode and permission policy are now independent**: Plan directs the
@@ -125,8 +120,8 @@ and DeepSeek prefix-cache–oriented design.
   remain unavailable until plan approval. `[agent].plan_mode_allowed_tools` and
   `plan_mode_read_only_commands` are still parsed and round-tripped so old
   configs do not break, but they no longer control main Plan availability.
-  Concrete MCP names in `plan_mode_allowed_tools` remain legacy local read-only
-  trust aliases; prefer audited raw names in `trusted_read_only_tools` for the
+  Concrete MCP names in `plan_mode_allowed_tools` remain legacy local reader
+  aliases; prefer audited raw names in `trusted_read_only_tools` for the
   dedicated planner/read-only sub-agent registries. Use `read_only_task` /
   `read_only_skill` when a child must be technically restricted to read-only;
   ordinary `task` / `run_skill` calls remain writer-capable and permission-gated
@@ -136,9 +131,10 @@ and DeepSeek prefix-cache–oriented design.
   writer-classified. New optional MCP-local fields
   (`default_tools_approval_mode`, `tools.<raw>.approval_mode`, and
   `approvals_reviewer`) override the new source-aware default when present. MCP tools
-  declaring `destructiveHint: true` require a fresh human approval on every
-  call — the configured reviewer is never consulted for them — and
-  non-interactive sessions fail closed.
+  declaring `destructiveHint: true` require fresh human approval on every call
+  under `auto`, `prompt`, or `writes` — the configured reviewer is never
+  consulted for them — while an effective `approve` mode permits them directly.
+  Non-interactive sessions fail closed whenever a fresh review is required.
 - **Read-only subagent research**: use `read_only_task` for generic isolated
   research in plan mode, or `read_only_skill` when the work should follow an
   existing skill. Both expose only read-only tools and safe foreground bash, do

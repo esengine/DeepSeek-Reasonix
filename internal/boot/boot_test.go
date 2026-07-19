@@ -2476,7 +2476,7 @@ trusted_read_only_tools = ["echo"]
 	}
 	defer ctrl.Close()
 	ctrl.SetPlanMode(true)
-	if err := ctrl.Run(context.Background(), "connect trusted mcp while planning"); err != nil {
+	if err := ctrl.Run(context.Background(), "connect declared mcp reader while planning"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -3751,7 +3751,7 @@ func TestPartitionByTier(t *testing.T) {
 	}
 }
 
-func TestPluginSpecsTrustKnownCodeGraphReadTools(t *testing.T) {
+func TestPluginSpecsDeclareKnownCodeGraphReadTools(t *testing.T) {
 	specs := PluginSpecs([]config.PluginEntry{{Name: "codegraph"}})
 	if len(specs) != 1 {
 		t.Fatalf("PluginSpecs returned %d specs, want 1", len(specs))
@@ -3763,7 +3763,7 @@ func TestPluginSpecsTrustKnownCodeGraphReadTools(t *testing.T) {
 	}
 }
 
-func TestPluginSpecsTrustConfiguredReadOnlyTools(t *testing.T) {
+func TestPluginSpecsDeclareConfiguredReadOnlyTools(t *testing.T) {
 	specs := PluginSpecs([]config.PluginEntry{{
 		Name:                 "github",
 		TrustedReadOnlyTools: []string{"issue_read", " pull_request_read ", ""},
@@ -3835,28 +3835,28 @@ func TestPluginSpecsMapMCPSourceDefaults(t *testing.T) {
 	if len(specs) != 2 {
 		t.Fatalf("spec count = %d", len(specs))
 	}
-	if !specs[0].AutoTrust || !specs[0].ImplicitApproval || specs[0].RequireLaunchApproval || specs[0].ConfigSource != string(config.MCPSourceUserConfig) {
+	if !specs[0].ImplicitApproval || specs[0].RequireLaunchApproval || specs[0].ConfigSource != string(config.MCPSourceUserConfig) {
 		t.Fatalf("user source defaults = %+v", specs[0])
 	}
-	if specs[1].AutoTrust || specs[1].ImplicitApproval || !specs[1].RequireLaunchApproval || specs[1].ConfigSource != string(config.MCPSourceProjectConfig) {
+	if specs[1].ImplicitApproval || !specs[1].RequireLaunchApproval || specs[1].ConfigSource != string(config.MCPSourceProjectConfig) {
 		t.Fatalf("project source defaults = %+v", specs[1])
 	}
 }
 
-func TestOfficialMCPTrustRequiresMatchingTransport(t *testing.T) {
+func TestVerifiedMCPPackageRequiresMatchingTransport(t *testing.T) {
 	entry := config.PluginEntry{Name: "official", Type: "http", URL: "https://example.com/mcp"}
-	official := OfficialMCPTrust{
+	official := VerifiedMCPPackage{
 		CatalogEntryID: "official@1", PackageDigest: "digest", Readers: []string{"read"}, Transport: "stdio",
 	}
 	specs := PluginSpecsForRootWithOptions([]config.PluginEntry{entry}, "/workspace", PluginSpecOptions{
-		OfficialServers: map[string]OfficialMCPTrust{"official": official},
+		OfficialServers: map[string]VerifiedMCPPackage{"official": official},
 	})
 	if len(specs) != 1 || specs[0].OfficialCatalogEntryID != "" {
 		t.Fatalf("mismatched transport received official trust: %+v", specs)
 	}
 	official.Transport = "streamable-http"
 	specs = PluginSpecsForRootWithOptions([]config.PluginEntry{entry}, "/workspace", PluginSpecOptions{
-		OfficialServers: map[string]OfficialMCPTrust{"official": official},
+		OfficialServers: map[string]VerifiedMCPPackage{"official": official},
 	})
 	if len(specs) != 1 || specs[0].OfficialCatalogEntryID != "official@1" {
 		t.Fatalf("equivalent HTTP transport did not receive official trust: %+v", specs)
@@ -3876,7 +3876,7 @@ func TestApplyDefaultMCPCallTimeoutPreservesConfiguredDefault(t *testing.T) {
 	}
 }
 
-func TestPluginSpecsTrustPlanModeAllowedMCPTools(t *testing.T) {
+func TestPluginSpecsApplyPlanModeAllowedMCPReaders(t *testing.T) {
 	specs := PluginSpecsForRootWithPlanModeAllowedTools(
 		[]config.PluginEntry{{Name: "github"}, {Name: "linear"}},
 		"",
@@ -3892,13 +3892,13 @@ func TestPluginSpecsTrustPlanModeAllowedMCPTools(t *testing.T) {
 		t.Fatalf("PluginSpecsForRootWithPlanModeAllowedTools returned %d specs, want 2", len(specs))
 	}
 	if !specs[0].ReadOnlyModelToolNames["mcp__github__issue_read"] {
-		t.Fatalf("github allowed MCP tool missing from model trust map: %+v", specs[0].ReadOnlyModelToolNames)
+		t.Fatalf("github allowed MCP tool missing from model reader map: %+v", specs[0].ReadOnlyModelToolNames)
 	}
 	if specs[0].ReadOnlyModelToolNames["mcp__github__"] || specs[0].ReadOnlyModelToolNames["mcp__other__issue_read"] {
 		t.Fatalf("github trust map accepted non-concrete or other-server tools: %+v", specs[0].ReadOnlyModelToolNames)
 	}
 	if !specs[1].ReadOnlyModelToolNames["mcp__linear__issue_read"] {
-		t.Fatalf("linear allowed MCP tool missing from model trust map: %+v", specs[1].ReadOnlyModelToolNames)
+		t.Fatalf("linear allowed MCP tool missing from model reader map: %+v", specs[1].ReadOnlyModelToolNames)
 	}
 }
 

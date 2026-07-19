@@ -77,9 +77,6 @@ func ToWire(e event.Event) Event {
 		}
 	case event.ApprovalRequest:
 		w.Approval = &Approval{ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject, Reason: e.Approval.Reason, Fresh: e.Approval.Fresh}
-		if e.Approval.MCPTrust != nil {
-			w.Approval.MCPTrust = toWireMCPTrust(e.Approval.MCPTrust)
-		}
 	case event.AskRequest:
 		w.Ask = ToWireAsk(e.Ask)
 	case event.CompactionStarted, event.CompactionDone:
@@ -227,49 +224,11 @@ type CacheDiagnostics struct {
 
 // Approval is the JSON form of an event.Approval.
 type Approval struct {
-	ID       string    `json:"id"`
-	Tool     string    `json:"tool"`
-	Subject  string    `json:"subject"`
-	Reason   string    `json:"reason,omitempty"`
-	Fresh    bool      `json:"fresh,omitempty"`
-	MCPTrust *MCPTrust `json:"mcpTrust,omitempty"`
-}
-
-type MCPTrust struct {
-	Server          string          `json:"server"`
-	TrustState      string          `json:"trustState"`
-	TrustSource     string          `json:"trustSource,omitempty"`
-	TrustScope      string          `json:"trustScope,omitempty"`
-	IsolationState  string          `json:"isolationState"`
-	IsolationReason string          `json:"isolationReason,omitempty"`
-	IdentityChanged bool            `json:"identityChanged,omitempty"`
-	ChangedTools    []string        `json:"changedTools"`
-	ToolChanges     []MCPToolChange `json:"toolChanges"`
-	Readers         []string        `json:"readers"`
-	Writers         []string        `json:"writers"`
-	Destructive     []string        `json:"destructive"`
-}
-
-type MCPToolChange struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
-}
-
-func toWireMCPTrust(in *event.MCPTrust) *MCPTrust {
-	if in == nil {
-		return nil
-	}
-	out := &MCPTrust{
-		Server: in.Server, TrustState: in.TrustState, TrustSource: in.TrustSource, TrustScope: in.TrustScope,
-		IsolationState: in.IsolationState, IsolationReason: in.IsolationReason, IdentityChanged: in.IdentityChanged,
-		ChangedTools: append([]string{}, in.ChangedTools...), Readers: append([]string{}, in.Readers...),
-		Writers: append([]string{}, in.Writers...), Destructive: append([]string{}, in.Destructive...),
-		ToolChanges: make([]MCPToolChange, 0, len(in.ToolChanges)),
-	}
-	for _, change := range in.ToolChanges {
-		out.ToolChanges = append(out.ToolChanges, MCPToolChange{Name: change.Name, Kind: change.Kind})
-	}
-	return out
+	ID      string `json:"id"`
+	Tool    string `json:"tool"`
+	Subject string `json:"subject"`
+	Reason  string `json:"reason,omitempty"`
+	Fresh   bool   `json:"fresh,omitempty"`
 }
 
 // Guardian is the JSON form of an event.GuardianResult.

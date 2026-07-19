@@ -66,6 +66,21 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "stopped", error: "handshake failed" } },
   });
   ok(failed.includes("demo · Connection failed"), "SSH entry keeps a recoverable failure summary visible");
+  ok(!failed.includes("handshake failed"), "status entry keeps raw connection diagnostics out of primary chrome");
+
+  const degraded = renderStatusBar({
+    workspacePath: "/workspace/repo",
+    remoteHosts,
+    remoteStatuses: {
+      demo: {
+        hostId: "demo",
+        state: "degraded",
+        error: "forward attach failed",
+      },
+    },
+  });
+  ok(degraded.includes("demo · Degraded"), "degraded SSH remains connected with a warning state");
+  ok(!degraded.includes("demo · Connection failed"), "degraded SSH is not mislabeled as a failed connection");
 }
 
 {

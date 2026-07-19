@@ -68,12 +68,12 @@ branch.
 - Restored captured-mouse right-click text paste, made composer drag selection
   copy through the verified native clipboard path, and kept non-Git footer
   telemetry left-aligned without reserving an empty data band.
-- Restored stateful MCP behavior after the v1.17.13 regression: compatible
-  trust receipts migrate instead of prompting again, user-added servers work
-  without extra trust settings (including delivery-mode on-demand calls), and
+- Restored stateful MCP behavior after the v1.17.13 regression: user-added
+  servers work without extra trust settings (including delivery-mode on-demand
+  calls), repository-provided servers use one exact launch confirmation, and
   stdio tools reuse one persistent process so browser sessions survive across
-  calls without repeated startup latency. Authorized project servers keep a
-  revoke entry in the desktop server details page.
+  calls without repeated startup latency. The former trust/reverify/catalog
+  management UI and CLI are removed.
 - Localized persistent-footer labels and displayed work-mode values in English,
   Simplified Chinese, and Traditional Chinese, while keeping command arguments
   stable.

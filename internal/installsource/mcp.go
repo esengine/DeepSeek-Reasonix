@@ -16,6 +16,15 @@ import (
 // SaveTo + connectMCP.
 func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, source string) action {
 	scope := t.installScope(req, "mcp", source)
+	// install_source is an explicit user action. Preserve that provenance for
+	// the live connector so a newly installed server is usable immediately,
+	// while still identifying project-scoped persistence accurately enough for
+	// the host to record the exact durable launch grant used on the next boot.
+	if scope == "project" {
+		e.Source = config.MCPSourceProjectConfig
+	} else {
+		e.Source = config.MCPSourceUserConfig
+	}
 	var normalizedCommand bool
 	e, normalizedCommand = config.NormalizePluginCommandLine(e)
 	// Tier comes from the call (req.Tier) or the entry; either way we

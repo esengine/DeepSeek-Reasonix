@@ -241,9 +241,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	fmt.Fprintf(&b, "cold_resume_prune   = %v   # elide stale tool results when reopening a session past the provider cache window\n", c.ColdResumePruneEnabled())
 	if len(c.Agent.PlanModeAllowedTools) > 0 {
-		fmt.Fprintf(&b, "plan_mode_allowed_tools = %s   # legacy MCP read-only trust aliases; does not change Plan availability\n", renderStringArray(c.Agent.PlanModeAllowedTools))
+		fmt.Fprintf(&b, "plan_mode_allowed_tools = %s   # legacy MCP read-only aliases; does not change Plan availability\n", renderStringArray(c.Agent.PlanModeAllowedTools))
 	} else {
-		b.WriteString("# plan_mode_allowed_tools = [\"mcp__legacy__reader\"]   # legacy MCP read-only trust alias; does not change Plan availability\n")
+		b.WriteString("# plan_mode_allowed_tools = [\"mcp__legacy__reader\"]   # legacy MCP read-only alias; does not change Plan availability\n")
 	}
 	if len(c.Agent.PlanModeReadOnlyCommands) > 0 {
 		fmt.Fprintf(&b, "plan_mode_read_only_commands = %s   # legacy compatibility only; Plan bash uses Permissions\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
@@ -759,7 +759,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 			}
 			if len(pl.TrustedReadOnlyTools) > 0 {
-				b.WriteString("# local Plan/read-only-research trust for audited raw MCP reader names\n")
+				b.WriteString("# explicit Plan/read-only-research declaration for audited raw MCP reader names\n")
 				fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
 			}
 			if strings.TrimSpace(pl.DefaultToolsApprovalMode) != "" {
@@ -1191,7 +1191,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 			fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 		}
 		if len(pl.TrustedReadOnlyTools) > 0 {
-			b.WriteString("# local Plan/read-only-research trust for audited raw MCP reader names\n")
+			b.WriteString("# explicit Plan/read-only-research declaration for audited raw MCP reader names\n")
 			fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
 		}
 		if strings.TrimSpace(pl.DefaultToolsApprovalMode) != "" {

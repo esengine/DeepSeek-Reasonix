@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
+import { isRemoteDegradedWarning, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { useRemoteStore } from "../store/remote";
 import type { RemoteConnectionStatus, RemoteHostInput, RemoteHostView, RemoteConnState } from "../lib/types";
 
@@ -120,13 +121,18 @@ function RemoteHostRow(props: {
   const state = props.status?.state;
   const target = `${host.user ? host.user + "@" : ""}${host.host}${host.port && host.port !== 22 ? ":" + host.port : ""}`;
   const connected = state === "connected" || state === "degraded";
+  const degradedWarning = isRemoteDegradedWarning(props.status);
   return (
     <li className="remote-host-row">
       <div className="remote-host-row__main">
         <span className="remote-host-row__name">{host.label}</span>
         <span className="remote-host-row__target">{target}</span>
         {state && <RemoteStatusChip state={state} />}
-        {props.status?.error && <span className="remote-panel__error">{props.status.error}</span>}
+        {props.status?.error && (
+          <span className={`remote-panel__error ${degradedWarning ? "remote-panel__error--warning" : ""}`}>
+            {t(remoteConnectionErrorSummaryKey(props.status), { host: host.label })}
+          </span>
+        )}
       </div>
       <div className="remote-host-row__actions">
         {connected ? (

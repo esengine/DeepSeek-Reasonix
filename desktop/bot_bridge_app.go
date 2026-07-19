@@ -112,23 +112,22 @@ func (a *App) bridgeAnnounce(tabID, text string) {
 // bridgeDrive 把远程文本提交为可见 tab 的新 turn，并为这一轮挂上事件转发器,
 // 让输出流回接管聊天（转发器在 TurnDone 自动卸载）。
 func (a *App) bridgeDrive(tabID, text string, route bot.DesktopWatchRoute) error {
-	tab, ctrl, err := a.beginTabTurn(tabID, false)
+	admission, ctrl, err := a.beginTabTurn(tabID, false)
 	if err != nil {
 		if err == control.ErrTurnRunning {
 			return errDriveBusy
 		}
 		return err
 	}
+	defer admission.abort()
+	tab := admission.tab
 	if tab.sink == nil {
-		a.finishTabTurnStart(tab, nil)
 		return fmt.Errorf("会话事件通道不可用，无法驱动")
 	}
 	// A local submission may have reclaimed the tab while this drive was waiting
 	// for the per-tab admission gate. Revalidate ownership only after the gate is
 	// held, immediately before attaching the route-specific forwarder.
 	if a.botBridge == nil || a.botBridge.TakeoverTab(route) != tabID {
-		tab.sink.cancelTurnStart()
-		tab.turnStartMu.Unlock()
 		return fmt.Errorf("接管已解除，请重新接管会话")
 	}
 	target := botForwardTarget{
@@ -143,7 +142,7 @@ func (a *App) bridgeDrive(tabID, text string, route bot.DesktopWatchRoute) error
 	// Confirm the submit actually started a turn. If nothing is running now, the
 	// controller was rotating and the submit no-oped — detach this exact
 	// generation so a later turn's output does not leak.
-	if !a.finishTabTurnStart(tab, ctrl) {
+	if !admission.finish(ctrl) {
 		tab.sink.clearBotSink(generation)
 		return errDriveBusy
 	}

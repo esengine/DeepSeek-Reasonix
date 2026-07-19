@@ -18,7 +18,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/mcpcatalog"
-	"reasonix/internal/mcptrust"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -511,7 +511,7 @@ func TestMCPApprovalPolicyDoesNotChangeProviderSchemas(t *testing.T) {
 	configured := makeSchemas(Spec{
 		Name: "admin", DefaultToolsApprovalMode: "writes",
 		ToolApprovalModes: map[string]string{"wipe": "prompt"},
-		ApprovalsReviewer: "auto_review", ImplicitApproval: true, AutoTrust: true,
+		ApprovalsReviewer: "auto_review", ImplicitApproval: true,
 	})
 	if !bytes.Equal(baseline, configured) {
 		t.Fatalf("provider schemas changed with local approval policy:\nbaseline=%s\nconfigured=%s", baseline, configured)
@@ -729,19 +729,19 @@ func TestStartAvailableKeepsGoodServers(t *testing.T) {
 	}
 }
 
-func TestRecordFailurePreservesReverificationAction(t *testing.T) {
+func TestRecordFailurePreservesLaunchApprovalAction(t *testing.T) {
 	host := NewHost()
-	host.RecordFailure(Spec{Name: "changed", Type: "stdio"}, fmt.Errorf("connect changed MCP: %w", &identityChangedError{server: "changed"}))
+	host.RecordFailure(Spec{Name: "project", Type: "stdio"}, fmt.Errorf("connect project MCP: %w", &launchApprovalError{server: "project"}))
 	host.RecordFailure(Spec{Name: "ordinary", Type: "stdio"}, errors.New("connection refused"))
 
 	failures := host.Failures()
 	if len(failures) != 2 {
 		t.Fatalf("failures = %+v, want two", failures)
 	}
-	if !failures[0].RequiresReverification {
-		t.Fatalf("identity drift failure = %+v, want re-verification action", failures[0])
+	if !failures[0].RequiresLaunchApproval {
+		t.Fatalf("project launch failure = %+v, want authorization action", failures[0])
 	}
-	if failures[1].RequiresReverification {
+	if failures[1].RequiresLaunchApproval {
 		t.Fatalf("ordinary failure = %+v, must remain retryable", failures[1])
 	}
 }
@@ -1357,17 +1357,6 @@ func TestValidateMCPToolNamesRejectsAmbiguousLists(t *testing.T) {
 	}
 }
 
-func TestPersistentHTTPTrustRequiresHTTPSBeforePreflight(t *testing.T) {
-	home := t.TempDir()
-	manager := mcptrust.ForWorkspace(home, t.TempDir())
-	err := SetSpecTrust(context.Background(), Spec{
-		Name: "insecure-remote", Type: "http", URL: "http://mcp.example.test/api", TrustManager: manager,
-	}, "workspace")
-	if err == nil || !strings.Contains(err.Error(), "requires an HTTPS URL") {
-		t.Fatalf("workspace trust error = %v, want HTTPS refusal before network preflight", err)
-	}
-}
-
 func TestNormalizeIdentityURLPreservesEndpointSemantics(t *testing.T) {
 	a := normalizeIdentityURL("HTTPS://alice:secret@Example.COM:443/mcp?access_token=abc&workspace=one#fragment")
 	b := normalizeIdentityURL("https://bob:rotated@example.com/mcp?workspace=two&access_token=xyz")
@@ -1443,99 +1432,17 @@ func TestWorkspaceIdentityIgnoresHostPolicyChanges(t *testing.T) {
 	}
 }
 
-func TestSetSpecTrustCachesPreflightForStrictReadOnlyRetry(t *testing.T) {
-	redirectCache(t)
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), t.TempDir())
-	spec := Spec{
-		Name: "trust-preflight-cache", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
-		Env:               map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
-		ReadOnlyToolNames: map[string]bool{"echo": true},
-		TrustManager:      manager, ConfigSource: "workspace_config",
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := SetSpecTrust(ctx, spec, "session"); err != nil {
-		t.Fatal(err)
-	}
-	cached, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec))
-	if !ok || len(cached.Tools) != 2 {
-		t.Fatalf("trust preflight cache = (%+v,%v), want two tools", cached, ok)
-	}
-	status, found, err := CachedToolTrustForSpec(ctx, spec, "echo")
-	if err != nil || !found || !status.TrustedReader {
-		t.Fatalf("cached trusted reader = (%+v,%v,%v)", status, found, err)
-	}
-}
-
-func TestIdentityDriftBlocksBeforeProcessStart(t *testing.T) {
-	startCount := filepath.Join(t.TempDir(), "starts")
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
-	if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, "identity-drift", "workspace_config", "different-identity", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	spec := Spec{
-		Name: "identity-drift", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
-		Env:          map[string]string{"GO_WANT_HELPER_PROCESS": "1", "GO_WANT_HELPER_START_COUNT": startCount},
-		TrustManager: manager, ConfigSource: "workspace_config",
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, _, err := StartAll(ctx, []Spec{spec}); err == nil || !strings.Contains(err.Error(), "blocked before process") {
-		t.Fatalf("identity drift start error = %v", err)
-	}
-	if got := readHelperCounter(t, startCount); got != 0 {
-		t.Fatalf("changed identity process starts = %d, want 0", got)
-	}
-	inspection, err := InspectSpec(ctx, spec)
-	if err != nil {
-		t.Fatalf("explicit drift preflight: %v", err)
-	}
-	if !inspection.Security.IdentityChanged || inspection.Security.TrustState != mcptrust.TrustChanged {
-		t.Fatalf("explicit preflight status = %+v", inspection.Security)
-	}
-	if got := readHelperCounter(t, startCount); got != 1 {
-		t.Fatalf("explicit preflight starts = %d, want 1", got)
-	}
-}
-
-func TestUserAuthorizedIdentityChangeRefreshesWithoutAnotherPrompt(t *testing.T) {
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
-	if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, "user-refresh", "user_config", "old-identity", "", nil); err != nil {
-		t.Fatal(err)
-	}
-	spec := Spec{
-		Name: "user-refresh", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
-		Env: map[string]string{"GO_WANT_HELPER_PROCESS": "1"}, TrustManager: manager,
-		ConfigSource: "user_config", AutoTrust: true, ImplicitApproval: true,
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	host, _, err := StartAll(ctx, []Spec{spec})
-	if err != nil {
-		t.Fatalf("user-authorized refresh: %v", err)
-	}
-	defer host.Close()
-	identity, err := specIdentityFingerprint(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	has, changed, err := manager.IdentityChanged(spec.Name, spec.ConfigSource, identity)
-	if err != nil || !has || changed {
-		t.Fatalf("refreshed user receipt = (has=%v changed=%v err=%v)", has, changed, err)
-	}
-}
-
 func TestProjectLaunchApprovalBlocksBeforeProcessStart(t *testing.T) {
 	redirectCache(t)
 	startCount := filepath.Join(t.TempDir(), "starts")
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), "/workspace")
 	spec := Spec{
 		Name: "project-server", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
 		Env: map[string]string{
 			"GO_WANT_HELPER_PROCESS":     "1",
 			"GO_WANT_HELPER_START_COUNT": startCount,
 		},
-		TrustManager: manager, ConfigSource: "project_config", RequireLaunchApproval: true,
+		LaunchManager: manager, ConfigSource: "project_config", RequireLaunchApproval: true,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1546,70 +1453,131 @@ func TestProjectLaunchApprovalBlocksBeforeProcessStart(t *testing.T) {
 	if got := readHelperCounter(t, startCount); got != 0 {
 		t.Fatalf("unauthorized project starts = %d, want 0", got)
 	}
-	inspection, err := InspectSpec(ctx, spec)
-	if err != nil {
+	if err := AuthorizeSpecLaunch(ctx, spec); err != nil {
 		t.Fatal(err)
-	}
-	if !inspection.RequiresLaunchApproval || inspection.Security.TrustState != mcptrust.TrustUntrusted {
-		t.Fatalf("launch inspection = %+v", inspection)
 	}
 	if got := readHelperCounter(t, startCount); got != 0 {
-		t.Fatalf("inspection started unauthorized project %d times", got)
+		t.Fatalf("launch authorization started project %d times, want 0", got)
 	}
-	if err := SetSpecTrust(ctx, spec, "workspace"); err != nil {
-		t.Fatal(err)
-	}
-	if got := readHelperCounter(t, startCount); got != 1 {
-		t.Fatalf("authorized preflight starts = %d, want 1", got)
-	}
-	host, _, err := StartAll(ctx, []Spec{spec})
+	host, tools, err := StartAll(ctx, []Spec{spec})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(tools) == 0 {
+		t.Fatal("authorized project server returned no tools")
+	}
+	policy, ok := tools[0].(tool.MCPApprovalPolicy)
+	if !ok {
+		t.Fatalf("authorized project tool %T does not expose MCP approval policy", tools[0])
+	}
+	if got := policy.MCPApprovalMode(); got != tool.MCPApprovalApprove {
+		t.Fatalf("authorized project tool approval = %q, want direct approval", got)
+	}
 	host.Close()
-	if got := readHelperCounter(t, startCount); got != 2 {
-		t.Fatalf("post-authorization starts = %d, want 2", got)
+	if got := readHelperCounter(t, startCount); got != 1 {
+		t.Fatalf("post-authorization starts = %d, want 1", got)
 	}
 }
 
-func TestLegacyPolicyCoupledIdentityAndWorkspaceSourceMigrate(t *testing.T) {
-	workspace := t.TempDir()
-	secret := t.TempDir()
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), workspace)
+func TestAuthorizeSpecLaunchRecordsInstallConsentWithoutStartingServer(t *testing.T) {
+	redirectCache(t)
+	startCount := filepath.Join(t.TempDir(), "starts")
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), "/workspace")
 	spec := Spec{
-		Name: "legacy-policy", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
-		Env:          map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
-		ConfigSource: "project_config", TrustManager: manager, RequireLaunchApproval: true,
-		ReaderSandbox: sandbox.Spec{Mode: "enforce", ReadRoots: []string{workspace}, ForbidReadRoots: []string{secret}},
-		WriterSandbox: sandbox.Spec{Mode: "enforce", WriteRoots: []string{workspace}},
-	}
-	identity, err := buildSpecIdentity(context.Background(), spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyIdentity := identity
-	legacyIdentity.ConfigSource = "workspace_config"
-	legacyFPs := mcptrust.LegacyIdentityFingerprints(legacyIdentity)
-	if len(legacyFPs) == 0 {
-		t.Fatal("missing legacy fingerprints")
-	}
-	if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, spec.Name, "workspace_config", legacyFPs[0], "", nil); err != nil {
-		t.Fatal(err)
-	}
-	currentFP, err := mcptrust.IdentityFingerprint(identity)
-	if err != nil {
-		t.Fatal(err)
+		Name: "installed-project-server", Command: os.Args[0], Args: []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS":     "1",
+			"GO_WANT_HELPER_START_COUNT": startCount,
+		},
+		LaunchManager: manager, ConfigSource: "project_config", RequireLaunchApproval: true,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := start(ctx, ctx, spec)
-	if err != nil {
-		t.Fatalf("legacy receipt should migrate before the project launch gate: %v", err)
+
+	if err := AuthorizeSpecLaunch(ctx, spec); err != nil {
+		t.Fatalf("AuthorizeSpecLaunch: %v", err)
 	}
-	client.close()
-	has, changed, err := manager.IdentityChanged(spec.Name, spec.ConfigSource, currentFP)
-	if err != nil || !has || changed {
-		t.Fatalf("migrated identity = (has=%v changed=%v err=%v)", has, changed, err)
+	if got := readHelperCounter(t, startCount); got != 0 {
+		t.Fatalf("install authorization started server %d times, want 0", got)
+	}
+	identity, err := specIdentityFingerprint(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, changed, err := manager.LaunchAuthorized(spec.Name, spec.ConfigSource, identity)
+	if err != nil || !authorized || changed {
+		t.Fatalf("installed launch grant = (authorized=%v changed=%v err=%v)", authorized, changed, err)
+	}
+	host, tools, err := StartAll(ctx, []Spec{spec})
+	if err != nil {
+		t.Fatalf("start installed project server: %v", err)
+	}
+	defer host.Close()
+	if len(tools) == 0 {
+		t.Fatal("installed project server returned no tools")
+	}
+	policy, ok := tools[0].(tool.MCPApprovalPolicy)
+	if !ok {
+		t.Fatalf("installed project tool %T does not expose MCP approval policy", tools[0])
+	}
+	if got := policy.MCPApprovalMode(); got != tool.MCPApprovalApprove {
+		t.Fatalf("installed project tool approval = %q, want direct approval", got)
+	}
+}
+
+func TestAuthorizeSpecLaunchDoesNotAddPersistentTransportRestrictions(t *testing.T) {
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), "/workspace")
+	spec := Spec{
+		Name: "installed-local-http", Type: "http", URL: "http://127.0.0.1:8080/mcp",
+		LaunchManager: manager, ConfigSource: "project_config", RequireLaunchApproval: true,
+	}
+	ctx := context.Background()
+	if err := AuthorizeSpecLaunch(ctx, spec); err != nil {
+		t.Fatalf("explicit install authorization: %v", err)
+	}
+	identity, err := specIdentityFingerprint(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, changed, err := manager.LaunchAuthorized(spec.Name, spec.ConfigSource, identity)
+	if err != nil || !authorized || changed {
+		t.Fatalf("installed local HTTP grant = (authorized=%v changed=%v err=%v)", authorized, changed, err)
+	}
+}
+
+func TestAuthorizeProjectSpecLaunchLocksMutableLauncherWithoutStartingServer(t *testing.T) {
+	manager := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), "/workspace")
+	launcher := filepath.Join(t.TempDir(), "npx")
+	if runtime.GOOS == "windows" {
+		launcher += ".exe"
+	}
+	if err := os.WriteFile(launcher, []byte("launcher fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commit := "0123456789abcdef0123456789abcdef01234567"
+	locator := "git+https://example.invalid/server.git@" + commit
+	spec := Spec{
+		Name: "repository-server", Command: launcher, Args: []string{locator},
+		LaunchManager: manager, ConfigSource: "project_config", RequireLaunchApproval: true,
+	}
+	if err := AuthorizeProjectSpecLaunch(context.Background(), spec); err != nil {
+		t.Fatalf("AuthorizeProjectSpecLaunch: %v", err)
+	}
+	lock, found, err := manager.GetLauncherLock(spec.Name, digestText(locator))
+	if err != nil || !found || lock.ResolvedVersion != commit {
+		t.Fatalf("project launcher lock = (%+v, found=%v, err=%v)", lock, found, err)
+	}
+	locked, err := applyStoredLauncherLock(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := specIdentityFingerprint(context.Background(), locked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, changed, err := manager.LaunchAuthorized(spec.Name, spec.ConfigSource, identity)
+	if err != nil || !authorized || changed {
+		t.Fatalf("project launch grant = (authorized=%v changed=%v err=%v)", authorized, changed, err)
 	}
 }
 

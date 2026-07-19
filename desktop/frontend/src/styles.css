@@ -28065,7 +28065,11 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   pointer-events: none;
 }
+:root[data-platform="darwin"] .toast-container {
+  top: 48px;
+}
 .toast {
+  max-width: min(560px, calc(100vw - 32px));
   pointer-events: auto;
   cursor: pointer;
   background: var(--bg-elev);
@@ -28075,7 +28079,7 @@ body > .mermaid-diagram--fullscreen {
   font-size: 14px;
   color: var(--fg);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2);
-  white-space: nowrap;
+  white-space: normal;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -28098,7 +28102,9 @@ body > .mermaid-diagram--fullscreen {
   font-size: 14px;
 }
 .toast__text {
+  min-width: 0;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .toast__action {
   --wails-draggable: no-drag;
@@ -34268,6 +34274,9 @@ body > .mermaid-diagram--fullscreen {
   color: var(--danger);
   font-size: var(--text-sm);
 }
+.remote-panel__error--warning {
+  color: var(--warn);
+}
 .remote-panel {
   display: flex;
   flex-direction: column;
@@ -34319,6 +34328,11 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--danger) 10%, var(--bg));
   color: var(--danger);
   font-size: var(--text-xs);
+}
+.remote-panel__error-banner--warning {
+  border-bottom-color: color-mix(in srgb, var(--warn) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--warn) 10%, var(--bg));
+  color: var(--warn);
 }
 .remote-panel__banner {
   padding: 6px 12px;
@@ -34494,6 +34508,43 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   margin-top: 12px;
 }
+.remote-connection-error-dialog__summary {
+  margin: 0;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+.remote-connection-error-dialog__records {
+  margin: 10px 0;
+  color: var(--fg-dim);
+  font-size: var(--text-sm);
+}
+.remote-connection-error-dialog__records ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.remote-connection-error-dialog__records code,
+.remote-connection-error-dialog__technical code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.remote-connection-error-dialog__technical {
+  margin-top: 12px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+.remote-connection-error-dialog__technical summary {
+  cursor: pointer;
+}
+.remote-connection-error-dialog__technical code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+}
 .statusbar__remote {
   display: inline-flex;
   align-items: center;
@@ -34600,7 +34651,39 @@ body > .mermaid-diagram--fullscreen {
 }
 .remote-switcher__host {
   min-height: 54px;
+  flex-wrap: wrap;
   padding: 4px 6px 4px 9px;
+}
+.remote-switcher__error-card {
+  display: flex;
+  width: calc(100% - 17px);
+  flex-direction: column;
+  gap: 3px;
+  margin: 0 0 5px 17px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 9%, var(--bg));
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+.remote-switcher__error-card strong {
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+.remote-switcher__error-card--warning {
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--warn) 9%, var(--bg));
+}
+.remote-switcher__error-card--warning strong {
+  color: var(--warn);
+}
+.remote-switcher__error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
 }
 .remote-switcher__actions {
   display: inline-flex;

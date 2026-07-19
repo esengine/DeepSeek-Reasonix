@@ -131,13 +131,12 @@ type MCPCapabilityFingerprint interface {
 	MCPCapabilityFingerprint() string
 }
 
-// ReadOnlyExecutionTrustAuthority reports whether an MCP-backed tool's reader
-// classification is backed by a real host trust store (receipts), rather than
-// a server hint or legacy config compatibility. Strict read-only execution
-// requires positive authority; direct library embedders without a TrustManager
-// keep their historical behavior outside that boundary.
-type ReadOnlyExecutionTrustAuthority interface {
-	ReadOnlyExecutionTrustAuthority() bool
+// ReadOnlyExecutionAuthority reports whether an MCP-backed tool's reader
+// classification comes from explicit local policy or a signed official
+// package rather than an unaudited server hint. Strict read-only execution
+// requires that positive authority.
+type ReadOnlyExecutionAuthority interface {
+	ReadOnlyExecutionAuthority() bool
 }
 
 // readerExecutionIntentKey carries a per-call, immutable authorization basis:

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -54,11 +55,23 @@ type RemoteFingerprintView struct {
 }
 
 type RemoteConnectionStatusView struct {
-	HostID      string                 `json:"hostId"`
-	State       string                 `json:"state"`
-	Error       string                 `json:"error,omitempty"`
-	Fingerprint *RemoteFingerprintView `json:"fingerprint,omitempty"`
-	Attempt     int                    `json:"attempt,omitempty"`
+	HostID       string                            `json:"hostId"`
+	State        string                            `json:"state"`
+	Error        string                            `json:"error,omitempty"`
+	ErrorDetails *RemoteConnectionErrorDetailsView `json:"errorDetails,omitempty"`
+	Fingerprint  *RemoteFingerprintView            `json:"fingerprint,omitempty"`
+	Attempt      int                               `json:"attempt,omitempty"`
+}
+
+type RemoteKnownHostLocationView struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+}
+
+type RemoteConnectionErrorDetailsView struct {
+	Code             string                        `json:"code"`
+	PresentedSHA256  string                        `json:"presentedSha256,omitempty"`
+	KnownHostRecords []RemoteKnownHostLocationView `json:"knownHostRecords,omitempty"`
 }
 
 type RemoteDirEntry struct {
@@ -244,10 +257,43 @@ func (a *App) ConnectRemoteHost(id string) error {
 		return err
 	}
 	if err := rt.Connect(id); err != nil {
-		a.onStatus(RemoteConnectionStatusView{HostID: id, State: "stopped", Error: err.Error()})
+		view := RemoteConnectionStatusView{HostID: id, State: "stopped"}
+		applyRemoteConnectionError(&view, err)
+		a.onStatus(view)
 		return err
 	}
 	return nil
+}
+
+func applyRemoteConnectionError(view *RemoteConnectionStatusView, err error) {
+	if err == nil {
+		return
+	}
+	view.Error = err.Error()
+	if view.State == "degraded" {
+		return
+	}
+	details := &RemoteConnectionErrorDetailsView{Code: "connection_failed"}
+	switch {
+	case errors.Is(err, remote.ErrHostKeyMismatch):
+		details.Code = "host_key_mismatch"
+		var mismatch *remote.HostKeyMismatchError
+		if errors.As(err, &mismatch) {
+			details.PresentedSHA256 = mismatch.PresentedFingerprint
+			details.KnownHostRecords = make([]RemoteKnownHostLocationView, 0, len(mismatch.Locations))
+			for _, location := range mismatch.Locations {
+				details.KnownHostRecords = append(details.KnownHostRecords, RemoteKnownHostLocationView{
+					Path: location.Filename,
+					Line: location.Line,
+				})
+			}
+		}
+	case errors.Is(err, remote.ErrAuthFailed):
+		details.Code = "auth_failed"
+	case errors.Is(err, remote.ErrHostKeyRejected):
+		details.Code = "host_key_rejected"
+	}
+	view.ErrorDetails = details
 }
 
 func (a *App) DisconnectRemoteHost(id string) error {
@@ -778,7 +824,7 @@ func (m *desktopRemoteManager) onClientStatus(hostID string, generation *managed
 		Attempt: ev.Attempt,
 	}
 	if ev.Err != nil {
-		view.Error = ev.Err.Error()
+		applyRemoteConnectionError(&view, ev.Err)
 	}
 	m.mu.Lock()
 	mh := m.hosts[hostID]

@@ -190,14 +190,16 @@ type Gate interface {
 
 // FreshApprovalGate is an optional Gate extension for calls that must be
 // answered by a current human decision even when Auto/YOLO or an allow rule
-// would normally bypass approval. Installed MCP destructiveHint uses it.
+// would normally bypass approval. MCP destructiveHint uses it as a conservative
+// fallback when the gate does not implement MCP-local approval policy.
 type FreshApprovalGate interface {
 	CheckFresh(ctx context.Context, toolName, subject string, args json.RawMessage, readOnly bool) (allow bool, reason string, err error)
 }
 
 // MCPApprovalGate applies local per-server/per-tool MCP policy without changing
 // provider-visible tool metadata. Destructive calls are identified separately
-// so the gate can route every invocation through the configured reviewer.
+// so the gate can apply the effective approval mode before deciding whether a
+// fresh review is required.
 type MCPApprovalGate interface {
 	CheckMCP(ctx context.Context, toolName, subject string, args json.RawMessage, readOnly, destructive bool, mode, reviewer string) (allow bool, reason string, err error)
 }
@@ -3280,7 +3282,7 @@ func (a *Agent) readOnlyExecutionBlock(visible tool.Tool, resolved *tool.Resolve
 		if readOnlyExecutionMCPDestructive(visible) {
 			return block("execute a destructive MCP capability")
 		}
-		if h, ok := visible.(tool.ReadOnlyExecutionHostMutation); ok && h.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsTrustedMCPStartup(visible) {
+		if h, ok := visible.(tool.ReadOnlyExecutionHostMutation); ok && h.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsMCPStartup(visible) {
 			return block("start or mutate a host capability")
 		}
 		return toolOutcome{}, false
@@ -3310,7 +3312,7 @@ func (a *Agent) readOnlyExecutionBlock(visible tool.Tool, resolved *tool.Resolve
 		if readOnlyExecutionMCPDestructive(resolved.Target) {
 			return block("execute a destructive MCP capability")
 		}
-		if h, ok := resolved.Target.(tool.ReadOnlyExecutionHostMutation); ok && h.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsTrustedMCPStartup(resolved.Target) {
+		if h, ok := resolved.Target.(tool.ReadOnlyExecutionHostMutation); ok && h.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsMCPStartup(resolved.Target) {
 			return block("start or mutate a host capability")
 		}
 		return toolOutcome{}, false
@@ -3323,7 +3325,7 @@ func readOnlyExecutionMCPDestructive(t tool.Tool) bool {
 	return mcpDestructiveHint(t)
 }
 
-func readOnlyExecutionAllowsTrustedMCPStartup(t tool.Tool) bool {
+func readOnlyExecutionAllowsMCPStartup(t tool.Tool) bool {
 	if t == nil || !t.ReadOnly() || readOnlyExecutionMCPDestructive(t) {
 		return false
 	}
@@ -3334,10 +3336,10 @@ func readOnlyExecutionAllowsTrustedMCPStartup(t tool.Tool) bool {
 	if !ok || strings.TrimSpace(meta.MCPServerName()) == "" || strings.TrimSpace(meta.MCPRawToolName()) == "" {
 		return false
 	}
-	// A reader classification only admits a host start when it is backed by a
-	// real trust store: the hint/legacy compatibility paths used by direct
-	// library embedders never satisfy the strict boundary.
-	if authority, ok := t.(tool.ReadOnlyExecutionTrustAuthority); !ok || !authority.ReadOnlyExecutionTrustAuthority() {
+	// A reader classification only admits a host start when explicit local or
+	// signed package policy backs it. A server hint alone never satisfies the
+	// strict boundary.
+	if authority, ok := t.(tool.ReadOnlyExecutionAuthority); !ok || !authority.ReadOnlyExecutionAuthority() {
 		return false
 	}
 	_, governed := t.(tool.MCPApprovalPolicy)

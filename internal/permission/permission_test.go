@@ -348,12 +348,21 @@ func TestGateMCPApprovalPrecedence(t *testing.T) {
 		}
 	})
 
-	t.Run("destructive beats approve and forwards reviewer", func(t *testing.T) {
+	t.Run("approve bypasses destructive review", func(t *testing.T) {
 		ap := &mcpStubApprover{stubApprover: stubApprover{allow: true}}
 		g := NewGate(New("allow", []string{"mcp__srv__tool"}, nil, nil), ap)
 		allow, _, err := g.CheckMCP(context.Background(), "mcp__srv__tool", "srv/tool", args, true, true, "approve", "auto_review")
+		if err != nil || !allow || ap.calls != 0 || ap.mcpCalls != 0 {
+			t.Fatalf("approve destructive result allow=%v err=%v approver=%+v", allow, err, ap)
+		}
+	})
+
+	t.Run("destructive prompt remains fresh and forwards reviewer", func(t *testing.T) {
+		ap := &mcpStubApprover{stubApprover: stubApprover{allow: true}}
+		g := NewGate(New("allow", []string{"mcp__srv__tool"}, nil, nil), ap)
+		allow, _, err := g.CheckMCP(context.Background(), "mcp__srv__tool", "srv/tool", args, true, true, "prompt", "auto_review")
 		if err != nil || !allow || ap.mcpCalls != 1 || !ap.destructive || !ap.forced || ap.reviewer != "auto_review" || ap.subject != "srv/tool" {
-			t.Fatalf("destructive result allow=%v err=%v approver=%+v", allow, err, ap)
+			t.Fatalf("destructive prompt result allow=%v err=%v approver=%+v", allow, err, ap)
 		}
 	})
 
@@ -426,12 +435,16 @@ func TestGateMCPConfiguredReviewFailsClosedWithoutReviewer(t *testing.T) {
 	}{
 		{mode: "prompt"},
 		{mode: "writes"},
-		{mode: "approve", destructive: true},
 	} {
 		allow, reason, err := g.CheckMCP(context.Background(), "mcp__srv__tool", "srv/tool", nil, false, tc.destructive, tc.mode, "user")
 		if err != nil || allow || !strings.Contains(reason, "non-interactive") {
 			t.Fatalf("mode=%s destructive=%v result=(%v,%q,%v)", tc.mode, tc.destructive, allow, reason, err)
 		}
+	}
+
+	allow, reason, err := g.CheckMCP(context.Background(), "mcp__srv__tool", "srv/tool", nil, false, true, "approve", "user")
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("approve destructive result=(%v,%q,%v), want allow without reviewer", allow, reason, err)
 	}
 }
 

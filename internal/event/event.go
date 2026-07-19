@@ -159,34 +159,11 @@ type FileDiff struct {
 // Approval identifies a pending tool-call approval for an ApprovalRequest
 // event. ID correlates the request with the controller's Approve(ID, …) reply.
 type Approval struct {
-	ID       string
-	Tool     string
-	Subject  string
-	Reason   string    // optional annotation explaining why approval is needed
-	Fresh    bool      // current human decision required; do not offer remembered grants
-	MCPTrust *MCPTrust // host-local MCP safety summary; nil for non-MCP approvals
-}
-
-// MCPTrust is the credential-free safety snapshot attached to an MCP tool
-// approval. It is a local UI/event payload only: provider requests never see it.
-type MCPTrust struct {
-	Server          string
-	TrustState      string
-	TrustSource     string
-	TrustScope      string
-	IsolationState  string
-	IsolationReason string
-	IdentityChanged bool
-	ChangedTools    []string
-	ToolChanges     []MCPToolChange
-	Readers         []string
-	Writers         []string
-	Destructive     []string
-}
-
-type MCPToolChange struct {
-	Name string
-	Kind string
+	ID      string
+	Tool    string
+	Subject string
+	Reason  string // optional annotation explaining why approval is needed
+	Fresh   bool   // current human decision required; do not offer remembered grants
 }
 
 // AskOption is one choice the user can pick for an AskQuestion.

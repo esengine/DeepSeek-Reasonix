@@ -2596,8 +2596,12 @@ func (a *App) ReorderTabs(tabIDs []string) error {
 // background work, the controller is detached so closing a view does not destroy
 // the session runtime.
 func (a *App) CloseTab(tabID string) error {
+	defer a.lockRuntimeMutation("close-tab")()
 	a.sessionRemovalMu.Lock()
 	defer a.sessionRemovalMu.Unlock()
+	// The runtime mutation barrier is acquired before sessionRemovalMu. This waits
+	// for a turn whose admission is already in progress, blocks later turns/builds,
+	// and leaves the tab visible until an earlier MCP Host-wide gate completes.
 
 	a.mu.Lock()
 	tab, ok := a.tabs[tabID]
@@ -2673,7 +2677,8 @@ func (a *App) CloseTab(tabID string) error {
 	closeSink := tab.sink
 	a.mu.Unlock()
 
-	// Tear down outside the lock.
+	// Tear down outside App.mu while retaining the lifecycle barrier acquired
+	// before the tab binding was removed.
 	discardPath, discardTransientBlank := a.transientBlankSessionArtifactPath(tab)
 	if closeCtrl != nil {
 		if controllerHasActiveRuntimeWork(closeCtrl) && a.detachSessionRuntime(tab) {
@@ -2712,6 +2717,7 @@ func (a *App) keepOnlyVisibleTab(tabID string) (TabMeta, error) {
 	// project-tree event stays outside so a listener can never re-enter a
 	// removal path while the lock is held.
 	meta, err := func() (TabMeta, error) {
+		defer a.lockRuntimeMutation("prune-visible-tabs")()
 		a.sessionRemovalMu.Lock()
 		defer a.sessionRemovalMu.Unlock()
 
@@ -2779,7 +2785,7 @@ func (a *App) keepOnlyVisibleTab(tabID string) (TabMeta, error) {
 		a.mu.Unlock()
 
 		for _, tab := range removed {
-			a.removeVisibleTabRuntime(tab)
+			a.removeVisibleTabRuntimeAdmissionHeld(tab)
 		}
 		return meta, nil
 	}()
@@ -2818,7 +2824,7 @@ func (a *App) applySingleSurfaceTabPolicy() error {
 	return err
 }
 
-func (a *App) removeVisibleTabRuntime(tab *WorkspaceTab) {
+func (a *App) removeVisibleTabRuntimeAdmissionHeld(tab *WorkspaceTab) {
 	if tab == nil {
 		return
 	}
@@ -2833,7 +2839,7 @@ func (a *App) removeVisibleTabRuntime(tab *WorkspaceTab) {
 		return
 	}
 	a.markTabRemoved(tab)
-	a.closeTabRuntime(tab)
+	a.closeTabRuntimeAdmissionHeld(tab)
 	if discardTransientBlank {
 		discardTransientBlankSessionArtifacts(discardPath)
 	}
@@ -2964,7 +2970,7 @@ func (a *App) clearTabBuildCancel(tab *WorkspaceTab, generation uint64, cancel c
 	a.mu.Unlock()
 }
 
-func (a *App) closeTabRuntime(tab *WorkspaceTab) {
+func (a *App) closeTabRuntimeAdmissionHeld(tab *WorkspaceTab) {
 	if tab == nil {
 		return
 	}
@@ -3011,6 +3017,10 @@ func (a *App) buildTabController(tab *WorkspaceTab) {
 	a.buildTabControllerWithLoadedSession(tab, loadedTabSession{})
 }
 
+func (a *App) buildTabControllerAdmissionHeld(tab *WorkspaceTab) {
+	a.buildTabControllerWithLoadedSessionAdmissionHeld(tab, loadedTabSession{})
+}
+
 type loadedTabSession struct {
 	Path    string
 	Session *agent.Session
@@ -3022,6 +3032,10 @@ func (s loadedTabSession) matches(path string) bool {
 
 func (a *App) buildTabControllerWithLoadedSession(tab *WorkspaceTab, loadedSession loadedTabSession) {
 	a.buildTabControllerWithContext(tab, loadedSession, a.bootContext(), 0, nil)
+}
+
+func (a *App) buildTabControllerWithLoadedSessionAdmissionHeld(tab *WorkspaceTab, loadedSession loadedTabSession) {
+	a.buildTabControllerWithContextAdmissionHeld(tab, loadedSession, a.bootContext(), 0, nil)
 }
 
 func (a *App) desktopNotificationSender() notify.Sender {
@@ -3065,6 +3079,16 @@ func clearTabStartupError(tab *WorkspaceTab) {
 }
 
 func (a *App) buildTabControllerWithContext(tab *WorkspaceTab, loadedSession loadedTabSession, buildCtx context.Context, buildGeneration uint64, buildCancel context.CancelFunc) {
+	a.runtimeAdmissionMu.RLock()
+	defer a.runtimeAdmissionMu.RUnlock()
+	a.buildTabControllerWithContextAdmissionHeld(tab, loadedSession, buildCtx, buildGeneration, buildCancel)
+}
+
+// buildTabControllerWithContextAdmissionHeld is the build core for callers
+// that already hold either side of runtimeAdmissionMu. Keeping acquisition in
+// the outer wrapper prevents recursive RLock deadlocks when foreground turn
+// admission repairs a stale workspace while an MCP lifecycle writer is queued.
+func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, loadedSession loadedTabSession, buildCtx context.Context, buildGeneration uint64, buildCancel context.CancelFunc) {
 	defer a.recoverToPending("buildTabController")
 	keepBuildContext := false
 	defer func() {
@@ -6784,6 +6808,7 @@ func (a *App) trashTopic(topicID string) error {
 
 	var fallback fallbackRuntimeTarget
 	if err := func() error {
+		defer a.lockRuntimeMutation("trash-topic")()
 		a.sessionRemovalMu.Lock()
 		defer a.sessionRemovalMu.Unlock()
 
@@ -6794,17 +6819,17 @@ func (a *App) trashTopic(topicID string) error {
 		removed, nextFallback := a.removeTopicRuntimeBindings(topicID)
 		fallback = nextFallback
 		if err := a.prepareRemovedSessionRuntimes(removed); err != nil {
-			a.closeRemovedSessionRuntimes(removed)
+			a.closeRemainingRemovedSessionRuntimesAdmissionHeld(removed, map[control.SessionAPI]bool{})
 			return err
 		}
 		destroyBegun := false
 		closedRemoved := map[control.SessionAPI]bool{}
 		defer func() {
 			if destroyBegun {
-				a.closeRemainingRemovedSessionRuntimesAfterDestroy(removed, closedRemoved)
+				a.closeRemainingRemovedSessionRuntimesAfterDestroyAdmissionHeld(removed, closedRemoved)
 				return
 			}
-			a.closeRemovedSessionRuntimes(removed)
+			a.closeRemainingRemovedSessionRuntimesAdmissionHeld(removed, closedRemoved)
 		}()
 
 		for _, target := range targets {
@@ -6813,7 +6838,7 @@ func (a *App) trashTopic(topicID string) error {
 				destroyBegun = true
 			}
 			teardownTimedOut := waitDestroyHandles(destroys)
-			a.closeRemovedSessionRuntimesForSessionAfterDestroy(removed, target.dir, target.sessionPath, closedRemoved)
+			a.closeRemovedSessionRuntimesForSessionAfterDestroyAdmissionHeld(removed, target.dir, target.sessionPath, closedRemoved)
 			if teardownTimedOut {
 				if err := agent.MarkCleanupPending(target.sessionPath, "delete"); err != nil {
 					return err

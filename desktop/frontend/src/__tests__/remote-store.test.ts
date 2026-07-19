@@ -3,8 +3,9 @@
 // Tests for the remote store's status/fingerprint reconciliation and the
 // bridge mock's remote:* event fan-out.
 
-import { useRemoteStore, waitForRemoteConnection } from "../store/remote";
+import { RemoteConnectionTimeoutError, useRemoteStore, waitForRemoteConnection } from "../store/remote";
 import { onRemoteStatus, __emitMockRemote } from "../lib/bridge";
+import { isRemoteHostKeyMismatch, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import type { RemoteConnectionStatus } from "../lib/types";
 
 let passed = 0;
@@ -21,7 +22,7 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 function reset() {
-  useRemoteStore.setState({ hosts: [], statuses: {}, pendingFingerprint: null });
+  useRemoteStore.setState({ hosts: [], statuses: {}, pendingFingerprint: null, statusPopoverRequest: null });
 }
 
 useRemoteStore.getState().setHosts([
@@ -70,6 +71,35 @@ useRemoteStore.getState().hydrateStatuses([
 eq(useRemoteStore.getState().statuses["live"]?.state, "connected", "hydration preserves newer live status");
 eq(useRemoteStore.getState().statuses["snapshot-only"]?.state, "connected", "hydration fills missing status");
 
+useRemoteStore.getState().requestStatusPopover("box");
+const firstReveal = useRemoteStore.getState().statusPopoverRequest!;
+eq(firstReveal.hostId, "box", "connection failures can request the anchored status popover");
+useRemoteStore.getState().requestStatusPopover("box");
+const secondReveal = useRemoteStore.getState().statusPopoverRequest!;
+eq(secondReveal.nonce > firstReveal.nonce, true, "repeated failures create a fresh popover request");
+useRemoteStore.getState().clearStatusPopoverRequest(firstReveal);
+eq(useRemoteStore.getState().statusPopoverRequest?.nonce, secondReveal.nonce, "stale popover completion cannot clear a newer request");
+useRemoteStore.getState().clearStatusPopoverRequest(secondReveal);
+eq(useRemoteStore.getState().statusPopoverRequest, null, "matching popover request is consumed");
+
+const mismatchStatus: RemoteConnectionStatus = {
+  hostId: "box",
+  state: "stopped",
+  error: "raw path-bearing backend error",
+  errorDetails: {
+    code: "host_key_mismatch",
+    presentedSha256: "SHA256:new",
+    knownHostRecords: [{ path: "/home/dev/.ssh/known_hosts", line: 7 }],
+  },
+};
+eq(isRemoteHostKeyMismatch(mismatchStatus), true, "structured mismatch is recognized without parsing raw error text");
+eq(remoteConnectionErrorSummaryKey(mismatchStatus), "remote.error.summary.host_key_mismatch", "mismatch uses the localized safe summary");
+eq(
+  remoteConnectionErrorSummaryKey({ hostId: "legacy", state: "degraded", error: "forward attach failed" }),
+  "remote.error.summary.degraded",
+  "legacy degraded status falls back to the warning summary",
+);
+
 const connectionReady = waitForRemoteConnection("waiting", 1_000);
 useRemoteStore.getState().applyStatus({ hostId: "waiting", state: "connected" });
 await connectionReady;
@@ -83,6 +113,16 @@ try {
   failedConnection = err instanceof Error ? err.message : String(err);
 }
 eq(failedConnection, "handshake failed", "connection waiter rejects the host error without waiting for timeout");
+
+useRemoteStore.getState().applyStatus({ hostId: "timeout", state: "connecting" });
+let timeoutError: unknown;
+try {
+  await waitForRemoteConnection("timeout", 1);
+} catch (err) {
+  timeoutError = err;
+}
+eq(timeoutError instanceof RemoteConnectionTimeoutError, true, "connection waiter exposes a typed timeout for recovery UI");
+eq(useRemoteStore.getState().statuses.timeout?.state, "connecting", "connection timeout does not forge a backend terminal state");
 
 // The bridge mock fan-out delivers remote:status to subscribers.
 (function testMockFanout() {

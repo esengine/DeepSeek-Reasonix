@@ -2,6 +2,9 @@ package plugin
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -10,7 +13,7 @@ import (
 	"strings"
 
 	"reasonix/internal/mcpcatalog"
-	"reasonix/internal/mcptrust"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
 )
@@ -23,81 +26,36 @@ func specIdentityFingerprint(ctx context.Context, s Spec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return mcptrust.IdentityFingerprint(identity)
+	return mcplaunch.IdentityFingerprint(identity)
 }
 
-// legacySpecIdentityFingerprint computes the identity fingerprint this spec
-// had before credential-aware URL normalization, or ("", false) when the two
-// cannot differ. It exists only so MigrateIdentityFingerprint can upgrade
-// pre-rollout receipts by digest comparison; remove together with
-// legacyNormalizeIdentityURL (see docs/MIGRATING.md).
-func legacySpecIdentityFingerprint(s Spec) (string, bool) {
-	legacyURL := legacyNormalizeIdentityURL(s.URL)
-	if strings.TrimSpace(s.URL) == "" || legacyURL == normalizeIdentityURL(s.URL) {
-		return "", false
-	}
-	// URL-bearing transports never resolve a stdio executable, so the identity
-	// build needs no live context here.
-	identity, err := buildSpecIdentity(context.Background(), s)
-	if err != nil || identity.URL == "" {
-		return "", false
-	}
-	identity.URL = legacyURL
-	fingerprints := mcptrust.LegacyIdentityFingerprints(identity)
-	if len(fingerprints) == 0 {
-		return "", false
-	}
-	return fingerprints[0], true
-}
-
-func legacySpecIdentityFingerprints(s Spec) []string {
-	identity, err := buildSpecIdentity(context.Background(), s)
-	if err != nil {
-		return nil
-	}
-	out := mcptrust.LegacyIdentityFingerprints(identity)
-	if legacyURL := legacyNormalizeIdentityURL(s.URL); identity.URL != "" && legacyURL != normalizeIdentityURL(s.URL) {
-		identity.URL = legacyURL
-		out = append(out, mcptrust.LegacyIdentityFingerprints(identity)...)
-	}
-	return compactFingerprints(out)
-}
-
-func compactFingerprints(values []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" && !seen[value] {
-			seen[value] = true
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
-func buildSpecIdentity(ctx context.Context, s Spec) (mcptrust.Identity, error) {
+func buildSpecIdentity(ctx context.Context, s Spec) (mcplaunch.Identity, error) {
 	transport := strings.ToLower(strings.TrimSpace(s.Type))
 	if transport == "" {
 		transport = "stdio"
 	}
 	if strings.TrimSpace(s.OfficialCatalogEntryID) != "" {
 		if err := validateOfficialLauncher(s); err != nil {
-			return mcptrust.Identity{}, err
+			return mcplaunch.Identity{}, err
 		}
 		if strings.TrimSpace(s.PackageRoot) == "" || strings.TrimSpace(s.PackageDigest) == "" {
-			return mcptrust.Identity{}, fmt.Errorf("official MCP server %q is missing its verified package root or digest", s.Name)
+			return mcplaunch.Identity{}, fmt.Errorf("official MCP server %q is missing its verified package root or digest", s.Name)
 		}
 		liveDigest, err := mcpcatalog.TreeSHA256(s.PackageRoot)
 		if err != nil {
-			return mcptrust.Identity{}, fmt.Errorf("reverify official MCP package for %q: %w", s.Name, err)
+			return mcplaunch.Identity{}, fmt.Errorf("verify official MCP package for %q: %w", s.Name, err)
 		}
 		if !strings.EqualFold(liveDigest, s.PackageDigest) {
-			return mcptrust.Identity{}, fmt.Errorf("official MCP package for %q changed after verification; blocked before process or network startup", s.Name)
+			return mcplaunch.Identity{}, fmt.Errorf("official MCP package for %q changed after verification; blocked before process or network startup", s.Name)
 		}
 	}
-	identity := mcptrust.Identity{
+	launchArgs := effectiveLaunchArgs(s)
+	if s.LauncherIdentityArgs != nil {
+		launchArgs = s.LauncherIdentityArgs
+	}
+	identity := mcplaunch.Identity{
 		Server: s.Name, Transport: transport, ConfigSource: s.ConfigSource,
-		Dir: s.Dir, Args: append([]string(nil), effectiveLaunchArgs(s)...),
+		Dir: s.Dir, Args: append([]string(nil), launchArgs...),
 		EnvKeys: sortedMapKeys(s.Env), HeaderKeys: sortedMapKeys(s.Headers),
 		Network: s.ReaderSandbox.Network || s.WriterSandbox.Network,
 		WriteRoots: append(append(append([]string(nil), s.ReaderSandbox.WriteRoots...),
@@ -110,7 +68,7 @@ func buildSpecIdentity(ctx context.Context, s Spec) (mcptrust.Identity, error) {
 		LauncherDigest:  s.LauncherDigest,
 	}
 	if strings.TrimSpace(s.OfficialCatalogEntryID) != "" {
-		// Official trust is global across workspaces. The signed package digest
+		// Verified official package identity is global across workspaces. The signed package digest
 		// pins executable code and the catalog pins the server definition, so
 		// workspace-expanded args and write-root paths are excluded here.
 		identity.Args = nil
@@ -123,20 +81,20 @@ func buildSpecIdentity(ctx context.Context, s Spec) (mcptrust.Identity, error) {
 	switch transport {
 	case "stdio":
 		if strings.TrimSpace(s.Command) == "" {
-			return mcptrust.Identity{}, fmt.Errorf("stdio plugin %q: command is required", s.Name)
+			return mcplaunch.Identity{}, fmt.Errorf("stdio plugin %q: command is required", s.Name)
 		}
 		env := mergeEnv(secrets.ProcessEnv(), s.Env)
 		exe, _, err := resolveStdioExecutable(ctx, s, env)
 		if err != nil {
-			return mcptrust.Identity{}, err
+			return mcplaunch.Identity{}, err
 		}
 		if abs, err := filepath.Abs(exe); err == nil {
 			exe = abs
 		}
 		identity.CommandPath = exe
-		identity.CommandSHA256, err = mcptrust.FileSHA256(exe)
+		identity.CommandSHA256, err = mcplaunch.FileSHA256(exe)
 		if err != nil {
-			return mcptrust.Identity{}, fmt.Errorf("hash MCP executable %q: %w", exe, err)
+			return mcplaunch.Identity{}, fmt.Errorf("hash MCP executable %q: %w", exe, err)
 		}
 	case "http", "streamable-http", "streamable_http":
 		identity.Transport = "http"
@@ -153,7 +111,7 @@ func MCPStateDir(reasonixHome, workspace, server string) string {
 	if strings.TrimSpace(reasonixHome) == "" {
 		return ""
 	}
-	workspaceID := mcptrust.WorkspaceFingerprint(workspace)
+	workspaceID := mcplaunch.WorkspaceFingerprint(workspace)
 	if len(workspaceID) > 16 {
 		workspaceID = workspaceID[:16]
 	}
@@ -166,26 +124,15 @@ func MCPStateDir(reasonixHome, workspace, server string) string {
 func isolationPolicy(s Spec) string {
 	transport := strings.ToLower(strings.TrimSpace(s.Type))
 	if transport == "http" || transport == "streamable-http" || transport == "streamable_http" {
-		return string(mcptrust.IsolationNotApplicable)
+		return "not_applicable"
 	}
 	if !s.ReaderSandbox.Enforce() && !s.WriterSandbox.Enforce() {
 		return "off"
 	}
 	if sandbox.Available() {
-		return string(mcptrust.IsolationEnforced)
+		return "enforced"
 	}
-	return string(mcptrust.IsolationUnavailableUnconfined)
-}
-
-func isolationStateForSpec(s Spec) mcptrust.IsolationState {
-	switch isolationPolicy(s) {
-	case string(mcptrust.IsolationEnforced):
-		return mcptrust.IsolationEnforced
-	case string(mcptrust.IsolationUnavailableUnconfined):
-		return mcptrust.IsolationUnavailableUnconfined
-	default:
-		return mcptrust.IsolationNotApplicable
-	}
+	return "unavailable_unconfined"
 }
 
 // identityURLRedacted replaces credential material inside identity and cache
@@ -234,7 +181,7 @@ func credentialURLQueryKey(key string) bool {
 // and schema-cache fingerprints: scheme/host case and default ports fold,
 // the fragment drops, query keys sort stably, and credential material
 // (userinfo, credential query values) is replaced by a fixed placeholder so
-// rotation never invalidates trust and receipts never bind secret values.
+// rotation never invalidates an exact project launch authorization.
 // Network requests always use the raw configured URL, never this form.
 func normalizeIdentityURL(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
@@ -280,10 +227,9 @@ func normalizeIdentityURL(raw string) string {
 	return u.String()
 }
 
-// legacyNormalizeIdentityURL is the pre-credential-aware normalization, kept
-// read-only so receipts and schema caches written before the rollout migrate
-// by digest comparison instead of forcing a re-trust. Scheduled for removal
-// two minor releases after the rollout (see docs/MIGRATING.md).
+// legacyNormalizeIdentityURL is the pre-credential-aware normalization kept
+// only so old schema-cache keys remain readable during the compatibility
+// window. It no longer participates in authorization or tool classification.
 func legacyNormalizeIdentityURL(raw string) string {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Scheme == "" || u.Host == "" {
@@ -306,18 +252,6 @@ func legacyNormalizeIdentityURL(raw string) string {
 	return u.String()
 }
 
-func validatePersistentTransportTrust(s Spec) error {
-	transport := strings.ToLower(strings.TrimSpace(s.Type))
-	switch transport {
-	case "http", "streamable-http", "streamable_http", "sse":
-		u, err := url.Parse(strings.TrimSpace(s.URL))
-		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
-			return fmt.Errorf("persistent trust for remote MCP server %q requires an HTTPS URL; use session trust for this connection", s.Name)
-		}
-	}
-	return nil
-}
-
 func sortedMapKeys[V any](values map[string]V) []string {
 	out := make([]string, 0, len(values))
 	for key := range values {
@@ -329,252 +263,161 @@ func sortedMapKeys[V any](values map[string]V) []string {
 	return out
 }
 
-func capabilityOf(s Spec, raw mcpTool, schema []byte) mcptrust.Capability {
-	visible := raw.Name
-	if s.StripRawPrefix != "" {
-		visible = strings.TrimPrefix(visible, s.StripRawPrefix)
-	}
-	hinted := raw.Annotations != nil && raw.Annotations.ReadOnlyHint
-	destructive := raw.Annotations != nil && raw.Annotations.DestructiveHint
-	return mcptrust.Capability{
-		RawName: raw.Name, ModelName: toolName(s.Name, visible),
-		InputSchema: schema, OutputSchema: raw.OutputSchema,
-		ReadOnly:    hinted || s.toolReadOnlyOverride(raw.Name, visible),
-		Destructive: destructive,
-	}
-}
-
-// managerEvaluate is the shared evaluation entry for every path that can
-// execute MCP tools. Official catalog servers evaluate against the current
-// signed reader allowlist, and a receipt still carrying the legacy URL
-// fingerprint upgrades in place when nothing else drifted.
-func managerEvaluate(manager *mcptrust.Manager, s Spec, identity string, capabilities []mcptrust.Capability) (mcptrust.Evaluation, error) {
-	eval, err := managerEvaluateOnce(manager, s, identity, capabilities)
-	if err != nil {
-		return eval, err
-	}
-	migrated, migErr := migrateLegacyIdentity(s, identity, capabilities)
-	if migErr != nil {
-		return eval, migErr
-	}
-	if !migrated {
-		return eval, nil
-	}
-	return managerEvaluateOnce(manager, s, identity, capabilities)
-}
-
-// migrateLegacyIdentity upgrades a receipt still carrying the legacy URL
-// fingerprint of this exact spec to the current credential-aware fingerprint.
-// It runs before the pre-start identity block, where no live capabilities
-// exist yet, so the drift comparison is deliberately skipped (nil): the
-// receipt's tool snapshot is untouched and the post-handshake evaluation
-// still performs the full capability drift check against it.
-func migrateLegacyIdentity(s Spec, identity string, capabilities []mcptrust.Capability) (bool, error) {
-	if s.TrustManager == nil {
-		return false, nil
-	}
-	legacy := legacySpecIdentityFingerprints(s)
-	if len(legacy) == 0 {
-		return false, nil
-	}
-	currentSource := trustConfigSource(s)
-	return s.TrustManager.MigrateIdentityFingerprints(
-		s.Name,
-		currentSource,
-		[]string{currentSource, "workspace_config"},
-		legacy,
-		identity,
-		capabilities,
-	)
-}
-
-func managerEvaluateOnce(manager *mcptrust.Manager, s Spec, identity string, capabilities []mcptrust.Capability) (mcptrust.Evaluation, error) {
-	if strings.TrimSpace(s.OfficialCatalogEntryID) != "" {
-		return manager.EvaluateOfficial(s.Name, trustConfigSource(s), identity, capabilities, mcptrust.OfficialAuthority{
-			CatalogEntryID: s.OfficialCatalogEntryID,
-			Readers:        s.OfficialReaderNames,
-		})
-	}
-	return manager.Evaluate(s.Name, trustConfigSource(s), identity, capabilities)
-}
-
-func evaluateSpecTrust(s Spec, identity string, capabilities []mcptrust.Capability) (mcptrust.Evaluation, error) {
-	manager := s.TrustManager
-	if manager == nil {
-		trusted := map[string]bool{}
-		for _, cap := range capabilities {
-			// Direct plugin-package users without a composition-root manager keep
-			// the historical annotation behavior. Every product frontend injects
-			// a manager, where third-party hints require a receipt.
-			if cap.ReadOnly {
-				trusted[cap.RawName] = true
-			}
-		}
-		return mcptrust.Evaluation{State: mcptrust.TrustUntrusted, TrustedReaders: trusted}, nil
-	}
-	configSource := trustConfigSource(s)
-	if _, err := migrateLegacyIdentity(s, identity, capabilities); err != nil {
-		return untrustedEvaluation(), err
-	}
-	if s.OfficialCatalogEntryID != "" && mcpcatalog.RuntimeEntryRevoked(s.OfficialCatalogEntryID) {
-		return untrustedEvaluation(), nil
-	}
-	if s.OfficialCatalogEntryID != "" {
-		denied, err := manager.OfficialDenied(s.OfficialCatalogEntryID)
-		if err != nil {
-			return untrustedEvaluation(), err
-		}
-		if denied {
-			return untrustedEvaluation(), nil
-		}
-	}
-	hasReceipt, err := manager.HasReceipt(s.Name, configSource)
-	if err != nil {
-		return untrustedEvaluation(), err
-	}
-	if !hasReceipt {
-		if s.OfficialCatalogEntryID != "" {
-			if err := manager.TrustOfficial(s.Name, configSource, identity, s.OfficialCatalogEntryID, capabilities, s.OfficialReaderNames); err != nil {
-				return untrustedEvaluation(), err
-			}
-			return managerEvaluate(manager, s, identity, capabilities)
-		}
-		if s.AutoTrust {
-			if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, s.Name, configSource, identity, "", capabilities); err != nil {
-				return untrustedEvaluation(), err
-			}
-			return managerEvaluate(manager, s, identity, capabilities)
-		}
-		legacyConfigured := len(s.ReadOnlyToolNames) > 0 || len(s.ReadOnlyModelToolNames) > 0
-		legacyImported, err := manager.LegacyImported(s.Name, configSource)
-		if err != nil {
-			return untrustedEvaluation(), err
-		}
-		if legacyConfigured && !legacyImported {
-			legacy := make([]mcptrust.Capability, 0)
-			for _, cap := range capabilities {
-				visible := strings.TrimPrefix(cap.ModelName, ToolPrefix(s.Name))
-				if s.toolReadOnlyOverride(cap.RawName, visible) && cap.ReadOnly && !cap.Destructive {
-					legacy = append(legacy, cap)
-				}
-			}
-			if len(legacy) > 0 {
-				if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceLegacyImport, s.Name, configSource, identity, "", legacy); err != nil {
-					return untrustedEvaluation(), err
-				}
-			}
-			if err := manager.MarkLegacyImported(s.Name, configSource); err != nil {
-				return untrustedEvaluation(), err
-			}
-		}
-	}
-	eval, err := managerEvaluate(manager, s, identity, capabilities)
-	if err != nil {
-		return untrustedEvaluation(), err
-	}
-	if s.AutoTrust && (eval.IdentityChanged || len(eval.ChangedTools) > 0) {
-		if err := manager.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, s.Name, configSource, identity, "", capabilities); err != nil {
-			return untrustedEvaluation(), err
-		}
-		return managerEvaluate(manager, s, identity, capabilities)
-	}
-	return eval, nil
-}
-
-func trustConfigSource(s Spec) string {
+func launchConfigSource(s Spec) string {
 	if s.OfficialCatalogEntryID != "" {
 		return "official_catalog:" + s.OfficialCatalogEntryID
 	}
 	return s.ConfigSource
 }
 
-func capabilityFingerprint(cap mcptrust.Capability) string {
-	fp, _ := mcptrust.CapabilityFingerprint(cap)
-	return fp
+type toolCapability struct {
+	RawName      string
+	ModelName    string
+	VisibleName  string
+	InputSchema  json.RawMessage
+	OutputSchema json.RawMessage
+	ReadOnly     bool
+	Destructive  bool
 }
 
-// CachedToolTrust is the host-local safety classification for one tool in an
-// identity-matched schema cache. It is used by strict read-only sessions to
-// decide whether an unconnected MCP reader may start without granting trust or
-// invoking the server during resolution.
-type CachedToolTrust struct {
+func capabilityOf(s Spec, raw mcpTool, schema []byte) toolCapability {
+	visible := raw.Name
+	if s.StripRawPrefix != "" {
+		visible = strings.TrimPrefix(visible, s.StripRawPrefix)
+	}
+	hinted := raw.Annotations != nil && raw.Annotations.ReadOnlyHint
+	destructive := raw.Annotations != nil && raw.Annotations.DestructiveHint
+	return toolCapability{
+		RawName: raw.Name, ModelName: toolName(s.Name, visible), VisibleName: visible,
+		InputSchema: schema, OutputSchema: raw.OutputSchema,
+		ReadOnly: hinted || s.toolReadOnlyOverride(raw.Name, visible), Destructive: destructive,
+	}
+}
+
+func trustedReaderForSpec(s Spec, cap toolCapability) bool {
+	if !cap.ReadOnly || cap.Destructive {
+		return false
+	}
+	if s.toolReadOnlyOverride(cap.RawName, cap.VisibleName) {
+		return true
+	}
+	if strings.TrimSpace(s.OfficialCatalogEntryID) == "" || mcpcatalog.RuntimeEntryRevoked(s.OfficialCatalogEntryID) {
+		return false
+	}
+	for _, name := range s.OfficialReaderNames {
+		if strings.TrimSpace(name) == cap.RawName {
+			return true
+		}
+	}
+	return false
+}
+
+func capabilityFingerprint(cap toolCapability) string {
+	in, err := canonicalSecuritySchema(cap.InputSchema)
+	if err != nil {
+		return ""
+	}
+	out, err := canonicalSecuritySchema(cap.OutputSchema)
+	if err != nil {
+		return ""
+	}
+	payload := struct {
+		RawName     string          `json:"raw_name"`
+		ModelName   string          `json:"model_name"`
+		Input       json.RawMessage `json:"input,omitempty"`
+		Output      json.RawMessage `json:"output,omitempty"`
+		ReadOnly    bool            `json:"read_only"`
+		Destructive bool            `json:"destructive"`
+	}{
+		RawName: strings.TrimSpace(cap.RawName), ModelName: strings.TrimSpace(cap.ModelName),
+		Input: in, Output: out, ReadOnly: cap.ReadOnly, Destructive: cap.Destructive,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func canonicalSecuritySchema(raw json.RawMessage) (json.RawMessage, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	stripSchemaDisplayFields(value)
+	body, err := json.Marshal(value)
+	return json.RawMessage(body), err
+}
+
+func stripSchemaDisplayFields(value any) {
+	switch v := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"description", "title", "examples", "$comment"} {
+			delete(v, key)
+		}
+		for key, child := range v {
+			switch key {
+			case "properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependentRequired", "dependencies":
+				if named, ok := child.(map[string]any); ok {
+					for _, schema := range named {
+						stripSchemaDisplayFields(schema)
+					}
+					continue
+				}
+			}
+			stripSchemaDisplayFields(child)
+		}
+	case []any:
+		for _, child := range v {
+			stripSchemaDisplayFields(child)
+		}
+	}
+}
+
+// CachedToolSafety is the local safety classification for one tool in an
+// identity-matched schema cache. Server hints control ordinary read-only
+// policy; only explicit local declarations or signed catalog readers are
+// admitted into strict read-only execution.
+type CachedToolSafety struct {
+	ReadOnly              bool
 	TrustedReader         bool
 	Destructive           bool
 	CapabilityFingerprint string
-	TrustState            mcptrust.TrustState
 }
 
-// CachedToolTrustForSpec evaluates an already-established receipt against the
-// exact cached server identity and capability snapshot. It never creates or
-// upgrades trust: first trust and drift review remain parent-session actions.
-func CachedToolTrustForSpec(ctx context.Context, s Spec, rawName string) (CachedToolTrust, bool, error) {
+func CachedToolSafetyForSpec(s Spec, rawName string) (CachedToolSafety, bool) {
 	cs, ok := LoadCachedSchemaForSpec(s)
 	if !ok {
-		return CachedToolTrust{}, false, nil
+		return CachedToolSafety{}, false
 	}
-	caps := make([]mcptrust.Capability, 0, len(cs.Tools))
-	var target *mcptrust.Capability
+	var target *toolCapability
 	for _, cached := range cs.Tools {
 		visible := cached.Name
 		if s.StripRawPrefix != "" {
 			visible = strings.TrimPrefix(visible, s.StripRawPrefix)
 		}
-		cap := mcptrust.Capability{
-			RawName: cached.Name, ModelName: toolName(s.Name, visible),
+		cap := toolCapability{
+			RawName: cached.Name, ModelName: toolName(s.Name, visible), VisibleName: visible,
 			InputSchema: cached.Schema, OutputSchema: cached.OutputSchema,
 			ReadOnly:    cached.ReadOnly || s.toolReadOnlyOverride(cached.Name, visible),
 			Destructive: cached.Destructive,
 		}
-		caps = append(caps, cap)
 		if cached.Name == rawName {
 			copy := cap
 			target = &copy
 		}
 	}
 	if target == nil {
-		return CachedToolTrust{}, false, nil
+		return CachedToolSafety{}, false
 	}
-	result := CachedToolTrust{
+	return CachedToolSafety{
+		ReadOnly:              target.ReadOnly,
+		TrustedReader:         trustedReaderForSpec(s, *target),
 		Destructive:           target.Destructive,
 		CapabilityFingerprint: capabilityFingerprint(*target),
-		TrustState:            mcptrust.TrustUntrusted,
-	}
-	if s.TrustManager == nil {
-		result.TrustedReader = target.ReadOnly && !target.Destructive
-		return result, true, nil
-	}
-	if s.OfficialCatalogEntryID != "" && mcpcatalog.RuntimeEntryRevoked(s.OfficialCatalogEntryID) {
-		return result, true, nil
-	}
-	if s.OfficialCatalogEntryID != "" {
-		denied, err := s.TrustManager.OfficialDenied(s.OfficialCatalogEntryID)
-		if err != nil {
-			return result, true, err
-		}
-		if denied {
-			return result, true, nil
-		}
-	}
-	hasReceipt, err := s.TrustManager.HasReceipt(s.Name, trustConfigSource(s))
-	if err != nil {
-		return result, true, err
-	}
-	if !hasReceipt {
-		return result, true, nil
-	}
-	locked, err := applyStoredLauncherLock(s)
-	if err != nil {
-		return result, true, err
-	}
-	identity, err := specIdentityFingerprint(ctx, locked)
-	if err != nil {
-		return result, true, err
-	}
-	eval, err := managerEvaluate(s.TrustManager, s, identity, caps)
-	if err != nil {
-		return result, true, err
-	}
-	result.TrustState = eval.State
-	result.TrustedReader = eval.TrustedReaders[target.RawName] && !target.Destructive
-	return result, true, nil
+	}, true
 }

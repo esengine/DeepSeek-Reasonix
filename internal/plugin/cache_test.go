@@ -1,14 +1,13 @@
 package plugin
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"reasonix/internal/mcptrust"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -95,16 +94,10 @@ func TestCachePersistsDeclaredReaderIndependentlyOfLocalTrust(t *testing.T) {
 	}
 }
 
-func TestCachedToolTrustForSpecRequiresMatchingExistingReceipt(t *testing.T) {
+func TestCachedToolSafetySeparatesServerHintFromExplicitReaderAuthority(t *testing.T) {
 	redirectCache(t)
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), t.TempDir())
 	spec := Spec{
-		Name: "cached-reader", Type: "stdio", Command: exe,
-		ConfigSource: "workspace_config", TrustManager: manager,
+		Name: "cached-reader", Type: "http", URL: "https://example.com/mcp",
 	}
 	reader := CachedTool{
 		Name: "search", Schema: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`), ReadOnly: true,
@@ -112,32 +105,30 @@ func TestCachedToolTrustForSpecRequiresMatchingExistingReceipt(t *testing.T) {
 	if err := SaveCachedSchema(spec.Name, CachedSchema{SpecHash: SpecFingerprint(spec), Tools: []CachedTool{reader}}); err != nil {
 		t.Fatal(err)
 	}
-	before, found, err := CachedToolTrustForSpec(context.Background(), spec, "search")
-	if err != nil || !found || before.TrustedReader {
-		t.Fatalf("before receipt = (%+v,%v,%v), want found but untrusted", before, found, err)
+	before, found := CachedToolSafetyForSpec(spec, "search")
+	if !found || !before.ReadOnly || before.TrustedReader {
+		t.Fatalf("server hint = (%+v,%v), want ordinary reader without strict authority", before, found)
 	}
-	identity, err := specIdentityFingerprint(context.Background(), spec)
-	if err != nil {
+	spec.ReadOnlyToolNames = map[string]bool{"search": true}
+	if _, found := CachedToolSafetyForSpec(spec, "search"); found {
+		t.Fatal("classification change reused a cache from a different policy")
+	}
+	if err := SaveCachedSchema(spec.Name, CachedSchema{SpecHash: SpecFingerprint(spec), Tools: []CachedTool{reader}}); err != nil {
 		t.Fatal(err)
 	}
-	capability := mcptrust.Capability{
-		RawName: "search", ModelName: toolName(spec.Name, "search"), InputSchema: reader.Schema, ReadOnly: true,
-	}
-	if err := manager.Trust(mcptrust.ScopeSession, mcptrust.SourceUser, spec.Name, trustConfigSource(spec), identity, "", []mcptrust.Capability{capability}); err != nil {
-		t.Fatal(err)
-	}
-	after, found, err := CachedToolTrustForSpec(context.Background(), spec, "search")
-	if err != nil || !found || !after.TrustedReader {
-		t.Fatalf("matching receipt = (%+v,%v,%v), want trusted reader", after, found, err)
+	after, found := CachedToolSafetyForSpec(spec, "search")
+	if !found || !after.ReadOnly || !after.TrustedReader {
+		t.Fatalf("explicit reader = (%+v,%v), want strict reader authority", after, found)
 	}
 
+	oldFingerprint := after.CapabilityFingerprint
 	reader.Schema = json.RawMessage(`{"type":"object","properties":{"q":{"type":"number"}}}`)
 	if err := SaveCachedSchema(spec.Name, CachedSchema{SpecHash: SpecFingerprint(spec), Tools: []CachedTool{reader}}); err != nil {
 		t.Fatal(err)
 	}
-	drifted, found, err := CachedToolTrustForSpec(context.Background(), spec, "search")
-	if err != nil || !found || drifted.TrustedReader || drifted.TrustState != mcptrust.TrustChanged {
-		t.Fatalf("schema drift = (%+v,%v,%v), want changed and untrusted", drifted, found, err)
+	drifted, found := CachedToolSafetyForSpec(spec, "search")
+	if !found || !drifted.TrustedReader || drifted.CapabilityFingerprint == oldFingerprint {
+		t.Fatalf("schema update = (%+v,%v), want current fingerprint with explicit authority", drifted, found)
 	}
 }
 
@@ -288,7 +279,7 @@ func TestSpecFingerprintStable(t *testing.T) {
 func TestSpecFingerprintIgnoresHostLocalTrustAndIsolation(t *testing.T) {
 	base := sampleSpec()
 	changed := base
-	changed.TrustManager = mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
+	changed.LaunchManager = mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), "/workspace")
 	changed.ConfigSource = "project:.mcp.json"
 	changed.OfficialCatalogEntryID = "plugin@example.com@1.0.0"
 	changed.OfficialReaderNames = []string{"search"}
@@ -503,65 +494,6 @@ func TestNormalizeIdentityURLRedactsCredentialMaterial(t *testing.T) {
 	}
 	if strings.Contains(userinfoOnly, "alice") || strings.Contains(userinfoPassword, "pw") {
 		t.Fatalf("userinfo values leaked: %q %q", userinfoOnly, userinfoPassword)
-	}
-}
-
-func TestManagerEvaluateMigratesLegacyURLIdentityWithoutRetrust(t *testing.T) {
-	m := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
-	spec := Spec{
-		Name: "srv", Type: "http",
-		URL:          "https://example.com/mcp?access_token=first&workspace=alpha",
-		ConfigSource: "workspace_config", TrustManager: m,
-	}
-	caps := []mcptrust.Capability{{RawName: "read", ModelName: "mcp__srv__read", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`)}}
-
-	legacyFP, ok := legacySpecIdentityFingerprint(spec)
-	if !ok {
-		t.Fatal("legacy identity fingerprint unavailable for credential-bearing URL")
-	}
-	if err := m.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, "srv", "workspace_config", legacyFP, "", caps); err != nil {
-		t.Fatal(err)
-	}
-
-	current, err := specIdentityFingerprint(context.Background(), spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if current == legacyFP {
-		t.Fatal("credential-aware fingerprint did not change; migration test is vacuous")
-	}
-	eval, err := managerEvaluate(m, spec, current, caps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if eval.State != mcptrust.TrustWorkspace || eval.IdentityChanged || !eval.TrustedReaders["read"] {
-		t.Fatalf("legacy receipt did not migrate cleanly: %+v", eval)
-	}
-
-	// After migration, credential rotation keeps the identity stable...
-	rotated := spec
-	rotated.URL = "https://example.com/mcp?access_token=second&workspace=alpha"
-	rotatedFP, err := specIdentityFingerprint(context.Background(), rotated)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rotatedFP != current {
-		t.Fatal("credential rotation changed the migrated identity")
-	}
-	// ...while a resource-scope change still demands re-verification and must
-	// not silently migrate.
-	moved := spec
-	moved.URL = "https://example.com/mcp?access_token=first&workspace=beta"
-	movedFP, err := specIdentityFingerprint(context.Background(), moved)
-	if err != nil {
-		t.Fatal(err)
-	}
-	eval, err = managerEvaluate(m, moved, movedFP, caps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !eval.IdentityChanged {
-		t.Fatalf("workspace scope change was not flagged: %+v", eval)
 	}
 }
 
