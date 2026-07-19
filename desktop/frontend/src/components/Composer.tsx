@@ -2739,7 +2739,8 @@ export function Composer({
 
     // The send chord (default Enter) sends and the newline chord (default
     // Shift+Enter) breaks the line — both configurable in Settings →
-    // Shortcuts; other Enter combos do nothing. `composing` guards IME confirms.
+    // Shortcuts. The default send layout retains legacy modified-Enter send
+    // aliases; explicit custom bindings are exact. `composing` guards IME confirms.
     if (e.key === "Enter" && !composing) {
       const enterAction = composerEnterAction(e.nativeEvent, shortcutPlatform);
       if (enterAction === "newline-insert") {

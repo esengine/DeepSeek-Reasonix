@@ -1,4 +1,4 @@
-import { matchesShortcut, type ShortcutPlatform } from "./keyboardShortcuts";
+import { loadCustomShortcuts, matchesShortcut, type ShortcutPlatform } from "./keyboardShortcuts";
 import { replaceInvocationTextRange, type ComposerInvocation } from "./invocationDisplay";
 
 export type PromptHistoryDirection = "up" | "down";
@@ -26,6 +26,10 @@ export function composerEnterAction(event: ComposerEnterKeyLike, platform: Short
     return nativeInserts ? "newline-native" : "newline-insert";
   }
   if (matchesShortcut(event, "composer.send", platform)) return "send";
+  // Before composer shortcuts were configurable, every non-Shift Enter chord
+  // submitted. Preserve that default compatibility, but stop applying it as
+  // soon as the user explicitly chooses a send chord.
+  if (!loadCustomShortcuts()["composer.send"] && !event.shiftKey) return "send";
   // Plain Enter bound to neither chord (send moved to e.g. Ctrl+Enter) still
   // breaks the line — the WeChat/DingTalk-style layout users expect there.
   if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) return "newline-insert";

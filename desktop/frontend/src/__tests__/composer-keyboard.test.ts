@@ -74,8 +74,9 @@ console.log("\ncomposerEnterAction");
 resetCustomShortcuts();
 eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "plain Enter sends by default");
 eq(composerEnterAction({ key: "Enter", shiftKey: true }, "darwin"), "newline-native", "Shift+Enter keeps the native line break by default");
-eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "windows"), "none", "Ctrl+Enter matches neither chord and does nothing");
-eq(composerEnterAction({ key: "Enter", metaKey: true }, "darwin"), "none", "Cmd+Enter matches neither chord and does nothing");
+eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "windows"), "send", "Ctrl+Enter keeps the legacy default send behavior");
+eq(composerEnterAction({ key: "Enter", metaKey: true }, "darwin"), "send", "Cmd+Enter keeps the legacy default send behavior");
+eq(composerEnterAction({ key: "Enter", altKey: true }, "linux"), "send", "Alt+Enter keeps the legacy default send behavior");
 eq(composerEnterAction({ key: "a" }, "darwin"), null, "non-Enter keys are ignored");
 
 saveCustomShortcut("composer.newline", { key: "Enter", ctrl: true });
@@ -88,6 +89,7 @@ saveCustomShortcut("composer.send", { key: "Enter", ctrl: true });
 eq(composerEnterAction({ key: "Enter", ctrlKey: true }, "linux"), "send", "custom Ctrl+Enter sends (WeChat-style layout)");
 eq(composerEnterAction({ key: "Enter" }, "linux"), "newline-insert", "plain Enter breaks the line when the send chord moved to Ctrl+Enter");
 eq(composerEnterAction({ key: "Enter", shiftKey: true }, "linux"), "newline-native", "Shift+Enter still breaks the line in the WeChat-style layout");
+eq(composerEnterAction({ key: "Enter", altKey: true }, "linux"), "none", "a custom send chord disables legacy modified-Enter aliases");
 
 resetCustomShortcuts();
 eq(composerEnterAction({ key: "Enter" }, "darwin"), "send", "reset restores plain-Enter send");

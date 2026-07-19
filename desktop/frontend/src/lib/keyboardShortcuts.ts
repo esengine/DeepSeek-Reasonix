@@ -92,8 +92,8 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     preventDefault: true,
   },
   // composer.send / composer.newline are handled inside the composer's own
-  // keydown path (see composerKeyboard.ts), not via useGlobalShortcut. An
-  // Enter chord matching neither combo does nothing.
+  // keydown path (see composerKeyboard.ts), not via useGlobalShortcut. That
+  // path also owns backward compatibility for the default send behavior.
   {
     action: "composer.send",
     section: "session",

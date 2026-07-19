@@ -157,6 +157,33 @@ async function main() {
   ok(Boolean(savedSend && savedSend.key === "Enter" && savedSend.ctrl), "Ctrl+Enter is saved for composer send");
 
   await act(async () => {
+    sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await flushPromises();
+  });
+  await act(async () => {
+    sendButton.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await flushPromises();
+  });
+  ok(!sendButton.classList.contains("shortcuts-settings__key--recording"), "Escape cancels composer shortcut recording");
+  const afterEscape = loadCustomShortcuts()["composer.send"];
+  ok(Boolean(afterEscape && afterEscape.key === "Enter" && afterEscape.ctrl), "Escape preserves the saved composer shortcut");
+
+  await act(async () => {
+    sendButton.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await flushPromises();
+  });
+  const tabEvent = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+  await act(async () => {
+    sendButton.dispatchEvent(tabEvent);
+    await flushPromises();
+  });
+  ok(!tabEvent.defaultPrevented, "Tab remains available for keyboard focus navigation");
+  ok(document.activeElement !== sendButton, "Tab releases focus when native traversal is unavailable");
+  ok(!sendButton.classList.contains("shortcuts-settings__key--recording"), "Tab exits composer shortcut recording");
+  const afterTab = loadCustomShortcuts()["composer.send"];
+  ok(Boolean(afterTab && afterTab.key === "Enter" && afterTab.ctrl), "Tab preserves the saved composer shortcut");
+
+  await act(async () => {
     resetCustomShortcuts();
     await flushPromises();
   });
