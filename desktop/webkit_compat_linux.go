@@ -97,18 +97,6 @@ static void reasonix_schedule_signal_handler_fix(void)
 */
 import "C"
 
-import "os"
-
-// init applies Linux WebKit2GTK compatibility workarounds.
-//
-// WebKit2GTK 2.50.x (shipped by Deepin 23, Arch, and other rolling/bleeding-
-// edge distros) can abort while the Wails v2.12 Linux frontend creates or
-// starts the webview. One reported crash manifests as:
-//
-//	GLib-GObject-CRITICAL: g_value_set_boxed: assertion 'G_VALUE_HOLDS_BOXED'
-//	SIGABRT: abort  PC=0x... signal arrived during cgo execution
-//	runtime.cgocall → _Cfunc_webkit_user_content_manager_new()
-//
 // JavaScriptCore installs several signal handlers lazily when JavaScript first
 // executes. Those handlers can replace the SA_ONSTACK flag required by Go after
 // Wails v2.12's one-shot repair has already run. The bounded GLib timer below
@@ -116,24 +104,20 @@ import "os"
 // 50 ms for the first five seconds of WebKit startup, then domReady performs one
 // final deterministic repair.
 //
-// The bounded signal repair is backported from Wails v2.13's verified Linux
-// fix. The NVIDIA renderer workaround was reported effective on WebKit2GTK
-// 2.50.4 + Go 1.26.5 + NVIDIA GeForce GT 1030 on Deepin 23 (X11).
-func init() {
-	// Disable the DMA-BUF renderer on NVIDIA GPUs. This is independent of the
-	// signal repair and protects WebKit2GTK's accelerated rendering path.
-	//
-	// WebKit2GTK 2.50.x introduced a new DMA-BUF accelerated compositing
-	// path that can crash on NVIDIA proprietary drivers. Disabling it
-	// falls back to the stable software OpenGL renderer.
-	//
-	// This complements nvidia_wayland_linux.go's explicit-sync workaround by
-	// guarding all NVIDIA GPUs, in both X11 and Wayland sessions.
-	if _, set := os.LookupEnv("WEBKIT_DISABLE_DMABUF_RENDERER"); !set {
-		if hasNVIDIAGPU() {
-			_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
-		}
+// The timer starts dispatching only after Wails enters GTK's main loop. It fixes
+// the verified JavaScriptCore signal-handler race, but is not intended to cover
+// failures that occur earlier while WebKit constructs the window.
+
+// configureWebKitRendererRecovery applies WebKit's costly DMA-BUF fallback only
+// during Safe Mode on NVIDIA systems. Normal launches keep accelerated backing
+// store enabled; NVIDIA Wayland sessions continue to use the narrower explicit-
+// sync workaround in nvidia_wayland_linux.go. Call this before wails.Run so the
+// WebKit process inherits the environment.
+func configureWebKitRendererRecovery(safeMode bool) {
+	if !safeMode {
+		return
 	}
+	configureWebKitRendererRecoveryForGPU(safeMode, hasNVIDIAGPU())
 }
 
 // scheduleWebKitSignalHandlerRepair starts the bounded GLib timer immediately

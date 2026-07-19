@@ -103,6 +103,11 @@ func main() {
 	if launch.SafeMode {
 		_ = os.Setenv("REASONIX_SAFE_MODE", "1")
 	}
+	// Keep WebKit acceleration enabled during normal Linux launches. If the
+	// startup tracker selects Safe Mode after a crash loop (or the user requests
+	// it explicitly), NVIDIA systems use the broader renderer fallback before
+	// Wails creates the WebKit process. Other platforms provide a no-op.
+	configureWebKitRendererRecovery(launch.SafeMode)
 	// Begin runs before the Wails single-instance gate, but it refuses to
 	// overwrite the recorded state while its owner PID is alive, so a duplicate
 	// launch — which Wails terminates via os.Exit without OnShutdown — never
