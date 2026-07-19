@@ -420,6 +420,10 @@ export interface AppBindings {
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
+  SetSoftCompactRatio(ratio: number): Promise<void>;
+  SetToolResultSnipRatio(ratio: number): Promise<void>;
+  SetCompactRatio(ratio: number): Promise<void>;
+  SetCompactForceRatio(ratio: number): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
@@ -4133,6 +4137,18 @@ function makeMockApp(): AppBindings {
     async SetReasoningLanguage(lang: string) {
       const normalized = lang === "zh" || lang === "en" ? lang : "auto";
       settings.agent = { ...settings.agent, reasoningLanguage: normalized };
+    },
+    async SetSoftCompactRatio(ratio: number) {
+      settings.agent = { ...settings.agent, softCompactRatio: ratio };
+    },
+    async SetToolResultSnipRatio(ratio: number) {
+      settings.agent = { ...settings.agent, toolResultSnipRatio: ratio };
+    },
+    async SetCompactRatio(ratio: number) {
+      settings.agent = { ...settings.agent, compactRatio: ratio };
+    },
+    async SetCompactForceRatio(ratio: number) {
+      settings.agent = { ...settings.agent, compactForceRatio: ratio };
     },
     // ── Heartbeat mock ──
     async HeartbeatListTasks() { return []; },

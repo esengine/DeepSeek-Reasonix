@@ -4202,6 +4202,79 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
                 ))}
               </div>
             </SettingsField>
+
+            <SettingsField label={t("settings.compactRatios")} hint={t("settings.compactRatiosHint")}>
+              <div className="set-compact-ratios">
+                <div className="set-compact-row">
+                  <label>{t("settings.softCompactRatio")}</label>
+                  <input
+                    className="mem-input set-compact-input"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={agent.softCompactRatio ?? 0.5}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      void apply(() => app.SetSoftCompactRatio(v));
+                    }}
+                  />
+                </div>
+                <div className="set-compact-row">
+                  <label>{t("settings.toolResultSnipRatio")}</label>
+                  <input
+                    className="mem-input set-compact-input"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={agent.toolResultSnipRatio ?? 0.6}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      void apply(() => app.SetToolResultSnipRatio(v));
+                    }}
+                  />
+                </div>
+                <div className="set-compact-row">
+                  <label>{t("settings.compactRatio")}</label>
+                  <input
+                    className="mem-input set-compact-input"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={agent.compactRatio ?? 0.8}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      void apply(() => app.SetCompactRatio(v));
+                    }}
+                  />
+                </div>
+                <div className="set-compact-row">
+                  <label>{t("settings.compactForceRatio")}</label>
+                  <input
+                    className="mem-input set-compact-input"
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={agent.compactForceRatio ?? 0.9}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (!Number.isFinite(v)) return;
+                      void apply(() => app.SetCompactForceRatio(v));
+                    }}
+                  />
+                </div>
+              </div>
+            </SettingsField>
           </SettingsSection>
         </>
       ) : (
