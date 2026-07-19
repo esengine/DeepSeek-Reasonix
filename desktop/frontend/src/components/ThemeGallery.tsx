@@ -527,7 +527,10 @@ export function ThemeGallery({
         taskBackgroundDataUrl: editor.taskBackgroundDataUrl || undefined,
         clearTaskBackground: !editor.taskBackground && !editor.taskBackgroundDataUrl && !editor.existingTaskBackgroundUrl,
         replace: editor.mode === "edit",
-        activate,
+        // Keep save and activation separate. The activation path below is the
+        // sole owner of the active-theme pointer, so a failed activation leaves
+        // the previous theme selected and the preview snapshot reversible.
+        activate: false,
       };
       const saved = await app.SaveThemePack(input);
       showToast(t("settings.themeLibrary.saved", { name: saved.name }), "info");

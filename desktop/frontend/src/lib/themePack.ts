@@ -323,8 +323,8 @@ export function commitThemePreview(pack: ThemePackView | null): void {
 
 /**
  * Clear the preview snapshot without restoring the original theme.
- * Use this before activating a new theme to prevent cancelThemePreview()
- * from overwriting the theme being applied.
+ * Use this after persistent activation succeeds and before editor cleanup so
+ * cancelThemePreview() cannot overwrite the newly applied theme.
  */
 export function clearPreviewSnapshotOnly(): void {
   previewSnapshot = null;
@@ -469,7 +469,7 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
   root.style.setProperty("--theme-bg-task-overlay", String(clamp01(taskOverlay ?? 0.62)));
   root.style.setProperty("--theme-bg-overlay", String(clamp01(taskOverlay ?? 0.62)));
   // Task scene pane transparency (defaults to home paneOpacity if not set on task scene).
-  const taskPane = clamp01(task ? task.paneOpacity : home?.paneOpacity ?? 0.68);
+  const taskPane = clamp01(task?.paneOpacity ?? home?.paneOpacity ?? 0.68);
   root.style.setProperty("--theme-pane-task-alpha", String(taskPane));
   root.style.setProperty("--theme-pane-task-shell-pct", `${Math.min((taskPane + 0.08) * 100, 100)}%`);
   root.style.setProperty("--theme-pane-task-card-pct", `${Math.min((taskPane + 0.14) * 100, 100)}%`);

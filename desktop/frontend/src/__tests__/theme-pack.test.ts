@@ -189,6 +189,17 @@ ok(styleProps.get("--theme-pane-card-pct") === "76%", "computes home card pane o
 ok(styleProps.get("--theme-pane-task-card-pct") === "82%", "computes task card pane opacity");
 ok(attrs.get("data-theme-safe-area") === "right", "task background controls safe area");
 
+// Older shells and partial mocks can expose the independent task scene without
+// the newly added paneOpacity field. It must inherit the home pane value rather
+// than falling through clamp01(undefined)'s generic midpoint.
+const legacyTaskPaneDraft = draftPackView({
+  ...twoSceneDraft,
+  taskBackground: { ...twoSceneDraft.taskBackground! },
+});
+delete (legacyTaskPaneDraft.taskBackground as { paneOpacity?: number }).paneOpacity;
+applyThemePack(legacyTaskPaneDraft);
+ok(styleProps.get("--theme-pane-task-alpha") === "0.5", "legacy task scene inherits home pane opacity");
+
 applyThemeScene("task");
 ok(attrs.get("data-theme-scene") === "task", "scene task on root");
 
@@ -235,6 +246,11 @@ delete testWindow.go;
 const saveEditorStart = gallerySource.indexOf("const saveEditor = async");
 const saveEditorEnd = gallerySource.indexOf("if (immersive && selectedPack)", saveEditorStart);
 const saveEditorSource = gallerySource.slice(saveEditorStart, saveEditorEnd);
+ok(saveEditorSource.includes("activate: false"), "save-and-apply defers persistent activation to the experience controller");
+ok(
+  (saveEditorSource.match(/activateThemePack\(saved\.id\)/g) || []).length === 1,
+  "save-and-apply persists activation exactly once",
+);
 ok(
   saveEditorSource.indexOf("await activateThemePack(saved.id)") < saveEditorSource.indexOf("setEditor(null)"),
   "save-and-apply activates before editor unmount",
@@ -483,6 +499,7 @@ ok((bridgeSource.match(/kind: "base"/g) || []).length === 6, "mock has 6 base pa
 ok((bridgeSource.match(/kind: "official"/g) || []).length === 8, "mock has 8 official packs");
 ok((bridgeSource.match(/previewUrl: new URL\("\.\.\/\.\.\/\.\.\/themes\/official\//g) || []).length === 8, "browser mock has 8 real official previews");
 ok((bridgeSource.match(/backgroundUrl: new URL\("\.\.\/\.\.\/\.\.\/themes\/official\//g) || []).length === 8, "browser mock has 8 real official backgrounds");
+ok((bridgeSource.match(/paneOpacity:\s*0\.50/g) || []).length === 8, "browser mock gives every official theme the product pane opacity");
 ok(viteSource.includes('resolve(configDir, "../themes/official")'), "Vite dev server permits only the official theme asset directory");
 ok(stylesSource.includes("container: theme-gallery / inline-size"), "gallery establishes its own responsive container");
 ok(stylesSource.includes("@container theme-gallery (max-width: 760px)"), "gallery collapses from its content width");

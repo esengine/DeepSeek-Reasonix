@@ -43,6 +43,9 @@ func TestOfficialThemesAllValid(t *testing.T) {
 		if m.Background == nil || m.Background.Image != "background.webp" {
 			t.Fatalf("%s: background must be background.webp", m.ID)
 		}
+		if m.Background.PaneOpacity == nil || *m.Background.PaneOpacity != 0.5 {
+			t.Fatalf("%s: paneOpacity must be 0.5, got %v", m.ID, m.Background.PaneOpacity)
+		}
 		if m.Background.SafeArea != "left" {
 			t.Fatalf("%s: safeArea must be left, got %q", m.ID, m.Background.SafeArea)
 		}

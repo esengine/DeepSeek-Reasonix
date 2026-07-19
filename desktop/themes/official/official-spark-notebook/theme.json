@@ -53,6 +53,7 @@
     "safeArea": "left",
     "homeOpacity": 0.98,
     "taskOpacity": 0.2,
-    "overlayStrength": 0.68
+    "overlayStrength": 0.68,
+    "paneOpacity": 0.5
   }
 }
