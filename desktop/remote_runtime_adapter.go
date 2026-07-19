@@ -764,16 +764,34 @@ func optionalToolApprovalMode(value string) *protocol.ToolApprovalMode {
 }
 
 func (a *RemoteRuntimeAdapter) AttachAndSubscribe(ctx context.Context, input runtimeapi.AttachAndSubscribeInput) (runtimeapi.SessionSnapshot, error) {
+	snapshot, _, err := a.attachAndSubscribeTracked(ctx, input)
+	return snapshot, err
+}
+
+type remoteWorkbenchSubscriptionHandle struct {
+	target             protocol.RuntimeTarget
+	subscription       protocol.SubscriptionID
+	generation         uint64
+	pumpToken          uint64
+	recoverySuppressed bool
+}
+
+func (a *RemoteRuntimeAdapter) attachAndSubscribeTracked(
+	ctx context.Context,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionHandle, error) {
 	if !input.Session.Valid() {
-		return runtimeapi.SessionSnapshot{}, errors.New("Remote Session identity is required")
+		return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, errors.New("Remote Session identity is required")
 	}
 	if input.HistoryTurns < 1 || input.HistoryTurns > protocol.HistoryMaxTurns {
-		return runtimeapi.SessionSnapshot{}, fmt.Errorf("historyTurns must be between 1 and %d", protocol.HistoryMaxTurns)
+		return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, fmt.Errorf("historyTurns must be between 1 and %d", protocol.HistoryMaxTurns)
 	}
 	target := mapRuntimeSessionRef(input.Session)
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
 	status, err := a.connectedStatus()
 	if err != nil {
-		return runtimeapi.SessionSnapshot{}, err
+		return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, err
 	}
 	a.mu.RLock()
 	binding := a.sessions[target]
@@ -782,7 +800,116 @@ func (a *RemoteRuntimeAdapter) AttachAndSubscribe(ctx context.Context, input run
 		replace = binding.subscription
 	}
 	a.mu.RUnlock()
-	return a.subscribeFresh(ctx, target, input.HistoryTurns, replace, protocol.RuntimeTarget{})
+	return a.subscribeFreshOrderedTrackedLocked(ctx, target, input.HistoryTurns, replace, protocol.RuntimeTarget{}, nil)
+}
+
+func (a *RemoteRuntimeAdapter) attachRemoteWorkbenchSession(
+	ctx context.Context,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error) {
+	snapshot, handle, err := a.attachAndSubscribeTracked(ctx, input)
+	if err != nil {
+		return runtimeapi.SessionSnapshot{}, nil, err
+	}
+	rollback := func(rollbackCtx context.Context) error {
+		return a.rollbackRemoteWorkbenchSubscription(rollbackCtx, handle)
+	}
+	return snapshot, rollback, nil
+}
+
+// previewRemoteWorkbenchSession never replaces the adapter's authoritative
+// binding. If a resync has already installed one whose workbench event is still
+// queued, its atomic snapshot is reused. Otherwise an ephemeral transport
+// subscription is created and later removed by exact subscription ID.
+func (a *RemoteRuntimeAdapter) previewRemoteWorkbenchSession(
+	ctx context.Context,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error) {
+	if !input.Session.Valid() {
+		return runtimeapi.SessionSnapshot{}, nil, errors.New("Remote Session identity is required")
+	}
+	if input.HistoryTurns < 1 || input.HistoryTurns > protocol.HistoryMaxTurns {
+		return runtimeapi.SessionSnapshot{}, nil, fmt.Errorf("historyTurns must be between 1 and %d", protocol.HistoryMaxTurns)
+	}
+	target := mapRuntimeSessionRef(input.Session)
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+	status, err := a.connectedStatus()
+	if err != nil {
+		return runtimeapi.SessionSnapshot{}, nil, err
+	}
+	a.mu.RLock()
+	binding := a.sessions[target]
+	if binding != nil && binding.generation == status.Generation && binding.hasSnapshot {
+		snapshot := mapRemoteSessionSnapshot(binding.snapshot)
+		a.mu.RUnlock()
+		return snapshot, nil, nil
+	}
+	a.mu.RUnlock()
+	subscription, err := a.client.Subscribe(ctx, protocol.SessionSubscribeParams{
+		ExpectedHostEpoch: status.HostEpoch, Target: target, PageTurns: input.HistoryTurns,
+	})
+	if err != nil {
+		return runtimeapi.SessionSnapshot{}, nil, err
+	}
+	if subscription.Snapshot.Target != target || subscription.Generation != status.Generation {
+		cleanupErr := a.discardRemoteSubscriptionLocked(target, subscription.ID, subscription.Generation)
+		return runtimeapi.SessionSnapshot{}, nil, errors.Join(
+			errors.New("Remote preview subscription identity changed during attach"), cleanupErr,
+		)
+	}
+	a.client.SuppressSubscriptionRecovery(subscription.Generation, subscription.ID, target)
+	handle := remoteWorkbenchSubscriptionHandle{
+		target: target, subscription: subscription.ID, generation: subscription.Generation, recoverySuppressed: true,
+	}
+	rollback := func(rollbackCtx context.Context) error {
+		return a.rollbackRemotePreviewSubscription(rollbackCtx, handle)
+	}
+	return mapRemoteSessionSnapshot(subscription.Snapshot), rollback, nil
+}
+
+// attachRemoteWorkbenchFreshCandidate validates speculative /new candidates
+// without replacing a binding installed by an in-flight resync. A current
+// binding already owns the live stream, so its paired atomic snapshot is the
+// candidate authority; otherwise this method creates the ordinary workbench
+// binding while holding the same subscribe serialization point.
+func (a *RemoteRuntimeAdapter) attachRemoteWorkbenchFreshCandidate(
+	ctx context.Context,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error) {
+	if !input.Session.Valid() {
+		return runtimeapi.SessionSnapshot{}, nil, errors.New("Remote Session identity is required")
+	}
+	if input.HistoryTurns < 1 || input.HistoryTurns > protocol.HistoryMaxTurns {
+		return runtimeapi.SessionSnapshot{}, nil, fmt.Errorf("historyTurns must be between 1 and %d", protocol.HistoryMaxTurns)
+	}
+	target := mapRuntimeSessionRef(input.Session)
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+	status, err := a.connectedStatus()
+	if err != nil {
+		return runtimeapi.SessionSnapshot{}, nil, err
+	}
+	a.mu.RLock()
+	binding := a.sessions[target]
+	if binding != nil && binding.generation == status.Generation {
+		if !binding.hasSnapshot {
+			a.mu.RUnlock()
+			return runtimeapi.SessionSnapshot{}, nil, errors.New("Remote candidate binding has no atomic snapshot")
+		}
+		snapshot := mapRemoteSessionSnapshot(binding.snapshot)
+		a.mu.RUnlock()
+		return snapshot, nil, nil
+	}
+	a.mu.RUnlock()
+	snapshot, handle, err := a.subscribeFreshOrderedTrackedLocked(ctx, target, input.HistoryTurns, "", protocol.RuntimeTarget{}, nil)
+	if err != nil {
+		return runtimeapi.SessionSnapshot{}, nil, err
+	}
+	rollback := func(rollbackCtx context.Context) error {
+		return a.rollbackRemoteWorkbenchSubscription(rollbackCtx, handle)
+	}
+	return snapshot, rollback, nil
 }
 
 // UnsubscribeSession removes the current transport subscription for one
@@ -793,6 +920,11 @@ func (a *RemoteRuntimeAdapter) UnsubscribeSession(ctx context.Context, input run
 	if !session.Valid() {
 		return errors.New("Remote Session identity is required")
 	}
+	a.connectionMu.Lock()
+	defer a.connectionMu.Unlock()
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+
 	target := mapRuntimeSessionRef(session)
 	status, err := a.connectedStatus()
 	if err != nil {
@@ -824,6 +956,177 @@ func (a *RemoteRuntimeAdapter) UnsubscribeSession(ctx context.Context, input run
 	return nil
 }
 
+// rollbackRemoteWorkbenchSubscription removes only the subscription produced by
+// one workbench attach. A reconnect or concurrent authoritative reattach may
+// already have installed a newer pump for the same opaque SessionRef; the token
+// check makes that newer subscription untouchable. When the transport was lost,
+// forgetting the client's recovery entry prevents the rejected attach from
+// being resurrected as an invisible subscription on reconnect.
+func (a *RemoteRuntimeAdapter) rollbackRemoteWorkbenchSubscription(
+	ctx context.Context,
+	handle remoteWorkbenchSubscriptionHandle,
+) error {
+	if handle.target == (protocol.RuntimeTarget{}) || handle.subscription == "" || handle.generation == 0 || handle.pumpToken == 0 {
+		return nil
+	}
+	a.connectionMu.Lock()
+	defer a.connectionMu.Unlock()
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+
+	a.mu.RLock()
+	current := a.sessions[handle.target]
+	matches := current != nil && current.subscription == handle.subscription && current.generation == handle.generation &&
+		current.pumpToken == handle.pumpToken
+	a.mu.RUnlock()
+	if !matches {
+		return nil
+	}
+
+	status := a.client.Status()
+	var rollbackErr error
+	if status.State == remoteclient.StateConnected && status.Generation == handle.generation {
+		_, rollbackErr = a.client.Unsubscribe(ctx, handle.subscription)
+		status = a.client.Status()
+	}
+	if rollbackErr != nil || status.State != remoteclient.StateConnected || status.Generation != handle.generation {
+		// Even when the request loses its response before watchTransport commits
+		// Disconnected, suppress this exact ID from recovery. A newer generation
+		// or replacement ID is unaffected.
+		a.client.SuppressSubscriptionRecovery(handle.generation, handle.subscription, handle.target)
+	}
+	a.mu.Lock()
+	if current := a.sessions[handle.target]; current != nil && current.subscription == handle.subscription &&
+		current.generation == handle.generation && current.pumpToken == handle.pumpToken {
+		delete(a.sessions, handle.target)
+	}
+	a.mu.Unlock()
+	return rollbackErr
+}
+
+func (a *RemoteRuntimeAdapter) rollbackRemotePreviewSubscription(
+	ctx context.Context,
+	handle remoteWorkbenchSubscriptionHandle,
+) error {
+	if handle.target == (protocol.RuntimeTarget{}) || handle.subscription == "" || handle.generation == 0 {
+		return nil
+	}
+	a.connectionMu.Lock()
+	defer a.connectionMu.Unlock()
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+	status := a.client.Status()
+	var rollbackErr error
+	if status.State == remoteclient.StateConnected && status.Generation == handle.generation {
+		_, rollbackErr = a.client.Unsubscribe(ctx, handle.subscription)
+		status = a.client.Status()
+	}
+	if !handle.recoverySuppressed && (rollbackErr != nil || status.State != remoteclient.StateConnected || status.Generation != handle.generation) {
+		a.client.SuppressSubscriptionRecovery(handle.generation, handle.subscription, handle.target)
+	}
+	return rollbackErr
+}
+
+// discardRemoteSubscriptionLocked retires one exact post-Subscribe result.
+// Callers hold subscribeMu, preventing a later adapter binding from being
+// confused with this ID. The recovery suppression is unconditional because a
+// lost unsubscribe response must not resurrect a speculative subscription.
+func (a *RemoteRuntimeAdapter) discardRemoteSubscriptionLocked(
+	target protocol.RuntimeTarget,
+	subscription protocol.SubscriptionID,
+	generation uint64,
+) error {
+	if target == (protocol.RuntimeTarget{}) || subscription == "" || generation == 0 {
+		return nil
+	}
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cleanupCancel()
+	status := a.client.Status()
+	var cleanupErr error
+	if status.State == remoteclient.StateConnected && status.Generation == generation {
+		_, cleanupErr = a.client.Unsubscribe(cleanupCtx, subscription)
+	}
+	a.client.SuppressSubscriptionRecovery(generation, subscription, target)
+	return cleanupErr
+}
+
+type remoteRetiredSubscription struct {
+	target       protocol.RuntimeTarget
+	subscription protocol.SubscriptionID
+	generation   uint64
+	pumpToken    uint64
+	pageTurns    int
+}
+
+// retireRemoteTargetsLocked makes a destructive record mutation independent
+// of reconnect recovery before the Host commit boundary is crossed. This is
+// required even when the mutation response is lost: retrying the retained
+// requestId must not first try to restore a Session that may already be gone.
+// Callers hold connectionMu and subscribeMu.
+func (a *RemoteRuntimeAdapter) retireRemoteTargetsLocked(targets []protocol.RuntimeTarget) []remoteRetiredSubscription {
+	retired := make([]remoteRetiredSubscription, 0, len(targets))
+	a.mu.RLock()
+	for _, target := range targets {
+		binding := a.sessions[target]
+		if binding == nil {
+			continue
+		}
+		retired = append(retired, remoteRetiredSubscription{
+			target: target, subscription: binding.subscription, generation: binding.generation,
+			pumpToken: binding.pumpToken, pageTurns: binding.pageTurns,
+		})
+	}
+	a.mu.RUnlock()
+	for _, item := range retired {
+		_ = a.discardRemoteSubscriptionLocked(item.target, item.subscription, item.generation)
+	}
+	for _, target := range targets {
+		a.client.ForgetSubscriptionRecovery(target)
+	}
+	a.mu.Lock()
+	for _, item := range retired {
+		if current := a.sessions[item.target]; current != nil && current.subscription == item.subscription &&
+			current.generation == item.generation && current.pumpToken == item.pumpToken {
+			delete(a.sessions, item.target)
+		}
+	}
+	a.mu.Unlock()
+	return retired
+}
+
+// restoreRetiredTargetsLocked repairs the ordinary definite-error path after a
+// destructive mutation. An unknown outcome either has disconnected the client
+// or makes the fresh attach fail because the record is already gone; in both
+// cases the intentionally suppressed recovery remains absent.
+func (a *RemoteRuntimeAdapter) restoreRetiredTargetsLocked(items []remoteRetiredSubscription) {
+	status := a.client.Status()
+	if status.State != remoteclient.StateConnected {
+		return
+	}
+	for _, item := range items {
+		pageTurns := item.pageTurns
+		if pageTurns < 1 || pageTurns > protocol.HistoryMaxTurns {
+			pageTurns = protocol.HistoryMaxTurns
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, _, _ = a.subscribeFreshOrderedTrackedLocked(
+			ctx, item.target, pageTurns, "", protocol.RuntimeTarget{},
+			func(snapshot runtimeapi.SessionSnapshot) error {
+				if !a.emitEvent(status.Generation, runtimeapi.Event{
+					Session: snapshot.Session,
+					Snapshot: &runtimeapi.SnapshotUpdate{
+						Previous: mapRemoteSessionRef(item.target), Snapshot: snapshot,
+					},
+				}) {
+					return errors.New("Remote recovery snapshot could not be delivered to the workbench")
+				}
+				return nil
+			},
+		)
+		cancel()
+	}
+}
+
 func (a *RemoteRuntimeAdapter) subscribeFresh(
 	ctx context.Context,
 	target protocol.RuntimeTarget,
@@ -831,7 +1134,18 @@ func (a *RemoteRuntimeAdapter) subscribeFresh(
 	replace protocol.SubscriptionID,
 	previousTarget protocol.RuntimeTarget,
 ) (runtimeapi.SessionSnapshot, error) {
-	return a.subscribeFreshOrdered(ctx, target, pageTurns, replace, previousTarget, nil)
+	snapshot, _, err := a.subscribeFreshTracked(ctx, target, pageTurns, replace, previousTarget)
+	return snapshot, err
+}
+
+func (a *RemoteRuntimeAdapter) subscribeFreshTracked(
+	ctx context.Context,
+	target protocol.RuntimeTarget,
+	pageTurns int,
+	replace protocol.SubscriptionID,
+	previousTarget protocol.RuntimeTarget,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionHandle, error) {
+	return a.subscribeFreshOrderedTracked(ctx, target, pageTurns, replace, previousTarget, nil)
 }
 
 // subscribeFreshOrdered commits the adapter binding, publishes the replacement
@@ -846,30 +1160,108 @@ func (a *RemoteRuntimeAdapter) subscribeFreshOrdered(
 	previousTarget protocol.RuntimeTarget,
 	beforePump func(runtimeapi.SessionSnapshot) error,
 ) (runtimeapi.SessionSnapshot, error) {
+	snapshot, _, err := a.subscribeFreshOrderedTracked(ctx, target, pageTurns, replace, previousTarget, beforePump)
+	return snapshot, err
+}
+
+func (a *RemoteRuntimeAdapter) subscribeFreshOrderedTracked(
+	ctx context.Context,
+	target protocol.RuntimeTarget,
+	pageTurns int,
+	replace protocol.SubscriptionID,
+	previousTarget protocol.RuntimeTarget,
+	beforePump func(runtimeapi.SessionSnapshot) error,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionHandle, error) {
 	a.subscribeMu.Lock()
 	defer a.subscribeMu.Unlock()
+	return a.subscribeFreshOrderedTrackedLocked(ctx, target, pageTurns, replace, previousTarget, beforePump)
+}
+
+func (a *RemoteRuntimeAdapter) subscribeFreshOrderedTrackedLocked(
+	ctx context.Context,
+	target protocol.RuntimeTarget,
+	pageTurns int,
+	replace protocol.SubscriptionID,
+	previousTarget protocol.RuntimeTarget,
+	beforePump func(runtimeapi.SessionSnapshot) error,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionHandle, error) {
 	status, err := a.connectedStatus()
 	if err != nil {
-		return runtimeapi.SessionSnapshot{}, err
+		return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, err
+	}
+	if previousTarget != (protocol.RuntimeTarget{}) && replace != "" {
+		a.mu.RLock()
+		previous := a.sessions[previousTarget]
+		migrationCurrent := previous != nil && previous.subscription == replace && previous.generation == status.Generation
+		a.mu.RUnlock()
+		if !migrationCurrent {
+			return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, remoteclient.ErrSubscriptionReplaced
+		}
+	}
+	if previousTarget != (protocol.RuntimeTarget{}) && previousTarget != target {
+		a.mu.RLock()
+		existing := a.sessions[target]
+		previous := a.sessions[previousTarget]
+		if existing != nil && existing.generation == status.Generation && existing.hasSnapshot {
+			existingCopy := *existing
+			var previousCopy *remoteSessionBinding
+			if previous != nil {
+				copy := *previous
+				previousCopy = &copy
+			}
+			a.mu.RUnlock()
+			mapped := mapRemoteSessionSnapshot(existingCopy.snapshot)
+			if beforePump != nil {
+				if err := beforePump(mapped); err != nil {
+					return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, err
+				}
+			}
+			var retireErr error
+			if replace != "" {
+				_, retireErr = a.client.Unsubscribe(ctx, replace)
+				if retireErr != nil && previousCopy != nil {
+					a.client.SuppressSubscriptionRecovery(previousCopy.generation, previousCopy.subscription, previousTarget)
+				}
+			}
+			a.mu.Lock()
+			if current := a.sessions[previousTarget]; previousCopy != nil && current != nil &&
+				current.subscription == previousCopy.subscription && current.generation == previousCopy.generation &&
+				current.pumpToken == previousCopy.pumpToken {
+				delete(a.sessions, previousTarget)
+			}
+			a.mu.Unlock()
+			return mapped, remoteWorkbenchSubscriptionHandle{
+				target: target, subscription: existingCopy.subscription, generation: existingCopy.generation,
+				pumpToken: existingCopy.pumpToken,
+			}, retireErr
+		}
+		a.mu.RUnlock()
+	}
+	var previousBinding *remoteSessionBinding
+	if previousTarget != (protocol.RuntimeTarget{}) && previousTarget != target {
+		a.mu.RLock()
+		if current := a.sessions[previousTarget]; current != nil {
+			copy := *current
+			previousBinding = &copy
+		}
+		a.mu.RUnlock()
 	}
 	subscription, err := a.client.Subscribe(ctx, protocol.SessionSubscribeParams{
 		ExpectedHostEpoch: status.HostEpoch, Target: target, PageTurns: pageTurns, ReplaceSubscriptionID: replace,
 	})
 	if err != nil {
-		return runtimeapi.SessionSnapshot{}, err
+		return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, err
 	}
 	if subscription.Snapshot.Target != target || subscription.Generation != status.Generation {
-		return runtimeapi.SessionSnapshot{}, errors.New("Remote subscription identity changed during attach")
+		cleanupErr := a.discardRemoteSubscriptionLocked(target, subscription.ID, subscription.Generation)
+		return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, errors.Join(
+			errors.New("Remote subscription identity changed during attach"), cleanupErr,
+		)
 	}
 	mapped := mapRemoteSessionSnapshot(subscription.Snapshot)
 	a.mu.Lock()
 	a.nextPump++
 	pumpToken := a.nextPump
-	var replacedBinding *remoteSessionBinding
-	if current := a.sessions[target]; current != nil {
-		copy := *current
-		replacedBinding = &copy
-	}
 	binding := a.sessionBindingLocked(target)
 	binding.runtimeEpoch = subscription.Snapshot.RuntimeEpoch
 	binding.subscription = subscription.ID
@@ -884,28 +1276,34 @@ func (a *RemoteRuntimeAdapter) subscribeFreshOrdered(
 	if beforePump != nil {
 		if err := beforePump(mapped); err != nil {
 			a.mu.Lock()
-			if current := a.sessions[target]; current != nil && current.pumpToken == pumpToken {
-				if replacedBinding == nil {
-					delete(a.sessions, target)
-				} else {
-					a.sessions[target] = replacedBinding
-				}
+			if current := a.sessions[target]; current != nil && current.subscription == subscription.ID &&
+				current.generation == subscription.Generation && current.pumpToken == pumpToken {
+				delete(a.sessions, target)
+			}
+			if current := a.sessions[previousTarget]; previousBinding != nil && current != nil &&
+				current.subscription == previousBinding.subscription && current.generation == previousBinding.generation &&
+				current.pumpToken == previousBinding.pumpToken {
+				delete(a.sessions, previousTarget)
 			}
 			a.mu.Unlock()
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, _ = a.client.Unsubscribe(cleanupCtx, subscription.ID)
-			cleanupCancel()
-			return runtimeapi.SessionSnapshot{}, err
+			cleanupErr := a.discardRemoteSubscriptionLocked(target, subscription.ID, subscription.Generation)
+			return runtimeapi.SessionSnapshot{}, remoteWorkbenchSubscriptionHandle{}, errors.Join(err, cleanupErr)
 		}
 	}
 	a.mu.Lock()
 	if previousTarget != (protocol.RuntimeTarget{}) && previousTarget != target {
-		delete(a.sessions, previousTarget)
+		if current := a.sessions[previousTarget]; previousBinding != nil && current != nil &&
+			current.subscription == previousBinding.subscription && current.generation == previousBinding.generation &&
+			current.pumpToken == previousBinding.pumpToken {
+			delete(a.sessions, previousTarget)
+		}
 	}
 	a.mu.Unlock()
 	a.wg.Add(1)
 	go a.pumpSubscription(target, subscription.ID, subscription.Generation, pumpToken, subscription.Updates)
-	return mapped, nil
+	return mapped, remoteWorkbenchSubscriptionHandle{
+		target: target, subscription: subscription.ID, generation: subscription.Generation, pumpToken: pumpToken,
+	}, nil
 }
 
 func (a *RemoteRuntimeAdapter) pumpSubscription(
@@ -965,14 +1363,20 @@ func (a *RemoteRuntimeAdapter) pumpSubscription(
 					return nil
 				})
 				cancel()
-				if err != nil {
+				if err != nil && !errors.Is(err, remoteclient.ErrSubscriptionReplaced) &&
+					!errors.Is(err, remoteclient.ErrUnsubscribed) {
 					a.emitFault(generation, fmt.Errorf("migrate Remote subscription: %w", err))
 				}
 				return
 			}
 			// Transport loss has a richer generation-qualified client fault. Do
 			// not race it with a generic subscription terminal error.
-			if update.Err != nil && a.client.Status().State == remoteclient.StateConnected {
+			if errors.Is(update.Err, remoteclient.ErrUnsubscribed) ||
+				errors.Is(update.Err, remoteclient.ErrSubscriptionReplaced) {
+				return
+			}
+			if update.Err != nil && a.client.Status().State == remoteclient.StateConnected &&
+				a.subscriptionCurrent(target, generation, pumpToken) {
 				a.emitFault(generation, update.Err)
 			}
 			return

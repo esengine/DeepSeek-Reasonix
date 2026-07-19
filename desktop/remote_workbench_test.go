@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/eventwire"
@@ -23,6 +24,7 @@ type remoteWorkbenchTestRuntime struct {
 	created    runtimeapi.CreatedSession
 	snapshot   runtimeapi.SessionSnapshot
 	attachErrs []error
+	createHook func()
 	attachHook func()
 	submit     runtimeapi.ComposerSubmitResult
 
@@ -86,10 +88,15 @@ func (r *remoteWorkbenchTestRuntime) OpenWorkspace(_ context.Context, input runt
 
 func (r *remoteWorkbenchTestRuntime) CreateSession(_ context.Context, input runtimeapi.CreateSessionInput) (runtimeapi.CreatedSession, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	input.AdditionalDirectories = append([]runtimeapi.DirectoryRef(nil), input.AdditionalDirectories...)
 	r.createInputs = append(r.createInputs, input)
-	return r.created, nil
+	created := r.created
+	hook := r.createHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return created, nil
 }
 
 func (r *remoteWorkbenchTestRuntime) AttachAndSubscribe(_ context.Context, input runtimeapi.AttachAndSubscribeInput) (runtimeapi.SessionSnapshot, error) {
@@ -287,6 +294,83 @@ func TestRemoteWorkbenchBrowseCreateRetryAndOpaquePathBoundary(t *testing.T) {
 	}
 	if tree := app.ListProjectTree(); len(tree) != 0 {
 		t.Fatalf("Phase 5 Remote project tree = %#v, want no local path traversal", tree)
+	}
+}
+
+func TestRemoteWorkspaceSessionCreateBlocksNativeCloseUntilResultIsKnown(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_close_guard", Label: "Close guard"}
+	runtime := newRemoteWorkbenchTestRuntime()
+	attachStarted := make(chan struct{})
+	releaseAttach := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseAttach) }) }
+	defer release()
+	runtime.attachHook = func() {
+		close(attachStarted)
+		<-releaseAttach
+	}
+	app, _ := newRemoteWorkbenchTestApp(t, target, runtime, nil)
+
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+			PrimaryDirectoryRef: "dir_primary",
+			TopicTitle:          "Close guard",
+		})
+		createDone <- err
+	}()
+
+	<-attachStarted
+	if !app.remoteWorkspaceSessionCreateInFlight() {
+		t.Fatal("Remote workspace Session create was not marked in flight")
+	}
+	consumeSystemQuitRequested()
+	t.Cleanup(func() { consumeSystemQuitRequested() })
+	app.forceQuit.Store(true)
+	markSystemQuitRequested()
+	if !app.beforeClose(context.Background()) {
+		t.Fatal("native OnBeforeClose did not fail closed during Remote Session creation")
+	}
+	if app.forceQuit.Load() || consumeSystemQuitRequested() {
+		t.Fatal("blocked close retained an explicit quit signal for a later unrelated close")
+	}
+	app.CloseMainWindow()
+	if app.forceQuit.Load() {
+		t.Fatal("frameless CloseMainWindow advanced to runtime quit during Remote Session creation")
+	}
+
+	release()
+	if err := <-createDone; err != nil {
+		t.Fatal(err)
+	}
+	if app.remoteWorkspaceSessionCreateInFlight() {
+		t.Fatal("Remote workspace Session create remained marked in flight after completion")
+	}
+
+	if !app.beginRemoteDesktopClose() {
+		t.Fatal("native close gate did not admit shutdown after Remote Session creation")
+	}
+	if _, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+		PrimaryDirectoryRef: "dir_primary",
+		TopicTitle:          "Must not reach Host",
+	}); !errors.Is(err, errRemoteWorkspaceSessionCreateWhileClosing) {
+		t.Fatalf("create admitted after native close = %v, want closing rejection", err)
+	}
+}
+
+func TestRemoteBackgroundCloseCannotCancelAdmittedFinalClose(t *testing.T) {
+	app := NewApp()
+	if !app.beginRemoteDesktopClose() {
+		t.Fatal("final close gate was not admitted")
+	}
+	if decision := app.decideRemoteDesktopBackgroundClose(); decision != remoteDesktopBackgroundCloseAlreadyClosing {
+		t.Fatalf("background close decision = %v, want already closing", decision)
+	}
+	if _, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+		PrimaryDirectoryRef: "dir_primary",
+		TopicTitle:          "Must remain closed",
+	}); !errors.Is(err, errRemoteWorkspaceSessionCreateWhileClosing) {
+		t.Fatalf("create admitted after competing background close = %v, want closing rejection", err)
 	}
 }
 
@@ -856,6 +940,186 @@ func TestRemoteWorkbenchRejectsAttachAndEventABA(t *testing.T) {
 	app.remote.workbenchMu.RUnlock()
 	if !running || turn == nil || turn.ID != "turn_b" {
 		t.Fatalf("Remote runtime projection running=%v turn=%#v", running, turn)
+	}
+}
+
+func TestRemoteWorkspaceCreatePendingSurvivesHostABA(t *testing.T) {
+	targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_pending_old", Label: "Old Host"}
+	targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_pending_new", Label: "New Host"}
+	runtimeA := newRemoteWorkbenchTestRuntime()
+	runtimeB := newRemoteWorkbenchTestRuntime()
+	adapterB := &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}
+	adapterA := &remoteWorkbenchTestAdapter{target: targetA, runtime: runtimeA}
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		switch {
+		case sameTarget(target, targetB):
+			return adapterB, nil
+		case sameTarget(target, targetA):
+			return adapterA, nil
+		default:
+			return nil, errors.New("unexpected target switch")
+		}
+	})
+	app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+	var switchErr error
+	var switchOnce sync.Once
+	runtimeA.createHook = func() {
+		switchOnce.Do(func() {
+			switchErr = manager.Switch(context.Background(), targetB, SwitchTargetOptions{})
+		})
+	}
+	input := RemoteCreateWorkspaceSessionInput{
+		PrimaryDirectoryRef: "dir_primary", TopicTitle: "Must stay on Host A",
+	}
+
+	if _, err := app.CreateRemoteWorkspaceSession(input); !errors.Is(err, ErrTargetTransitionSuperseded) {
+		t.Fatalf("workspace create after newer Host StateSink = %v, want ErrTargetTransitionSuperseded", err)
+	}
+	if switchErr != nil {
+		t.Fatal(switchErr)
+	}
+	current := manager.Snapshot()
+	if !sameTarget(current.Target, targetB) || current.State != TargetRemoteConnected {
+		t.Fatalf("current target = %#v, want connected Host B", current)
+	}
+	app.remote.workbenchMu.RLock()
+	hostID := app.remote.workbench.HostID
+	pending := len(app.remote.workbench.Pending)
+	sessions := len(app.remote.workbench.Sessions)
+	app.remote.workbenchMu.RUnlock()
+	if hostID == targetA.ID || pending != 0 || sessions != 0 {
+		t.Fatalf("stale Host A state overwrote Host B: host=%q pending=%d sessions=%d", hostID, pending, sessions)
+	}
+	app.remote.workbenchMu.RLock()
+	retained := clonePendingRemoteCreate(app.remote.workspacePending[targetA.ID][remoteSessionCreateFingerprint("dir_primary", nil, "Must stay on Host A")])
+	app.remote.workbenchMu.RUnlock()
+	if retained == nil || retained.HostID != targetA.ID || retained.Created.Session != runtimeA.created.Session {
+		t.Fatalf("Host A pending create was not retained across switch to B: %#v", retained)
+	}
+
+	if err := manager.Switch(context.Background(), targetA, SwitchTargetOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := app.CreateRemoteWorkspaceSession(input)
+	if err != nil {
+		t.Fatalf("retry after returning to Host A: %v", err)
+	}
+	if !status.SessionAttached || status.HostID != targetA.ID || status.TabID != remoteSessionTabID(runtimeA.created.Session) {
+		t.Fatalf("Host A retry status = %#v", status)
+	}
+	runtimeA.mu.Lock()
+	createCalls := len(runtimeA.createInputs)
+	openCalls := len(runtimeA.openInputs)
+	attachCalls := len(runtimeA.attachInputs)
+	runtimeA.mu.Unlock()
+	if createCalls != 1 || openCalls != 1 || attachCalls != 1 {
+		t.Fatalf("Host A open/create/attach calls after retry = %d/%d/%d, want 1/1/1", openCalls, createCalls, attachCalls)
+	}
+	app.remote.workbenchMu.RLock()
+	remaining := len(app.remote.workspacePending[targetA.ID])
+	app.remote.workbenchMu.RUnlock()
+	if remaining != 0 {
+		t.Fatalf("successful Host A retry retained %d pending creates", remaining)
+	}
+}
+
+func TestRemoteWorkbenchCommitEventsPrecedeNewerStateSink(t *testing.T) {
+	targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_event_old", Label: "Old event Host"}
+	targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_event_new", Label: "New event Host"}
+	runtimeA := newRemoteWorkbenchTestRuntime()
+	runtimeB := newRemoteWorkbenchTestRuntime()
+	adapterB := &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		if sameTarget(target, targetB) {
+			return adapterB, nil
+		}
+		return nil, errors.New("unexpected target switch")
+	})
+	app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+
+	type observedEvent struct {
+		name     string
+		hostID   string
+		attached bool
+		tabID    string
+	}
+	var eventsMu sync.Mutex
+	var events []observedEvent
+	barrier := make(chan struct{})
+	setRemoteWorkbenchTestEmitter(app, func(_ context.Context, name string, payload ...interface{}) {
+		event := observedEvent{name: name}
+		if len(payload) != 0 {
+			switch value := payload[0].(type) {
+			case RemoteWorkbenchStatusView:
+				event.hostID = value.HostID
+				event.attached = value.SessionAttached
+				event.tabID = value.TabID
+			case string:
+				event.tabID = value
+			}
+		}
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+		if name == "test:workbench-event-barrier" {
+			close(barrier)
+		}
+	})
+
+	// This hook sits exactly between workbench-state and rebuilt in the old
+	// publication path. The fixed path invokes it only after the complete event
+	// batch has been enqueued and stateDispatchMu has been released.
+	var switched atomic.Bool
+	var switchErr error
+	app.projectTreeChangedHook = func() {
+		if switched.CompareAndSwap(false, true) {
+			switchErr = manager.Switch(context.Background(), targetB, SwitchTargetOptions{})
+		}
+	}
+	status, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+		PrimaryDirectoryRef: "dir_primary", TopicTitle: "Old Host result",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if switchErr != nil {
+		t.Fatal(switchErr)
+	}
+	if !switched.Load() {
+		t.Fatal("adversarial target switch was not triggered")
+	}
+	app.emitRuntimeEvent("test:workbench-event-barrier")
+	waitSignal(t, barrier, "workbench event queue barrier")
+
+	eventsMu.Lock()
+	got := append([]observedEvent(nil), events...)
+	eventsMu.Unlock()
+	index := func(match func(observedEvent) bool) int {
+		for i, event := range got {
+			if match(event) {
+				return i
+			}
+		}
+		return -1
+	}
+	aState := index(func(event observedEvent) bool {
+		return event.name == remoteWorkbenchStateEvent && event.hostID == targetA.ID && event.attached && event.tabID == status.TabID
+	})
+	aRebuilt := index(func(event observedEvent) bool { return event.name == "runtime:rebuilt" && event.tabID == status.TabID })
+	aReady := index(func(event observedEvent) bool { return event.name == "agent:ready" && event.tabID == status.TabID })
+	bState := index(func(event observedEvent) bool {
+		return event.name == remoteWorkbenchStateEvent && event.hostID == targetB.ID && !event.attached
+	})
+	if aState < 0 || aRebuilt < 0 || aReady < 0 || bState < 0 {
+		t.Fatalf("missing ordered workbench events: %#v", got)
+	}
+	if !(aState < aRebuilt && aRebuilt < aReady && aReady < bState) {
+		t.Fatalf("old Host events crossed newer StateSink: state=%d rebuilt=%d ready=%d newState=%d events=%#v", aState, aRebuilt, aReady, bState, got)
+	}
+	for i := bState + 1; i < len(got); i++ {
+		if got[i].tabID == status.TabID && (got[i].name == remoteWorkbenchStateEvent || got[i].name == "runtime:rebuilt" || got[i].name == "agent:ready") {
+			t.Fatalf("old Host event published after Host B StateSink at index %d: %#v", i, got)
+		}
 	}
 }
 

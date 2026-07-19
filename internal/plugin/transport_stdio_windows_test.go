@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestResolveStdioExecutableWindowsPathAndPATHEXT(t *testing.T) {
@@ -68,4 +70,43 @@ func TestSetEnvValueWindowsReplacesPathCaseInsensitively(t *testing.T) {
 	if len(env) != 2 {
 		t.Fatalf("setEnvValue should replace Path instead of appending PATH, got %v", env)
 	}
+}
+
+func TestStdioTransportRequiresWindowsJobOwnership(t *testing.T) {
+	t.Setenv("GO_WANT_STDIO_TRACKING_HELPER", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	transport, err := newStdioTransport(ctx, Spec{
+		Name:    "tracking-contract",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=^TestStdioTrackingHelper$"},
+	})
+	if err != nil {
+		t.Fatalf("start stdio transport: %v", err)
+	}
+	t.Cleanup(transport.close)
+	if transport.job == 0 {
+		t.Fatal("Windows stdio transport started without required Job Object ownership")
+	}
+
+	var closes sync.WaitGroup
+	for range 8 {
+		closes.Add(1)
+		go func() {
+			defer closes.Done()
+			transport.close()
+		}()
+	}
+	closes.Wait()
+	if state := transport.cmd.ProcessState; state == nil || !state.Exited() {
+		t.Fatalf("tracked stdio helper was not reaped: %#v", state)
+	}
+}
+
+func TestStdioTrackingHelper(t *testing.T) {
+	if os.Getenv("GO_WANT_STDIO_TRACKING_HELPER") != "1" {
+		return
+	}
+	time.Sleep(10 * time.Minute)
 }

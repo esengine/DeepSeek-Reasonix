@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,6 +98,16 @@ type remoteDesktopState struct {
 	workbenchMu sync.RWMutex
 	workbench   remoteWorkbenchState
 	workbenchOp sync.Mutex
+	// workspacePending is Host-scoped rather than active-workbench-scoped so a
+	// successful Host create survives A -> B -> A without ever being projected
+	// into B's workbench. workbenchMu protects both this map and workbench.
+	workspacePending map[string]map[string]*pendingRemoteSessionCreate
+	// workspaceSessionCreateMu makes admitting a Host-side create and accepting
+	// native shutdown one atomic decision. The count includes callers queued
+	// behind workbenchOp; closing rejects every later create before Host mutation.
+	workspaceSessionCreateMu sync.Mutex
+	workspaceSessionCreates  int
+	workspaceSessionClosing  bool
 }
 
 type appLocalTargetConnector struct{ app *App }
@@ -302,6 +313,10 @@ func (a *App) SaveRemoteHost(input RemoteHostInput) (RemoteHostView, error) {
 		}
 		return remoteHostView(entry), nil
 	}
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+	manager.stateDispatchMu.Lock()
+	defer manager.stateDispatchMu.Unlock()
 	if remoteHostEntryInUse(manager.Snapshot(), input.ID) {
 		return RemoteHostView{}, errors.New("disconnect this Remote Host before editing its connection entry")
 	}
@@ -312,16 +327,36 @@ func (a *App) SaveRemoteHost(input RemoteHostInput) (RemoteHostView, error) {
 	if !found {
 		return RemoteHostView{}, fmt.Errorf("Remote Host entry %q is not saved", input.ID)
 	}
-	entry.Mode = input.Mode
-	entry.Destination = input.Destination
-	entry.Port = input.Port
-	entry.Alias = input.Alias
-	entry.Label = input.Label
-	entry.SSHConfigPath = input.SSHConfigPath
-	if err := store.Upsert(entry); err != nil {
+	updated := entry
+	updated.Mode = input.Mode
+	updated.Destination = input.Destination
+	updated.Port = input.Port
+	updated.Alias = input.Alias
+	updated.Label = input.Label
+	updated.SSHConfigPath = input.SSHConfigPath
+	connectionChanged := !sameRemoteConnectionIdentity(entry, updated)
+	if connectionChanged {
+		updated.ResumeLeaseID = ""
+		updated.LayoutRef = ""
+	}
+	var layoutLock *sync.Mutex
+	if connectionChanged {
+		layoutLock = remoteLayoutTargetLock(store, input.ID)
+		layoutLock.Lock()
+		defer layoutLock.Unlock()
+	}
+	if err := store.Upsert(updated); err != nil {
 		return RemoteHostView{}, err
 	}
-	return remoteHostView(entry), nil
+	if connectionChanged {
+		a.clearRemoteHostProjectionLocked(input.ID)
+		if err := removeRemoteLayoutProjectionFile(store, input.ID); err != nil {
+			slog.Warn("desktop: remove obsolete Remote layout projection", "host", input.ID, "err", err)
+		}
+		a.emitRuntimeEvent(remoteWorkbenchStateEvent, remoteWorkbenchStatusLocked(remoteWorkbenchState{}, manager.Snapshot()))
+		a.emitProjectTreeChanged()
+	}
+	return remoteHostView(updated), nil
 }
 
 func normalizeRemoteHostInput(input RemoteHostInput) (RemoteHostInput, error) {
@@ -379,10 +414,42 @@ func (a *App) DeleteRemoteHost(id string) error {
 	if err != nil {
 		return err
 	}
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+	manager.stateDispatchMu.Lock()
+	defer manager.stateDispatchMu.Unlock()
 	if remoteHostEntryInUse(manager.Snapshot(), id) {
 		return errors.New("disconnect this Remote Host before deleting its connection entry")
 	}
-	return store.Delete(id)
+	if err := ValidateRemoteHostEntryID(id); err != nil {
+		return err
+	}
+	layoutLock := remoteLayoutTargetLock(store, id)
+	layoutLock.Lock()
+	defer layoutLock.Unlock()
+	if err := store.Delete(id); err != nil {
+		return err
+	}
+	a.clearRemoteHostProjectionLocked(id)
+	if err := removeRemoteLayoutProjectionFile(store, id); err != nil {
+		slog.Warn("desktop: remove deleted Remote layout projection", "host", id, "err", err)
+	}
+	a.emitRuntimeEvent(remoteWorkbenchStateEvent, remoteWorkbenchStatusLocked(remoteWorkbenchState{}, manager.Snapshot()))
+	a.emitProjectTreeChanged()
+	return nil
+}
+
+// clearRemoteHostProjectionLocked invalidates every in-memory identity that is
+// scoped by a saved Host ID. Callers serialize with workbenchOp and hold the
+// TargetManager state-dispatch gate, so a connection transition cannot publish
+// the old authority between the store commit and this reset.
+func (a *App) clearRemoteHostProjectionLocked(hostID string) {
+	a.remote.workbenchMu.Lock()
+	defer a.remote.workbenchMu.Unlock()
+	delete(a.remote.workspacePending, hostID)
+	if a.remote.workbench.HostID == hostID {
+		a.remote.workbench = remoteWorkbenchState{HostID: hostID}
+	}
 }
 
 func remoteHostEntryInUse(snapshot TargetManagerSnapshot, hostID string) bool {

@@ -136,6 +136,11 @@ func (a *RemoteRuntimeAdapter) ListWorkspaces(ctx context.Context, input runtime
 }
 
 func (a *RemoteRuntimeAdapter) CloseWorkspace(ctx context.Context, input runtimeapi.CloseWorkspaceInput) (runtimeapi.CloseWorkspaceResult, error) {
+	a.connectionMu.Lock()
+	defer a.connectionMu.Unlock()
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+
 	status, err := a.connectedStatus()
 	if err != nil {
 		return runtimeapi.CloseWorkspaceResult{}, err
@@ -144,11 +149,24 @@ func (a *RemoteRuntimeAdapter) CloseWorkspace(ctx context.Context, input runtime
 	if err != nil {
 		return runtimeapi.CloseWorkspaceResult{}, err
 	}
+	a.mu.RLock()
+	targets := make([]protocol.RuntimeTarget, 0)
+	for target := range a.sessions {
+		if runtimeapi.WorkspaceID(target.WorkspaceID) == input.WorkspaceID {
+			targets = append(targets, target)
+		}
+	}
+	a.mu.RUnlock()
+	retired := a.retireRemoteTargetsLocked(targets)
 	value, requestErr := a.client.Request(ctx, protocol.MethodWorkspaceClose, protocol.WorkspaceCloseParams{
 		HostMutation: protocol.HostMutation{RequestID: attempt.id(), ExpectedHostEpoch: status.HostEpoch},
 		WorkspaceID:  protocol.WorkspaceID(input.WorkspaceID),
 	})
 	if err = attempt.finish(requestErr); err != nil {
+		var unknown *RemoteMutationOutcomeUnknownError
+		if !errors.As(err, &unknown) {
+			a.restoreRetiredTargetsLocked(retired)
+		}
 		return runtimeapi.CloseWorkspaceResult{}, err
 	}
 	result, err := remoteResult[protocol.WorkspaceCloseResult](value, protocol.MethodWorkspaceClose)
@@ -469,6 +487,11 @@ func (a *RemoteRuntimeAdapter) ListTrashedSessions(ctx context.Context, input ru
 }
 
 func (a *RemoteRuntimeAdapter) TrashSession(ctx context.Context, input runtimeapi.TrashSessionInput) (runtimeapi.TrashSessionResult, error) {
+	a.connectionMu.Lock()
+	defer a.connectionMu.Unlock()
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+
 	status, target, err := a.sessionRecordIdentity(input.Session)
 	if err != nil {
 		return runtimeapi.TrashSessionResult{}, err
@@ -477,19 +500,21 @@ func (a *RemoteRuntimeAdapter) TrashSession(ctx context.Context, input runtimeap
 	if err != nil {
 		return runtimeapi.TrashSessionResult{}, err
 	}
+	retired := a.retireRemoteTargetsLocked([]protocol.RuntimeTarget{target})
 	value, requestErr := a.client.Request(ctx, protocol.MethodSessionTrash, protocol.SessionTrashParams{
 		SessionRecordMutation: remoteRecordMutation(attempt.id(), status, target), Guard: protocol.TrashGuard(input.Guard),
 	})
 	if err = attempt.finish(requestErr); err != nil {
+		var unknown *RemoteMutationOutcomeUnknownError
+		if !errors.As(err, &unknown) {
+			a.restoreRetiredTargetsLocked(retired)
+		}
 		return runtimeapi.TrashSessionResult{}, err
 	}
 	result, err := remoteResult[protocol.SessionTrashResult](value, protocol.MethodSessionTrash)
 	if err != nil {
 		return runtimeapi.TrashSessionResult{}, err
 	}
-	a.mu.Lock()
-	delete(a.sessions, target)
-	a.mu.Unlock()
 	return runtimeapi.TrashSessionResult{Disposition: runtimeapi.CleanupDisposition(result.Disposition)}, nil
 }
 
@@ -519,6 +544,11 @@ func (a *RemoteRuntimeAdapter) RestoreSession(ctx context.Context, input runtime
 }
 
 func (a *RemoteRuntimeAdapter) PurgeSession(ctx context.Context, input runtimeapi.PurgeSessionInput) (runtimeapi.PurgeSessionResult, error) {
+	a.connectionMu.Lock()
+	defer a.connectionMu.Unlock()
+	a.subscribeMu.Lock()
+	defer a.subscribeMu.Unlock()
+
 	status, target, err := a.sessionRecordIdentity(input.Session)
 	if err != nil {
 		return runtimeapi.PurgeSessionResult{}, err
@@ -527,19 +557,21 @@ func (a *RemoteRuntimeAdapter) PurgeSession(ctx context.Context, input runtimeap
 	if err != nil {
 		return runtimeapi.PurgeSessionResult{}, err
 	}
+	retired := a.retireRemoteTargetsLocked([]protocol.RuntimeTarget{target})
 	value, requestErr := a.client.Request(ctx, protocol.MethodSessionPurge, protocol.SessionPurgeParams{
 		SessionRecordMutation: remoteRecordMutation(attempt.id(), status, target), Guard: protocol.TrashGuard(input.Guard),
 	})
 	if err = attempt.finish(requestErr); err != nil {
+		var unknown *RemoteMutationOutcomeUnknownError
+		if !errors.As(err, &unknown) {
+			a.restoreRetiredTargetsLocked(retired)
+		}
 		return runtimeapi.PurgeSessionResult{}, err
 	}
 	result, err := remoteResult[protocol.SessionPurgeResult](value, protocol.MethodSessionPurge)
 	if err != nil {
 		return runtimeapi.PurgeSessionResult{}, err
 	}
-	a.mu.Lock()
-	delete(a.sessions, target)
-	a.mu.Unlock()
 	return runtimeapi.PurgeSessionResult{Purged: result.Purged}, nil
 }
 

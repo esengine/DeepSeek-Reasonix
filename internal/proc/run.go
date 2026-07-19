@@ -46,11 +46,12 @@ type RunDiagnostics struct {
 type TrackedCommand struct {
 	cmd *exec.Cmd
 
-	mu     sync.Mutex
-	job    uintptr
-	tree   *TreeTracker
-	killed bool
-	diag   RunDiagnostics
+	mu        sync.Mutex
+	job       uintptr
+	jobBacked bool
+	tree      *TreeTracker
+	killed    bool
+	diag      RunDiagnostics
 }
 
 // RunCommand starts cmd and waits for it. When tracking is enabled, cancellation
@@ -142,7 +143,7 @@ func waitForTrackedCommand(ctx context.Context, tracked *TrackedCommand, wait fu
 
 	select {
 	case err := <-waitCh:
-		tracked.StopTracking()
+		tracked.finishTracking()
 		return err
 	case <-ctx.Done():
 	}
@@ -150,7 +151,7 @@ func waitForTrackedCommand(ctx context.Context, tracked *TrackedCommand, wait fu
 	tracked.Kill()
 	select {
 	case err := <-waitCh:
-		tracked.StopTracking()
+		tracked.finishTracking()
 		return CanceledWaitError{Cause: context.Cause(ctx), WaitErr: err}
 	case <-time.After(grace):
 		tracked.markGraceExpired(retryFor)
@@ -181,12 +182,16 @@ func (p *TrackedCommand) Kill() {
 	p.diag.KillCalls++
 	job := p.job
 	p.job = 0
+	jobBacked := p.jobBacked
 	tree := p.tree
 	p.mu.Unlock()
-	if !firstKill {
-		job = 0
+	// A Job Object was assigned before the root resumed, so it is the complete
+	// tree-termination authority. Once its handle has been transferred to a
+	// prior Kill or finishTracking, never downgrade a retry to taskkill /PID:
+	// cmd.Wait may already have made that numeric PID reusable.
+	if job != 0 || (!jobBacked && firstKill) {
+		KillTracked(p.cmd, job)
 	}
-	KillTracked(p.cmd, job)
 	if tree != nil {
 		treeKills := tree.Kill()
 		tree.Stop()
@@ -210,6 +215,30 @@ func (p *TrackedCommand) StopTracking() {
 	}
 }
 
+// finishTracking releases ownership after cmd.Wait has completed. Unlike
+// StopTracking, it is not safe for a live command: closing the Windows Job
+// Object intentionally terminates descendants that outlived the root, while a
+// jobless fallback freezes and terminates its recorded process identities.
+func (p *TrackedCommand) finishTracking() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	job := p.job
+	p.job = 0
+	tree := p.tree
+	p.tree = nil
+	p.mu.Unlock()
+	FinishTracked(job)
+	if tree != nil {
+		treeKills := tree.Kill()
+		tree.Stop()
+		p.mu.Lock()
+		p.diag.TreeKillAttempts += treeKills
+		p.mu.Unlock()
+	}
+}
+
 // Diagnostics returns a snapshot of local cancellation state.
 func (p *TrackedCommand) Diagnostics() RunDiagnostics {
 	if p == nil {
@@ -230,6 +259,7 @@ func (p *TrackedCommand) setStarted(job uintptr) {
 	}
 	p.mu.Lock()
 	killed := p.killed
+	p.jobBacked = job != 0
 	if !killed {
 		p.job = job
 	}
@@ -248,13 +278,16 @@ func (p *TrackedCommand) setTree(tree *TreeTracker) {
 	}
 	p.mu.Lock()
 	killed := p.killed
-	if !killed {
+	jobBacked := p.jobBacked
+	if !jobBacked {
 		p.tree = tree
 		p.diag.TreeTrackerStarted = true
 	}
 	p.mu.Unlock()
-	if killed {
+	if killed && !jobBacked {
 		tree.Kill()
+	}
+	if killed || jobBacked {
 		tree.Stop()
 	}
 }

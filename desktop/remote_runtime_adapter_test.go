@@ -223,6 +223,163 @@ func remoteAdapterContext(t *testing.T) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), remoteAdapterTestTimeout)
 }
 
+func TestRemoteWorkbenchTrackedRollbackCannotRemoveNewerSubscription(t *testing.T) {
+	buildID := remoteAdapterTestBuildID()
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace-rollback-token", SessionID: "session-rollback-token"}
+	firstSnapshot := remoteAdapterSnapshot(target, "runtime-rollback", "snapshot-rollback-one", 0, nil)
+	secondSnapshot := remoteAdapterSnapshot(target, "runtime-rollback", "snapshot-rollback-two", 0, nil)
+	unsubscribed := make(chan protocol.SubscriptionID, 2)
+	var subscribes atomic.Int32
+	factory := &remoteAdapterScriptedFactory{scripts: []remoteAdapterPeerScript{
+		remoteAdapterBasePeer(buildID, "lease-rollback-token", "", func(wire *rpcwire.Conn, _ net.Conn) {
+			wire.Handle(string(protocol.MethodSessionSubscribe), func(_ context.Context, payload json.RawMessage) (any, error) {
+				var params protocol.SessionSubscribeParams
+				if err := json.Unmarshal(payload, &params); err != nil {
+					return nil, err
+				}
+				switch subscribes.Add(1) {
+				case 1:
+					if params.ReplaceSubscriptionID != "" {
+						return nil, fmt.Errorf("first replaceSubscriptionId = %q", params.ReplaceSubscriptionID)
+					}
+					return protocol.SessionSubscribeResult{SubscriptionID: "subscription-rollback-one", Snapshot: firstSnapshot}, nil
+				case 2:
+					if params.ReplaceSubscriptionID != "subscription-rollback-one" {
+						return nil, fmt.Errorf("second replaceSubscriptionId = %q", params.ReplaceSubscriptionID)
+					}
+					return protocol.SessionSubscribeResult{SubscriptionID: "subscription-rollback-two", Snapshot: secondSnapshot}, nil
+				default:
+					return nil, errors.New("unexpected extra subscribe")
+				}
+			})
+			wire.Handle(string(protocol.MethodSessionUnsubscribe), func(_ context.Context, payload json.RawMessage) (any, error) {
+				var params protocol.SessionUnsubscribeParams
+				if err := json.Unmarshal(payload, &params); err != nil {
+					return nil, err
+				}
+				unsubscribed <- params.SubscriptionID
+				return protocol.SessionUnsubscribeResult{Unsubscribed: true}, nil
+			})
+		}),
+	}}
+	connector, _, entry := newRemoteAdapterTestConnector(t, factory)
+	ctx, cancel := remoteAdapterContext(t)
+	adapterValue, err := connector.Connect(ctx, TargetDescriptor{Kind: TargetRemote, ID: entry.ID, Label: entry.Label})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := adapterValue.(*RemoteRuntimeAdapter)
+	t.Cleanup(func() { adapter.shutdown(false) })
+	input := runtimeapi.AttachAndSubscribeInput{Session: mapRemoteSessionRef(target), HistoryTurns: 20}
+
+	ctx, cancel = remoteAdapterContext(t)
+	_, rollbackOld, err := adapter.attachRemoteWorkbenchSession(ctx, input)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel = remoteAdapterContext(t)
+	_, rollbackCurrent, err := adapter.attachRemoteWorkbenchSession(ctx, input)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel = remoteAdapterContext(t)
+	err = rollbackOld(ctx)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-unsubscribed:
+		t.Fatalf("stale rollback unsubscribed newer binding %q", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+	adapter.mu.RLock()
+	current := adapter.sessions[target]
+	adapter.mu.RUnlock()
+	if current == nil || current.subscription != "subscription-rollback-two" {
+		t.Fatalf("current subscription after stale rollback = %#v", current)
+	}
+
+	ctx, cancel = remoteAdapterContext(t)
+	err = rollbackCurrent(ctx)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-unsubscribed:
+		if id != "subscription-rollback-two" {
+			t.Fatalf("current rollback unsubscribed %q", id)
+		}
+	case <-time.After(remoteAdapterTestTimeout):
+		t.Fatal("current tracked rollback did not unsubscribe")
+	}
+}
+
+func TestRemoteWorkbenchTrackedRollbackForgetsDisconnectedRecovery(t *testing.T) {
+	buildID := remoteAdapterTestBuildID()
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace-rollback-loss", SessionID: "session-rollback-loss"}
+	snapshot := remoteAdapterSnapshot(target, "runtime-rollback-loss", "snapshot-rollback-loss", 0, nil)
+	rawConnection := make(chan net.Conn, 1)
+	factory := &remoteAdapterScriptedFactory{scripts: []remoteAdapterPeerScript{
+		remoteAdapterBasePeer(buildID, "lease-rollback-loss", "", func(wire *rpcwire.Conn, raw net.Conn) {
+			rawConnection <- raw
+			wire.Handle(string(protocol.MethodSessionSubscribe), func(context.Context, json.RawMessage) (any, error) {
+				return protocol.SessionSubscribeResult{SubscriptionID: "subscription-rollback-loss", Snapshot: snapshot}, nil
+			})
+		}),
+	}}
+	connector, _, entry := newRemoteAdapterTestConnector(t, factory)
+	ctx, cancel := remoteAdapterContext(t)
+	adapterValue, err := connector.Connect(ctx, TargetDescriptor{Kind: TargetRemote, ID: entry.ID, Label: entry.Label})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := adapterValue.(*RemoteRuntimeAdapter)
+	t.Cleanup(func() { adapter.shutdown(false) })
+	ctx, cancel = remoteAdapterContext(t)
+	_, rollback, err := adapter.attachRemoteWorkbenchSession(ctx, runtimeapi.AttachAndSubscribeInput{
+		Session: mapRemoteSessionRef(target), HistoryTurns: 20,
+	})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (<-rawConnection).Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case fault := <-adapter.Faults():
+		if fault == nil {
+			t.Fatal("transport loss published a nil fault")
+		}
+	case <-time.After(remoteAdapterTestTimeout):
+		t.Fatal("timed out waiting for transport loss")
+	}
+	if recovery := adapter.client.RecoveryState(); len(recovery.Subscriptions) != 1 || recovery.Subscriptions[0].Target != target {
+		t.Fatalf("pre-rollback recovery = %#v", recovery)
+	}
+	ctx, cancel = remoteAdapterContext(t)
+	err = rollback(ctx)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovery := adapter.client.RecoveryState(); len(recovery.Subscriptions) != 0 {
+		t.Fatalf("rejected attach remained in reconnect recovery: %#v", recovery)
+	}
+	adapter.mu.RLock()
+	binding := adapter.sessions[target]
+	adapter.mu.RUnlock()
+	if binding != nil {
+		t.Fatalf("rejected attach retained adapter binding: %#v", binding)
+	}
+}
+
 func TestRemoteRuntimeAdapterRealPhase5ClosedLoopAndLosslessMapping(t *testing.T) {
 	buildID := remoteAdapterTestBuildID()
 	target := protocol.RuntimeTarget{WorkspaceID: "workspace-opaque", SessionID: "session-opaque"}
@@ -910,6 +1067,156 @@ func TestRemoteRuntimeAdapterEmitsHydratedSnapshotAfterAtomicTargetMigration(t *
 	adapter.mu.RUnlock()
 	if oldRetained || current == nil || !current.hasSnapshot || current.subscription != "subscription-new" {
 		t.Fatalf("post-migration bindings old=%v current=%+v", oldRetained, current)
+	}
+}
+
+func TestRemoteRuntimeAdapterFailedMigrationPublishDropsBothAtomicReplacementBindings(t *testing.T) {
+	buildID := remoteAdapterTestBuildID()
+	source := protocol.RuntimeTarget{WorkspaceID: "workspace-migrate-fail", SessionID: "session-old"}
+	replacement := protocol.RuntimeTarget{WorkspaceID: source.WorkspaceID, SessionID: "session-new"}
+	var subscribeCalls atomic.Int32
+	factory := &remoteAdapterScriptedFactory{scripts: []remoteAdapterPeerScript{
+		remoteAdapterBasePeer(buildID, "lease-migrate-fail", "", func(wire *rpcwire.Conn, _ net.Conn) {
+			wire.Handle(string(protocol.MethodSessionSubscribe), func(_ context.Context, payload json.RawMessage) (any, error) {
+				var params protocol.SessionSubscribeParams
+				if err := json.Unmarshal(payload, &params); err != nil {
+					return nil, err
+				}
+				switch subscribeCalls.Add(1) {
+				case 1:
+					return protocol.SessionSubscribeResult{
+						SubscriptionID: "subscription-old",
+						Snapshot:       remoteAdapterSnapshot(source, "runtime-old", "snapshot-old", 1, nil),
+					}, nil
+				case 2:
+					if params.Target != replacement || params.ReplaceSubscriptionID != "subscription-old" {
+						return nil, fmt.Errorf("replacement subscribe = %+v", params)
+					}
+					return protocol.SessionSubscribeResult{
+						SubscriptionID: "subscription-new",
+						Snapshot:       remoteAdapterSnapshot(replacement, "runtime-new", "snapshot-new", 2, nil),
+					}, nil
+				default:
+					return nil, errors.New("unexpected extra subscribe")
+				}
+			})
+			wire.Handle(string(protocol.MethodSessionUnsubscribe), func(context.Context, json.RawMessage) (any, error) {
+				return protocol.SessionUnsubscribeResult{Unsubscribed: true}, nil
+			})
+		}),
+	}}
+	connector, _, entry := newRemoteAdapterTestConnector(t, factory)
+	ctx, cancel := remoteAdapterContext(t)
+	adapterValue, err := connector.Connect(ctx, TargetDescriptor{Kind: TargetRemote, ID: entry.ID, Label: entry.Label})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := adapterValue.(*RemoteRuntimeAdapter)
+	t.Cleanup(func() { adapter.shutdown(false) })
+	ctx, cancel = remoteAdapterContext(t)
+	if _, err := adapter.AttachAndSubscribe(ctx, runtimeapi.AttachAndSubscribeInput{
+		Session: mapRemoteSessionRef(source), HistoryTurns: 20,
+	}); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	cancel()
+	publishErr := errors.New("reject replacement snapshot")
+	ctx, cancel = remoteAdapterContext(t)
+	_, err = adapter.subscribeFreshOrdered(ctx, replacement, 20, "subscription-old", source, func(runtimeapi.SessionSnapshot) error {
+		return publishErr
+	})
+	cancel()
+	if !errors.Is(err, publishErr) {
+		t.Fatalf("failed migration = %v, want %v", err, publishErr)
+	}
+	adapter.mu.RLock()
+	oldBinding := adapter.sessions[source]
+	newBinding := adapter.sessions[replacement]
+	adapter.mu.RUnlock()
+	if oldBinding != nil || newBinding != nil {
+		t.Fatalf("failed migration retained ghost bindings: old=%+v new=%+v", oldBinding, newBinding)
+	}
+	if recovery := adapter.client.RecoveryState(); len(recovery.Subscriptions) != 0 {
+		t.Fatalf("failed migration recovery = %+v, want empty", recovery.Subscriptions)
+	}
+}
+
+func TestRemoteRuntimeAdapterStaleMigrationCannotRetireNewerSourceBindingWhenTargetExists(t *testing.T) {
+	buildID := remoteAdapterTestBuildID()
+	source := protocol.RuntimeTarget{WorkspaceID: "workspace-stale-migrate", SessionID: "session-source"}
+	replacement := protocol.RuntimeTarget{WorkspaceID: source.WorkspaceID, SessionID: "session-existing"}
+	var subscribeCalls atomic.Int32
+	factory := &remoteAdapterScriptedFactory{scripts: []remoteAdapterPeerScript{
+		remoteAdapterBasePeer(buildID, "lease-stale-migrate", "", func(wire *rpcwire.Conn, _ net.Conn) {
+			wire.Handle(string(protocol.MethodSessionSubscribe), func(_ context.Context, payload json.RawMessage) (any, error) {
+				var params protocol.SessionSubscribeParams
+				if err := json.Unmarshal(payload, &params); err != nil {
+					return nil, err
+				}
+				switch subscribeCalls.Add(1) {
+				case 1:
+					if params.Target != source || params.ReplaceSubscriptionID != "" {
+						return nil, fmt.Errorf("first source subscribe = %+v", params)
+					}
+					return protocol.SessionSubscribeResult{SubscriptionID: "source-old", Snapshot: remoteAdapterSnapshot(source, "runtime-source-old", "snapshot-source-old", 1, nil)}, nil
+				case 2:
+					if params.Target != replacement || params.ReplaceSubscriptionID != "" {
+						return nil, fmt.Errorf("existing target subscribe = %+v", params)
+					}
+					return protocol.SessionSubscribeResult{SubscriptionID: "target-current", Snapshot: remoteAdapterSnapshot(replacement, "runtime-target", "snapshot-target", 1, nil)}, nil
+				case 3:
+					if params.Target != source || params.ReplaceSubscriptionID != "source-old" {
+						return nil, fmt.Errorf("newer source subscribe = %+v", params)
+					}
+					return protocol.SessionSubscribeResult{SubscriptionID: "source-new", Snapshot: remoteAdapterSnapshot(source, "runtime-source-new", "snapshot-source-new", 2, nil)}, nil
+				default:
+					return nil, errors.New("stale migration reached Host")
+				}
+			})
+		}),
+	}}
+	connector, _, entry := newRemoteAdapterTestConnector(t, factory)
+	ctx, cancel := remoteAdapterContext(t)
+	adapterValue, err := connector.Connect(ctx, TargetDescriptor{Kind: TargetRemote, ID: entry.ID, Label: entry.Label})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := adapterValue.(*RemoteRuntimeAdapter)
+	t.Cleanup(func() { adapter.shutdown(false) })
+	for _, ref := range []protocol.RuntimeTarget{source, replacement, source} {
+		ctx, cancel = remoteAdapterContext(t)
+		_, err = adapter.AttachAndSubscribe(ctx, runtimeapi.AttachAndSubscribeInput{
+			Session: mapRemoteSessionRef(ref), HistoryTurns: 20,
+		})
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel = remoteAdapterContext(t)
+	_, err = adapter.subscribeFreshOrdered(ctx, replacement, 20, "source-old", source, nil)
+	cancel()
+	if !errors.Is(err, remoteclient.ErrSubscriptionReplaced) {
+		t.Fatalf("stale migration = %v, want replaced", err)
+	}
+	adapter.mu.RLock()
+	sourceBinding := adapter.sessions[source]
+	targetBinding := adapter.sessions[replacement]
+	adapter.mu.RUnlock()
+	if sourceBinding == nil || sourceBinding.subscription != "source-new" ||
+		targetBinding == nil || targetBinding.subscription != "target-current" {
+		t.Fatalf("stale migration changed bindings: source=%+v target=%+v", sourceBinding, targetBinding)
+	}
+	if got := subscribeCalls.Load(); got != 3 {
+		t.Fatalf("subscribe calls = %d, want 3", got)
+	}
+	select {
+	case fault := <-adapter.Faults():
+		t.Fatalf("stale expected migration emitted adapter fault: %v", fault)
+	default:
 	}
 }
 

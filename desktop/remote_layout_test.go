@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"reasonix/internal/runtimeapi"
@@ -133,7 +134,10 @@ func TestRemoteLayoutPersistsPerHostAndNeverTouchesLocalProjectRegistry(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Windows reports synthesized POSIX permission bits (typically 0666) for
+	// regular files even when WriteFile was given 0600. The Unix hosts where
+	// this layout can carry meaningful mode bits must retain the strict check.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("Remote layout permissions = %04o, want 0600", info.Mode().Perm())
 	}
 	if bytes.Contains([]byte(layoutPath), []byte(workspaceA)) || bytes.Contains([]byte(layoutPath), []byte(workspaceB)) {

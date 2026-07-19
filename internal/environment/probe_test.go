@@ -2,12 +2,15 @@ package environment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,6 +177,231 @@ func TestRunProbesReportsTimeout(t *testing.T) {
 	}
 	if results[0].Error != "timeout" {
 		t.Fatalf("Error = %q, want timeout", results[0].Error)
+	}
+}
+
+func TestRunProbesCapsConcurrencyAndPreservesOrdering(t *testing.T) {
+	commands := []string{
+		"z-missing", "hotel", "golf", "foxtrot", "echo",
+		"delta", "charlie", "bravo", "alpha",
+	}
+	started := make(chan struct{}, len(commands))
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+
+	var active atomic.Int32
+	var peak atomic.Int32
+	runner := func(_ context.Context, command string, _ ProbeOptions) ProbeResult {
+		current := active.Add(1)
+		for {
+			previous := peak.Load()
+			if current <= previous || peak.CompareAndSwap(previous, current) {
+				break
+			}
+		}
+		started <- struct{}{}
+		<-release
+		active.Add(-1)
+		return ProbeResult{
+			Command: command,
+			Binary:  command,
+			Output:  command,
+			Found:   command != "z-missing",
+		}
+	}
+
+	done := make(chan []ProbeResult, 1)
+	go func() {
+		done <- runProbesWithRunner(context.Background(), commands, ProbeOptions{}, runner)
+	}()
+
+	for i := 0; i < maxConcurrentProbes; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d runners started; want %d", i, maxConcurrentProbes)
+		}
+	}
+	select {
+	case <-started:
+		t.Fatalf("more than %d probe runners started concurrently", maxConcurrentProbes)
+	case <-time.After(100 * time.Millisecond):
+	}
+	unblock()
+
+	var results []ProbeResult
+	select {
+	case results = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("bounded probe run did not finish")
+	}
+	if got := peak.Load(); got != maxConcurrentProbes {
+		t.Fatalf("peak concurrency = %d, want %d", got, maxConcurrentProbes)
+	}
+	wantOrder := []string{
+		"alpha", "bravo", "charlie", "delta", "echo",
+		"foxtrot", "golf", "hotel", "z-missing",
+	}
+	if len(results) != len(wantOrder) {
+		t.Fatalf("result count = %d, want %d", len(results), len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if results[i].Binary != want {
+			t.Fatalf("result %d binary = %q, want %q", i, results[i].Binary, want)
+		}
+	}
+}
+
+func TestRunProbesCapsConcurrencyAcrossCalls(t *testing.T) {
+	const callCount = 3
+	commands := []string{"delta", "charlie", "bravo", "alpha"}
+	started := make(chan string, callCount*len(commands))
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+
+	var active atomic.Int32
+	var peak atomic.Int32
+	runner := func(ctx context.Context, command string, opts ProbeOptions) ProbeResult {
+		err := runProbeCommand(ctx, func() error {
+			current := active.Add(1)
+			for {
+				previous := peak.Load()
+				if current <= previous || peak.CompareAndSwap(previous, current) {
+					break
+				}
+			}
+			started <- opts.Overrides["scope"] + ":" + command
+			<-release
+			active.Add(-1)
+			return nil
+		})
+		result := ProbeResult{Command: command, Binary: command}
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		result.Found = true
+		return result
+	}
+
+	done := make(chan []ProbeResult, callCount)
+	for call := 0; call < callCount; call++ {
+		opts := ProbeOptions{Overrides: map[string]string{"scope": fmt.Sprintf("call-%d", call)}}
+		go func() {
+			done <- runProbesWithRunner(context.Background(), commands, opts, runner)
+		}()
+	}
+
+	for i := 0; i < maxConcurrentProbes; i++ {
+		select {
+		case <-started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d globally admitted runners started; want %d", i, maxConcurrentProbes)
+		}
+	}
+	select {
+	case extra := <-started:
+		t.Fatalf("global probe limit exceeded by %q", extra)
+	case <-time.After(100 * time.Millisecond):
+	}
+	unblock()
+
+	for call := 0; call < callCount; call++ {
+		select {
+		case results := <-done:
+			if len(results) != len(commands) {
+				t.Fatalf("result count = %d, want %d", len(results), len(commands))
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("globally bounded probe run did not finish")
+		}
+	}
+	if got := peak.Load(); got != maxConcurrentProbes {
+		t.Fatalf("global peak concurrency = %d, want %d", got, maxConcurrentProbes)
+	}
+}
+
+func TestProbeAdmissionHonorsCancellation(t *testing.T) {
+	holdersStarted := make(chan struct{}, maxConcurrentProbes)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+
+	holdersDone := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		wg.Add(maxConcurrentProbes)
+		for range maxConcurrentProbes {
+			go func() {
+				defer wg.Done()
+				_ = runProbeCommand(context.Background(), func() error {
+					holdersStarted <- struct{}{}
+					<-release
+					return nil
+				})
+			}()
+		}
+		wg.Wait()
+		close(holdersDone)
+	}()
+
+	for i := 0; i < maxConcurrentProbes; i++ {
+		select {
+		case <-holdersStarted:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d admission holders started; want %d", i, maxConcurrentProbes)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	wouldRun := make(chan struct{}, 1)
+	waiterDone := make(chan error, 1)
+	go func() {
+		waiterDone <- runProbeCommand(ctx, func() error {
+			wouldRun <- struct{}{}
+			return nil
+		})
+	}()
+	cancel()
+
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waiting probe error = %v, want context canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting probe did not honor cancellation")
+	}
+	select {
+	case <-wouldRun:
+		t.Fatal("canceled probe ran without global admission")
+	default:
+	}
+
+	unblock()
+	select {
+	case <-holdersDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("admission holders did not finish")
+	}
+}
+
+func TestRunProbesWithRunnerHandlesNoCommands(t *testing.T) {
+	called := false
+	results := runProbesWithRunner(context.Background(), nil, ProbeOptions{}, func(context.Context, string, ProbeOptions) ProbeResult {
+		called = true
+		return ProbeResult{}
+	})
+	if called {
+		t.Fatal("runner called for an empty command list")
+	}
+	if len(results) != 0 {
+		t.Fatalf("result count = %d, want 0", len(results))
 	}
 }
 

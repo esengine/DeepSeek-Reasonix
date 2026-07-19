@@ -3,6 +3,7 @@
 package proc
 
 import (
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -18,12 +19,14 @@ import (
 // expose grandchildren before or outside taskkill's live tree walk. Recording
 // descendants gives cancellation a second chance to terminate those escapees.
 type TreeTracker struct {
-	root uint32
-	done chan struct{}
-	once sync.Once
+	root       uint32
+	done       chan struct{}
+	once       sync.Once
+	freezeOnce sync.Once
 
 	mu      sync.Mutex
 	records map[uint32]processRecord
+	frozen  bool
 }
 
 type processRecord struct {
@@ -38,10 +41,17 @@ func TrackTree(cmd *exec.Cmd) *TreeTracker {
 	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
+	root, ok := processRecordFromHandle(cmd.Process, uint32(cmd.Process.Pid))
+	if !ok {
+		// Without an immutable creation-time identity, a later retry could
+		// mistake a reused PID for the original root. The handle-pinned taskkill
+		// pass remains available while the process itself is still waitable.
+		return nil
+	}
 	t := &TreeTracker{
 		root:    uint32(cmd.Process.Pid),
 		done:    make(chan struct{}),
-		records: map[uint32]processRecord{},
+		records: map[uint32]processRecord{root.pid: root},
 	}
 	t.record()
 	go t.loop()
@@ -59,7 +69,7 @@ func (t *TreeTracker) Kill() int {
 	if t == nil {
 		return 0
 	}
-	t.record()
+	t.freeze()
 	records := t.snapshot()
 	killed := 0
 	for _, rec := range records {
@@ -74,6 +84,22 @@ func (t *TreeTracker) Kill() int {
 		}
 	}
 	return killed
+}
+
+// freeze captures one final live-tree snapshot, then makes the identity set
+// immutable. Retry kills can act on those same process objects, but can never
+// reinterpret a reused PID or discover an unrelated new root generation.
+func (t *TreeTracker) freeze() {
+	if t == nil {
+		return
+	}
+	t.freezeOnce.Do(func() {
+		t.record()
+		t.mu.Lock()
+		t.frozen = true
+		t.mu.Unlock()
+		t.Stop()
+	})
 }
 
 func (t *TreeTracker) loop() {
@@ -93,15 +119,31 @@ func (t *TreeTracker) record() {
 	if t == nil || t.root == 0 {
 		return
 	}
-	records := processSnapshot()
+	t.recordSnapshot(processSnapshot())
+}
+
+// recordSnapshot extends the immutable identity set only while the original
+// root identity is still present. It never replaces an existing PID record:
+// after a process exits, that numeric PID can be reused by an unrelated tree.
+func (t *TreeTracker) recordSnapshot(records map[uint32]processRecord) {
+	if t == nil || t.root == 0 {
+		return
+	}
 	t.mu.Lock()
-	if root, ok := records[t.root]; ok {
-		t.records[t.root] = root
+	defer t.mu.Unlock()
+	if t.frozen {
+		return
+	}
+	root, tracked := t.records[t.root]
+	currentRoot, live := records[t.root]
+	if !tracked || !live || !sameProcessIdentity(root, currentRoot) {
+		return
 	}
 	for _, rec := range descendantRecords(t.root, records) {
-		t.records[rec.pid] = rec
+		if _, exists := t.records[rec.pid]; !exists && rec.hasTimes {
+			t.records[rec.pid] = rec
+		}
 	}
-	t.mu.Unlock()
 }
 
 func (t *TreeTracker) snapshot() []processRecord {
@@ -178,20 +220,45 @@ func processCreationTime(pid uint32) (windows.Filetime, bool) {
 	return created, true
 }
 
+func processRecordFromHandle(process *os.Process, pid uint32) (processRecord, bool) {
+	if process == nil || pid == 0 {
+		return processRecord{}, false
+	}
+	record := processRecord{pid: pid}
+	var queryErr error
+	err := process.WithHandle(func(rawHandle uintptr) {
+		var exited, kernel, user windows.Filetime
+		queryErr = windows.GetProcessTimes(
+			windows.Handle(rawHandle), &record.created, &exited, &kernel, &user,
+		)
+	})
+	if err != nil || queryErr != nil {
+		return processRecord{}, false
+	}
+	record.hasTimes = true
+	return record, true
+}
+
 func terminateRecord(rec processRecord) int {
-	if rec.pid == 0 {
+	if rec.pid == 0 || !rec.hasTimes {
 		return 0
 	}
-	current, ok := processSnapshot()[rec.pid]
-	if !ok || !sameProcessIdentity(rec, current) {
-		return 0
-	}
-	h, err := windows.OpenProcess(windows.PROCESS_TERMINATE, false, rec.pid)
+	h, err := windows.OpenProcess(
+		windows.PROCESS_TERMINATE|windows.PROCESS_QUERY_LIMITED_INFORMATION,
+		false,
+		rec.pid,
+	)
 	if err != nil {
 		return 0
 	}
 	defer func() { _ = windows.CloseHandle(h) }()
-	_ = windows.TerminateProcess(h, 1)
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil || created != rec.created {
+		return 0
+	}
+	if err := windows.TerminateProcess(h, 1); err != nil {
+		return 0
+	}
 	return 1
 }
 
@@ -199,8 +266,8 @@ func sameProcessIdentity(recorded, current processRecord) bool {
 	if recorded.pid != current.pid {
 		return false
 	}
-	if recorded.hasTimes && current.hasTimes {
-		return recorded.created == current.created
+	if recorded.hasTimes || current.hasTimes {
+		return recorded.hasTimes && current.hasTimes && recorded.created == current.created
 	}
 	if recorded.exe != "" && current.exe != "" {
 		return strings.EqualFold(recorded.exe, current.exe)

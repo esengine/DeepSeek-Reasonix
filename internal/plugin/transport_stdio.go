@@ -45,6 +45,7 @@ type stdioTransport struct {
 	readErr error // set once the reader goroutine exits; further calls fail fast
 
 	waitOnce    sync.Once
+	closeOnce   sync.Once
 	releaseSlot func() // returns a bounded instance slot (e.g. CodeGraph) on close; nil when unbounded
 	cleanupDir  string
 }
@@ -112,7 +113,11 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	job, err := proc.StartTracked(cmd)
+	// A stdio server can outlive its launcher while retaining inherited pipes.
+	// Require OS-enforced tree ownership before the child is allowed to run:
+	// once cmd.Wait has released the root handle, a PID-based fallback is both
+	// unsafe (the PID may be reused) and unable to identify detached children.
+	job, err := proc.StartTrackedRequired(cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -661,22 +666,33 @@ func waitWithBudget(wait func(), budget time.Duration) {
 // blocking forever) and reaps it under a budget so one wedged server can never
 // stall a boot or a turn teardown.
 func (t *stdioTransport) close() {
-	defer func() {
-		if t.cleanupDir != "" {
-			_ = os.RemoveAll(t.cleanupDir)
-		}
-	}()
-	if t.releaseSlot != nil {
-		t.releaseSlot() // idempotent; frees the bounded CodeGraph instance slot
-	}
-	if t.stdin != nil {
-		_ = t.stdin.Close()
-	}
-	if t.cmd == nil || t.cmd.Process == nil {
+	if t == nil {
 		return
 	}
-	proc.KillTracked(t.cmd, t.job)
-	waitWithBudget(t.wait, closeWaitBudget)
+	t.closeOnce.Do(func() {
+		cleanupDir := t.cleanupDir
+		t.cleanupDir = ""
+		defer func() {
+			if cleanupDir != "" {
+				_ = os.RemoveAll(cleanupDir)
+			}
+		}()
+		releaseSlot := t.releaseSlot
+		t.releaseSlot = nil
+		if releaseSlot != nil {
+			releaseSlot() // frees the bounded CodeGraph instance slot
+		}
+		if t.stdin != nil {
+			_ = t.stdin.Close()
+		}
+		if t.cmd == nil || t.cmd.Process == nil {
+			return
+		}
+		job := t.job
+		t.job = 0
+		proc.KillTracked(t.cmd, job)
+		waitWithBudget(t.wait, closeWaitBudget)
+	})
 }
 
 type tailBuffer struct {

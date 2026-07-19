@@ -189,7 +189,13 @@ func (a *App) remoteRewindV1(tabID string, turn int, scope string) error {
 }
 
 func (a *App) remoteForkV1(tabID string, turn int) (TabMeta, error) {
-	api, session, _, _, err := a.remoteV1ForTab(tabID)
+	finishCreate, err := a.beginRemoteWorkbenchSessionCreate()
+	if err != nil {
+		return TabMeta{}, err
+	}
+	defer finishCreate()
+
+	api, session, _, expected, err := a.remoteV1ForTab(tabID)
 	if err != nil {
 		return TabMeta{}, err
 	}
@@ -197,16 +203,37 @@ func (a *App) remoteForkV1(tabID string, turn int) (TabMeta, error) {
 	if err != nil {
 		return TabMeta{}, err
 	}
+	fingerprint := remoteForkSessionCreateFingerprint(session.Created.Session, checkpointID)
+	if pending := a.remoteWorkspacePending(expected.Target.ID, fingerprint); pending != nil {
+		return a.attachRemoteWorkbenchSessionForTarget(api, pending.Created.Session, true, expected)
+	}
+	manager := a.remote.manager
+	if manager == nil {
+		return TabMeta{}, ErrRuntimeTargetUnavailable
+	}
+	if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+		return TabMeta{}, ErrTargetTransitionSuperseded
+	}
 	ctx, cancel := a.remoteActionContext()
 	result, err := api.ForkSession(ctx, runtimeapi.ForkSessionInput{Session: session.Created.Session, CheckpointID: checkpointID})
 	cancel()
 	if err != nil {
 		return TabMeta{}, err
 	}
-	if result.Source != session.Created.Session || !result.Child.Valid() {
+	if result.Source != session.Created.Session || !result.Child.Valid() || result.Child.WorkspaceID != session.Created.Session.WorkspaceID {
 		return TabMeta{}, errors.New("Remote fork returned an invalid child Session")
 	}
-	return a.attachRemoteWorkbenchSession(result.Child, true)
+	a.storeRemoteWorkspacePending(&pendingRemoteSessionCreate{
+		HostID: expected.Target.ID, Fingerprint: fingerprint,
+		Workspace: runtimeapi.Workspace{ID: result.Child.WorkspaceID},
+		Created: runtimeapi.CreatedSession{
+			Session: result.Child, TopicID: session.Created.TopicID, TopicTitle: session.Created.TopicTitle,
+		},
+	})
+	if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+		return TabMeta{}, ErrTargetTransitionSuperseded
+	}
+	return a.attachRemoteWorkbenchSessionForTarget(api, result.Child, true, expected)
 }
 
 func (a *App) remoteSummarizeV1(tabID string, turn int, direction runtimeapi.SummaryDirection) error {
@@ -318,9 +345,19 @@ func parseRemoteSessionToken(token string) (runtimeapi.SessionRef, bool, error) 
 	return ref, true, nil
 }
 
-func (a *App) remoteSessionRefForToken(tabID, token string) (runtimeapi.SessionRef, error) {
+func (a *App) remoteSessionRefForToken(
+	api runtimeapi.V1RuntimeAPI,
+	expected TargetManagerSnapshot,
+	token string,
+) (runtimeapi.SessionRef, error) {
 	if ref, encoded, err := parseRemoteSessionToken(token); encoded {
-		return ref, err
+		if err != nil {
+			return runtimeapi.SessionRef{}, err
+		}
+		if a.remote.manager == nil || !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+			return runtimeapi.SessionRef{}, ErrTargetTransitionSuperseded
+		}
+		return ref, nil
 	}
 	id := runtimeapi.SessionID(strings.TrimSpace(token))
 	if id == "" {
@@ -330,9 +367,8 @@ func (a *App) remoteSessionRefForToken(tabID, token string) (runtimeapi.SessionR
 	// Resolve it from Host authority even when the active Session appears to
 	// match: SessionID is workspace-scoped, so that apparent match may be
 	// ambiguous on another workspace. Never silently borrow active workspace.
-	api, _, err := a.remoteConnectedV1Runtime()
-	if err != nil {
-		return runtimeapi.SessionRef{}, err
+	if api == nil || a.remote.manager == nil || !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+		return runtimeapi.SessionRef{}, ErrTargetTransitionSuperseded
 	}
 	ctx, cancel := a.remoteActionContext()
 	defer cancel()
@@ -342,6 +378,9 @@ func (a *App) remoteSessionRefForToken(tabID, token string) (runtimeapi.SessionR
 	}
 	var match runtimeapi.SessionRef
 	for _, workspace := range workspaces {
+		if !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+			return runtimeapi.SessionRef{}, ErrTargetTransitionSuperseded
+		}
 		sessions, listErr := listAllRemoteSessions(ctx, api, workspace.ID)
 		if listErr != nil {
 			return runtimeapi.SessionRef{}, listErr
@@ -355,6 +394,9 @@ func (a *App) remoteSessionRefForToken(tabID, token string) (runtimeapi.SessionR
 			}
 			match = summary.Session
 		}
+	}
+	if !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+		return runtimeapi.SessionRef{}, ErrTargetTransitionSuperseded
 	}
 	if !match.Valid() {
 		return runtimeapi.SessionRef{}, fmt.Errorf("Remote Session %q not found", id)
@@ -451,11 +493,14 @@ func (a *App) remoteListTrashV1(tabID string) ([]SessionMeta, error) {
 }
 
 func (a *App) remoteTrashSessionV1(tabID, token string, redundantOnly bool) error {
-	api, _, _, _, err := a.remoteV1ForTab(tabID)
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
+	api, _, _, expected, err := a.remoteV1ForTab(tabID)
 	if err != nil {
 		return err
 	}
-	ref, err := a.remoteSessionRefForToken(tabID, token)
+	ref, err := a.remoteSessionRefForToken(api, expected, token)
 	if err != nil {
 		return err
 	}
@@ -467,17 +512,19 @@ func (a *App) remoteTrashSessionV1(tabID, token string, redundantOnly bool) erro
 	_, err = api.TrashSession(ctx, runtimeapi.TrashSessionInput{Session: ref, Guard: guard})
 	cancel()
 	if err == nil {
-		a.removeRemoteWorkbenchSession(ref)
+		if _, committed := a.removeRemoteWorkbenchSession(expected, ref); !committed {
+			return ErrTargetTransitionSuperseded
+		}
 	}
 	return err
 }
 
 func (a *App) remoteRestoreSessionV1(tabID, token string) error {
-	api, _, _, _, err := a.remoteV1ForTab(tabID)
+	api, _, _, expected, err := a.remoteV1ForTab(tabID)
 	if err != nil {
 		return err
 	}
-	ref, err := a.remoteSessionRefForToken(tabID, token)
+	ref, err := a.remoteSessionRefForToken(api, expected, token)
 	if err != nil {
 		return err
 	}
@@ -488,11 +535,11 @@ func (a *App) remoteRestoreSessionV1(tabID, token string) error {
 }
 
 func (a *App) remotePurgeSessionV1(tabID, token string, redundantOnly bool) error {
-	api, _, _, _, err := a.remoteV1ForTab(tabID)
+	api, _, _, expected, err := a.remoteV1ForTab(tabID)
 	if err != nil {
 		return err
 	}
-	ref, err := a.remoteSessionRefForToken(tabID, token)
+	ref, err := a.remoteSessionRefForToken(api, expected, token)
 	if err != nil {
 		return err
 	}
@@ -507,11 +554,11 @@ func (a *App) remotePurgeSessionV1(tabID, token string, redundantOnly bool) erro
 }
 
 func (a *App) remoteRenameSessionV1(tabID, token, title string) error {
-	api, _, _, _, err := a.remoteV1ForTab(tabID)
+	api, _, _, expected, err := a.remoteV1ForTab(tabID)
 	if err != nil {
 		return err
 	}
-	ref, err := a.remoteSessionRefForToken(tabID, token)
+	ref, err := a.remoteSessionRefForToken(api, expected, token)
 	if err != nil {
 		return err
 	}
@@ -522,11 +569,18 @@ func (a *App) remoteRenameSessionV1(tabID, token, title string) error {
 }
 
 func (a *App) remoteResumeSessionV1(tabID, token string) (HistoryPage, error) {
-	ref, err := a.remoteSessionRefForToken(tabID, token)
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
+	api, expected, err := a.remoteConnectedV1RuntimeSnapshot()
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	if _, err = a.attachRemoteWorkbenchSession(ref, true); err != nil {
+	ref, err := a.remoteSessionRefForToken(api, expected, token)
+	if err != nil {
+		return HistoryPage{}, err
+	}
+	if _, err = a.attachRemoteWorkbenchSessionForTarget(api, ref, true, expected); err != nil {
 		return HistoryPage{}, err
 	}
 	page, ok := a.remoteHistoryPage(remoteSessionTabID(ref))
@@ -537,11 +591,14 @@ func (a *App) remoteResumeSessionV1(tabID, token string) (HistoryPage, error) {
 }
 
 func (a *App) remotePreviewSessionV1(tabID, token string) ([]HistoryMessage, error) {
-	api, _, _, _, err := a.remoteV1ForTab(tabID)
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
+	api, _, _, expected, err := a.remoteV1ForTab(tabID)
 	if err != nil {
 		return nil, err
 	}
-	ref, err := a.remoteSessionRefForToken(tabID, token)
+	ref, err := a.remoteSessionRefForToken(api, expected, token)
 	if err != nil {
 		return nil, err
 	}
@@ -552,13 +609,41 @@ func (a *App) remotePreviewSessionV1(tabID, token string) ([]HistoryMessage, err
 		return mapRemoteHistoryMessages(open.Snapshot.History.Messages, open.Snapshot.Checkpoints), nil
 	}
 	ctx, cancel := a.remoteActionContext()
-	snapshot, err := api.AttachAndSubscribe(ctx, runtimeapi.AttachAndSubscribeInput{
+	defer cancel()
+	snapshot, rollback, err := previewRemoteWorkbenchAtomic(ctx, api, runtimeapi.AttachAndSubscribeInput{
 		Session: ref, HistoryTurns: a.desktopHistoryPageTurns(),
 	})
 	if err == nil {
-		err = api.UnsubscribeSession(ctx, runtimeapi.UnsubscribeSessionInput{Session: ref})
+		if snapshot.Session != ref {
+			err = errors.New("Remote preview attach returned a different Session identity")
+		}
+		if err == nil && !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+			err = ErrTargetTransitionSuperseded
+		}
+		// An asynchronous resync can migrate an existing tab to ref while the
+		// preview attach is in flight. In that ordering this attach replaced the
+		// visible tab's subscription; adopt its atomic snapshot instead of
+		// rolling it back and leaving the tab without a binding.
+		if err == nil && rollback == nil {
+			if open, workspace, current, ok := a.remoteSessionView(remoteSessionTabID(ref)); ok &&
+				open.Created.Session == ref && remoteWorkbenchTargetMatches(current, expected) {
+				created := open.Created
+				created.TopicID = snapshot.TopicID
+				created.TopicTitle = snapshot.Title
+				created.ResolvedProfile = snapshot.Profile
+				if _, _, committed := a.commitRemoteWorkbenchSession(expected, workspace, created, snapshot, false); committed {
+					return mapRemoteHistoryMessages(snapshot.History.Messages, snapshot.Checkpoints), nil
+				}
+				err = ErrTargetTransitionSuperseded
+			}
+		}
+		rollbackErr := runRemoteWorkbenchSubscriptionRollback(rollback)
+		if err == nil {
+			err = rollbackErr
+		} else if rollbackErr != nil {
+			err = fmt.Errorf("%w (subscription rollback failed: %v)", err, rollbackErr)
+		}
 	}
-	cancel()
 	if err != nil {
 		return nil, err
 	}
@@ -1340,7 +1425,10 @@ func (a *App) remoteListWorkspacesV1() ([]WorkspaceMeta, error) {
 }
 
 func (a *App) remoteRemoveWorkspaceV1(workspaceToken string) error {
-	api, _, err := a.remoteConnectedV1Runtime()
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
+	api, expected, err := a.remoteConnectedV1RuntimeSnapshot()
 	if err != nil {
 		return err
 	}
@@ -1352,30 +1440,56 @@ func (a *App) remoteRemoveWorkspaceV1(workspaceToken string) error {
 	_, err = api.CloseWorkspace(ctx, runtimeapi.CloseWorkspaceInput{WorkspaceID: id})
 	cancel()
 	if err == nil {
-		a.removeRemoteWorkbenchWorkspace(id)
+		if _, committed := a.removeRemoteWorkbenchWorkspace(expected, id); !committed {
+			return ErrTargetTransitionSuperseded
+		}
 	}
 	return err
 }
 
 func (a *App) remoteSwitchWorkspaceV1(workspaceToken string) (string, error) {
-	api, _, err := a.remoteConnectedV1Runtime()
-	if err != nil {
-		return "", err
-	}
 	id := runtimeapi.WorkspaceID(strings.TrimSpace(workspaceToken))
 	if id == "" {
 		return "", errors.New("Remote Workspace identity is required")
 	}
+	finishCreate, err := a.beginRemoteWorkbenchSessionCreate()
+	if err != nil {
+		return "", err
+	}
+	defer finishCreate()
+
+	api, expected, err := a.remoteConnectedV1RuntimeSnapshot()
+	if err != nil {
+		return "", err
+	}
+	manager := a.remote.manager
+	if manager == nil {
+		return "", ErrRuntimeTargetUnavailable
+	}
+	fingerprint := remoteWorkspaceSwitchSessionCreateFingerprint(id)
+	if pending := a.remoteWorkspacePending(expected.Target.ID, fingerprint); pending != nil {
+		if _, attachErr := a.attachRemoteWorkbenchSessionForTarget(api, pending.Created.Session, true, expected); attachErr != nil {
+			return "", attachErr
+		}
+		return string(id), nil
+	}
+
 	ctx, cancel := a.remoteActionContext()
 	page, err := api.ListSessions(ctx, runtimeapi.ListSessionsInput{WorkspaceID: id, Limit: 1})
 	if err != nil {
 		cancel()
 		return "", err
 	}
-	var ref runtimeapi.SessionRef
+	var attachErr error
 	if len(page.Items) != 0 {
-		ref = page.Items[0].Session
+		ref := page.Items[0].Session
+		cancel()
+		_, attachErr = a.attachRemoteWorkbenchSessionForTarget(api, ref, true, expected)
 	} else {
+		if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+			cancel()
+			return "", ErrTargetTransitionSuperseded
+		}
 		created, createErr := api.CreateSession(ctx, runtimeapi.CreateSessionInput{
 			WorkspaceID: id, Topic: runtimeapi.TopicSelection{Kind: runtimeapi.TopicNew},
 		})
@@ -1383,11 +1497,23 @@ func (a *App) remoteSwitchWorkspaceV1(workspaceToken string) (string, error) {
 			cancel()
 			return "", createErr
 		}
-		ref = created.Session
+		if !created.Session.Valid() || created.Session.WorkspaceID != id {
+			cancel()
+			return "", errors.New("Remote create returned a Session in a different workspace")
+		}
+		a.storeRemoteWorkspacePending(&pendingRemoteSessionCreate{
+			HostID: expected.Target.ID, Fingerprint: fingerprint,
+			Workspace: runtimeapi.Workspace{ID: id}, Created: created,
+		})
+		if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+			cancel()
+			return "", ErrTargetTransitionSuperseded
+		}
+		cancel()
+		_, attachErr = a.attachRemoteWorkbenchCreatedSession(api, created, true, expected)
 	}
-	cancel()
-	if _, err = a.attachRemoteWorkbenchSession(ref, true); err != nil {
-		return "", err
+	if attachErr != nil {
+		return "", attachErr
 	}
 	return string(id), nil
 }

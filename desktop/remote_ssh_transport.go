@@ -65,6 +65,8 @@ type RemoteSSHDiagnostic struct {
 
 type remoteSSHCommandContext func(context.Context, string, ...string) *exec.Cmd
 
+var errRemoteSSHProcessIsolation = errors.New("OpenSSH process isolation is unavailable")
+
 // RemoteSSHTransportFactory starts the system OpenSSH client directly. No
 // shell participates, and the only remote command is the frozen attach entry.
 type RemoteSSHTransportFactory struct {
@@ -138,7 +140,7 @@ func (f *RemoteSSHTransportFactory) start(ctx context.Context, args []string) (*
 	if cmd == nil {
 		return nil, errors.New("OpenSSH command builder returned nil")
 	}
-	configureRemoteSSHProcess(cmd)
+	process := newRemoteSSHProcess(cmd)
 	cmd.Env = sanitizeRemoteSSHEnvironment(os.Environ())
 	if f.AskPass != nil {
 		overrides, err := f.AskPass.SSHEnvironment(f.AskPassHelper)
@@ -162,6 +164,7 @@ func (f *RemoteSSHTransportFactory) start(ctx context.Context, args []string) (*
 	cmd.Stdout = stdoutWriter
 	transport := &RemoteSSHTransport{
 		cmd:          cmd,
+		process:      process,
 		stdin:        stdin,
 		stdout:       stdout,
 		stdoutWriter: stdoutWriter,
@@ -169,7 +172,7 @@ func (f *RemoteSSHTransportFactory) start(ctx context.Context, args []string) (*
 		ctx:          ctx,
 		processWait:  make(chan error, 1),
 	}
-	if err := cmd.Start(); err != nil {
+	if err := process.start(cmd); err != nil {
 		stdin.Close()
 		stdout.Close()
 		stdoutWriter.Close()
@@ -179,7 +182,7 @@ func (f *RemoteSSHTransportFactory) start(ctx context.Context, args []string) (*
 		return nil, failure
 	}
 	go func() {
-		err := cmd.Wait()
+		err := process.wait(cmd)
 		transport.processExited.Store(true)
 		_ = stdoutWriter.Close()
 		transport.processWait <- err
@@ -234,9 +237,10 @@ func (f RemoteSSHHostTransportFactory) Open(ctx context.Context) (remoteclient.T
 // RemoteSSHTransport exposes protocol-only stdin/stdout. Authentication and
 // diagnostics use separate AskPass/stderr paths and can never corrupt NDJSON.
 type RemoteSSHTransport struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *io.PipeReader
+	cmd     *exec.Cmd
+	process *remoteSSHProcess
+	stdin   io.WriteCloser
+	stdout  *io.PipeReader
 	// stdoutWriter is owned by the exec copy goroutine and closed after Wait.
 	stdoutWriter *io.PipeWriter
 	stderr       *boundedRemoteSSHStderr
@@ -328,8 +332,8 @@ func (t *RemoteSSHTransport) Close() error {
 		if t.stdin != nil {
 			_ = t.stdin.Close()
 		}
-		if t.cmd != nil && t.cmd.Process != nil && !t.processExited.Load() {
-			closeErr = terminateRemoteSSHProcess(t.cmd)
+		if t.cmd != nil && t.cmd.Process != nil && !t.processExited.Load() && t.process != nil {
+			t.process.kill(t.cmd)
 		}
 		if t.stdout != nil {
 			_ = t.stdout.Close()
@@ -339,6 +343,12 @@ func (t *RemoteSSHTransport) Close() error {
 }
 
 func classifyRemoteSSHStartFailure(err error) *RemoteSSHConnectionFailure {
+	if errors.Is(err, errRemoteSSHProcessIsolation) {
+		return &RemoteSSHConnectionFailure{
+			Code: RemoteSSHTransportLost, Stage: RemoteSSHStageStart,
+			Retryable: false, Message: "Unable to isolate the system OpenSSH process tree safely.",
+		}
+	}
 	message := "Unable to start the system OpenSSH client."
 	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
 		message = "The system OpenSSH client was not found."

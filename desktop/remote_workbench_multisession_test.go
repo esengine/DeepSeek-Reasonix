@@ -5,9 +5,89 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
+	"reasonix/internal/eventwire"
 	"reasonix/internal/runtimeapi"
 )
+
+type remoteSessionCreateGateTestRuntime struct {
+	*remoteWorkbenchV1TestRuntime
+
+	createStarted chan struct{}
+	releaseCreate chan struct{}
+	startOnce     sync.Once
+	releaseOnce   sync.Once
+	attachStarted chan struct{}
+	releaseAttach chan struct{}
+	attachOnce    sync.Once
+	attachRelease sync.Once
+	blockAttach   bool
+	callsMu       sync.Mutex
+	createCalls   int
+	createHook    func()
+	attachHook    func()
+}
+
+func newRemoteSessionCreateGateTestRuntime() *remoteSessionCreateGateTestRuntime {
+	return &remoteSessionCreateGateTestRuntime{
+		remoteWorkbenchV1TestRuntime: newRemoteWorkbenchV1TestRuntime(),
+		createStarted:                make(chan struct{}),
+		releaseCreate:                make(chan struct{}),
+		attachStarted:                make(chan struct{}),
+		releaseAttach:                make(chan struct{}),
+	}
+}
+
+func (r *remoteSessionCreateGateTestRuntime) CreateSession(ctx context.Context, input runtimeapi.CreateSessionInput) (runtimeapi.CreatedSession, error) {
+	r.callsMu.Lock()
+	r.createCalls++
+	r.callsMu.Unlock()
+	created, err := r.remoteWorkbenchV1TestRuntime.CreateSession(ctx, input)
+	if err != nil {
+		return runtimeapi.CreatedSession{}, err
+	}
+	r.startOnce.Do(func() { close(r.createStarted) })
+	select {
+	case <-r.releaseCreate:
+		if r.createHook != nil {
+			r.createHook()
+		}
+		return created, nil
+	case <-ctx.Done():
+		return runtimeapi.CreatedSession{}, ctx.Err()
+	}
+}
+
+func (r *remoteSessionCreateGateTestRuntime) AttachAndSubscribe(ctx context.Context, input runtimeapi.AttachAndSubscribeInput) (runtimeapi.SessionSnapshot, error) {
+	snapshot, err := r.remoteWorkbenchV1TestRuntime.AttachAndSubscribe(ctx, input)
+	if r.blockAttach {
+		r.attachOnce.Do(func() { close(r.attachStarted) })
+		select {
+		case <-r.releaseAttach:
+		case <-ctx.Done():
+			return runtimeapi.SessionSnapshot{}, ctx.Err()
+		}
+	}
+	if r.attachHook != nil {
+		r.attachHook()
+	}
+	return snapshot, err
+}
+
+func (r *remoteSessionCreateGateTestRuntime) release() {
+	r.releaseOnce.Do(func() { close(r.releaseCreate) })
+}
+
+func (r *remoteSessionCreateGateTestRuntime) releaseAttachment() {
+	r.attachRelease.Do(func() { close(r.releaseAttach) })
+}
+
+func (r *remoteSessionCreateGateTestRuntime) calls() int {
+	r.callsMu.Lock()
+	defer r.callsMu.Unlock()
+	return r.createCalls
+}
 
 // remoteWorkbenchV1TestRuntime embeds the complete interface so focused tests
 // can override only the exercised domains. The core methods are forwarded to
@@ -39,7 +119,10 @@ type remoteWorkbenchV1TestRuntime struct {
 	renameTopicInput []runtimeapi.RenameTopicInput
 	trashTopicInputs []runtimeapi.TrashTopicInput
 	trashTopicErr    error
+	trashTopicHook   func()
+	unsubscribeHook  func()
 	blockWorkspaces  bool
+	listSessionsHook func()
 }
 
 var _ runtimeapi.V1RuntimeAPI = (*remoteWorkbenchV1TestRuntime)(nil)
@@ -113,9 +196,14 @@ func (r *remoteWorkbenchV1TestRuntime) ListTopics(_ context.Context, input runti
 
 func (r *remoteWorkbenchV1TestRuntime) ListSessions(_ context.Context, input runtimeapi.ListSessionsInput) (runtimeapi.SessionListPage, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.sessionInputs = append(r.sessionInputs, input)
-	return runtimeapi.SessionListPage{Items: append([]runtimeapi.SessionSummary(nil), r.sessions[input.WorkspaceID]...)}, nil
+	items := append([]runtimeapi.SessionSummary(nil), r.sessions[input.WorkspaceID]...)
+	hook := r.listSessionsHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return runtimeapi.SessionListPage{Items: items}, nil
 }
 
 func (r *remoteWorkbenchV1TestRuntime) ListTrashedSessions(_ context.Context, input runtimeapi.ListTrashedSessionsInput) (runtimeapi.TrashPage, error) {
@@ -183,9 +271,13 @@ func (r *remoteWorkbenchV1TestRuntime) AttachAndSubscribe(_ context.Context, inp
 
 func (r *remoteWorkbenchV1TestRuntime) UnsubscribeSession(_ context.Context, input runtimeapi.UnsubscribeSessionInput) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.unsubscribed = append(r.unsubscribed, input.Session)
 	r.subscribed[input.Session] = false
+	hook := r.unsubscribeHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return nil
 }
 
@@ -233,10 +325,15 @@ func (r *remoteWorkbenchV1TestRuntime) DeleteTopic(_ context.Context, input runt
 
 func (r *remoteWorkbenchV1TestRuntime) TrashTopic(_ context.Context, input runtimeapi.TrashTopicInput) (runtimeapi.TrashTopicResult, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.trashTopicInputs = append(r.trashTopicInputs, input)
-	if r.trashTopicErr != nil {
-		return runtimeapi.TrashTopicResult{}, r.trashTopicErr
+	err := r.trashTopicErr
+	hook := r.trashTopicHook
+	r.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	if err != nil {
+		return runtimeapi.TrashTopicResult{}, err
 	}
 	return runtimeapi.TrashTopicResult{Disposition: runtimeapi.CleanupTrashed}, nil
 }
@@ -276,6 +373,103 @@ func remoteWorkbenchV1Fixture() (*remoteWorkbenchV1TestRuntime, []runtimeapi.Ses
 		Session: runtimeapi.SessionRef{WorkspaceID: wsA.ID, SessionID: "trash_a"}, TopicID: "topic_old", Title: "Old", TrashedAtMillis: 70,
 	}}
 	return rt, refs
+}
+
+func TestRemoteSessionCreatePathsExcludeFinalClose(t *testing.T) {
+	tests := []struct {
+		name   string
+		invoke func(*App, runtimeapi.Workspace) error
+	}{
+		{
+			name: "workspace create",
+			invoke: func(app *App, _ runtimeapi.Workspace) error {
+				_, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+					PrimaryDirectoryRef: "directory_gate", TopicTitle: "Gate test",
+				})
+				return err
+			},
+		},
+		{
+			name: "project tab",
+			invoke: func(app *App, workspace runtimeapi.Workspace) error {
+				_, err := app.remoteOpenProjectTab(string(workspace.ID), "")
+				return err
+			},
+		},
+		{
+			name: "blank tab",
+			invoke: func(app *App, workspace runtimeapi.Workspace) error {
+				_, err := app.remoteEnsureBlankTab(string(workspace.ID))
+				return err
+			},
+		},
+		{
+			name: "workspace switch",
+			invoke: func(app *App, workspace runtimeapi.Workspace) error {
+				_, err := app.remoteSwitchWorkspaceV1(string(workspace.ID))
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := newRemoteSessionCreateGateTestRuntime()
+			runtime.release()
+			runtime.blockAttach = true
+			defer runtime.releaseAttachment()
+			workspace := runtimeapi.Workspace{
+				ID: "workspace_create_gate", Name: "Create gate", DisplayPath: "/host/create-gate",
+			}
+			created := runtimeapi.CreatedSession{
+				Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_create_gate"},
+				TopicID: "topic_create_gate", TopicTitle: "Create gate",
+			}
+			runtime.core.workspace = workspace
+			runtime.workspaces = []runtimeapi.Workspace{workspace}
+			runtime.created = []runtimeapi.CreatedSession{created}
+			runtime.snapshots[created.Session] = runtimeapi.SessionSnapshot{
+				Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+				Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+			}
+			app, _ := newRemoteWorkbenchTestApp(t, TargetDescriptor{
+				Kind: TargetRemote, ID: "host_create_gate", Label: "Create gate",
+			}, runtime, nil)
+
+			createDone := make(chan error, 1)
+			go func() { createDone <- test.invoke(app, workspace) }()
+			select {
+			case <-runtime.attachStarted:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Host Session attach did not start after create")
+			}
+			if app.beginRemoteDesktopClose() {
+				t.Fatal("final close passed an admitted Host Session create")
+			}
+
+			runtime.releaseAttachment()
+			select {
+			case err := <-createDone:
+				if err != nil {
+					t.Fatalf("Host Session create failed: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("Host Session create deadlocked after release")
+			}
+			if calls := runtime.calls(); calls != 1 {
+				t.Fatalf("Host Session create calls = %d, want 1", calls)
+			}
+			if !app.beginRemoteDesktopClose() {
+				t.Fatal("final close was not admitted after Host Session create completed")
+			}
+			if err := test.invoke(app, workspace); !errors.Is(err, errRemoteWorkspaceSessionCreateWhileClosing) {
+				t.Fatalf("path admitted after final close: %v", err)
+			}
+			if calls := runtime.calls(); calls != 1 {
+				t.Fatalf("Host Session create reached after final close; calls = %d", calls)
+			}
+		})
+	}
 }
 
 func TestRemoteWorkbenchMultipleWorkspacesTabsAndCatalogTree(t *testing.T) {
@@ -369,10 +563,14 @@ func TestRemoteSessionSurfacesPreserveFullRefAcrossWorkspaces(t *testing.T) {
 	if !sessions[2].Current || sessions[0].Current || sessions[1].Current {
 		t.Fatalf("Remote current Session projection = %#v", sessions)
 	}
-	if _, err := app.remoteSessionRefForToken("", string(refs[0].SessionID)); err == nil || !containsError(err, "ambiguous across workspaces") {
+	api, expected, err := app.remoteConnectedV1RuntimeSnapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.remoteSessionRefForToken(api, expected, string(refs[0].SessionID)); err == nil || !containsError(err, "ambiguous across workspaces") {
 		t.Fatalf("duplicate raw SessionID was not rejected: %v", err)
 	}
-	if resolved, err := app.remoteSessionRefForToken("", sessions[0].Path); err != nil || resolved != refs[2] {
+	if resolved, err := app.remoteSessionRefForToken(api, expected, sessions[0].Path); err != nil || resolved != refs[2] {
 		t.Fatalf("encoded full SessionRef resolved as %#v, %v; want %#v", resolved, err, refs[2])
 	}
 
@@ -500,6 +698,623 @@ func TestRemoteEnsureBlankAfterUsedSessionCreatesNewTopicVisibleInTree(t *testin
 		if len(topic.Children) != 0 {
 			t.Fatalf("single-Session topic rendered duplicate child: %#v", topic)
 		}
+	}
+}
+
+func TestRemoteEnsureBlankRetriesPendingCreatedSessionAfterAttachFailure(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_retry", Label: "Blank retry"}
+	runtime := newRemoteSessionCreateGateTestRuntime()
+	runtime.release()
+	workspace := runtimeapi.Workspace{ID: "workspace_blank_retry", Name: "Blank retry", DisplayPath: "/host/blank-retry"}
+	created := runtimeapi.CreatedSession{
+		Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_opaque_blank_retry"},
+		TopicID: "topic_opaque_blank_retry", TopicTitle: defaultTopicTitle,
+	}
+	runtime.workspaces = []runtimeapi.Workspace{workspace}
+	runtime.created = []runtimeapi.CreatedSession{created}
+	runtime.snapshots[created.Session] = runtimeapi.SessionSnapshot{
+		Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+		Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+	}
+	runtime.attachErrors[created.Session] = errors.New("atomic attach interrupted")
+	app, _ := newRemoteWorkbenchTestApp(t, target, runtime, nil)
+
+	if _, err := app.remoteEnsureBlankTab(string(workspace.ID)); err == nil || !containsError(err, "atomic attach interrupted") {
+		t.Fatalf("first /new attach error = %v", err)
+	}
+	if calls := runtime.calls(); calls != 1 {
+		t.Fatalf("Host Session create calls after failed attach = %d, want 1", calls)
+	}
+	fingerprint := remoteBlankSessionCreateFingerprint(workspace.ID)
+	app.remote.workbenchMu.RLock()
+	pending := clonePendingRemoteCreate(app.remote.workspacePending[target.ID][fingerprint])
+	app.remote.workbenchMu.RUnlock()
+	if pending == nil || pending.HostID != target.ID || pending.Created.Session != created.Session || pending.Workspace.ID != workspace.ID {
+		t.Fatalf("pending /new create = %#v", pending)
+	}
+
+	runtime.mu.Lock()
+	delete(runtime.attachErrors, created.Session)
+	runtime.mu.Unlock()
+	meta, err := app.remoteEnsureBlankTab(string(workspace.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SessionID != string(created.Session.SessionID) || meta.SessionPath != remoteSessionToken(created.Session) {
+		t.Fatalf("retried /new tab = %#v", meta)
+	}
+	if calls := runtime.calls(); calls != 1 {
+		t.Fatalf("retry created a second Host Session; calls = %d", calls)
+	}
+	runtime.mu.Lock()
+	attachInputs := append([]runtimeapi.AttachAndSubscribeInput(nil), runtime.attachInputs...)
+	runtime.mu.Unlock()
+	if len(attachInputs) != 2 || attachInputs[0].Session != created.Session || attachInputs[1].Session != created.Session {
+		t.Fatalf("/new attach retries = %#v", attachInputs)
+	}
+	app.remote.workbenchMu.RLock()
+	pending = clonePendingRemoteCreate(app.remote.workspacePending[target.ID][fingerprint])
+	app.remote.workbenchMu.RUnlock()
+	if pending != nil {
+		t.Fatalf("successful /new retained pending create = %#v", pending)
+	}
+}
+
+func TestRemoteEnsureBlankRejectsTargetABABeforePublishing(t *testing.T) {
+	targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_aba_a", Label: "Blank ABA A"}
+	targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_aba_b", Label: "Blank ABA B"}
+	runtimeA := newRemoteSessionCreateGateTestRuntime()
+	runtimeA.release()
+	workspace := runtimeapi.Workspace{ID: "workspace_blank_aba", Name: "Blank ABA", DisplayPath: "/host/blank-aba"}
+	created := runtimeapi.CreatedSession{
+		Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_opaque_blank_aba"},
+		TopicID: "topic_opaque_blank_aba", TopicTitle: defaultTopicTitle,
+	}
+	runtimeA.workspaces = []runtimeapi.Workspace{workspace}
+	runtimeA.created = []runtimeapi.CreatedSession{created}
+	runtimeA.snapshots[created.Session] = runtimeapi.SessionSnapshot{
+		Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+		Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+	}
+	runtimeB := newRemoteWorkbenchV1TestRuntime()
+	adapterA := &remoteWorkbenchTestAdapter{target: targetA, runtime: runtimeA}
+	adapterB := &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		switch {
+		case sameTarget(target, targetA):
+			return adapterA, nil
+		case sameTarget(target, targetB):
+			return adapterB, nil
+		default:
+			return nil, errors.New("unexpected target switch")
+		}
+	})
+	app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+	initial := manager.Snapshot()
+	var switchErr error
+	var switchOnce sync.Once
+	runtimeA.attachHook = func() {
+		switchOnce.Do(func() {
+			if err := manager.Switch(context.Background(), targetB, SwitchTargetOptions{}); err != nil {
+				switchErr = err
+				return
+			}
+			switchErr = manager.Switch(context.Background(), targetA, SwitchTargetOptions{})
+		})
+	}
+
+	if _, err := app.remoteEnsureBlankTab(string(workspace.ID)); !errors.Is(err, ErrTargetTransitionSuperseded) {
+		t.Fatalf("/new after target ABA = %v, want ErrTargetTransitionSuperseded", err)
+	}
+	if switchErr != nil {
+		t.Fatal(switchErr)
+	}
+	current := manager.Snapshot()
+	if !sameTarget(current.Target, targetA) || current.Generation == initial.Generation {
+		t.Fatalf("target after ABA = %#v, initial = %#v", current, initial)
+	}
+	if calls := runtimeA.calls(); calls != 1 {
+		t.Fatalf("Host Session create calls = %d, want 1", calls)
+	}
+	app.remote.workbenchMu.RLock()
+	hostID := app.remote.workbench.HostID
+	sessions := len(app.remote.workbench.Sessions)
+	pending := len(app.remote.workbench.Pending)
+	hostPending := clonePendingRemoteCreate(app.remote.workspacePending[targetA.ID][remoteBlankSessionCreateFingerprint(workspace.ID)])
+	app.remote.workbenchMu.RUnlock()
+	if (hostID != "" && hostID != targetA.ID) || sessions != 0 || pending != 0 {
+		t.Fatalf("stale /new state published after target ABA: host=%q sessions=%d pending=%d", hostID, sessions, pending)
+	}
+	if hostPending == nil || hostPending.Created.Session != created.Session || hostPending.HostID != targetA.ID {
+		t.Fatalf("Host A /new pending create was not retained across ABA: %#v", hostPending)
+	}
+	runtimeA.mu.Lock()
+	if len(runtimeA.unsubscribed) != 1 || runtimeA.unsubscribed[0] != created.Session || runtimeA.subscribed[created.Session] {
+		t.Fatalf("superseded /new subscription rollback = unsubscribed %#v subscribed=%v", runtimeA.unsubscribed, runtimeA.subscribed[created.Session])
+	}
+	// Make the Host catalog deliberately lag the successful create. The retry
+	// must use Host-scoped pending state, not rely on list visibility.
+	runtimeA.sessions[workspace.ID] = nil
+	runtimeA.topics[workspace.ID] = nil
+	runtimeA.mu.Unlock()
+	meta, err := app.remoteEnsureBlankTab(string(workspace.ID))
+	if err != nil {
+		t.Fatalf("recover catalog-created blank after target ABA: %v", err)
+	}
+	if meta.SessionPath != remoteSessionToken(created.Session) || runtimeA.calls() != 1 {
+		t.Fatalf("catalog recovery created a duplicate Session: meta=%#v createCalls=%d", meta, runtimeA.calls())
+	}
+	app.remote.workbenchMu.RLock()
+	remaining := len(app.remote.workspacePending[targetA.ID])
+	app.remote.workbenchMu.RUnlock()
+	if remaining != 0 {
+		t.Fatalf("successful /new retry retained %d Host-scoped pending creates", remaining)
+	}
+}
+
+func TestRemoteAttachSuccessRollsBackEverySupersededWorkbenchPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing bool
+		invoke   func(*App, runtimeapi.Workspace, runtimeapi.CreatedSession) error
+	}{
+		{
+			name: "workspace create",
+			invoke: func(app *App, _ runtimeapi.Workspace, _ runtimeapi.CreatedSession) error {
+				_, err := app.CreateRemoteWorkspaceSession(RemoteCreateWorkspaceSessionInput{
+					PrimaryDirectoryRef: "directory_superseded", TopicTitle: "Superseded workspace create",
+				})
+				return err
+			},
+		},
+		{
+			name:     "project existing",
+			existing: true,
+			invoke: func(app *App, workspace runtimeapi.Workspace, _ runtimeapi.CreatedSession) error {
+				_, err := app.remoteOpenProjectTab(string(workspace.ID), "")
+				return err
+			},
+		},
+		{
+			name: "project create",
+			invoke: func(app *App, workspace runtimeapi.Workspace, _ runtimeapi.CreatedSession) error {
+				_, err := app.remoteOpenProjectTab(string(workspace.ID), "")
+				return err
+			},
+		},
+		{
+			name:     "topic existing",
+			existing: true,
+			invoke: func(app *App, workspace runtimeapi.Workspace, created runtimeapi.CreatedSession) error {
+				_, err := app.remoteOpenTopicSession(
+					string(workspace.ID), string(created.TopicID), remoteSessionToken(created.Session),
+				)
+				return err
+			},
+		},
+		{
+			name:     "workspace switch existing",
+			existing: true,
+			invoke: func(app *App, workspace runtimeapi.Workspace, _ runtimeapi.CreatedSession) error {
+				_, err := app.remoteSwitchWorkspaceV1(string(workspace.ID))
+				return err
+			},
+		},
+		{
+			name: "workspace switch create",
+			invoke: func(app *App, workspace runtimeapi.Workspace, _ runtimeapi.CreatedSession) error {
+				_, err := app.remoteSwitchWorkspaceV1(string(workspace.ID))
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_attach_rollback_a", Label: "Rollback A"}
+			targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_attach_rollback_b", Label: "Rollback B"}
+			runtimeA := newRemoteSessionCreateGateTestRuntime()
+			runtimeA.release()
+			workspace := runtimeapi.Workspace{
+				ID: "workspace_attach_rollback", Name: "Attach rollback", DisplayPath: "/host/attach-rollback",
+			}
+			created := runtimeapi.CreatedSession{
+				Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_attach_rollback"},
+				TopicID: "topic_attach_rollback", TopicTitle: "Attach rollback",
+			}
+			snapshot := runtimeapi.SessionSnapshot{
+				Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+				Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+			}
+			runtimeA.workspaces = []runtimeapi.Workspace{workspace}
+			runtimeA.created = []runtimeapi.CreatedSession{created}
+			runtimeA.snapshots[created.Session] = snapshot
+			runtimeA.core.workspace = workspace
+			runtimeA.core.created = created
+			runtimeA.core.snapshot = snapshot
+			if test.existing {
+				runtimeA.sessions[workspace.ID] = []runtimeapi.SessionSummary{{
+					Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+				}}
+			}
+			runtimeB := newRemoteWorkbenchV1TestRuntime()
+			adapterB := &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}
+			connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+				if sameTarget(target, targetB) {
+					return adapterB, nil
+				}
+				return nil, errors.New("unexpected target switch")
+			})
+			app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+			var switchErr error
+			var switchOnce sync.Once
+			runtimeA.attachHook = func() {
+				switchOnce.Do(func() {
+					switchErr = manager.Switch(context.Background(), targetB, SwitchTargetOptions{})
+				})
+			}
+
+			if err := test.invoke(app, workspace, created); !errors.Is(err, ErrTargetTransitionSuperseded) {
+				t.Fatalf("successful attach after target supersede = %v, want ErrTargetTransitionSuperseded", err)
+			}
+			if switchErr != nil {
+				t.Fatal(switchErr)
+			}
+			runtimeA.mu.Lock()
+			unsubscribed := append([]runtimeapi.SessionRef(nil), runtimeA.unsubscribed...)
+			subscribed := runtimeA.subscribed[created.Session]
+			runtimeA.mu.Unlock()
+			if len(unsubscribed) != 1 || unsubscribed[0] != created.Session || subscribed {
+				t.Fatalf("superseded attach rollback = unsubscribed %#v subscribed=%v", unsubscribed, subscribed)
+			}
+		})
+	}
+}
+
+func TestNewestReusableRemoteBlankSessionRejectsNonBlankOrActiveCandidates(t *testing.T) {
+	workspace := runtimeapi.WorkspaceID("workspace_blank_candidate")
+	summary := func(id string, activity int64) runtimeapi.SessionSummary {
+		return runtimeapi.SessionSummary{
+			Session: runtimeapi.SessionRef{WorkspaceID: workspace, SessionID: runtimeapi.SessionID(id)},
+			TopicID: runtimeapi.TopicID("topic_" + id), Title: id,
+			CreatedAtMillis: activity, LastActivityMillis: activity,
+		}
+	}
+	used := summary("used", 100)
+	used.Turns = 1
+	preview := summary("preview", 101)
+	preview.Preview = "unfinished input"
+	branched := summary("branched", 102)
+	branched.BranchSource = &runtimeapi.BranchSource{Parent: summary("parent", 1).Session, ParentCheckpointID: "checkpoint_parent"}
+	recovering := summary("recovering", 103)
+	recovering.RecoveryInterrupted = true
+	running := summary("running", 104)
+	running.Runtime = &runtimeapi.SessionRuntimeSummary{Running: true}
+	prompt := summary("prompt", 105)
+	prompt.Runtime = &runtimeapi.SessionRuntimeSummary{PendingPrompt: true}
+	jobs := summary("jobs", 106)
+	jobs.Runtime = &runtimeapi.SessionRuntimeSummary{ActiveJobs: 1}
+	sharedTopic := summary("shared_topic", 107)
+	olderBlank := summary("older_blank", 10)
+	newerBlank := summary("newer_blank", 20)
+	candidates := []runtimeapi.SessionSummary{
+		used, preview, branched, recovering, running, prompt, jobs, sharedTopic, olderBlank, newerBlank,
+	}
+	topics := make([]runtimeapi.TopicSummary, 0, len(candidates))
+	for _, candidate := range candidates {
+		count := 1
+		if candidate.Session == sharedTopic.Session {
+			count = 2
+		}
+		topics = append(topics, runtimeapi.TopicSummary{TopicID: candidate.TopicID, SessionCount: count})
+	}
+
+	selected, ok := newestReusableRemoteBlankSession(candidates, topics)
+	if !ok || selected.Session != newerBlank.Session {
+		t.Fatalf("reusable blank selection = %#v, %v", selected, ok)
+	}
+}
+
+func TestRemoteReusableBlankSnapshotRejectsEveryActiveOrNonFreshField(t *testing.T) {
+	if !remoteSnapshotIsReusableBlank(runtimeapi.SessionSnapshot{}) {
+		t.Fatal("zero fresh snapshot was rejected")
+	}
+	text := "state"
+	tests := []struct {
+		name   string
+		mutate func(*runtimeapi.SessionSnapshot)
+	}{
+		{name: "history total", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.TotalTurns = 1 }},
+		{name: "history actual", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.ActualTurns = 1 }},
+		{name: "history start", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.StartTurn = 1 }},
+		{name: "history end", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.EndTurn = 1 }},
+		{name: "history message", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.Messages = []runtimeapi.HistoryMessage{{}} }},
+		{name: "history older", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.HasOlder = true }},
+		{name: "history cursor", mutate: func(s *runtimeapi.SessionSnapshot) { s.History.Next = "cursor_nonfresh" }},
+		{name: "running", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.Running = true }},
+		{name: "turn", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.CurrentTurn = &runtimeapi.TurnState{} }},
+		{name: "operation", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.CurrentOperation = &runtimeapi.OperationState{} }},
+		{name: "cancel", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.CancelRequested = true }},
+		{name: "outcome", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.LastOutcome = runtimeapi.OutcomeCompleted }},
+		{name: "error", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.LastError = &text }},
+		{name: "interruption", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.Interruption = &runtimeapi.RuntimeInterruption{} }},
+		{name: "live event", mutate: func(s *runtimeapi.SessionSnapshot) { s.Runtime.LiveEvents = []eventwire.Event{{Kind: "turn_started"}} }},
+		{name: "prompt", mutate: func(s *runtimeapi.SessionSnapshot) { s.PendingPrompt = &runtimeapi.PendingPrompt{} }},
+		{name: "goal", mutate: func(s *runtimeapi.SessionSnapshot) { s.Goal = &text }},
+		{name: "goal status", mutate: func(s *runtimeapi.SessionSnapshot) { s.GoalStatus = runtimeapi.GoalComplete }},
+		{name: "todo", mutate: func(s *runtimeapi.SessionSnapshot) { s.Todos = []runtimeapi.TodoItem{{}} }},
+		{name: "job", mutate: func(s *runtimeapi.SessionSnapshot) { s.Jobs = []runtimeapi.Job{{}} }},
+		{name: "checkpoint", mutate: func(s *runtimeapi.SessionSnapshot) { s.Checkpoints = []runtimeapi.Checkpoint{{}} }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var snapshot runtimeapi.SessionSnapshot
+			test.mutate(&snapshot)
+			if remoteSnapshotIsReusableBlank(snapshot) {
+				t.Fatalf("snapshot with %s was treated as reusable blank: %#v", test.name, snapshot)
+			}
+		})
+	}
+}
+
+func TestRemoteEnsureBlankRechecksCatalogCandidateAtomicSnapshot(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_recheck", Label: "Blank recheck"}
+	runtime := newRemoteSessionCreateGateTestRuntime()
+	runtime.release()
+	workspace := runtimeapi.Workspace{ID: "workspace_blank_recheck", Name: "Blank recheck", DisplayPath: "/host/blank-recheck"}
+	candidate := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_stale_blank"}
+	replacement := runtimeapi.CreatedSession{
+		Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_fresh_replacement"},
+		TopicID: "topic_fresh_replacement", TopicTitle: defaultTopicTitle,
+	}
+	runtime.workspaces = []runtimeapi.Workspace{workspace}
+	runtime.topics[workspace.ID] = []runtimeapi.TopicSummary{{TopicID: "topic_stale_blank", Title: "Stale blank", SessionCount: 1}}
+	runtime.sessions[workspace.ID] = []runtimeapi.SessionSummary{{Session: candidate, TopicID: "topic_stale_blank", Title: "Stale blank"}}
+	runtime.snapshots[candidate] = runtimeapi.SessionSnapshot{
+		Session: candidate, TopicID: "topic_stale_blank", Title: "Stale blank",
+		Runtime: runtimeapi.RuntimeState{CurrentOperation: &runtimeapi.OperationState{ID: "operation_started_after_list"}},
+	}
+	runtime.created = []runtimeapi.CreatedSession{replacement}
+	runtime.snapshots[replacement.Session] = runtimeapi.SessionSnapshot{
+		Session: replacement.Session, TopicID: replacement.TopicID, Title: replacement.TopicTitle,
+	}
+	app, _ := newRemoteWorkbenchTestApp(t, target, runtime, nil)
+
+	meta, err := app.remoteEnsureBlankTab(string(workspace.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SessionPath != remoteSessionToken(replacement.Session) || runtime.calls() != 1 {
+		t.Fatalf("/new reused stale catalog candidate: meta=%#v createCalls=%d", meta, runtime.calls())
+	}
+	runtime.mu.Lock()
+	unsubscribed := append([]runtimeapi.SessionRef(nil), runtime.unsubscribed...)
+	attachInputs := append([]runtimeapi.AttachAndSubscribeInput(nil), runtime.attachInputs...)
+	runtime.mu.Unlock()
+	if len(unsubscribed) != 1 || unsubscribed[0] != candidate {
+		t.Fatalf("rejected catalog candidate unsubscribe = %#v", unsubscribed)
+	}
+	if len(attachInputs) != 2 || attachInputs[0].Session != candidate || attachInputs[1].Session != replacement.Session {
+		t.Fatalf("catalog candidate/replacement attaches = %#v", attachInputs)
+	}
+}
+
+func TestRemoteEnsureBlankFastPathUsesCanonicalSnapshot(t *testing.T) {
+	target := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_fast_path", Label: "Blank fast path"}
+	runtime := newRemoteSessionCreateGateTestRuntime()
+	runtime.release()
+	workspace := runtimeapi.Workspace{ID: "workspace_blank_fast_path", Name: "Blank fast path", DisplayPath: "/host/blank-fast-path"}
+	source := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_fast_path_active"}
+	replacement := runtimeapi.CreatedSession{
+		Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_fast_path_fresh"},
+		TopicID: "topic_fast_path_fresh", TopicTitle: defaultTopicTitle,
+	}
+	runtime.workspaces = []runtimeapi.Workspace{workspace}
+	runtime.topics[workspace.ID] = []runtimeapi.TopicSummary{{TopicID: "topic_fast_path_active", Title: "Active", SessionCount: 1}}
+	runtime.sessions[workspace.ID] = []runtimeapi.SessionSummary{{
+		Session: source, TopicID: "topic_fast_path_active", Title: "Active",
+	}}
+	runtime.snapshots[source] = runtimeapi.SessionSnapshot{
+		Session: source, TopicID: "topic_fast_path_active", Title: "Active",
+	}
+	runtime.created = []runtimeapi.CreatedSession{replacement}
+	runtime.snapshots[replacement.Session] = runtimeapi.SessionSnapshot{
+		Session: replacement.Session, TopicID: replacement.TopicID, Title: replacement.TopicTitle,
+	}
+	app, _ := newRemoteWorkbenchTestApp(t, target, runtime, nil)
+	if _, err := app.attachRemoteWorkbenchSession(source, true); err != nil {
+		t.Fatal(err)
+	}
+	// The cached workbench snapshot is still blank, but the Host becomes active
+	// before /new makes its decision. Only a fresh atomic attach can observe it.
+	runtime.mu.Lock()
+	active := runtime.snapshots[source]
+	active.Runtime.CurrentOperation = &runtimeapi.OperationState{ID: "operation_active"}
+	active.Jobs = []runtimeapi.Job{{ID: "job_active"}}
+	runtime.snapshots[source] = active
+	runtime.mu.Unlock()
+
+	meta, err := app.remoteEnsureBlankTab(string(workspace.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.SessionPath != remoteSessionToken(replacement.Session) || runtime.calls() != 1 {
+		t.Fatalf("/new fast path reused active Session: meta=%#v createCalls=%d", meta, runtime.calls())
+	}
+	runtime.mu.Lock()
+	unsubscribed := append([]runtimeapi.SessionRef(nil), runtime.unsubscribed...)
+	runtime.mu.Unlock()
+	if len(unsubscribed) != 0 {
+		t.Fatalf("/new catalog retry unsubscribed an already-open active Session: %#v", unsubscribed)
+	}
+	app.remote.workbenchMu.RLock()
+	refreshed := app.remote.workbench.Sessions[source]
+	app.remote.workbenchMu.RUnlock()
+	if refreshed == nil || refreshed.Snapshot.Runtime.CurrentOperation == nil || len(refreshed.Snapshot.Jobs) != 1 {
+		t.Fatalf("open Session did not retain authoritative active snapshot: %#v", refreshed)
+	}
+}
+
+func TestRemoteBlankPendingCommitCannotOverwriteNewerHostState(t *testing.T) {
+	targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_pending_old", Label: "Old blank Host"}
+	targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_blank_pending_new", Label: "New blank Host"}
+	runtimeA := newRemoteSessionCreateGateTestRuntime()
+	runtimeA.release()
+	workspace := runtimeapi.Workspace{ID: "workspace_blank_pending", Name: "Blank pending", DisplayPath: "/host/blank-pending"}
+	created := runtimeapi.CreatedSession{
+		Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_blank_pending_old"},
+		TopicID: "topic_blank_pending_old", TopicTitle: defaultTopicTitle,
+	}
+	runtimeA.workspaces = []runtimeapi.Workspace{workspace}
+	runtimeA.created = []runtimeapi.CreatedSession{created}
+	runtimeA.snapshots[created.Session] = runtimeapi.SessionSnapshot{Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle}
+	runtimeB := newRemoteWorkbenchV1TestRuntime()
+	adapterB := &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		if sameTarget(target, targetB) {
+			return adapterB, nil
+		}
+		return nil, errors.New("unexpected target switch")
+	})
+	app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+	var switchErr error
+	runtimeA.createHook = func() {
+		switchErr = manager.Switch(context.Background(), targetB, SwitchTargetOptions{})
+	}
+
+	if _, err := app.remoteEnsureBlankTab(string(workspace.ID)); !errors.Is(err, ErrTargetTransitionSuperseded) {
+		t.Fatalf("/new after newer Host StateSink = %v, want ErrTargetTransitionSuperseded", err)
+	}
+	if switchErr != nil {
+		t.Fatal(switchErr)
+	}
+	app.remote.workbenchMu.RLock()
+	hostID := app.remote.workbench.HostID
+	pending := len(app.remote.workbench.Pending)
+	sessions := len(app.remote.workbench.Sessions)
+	app.remote.workbenchMu.RUnlock()
+	if hostID == targetA.ID || pending != 0 || sessions != 0 {
+		t.Fatalf("stale blank Host state overwrote Host B: host=%q pending=%d sessions=%d", hostID, pending, sessions)
+	}
+}
+
+func TestRemoteListFirstAttachRejectsCrossHostOpaqueIDCollision(t *testing.T) {
+	tests := []struct {
+		name   string
+		invoke func(*App, runtimeapi.Workspace) error
+	}{
+		{name: "project tab", invoke: func(app *App, workspace runtimeapi.Workspace) error {
+			_, err := app.remoteOpenProjectTab(string(workspace.ID), "")
+			return err
+		}},
+		{name: "workspace switch", invoke: func(app *App, workspace runtimeapi.Workspace) error {
+			_, err := app.remoteSwitchWorkspaceV1(string(workspace.ID))
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			targetA := TargetDescriptor{Kind: TargetRemote, ID: "host_collision_a", Label: "Collision A"}
+			targetB := TargetDescriptor{Kind: TargetRemote, ID: "host_collision_b", Label: "Collision B"}
+			workspace := runtimeapi.Workspace{ID: "workspace_collision", Name: "Collision", DisplayPath: "/host/collision"}
+			collision := runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_collision"}
+			runtimeA := newRemoteWorkbenchV1TestRuntime()
+			runtimeA.workspaces = []runtimeapi.Workspace{workspace}
+			runtimeA.sessions[workspace.ID] = []runtimeapi.SessionSummary{{Session: collision, TopicID: "topic_a", Title: "Host A Session"}}
+			runtimeA.snapshots[collision] = runtimeapi.SessionSnapshot{Session: collision, TopicID: "topic_a", Title: "Host A Session"}
+			runtimeB := newRemoteWorkbenchV1TestRuntime()
+			runtimeB.workspaces = []runtimeapi.Workspace{workspace}
+			runtimeB.sessions[workspace.ID] = []runtimeapi.SessionSummary{{Session: collision, TopicID: "topic_b", Title: "Host B unrelated Session"}}
+			runtimeB.snapshots[collision] = runtimeapi.SessionSnapshot{Session: collision, TopicID: "topic_b", Title: "Host B unrelated Session"}
+			adapterB := &remoteWorkbenchTestAdapter{target: targetB, runtime: runtimeB}
+			connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+				if sameTarget(target, targetB) {
+					return adapterB, nil
+				}
+				return nil, errors.New("unexpected target switch")
+			})
+			app, manager := newRemoteWorkbenchTestApp(t, targetA, runtimeA, connector)
+			var switchErr error
+			var once sync.Once
+			runtimeA.listSessionsHook = func() {
+				once.Do(func() { switchErr = manager.Switch(context.Background(), targetB, SwitchTargetOptions{}) })
+			}
+
+			if err := test.invoke(app, workspace); !errors.Is(err, ErrTargetTransitionSuperseded) {
+				t.Fatalf("list-first attach after Host switch = %v, want ErrTargetTransitionSuperseded", err)
+			}
+			if switchErr != nil {
+				t.Fatal(switchErr)
+			}
+			app.remote.workbenchMu.RLock()
+			sessions := len(app.remote.workbench.Sessions)
+			app.remote.workbenchMu.RUnlock()
+			if sessions != 0 {
+				t.Fatalf("opaque ID collision attached unrelated Host B Session: sessions=%d", sessions)
+			}
+		})
+	}
+}
+
+func TestRemoteListFirstCreatePathsRetryExistingSessionAfterAttachFailure(t *testing.T) {
+	tests := []struct {
+		name   string
+		invoke func(*App, runtimeapi.Workspace) error
+	}{
+		{
+			name: "project tab",
+			invoke: func(app *App, workspace runtimeapi.Workspace) error {
+				_, err := app.remoteOpenProjectTab(string(workspace.ID), "")
+				return err
+			},
+		},
+		{
+			name: "workspace switch",
+			invoke: func(app *App, workspace runtimeapi.Workspace) error {
+				_, err := app.remoteSwitchWorkspaceV1(string(workspace.ID))
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := newRemoteSessionCreateGateTestRuntime()
+			runtime.release()
+			workspace := runtimeapi.Workspace{ID: "workspace_list_retry", Name: "List retry", DisplayPath: "/host/list-retry"}
+			created := runtimeapi.CreatedSession{
+				Session: runtimeapi.SessionRef{WorkspaceID: workspace.ID, SessionID: "session_opaque_list_retry"},
+				TopicID: "topic_opaque_list_retry", TopicTitle: defaultTopicTitle,
+			}
+			runtime.workspaces = []runtimeapi.Workspace{workspace}
+			runtime.created = []runtimeapi.CreatedSession{created}
+			runtime.snapshots[created.Session] = runtimeapi.SessionSnapshot{
+				Session: created.Session, TopicID: created.TopicID, Title: created.TopicTitle,
+				Profile: runtimeapi.ResolvedProfile{Model: "remote-model"},
+			}
+			runtime.attachErrors[created.Session] = errors.New("atomic attach interrupted")
+			app, _ := newRemoteWorkbenchTestApp(t, TargetDescriptor{
+				Kind: TargetRemote, ID: "host_list_retry", Label: "List retry",
+			}, runtime, nil)
+
+			if err := test.invoke(app, workspace); err == nil || !containsError(err, "atomic attach interrupted") {
+				t.Fatalf("first attach error = %v", err)
+			}
+			runtime.mu.Lock()
+			delete(runtime.attachErrors, created.Session)
+			runtime.mu.Unlock()
+			if err := test.invoke(app, workspace); err != nil {
+				t.Fatal(err)
+			}
+			if calls := runtime.calls(); calls != 1 {
+				t.Fatalf("retry created a second Host Session; calls = %d", calls)
+			}
+			runtime.mu.Lock()
+			attachInputs := append([]runtimeapi.AttachAndSubscribeInput(nil), runtime.attachInputs...)
+			runtime.mu.Unlock()
+			if len(attachInputs) != 2 || attachInputs[0].Session != created.Session || attachInputs[1].Session != created.Session {
+				t.Fatalf("attach retries = %#v", attachInputs)
+			}
+		})
 	}
 }
 

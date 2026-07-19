@@ -91,6 +91,28 @@ func remoteLayoutTargetLock(store *RemoteHostStore, hostID string) *sync.Mutex {
 	return lock.(*sync.Mutex)
 }
 
+// removeRemoteLayoutProjectionFile removes the deterministic Desktop-only
+// layout owned by a saved Host ID. The caller holds remoteLayoutTargetLock so a
+// concurrent layout update cannot recreate the old authority after an entry is
+// edited to point at a different physical Host or deleted.
+func removeRemoteLayoutProjectionFile(store *RemoteHostStore, hostID string) error {
+	if store == nil {
+		return errors.New("Remote Host store is unavailable")
+	}
+	ref, err := remoteLayoutRefForHost(hostID)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(filepath.Dir(store.Path()), ref)
+	if filepath.Dir(path) != filepath.Dir(store.Path()) {
+		return fmt.Errorf("%w: layout projection escapes the Host store directory", ErrRemoteLayoutUnsafe)
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // loadRemoteLayout returns an empty layout when the Host has never persisted
 // one. Existing corrupt or unsafe state is surfaced instead of being silently
 // replaced, so callers can preserve it for diagnosis/recovery.
@@ -139,7 +161,8 @@ func updateRemoteLayout(store *RemoteHostStore, hostID string, mutate func(*remo
 	if err != nil {
 		return err
 	}
-	if host.LayoutRef == "" {
+	freshLayout := host.LayoutRef == ""
+	if freshLayout {
 		if err := store.UpdateLayoutRef(hostID, expectedRef); err != nil {
 			return fmt.Errorf("persist Remote layout reference: %w", err)
 		}
@@ -149,11 +172,16 @@ func updateRemoteLayout(store *RemoteHostStore, hostID string, mutate func(*remo
 	if err != nil {
 		return err
 	}
-	document, err := readRemoteLayoutFile(path, hostID)
-	if errors.Is(err, os.ErrNotExist) {
+	var document remoteLayoutDocument
+	if freshLayout {
 		document = newRemoteLayoutDocument(hostID)
-	} else if err != nil {
-		return err
+	} else {
+		document, err = readRemoteLayoutFile(path, hostID)
+		if errors.Is(err, os.ErrNotExist) {
+			document = newRemoteLayoutDocument(hostID)
+		} else if err != nil {
+			return err
+		}
 	}
 	if err := mutate(&document); err != nil {
 		return err
@@ -336,7 +364,7 @@ func (a *App) remoteLayoutWorkspaceMutation(workspaceRoot string, mutate func(*r
 	if err := validateRemoteLayoutOpaqueID("workspace", workspaceRoot); err != nil {
 		return err
 	}
-	api, target, err := a.remoteConnectedV1Runtime()
+	api, expected, err := a.remoteConnectedV1RuntimeSnapshot()
 	if err != nil {
 		return err
 	}
@@ -345,7 +373,10 @@ func (a *App) remoteLayoutWorkspaceMutation(workspaceRoot string, mutate func(*r
 	if _, err := remoteWorkspaceByID(ctx, api, workspaceID); err != nil {
 		return err
 	}
-	return updateRemoteLayout(a.remote.store, target.ID, func(document *remoteLayoutDocument) error {
+	if a.remote.manager == nil || !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+		return ErrTargetTransitionSuperseded
+	}
+	return updateRemoteLayout(a.remote.store, expected.Target.ID, func(document *remoteLayoutDocument) error {
 		mutate(document, workspaceRoot)
 		return nil
 	})
@@ -388,7 +419,7 @@ func (a *App) remoteSetProjectPinned(workspaceRoot string, pinned bool) error {
 }
 
 func (a *App) remoteReorderProjects(workspaceRoots []string) error {
-	api, target, err := a.remoteConnectedV1Runtime()
+	api, expected, err := a.remoteConnectedV1RuntimeSnapshot()
 	if err != nil {
 		return err
 	}
@@ -418,7 +449,10 @@ func (a *App) remoteReorderProjects(workspaceRoots []string) error {
 		}
 		seen[workspaceID] = struct{}{}
 	}
-	return updateRemoteLayout(a.remote.store, target.ID, func(document *remoteLayoutDocument) error {
+	if a.remote.manager == nil || !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+		return ErrTargetTransitionSuperseded
+	}
+	return updateRemoteLayout(a.remote.store, expected.Target.ID, func(document *remoteLayoutDocument) error {
 		document.WorkspaceOrder = append([]string(nil), workspaceRoots...)
 		return nil
 	})
@@ -428,18 +462,21 @@ func (a *App) remoteSetTopicPinned(topicIDValue string, pinned bool) error {
 	if err := validateRemoteLayoutOpaqueID("topic", topicIDValue); err != nil {
 		return err
 	}
-	api, target, err := a.remoteConnectedV1Runtime()
+	api, expected, err := a.remoteConnectedV1RuntimeSnapshot()
 	if err != nil {
 		return err
 	}
 	ctx, cancel := a.remoteActionContext()
 	defer cancel()
 	topicID := runtimeapi.TopicID(topicIDValue)
-	workspaceID, err := a.remoteWorkspaceForTopic(ctx, api, topicID)
+	workspaceID, err := a.remoteWorkspaceForTopic(ctx, api, expected, topicID)
 	if err != nil {
 		return err
 	}
-	return updateRemoteLayout(a.remote.store, target.ID, func(document *remoteLayoutDocument) error {
+	if a.remote.manager == nil || !remoteWorkbenchTargetMatches(a.remote.manager.Snapshot(), expected) {
+		return ErrTargetTransitionSuperseded
+	}
+	return updateRemoteLayout(a.remote.store, expected.Target.ID, func(document *remoteLayoutDocument) error {
 		workspaceKey := string(workspaceID)
 		topics := removeRemoteLayoutID(document.PinnedTopics[workspaceKey], topicIDValue)
 		if pinned {

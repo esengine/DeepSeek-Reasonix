@@ -158,6 +158,46 @@ func TestConnectPingAndDetachResponseBeforeImmediateEOF(t *testing.T) {
 	}
 }
 
+func TestUnsubscribeResponseBeforeImmediateEOFClearsRecovery(t *testing.T) {
+	for iteration := 0; iteration < 50; iteration++ {
+		target := protocol.RuntimeTarget{WorkspaceID: "workspace-unsubscribe-eof", SessionID: "session-unsubscribe-eof"}
+		factory := &scriptedFactory{scripts: []peerScript{basePeer(testInitialize("lease-unsubscribe-eof"), func(wire *rpcwire.Conn, raw net.Conn) {
+			wire.Handle(string(protocol.MethodSessionSubscribe), func(context.Context, json.RawMessage) (any, error) {
+				return protocol.SessionSubscribeResult{
+					SubscriptionID: "subscription-unsubscribe-eof", Snapshot: testSnapshot(target, 7),
+				}, nil
+			})
+			wire.Handle(string(protocol.MethodSessionUnsubscribe), func(context.Context, json.RawMessage) (any, error) {
+				return rpcwire.RespondThen(protocol.SessionUnsubscribeResult{Unsubscribed: true}, func(error) { _ = raw.Close() }), nil
+			})
+		})}}
+		client := newTestClient(t, factory)
+		connectTestClient(t, client)
+		ctx, cancel := context.WithTimeout(context.Background(), clientTestTimeout)
+		subscription, err := client.Subscribe(ctx, protocol.SessionSubscribeParams{
+			ExpectedHostEpoch: "host-epoch", Target: target, PageTurns: 60,
+		})
+		cancel()
+		if err != nil {
+			t.Fatalf("iteration %d Subscribe: %v", iteration, err)
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), clientTestTimeout)
+		result, err := client.Unsubscribe(ctx, subscription.ID)
+		cancel()
+		if err != nil || !result.Unsubscribed {
+			t.Fatalf("iteration %d Unsubscribe = %+v, %v", iteration, result, err)
+		}
+		select {
+		case <-client.Faults():
+		case <-time.After(clientTestTimeout):
+			t.Fatalf("iteration %d immediate EOF fault not observed", iteration)
+		}
+		if recovery := client.RecoveryState(); len(recovery.Subscriptions) != 0 {
+			t.Fatalf("iteration %d unsubscribe recovery = %+v", iteration, recovery)
+		}
+	}
+}
+
 func TestDetachEOFBeforeResponsePreservesRecoveryAndFaults(t *testing.T) {
 	target := protocol.RuntimeTarget{WorkspaceID: "workspace-1", SessionID: "session-1"}
 	factory := &scriptedFactory{scripts: []peerScript{basePeer(testInitialize("lease-detach-loss"), func(wire *rpcwire.Conn, raw net.Conn) {

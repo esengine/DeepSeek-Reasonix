@@ -26,11 +26,12 @@ type subscriptionState struct {
 	pageTurns    int
 	lastSeq      uint64
 
-	input     chan notificationEnvelope
-	updates   chan SubscriptionUpdate
-	stop      chan SubscriptionUpdate
-	stopOnce  sync.Once
-	accepting bool
+	input       chan notificationEnvelope
+	updates     chan SubscriptionUpdate
+	stop        chan SubscriptionUpdate
+	stopOnce    sync.Once
+	accepting   bool
+	recoverable bool
 }
 
 func (s *subscriptionState) recovery() SubscriptionRecovery {
@@ -178,7 +179,7 @@ func (c *Client) Subscribe(ctx context.Context, params protocol.SessionSubscribe
 		// exposed, preserving wire order against later notifications.
 		input:   make(chan notificationEnvelope, maxPendingNotifications+defaultSubscriptionBuffer),
 		updates: make(chan SubscriptionUpdate, defaultSubscriptionBuffer), stop: make(chan SubscriptionUpdate, 1),
-		accepting: true,
+		accepting: true, recoverable: true,
 	}
 	c.mu.Lock()
 	if c.closed || c.active != conn {
@@ -375,12 +376,25 @@ func (s *subscriptionState) deliverFinal(update SubscriptionUpdate) {
 // Unsubscribe is connection-level idempotent on the Host. The local stream is
 // closed only after the typed success response.
 func (c *Client) Unsubscribe(ctx context.Context, id protocol.SubscriptionID) (protocol.SessionUnsubscribeResult, error) {
+	// Keep a typed success and its local cleanup in one connection lifecycle.
+	// In particular, Connect must not restore an EOF-preserved recovery entry
+	// between the response and the cleanup below.
+	c.operationMu.Lock()
+	defer c.operationMu.Unlock()
+
 	conn, err := c.currentConnection()
 	if err != nil {
 		return protocol.SessionUnsubscribeResult{}, err
 	}
+	c.mu.Lock()
+	observed := conn.subscriptions[id]
+	var observedTarget protocol.RuntimeTarget
+	if observed != nil {
+		observedTarget = observed.target
+	}
+	c.mu.Unlock()
 	value, _, err := c.requestOn(ctx, conn, protocol.MethodSessionUnsubscribe,
-		protocol.SessionUnsubscribeParams{SubscriptionID: id}, true)
+		protocol.SessionUnsubscribeParams{SubscriptionID: id}, false)
 	if err != nil {
 		return protocol.SessionUnsubscribeResult{}, err
 	}
@@ -390,12 +404,20 @@ func (c *Client) Unsubscribe(ctx context.Context, id protocol.SubscriptionID) (p
 	}
 	c.mu.Lock()
 	sub := conn.subscriptions[id]
-	delete(conn.subscriptions, id)
-	if sub != nil {
+	if observed == nil || sub == observed {
+		delete(conn.subscriptions, id)
+	}
+	if observedTarget != (protocol.RuntimeTarget{}) {
+		// The EOF watcher may already have moved this exact subscription from
+		// conn.subscriptions into recovery after the typed response arrived.
+		delete(c.recovery, observedTarget)
+	} else if sub != nil {
 		delete(c.recovery, sub.target)
 	}
 	c.mu.Unlock()
-	if sub != nil {
+	if observed != nil {
+		observed.finish(SubscriptionUpdate{Err: ErrUnsubscribed})
+	} else if sub != nil {
 		sub.finish(SubscriptionUpdate{Err: ErrUnsubscribed})
 	}
 	return result, nil

@@ -78,6 +78,24 @@ type targetManagerTestAdapter struct {
 	releaseCalls atomic.Int32
 }
 
+type blockingRuntimeTargetAdapter struct {
+	*targetManagerTestAdapter
+	runtimeCalls   atomic.Int32
+	runtimeEntered chan struct{}
+	runtimeRelease chan struct{}
+}
+
+func (a *blockingRuntimeTargetAdapter) RuntimeAPI() runtimeapi.RuntimeAPI {
+	// NewTargetManager performs validation and event-pump calls. Block the first
+	// consumer call while it holds TargetManager.mu so an A -> B -> A writer is
+	// queued directly against the atomic API/snapshot read.
+	if a.runtimeCalls.Add(1) == 3 {
+		close(a.runtimeEntered)
+		<-a.runtimeRelease
+	}
+	return a.targetManagerTestAdapter.runtime
+}
+
 func newTargetManagerTestAdapter(target TargetDescriptor) *targetManagerTestAdapter {
 	return &targetManagerTestAdapter{target: target, runtime: newTargetManagerTestRuntime()}
 }
@@ -108,6 +126,85 @@ func (a *targetManagerTestAdapter) AbandonTarget() error {
 		return a.abandon()
 	}
 	return nil
+}
+
+func TestTargetManagerRuntimeAPISnapshotStaysPairedAcrossABA(t *testing.T) {
+	hostA := TargetDescriptor{Kind: TargetRemote, ID: "host-runtime-aba", Label: "Host A"}
+	hostB := TargetDescriptor{Kind: TargetRemote, ID: "host-runtime-b", Label: "Host B"}
+	oldA := &blockingRuntimeTargetAdapter{
+		targetManagerTestAdapter: newTargetManagerTestAdapter(hostA),
+		runtimeEntered:           make(chan struct{}),
+		runtimeRelease:           make(chan struct{}),
+	}
+	var releaseOnce sync.Once
+	releaseRuntime := func() { releaseOnce.Do(func() { close(oldA.runtimeRelease) }) }
+	defer releaseRuntime()
+	adapterB := newTargetManagerTestAdapter(hostB)
+	newA := newTargetManagerTestAdapter(hostA)
+	connector := TargetConnectorFunc(func(_ context.Context, target TargetDescriptor) (TargetAdapter, error) {
+		switch {
+		case sameTarget(target, hostB):
+			return adapterB, nil
+		case sameTarget(target, hostA):
+			return newA, nil
+		default:
+			return nil, fmt.Errorf("unexpected target %s/%s", target.Kind, target.ID)
+		}
+	})
+	manager, err := NewTargetManager(connector, oldA, TargetManagerOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanupTargetManager(t, manager)
+
+	type result struct {
+		api      runtimeapi.RuntimeAPI
+		snapshot TargetManagerSnapshot
+		err      error
+	}
+	acquired := make(chan result, 1)
+	go func() {
+		api, snapshot, err := manager.RuntimeAPISnapshot()
+		acquired <- result{api: api, snapshot: snapshot, err: err}
+	}()
+	waitSignal(t, oldA.runtimeEntered, "atomic RuntimeAPI read")
+
+	switchStarted := make(chan struct{})
+	switched := make(chan error, 1)
+	go func() {
+		close(switchStarted)
+		if err := manager.Switch(context.Background(), hostB, SwitchTargetOptions{}); err != nil {
+			switched <- err
+			return
+		}
+		switched <- manager.Switch(context.Background(), hostA, SwitchTargetOptions{})
+	}()
+	waitSignal(t, switchStarted, "A -> B -> A switch start")
+	select {
+	case err := <-switched:
+		t.Fatalf("ABA switch completed while atomic RuntimeAPI read held manager lock: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	releaseRuntime()
+
+	got := waitValue(t, acquired, "atomic RuntimeAPI result")
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	if got.api != oldA.targetManagerTestAdapter.runtime || got.snapshot.Generation != 1 || !sameTarget(got.snapshot.Target, hostA) {
+		t.Fatalf("atomic RuntimeAPI/snapshot = %T/%#v, want old Host A generation 1", got.api, got.snapshot)
+	}
+	if err := waitValue(t, switched, "A -> B -> A switch"); err != nil {
+		t.Fatal(err)
+	}
+	current := manager.Snapshot()
+	if current.Generation != 3 || !sameTarget(current.Target, hostA) {
+		t.Fatalf("current target after ABA = %#v, want Host A generation 3", current)
+	}
+	api, snapshot, err := manager.RuntimeAPISnapshot()
+	if err != nil || api != newA.runtime || snapshot.Generation != current.Generation {
+		t.Fatalf("post-ABA RuntimeAPI/snapshot = %T/%#v/%v", api, snapshot, err)
+	}
 }
 
 type targetManagerTestConnector struct {

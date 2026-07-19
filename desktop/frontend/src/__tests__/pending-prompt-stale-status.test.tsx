@@ -485,6 +485,15 @@ await act(async () => {
 eq(controller?.state.approval?.id, undefined, "a snapshot fetched after the prompt event still reconciles a dead prompt");
 eq(controller?.state.running, false, "fresh idle snapshot releases the blocked state");
 
+// The rejected stale snapshot above also scheduled a debounced reconcile.
+// Let that independent timer drain before arming another prompt; otherwise it
+// can validly apply its fresh idle snapshot during the next scenario and erase
+// the intermediate state that scenario is specifically trying to observe.
+await act(async () => {
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 300));
+  await flushPromises();
+});
+
 // #6432 backstop (reviewer round 2): after navigation drops the prompt anchor
 // (backend_activation_start on a rapid A→B→A, or single-surface state wipe), a
 // delayed replay of an already-answered prompt re-anchors it, so the

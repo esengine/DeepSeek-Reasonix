@@ -28,7 +28,18 @@ const probeCacheTTL = 5 * time.Minute
 
 const maxRenderedTools = 24
 
+// Keep startup probes from adding a large CreateProcess burst to other work
+// the host may already be running. The default probe set is small, and four
+// workers preserve most of the latency benefit without unbounded fan-out.
+const maxConcurrentProbes = 4
+
 var probeTimeout = ProbeTimeout
+
+// probeProcessSlots is shared by every probe invocation in the process. A
+// per-call worker limit alone is insufficient because Desktop can build tabs
+// for different workspace roots concurrently (and therefore use distinct
+// probe fingerprints).
+var probeProcessSlots = make(chan struct{}, maxConcurrentProbes)
 
 type probeCacheEntry struct {
 	storedAt time.Time
@@ -124,15 +135,32 @@ func RunProbesWithOptions(ctx context.Context, commands []string, opts ProbeOpti
 }
 
 func runProbesUncached(ctx context.Context, commands []string, opts ProbeOptions) []ProbeResult {
+	return runProbesWithRunner(ctx, commands, opts, runOne)
+}
+
+func runProbesWithRunner(
+	ctx context.Context,
+	commands []string,
+	opts ProbeOptions,
+	runner func(context.Context, string, ProbeOptions) ProbeResult,
+) []ProbeResult {
 	results := make([]ProbeResult, len(commands))
+	workerCount := min(maxConcurrentProbes, len(commands))
+	jobs := make(chan int)
 	var wg sync.WaitGroup
-	for i, command := range commands {
-		wg.Add(1)
-		go func(i int, command string) {
+	wg.Add(workerCount)
+	for range workerCount {
+		go func() {
 			defer wg.Done()
-			results[i] = runOne(ctx, command, opts)
-		}(i, command)
+			for i := range jobs {
+				results[i] = runner(ctx, commands[i], opts)
+			}
+		}()
 	}
+	for i := range commands {
+		jobs <- i
+	}
+	close(jobs)
 	wg.Wait()
 	sortResults(results)
 	return results
@@ -249,7 +277,7 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 	} else {
 		cmd.Stderr = &stderr
 	}
-	err = cmd.Run()
+	err = runProbeCommand(cmdCtx, cmd.Run)
 	out := strings.TrimSpace(stdout.String())
 	if out == "" {
 		out = strings.TrimSpace(stderr.String())
@@ -269,6 +297,16 @@ func runOne(ctx context.Context, command string, opts ProbeOptions) ProbeResult 
 	res.Found = true
 	res.Output = firstLine(out)
 	return res
+}
+
+func runProbeCommand(ctx context.Context, run func() error) error {
+	select {
+	case probeProcessSlots <- struct{}{}:
+		defer func() { <-probeProcessSlots }()
+		return run()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func prepareProbeCommand(cmd *exec.Cmd) {

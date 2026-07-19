@@ -400,6 +400,33 @@ func TestRemoteSSHFakeProcess(t *testing.T) {
 	case "hang":
 		_, _ = fmt.Fprintln(os.Stdout, "ready")
 		time.Sleep(10 * time.Minute)
+	case "tree":
+		child := exec.Command(os.Args[0], "-test.run=^TestRemoteSSHFakeProcess$")
+		child.Env = mergeRemoteSSHEnvironment(os.Environ(), []string{"REMOTE_SSH_FAKE_MODE=grandchild"})
+		// Inheriting the protocol pipes reproduces ProxyCommand descendants that
+		// otherwise keep them open after the ssh.exe parent is terminated.
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "fake descendant start failed")
+			os.Exit(254)
+		}
+		_, _ = fmt.Fprintf(os.Stdout, "ready %d\n", child.Process.Pid)
+		_ = child.Wait()
+		os.Exit(255)
+	case "tree-exit":
+		child := exec.Command(os.Args[0], "-test.run=^TestRemoteSSHFakeProcess$")
+		child.Env = mergeRemoteSSHEnvironment(os.Environ(), []string{"REMOTE_SSH_FAKE_MODE=grandchild"})
+		child.Stdout = os.Stdout
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, "fake descendant start failed")
+			os.Exit(254)
+		}
+		_, _ = fmt.Fprintf(os.Stdout, "ready %d\n", child.Process.Pid)
+		os.Exit(0)
+	case "grandchild":
+		time.Sleep(10 * time.Minute)
 	default:
 		_, _ = io.WriteString(os.Stderr, "unknown fake mode\n")
 	}

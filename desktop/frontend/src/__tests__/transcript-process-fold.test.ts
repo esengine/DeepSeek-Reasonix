@@ -23,6 +23,11 @@ console.log("\ntranscript process fold");
 
 let displayMode = "standard";
 let processFoldPref = "auto";
+const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: { language: "en-US" },
+});
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
   value: {
@@ -223,8 +228,16 @@ try {
   ok(segmentHeads.length === 3, "every reasoning segment gets its own toggle");
   ok(Array.from(segmentHeads).every((head) => head.getAttribute("aria-expanded") === "true"), "reasoning segments default to expanded");
 } finally {
-  await server?.close();
-  delete (globalThis as { localStorage?: Storage }).localStorage;
+  try {
+    await server?.close();
+  } finally {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+    if (originalNavigatorDescriptor) {
+      Object.defineProperty(globalThis, "navigator", originalNavigatorDescriptor);
+    } else {
+      delete (globalThis as { navigator?: Navigator }).navigator;
+    }
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

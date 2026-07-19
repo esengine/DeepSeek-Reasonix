@@ -82,12 +82,18 @@ type Client struct {
 	active      *connectionState
 	lastInit    protocol.InitializeResult
 	leaseID     protocol.LeaseID
-	recovery    map[protocol.RuntimeTarget]SubscriptionRecovery
+	recovery    map[protocol.RuntimeTarget]subscriptionRecoveryRecord
 
 	catalogs chan CatalogNotification
 	faults   chan ConnectionFault
 
 	newTicker func(time.Duration) ticker
+}
+
+type subscriptionRecoveryRecord struct {
+	SubscriptionRecovery
+	generation   uint64
+	subscription protocol.SubscriptionID
 }
 
 // New validates immutable Host-entry identity without opening a transport.
@@ -116,7 +122,7 @@ func New(options Options) (*Client, error) {
 	return &Client{
 		factory: options.Factory, buildID: options.BuildID, clientInstanceID: options.ClientInstanceID,
 		state: StateDisconnected, leaseID: options.ResumeLeaseID,
-		recovery:  make(map[protocol.RuntimeTarget]SubscriptionRecovery),
+		recovery:  make(map[protocol.RuntimeTarget]subscriptionRecoveryRecord),
 		catalogs:  make(chan CatalogNotification, defaultCatalogBuffer),
 		faults:    make(chan ConnectionFault, defaultFaultBuffer),
 		newTicker: func(interval time.Duration) ticker { return realTicker{time.NewTicker(interval)} },
@@ -326,11 +332,13 @@ func (c *Client) RecoveryState() RecoveryState {
 	state := RecoveryState{ResumeLeaseID: c.leaseID, HostEpoch: c.lastInit.HostEpoch, Generation: c.lastGen}
 	items := make(map[protocol.RuntimeTarget]SubscriptionRecovery, len(c.recovery))
 	for target, item := range c.recovery {
-		items[target] = item
+		items[target] = item.SubscriptionRecovery
 	}
 	if c.active != nil {
 		for _, sub := range c.active.subscriptions {
-			items[sub.target] = sub.recovery()
+			if sub.recoverable {
+				items[sub.target] = sub.recovery()
+			}
 		}
 	}
 	for _, item := range items {
@@ -344,6 +352,51 @@ func (c *Client) RecoveryState() RecoveryState {
 		return left.SessionID < right.SessionID
 	})
 	return state
+}
+
+// ForgetSubscriptionRecovery drops one target from the next reconnect plan.
+// It is used after a higher layer rejects an attach that had already crossed
+// the atomic subscribe boundary. Callers must only use it when that transport
+// subscription is no longer current (or after an exact unsubscribe); otherwise
+// the still-connected Host would continue sending notifications for an entry
+// the client no longer recognizes.
+func (c *Client) ForgetSubscriptionRecovery(target protocol.RuntimeTarget) {
+	c.mu.Lock()
+	delete(c.recovery, target)
+	c.mu.Unlock()
+}
+
+// SuppressSubscriptionRecovery marks one exact transport subscription as
+// intentionally abandoned. It is safe after an unsubscribe with unknown
+// transport outcome: a still-connected peer may finish sending that old ID,
+// but it can never enter the reconnect plan or replace a newer subscription.
+func (c *Client) SuppressSubscriptionRecovery(
+	generation uint64,
+	id protocol.SubscriptionID,
+	target protocol.RuntimeTarget,
+) bool {
+	if generation == 0 || id == "" || target == (protocol.RuntimeTarget{}) {
+		return false
+	}
+	var suppressed *subscriptionState
+	deletedRecovery := false
+	c.mu.Lock()
+	if c.active != nil && c.active.generation == generation {
+		if sub := c.active.subscriptions[id]; sub != nil && sub.target == target {
+			sub.recoverable = false
+			suppressed = sub
+			delete(c.recovery, target)
+		}
+	}
+	if item, ok := c.recovery[target]; ok && item.generation == generation && item.subscription == id {
+		delete(c.recovery, target)
+		deletedRecovery = true
+	}
+	c.mu.Unlock()
+	if suppressed != nil {
+		suppressed.finish(SubscriptionUpdate{Err: ErrUnsubscribed})
+	}
+	return suppressed != nil || deletedRecovery
 }
 
 // CatalogNotifications returns strictly validated current-generation
@@ -538,10 +591,14 @@ func (c *Client) watchTransport(conn *connectionState) {
 	close(conn.terminated)
 }
 
-func recoveryFromSubscriptions(subscriptions map[protocol.SubscriptionID]*subscriptionState) map[protocol.RuntimeTarget]SubscriptionRecovery {
-	out := make(map[protocol.RuntimeTarget]SubscriptionRecovery, len(subscriptions))
+func recoveryFromSubscriptions(subscriptions map[protocol.SubscriptionID]*subscriptionState) map[protocol.RuntimeTarget]subscriptionRecoveryRecord {
+	out := make(map[protocol.RuntimeTarget]subscriptionRecoveryRecord, len(subscriptions))
 	for _, sub := range subscriptions {
-		out[sub.target] = sub.recovery()
+		if sub.recoverable {
+			out[sub.target] = subscriptionRecoveryRecord{
+				SubscriptionRecovery: sub.recovery(), generation: sub.connection.generation, subscription: sub.id,
+			}
+		}
 	}
 	return out
 }
@@ -648,7 +705,7 @@ func (c *Client) Detach(ctx context.Context) (protocol.DetachResult, error) {
 		c.active = nil
 		c.state = StateDisconnected
 		c.leaseID = ""
-		c.recovery = make(map[protocol.RuntimeTarget]SubscriptionRecovery)
+		c.recovery = make(map[protocol.RuntimeTarget]subscriptionRecoveryRecord)
 	}
 	c.mu.Unlock()
 	c.retireConnection(conn, ErrUnsubscribed)

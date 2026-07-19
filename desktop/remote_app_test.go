@@ -127,7 +127,7 @@ func TestRemoteAppHostCRUDPreservesPrivateStableIdentities(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("load updated Host = %#v, %v, found=%v", privateAfter, err, found)
 	}
-	if privateAfter.ClientInstanceID != privateBefore.ClientInstanceID || privateAfter.ResumeLeaseID != leaseID {
+	if privateAfter.ClientInstanceID != privateBefore.ClientInstanceID || privateAfter.ResumeLeaseID != "" {
 		t.Fatalf("private identities changed: before=%#v after=%#v", privateBefore, privateAfter)
 	}
 
@@ -201,7 +201,7 @@ func TestRemoteAppDirectHostDefaultsPortAndCanSwitchModes(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("load changed Host = %#v, %v, found=%v", privateAfter, err, found)
 	}
-	if privateAfter.ID != privateBefore.ID || privateAfter.ClientInstanceID != privateBefore.ClientInstanceID || privateAfter.ResumeLeaseID != "lease_survives_mode_change" {
+	if privateAfter.ID != privateBefore.ID || privateAfter.ClientInstanceID != privateBefore.ClientInstanceID || privateAfter.ResumeLeaseID != "" {
 		t.Fatalf("private identity changed across connection mode edit: before=%#v after=%#v", privateBefore, privateAfter)
 	}
 }

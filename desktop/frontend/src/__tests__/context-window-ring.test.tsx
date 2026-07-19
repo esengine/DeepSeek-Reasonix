@@ -8,6 +8,12 @@ import { ContextWindowRing } from "../components/ContextWindowRing";
 import { LocaleProvider } from "../lib/i18n";
 import type { ContextPanelInfo } from "../lib/types";
 
+const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+Object.defineProperty(globalThis, "navigator", {
+  configurable: true,
+  value: { language: "en-US" },
+});
+
 let passed = 0;
 let failed = 0;
 
@@ -200,6 +206,12 @@ console.log("\ncontext window ring");
     root.unmount();
   });
   dom.window.close();
+}
+
+if (originalNavigatorDescriptor) {
+  Object.defineProperty(globalThis, "navigator", originalNavigatorDescriptor);
+} else {
+  delete (globalThis as { navigator?: Navigator }).navigator;
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

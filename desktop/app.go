@@ -488,8 +488,13 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
-	if a.forceQuit.Swap(false) || consumeSystemQuitRequested() {
-		return false
+	// Consume explicit quit signals even when a Host mutation keeps the window
+	// open, so a cancelled close cannot make a later ordinary close bypass the
+	// configured background behavior.
+	forceQuit := a.forceQuit.Swap(false)
+	systemQuit := consumeSystemQuitRequested()
+	if forceQuit || systemQuit {
+		return !a.beginRemoteDesktopClose()
 	}
 	cfg, _, err := a.loadDesktopUserConfigForView()
 	if err != nil {
@@ -497,6 +502,12 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 	if cfg.DesktopCloseBehavior() == "background" {
 		if !a.backgroundCloseHasRestorePath() {
+			return !a.beginRemoteDesktopClose()
+		}
+		switch a.decideRemoteDesktopBackgroundClose() {
+		case remoteDesktopBackgroundCloseBlocked:
+			return true
+		case remoteDesktopBackgroundCloseAlreadyClosing:
 			return false
 		}
 		a.backgroundMaximised.Store(runtime.WindowIsMaximised(ctx))
@@ -505,7 +516,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		hideForBackground(ctx)
 		return true
 	}
-	return false
+	return !a.beginRemoteDesktopClose()
 }
 
 const backgroundCloseTrayReadyTimeout = 500 * time.Millisecond
@@ -602,6 +613,9 @@ func (a *App) secondInstanceLaunch() {
 
 func (a *App) quitApp() {
 	if a.ctx == nil {
+		return
+	}
+	if !a.beginRemoteDesktopClose() {
 		return
 	}
 	a.forceQuit.Store(true)
@@ -800,6 +814,7 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	a.markRemoteDesktopClosing()
 	if err := a.shutdownRemoteDesktop(); err != nil {
 		slog.Warn("desktop: shut down target manager", "err", err)
 	}

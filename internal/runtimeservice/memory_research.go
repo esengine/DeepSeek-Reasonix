@@ -895,7 +895,7 @@ func validFindingSource(value string) bool {
 
 func primaryRelativeDisplayPath(root, raw string) (string, bool) {
 	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.ContainsAny(raw, `\:`) || strings.HasPrefix(raw, "~") || containsControl(raw) || windowsAbsolutePathPattern.MatchString(raw) {
+	if raw == "" || strings.HasPrefix(raw, "~") || containsControl(raw) {
 		return "", false
 	}
 	var relative string
@@ -906,6 +906,12 @@ func primaryRelativeDisplayPath(root, raw string) (string, bool) {
 		}
 		relative = value
 	} else {
+		// On a non-Windows Host, filepath.IsAbs does not recognize a Windows
+		// drive path. Relative paths must also stay slash-normalized so a
+		// backslash or colon cannot acquire platform-dependent semantics.
+		if windowsAbsolutePathPattern.MatchString(raw) || strings.ContainsAny(raw, `\:`) {
+			return "", false
+		}
 		relative = filepath.Clean(filepath.FromSlash(raw))
 	}
 	if relative == "." || !filepath.IsLocal(relative) || filepath.IsAbs(relative) ||
@@ -922,15 +928,31 @@ func primaryRelativeDisplayPath(root, raw string) (string, bool) {
 func safeDisplayCommand(command, root string) string {
 	command = strings.TrimSpace(command)
 	if command == "" || !utf8.ValidString(command) || len(command) > 16<<10 || containsControl(command) ||
-		strings.ContainsAny(command, "<>|&;$\\`'\"") {
+		strings.ContainsAny(command, "<>|&;$`'\"") {
 		return ""
 	}
 	root = filepath.Clean(root)
-	command = strings.ReplaceAll(command, root, ".")
 	fields := strings.Fields(command)
 	for index, field := range fields {
 		candidate := strings.Trim(field, `"'(),;[]{}:`)
-		if candidate == "" || filepath.IsAbs(candidate) || windowsAbsolutePathPattern.MatchString(candidate) ||
+		if !filepath.IsAbs(candidate) {
+			continue
+		}
+		relative, err := filepath.Rel(root, filepath.Clean(candidate))
+		if err == nil && relative == "." {
+			fields[index] = strings.Replace(field, candidate, ".", 1)
+		}
+	}
+	command = strings.Join(fields, " ")
+	// The only accepted Windows separator is the exact workspace-root token
+	// collapsed above. Every other backslash remains ambiguous or external.
+	if strings.Contains(command, `\`) {
+		return ""
+	}
+	fields = strings.Fields(command)
+	for index, field := range fields {
+		candidate := strings.Trim(field, `"'(),;[]{}:`)
+		if candidate == "" || filepath.IsAbs(candidate) || strings.HasPrefix(candidate, "/") || windowsAbsolutePathPattern.MatchString(candidate) ||
 			strings.ContainsAny(candidate, `\:`) || strings.HasPrefix(candidate, "~") || containsControl(candidate) {
 			return ""
 		}
@@ -938,7 +960,7 @@ func safeDisplayCommand(command, root string) string {
 			return ""
 		}
 		for _, fragment := range strings.Split(candidate, "=") {
-			if filepath.IsAbs(fragment) || windowsAbsolutePathPattern.MatchString(fragment) || strings.HasPrefix(fragment, "~") {
+			if filepath.IsAbs(fragment) || strings.HasPrefix(fragment, "/") || windowsAbsolutePathPattern.MatchString(fragment) || strings.HasPrefix(fragment, "~") {
 				return ""
 			}
 		}

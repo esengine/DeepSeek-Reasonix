@@ -275,16 +275,27 @@ func (m *TargetManager) SetStateSink(sink func(TargetManagerSnapshot)) {
 }
 
 func (m *TargetManager) RuntimeAPI() (runtimeapi.RuntimeAPI, error) {
+	api, _, err := m.RuntimeAPISnapshot()
+	return api, err
+}
+
+// RuntimeAPISnapshot returns the current RuntimeAPI together with the exact
+// target snapshot that authorized it. Keeping both reads under one lock avoids
+// pairing an adapter from one target generation with an ABA-replaced snapshot
+// from a later generation.
+func (m *TargetManager) RuntimeAPISnapshot() (runtimeapi.RuntimeAPI, TargetManagerSnapshot, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.current == nil || (m.state != TargetLocalConnected && m.state != TargetRemoteConnected) {
-		return nil, ErrRuntimeTargetUnavailable
+	snapshot := m.snapshotLocked()
+	if m.current == nil || m.currentGeneration != m.generation || !sameTarget(m.current.Descriptor(), m.target) ||
+		(m.state != TargetLocalConnected && m.state != TargetRemoteConnected) {
+		return nil, snapshot, ErrRuntimeTargetUnavailable
 	}
 	api := m.current.RuntimeAPI()
 	if api == nil {
-		return nil, ErrRuntimeTargetUnavailable
+		return nil, snapshot, ErrRuntimeTargetUnavailable
 	}
-	return api, nil
+	return api, snapshot, nil
 }
 
 func (m *TargetManager) SetEventSink(sink TargetEventSink) {

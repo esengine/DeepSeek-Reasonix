@@ -6,31 +6,48 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 )
 
-func configureRemoteSSHProcess(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return os.ErrProcessDone
-		}
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	cmd.WaitDelay = remoteSSHWaitDelay
+type remoteSSHProcess struct {
+	killOnce sync.Once
+	killErr  error
 }
 
-func terminateRemoteSSHProcess(cmd *exec.Cmd) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
+func newRemoteSSHProcess(cmd *exec.Cmd) *remoteSSHProcess {
+	process := &remoteSSHProcess{}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if process.kill(cmd) {
+			return process.killErr
+		}
+		return os.ErrProcessDone
 	}
-	err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
+	cmd.WaitDelay = remoteSSHWaitDelay
+	return process
 }
+
+func (*remoteSSHProcess) start(cmd *exec.Cmd) error { return cmd.Start() }
+
+func (*remoteSSHProcess) wait(cmd *exec.Cmd) error { return cmd.Wait() }
+
+func (p *remoteSSHProcess) kill(cmd *exec.Cmd) bool {
+	if p == nil {
+		return false
+	}
+	killed := false
+	p.killOnce.Do(func() {
+		killed = true
+		if cmd == nil || cmd.Process == nil {
+			return
+		}
+		p.killErr = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(p.killErr, syscall.ESRCH) {
+			p.killErr = nil
+		}
+	})
+	return killed
+}
+
+func (*remoteSSHProcess) finish() {}

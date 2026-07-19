@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"reasonix/internal/eventwire"
 	"reasonix/internal/provider"
@@ -13,8 +14,99 @@ import (
 )
 
 const (
-	remoteWorkbenchStateEvent = "remote:workbench-state"
+	remoteWorkbenchStateEvent      = "remote:workbench-state"
+	remoteWorkbenchRollbackTimeout = 5 * time.Second
 )
+
+type remoteWorkbenchSubscriptionRollback func(context.Context) error
+
+// remoteWorkbenchTrackedAttacher is a Desktop-private extension implemented by
+// the production Remote adapter. Its rollback is bound to the exact transport
+// subscription created by this attach, so it cannot unsubscribe a newer
+// reconnect/reattach for the same opaque SessionRef.
+type remoteWorkbenchTrackedAttacher interface {
+	attachRemoteWorkbenchSession(
+		context.Context,
+		runtimeapi.AttachAndSubscribeInput,
+	) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error)
+}
+
+type remoteWorkbenchPreviewAttacher interface {
+	previewRemoteWorkbenchSession(
+		context.Context,
+		runtimeapi.AttachAndSubscribeInput,
+	) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error)
+}
+
+type remoteWorkbenchFreshCandidateAttacher interface {
+	attachRemoteWorkbenchFreshCandidate(
+		context.Context,
+		runtimeapi.AttachAndSubscribeInput,
+	) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error)
+}
+
+type remoteWorkbenchSessionUnsubscriber interface {
+	UnsubscribeSession(context.Context, runtimeapi.UnsubscribeSessionInput) error
+}
+
+func attachRemoteWorkbenchAtomic(
+	ctx context.Context,
+	api runtimeapi.SessionAPI,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error) {
+	if tracked, ok := api.(remoteWorkbenchTrackedAttacher); ok {
+		return tracked.attachRemoteWorkbenchSession(ctx, input)
+	}
+	snapshot, err := api.AttachAndSubscribe(ctx, input)
+	if err != nil {
+		return runtimeapi.SessionSnapshot{}, nil, err
+	}
+	rollback := func(rollbackCtx context.Context) error {
+		unsubscriber, ok := api.(remoteWorkbenchSessionUnsubscriber)
+		if !ok {
+			return errors.New("Remote RuntimeAPI cannot roll back a Session subscription")
+		}
+		return unsubscriber.UnsubscribeSession(rollbackCtx, runtimeapi.UnsubscribeSessionInput{Session: input.Session})
+	}
+	return snapshot, rollback, nil
+}
+
+func previewRemoteWorkbenchAtomic(
+	ctx context.Context,
+	api runtimeapi.SessionAPI,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error) {
+	if previewer, ok := api.(remoteWorkbenchPreviewAttacher); ok {
+		return previewer.previewRemoteWorkbenchSession(ctx, input)
+	}
+	return attachRemoteWorkbenchAtomic(ctx, api, input)
+}
+
+func attachRemoteWorkbenchFreshCandidateAtomic(
+	ctx context.Context,
+	api runtimeapi.SessionAPI,
+	input runtimeapi.AttachAndSubscribeInput,
+) (runtimeapi.SessionSnapshot, remoteWorkbenchSubscriptionRollback, error) {
+	if attacher, ok := api.(remoteWorkbenchFreshCandidateAttacher); ok {
+		return attacher.attachRemoteWorkbenchFreshCandidate(ctx, input)
+	}
+	return attachRemoteWorkbenchAtomic(ctx, api, input)
+}
+
+func runRemoteWorkbenchSubscriptionRollback(rollback remoteWorkbenchSubscriptionRollback) error {
+	if rollback == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remoteWorkbenchRollbackTimeout)
+	defer cancel()
+	return rollback(ctx)
+}
+
+func discardRemoteWorkbenchSubscription(rollback remoteWorkbenchSubscriptionRollback, ref runtimeapi.SessionRef) {
+	if err := runRemoteWorkbenchSubscriptionRollback(rollback); err != nil {
+		slog.Warn("desktop: roll back superseded Remote Session subscription", "session", ref, "err", err)
+	}
+}
 
 // RemoteDirectoryView is a Host-owned directory selection. Ref is opaque and
 // DisplayPath is presentation-only; neither may be interpreted as a Desktop
@@ -175,6 +267,12 @@ func remoteDirectoryView(value runtimeapi.Directory) RemoteDirectoryView {
 // subscription have succeeded. A create that succeeded before attach failed is
 // retained so the same UI retry cannot create a duplicate Session.
 func (a *App) CreateRemoteWorkspaceSession(input RemoteCreateWorkspaceSessionInput) (RemoteWorkbenchStatusView, error) {
+	finishCreate, err := a.beginRemoteWorkbenchSessionCreate()
+	if err != nil {
+		return RemoteWorkbenchStatusView{}, err
+	}
+	defer finishCreate()
+
 	primary := strings.TrimSpace(input.PrimaryDirectoryRef)
 	if primary == "" {
 		return RemoteWorkbenchStatusView{}, errors.New("a primary Remote directory is required")
@@ -186,10 +284,7 @@ func (a *App) CreateRemoteWorkspaceSession(input RemoteCreateWorkspaceSessionInp
 	title := strings.TrimSpace(input.TopicTitle)
 	fingerprint := remoteSessionCreateFingerprint(primary, additional, title)
 
-	a.remote.workbenchOp.Lock()
-	defer a.remote.workbenchOp.Unlock()
-
-	api, target, err := a.remoteConnectedRuntime()
+	api, expected, err := a.remoteConnectedRuntimeSnapshot()
 	if err != nil {
 		return RemoteWorkbenchStatusView{}, err
 	}
@@ -197,18 +292,13 @@ func (a *App) CreateRemoteWorkspaceSession(input RemoteCreateWorkspaceSessionInp
 	if manager == nil {
 		return RemoteWorkbenchStatusView{}, ErrRuntimeTargetUnavailable
 	}
-	before := manager.Snapshot()
-	if before.State != TargetRemoteConnected || before.Target.ID != target.ID {
-		return RemoteWorkbenchStatusView{}, ErrRuntimeTargetUnavailable
-	}
+	target := expected.Target
 
-	a.remote.workbenchMu.RLock()
-	pending := clonePendingRemoteCreate(a.remote.workbench.Pending[fingerprint])
-	a.remote.workbenchMu.RUnlock()
+	pending := a.remoteWorkspacePending(target.ID, fingerprint)
 
 	var workspace runtimeapi.Workspace
 	var created runtimeapi.CreatedSession
-	if pending != nil && pending.HostID == target.ID && pending.Fingerprint == fingerprint {
+	if pending != nil {
 		workspace = pending.Workspace
 		created = pending.Created
 	} else {
@@ -219,6 +309,9 @@ func (a *App) CreateRemoteWorkspaceSession(input RemoteCreateWorkspaceSessionInp
 			return RemoteWorkbenchStatusView{}, openErr
 		}
 		workspace = opened.Workspace
+		if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+			return RemoteWorkbenchStatusView{}, ErrTargetTransitionSuperseded
+		}
 		ctx, cancel = a.remoteActionContext()
 		created, err = api.CreateSession(ctx, runtimeapi.CreateSessionInput{
 			WorkspaceID: workspace.ID, AdditionalDirectories: additional,
@@ -229,65 +322,241 @@ func (a *App) CreateRemoteWorkspaceSession(input RemoteCreateWorkspaceSessionInp
 		if err != nil {
 			return RemoteWorkbenchStatusView{}, err
 		}
+		if !created.Session.Valid() || created.Session.WorkspaceID != workspace.ID {
+			return RemoteWorkbenchStatusView{}, errors.New("Remote create returned a Session in a different workspace")
+		}
 		pending = &pendingRemoteSessionCreate{
 			HostID: target.ID, Fingerprint: fingerprint, Workspace: workspace, Created: created,
 		}
-		a.remote.workbenchMu.Lock()
-		state := &a.remote.workbench
-		if state.HostID != target.ID {
-			*state = remoteWorkbenchState{HostID: target.ID}
+		// Persist the successful Host mutation before consulting current target
+		// state. A newer StateSink may already have installed Host B, but this
+		// Host-scoped entry remains hidden from B and is reusable after A returns.
+		a.storeRemoteWorkspacePending(pending)
+		if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+			return RemoteWorkbenchStatusView{}, ErrTargetTransitionSuperseded
 		}
-		state.ensureMaps()
-		state.Workspaces[workspace.ID] = workspace
-		state.Pending[fingerprint] = clonePendingRemoteCreate(pending)
-		a.remote.workbenchMu.Unlock()
+	}
+	if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+		return RemoteWorkbenchStatusView{}, ErrTargetTransitionSuperseded
 	}
 
 	ctx, cancel := a.remoteActionContext()
-	snapshot, err := api.AttachAndSubscribe(ctx, runtimeapi.AttachAndSubscribeInput{
+	snapshot, rollback, err := attachRemoteWorkbenchAtomic(ctx, api, runtimeapi.AttachAndSubscribeInput{
 		Session: created.Session, HistoryTurns: validateRemoteWorkbenchHistoryTurns(a.desktopHistoryPageTurns()),
 	})
 	cancel()
 	if err != nil {
-		a.remote.workbenchMu.Lock()
-		state := &a.remote.workbench
-		state.ensureMaps()
-		if current := state.Sessions[created.Session]; current != nil {
-			current.LastAttachError = err.Error()
+		if !a.withRemoteWorkbenchTarget(expected, func(state *remoteWorkbenchState) {
+			state.ensureMaps()
+			if current := state.Sessions[created.Session]; current != nil {
+				current.LastAttachError = err.Error()
+			}
+		}) {
+			return RemoteWorkbenchStatusView{}, ErrTargetTransitionSuperseded
 		}
-		a.remote.workbenchMu.Unlock()
 		return RemoteWorkbenchStatusView{}, fmt.Errorf("attach Remote Session: %w", err)
 	}
+	retainSubscription := false
+	defer func() {
+		if !retainSubscription {
+			discardRemoteWorkbenchSubscription(rollback, created.Session)
+		}
+	}()
 	if snapshot.Session != created.Session {
 		return RemoteWorkbenchStatusView{}, errors.New("Remote attach returned a different Session identity")
 	}
-	after := manager.Snapshot()
-	if after.State != TargetRemoteConnected || after.Generation != before.Generation || !sameTarget(after.Target, before.Target) {
+	_, status, committed := a.commitRemoteWorkbenchSession(expected, workspace, created, snapshot, true)
+	if !committed {
 		return RemoteWorkbenchStatusView{}, ErrTargetTransitionSuperseded
 	}
-
-	a.remote.workbenchMu.Lock()
-	state := &a.remote.workbench
-	if state.HostID != target.ID {
-		*state = remoteWorkbenchState{HostID: target.ID}
-	}
-	state.ensureMaps()
-	state.Workspaces[workspace.ID] = workspace
-	state.Sessions[created.Session] = &remoteWorkbenchSession{
-		Created: created, Snapshot: cloneRemoteSessionSnapshot(snapshot), HistoryCursors: remoteHistoryCursorsFromSnapshot(snapshot),
-		AttachedGeneration: after.Generation,
-	}
-	tabID := remoteSessionTabID(created.Session)
-	if _, exists := state.SessionTabs[tabID]; !exists {
-		state.TabOrder = append(state.TabOrder, tabID)
-	}
-	state.SessionTabs[tabID] = created.Session
-	state.ActiveTabID = tabID
-	delete(state.Pending, fingerprint)
-	status := remoteWorkbenchStatusLocked(*state, after)
-	a.remote.workbenchMu.Unlock()
-	a.publishRemoteWorkbenchReady(status)
+	retainSubscription = true
 	return status, nil
+}
+
+func (a *App) remoteWorkspacePending(hostID, fingerprint string) *pendingRemoteSessionCreate {
+	if a == nil || hostID == "" || fingerprint == "" {
+		return nil
+	}
+	a.remote.workbenchMu.Lock()
+	defer a.remote.workbenchMu.Unlock()
+	byFingerprint := a.remote.workspacePending[hostID]
+	pending := clonePendingRemoteCreate(byFingerprint[fingerprint])
+	if pending == nil {
+		return nil
+	}
+	if pending.HostID != hostID || pending.Fingerprint != fingerprint || pending.Workspace.ID == "" ||
+		!pending.Created.Session.Valid() || pending.Created.Session.WorkspaceID != pending.Workspace.ID {
+		delete(byFingerprint, fingerprint)
+		if len(byFingerprint) == 0 {
+			delete(a.remote.workspacePending, hostID)
+		}
+		return nil
+	}
+	return pending
+}
+
+func (a *App) storeRemoteWorkspacePending(pending *pendingRemoteSessionCreate) {
+	if a == nil || pending == nil || pending.HostID == "" || pending.Fingerprint == "" {
+		return
+	}
+	a.remote.workbenchMu.Lock()
+	defer a.remote.workbenchMu.Unlock()
+	if a.remote.workspacePending == nil {
+		a.remote.workspacePending = make(map[string]map[string]*pendingRemoteSessionCreate)
+	}
+	byFingerprint := a.remote.workspacePending[pending.HostID]
+	if byFingerprint == nil {
+		byFingerprint = make(map[string]*pendingRemoteSessionCreate)
+		a.remote.workspacePending[pending.HostID] = byFingerprint
+	}
+	byFingerprint[pending.Fingerprint] = clonePendingRemoteCreate(pending)
+}
+
+// clearRemoteWorkspacePending removes only the exact Host mutation observed by
+// the caller. A later retry may already have installed a different opaque
+// SessionRef under the same fingerprint, so clearing by fingerprint alone
+// would make that newer successful create duplicable.
+func (a *App) clearRemoteWorkspacePending(hostID, fingerprint string, ref runtimeapi.SessionRef) bool {
+	if a == nil || hostID == "" || fingerprint == "" || !ref.Valid() {
+		return false
+	}
+	a.remote.workbenchMu.Lock()
+	defer a.remote.workbenchMu.Unlock()
+	byFingerprint := a.remote.workspacePending[hostID]
+	current := byFingerprint[fingerprint]
+	if current == nil || current.HostID != hostID || current.Fingerprint != fingerprint || current.Created.Session != ref {
+		return false
+	}
+	delete(byFingerprint, fingerprint)
+	if len(byFingerprint) == 0 {
+		delete(a.remote.workspacePending, hostID)
+	}
+	return true
+}
+
+// withRemoteWorkbenchTarget linearizes a workbench mutation with TargetManager's
+// ordered StateSink. State transitions hold stateDispatchMu until their sink has
+// applied, so an older Host result can neither race after nor overwrite the
+// state of a newer target generation.
+func (a *App) withRemoteWorkbenchTarget(expected TargetManagerSnapshot, update func(*remoteWorkbenchState)) bool {
+	if a == nil || update == nil {
+		return false
+	}
+	manager := a.remote.manager
+	if manager == nil {
+		return false
+	}
+	manager.stateDispatchMu.Lock()
+	defer manager.stateDispatchMu.Unlock()
+	if !remoteWorkbenchTargetMatches(manager.Snapshot(), expected) {
+		return false
+	}
+	a.remote.workbenchMu.Lock()
+	update(&a.remote.workbench)
+	a.remote.workbenchMu.Unlock()
+	return true
+}
+
+func (a *App) remoteWorkspaceSessionCreateInFlight() bool {
+	if a == nil {
+		return false
+	}
+	a.remote.workspaceSessionCreateMu.Lock()
+	defer a.remote.workspaceSessionCreateMu.Unlock()
+	return a.remote.workspaceSessionCreates > 0
+}
+
+var errRemoteWorkspaceSessionCreateWhileClosing = errors.New("Reasonix is closing; a Remote Session cannot be created")
+
+// beginRemoteWorkbenchSessionCreate admits a complete Host-side Session-create
+// decision before queueing behind workbenchOp. The fixed lock order keeps every
+// create path serialized without allowing final shutdown to pass a queued
+// caller. The returned function must be called exactly once by the admitting
+// caller; keeping this helper at the outer entry point avoids nested admission.
+func (a *App) beginRemoteWorkbenchSessionCreate() (func(), error) {
+	if err := a.beginRemoteWorkspaceSessionCreate(); err != nil {
+		return nil, err
+	}
+	a.remote.workbenchOp.Lock()
+	return func() {
+		a.remote.workbenchOp.Unlock()
+		a.endRemoteWorkspaceSessionCreate()
+	}, nil
+}
+
+func (a *App) beginRemoteWorkspaceSessionCreate() error {
+	if a == nil {
+		return errRemoteWorkspaceSessionCreateWhileClosing
+	}
+	a.remote.workspaceSessionCreateMu.Lock()
+	defer a.remote.workspaceSessionCreateMu.Unlock()
+	if a.remote.workspaceSessionClosing {
+		return errRemoteWorkspaceSessionCreateWhileClosing
+	}
+	a.remote.workspaceSessionCreates++
+	return nil
+}
+
+func (a *App) endRemoteWorkspaceSessionCreate() {
+	if a == nil {
+		return
+	}
+	a.remote.workspaceSessionCreateMu.Lock()
+	defer a.remote.workspaceSessionCreateMu.Unlock()
+	if a.remote.workspaceSessionCreates > 0 {
+		a.remote.workspaceSessionCreates--
+	}
+}
+
+// beginRemoteDesktopClose atomically excludes every later Host-side Session
+// create. Repeated calls are allowed because runtime.Quit triggers Wails'
+// OnBeforeClose after a bound close action has already admitted shutdown.
+func (a *App) beginRemoteDesktopClose() bool {
+	if a == nil {
+		return true
+	}
+	a.remote.workspaceSessionCreateMu.Lock()
+	defer a.remote.workspaceSessionCreateMu.Unlock()
+	if a.remote.workspaceSessionCreates > 0 {
+		return false
+	}
+	a.remote.workspaceSessionClosing = true
+	return true
+}
+
+type remoteDesktopBackgroundCloseDecision uint8
+
+const (
+	remoteDesktopBackgroundCloseBlocked remoteDesktopBackgroundCloseDecision = iota
+	remoteDesktopBackgroundCloseHide
+	remoteDesktopBackgroundCloseAlreadyClosing
+)
+
+// decideRemoteDesktopBackgroundClose observes the create/close gate without
+// taking ownership of final shutdown. A background close must never clear an
+// already-admitted final close from another native or tray quit callback.
+func (a *App) decideRemoteDesktopBackgroundClose() remoteDesktopBackgroundCloseDecision {
+	if a == nil {
+		return remoteDesktopBackgroundCloseAlreadyClosing
+	}
+	a.remote.workspaceSessionCreateMu.Lock()
+	defer a.remote.workspaceSessionCreateMu.Unlock()
+	if a.remote.workspaceSessionClosing {
+		return remoteDesktopBackgroundCloseAlreadyClosing
+	}
+	if a.remote.workspaceSessionCreates > 0 {
+		return remoteDesktopBackgroundCloseBlocked
+	}
+	return remoteDesktopBackgroundCloseHide
+}
+
+func (a *App) markRemoteDesktopClosing() {
+	if a == nil {
+		return
+	}
+	a.remote.workspaceSessionCreateMu.Lock()
+	a.remote.workspaceSessionClosing = true
+	a.remote.workspaceSessionCreateMu.Unlock()
 }
 
 func normalizeRemoteAdditionalDirectories(primary string, values []string) ([]runtimeapi.DirectoryRef, error) {
@@ -309,6 +578,8 @@ func normalizeRemoteAdditionalDirectories(primary string, values []string) ([]ru
 
 func remoteSessionCreateFingerprint(primary string, additional []runtimeapi.DirectoryRef, title string) string {
 	var value strings.Builder
+	value.WriteString("workspace-create")
+	value.WriteByte(0)
 	value.WriteString(primary)
 	value.WriteByte(0)
 	for _, directory := range additional {
@@ -317,6 +588,22 @@ func remoteSessionCreateFingerprint(primary string, additional []runtimeapi.Dire
 	}
 	value.WriteString(title)
 	return value.String()
+}
+
+func remoteBlankSessionCreateFingerprint(workspaceID runtimeapi.WorkspaceID) string {
+	return "blank-create\x00" + string(workspaceID)
+}
+
+func remoteForkSessionCreateFingerprint(source runtimeapi.SessionRef, checkpoint runtimeapi.CheckpointID) string {
+	return "fork-create\x00" + string(source.WorkspaceID) + "\x00" + string(source.SessionID) + "\x00" + string(checkpoint)
+}
+
+func remoteProjectSessionCreateFingerprint(workspaceID runtimeapi.WorkspaceID, topicID runtimeapi.TopicID) string {
+	return "project-create\x00" + string(workspaceID) + "\x00" + string(topicID)
+}
+
+func remoteWorkspaceSwitchSessionCreateFingerprint(workspaceID runtimeapi.WorkspaceID) string {
+	return "workspace-switch-create\x00" + string(workspaceID)
 }
 
 func clonePendingRemoteCreate(value *pendingRemoteSessionCreate) *pendingRemoteSessionCreate {
@@ -359,11 +646,19 @@ func remoteWorkbenchStatusLocked(state remoteWorkbenchState, target TargetManage
 }
 
 func (a *App) publishRemoteWorkbenchReady(status RemoteWorkbenchStatusView) {
-	a.emitRuntimeEvent(remoteWorkbenchStateEvent, status)
+	a.enqueueRemoteWorkbenchReady(status)
 	a.emitProjectTreeChanged()
+}
+
+// enqueueRemoteWorkbenchReady only appends to the ordered runtime-event queue.
+// commitRemoteWorkbenchSession calls it while holding TargetManager's
+// stateDispatchMu, so a newer StateSink cannot enqueue its replacement state in
+// the middle of this workbench/rebuilt/ready sequence.
+func (a *App) enqueueRemoteWorkbenchReady(status RemoteWorkbenchStatusView) {
+	a.emitRuntimeEvent(remoteWorkbenchStateEvent, status)
 	if status.SessionAttached && status.TabID != "" {
 		a.emitRuntimeEvent("runtime:rebuilt", status.TabID)
-		a.emitReady(a.bootContext(), status.TabID)
+		a.emitRuntimeEvent("agent:ready", status.TabID)
 	}
 }
 
@@ -404,6 +699,9 @@ func (a *App) applyRemoteTargetState(target TargetManagerSnapshot) {
 }
 
 func (a *App) reattachRemoteWorkbench(expected TargetManagerSnapshot) {
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
 	a.remote.workbenchMu.RLock()
 	if a.remote.workbench.HostID != expected.Target.ID {
 		a.remote.workbenchMu.RUnlock()
@@ -421,13 +719,17 @@ func (a *App) reattachRemoteWorkbench(expected TargetManagerSnapshot) {
 	}
 	a.remote.workbenchMu.RUnlock()
 
-	api, _, connectionErr := a.remoteConnectedRuntime()
+	api, connected, connectionErr := a.remoteConnectedRuntimeSnapshot()
+	if connectionErr == nil && !remoteWorkbenchTargetMatches(connected, expected) {
+		connectionErr = ErrTargetTransitionSuperseded
+	}
 	for _, ref := range refs {
 		err := connectionErr
 		var snapshot runtimeapi.SessionSnapshot
+		var rollback remoteWorkbenchSubscriptionRollback
 		if err == nil {
 			ctx, cancel := context.WithTimeout(a.bootContext(), remoteAppActionTimeout)
-			snapshot, err = api.AttachAndSubscribe(ctx, runtimeapi.AttachAndSubscribeInput{
+			snapshot, rollback, err = attachRemoteWorkbenchAtomic(ctx, api, runtimeapi.AttachAndSubscribeInput{
 				Session: ref, HistoryTurns: validateRemoteWorkbenchHistoryTurns(a.desktopHistoryPageTurns()),
 			})
 			cancel()
@@ -439,6 +741,7 @@ func (a *App) reattachRemoteWorkbench(expected TargetManagerSnapshot) {
 		if err == nil && (current.State != TargetRemoteConnected || current.Generation != expected.Generation || !sameTarget(current.Target, expected.Target)) {
 			err = ErrTargetTransitionSuperseded
 		}
+		committed := false
 		a.remote.workbenchMu.Lock()
 		state := &a.remote.workbench
 		if state.HostID == expected.Target.ID {
@@ -452,12 +755,19 @@ func (a *App) reattachRemoteWorkbench(expected TargetManagerSnapshot) {
 					session.Created.ResolvedProfile = snapshot.Profile
 					session.AttachedGeneration = expected.Generation
 					session.LastAttachError = ""
+					committed = true
 				} else {
 					session.LastAttachError = err.Error()
 				}
 			}
 		}
 		a.remote.workbenchMu.Unlock()
+		if err == nil && !committed {
+			err = ErrTargetTransitionSuperseded
+		}
+		if err != nil && rollback != nil {
+			discardRemoteWorkbenchSubscription(rollback, ref)
+		}
 		if errors.Is(err, ErrTargetTransitionSuperseded) {
 			break
 		}
@@ -466,19 +776,38 @@ func (a *App) reattachRemoteWorkbench(expected TargetManagerSnapshot) {
 }
 
 func (a *App) remoteConnectedRuntime() (runtimeapi.RuntimeAPI, TargetDescriptor, error) {
+	api, snapshot, err := a.remoteConnectedRuntimeSnapshot()
+	return api, snapshot.Target, err
+}
+
+func (a *App) remoteConnectedRuntimeSnapshot() (runtimeapi.RuntimeAPI, TargetManagerSnapshot, error) {
 	manager := a.remote.manager
 	if manager == nil {
-		return nil, TargetDescriptor{}, ErrRuntimeTargetUnavailable
+		return nil, TargetManagerSnapshot{}, ErrRuntimeTargetUnavailable
 	}
-	snapshot := manager.Snapshot()
-	if snapshot.State != TargetRemoteConnected || snapshot.Target.Kind != TargetRemote {
-		return nil, snapshot.Target, ErrRuntimeTargetUnavailable
-	}
-	api, err := manager.RuntimeAPI()
+	api, snapshot, err := manager.RuntimeAPISnapshot()
 	if err != nil {
-		return nil, snapshot.Target, err
+		return nil, snapshot, err
 	}
-	return api, snapshot.Target, nil
+	if snapshot.State != TargetRemoteConnected || snapshot.Target.Kind != TargetRemote {
+		return nil, snapshot, ErrRuntimeTargetUnavailable
+	}
+	return api, snapshot, nil
+}
+
+// remoteConnectedRuntimeFor pairs a previously projected workbench Session
+// with the exact RuntimeAPI generation that projection came from. Without the
+// second snapshot comparison an A -> B transition between remoteSessionView
+// and RuntimeAPI lookup could send A's opaque SessionRef to B's adapter.
+func (a *App) remoteConnectedRuntimeFor(expected TargetManagerSnapshot) (runtimeapi.RuntimeAPI, error) {
+	api, current, err := a.remoteConnectedRuntimeSnapshot()
+	if err != nil {
+		return nil, err
+	}
+	if !remoteWorkbenchTargetMatches(current, expected) {
+		return nil, ErrTargetTransitionSuperseded
+	}
+	return api, nil
 }
 
 // remoteConnectedV1Runtime is the workbench's frozen V1 admission boundary.
@@ -486,15 +815,20 @@ func (a *App) remoteConnectedRuntime() (runtimeapi.RuntimeAPI, TargetDescriptor,
 // surface, so consumers that need catalogs/lifecycle/file domains must prove
 // that the connected adapter implements the complete V1 contract here.
 func (a *App) remoteConnectedV1Runtime() (runtimeapi.V1RuntimeAPI, TargetDescriptor, error) {
-	api, target, err := a.remoteConnectedRuntime()
+	api, snapshot, err := a.remoteConnectedV1RuntimeSnapshot()
+	return api, snapshot.Target, err
+}
+
+func (a *App) remoteConnectedV1RuntimeSnapshot() (runtimeapi.V1RuntimeAPI, TargetManagerSnapshot, error) {
+	api, snapshot, err := a.remoteConnectedRuntimeSnapshot()
 	if err != nil {
-		return nil, target, err
+		return nil, snapshot, err
 	}
 	v1, ok := api.(runtimeapi.V1RuntimeAPI)
 	if !ok {
-		return nil, target, runtimeapi.Unavailable(runtimeapi.CapabilitySessionAttach, "the connected target does not implement RuntimeAPI V1")
+		return nil, snapshot, runtimeapi.Unavailable(runtimeapi.CapabilitySessionAttach, "the connected target does not implement RuntimeAPI V1")
 	}
-	return v1, target, nil
+	return v1, snapshot, nil
 }
 
 func (a *App) remoteTargetSelected() bool {
@@ -547,9 +881,12 @@ func (a *App) remoteV1ForTab(tabID string) (runtimeapi.V1RuntimeAPI, remoteWorkb
 	if !ok || target.State != TargetRemoteConnected || session.AttachedGeneration != target.Generation {
 		return nil, remoteWorkbenchSession{}, runtimeapi.Workspace{}, target, ErrRuntimeTargetUnavailable
 	}
-	api, _, err := a.remoteConnectedV1Runtime()
+	api, connected, err := a.remoteConnectedV1RuntimeSnapshot()
 	if err != nil {
 		return nil, remoteWorkbenchSession{}, runtimeapi.Workspace{}, target, err
+	}
+	if !remoteWorkbenchTargetMatches(connected, target) {
+		return nil, remoteWorkbenchSession{}, runtimeapi.Workspace{}, target, ErrTargetTransitionSuperseded
 	}
 	return api, session, workspace, target, nil
 }
@@ -766,7 +1103,7 @@ func (a *App) remoteSubmit(tabID, input string) error {
 	if !ok || target.State != TargetRemoteConnected || session.AttachedGeneration != target.Generation {
 		return ErrRuntimeTargetUnavailable
 	}
-	api, _, err := a.remoteConnectedRuntime()
+	api, err := a.remoteConnectedRuntimeFor(target)
 	if err != nil {
 		return err
 	}
@@ -878,14 +1215,23 @@ func (a *App) refreshRemoteWorkbenchSession(api runtimeapi.RuntimeAPI, ref runti
 	if api == nil || !ref.Valid() {
 		return runtimeapi.SessionSnapshot{}, ErrRuntimeTargetUnavailable
 	}
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
 	ctx, cancel := a.remoteActionContext()
-	fresh, err := api.AttachAndSubscribe(ctx, runtimeapi.AttachAndSubscribeInput{
+	fresh, rollback, err := attachRemoteWorkbenchAtomic(ctx, api, runtimeapi.AttachAndSubscribeInput{
 		Session: ref, HistoryTurns: validateRemoteWorkbenchHistoryTurns(a.desktopHistoryPageTurns()),
 	})
 	cancel()
 	if err != nil {
 		return runtimeapi.SessionSnapshot{}, err
 	}
+	retainSubscription := false
+	defer func() {
+		if !retainSubscription {
+			discardRemoteWorkbenchSubscription(rollback, ref)
+		}
+	}()
 	if fresh.Session != ref {
 		return runtimeapi.SessionSnapshot{}, errors.New("Remote snapshot refresh returned a different Session identity")
 	}
@@ -910,6 +1256,7 @@ func (a *App) refreshRemoteWorkbenchSession(api runtimeapi.RuntimeAPI, ref runti
 	current.Created.ResolvedProfile = fresh.Profile
 	current.LastAttachError = ""
 	a.remote.workbenchMu.Unlock()
+	retainSubscription = true
 	return cloneRemoteSessionSnapshot(fresh), nil
 }
 
@@ -918,7 +1265,7 @@ func (a *App) remoteSteer(tabID, text string) error {
 	if !ok || target.State != TargetRemoteConnected || session.Snapshot.Runtime.CurrentTurn == nil {
 		return errors.New("the Remote Session has no active Turn to steer")
 	}
-	api, _, err := a.remoteConnectedRuntime()
+	api, err := a.remoteConnectedRuntimeFor(target)
 	if err != nil {
 		return err
 	}
@@ -934,7 +1281,7 @@ func (a *App) remoteCancel(tabID string) error {
 	if !ok || target.State != TargetRemoteConnected {
 		return ErrRuntimeTargetUnavailable
 	}
-	api, _, err := a.remoteConnectedRuntime()
+	api, err := a.remoteConnectedRuntimeFor(target)
 	if err != nil {
 		return err
 	}
@@ -989,7 +1336,7 @@ func (a *App) remoteApprove(tabID, promptID string, allow, sessionGrant, persist
 			decision = runtimeapi.DecisionAllowOnce
 		}
 	}
-	api, _, err := a.remoteConnectedRuntime()
+	api, err := a.remoteConnectedRuntimeFor(target)
 	if err != nil {
 		return err
 	}
@@ -998,10 +1345,13 @@ func (a *App) remoteApprove(tabID, promptID string, allow, sessionGrant, persist
 		Session: session.Created.Session, PromptID: runtimeapi.PromptID(promptID), Decision: decision,
 	})
 	cancel()
-	if err == nil {
-		a.clearRemotePendingPrompt(session.Created.Session)
+	if err != nil {
+		return err
 	}
-	return err
+	if !a.clearRemotePendingPrompt(target, session.Created.Session, runtimeapi.PromptID(promptID)) {
+		return ErrTargetTransitionSuperseded
+	}
+	return nil
 }
 
 func (a *App) remoteAnswer(tabID, promptID string, answers []QuestionAnswer) error {
@@ -1015,7 +1365,7 @@ func (a *App) remoteAnswer(tabID, promptID string, answers []QuestionAnswer) err
 			QuestionID: runtimeapi.QuestionID(answer.QuestionID), Selected: append([]string(nil), answer.Selected...),
 		}
 	}
-	api, _, err := a.remoteConnectedRuntime()
+	api, err := a.remoteConnectedRuntimeFor(target)
 	if err != nil {
 		return err
 	}
@@ -1024,22 +1374,60 @@ func (a *App) remoteAnswer(tabID, promptID string, answers []QuestionAnswer) err
 		Session: session.Created.Session, PromptID: runtimeapi.PromptID(promptID), Answers: projected,
 	})
 	cancel()
-	if err == nil {
-		a.clearRemotePendingPrompt(session.Created.Session)
+	if err != nil {
+		return err
 	}
-	return err
+	if !a.clearRemotePendingPrompt(target, session.Created.Session, runtimeapi.PromptID(promptID)) {
+		return ErrTargetTransitionSuperseded
+	}
+	return nil
 }
 
-func (a *App) clearRemotePendingPrompt(ref runtimeapi.SessionRef) {
-	a.remote.workbenchMu.Lock()
-	if current := a.remote.workbench.Sessions[ref]; current != nil {
-		current.Snapshot.PendingPrompt = nil
+func (a *App) clearRemotePendingPrompt(
+	expected TargetManagerSnapshot,
+	ref runtimeapi.SessionRef,
+	promptID runtimeapi.PromptID,
+) bool {
+	changed := false
+	committed := false
+	if !a.withRemoteWorkbenchTarget(expected, func(state *remoteWorkbenchState) {
+		current := state.Sessions[ref]
+		if current == nil || current.AttachedGeneration != expected.Generation {
+			return
+		}
+		committed = true
+		pending := current.Snapshot.PendingPrompt
+		if pending == nil {
+			return
+		}
+		var currentID runtimeapi.PromptID
+		switch pending.Kind {
+		case runtimeapi.PromptApproval:
+			if pending.Approval != nil {
+				currentID = pending.Approval.ID
+			}
+		case runtimeapi.PromptAsk:
+			if pending.Ask != nil {
+				currentID = pending.Ask.ID
+			}
+		}
+		if currentID == promptID {
+			current.Snapshot.PendingPrompt = nil
+			changed = true
+		}
+	}) || !committed {
+		return false
 	}
-	a.remote.workbenchMu.Unlock()
-	a.emitProjectTreeChanged()
+	if changed {
+		a.emitProjectTreeChanged()
+	}
+	return true
 }
 
 func (a *App) closeRemoteWorkbenchSession(tabID string) error {
+	a.remote.workbenchOp.Lock()
+	defer a.remote.workbenchOp.Unlock()
+
 	session, _, target, ok := a.remoteSessionView(tabID)
 	if !ok || target.State != TargetRemoteConnected {
 		return ErrRuntimeTargetUnavailable
@@ -1050,7 +1438,7 @@ func (a *App) closeRemoteWorkbenchSession(tabID string) error {
 	if tabCount <= 1 {
 		return errors.New("cannot close the last tab")
 	}
-	api, _, err := a.remoteConnectedRuntime()
+	api, err := a.remoteConnectedRuntimeFor(target)
 	if err != nil {
 		return err
 	}
@@ -1074,22 +1462,12 @@ func (a *App) closeRemoteWorkbenchSession(tabID string) error {
 			slog.Warn("desktop: Remote Session close hint failed after tab unsubscribe", "session", session.Created.Session.SessionID, "err", closeErr)
 		}
 	}
-	a.remote.workbenchMu.Lock()
-	state := &a.remote.workbench
-	if current := state.Sessions[session.Created.Session]; current != nil {
-		tabID := remoteSessionTabID(session.Created.Session)
-		delete(state.Sessions, session.Created.Session)
-		delete(state.SessionTabs, tabID)
-		state.TabOrder = removeRemoteTabID(state.TabOrder, tabID)
-		if state.ActiveTabID == tabID {
-			state.ActiveTabID = ""
-			if len(state.TabOrder) != 0 {
-				state.ActiveTabID = state.TabOrder[len(state.TabOrder)-1]
-			}
-		}
+	if _, committed := a.removeRemoteWorkbenchSession(target, session.Created.Session); !committed {
+		// The exact old subscription is gone, but a newer target generation now
+		// owns the visible workbench. Preserve that state; its queued reattach is
+		// serialized behind workbenchOp and will establish a fresh binding.
+		return ErrTargetTransitionSuperseded
 	}
-	a.remote.workbenchMu.Unlock()
-	a.publishRemoteWorkbenchChanged()
 	return nil
 }
 
@@ -1308,58 +1686,123 @@ func removeRemoteTabID(values []string, target string) []string {
 	return out
 }
 
-// removeRemoteWorkbenchSession commits a Host-confirmed cold removal. It does
-// not unsubscribe: TrashSession/CloseWorkspace already own that Host lifecycle
-// transition, and the adapter has discarded the corresponding binding.
-func (a *App) removeRemoteWorkbenchSession(ref runtimeapi.SessionRef) bool {
-	a.remote.workbenchMu.Lock()
-	state := &a.remote.workbench
-	if state.Sessions[ref] == nil {
-		a.remote.workbenchMu.Unlock()
-		return false
+type remoteWorkbenchSessionRemovalMatch func(runtimeapi.SessionRef, *remoteWorkbenchSession) bool
+type remoteWorkbenchPendingRemovalMatch func(*pendingRemoteSessionCreate) bool
+
+// removeRemoteWorkbenchRecords commits a Host-confirmed record removal only
+// against the target generation that issued it. Host-scoped pending creates are
+// safe to clear even after the UI has moved away, but current workbench state
+// must never be mutated after A -> B or A -> B -> A supersedes expected.
+func (a *App) removeRemoteWorkbenchRecords(
+	expected TargetManagerSnapshot,
+	matchSession remoteWorkbenchSessionRemovalMatch,
+	matchPending remoteWorkbenchPendingRemovalMatch,
+	removeWorkspace runtimeapi.WorkspaceID,
+) (int, bool) {
+	if a == nil || a.remote.manager == nil || matchSession == nil || matchPending == nil {
+		return 0, false
 	}
-	tabID := remoteSessionTabID(ref)
-	delete(state.Sessions, ref)
-	delete(state.SessionTabs, tabID)
-	state.TabOrder = removeRemoteTabID(state.TabOrder, tabID)
-	if state.ActiveTabID == tabID {
-		state.ActiveTabID = ""
-		if len(state.TabOrder) != 0 {
-			state.ActiveTabID = state.TabOrder[0]
+	manager := a.remote.manager
+	manager.stateDispatchMu.Lock()
+	currentMatches := remoteWorkbenchTargetMatches(manager.Snapshot(), expected)
+
+	a.remote.workbenchMu.Lock()
+	if byFingerprint := a.remote.workspacePending[expected.Target.ID]; byFingerprint != nil {
+		for fingerprint, pending := range byFingerprint {
+			if pending != nil && matchPending(pending) {
+				delete(byFingerprint, fingerprint)
+			}
+		}
+		if len(byFingerprint) == 0 {
+			delete(a.remote.workspacePending, expected.Target.ID)
 		}
 	}
-	a.remote.workbenchMu.Unlock()
-	a.publishRemoteWorkbenchChanged()
-	return true
-}
 
-func (a *App) removeRemoteWorkbenchWorkspace(workspaceID runtimeapi.WorkspaceID) int {
-	a.remote.workbenchMu.Lock()
 	state := &a.remote.workbench
 	removed := 0
-	for ref := range state.Sessions {
-		if ref.WorkspaceID != workspaceID {
-			continue
+	stateChanged := false
+	var status RemoteWorkbenchStatusView
+	if currentMatches && state.HostID == expected.Target.ID {
+		for ref, session := range state.Sessions {
+			if !matchSession(ref, session) {
+				continue
+			}
+			tabID := remoteSessionTabID(ref)
+			delete(state.Sessions, ref)
+			delete(state.SessionTabs, tabID)
+			state.TabOrder = removeRemoteTabID(state.TabOrder, tabID)
+			removed++
+			stateChanged = true
 		}
-		tabID := remoteSessionTabID(ref)
-		delete(state.Sessions, ref)
-		delete(state.SessionTabs, tabID)
-		state.TabOrder = removeRemoteTabID(state.TabOrder, tabID)
-		removed++
-	}
-	delete(state.Workspaces, workspaceID)
-	for fingerprint, pending := range state.Pending {
-		if pending != nil && pending.Workspace.ID == workspaceID {
-			delete(state.Pending, fingerprint)
+		if removeWorkspace != "" {
+			if _, exists := state.Workspaces[removeWorkspace]; exists {
+				delete(state.Workspaces, removeWorkspace)
+				stateChanged = true
+			}
 		}
-	}
-	if _, ok := state.SessionTabs[state.ActiveTabID]; !ok {
-		state.ActiveTabID = ""
-		if len(state.TabOrder) != 0 {
-			state.ActiveTabID = state.TabOrder[0]
+		for fingerprint, pending := range state.Pending {
+			if pending != nil && matchPending(pending) {
+				delete(state.Pending, fingerprint)
+				stateChanged = true
+			}
+		}
+		if _, ok := state.SessionTabs[state.ActiveTabID]; !ok {
+			state.ActiveTabID = ""
+			if len(state.TabOrder) != 0 {
+				state.ActiveTabID = state.TabOrder[0]
+			}
+		}
+		if stateChanged {
+			status = remoteWorkbenchStatusLocked(*state, expected)
 		}
 	}
 	a.remote.workbenchMu.Unlock()
-	a.publishRemoteWorkbenchChanged()
-	return removed
+	if stateChanged {
+		a.emitRuntimeEvent(remoteWorkbenchStateEvent, status)
+	}
+	manager.stateDispatchMu.Unlock()
+	if currentMatches {
+		a.emitProjectTreeChanged()
+	}
+	return removed, currentMatches
+}
+
+// removeRemoteWorkbenchSession does not unsubscribe: the caller has already
+// completed the Host lifecycle operation (or an exact view unsubscribe).
+func (a *App) removeRemoteWorkbenchSession(expected TargetManagerSnapshot, ref runtimeapi.SessionRef) (bool, bool) {
+	removed, committed := a.removeRemoteWorkbenchRecords(
+		expected,
+		func(candidate runtimeapi.SessionRef, _ *remoteWorkbenchSession) bool { return candidate == ref },
+		func(pending *pendingRemoteSessionCreate) bool { return pending.Created.Session == ref },
+		"",
+	)
+	return removed != 0, committed
+}
+
+func (a *App) removeRemoteWorkbenchWorkspace(expected TargetManagerSnapshot, workspaceID runtimeapi.WorkspaceID) (int, bool) {
+	return a.removeRemoteWorkbenchRecords(
+		expected,
+		func(ref runtimeapi.SessionRef, _ *remoteWorkbenchSession) bool { return ref.WorkspaceID == workspaceID },
+		func(pending *pendingRemoteSessionCreate) bool {
+			return pending.Workspace.ID == workspaceID || pending.Created.Session.WorkspaceID == workspaceID
+		},
+		workspaceID,
+	)
+}
+
+func (a *App) removeRemoteWorkbenchTopic(
+	expected TargetManagerSnapshot,
+	workspaceID runtimeapi.WorkspaceID,
+	topicID runtimeapi.TopicID,
+) (int, bool) {
+	return a.removeRemoteWorkbenchRecords(
+		expected,
+		func(ref runtimeapi.SessionRef, session *remoteWorkbenchSession) bool {
+			return ref.WorkspaceID == workspaceID && session != nil && session.Created.TopicID == topicID
+		},
+		func(pending *pendingRemoteSessionCreate) bool {
+			return pending.Created.Session.WorkspaceID == workspaceID && pending.Created.TopicID == topicID
+		},
+		"",
+	)
 }
