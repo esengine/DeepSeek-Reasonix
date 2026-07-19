@@ -19,8 +19,10 @@ function ok(cond: boolean, label: string) {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
+const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
+const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8");
 
 console.log("\nbundle contract");
 
@@ -41,6 +43,29 @@ ok(
   appSource.includes('import("./components/SettingsPanel")') &&
     appSource.includes('import("./components/HistoryPanel")'),
   "App loads secondary drawers on demand",
+);
+ok(
+  !appSource.includes("openAllHistory") &&
+    !appSource.includes("cmd-history") &&
+    !appSource.includes("sidebar.allHistory") &&
+    !projectTreeSource.includes("onOpenProjectHistory") &&
+    !projectTreeSource.includes("project-history"),
+  "App has no dedicated history-page entry points",
+);
+ok(
+  appSource.includes('id: "cmd-trash"') &&
+    appSource.includes("openTrash") &&
+    appSource.includes("paletteSessions.slice(0, 12)") &&
+    projectTreeSource.includes('t("projectTree.searchPlaceholder")'),
+  "Trash and existing session search remain available",
+);
+ok(
+  /\.sidebar--workbench\s+\.sidebar__utility-row\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s.test(stylesSource),
+  "Workbench footer distributes its three utility actions evenly",
+);
+ok(
+  /\.app--creation\s+\.sidebar__nav,\s*:root\[data-theme-style\]\s+\.app--creation\s+\.sidebar__nav\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s.test(stylesSource),
+  "Creation footer distributes search, trash, and settings evenly",
 );
 ok(
   !/import\s+\{[^}]*\b(?:MCPServersSettingsPage|SkillsSettingsPage|PluginsSettingsPage)\b[^}]*\}\s+from\s+["']\.\/CapabilitiesPanel["']/.test(settingsSource) &&

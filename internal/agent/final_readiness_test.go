@@ -190,6 +190,8 @@ func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
 		"do not claim the user answered",
 		"do not run exploratory bash commands",
 		"do not keep retrying the blocked command",
+		"final existing todo's exact text or 1-based step_index",
+		"do not invent a new step",
 	} {
 		if !strings.Contains(lower, want) {
 			t.Fatalf("finalReadinessRetryMessage() missing %q:\n%s", want, msg)

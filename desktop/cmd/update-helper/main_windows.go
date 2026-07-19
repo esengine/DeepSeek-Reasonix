@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/repair"
 )
 
 const parentExitTimeout = 2 * time.Minute
@@ -23,19 +25,24 @@ func main() {
 
 func run(args []string) int {
 	var parentPID uint
-	var installer, installDir, relaunch string
+	var installer, installDir, relaunch, toVersion string
 	fs := flag.NewFlagSet("reasonix-update-helper", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.UintVar(&parentPID, "parent-pid", 0, "Reasonix process id to wait for before installing")
 	fs.StringVar(&installer, "installer", "", "verified NSIS installer path")
 	fs.StringVar(&installDir, "install-dir", "", "Reasonix installation directory")
 	fs.StringVar(&relaunch, "relaunch", "", "Reasonix executable to start after the installer succeeds")
+	fs.StringVar(&toVersion, "to-version", "", "Reasonix version being installed")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	logger := newLogger()
 	if installer == "" {
 		logger.Print("missing --installer")
+		return 2
+	}
+	if toVersion == "" {
+		logger.Print("missing --to-version")
 		return 2
 	}
 	if parentPID != 0 {
@@ -46,6 +53,19 @@ func run(args []string) int {
 	}
 	if err := runInstaller(installer, installDir); err != nil {
 		logger.Printf("run installer: %v", err)
+		// The desktop already exited cleanly, so nothing would notice this
+		// failure: record it and relaunch through Guard, which rolls the
+		// release unit back on startup (the helper itself runs from the cache
+		// directory, outside the validated install, and must not restore
+		// binaries directly).
+		if markErr := repair.MarkUpdateApplyFailed(toVersion, err.Error()); markErr != nil {
+			logger.Printf("record install failure: %v", markErr)
+		}
+		if relaunch != "" {
+			if relaunchErr := startRelaunch(relaunch, installDir); relaunchErr != nil {
+				logger.Printf("relaunch after failed install: %v", relaunchErr)
+			}
+		}
 		return 1
 	}
 	if relaunch != "" {

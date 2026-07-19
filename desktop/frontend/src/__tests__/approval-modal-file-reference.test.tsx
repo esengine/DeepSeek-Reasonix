@@ -228,17 +228,41 @@ console.log("\napproval modal file references");
       id: "sandbox-escape-approval-zh",
       tool: "sandbox_escape",
       subject: "run unconfined once: go test ./...",
-      reason: "Windows sandbox failed while starting this command. Run it unconfined one time? This bypasses the OS sandbox for this command only.",
+      reason: "Windows does not provide an OS-level Bash sandbox for this command. Run it unconfined one time? This bypasses OS isolation for this command only.",
     },
   });
 
   const text = document.body.textContent ?? "";
   ok(text.includes("仅本次不进沙箱运行：go test ./..."), "sandbox escape approval localizes subject in Chinese UI");
-  ok(text.includes("Windows 沙箱启动这条命令时失败"), "sandbox escape approval localizes English backend reason in Chinese UI");
+  ok(text.includes("Windows 不提供这条命令所需的 OS 级 Bash 沙箱"), "sandbox escape approval localizes the retired Windows backend reason in Chinese UI");
   ok(text.includes("允许一次"), "sandbox escape Chinese approval shows allow once");
   ok(text.includes("本会话使用真实环境"), "sandbox escape Chinese approval shows session grant");
   ok(text.includes("拒绝"), "sandbox escape Chinese approval shows deny");
   ok(!text.includes("总是允许"), "sandbox escape Chinese approval hides persistent grant");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom("zh-CN");
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const { root } = await renderApproval({
+    approval: {
+      id: "sandbox-escape-runtime-approval-zh",
+      tool: "sandbox_escape",
+      subject: "run unconfined once: go test ./...",
+      reason: "The OS sandbox could not start this command. Run it unconfined one time? This bypasses OS isolation for this command only.",
+    },
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("OS 沙箱无法启动这条命令"), "sandbox escape approval localizes the runtime failure reason in Chinese UI");
 
   await act(async () => {
     root.unmount();

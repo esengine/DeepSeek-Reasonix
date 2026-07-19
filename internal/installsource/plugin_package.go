@@ -2,6 +2,8 @@ package installsource
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,7 +14,10 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
+	"reasonix/internal/config"
+	"reasonix/internal/mcpcatalog"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
@@ -455,9 +460,12 @@ func (t *installSourceTool) applyInstallPluginPackage(ctx context.Context, req r
 		Description:  pkg.Manifest.Description,
 		ManifestKind: pkg.ManifestKind,
 		Enabled:      true,
+		Commit:       strings.ToLower(strings.TrimSpace(commit)),
 	}
 	if act.Mode == "link" {
 		installed.Root = sourceRoot
+	} else if verification, ok := verifyInstalledPluginCatalog(ctx, installed, target, pkg.ManifestKind); ok {
+		installed.Verification = verification
 	}
 	if err := pluginpkg.Upsert(t.reasonixHome, installed); err != nil {
 		return err
@@ -471,6 +479,37 @@ func (t *installSourceTool) applyInstallPluginPackage(ctx context.Context, req r
 	act.MappedCapabilities = append([]string(nil), pkg.Compatibility.Mapped...)
 	act.SkippedCapabilities = append([]pluginpkg.CompatibilityIssue(nil), pkg.Compatibility.Skipped...)
 	return nil
+}
+
+func verifyInstalledPluginCatalog(ctx context.Context, installed pluginpkg.InstalledPlugin, root, manifestKind string) (*pluginpkg.Verification, bool) {
+	packageDigest, err := mcpcatalog.TreeSHA256(root)
+	if err != nil {
+		return nil, false
+	}
+	manifestPath := filepath.Join(root, pluginpkg.NativeManifest)
+	switch manifestKind {
+	case "codex":
+		manifestPath = filepath.Join(root, pluginpkg.CodexManifest)
+	case "claude":
+		manifestPath = filepath.Join(root, pluginpkg.ClaudeManifest)
+	}
+	manifestBody, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return nil, false
+	}
+	manifestSum := sha256.Sum256(manifestBody)
+	result, err := (mcpcatalog.Loader{CacheDir: config.CacheDir()}).Load(ctx, false)
+	if err != nil {
+		return nil, false
+	}
+	entry, ok := result.Index.Match(installed.Name, installed.Version, installed.Source, installed.Commit, packageDigest)
+	if !ok || !strings.EqualFold(entry.ManifestSHA256, hex.EncodeToString(manifestSum[:])) {
+		return nil, false
+	}
+	return &pluginpkg.Verification{
+		CatalogEntryID: entry.ID, Commit: installed.Commit, PackageSHA256: packageDigest,
+		VerifiedAt: time.Now().UTC(), CatalogSequence: result.Index.Sequence,
+	}, true
 }
 
 func (t *installSourceTool) preparePluginSource(ctx context.Context, source, mode string) (string, string, func(), error) {
@@ -554,7 +593,11 @@ func checkoutPluginCommit(ctx context.Context, cloneRoot, commit string) error {
 }
 
 func pluginGitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	// Preserve repository bytes across platforms. A user's global autocrlf
+	// setting must not rewrite JSON/scripts on Windows and make the installed
+	// tree differ from the catalog's signed package digest.
+	gitArgs := append([]string{"-c", "core.autocrlf=false"}, args...)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	cmd.Env = secrets.ProcessEnv()
 	proc.HideWindow(cmd)
 	return cmd

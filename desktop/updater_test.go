@@ -44,6 +44,21 @@ func TestNormalizeVersion(t *testing.T) {
 	}
 }
 
+func TestUpdateSiblingNamesCoverEveryReplacedEntryPoint(t *testing.T) {
+	windows := strings.Join(updateSiblingNames("windows"), "\x00")
+	for _, want := range []string{"reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix.exe", "Reasonix.exe"} {
+		if !strings.Contains(windows, want) {
+			t.Errorf("Windows release unit omits %q: %q", want, windows)
+		}
+	}
+	if got := updateSiblingNames("linux"); len(got) != 2 || got[0] != "reasonix-guard" || got[1] != "reasonix" {
+		t.Fatalf("Linux release unit = %q", got)
+	}
+	if got := updateSiblingNames("darwin"); got != nil {
+		t.Fatalf("macOS app-bundle update must not list file siblings: %q", got)
+	}
+}
+
 func TestEvaluate(t *testing.T) {
 	mk := func(version string) *update.Manifest {
 		return &update.Manifest{
@@ -126,6 +141,9 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 	}
 	if strings.Contains(downloadPage(), "/releases/latest") {
 		t.Errorf("download page should not use GitHub's repository-wide latest release: %q", downloadPage())
+	}
+	if downloadPage() != "https://reasonix.io/?download=desktop#start" {
+		t.Errorf("download page = %q, want the desktop install deep link", downloadPage())
 	}
 }
 

@@ -184,11 +184,10 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 }
 
 func collectBackgroundEvidence(ctx context.Context, jm *jobs.Manager, jobID string) {
-	// Plan mode researches with writers blocked: merging a finished background
-	// writer's mutation receipts into a planning turn would arm delivery
-	// sign-off demands (complete_step, verification, review) that the turn
-	// cannot satisfy. Skip without consuming — the job keeps its evidence, and
-	// the first collection from a normal turn merges it.
+	// A Plan turn should not consume a finished background writer's mutation
+	// receipts before the workflow reaches execution. Writers may still run after
+	// Permissions approval; leave their evidence on the job so the first
+	// post-approval collection can merge and audit it.
 	if planmode.Active(ctx) {
 		return
 	}

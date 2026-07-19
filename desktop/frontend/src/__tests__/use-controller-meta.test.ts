@@ -231,6 +231,16 @@ console.log("\nuse controller meta");
     "a stable notice code localizes the main copy even after backend copy edits",
   );
   eq(
+    localizedNoticeText("reworded workspace contention copy", "workspace_lease"),
+    "Another Delivery session is writing to this workspace; this session will continue automatically when it is safe.",
+    "workspace lease contention uses its stable localized notice code",
+  );
+  eq(
+    localizedNoticeText("reworded cancelled-turn copy", "cancelled_turn_display"),
+    "This turn was interrupted. Partial output is kept for reference but is not included in the model's next-turn history; inspect the workspace before continuing or reverting changes.",
+    "cancelled turn history explains the model-context boundary",
+  );
+  eq(
     localizedNoticeText("Tool round limit reached; asking the assistant to summarize progress.", "unknown_future_code"),
     "Tool round limit reached; asking the assistant to summarize progress.",
     "an unknown notice code falls back to exact-text matching",

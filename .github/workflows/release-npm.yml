@@ -1,25 +1,22 @@
 name: Release npm
 
-# npm line. Tag namespace `npm-v<semver>` triggers this — plain `v<semver>` tags
-# are the CLI binary + Homebrew release (release.yml) and intentionally do NOT
-# trigger here (GitHub glob `npm-v*` does not match `v*`). Splitting npm onto its
-# own tag lets a prerelease ship to npm's `next` channel without touching the
-# stable Homebrew cask (and lets a stable cask ship without forcing npm to leave
-# its rc). Bump with:
-#   git tag npm-vX.Y.Z          # stable  -> publishes under `latest`
+# npm line. Stable releases are called by release-stable.yml after its single
+# GitHub environment approval. Direct tag pushes are retained only for
+# prereleases so npm `next` can still ship independently without touching the
+# stable Homebrew cask. Bump a prerelease with:
 #   git tag npm-vX.Y.Z-rc.N     # prerelease -> publishes under `next`
 #   git push origin <tag>
 #
 # A manual workflow_dispatch can publish either an opt-in canary from the current
-# ref or an approved stable/next version when tag creation is restricted. Canary
-# publishes to the `canary` dist-tag (npm i reasonix@canary) and never moves
+# ref or recover an approved stable version from an existing tag. Canary publishes
+# to the `canary` dist-tag (npm i reasonix@canary) and never moves
 # `next`/`latest`. build.mjs decides the dist-tag: a `-canary.` build is `canary`,
 # any other prerelease is `next`, and a stable version is `latest` (#5822 — the
 # old "promote latest by hand" rule left it pinned at 0.53.2 and downgraded
 # `npm update -g` users). The verify step below asserts the tag actually landed.
 on:
   push:
-    tags: ['npm-v*']
+    tags: ['npm-v*-*']
   workflow_dispatch:
     inputs:
       channel:
@@ -34,16 +31,90 @@ on:
         description: "Version to publish. Canary appends -canary.<run_number>; stable publishes exactly this version."
         required: true
         type: string
+      tag:
+        description: "stable: existing npm tag to publish (for example npm-v1.18.0)"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      channel:
+        description: "Publish channel selected by the approved release orchestrator"
+        required: true
+        type: string
+      base_version:
+        description: "Version to publish"
+        required: true
+        type: string
+      tag:
+        description: "Existing npm tag to check out for stable publication"
+        required: false
+        default: ""
+        type: string
+      approved_cli_tag:
+        description: "Stable CLI tag recorded by the approved orchestrator"
+        required: true
+        type: string
+      approved_sha:
+        description: "Immutable commit recorded by the approved orchestrator"
+        required: true
+        type: string
+      orchestrated:
+        description: "True only when called by release-stable.yml after approval"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
+  orchestration-guard:
+    name: verify approved orchestrator
+    if: ${{ inputs.orchestrated }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify caller and approved release ref
+        env:
+          ACTUAL_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-stable.yml@{1}', github.repository, github.ref) }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          CALLER_SHA: ${{ github.sha }}
+          APPROVED_CLI_TAG: ${{ inputs.approved_cli_tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERIFY_RELEASE_CHECKOUT: false
+        run: |
+          bash scripts/verify-release-authorization.sh
+          bash scripts/verify-release-tag.sh
+
+  release-gate:
+    name: approve standalone npm release
+    if: ${{ !inputs.orchestrated && !(github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') }}
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: echo "Approved standalone npm release $RELEASE_TAG"
+
   cache-guard:
     name: cache hit guard
+    needs: [orchestration-guard, release-gate]
+    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && ((github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') || needs.release-gate.result == 'success'))) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -53,13 +124,15 @@ jobs:
   npm:
     name: publish npm packages
     needs: cache-guard
+    if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # A tag push (npm-v*) or manual stable dispatch publishes a stable/next
-    # release and goes through the `release` environment (esengine approves);
-    # canary dispatches run free.
-    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'canary' && 'canary' || 'release' }}
+    # The stable caller has already passed the single GitHub release approval.
+    # Direct prereleases/manual stable recovery pass release-gate above; canaries
+    # run free.
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -73,28 +146,35 @@ jobs:
       # the requested semver exactly. build.mjs strips the leading `npm-`/`v`.
       - name: Resolve version
         id: ver
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            base="${{ inputs.base_version }}"; base="${base#v}"
-            if [ "${{ inputs.channel }}" = "canary" ]; then
-              echo "arg=v${base}-canary.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-            else
-              echo "arg=v${base}" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "arg=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          fi
-      - run: node npm/build.mjs "${{ steps.ver.outputs.arg }}" --publish
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          IN_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: bash scripts/resolve-npm-release.sh
+      - name: Revalidate approved release ref
+        if: ${{ inputs.orchestrated }}
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+        run: bash scripts/verify-release-tag.sh
+      - env:
+          VERSION_ARG: ${{ steps.ver.outputs.arg }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node npm/build.mjs "$VERSION_ARG" --publish
       # Assert the dist-tag landed where build.mjs aimed it. This is the guard
       # that #5822 lacked: `latest` sat on 0.53.2 for months while stables went
       # to `next`, and nothing noticed until users got downgraded. The registry
       # applies tags asynchronously after publish, hence the poll.
       - name: Verify dist-tags
+        env:
+          VERSION_ARG: ${{ steps.ver.outputs.arg }}
         run: |
           set -euo pipefail
-          version="${{ steps.ver.outputs.arg }}"
+          version="$VERSION_ARG"
           version="${version#npm-}"; version="${version#v}"
           case "$version" in
             *-canary.*) tag=canary ;;

@@ -100,19 +100,19 @@ func TestConcurrentBotAndSettingsWritersKeepBothFields(t *testing.T) {
 		}
 	}()
 
-	// Settings writer: bumps an agent field like a desktop settings-page save.
+	// Settings writer: bumps a supported agent field like a desktop settings-page save.
 	go func() {
 		defer wg.Done()
 		<-start
 		for i := 1; i <= rounds; i++ {
 			unlock := LockUserConfigEdits()
 			cfg := LoadForEdit(path)
-			if i > 1 && cfg.Agent.MaxSteps != i-1 {
+			if i > 1 && cfg.Agent.Temperature != float64(i-1) {
 				unlock()
-				t.Errorf("round %d: previous settings update lost: MaxSteps = %d, want %d", i, cfg.Agent.MaxSteps, i-1)
+				t.Errorf("round %d: previous settings update lost: Temperature = %v, want %d", i, cfg.Agent.Temperature, i-1)
 				return
 			}
-			cfg.Agent.MaxSteps = i
+			cfg.Agent.Temperature = float64(i)
 			err := cfg.SaveTo(path)
 			unlock()
 			if err != nil {
@@ -133,7 +133,7 @@ func TestConcurrentBotAndSettingsWritersKeepBothFields(t *testing.T) {
 	if len(final.Bot.Connections) != 1 || final.Bot.Connections[0].ID != wantID {
 		t.Fatalf("bot writer's last update lost: got %+v, want single connection %q", final.Bot.Connections, wantID)
 	}
-	if final.Agent.MaxSteps != rounds {
-		t.Fatalf("settings writer's last update lost: MaxSteps = %d, want %d", final.Agent.MaxSteps, rounds)
+	if final.Agent.Temperature != rounds {
+		t.Fatalf("settings writer's last update lost: Temperature = %v, want %d", final.Agent.Temperature, rounds)
 	}
 }

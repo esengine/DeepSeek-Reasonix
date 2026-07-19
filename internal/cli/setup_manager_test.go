@@ -20,7 +20,7 @@ func setupTestConfig() *config.Config {
 		{Name: "cli-provider", Kind: "openai", BaseURL: "https://cli.example/v1", Model: "cli-model"},
 	}
 	cfg.DefaultModel = "desktop-provider"
-	cfg.Agent.MaxSteps = 77
+	cfg.Agent.Temperature = 0.77
 	cfg.Desktop.ProviderAccess = []string{"desktop-provider", "cli-provider"}
 	return cfg
 }
@@ -35,8 +35,8 @@ func TestProviderSetupSessionAddPreservesExistingProvidersAndSettings(t *testing
 	if len(cfg.Providers) != 3 || cfg.Providers[0].Name != "desktop-provider" || cfg.Providers[1].Name != "cli-provider" {
 		t.Fatalf("existing providers were not preserved: %+v", cfg.Providers)
 	}
-	if cfg.DefaultModel != "desktop-provider" || cfg.Agent.MaxSteps != 77 {
-		t.Fatalf("unrelated settings changed: default=%q max_steps=%d", cfg.DefaultModel, cfg.Agent.MaxSteps)
+	if cfg.DefaultModel != "desktop-provider" || cfg.Agent.Temperature != 0.77 {
+		t.Fatalf("unrelated settings changed: default=%q temperature=%v", cfg.DefaultModel, cfg.Agent.Temperature)
 	}
 	s.addProviderAccess([]config.ProviderEntry{added})
 	if got := cfg.Desktop.ProviderAccess; !containsString(got, "desktop-provider") || !containsString(got, "cli-provider") || !containsString(got, "grok-relay") {
@@ -402,7 +402,7 @@ func TestProviderSetupOperationReplayPreservesConcurrentUnrelatedChanges(t *test
 	}
 
 	external := config.LoadForEdit(path)
-	external.Agent.MaxSteps = 123
+	external.Agent.Temperature = 0.23
 	external.DefaultModel = "cli-provider"
 	external.Providers[1].Headers = map[string]string{"X-External": "keep"}
 	if err := external.SaveTo(path); err != nil {
@@ -413,8 +413,8 @@ func TestProviderSetupOperationReplayPreservesConcurrentUnrelatedChanges(t *test
 		t.Fatalf("commitProviderSetupSession: %v", err)
 	}
 	got := config.LoadForEdit(path)
-	if got.Agent.MaxSteps != 123 || got.DefaultModel != "cli-provider" || got.Language != "en" {
-		t.Fatalf("scalar replay lost data: max_steps=%d default=%q language=%q", got.Agent.MaxSteps, got.DefaultModel, got.Language)
+	if got.Agent.Temperature != 0.23 || got.DefaultModel != "cli-provider" || got.Language != "en" {
+		t.Fatalf("scalar replay lost data: temperature=%v default=%q language=%q", got.Agent.Temperature, got.DefaultModel, got.Language)
 	}
 	if got.Providers[1].Headers["X-External"] != "keep" {
 		t.Fatalf("concurrent sibling provider edit was lost: %+v", got.Providers[1])

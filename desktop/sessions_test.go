@@ -3,10 +3,14 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/jobs"
@@ -502,6 +506,10 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	if err := os.WriteFile(eventIndexPath, []byte(`{"schema_version":1,"message_count":1}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	damagedPath := store.SessionEventLogDamaged(sessionPath)
+	if err := os.WriteFile(damagedPath, []byte(`{"damaged_tail":true}`+"\ntorn bytes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	conflictLogPath := store.SessionConflictLog(sessionPath)
 	if err := os.WriteFile(conflictLogPath, []byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -531,7 +539,16 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	if err := deleteSessionFile(dir, sessionPath); err != nil {
 		t.Fatalf("trash: %v", err)
 	}
+	// The raw salvage sidecar holds session content; deletion must move it out
+	// of the live directory with the rest of the transcript artifacts (#6613
+	// review: it used to be left behind, and purging the trash never removed it).
+	if _, err := os.Stat(damagedPath); !os.IsNotExist(err) {
+		t.Fatalf("damaged salvage sidecar should leave the live dir on delete, stat err = %v", err)
+	}
 	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
+	if _, err := os.Stat(filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.events.jsonl.damaged")); err != nil {
+		t.Fatalf("damaged salvage sidecar should be in the trash: %v", err)
+	}
 	if err := restoreTrashedSessionFile(dir, trashPath); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -550,6 +567,9 @@ func TestRestoreTrashedSessionFile(t *testing.T) {
 	}
 	if _, err := os.Stat(eventIndexPath); err != nil {
 		t.Fatalf("session event index should be restored: %v", err)
+	}
+	if _, err := os.Stat(damagedPath); err != nil {
+		t.Fatalf("damaged salvage sidecar should be restored: %v", err)
 	}
 	if _, err := os.Stat(conflictLogPath); err != nil {
 		t.Fatalf("session conflict log should be restored: %v", err)
@@ -768,8 +788,16 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	if err := recordSessionDisplay(dir, sessionPath, "expanded prompt", "[Pasted text #1 · 5 lines]"); err != nil {
 		t.Fatal(err)
 	}
+	if err := recordSessionPlannerDisplay(dir, sessionPath, "prompt", []HistoryMessage{{
+		Role: "tool", ToolName: "read_file", Content: "sensitive cancelled output",
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := deleteSessionFile(dir, sessionPath); err != nil {
 		t.Fatalf("trash: %v", err)
+	}
+	if got := sessionPlannerDisplayTurns(dir, sessionPath); len(got) != 1 {
+		t.Fatalf("planner display should remain available while session is in trash: %+v", got)
 	}
 	trashPath := filepath.Join(dir, sessionTrashDir, "session.jsonl", "session.jsonl")
 	if err := purgeTrashedSessionFile(dir, trashPath); err != nil {
@@ -792,6 +820,9 @@ func TestPurgeTrashedSessionFile(t *testing.T) {
 	}
 	if got := resolveSessionDisplay(dir, sessionPath, "expanded prompt"); got != "expanded prompt" {
 		t.Fatalf("display sidecar should be removed after purge, got %q", got)
+	}
+	if got := sessionPlannerDisplayTurns(dir, sessionPath); len(got) != 0 {
+		t.Fatalf("planner display sidecar should be removed after purge: %+v", got)
 	}
 }
 
@@ -1157,6 +1188,250 @@ func TestSessionDisplayRoundTrip(t *testing.T) {
 	}
 	if got := resolveSessionDisplay(dir, sessionPath, "other"); got != "other" {
 		t.Fatalf("unknown content should pass through, got %q", got)
+	}
+}
+
+func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T) {
+	dir := t.TempDir()
+	const writers = 32
+	start := make(chan struct{})
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			path := filepath.Join(dir, fmt.Sprintf("session-%02d.jsonl", i))
+			errs <- recordSessionPlannerDisplay(dir, path, fmt.Sprintf("prompt-%02d", i), []HistoryMessage{{
+				Role: "assistant", Content: fmt.Sprintf("answer-%02d", i),
+			}})
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("record planner display: %v", err)
+		}
+	}
+
+	got := loadSessionPlannerDisplays(dir)
+	if len(got) != writers {
+		t.Fatalf("planner display sessions = %d, want %d", len(got), writers)
+	}
+	for i := 0; i < writers; i++ {
+		key := fmt.Sprintf("session-%02d.jsonl", i)
+		if len(got[key]) != 1 || len(got[key][0].Messages) != 1 || got[key][0].Messages[0].Content != fmt.Sprintf("answer-%02d", i) {
+			t.Fatalf("planner display %s = %+v", key, got[key])
+		}
+	}
+}
+
+func TestRecordSessionPlannerDisplayCrossProcessPreservesEverySession(t *testing.T) {
+	if role := os.Getenv("REASONIX_PLANNER_DISPLAY_HELPER"); role != "" {
+		dir := os.Getenv("REASONIX_PLANNER_DISPLAY_DIR")
+		sessionPlannerDisplayLockTimeout = 5 * time.Second
+		attempted := filepath.Join(dir, role+".attempted")
+		loaded := filepath.Join(dir, role+".loaded")
+		release := filepath.Join(dir, role+".release")
+		if err := os.WriteFile(attempted, []byte("ready"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if role == "second" && !waitForPlannerDisplayTestFile(filepath.Join(dir, "second.begin"), 10*time.Second) {
+			t.Fatal("timed out waiting to begin second update")
+		}
+		sessionPlannerDisplayUpdateAfterLoad = func() {
+			if err := os.WriteFile(loaded, []byte("loaded"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if !waitForPlannerDisplayTestFile(release, 10*time.Second) {
+				t.Fatalf("timed out waiting for %s release", role)
+			}
+		}
+		err := recordSessionPlannerDisplay(dir, filepath.Join(dir, role+".jsonl"), role+" prompt", []HistoryMessage{{
+			Role: "assistant", Content: role + " answer",
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	dir := t.TempDir()
+	startHelper := func(role string, output *strings.Builder) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRecordSessionPlannerDisplayCrossProcessPreservesEverySession$")
+		cmd.Env = append(os.Environ(),
+			"REASONIX_PLANNER_DISPLAY_HELPER="+role,
+			"REASONIX_PLANNER_DISPLAY_DIR="+dir,
+		)
+		cmd.Stdout = output
+		cmd.Stderr = output
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start %s helper: %v", role, err)
+		}
+		return cmd
+	}
+	releaseHelper := func(role string) {
+		if err := os.WriteFile(filepath.Join(dir, role+".release"), []byte("release"), 0o600); err != nil {
+			t.Fatalf("release %s helper: %v", role, err)
+		}
+	}
+
+	var firstOutput, secondOutput strings.Builder
+	first := startHelper("first", &firstOutput)
+	if !waitForPlannerDisplayTestFile(filepath.Join(dir, "first.loaded"), 5*time.Second) {
+		releaseHelper("first")
+		_ = first.Wait()
+		t.Fatalf("first helper did not load sidecar: %s", firstOutput.String())
+	}
+	second := startHelper("second", &secondOutput)
+	if !waitForPlannerDisplayTestFile(filepath.Join(dir, "second.attempted"), 5*time.Second) {
+		releaseHelper("first")
+		_ = os.WriteFile(filepath.Join(dir, "second.begin"), []byte("begin"), 0o600)
+		releaseHelper("second")
+		_ = first.Wait()
+		_ = second.Wait()
+		t.Fatalf("second helper did not attempt update: %s", secondOutput.String())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "second.begin"), []byte("begin"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if waitForPlannerDisplayTestFile(filepath.Join(dir, "second.loaded"), time.Second) {
+		releaseHelper("first")
+		releaseHelper("second")
+		_ = first.Wait()
+		_ = second.Wait()
+		t.Fatal("second process loaded the stale sidecar while the first update still held its transaction lock")
+	}
+
+	releaseHelper("first")
+	if err := first.Wait(); err != nil {
+		releaseHelper("second")
+		_ = second.Wait()
+		t.Fatalf("first helper failed: %v\n%s", err, firstOutput.String())
+	}
+	if !waitForPlannerDisplayTestFile(filepath.Join(dir, "second.loaded"), 5*time.Second) {
+		releaseHelper("second")
+		_ = second.Wait()
+		t.Fatalf("second helper did not enter transaction after release: %s", secondOutput.String())
+	}
+	releaseHelper("second")
+	if err := second.Wait(); err != nil {
+		t.Fatalf("second helper failed: %v\n%s", err, secondOutput.String())
+	}
+
+	got := loadSessionPlannerDisplays(dir)
+	for _, role := range []string{"first", "second"} {
+		turns := got[role+".jsonl"]
+		if len(turns) != 1 || len(turns[0].Messages) != 1 || turns[0].Messages[0].Content != role+" answer" {
+			t.Fatalf("%s planner display lost after cross-process updates: %#v", role, got)
+		}
+	}
+}
+
+func TestRecordSessionPlannerDisplayDoesNotOverwriteCorruptSidecar(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := []byte(`{"session.jsonl":[`)
+	if err := os.WriteFile(sessionPlannerDisplayPath(dir), corrupt, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := recordSessionPlannerDisplay(dir, filepath.Join(dir, "new.jsonl"), "prompt", []HistoryMessage{{Role: "assistant", Content: "answer"}})
+	if err == nil {
+		t.Fatal("record should reject a corrupt sidecar instead of replacing it with an empty map")
+	}
+	got, readErr := os.ReadFile(sessionPlannerDisplayPath(dir))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != string(corrupt) {
+		t.Fatalf("corrupt sidecar was overwritten: %q", got)
+	}
+}
+
+func TestRemoveSessionPlannerDisplayRetiresCorruptSidecar(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(sessionPlannerDisplayPath(dir), []byte(`{"session.jsonl":[`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeSessionPlannerDisplay(dir, filepath.Join(dir, "session.jsonl")); err != nil {
+		t.Fatalf("remove display from corrupt sidecar: %v", err)
+	}
+	if _, err := os.Stat(sessionPlannerDisplayPath(dir)); !os.IsNotExist(err) {
+		t.Fatalf("corrupt sidecar should be retired during destructive cleanup, stat err = %v", err)
+	}
+}
+
+func waitForPlannerDisplayTestFile(path string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
+func TestRemoveDesktopSessionArtifactsPrunesPlannerDisplay(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordSessionPlannerDisplay(dir, path, "prompt", []HistoryMessage{{
+		Role: "tool", ToolName: "read_file", Content: "sensitive cancelled output",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDesktopSessionArtifacts(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := sessionPlannerDisplayTurns(dir, path); len(got) != 0 {
+		t.Fatalf("planner display retained after permanent session removal: %+v", got)
+	}
+	if _, err := os.Stat(sessionPlannerDisplayPath(dir)); !os.IsNotExist(err) {
+		t.Fatalf("empty planner display sidecar should be removed, stat err = %v", err)
+	}
+}
+
+func TestPruneSessionPlannerDisplaysRemovesOnlyOrphans(t *testing.T) {
+	dir := t.TempDir()
+	turn := []plannerDisplayTurn{{UserHash: messageDisplayKey("prompt"), Messages: []HistoryMessage{{Role: "assistant", Content: "display"}}}}
+	if err := saveSessionPlannerDisplays(dir, sessionPlannerDisplayMap{
+		"live.jsonl":           turn,
+		"trashed.jsonl":        turn,
+		"protected.jsonl":      turn,
+		"missing.jsonl":        turn,
+		"sidecar.events.jsonl": turn,
+	}); err != nil {
+		t.Fatalf("save planner displays: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "live.jsonl"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write live session: %v", err)
+	}
+	trashDir := filepath.Join(dir, sessionTrashDir, "trashed.jsonl")
+	if err := os.MkdirAll(trashDir, 0o755); err != nil {
+		t.Fatalf("mkdir trash: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(trashDir, "trashed.jsonl"), []byte("data"), 0o644); err != nil {
+		t.Fatalf("write trashed session: %v", err)
+	}
+
+	if err := pruneSessionPlannerDisplays(dir, map[string]struct{}{"protected.jsonl": {}}); err != nil {
+		t.Fatalf("prune planner displays: %v", err)
+	}
+	got := loadSessionPlannerDisplays(dir)
+	for _, key := range []string{"live.jsonl", "trashed.jsonl", "protected.jsonl"} {
+		if got[key] == nil {
+			t.Fatalf("%s planner display should be retained; got %#v", key, got)
+		}
+	}
+	for _, key := range []string{"missing.jsonl", "sidecar.events.jsonl"} {
+		if got[key] != nil {
+			t.Fatalf("%s planner display should be pruned; got %#v", key, got)
+		}
 	}
 }
 

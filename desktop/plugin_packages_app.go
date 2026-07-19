@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"reasonix/internal/command"
 	"reasonix/internal/config"
@@ -36,6 +37,15 @@ type PluginView struct {
 	MCPServerDetails    []PluginMCPServerView          `json:"mcpServerDetails,omitempty"`
 	Warnings            []string                       `json:"warnings,omitempty"`
 	Error               string                         `json:"error,omitempty"`
+	Verification        *PluginVerificationView        `json:"verification,omitempty"`
+}
+
+type PluginVerificationView struct {
+	CatalogEntryID  string `json:"catalogEntryId"`
+	Commit          string `json:"commit"`
+	PackageSHA256   string `json:"packageSha256"`
+	VerifiedAt      string `json:"verifiedAt"`
+	CatalogSequence uint64 `json:"catalogSequence"`
 }
 
 type PluginInstallOptions struct {
@@ -112,6 +122,13 @@ func (a *App) Plugins() []PluginView {
 			Root:         pluginpkg.ResolveRoot(config.ReasonixHomeDir(), p.Root),
 			ManifestKind: p.ManifestKind,
 			Enabled:      p.Enabled,
+		}
+		if p.Verification != nil && pluginpkg.VerificationValid(config.ReasonixHomeDir(), p) {
+			view.Verification = &PluginVerificationView{
+				CatalogEntryID: p.Verification.CatalogEntryID, Commit: p.Verification.Commit,
+				PackageSHA256: p.Verification.PackageSHA256, VerifiedAt: p.Verification.VerifiedAt.Format(time.RFC3339),
+				CatalogSequence: p.Verification.CatalogSequence,
+			}
 		}
 		if pkg, warnings, err := pluginpkg.ParseDir(view.Root); err == nil {
 			applyPluginPackageDetails(&view, pkg, warnings)

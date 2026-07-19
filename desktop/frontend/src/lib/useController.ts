@@ -18,6 +18,7 @@ import type {
   CheckpointMeta,
   CollaborationMode,
   ContextInfo,
+  DeliveryWorktreeOpenResult,
   EffortInfo,
   HistoryMessage,
   HistoryPage,
@@ -34,6 +35,7 @@ import type {
   WireApproval,
   WireAsk,
   WireEvent,
+  WireFinalReadiness,
   WireUsage,
 } from "./types";
 
@@ -134,6 +136,7 @@ interface State {
   currentAssistant?: string;
   live?: LiveStream;
   pendingUser?: string;
+  deliveryRecoveryActive: boolean;
   discardTurn?: boolean;
   turnStartAt: number;
   // Time spent waiting on the user (approval/ask) within the current turn.
@@ -202,6 +205,7 @@ export const initialState: State = {
   historyHasOlder: false,
   historyOlderLoading: false,
   backendActivationPending: false,
+  deliveryRecoveryActive: false,
   promptEpoch: 0,
   turnStartAt: 0,
   turnWaitAccumMs: 0,
@@ -417,7 +421,7 @@ function compactArchivedToolItems(items: Item[]): Item[] {
 
 type Action =
   | { type: "event"; e: WireEvent }
-  | { type: "user"; text: string; submitText?: string; seq: number }
+  | { type: "user"; text: string; submitText?: string; seq: number; deliveryRecovery?: boolean }
   | { type: "unsend" }
   | { type: "send_failed"; error: string }
   | { type: "backend_status"; running: boolean; pendingPrompt?: boolean; backgroundJobs?: number; cancelRequested?: boolean; cancellable?: boolean; snapshotAt?: number }
@@ -746,7 +750,7 @@ function applyEvent(s: State, e: WireEvent): State {
     if (e.kind === "turn_done") return { ...s, discardTurn: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, currentAssistant: undefined, live: undefined };
     return s;
   }
-  if (e.kind === "memory_compiler_stats" || e.kind === "mcp_surface_ready") {
+  if (e.kind === "mcp_surface_ready") {
     // Background-only events must not confirm an optimistic user bubble.
     return s;
   }
@@ -1046,16 +1050,21 @@ function applyEvent(s: State, e: WireEvent): State {
         if (it.kind === "tool" && it.status === "running") return { ...it, status: "stopped" as const };
         return it;
       });
-      let items: Item[] = finalized;
+      let items: Item[] = s.deliveryRecoveryActive && !e.err
+        ? finalized.filter((item) => item.kind !== "notice" || item.variant !== "delivery")
+        : finalized;
       if (e.outcome === "final_readiness") {
-        items = [...finalized, {
+        const previous = items.map((item) => item.kind === "notice" && item.variant === "delivery"
+          ? { ...item, action: undefined }
+          : item);
+        items = [...previous, {
           kind: "notice",
           id: `e${s.seq}`,
           level: "info",
           variant: "delivery",
           title: t("notice.deliveryIncompleteTitle"),
           text: t("notice.deliveryIncompleteBody"),
-          detail: e.err,
+          detail: deliveryReadinessDetail(e.readiness, e.err),
           action: "continue_delivery",
         }];
       } else if (e.err) {
@@ -1076,6 +1085,7 @@ function applyEvent(s: State, e: WireEvent): State {
         currentAssistant: undefined,
         approval: keepPlanApproval ? s.approval : undefined,
         ask: undefined,
+        deliveryRecoveryActive: false,
         seq: s.seq + 1,
       };
       // Close user-wait unless the plan approval gate remains open.
@@ -1104,6 +1114,7 @@ export function reducer(s: State, a: Action): State {
         promptArrivedAt: undefined,
         promptArrivedId: undefined,
         pendingUser: a.text,
+        deliveryRecoveryActive: Boolean(a.deliveryRecovery),
         discardTurn: false,
       };
     }
@@ -1145,7 +1156,7 @@ export function reducer(s: State, a: Action): State {
       }
       const items = idx >= 0 ? s.items.map((it, i) => (i === idx ? { ...it, failed: true } : it)) : s.items;
       const notice: Item = { kind: "notice", id: `n${s.seq}`, level: "warn", text: a.error };
-      return { ...s, pendingUser: undefined, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
+      return { ...s, pendingUser: undefined, deliveryRecoveryActive: false, running: false, turnActive: false, pendingPrompt: false, cancelRequested: false, cancellable: false, live: undefined, seq: s.seq + 1, items: [...items, notice] };
     }
     case "backend_status": {
       // A snapshot fetched before the live approval/ask event arrived cannot
@@ -1412,6 +1423,8 @@ const noticeCodeKeys: Record<string, DictKey> = {
   executor_handoff: "notice.executorHandoff",
   tool_budget: "notice.toolBudget",
   loop_guard: "notice.loopGuard",
+  workspace_lease: "notice.workspaceLease",
+  cancelled_turn_display: "notice.cancelledTurnDisplay",
 };
 
 // localizedNoticeText localizes a notice's main copy by its stable code first,
@@ -1420,6 +1433,27 @@ export function localizedNoticeText(text: string, code?: string): string {
   const key = code ? noticeCodeKeys[code] : undefined;
   if (key) return t(key);
   return localizedBackendNoticeText(text);
+}
+
+const deliveryRequirementKeys: Record<string, DictKey> = {
+  project_check: "notice.deliveryRequirementProjectCheck",
+  todo: "notice.deliveryRequirementTodo",
+  criteria: "notice.deliveryRequirementCriteria",
+  verification: "notice.deliveryRequirementVerification",
+  review: "notice.deliveryRequirementReview",
+  signoff: "notice.deliveryRequirementSignoff",
+  action: "notice.deliveryRequirementAction",
+  mutation: "notice.deliveryRequirementMutation",
+  capability: "notice.deliveryRequirementCapability",
+};
+
+export function deliveryReadinessDetail(readiness: WireFinalReadiness | undefined, fallback = ""): string {
+  const labels = asArray(readiness?.missing)
+    .map((id) => deliveryRequirementKeys[id])
+    .filter((key): key is DictKey => Boolean(key))
+    .map((key) => t(key));
+  if (labels.length === 0) return fallback;
+  return t("notice.deliveryIncompleteMissing", { items: labels.join(t("notice.deliveryRequirementSeparator")) });
 }
 
 export function localizedBackendNoticeText(text: string): string {
@@ -2299,6 +2333,23 @@ export function useController() {
     }
   }, [dispatchTo]);
 
+  const recoverDeliveryToTab = useCallback(async (tabId: string, displayText: string, submitText = displayText) => {
+    if (!tabId) throw new Error(t("composer.workspaceStarting"));
+    const seq = getOrCreateState(statesRef.current, tabId).seq;
+    const display = displayText.trim();
+    const submit = submitText.trim();
+    dispatchTo(tabId, { type: "user", text: displayText, submitText: display !== submit ? submit : undefined, seq, deliveryRecovery: true });
+    invalidateCache();
+    try {
+      void app.SubmitDeliveryRecoveryToTab(tabId, display, submit).catch((error) => {
+        dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+      });
+    } catch (error) {
+      dispatchTo(tabId, { type: "send_failed", error: `Send failed: ${error instanceof Error ? error.message : String(error)}` });
+      throw error;
+    }
+  }, [dispatchTo]);
+
   const send = useCallback((displayText: string, submitText = displayText) => {
     const tabId = activeTabIdRef.current ?? activeTabId;
     if (tabId) {
@@ -2893,9 +2944,20 @@ export function useController() {
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const activateTopic = useCallback(async (scope: string, workspaceRoot: string, topicId: string, sessionPath = ""): Promise<TabMeta> => {
-    beginActiveNavigation();
+    const navigationSeq = beginActiveNavigation();
     const snapshotAt = promptEventClock();
     const meta = await app.ActivateTopic(scope, workspaceRoot, topicId, sessionPath);
+    if (activeNavigationSeqRef.current !== navigationSeq) {
+      // A newer navigation started while the backend processed this
+      // activation. Applying the stale result would flip the visible tab
+      // away from the user's last click and — worse — the single-surface
+      // prune below deletes every other tab's cached state, blanking the
+      // surface the user is actually looking at. Last click wins: hand the
+      // meta back for bookkeeping and leave the visible state to the newer
+      // navigation.
+      addBreadcrumb("topic.activate", `stale ${meta.id} seq=${navigationSeq} current=${activeNavigationSeqRef.current}`);
+      return meta;
+    }
     // Save previous tab's items so the new tab can use them as a placeholder
     // during loading, avoiding a blank/Welcome flash before history arrives.
     const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
@@ -2949,6 +3011,23 @@ export function useController() {
     return meta;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
+  const createDeliveryWorktree = useCallback(async (workspaceRoot: string): Promise<DeliveryWorktreeOpenResult> => {
+    beginActiveNavigation();
+    const snapshotAt = promptEventClock();
+    const result = await app.CreateDeliveryWorktree(workspaceRoot);
+    const meta = result.tab;
+    const isNewTab = !statesRef.current.has(meta.id);
+    setActiveTabId(meta.id);
+    activeTabIdRef.current = meta.id;
+    confirmBackendActiveTab(meta.id);
+    dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
+    dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
+    const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic");
+    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    else void load;
+    return result;
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+
   const closeTab = useCallback(async (tabId: string) => {
     if (tabId === activeTabIdRef.current) beginActiveNavigation();
     try {
@@ -2968,13 +3047,20 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, sendToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, answerQuestion, setControllerMode,
+    send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, answerQuestion, setControllerMode,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, setModel, setEffort, setTokenMode,
     fetchMemory, remember, forget, saveDoc,
-    switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, closeTab, reorderTabs,
+    switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createDeliveryWorktree, closeTab, reorderTabs,
+    // Invalidate in-flight navigation completions (activateTopic's stale
+    // guard) from outside the hook. The App-level navigation queue must call
+    // this at ENQUEUE time: a queued click does not run — and so does not
+    // advance this epoch — until the running request finishes, which would
+    // let the running stale activation pass the guard and prune the state of
+    // the surface the user just clicked.
+    noteNavigationIntent: beginActiveNavigation,
     syncActiveTab: syncActiveTabFromBackend,
   };
 }

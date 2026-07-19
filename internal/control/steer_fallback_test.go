@@ -20,7 +20,7 @@ func steerFallbackController(t *testing.T) (*Controller, *agent.Agent) {
 }
 
 func sessionHasUserText(ag *agent.Agent, text string) bool {
-	for _, m := range ag.Session().Messages {
+	for _, m := range ag.Session().Snapshot() {
 		if m.Role == provider.RoleUser && strings.Contains(m.Content, text) {
 			return true
 		}

@@ -43,7 +43,7 @@ import (
 const (
 	r2Base             = "https://dl.reasonix.io"
 	releaseGatewayBase = "https://crash.reasonix.io/v1/desktop/releases"
-	downloadPageURL    = "https://reasonix.io/#start"
+	downloadPageURL    = "https://reasonix.io/?download=desktop#start"
 	httpTimeout        = 15 * time.Second
 )
 
@@ -595,11 +595,29 @@ func applyLinux(targz []byte) error {
 	if err != nil {
 		return err
 	}
+	guard, err := extractBinary(targz, "reasonix-guard")
+	if err != nil {
+		return err
+	}
+	cli, err := extractBinary(targz, "reasonix")
+	if err != nil {
+		return err
+	}
+	exe := currentExecutablePath()
+	if exe == "" {
+		return fmt.Errorf("update: current executable path is unavailable")
+	}
+	if err := writeAtomic(filepath.Join(filepath.Dir(exe), "reasonix"), cli, 0o700); err != nil {
+		return fmt.Errorf("update CLI sidecar: %w", err)
+	}
+	if err := writeAtomic(filepath.Join(filepath.Dir(exe), "reasonix-guard"), guard, 0o700); err != nil {
+		return fmt.Errorf("update Guard: %w", err)
+	}
 	return selfupdate.Apply(bytes.NewReader(bin), selfupdate.Options{})
 }
 
-func applyWindowsFile(path string) error {
-	return startWindowsUpdateHandoff(path, currentInstallDir(), currentExecutablePath())
+func applyWindowsFile(path, toVersion string) error {
+	return startWindowsUpdateHandoff(path, currentInstallDir(), currentLauncherPath(), toVersion)
 }
 
 func currentExecutablePath() string {
@@ -624,13 +642,73 @@ func currentInstallDir() string {
 	return filepath.Dir(exe)
 }
 
-// relaunch starts a fresh copy of the (just-replaced) executable.
-func relaunch() error {
+// updateSiblingArtifacts lists the packaged binaries an update replaces beside
+// the main executable, so PrepareFileUpdate can snapshot the complete release
+// unit. Paths that do not exist on disk are skipped by the backup.
+func updateSiblingArtifacts() []string {
+	dir := currentInstallDir()
+	if dir == "" {
+		return nil
+	}
+	names := updateSiblingNames(runtime.GOOS)
+	if len(names) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		paths = append(paths, filepath.Join(dir, name))
+	}
+	return paths
+}
+
+func updateSiblingNames(goos string) []string {
+	switch goos {
+	case "windows":
+		return []string{"reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix.exe", "Reasonix.exe"}
+	case "linux":
+		return []string{"reasonix-guard", "reasonix"}
+	default:
+		return nil
+	}
+}
+
+// relaunchThroughGuard starts the packaged launcher so the replacement build is
+// covered by the same crash-loop and rollback policy as a normal app launch.
+func relaunchThroughGuard() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(exe)
+	launcher := filepath.Join(filepath.Dir(exe), "reasonix-guard")
+	if runtime.GOOS == "windows" {
+		launcher += ".exe"
+	}
+	if _, statErr := os.Stat(launcher); statErr != nil {
+		launcher = exe
+	}
+	cmd := exec.Command(launcher, "launch", "--detach")
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 	return cmd.Start()
+}
+
+func currentLauncherPath() string {
+	exe := currentExecutablePath()
+	if exe == "" {
+		return ""
+	}
+	name := "reasonix-guard"
+	if runtime.GOOS == "windows" {
+		name = "reasonix-launcher.exe"
+	}
+	launcher := filepath.Join(filepath.Dir(exe), name)
+	if _, err := os.Stat(launcher); err == nil {
+		return launcher
+	}
+	if runtime.GOOS == "windows" {
+		guard := filepath.Join(filepath.Dir(exe), "reasonix-guard.exe")
+		if _, err := os.Stat(guard); err == nil {
+			return guard
+		}
+	}
+	return exe
 }

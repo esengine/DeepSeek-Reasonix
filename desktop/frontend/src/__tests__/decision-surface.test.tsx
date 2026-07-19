@@ -122,6 +122,49 @@ console.log("\ndecision surface");
   dom.window.close();
 }
 
+// Destructive MCP approval is one-shot even though the tool name is dynamic.
+{
+  const dom = installDom();
+  const root = createRoot(document.getElementById("root")!);
+  const answers: Array<[boolean, boolean, boolean]> = [];
+  const approval: WireApproval = {
+    id: "mcp-danger-1",
+    tool: "mcp__srv__wipe",
+    subject: "MCP srv/wipe declares destructive side effects",
+    reason: "This installed MCP tool declares destructive side effects. Review the target and arguments before allowing this call. Auto/YOLO approval cannot answer this decision.",
+    fresh: true,
+  };
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <ApprovalModal
+          approval={approval}
+          onAnswer={(a, s, p) => answers.push([a, s, p])}
+          onStop={() => undefined}
+        />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+
+  const actions = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLButtonElement[];
+  eq(actions.length, 2, "fresh destructive MCP approval only offers allow once and deny");
+  ok(!document.body.textContent?.includes("Always allow"), "fresh destructive MCP approval hides remembered grants");
+
+  const confirm = document.querySelector(".decision-confirm-bar__confirm") as HTMLButtonElement;
+  await act(async () => {
+    confirm.click();
+    await flushTimers(220);
+  });
+  eq(JSON.stringify(answers[0]), JSON.stringify([true, false, false]), "fresh destructive MCP approval is one-shot");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
 // Clear context: default cancel; clear requires explicit confirm; Escape cancels.
 {
   const dom = installDom();

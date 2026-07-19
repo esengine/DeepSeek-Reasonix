@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 )
@@ -41,12 +42,44 @@ func newHTTPTransport(s Spec) (*httpTransport, error) {
 	if s.URL == "" {
 		return nil, fmt.Errorf("http plugin %q: url is required", s.Name)
 	}
+	headers := make(map[string]string, len(s.Headers))
+	for key, value := range s.Headers {
+		headers[key] = value
+	}
 	return &httpTransport{
 		name:    s.Name,
 		url:     s.URL,
-		headers: s.Headers,
-		client:  &http.Client{},
+		headers: headers,
+		client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) == 0 || sameHTTPOrigin(via[0].URL, req.URL) {
+				return nil
+			}
+			// Do not send configured credentials to another origin. Returning
+			// ErrUseLastResponse exposes the 3xx to the normal status handling
+			// without issuing the redirected request.
+			return http.ErrUseLastResponse
+		}},
 	}, nil
+}
+
+func sameHTTPOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil || !strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		return false
+	}
+	effectivePort := func(u *url.URL) string {
+		if port := u.Port(); port != "" {
+			return port
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			return "80"
+		case "https":
+			return "443"
+		default:
+			return ""
+		}
+	}
+	return effectivePort(a) == effectivePort(b)
 }
 
 func (t *httpTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {

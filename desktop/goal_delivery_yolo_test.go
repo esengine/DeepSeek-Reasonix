@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,12 +23,17 @@ func newGoalDeliveryYoloTestApp(t *testing.T, goalStatus string) (*App, *Workspa
 	t.Helper()
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "GOAL_DELIVERY_KEY", "sk-test")
+	setDesktopTestCredential(t, "GOAL_DELIVERY_ALT_KEY", "sk-test")
 	cfg := config.Default()
 	cfg.DefaultModel = "test/model"
-	cfg.Desktop.ProviderAccess = []string{"test"}
-	cfg.Providers = []config.ProviderEntry{{
-		Name: "test", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "model", APIKeyEnv: "GOAL_DELIVERY_KEY",
-	}}
+	cfg.Desktop.ProviderAccess = []string{"test", "alt"}
+	cfg.Providers = []config.ProviderEntry{
+		{
+			Name: "test", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "model", APIKeyEnv: "GOAL_DELIVERY_KEY",
+			SupportedEfforts: []string{"low", "high"},
+		},
+		{Name: "alt", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "alt-model", APIKeyEnv: "GOAL_DELIVERY_ALT_KEY"},
+	}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -47,6 +54,8 @@ func newGoalDeliveryYoloTestApp(t *testing.T, goalStatus string) (*App, *Workspa
 	state := map[string]any{
 		"goal":               "ship the combined mode",
 		"status":             goalStatus,
+		"researchMode":       control.GoalResearchOn,
+		"autoResearchTaskID": "research-task-1",
 		"scopeID":            checkpoint.ScopeID,
 		"deliveryCheckpoint": checkpoint,
 	}
@@ -65,6 +74,7 @@ func newGoalDeliveryYoloTestApp(t *testing.T, goalStatus string) (*App, *Workspa
 	exec := agent.New(nil, nil, loaded, agent.Options{}, event.Discard)
 	oldCtrl := control.New(control.Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test/model", Sink: event.Discard})
 	oldCtrl.Resume(loaded, path)
+	oldCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
 
 	app := NewApp()
 	app.ctx = context.Background()
@@ -142,6 +152,228 @@ func TestGoalDeliveryYoloTokenSwitchDoesNotReviveCompletedGoal(t *testing.T) {
 	}
 }
 
+func TestPlanYoloDeliveryRebuildUsesLiveControllerAxes(t *testing.T) {
+	app, tab, oldCtrl, _ := newGoalDeliveryYoloTestApp(t, control.GoalStatusBlocked)
+	oldCtrl.SetPlanMode(true)
+	oldCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	// Simulate stale tab metadata: the rebuild must snapshot the admitted
+	// Controller state, not restore these lagging persistence fields.
+	app.mu.Lock()
+	tab.mode = "normal"
+	tab.toolApprovalMode = ""
+	app.mu.Unlock()
+
+	if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
+		t.Fatalf("SetTokenModeForTab: %v", err)
+	}
+	ctrl := app.controllerForTab(tab)
+	if ctrl == nil || ctrl == oldCtrl {
+		t.Fatal("token-mode switch did not install a replacement controller")
+	}
+	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
+		t.Fatalf("rebuilt axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
+	}
+	if ctrl.GoalStatus() != control.GoalStatusBlocked {
+		t.Fatalf("blocked Goal status = %q, want preserved while Plan is active", ctrl.GoalStatus())
+	}
+	if currentTabTokenMode(tab) != boot.TokenModeDelivery {
+		t.Fatalf("token mode = %q, want delivery", currentTabTokenMode(tab))
+	}
+}
+
+func TestPlanWinsRunningGoalConflictDuringDeliveryRebuild(t *testing.T) {
+	app, tab, oldCtrl, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
+	oldCtrl.SetPlanMode(true)
+	oldCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
+	app.mu.Lock()
+	tab.mode = "plan-yolo"
+	tab.goal = "ship the combined mode"
+	app.mu.Unlock()
+
+	if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
+		t.Fatalf("SetTokenModeForTab: %v", err)
+	}
+	ctrl := app.controllerForTab(tab)
+	if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
+		t.Fatalf("rebuilt axes plan=%v approval=%q, want true/yolo", ctrl.PlanMode(), ctrl.ToolApprovalMode())
+	}
+	if ctrl.GoalStatus() == control.GoalStatusRunning || strings.TrimSpace(ctrl.Goal()) != "" {
+		t.Fatalf("Plan/Goal conflict survived rebuild: goal=%q status=%q", ctrl.Goal(), ctrl.GoalStatus())
+	}
+	var persisted struct {
+		Goal   string `json:"goal"`
+		Status string `json:"status"`
+	}
+	data, err := os.ReadFile(store.SessionGoalState(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status == control.GoalStatusRunning || strings.TrimSpace(persisted.Goal) != "" {
+		t.Fatalf("conflicting Goal sidecar = %+v, want cleared", persisted)
+	}
+}
+
+func TestRunningGoalDeliveryYoloRebuildKeepsScopeAndAutoResearch(t *testing.T) {
+	app, tab, oldCtrl, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
+	if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
+		t.Fatalf("SetTokenModeForTab: %v", err)
+	}
+	ctrl := app.controllerForTab(tab)
+	if ctrl == nil || ctrl == oldCtrl || ctrl.GoalStatus() != control.GoalStatusRunning {
+		t.Fatalf("running Goal was not restored: ctrl=%T goal=%q status=%q", ctrl, ctrl.Goal(), ctrl.GoalStatus())
+	}
+	if ctrl.ToolApprovalMode() != control.ToolApprovalYolo {
+		t.Fatalf("tool approval = %q, want yolo", ctrl.ToolApprovalMode())
+	}
+	var persisted struct {
+		ScopeID            string                      `json:"scopeID"`
+		AutoResearchTaskID string                      `json:"autoResearchTaskID"`
+		DeliveryCheckpoint evidence.DeliveryCheckpoint `json:"deliveryCheckpoint"`
+	}
+	data, err := os.ReadFile(store.SessionGoalState(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ScopeID != "goal-test-scope" || persisted.AutoResearchTaskID != "research-task-1" {
+		t.Fatalf("restored Goal identity = %+v", persisted)
+	}
+	if persisted.DeliveryCheckpoint.ScopeID != persisted.ScopeID || !persisted.DeliveryCheckpoint.PendingMutation {
+		t.Fatalf("restored Delivery checkpoint = %+v", persisted.DeliveryCheckpoint)
+	}
+}
+
+func TestGoalDeliveryYoloSurvivesEveryControllerRebuildPath(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		prepare func(*App, *WorkspaceTab)
+		rebuild func(*App, *WorkspaceTab) error
+	}{
+		{
+			name: "settings",
+			prepare: func(app *App, tab *WorkspaceTab) {
+				app.mu.Lock()
+				tab.tokenMode = boot.TokenModeDelivery
+				app.mu.Unlock()
+			},
+			rebuild: func(app *App, _ *WorkspaceTab) error {
+				return app.rebuildSetting("settings")
+			},
+		},
+		{
+			name: "model",
+			prepare: func(app *App, tab *WorkspaceTab) {
+				app.mu.Lock()
+				tab.tokenMode = boot.TokenModeDelivery
+				app.mu.Unlock()
+			},
+			rebuild: func(app *App, tab *WorkspaceTab) error {
+				return app.SetModelForTab(tab.ID, "alt/alt-model")
+			},
+		},
+		{
+			name: "effort",
+			prepare: func(app *App, tab *WorkspaceTab) {
+				app.mu.Lock()
+				tab.tokenMode = boot.TokenModeDelivery
+				app.mu.Unlock()
+			},
+			rebuild: func(app *App, tab *WorkspaceTab) error {
+				return app.SetEffortForTab(tab.ID, "high")
+			},
+		},
+		{
+			name:    "token mode",
+			prepare: func(*App, *WorkspaceTab) {},
+			rebuild: func(app *App, tab *WorkspaceTab) error {
+				return app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, tab, oldCtrl, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
+			tc.prepare(app, tab)
+			if err := tc.rebuild(app, tab); err != nil {
+				t.Fatalf("rebuild: %v", err)
+			}
+
+			ctrl := app.controllerForTab(tab)
+			if ctrl == nil || ctrl == oldCtrl {
+				t.Fatal("rebuild did not install a replacement controller")
+			}
+			if ctrl.PlanMode() || ctrl.GoalStatus() != control.GoalStatusRunning || ctrl.Goal() != "ship the combined mode" {
+				t.Fatalf("collaboration state plan=%v goal=%q status=%q, want running Goal", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
+			}
+			if ctrl.ToolApprovalMode() != control.ToolApprovalYolo || currentTabTokenMode(tab) != boot.TokenModeDelivery {
+				t.Fatalf("runtime axes approval=%q token=%q, want yolo/delivery", ctrl.ToolApprovalMode(), currentTabTokenMode(tab))
+			}
+
+			var persisted struct {
+				ScopeID            string                      `json:"scopeID"`
+				AutoResearchTaskID string                      `json:"autoResearchTaskID"`
+				DeliveryCheckpoint evidence.DeliveryCheckpoint `json:"deliveryCheckpoint"`
+			}
+			data, err := os.ReadFile(store.SessionGoalState(path))
+			if err != nil {
+				t.Fatalf("read Goal sidecar: %v", err)
+			}
+			if err := json.Unmarshal(data, &persisted); err != nil {
+				t.Fatalf("decode Goal sidecar: %v", err)
+			}
+			if persisted.ScopeID != "goal-test-scope" || persisted.AutoResearchTaskID != "research-task-1" {
+				t.Fatalf("restored Goal identity = %+v", persisted)
+			}
+			if persisted.DeliveryCheckpoint.ScopeID != persisted.ScopeID || !persisted.DeliveryCheckpoint.PendingMutation {
+				t.Fatalf("restored Delivery checkpoint = %+v", persisted.DeliveryCheckpoint)
+			}
+		})
+	}
+}
+
+func TestPlanYoloDeliveryOrderConverges(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*App, *WorkspaceTab) error
+	}{
+		{
+			name: "plan then yolo then delivery",
+			run: func(app *App, tab *WorkspaceTab) error {
+				app.SetCollaborationModeForTab(tab.ID, "plan")
+				app.SetToolApprovalModeForTab(tab.ID, control.ToolApprovalYolo)
+				return app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery)
+			},
+		},
+		{
+			name: "delivery then plan then yolo",
+			run: func(app *App, tab *WorkspaceTab) error {
+				if err := app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery); err != nil {
+					return err
+				}
+				app.SetCollaborationModeForTab(tab.ID, "plan")
+				app.SetToolApprovalModeForTab(tab.ID, control.ToolApprovalYolo)
+				return nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app, tab, _, _ := newGoalDeliveryYoloTestApp(t, control.GoalStatusComplete)
+			app.SetToolApprovalModeForTab(tab.ID, control.ToolApprovalAsk)
+			if err := tc.run(app, tab); err != nil {
+				t.Fatal(err)
+			}
+			ctrl := app.controllerForTab(tab)
+			if !ctrl.PlanMode() || ctrl.ToolApprovalMode() != control.ToolApprovalYolo || currentTabTokenMode(tab) != boot.TokenModeDelivery {
+				t.Fatalf("final axes plan=%v approval=%q token=%q", ctrl.PlanMode(), ctrl.ToolApprovalMode(), currentTabTokenMode(tab))
+			}
+		})
+	}
+}
+
 func TestGoalAndCollaborationResyncBeforeSendPreserveRunningDeliveryScope(t *testing.T) {
 	app, tab, ctrl, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
 	tab.goal = ctrl.Goal()
@@ -167,11 +399,25 @@ func TestTokenModeSwitchWaitsForForegroundTurnAdmission(t *testing.T) {
 	app, tab, _, _ := newGoalDeliveryYoloTestApp(t, control.GoalStatusBlocked)
 	tab.turnStartMu.Lock()
 	done := make(chan error, 1)
-	go func() { done <- app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery) }()
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		done <- app.SetTokenModeForTab(tab.ID, boot.TokenModeDelivery)
+	}()
+	<-started
+	for app.runtimeRebuildMu.TryLock() {
+		app.runtimeRebuildMu.Unlock()
+		select {
+		case err := <-done:
+			t.Fatalf("token-mode switch returned before reaching the admission gate: %v", err)
+		default:
+			runtime.Gosched()
+		}
+	}
 	select {
 	case err := <-done:
 		t.Fatalf("token-mode switch crossed the turn-admission gate: %v", err)
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	tab.turnStartMu.Unlock()
 	select {

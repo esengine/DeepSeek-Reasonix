@@ -451,10 +451,13 @@ func normalizedModelOverrides(overrides map[string]ProviderModelOverride) map[st
 		ov.ReasoningProtocol = normalizeReasoningProtocol(ov.ReasoningProtocol)
 		ov.SupportedEfforts = normalizedEffortLevels(ov.SupportedEfforts)
 		ov.DefaultEffort = normalizeEffortLevel(ov.DefaultEffort)
+		if ov.ContextWindow < 0 {
+			ov.ContextWindow = 0
+		}
 		if ov.DefaultEffort != "" && !containsString(ov.SupportedEfforts, ov.DefaultEffort) {
 			ov.DefaultEffort = ""
 		}
-		if ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil {
+		if ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow == 0 {
 			continue
 		}
 		out[model] = ov

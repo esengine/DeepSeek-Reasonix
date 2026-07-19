@@ -39,40 +39,18 @@ const confirmed = reducer(sent, { type: "event", e: { kind: "text", text: "hi" }
 eq(confirmed.items.filter((it) => it.kind === "user").length, 1, "first backend event confirms without duplicating");
 eq(confirmed.pendingUser, undefined, "confirmation clears the pending marker");
 
-const memoryStatsEvent = {
-  kind: "memory_compiler_stats",
-  memoryCompiler: {
-    injected: true,
-    usefulIR: true,
-    compiledTokens: 640,
-    irOverheadTokens: 120,
-    memoryReferences: 2,
-    constraints: 1,
-    riskNotes: 0,
-    executionSteps: 3,
-    totalNodes: 18,
-    highSignalNodes: 4,
-    toolResultNodes: 6,
-    decisionNodes: 2,
-    strategyCount: 5,
-    learningCount: 3,
-  },
-} as WireEvent;
-const statsOnly = reducer(sent, { type: "event", e: memoryStatsEvent });
-eq(statsOnly, sent, "memory compiler stats do not confirm or mutate the visible turn");
-const startedThenStats = reducer(reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent }), { type: "event", e: memoryStatsEvent });
-eq(startedThenStats.items.length, 2, "memory compiler stats do not add transcript items after turn start");
-const compilerCitationMessage = {
+const memoryCitationMessage = {
   kind: "message",
-  memoryCitations: [{ kind: "compiler_reference", source: "Memory v5", note: "evidence: bash succeeded" }],
+  memoryCitations: [{ kind: "memory_reference", source: "MEMORY.md", note: "reasonix workflow" }],
 } as WireEvent;
-const citationOnlyFinal = reducer(reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent }), { type: "event", e: compilerCitationMessage });
-eq(citationOnlyFinal.items.length, 1, "memory compiler citations alone do not leave an empty assistant bubble");
-eq(citationOnlyFinal.items.some((it) => it.kind === "assistant"), false, "memory compiler citations alone stay hidden from the transcript");
-const textThenCitationFinal = reducer(reducer(startedThenStats, { type: "event", e: { kind: "text", text: "done" } as WireEvent }), { type: "event", e: compilerCitationMessage });
+const started = reducer(sent, { type: "event", e: { kind: "turn_started" } as WireEvent });
+const citationOnlyFinal = reducer(started, { type: "event", e: memoryCitationMessage });
+eq(citationOnlyFinal.items.length, 1, "memory citations alone do not leave an empty assistant bubble");
+eq(citationOnlyFinal.items.some((it) => it.kind === "assistant"), false, "memory citations alone stay hidden from the transcript");
+const textThenCitationFinal = reducer(reducer(started, { type: "event", e: { kind: "text", text: "done" } as WireEvent }), { type: "event", e: memoryCitationMessage });
 const citedAssistant = textThenCitationFinal.items.find((it) => it.kind === "assistant");
-eq(citedAssistant?.kind === "assistant" && citedAssistant.text, "done", "memory compiler citations preserve existing assistant text");
-eq(citedAssistant?.kind === "assistant" && citedAssistant.memoryCitations?.length, 1, "memory compiler citations attach to real assistant content");
+eq(citedAssistant?.kind === "assistant" && citedAssistant.text, "done", "memory citations preserve existing assistant text");
+eq(citedAssistant?.kind === "assistant" && citedAssistant.memoryCitations?.length, 1, "memory citations attach to real assistant content");
 
 const failedState = reducer(sent, { type: "send_failed", error: "Send failed: bridge unavailable" });
 const failedBubble = failedState.items.find((it) => it.kind === "user");
@@ -88,8 +66,9 @@ const readinessState = reducer(readinessStarted, {
   type: "event",
   e: {
     kind: "turn_done",
-    outcome: "final_readiness",
-    err: "final-answer readiness failed 3 times: missing verification",
+		outcome: "final_readiness",
+		err: "final-answer readiness failed 3 times: missing verification",
+		readiness: { attempts: 3, missing: ["verification", "review"] },
   } as WireEvent,
 });
 const readinessNotice = readinessState.items[readinessState.items.length - 1];
@@ -97,10 +76,14 @@ eq(readinessNotice.kind, "notice", "final readiness appends a notice");
 eq(readinessNotice.kind === "notice" && readinessNotice.level, "info", "final readiness uses informational severity");
 eq(readinessNotice.kind === "notice" && readinessNotice.variant, "delivery", "final readiness uses the delivery status treatment");
 eq(readinessNotice.kind === "notice" && readinessNotice.title, "Delivery checks are not complete", "final readiness uses localized product copy");
-eq(readinessNotice.kind === "notice" && readinessNotice.detail?.includes("final-answer readiness failed"), true, "raw diagnostics stay in collapsed detail");
+eq(readinessNotice.kind === "notice" && readinessNotice.detail, "Still needed: verification, change review", "structured requirements produce localized detail");
 eq(readinessNotice.kind === "notice" && readinessNotice.action, "continue_delivery", "final readiness offers a recovery action");
 const readinessUser = readinessState.items.find((it) => it.kind === "user");
 eq(readinessUser?.kind === "user" && Boolean(readinessUser.failed), false, "final readiness does not mark the delivered user message as failed");
+
+const recovering = reducer(readinessState, { type: "user", text: "Continue checks", seq: readinessState.seq, deliveryRecovery: true });
+const recovered = reducer(recovering, { type: "event", e: { kind: "turn_done" } as WireEvent });
+eq(recovered.items.some((it) => it.kind === "notice" && it.variant === "delivery"), false, "successful explicit recovery removes the stale delivery card");
 
 const ordinaryTurnError = reducer(readinessStarted, {
   type: "event",
@@ -137,7 +120,7 @@ const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const typesSource = readFileSync(resolve(here, "../lib/types.ts"), "utf8");
 const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), "utf8");
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
-eq(controllerSource.includes('e.kind === "memory_compiler_stats" || e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
+eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
 eq(
   /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),
   true,

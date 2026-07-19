@@ -33,6 +33,7 @@ function renderStatusBar(props: Partial<Parameters<typeof StatusBar>[0]> = {}): 
 
 console.log("\nstatus bar workspace");
 
+
 {
   const defaultItems = DEFAULT_STATUS_BAR_ITEMS as readonly string[];
   ok(defaultItems.includes("workspace"), "workspace is a default configurable status item");
@@ -41,6 +42,30 @@ console.log("\nstatus bar workspace");
     normalizeStatusBarItems(["git_branch", "workspace", "cache"]).join(",") === "git_branch,workspace,cache",
     "workspace items preserve configured order",
   );
+}
+
+{
+  const remoteHosts = [
+    { id: "demo", label: "demo", host: "192.0.2.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
+  ];
+  const stopped = renderStatusBar({ workspacePath: "/workspace/repo", workspaceName: "repo", remoteHosts });
+  ok(stopped.includes("SSH · Disconnected"), "configured SSH entry remains visible while disconnected");
+  ok(stopped.indexOf("SSH · Disconnected") < stopped.indexOf("workspace/repo"), "window-level SSH entry leads the status bar");
+
+  const connected = renderStatusBar({
+    workspacePath: "/workspace/repo",
+    workspaceName: "repo",
+    remoteHosts,
+    remoteStatuses: { demo: { hostId: "demo", state: "connected" } },
+  });
+  ok(connected.includes("demo · Connected"), "SSH entry includes host and connected state text");
+
+  const failed = renderStatusBar({
+    workspacePath: "/workspace/repo",
+    remoteHosts,
+    remoteStatuses: { demo: { hostId: "demo", state: "stopped", error: "handshake failed" } },
+  });
+  ok(failed.includes("demo · Connection failed"), "SSH entry keeps a recoverable failure summary visible");
 }
 
 {

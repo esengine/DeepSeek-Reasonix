@@ -12,7 +12,7 @@ import (
 	"reasonix/internal/event"
 )
 
-func TestConnectToolSourcePlanModeClassifiesLeanOptionalSources(t *testing.T) {
+func TestConnectToolSourcePlanModeLoadsOptionalSources(t *testing.T) {
 	tsc := &toolSourceConnector{
 		sessions: func(context.Context) (string, error) { return "enabled sessions.", nil },
 		commands: func(context.Context) (string, error) { return "enabled commands.", nil },
@@ -21,21 +21,14 @@ func TestConnectToolSourcePlanModeClassifiesLeanOptionalSources(t *testing.T) {
 		memory:   func(context.Context) (string, error) { return "enabled memory.", nil },
 	}
 	ctx := agent.WithToolCallContext(context.Background(), "call", event.Discard, nil, true)
-	for _, source := range []string{"sessions", "commands", "search", "workflow"} {
+	for _, source := range []string{"sessions", "commands", "search", "workflow", "memory"} {
 		out, err := tsc.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"source":%q}`, source)))
 		if err != nil {
 			t.Fatalf("source %s: %v", source, err)
 		}
 		if strings.Contains(out, "blocked:") {
-			t.Fatalf("read-only source %s blocked in plan mode: %s", source, out)
+			t.Fatalf("source %s should load in Plan before permissioned tool use: %s", source, out)
 		}
-	}
-	out, err := tsc.Execute(ctx, json.RawMessage(`{"source":"memory"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out, "blocked:") {
-		t.Fatalf("memory source includes writers and must be blocked in plan mode: %s", out)
 	}
 }
 

@@ -1,0 +1,83 @@
+name: Prepare release notes
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without a tag prefix (for example 1.18.0)"
+        required: true
+        type: string
+      from_tag:
+        description: "Previous release tag (defaults to the newest catalog entry)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  draft:
+    name: generate reviewable bilingual draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Prepare the release-notes branch
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release-notes/v${VERSION#v}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" main-v2
+            git checkout -b "$branch" --track "origin/$branch"
+            git merge --no-edit origin/main-v2
+          else
+            git checkout -b "$branch"
+          fi
+          echo "RELEASE_NOTES_BRANCH=$branch" >> "$GITHUB_ENV"
+
+      - name: Generate and validate release notes
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: deepseek-v4-pro
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+          FROM_TAG: ${{ inputs.from_tag }}
+        run: |
+          set -euo pipefail
+          args=(--version "$VERSION")
+          if [ -n "$FROM_TAG" ]; then args+=(--from "$FROM_TAG"); fi
+          node scripts/generate-release-notes.mjs "${args[@]}"
+          node scripts/release-notes.mjs validate
+          node --test scripts/release-notes.test.mjs
+          node scripts/release-notes.mjs render --version "$VERSION" --output /tmp/release-notes.md
+
+      - name: Open or update the review PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          git add release-notes/releases.json
+          if ! git diff --cached --quiet; then
+            git commit -m "docs(release): prepare v${VERSION#v} notes" \
+              -m "Generate a bilingual, product-focused draft from merged pull request metadata. The reviewed catalog will drive the website, desktop app, and GitHub releases."
+          fi
+          git push -u origin "$RELEASE_NOTES_BRANCH"
+          if ! gh pr list --head "$RELEASE_NOTES_BRANCH" --state open --json number --jq 'length > 0' | grep -q true; then
+            gh pr create \
+              --base main-v2 \
+              --head "$RELEASE_NOTES_BRANCH" \
+              --title "docs(release): 准备 v${VERSION#v} 中英更新日志" \
+              --body-file /tmp/release-notes.md
+          fi

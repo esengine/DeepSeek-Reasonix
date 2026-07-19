@@ -50,6 +50,12 @@ func (a *App) sweepReclaimableRecoveryBranches() int {
 }
 
 func (a *App) reclaimRecoveryBranchesIn(dirs []string, now time.Time) int {
+	// Safe Mode loads none of the saved tabs, so the liveness checks below
+	// would see every normally-open session as closed and reclaim recovery
+	// branches the user's real layout still owns. Recovery boots never GC.
+	if config.SafeModeRequested() {
+		return 0
+	}
 	reclaimed := 0
 	for _, dir := range dirs {
 		reclaimable, err := agent.ReclaimableRecoveryBranches(dir, now, agent.RecoveryGCGracePeriod)

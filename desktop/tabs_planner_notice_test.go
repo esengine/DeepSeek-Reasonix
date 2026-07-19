@@ -11,17 +11,18 @@ import (
 // a reload even though the live transcript showed them.
 func TestRecordPlannerDisplayEventKeepsNoticeDetail(t *testing.T) {
 	tab := &WorkspaceTab{}
-	tab.recordPlannerDisplayEvent(event.Event{
+	tab.recordDisplayEvent(event.Event{
 		Kind:   event.Notice,
 		Level:  event.LevelWarn,
 		Source: event.UsageSourcePlanner,
 		Text:   "An MCP server failed to start.",
 		Detail: `mcp server "github" failed to start: command not found`,
 	})
-	if len(tab.plannerDisplay) != 1 {
-		t.Fatalf("plannerDisplay len = %d, want 1", len(tab.plannerDisplay))
+	messages := tab.takeDisplayTurn(false)
+	if len(messages) != 1 {
+		t.Fatalf("planner display len = %d, want 1", len(messages))
 	}
-	got := tab.plannerDisplay[0]
+	got := messages[0]
 	if got.Role != "notice" || got.Level != "warn" {
 		t.Fatalf("unexpected notice message: %+v", got)
 	}

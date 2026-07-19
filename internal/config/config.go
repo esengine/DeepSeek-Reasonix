@@ -1,6 +1,5 @@
 // Package config loads Reasonix's runtime configuration from TOML. Resolution order:
 // flag > project ./reasonix.toml > user config.toml (in the OS user-config dir) > built-in defaults.
-// User-global runtime controls, such as agent step limits, are documented exceptions.
 // Secrets come from the environment via api_key_env and are never stored in
 // config files.
 package config
@@ -61,14 +60,31 @@ type Config struct {
 	Bot              BotConfig           `toml:"bot"`
 	Serve            ServeConfig         `toml:"serve"`
 	Secrets          SecretsConfig       `toml:"secrets"`
+	Remote           RemoteConfig        `toml:"remote"`
 
 	providerSources            map[string]providerSourceScope
 	shadowedProjectProviders   []ProviderEntry
 	ignoredProjectDefaultModel string
+	ignoredLegacyStepLimits    bool
 	expansionEnv               map[string]string
 	pluginPackageOwners        map[string]string
 	pluginPackageSkillOwners   map[string][]string
 	pluginPackageAgentOwners   map[string][]string
+	safeMode                   bool
+}
+
+// SafeMode reports whether this configuration was built for recovery startup.
+// It is process-local runtime state and is never persisted to TOML.
+func (c *Config) SafeMode() bool {
+	return c != nil && c.safeMode
+}
+
+// IgnoredLegacyAgentStepLimits reports whether this load found and ignored the
+// retired [agent].max_steps or planner_max_steps settings. Boot removes standard
+// key assignments before loading, while read-only/config-only loads only report
+// and normalize them in memory.
+func (c *Config) IgnoredLegacyAgentStepLimits() bool {
+	return c != nil && c.ignoredLegacyStepLimits
 }
 
 // IgnoredProjectDefaultModel returns the project reasonix.toml default_model
@@ -83,14 +99,9 @@ func (c *Config) IgnoredProjectDefaultModel() string {
 
 // SecretsConfig controls the credential protection layers. It is a user-global
 // setting: project reasonix.toml values are ignored (see LoadForRoot), so a
-// cloned repository cannot silently switch off redaction or opt the user into
-// workflow-breaking protections.
+// cloned repository cannot silently opt the user into workflow-breaking
+// protections.
 type SecretsConfig struct {
-	// RedactToolOutput masks credential-shaped values in tool output before it
-	// enters model context and UI events. Nil keeps the default enabled.
-	// Session transcripts and background-job artifacts on disk are always
-	// redacted, regardless of this switch.
-	RedactToolOutput *bool `toml:"redact_tool_output"`
 	// FilterSubprocessEnv strips credential-like environment variables
 	// (*_API_KEY, *TOKEN*, *SECRET*, ...) from tool subprocesses (bash, hooks,
 	// LSP, MCP stdio). Default off: it breaks token-based workflows such as
@@ -98,15 +109,9 @@ type SecretsConfig struct {
 	FilterSubprocessEnv bool `toml:"filter_subprocess_env"`
 	// ProtectSensitiveFiles makes read/list/search tools treat credential
 	// paths (.env, .git-credentials, .netrc, *.pem/*.key/*.p12/*.pfx, ~/.ssh)
-	// as invisible. Default off: output redaction already masks the values,
-	// and hiding the files breaks legitimate "edit my .env" workflows.
+	// as invisible. Default off because hiding the files breaks legitimate
+	// "edit my .env" workflows.
 	ProtectSensitiveFiles bool `toml:"protect_sensitive_files"`
-}
-
-// SecretsRedactToolOutput reports whether live tool output redaction is
-// enabled (default true).
-func (c *Config) SecretsRedactToolOutput() bool {
-	return c == nil || c.Secrets.RedactToolOutput == nil || *c.Secrets.RedactToolOutput
 }
 
 type providerSourceScope string
@@ -124,7 +129,7 @@ type UIConfig struct {
 	ShortcutLayout string `toml:"shortcut_layout"` // classic|desktop; accepted for compatibility
 	CloseBehavior  string `toml:"close_behavior"`  // legacy desktop close behavior; prefer desktop.close_behavior
 	ShowReasoning  bool   `toml:"show_reasoning"`  // Ctrl+O / /verbose: show thinking text in CLI; false = collapsed
-	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to underline
+	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
 }
 
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
@@ -146,6 +151,7 @@ type DesktopConfig struct {
 	Metrics                 *bool    `toml:"metrics"`                    // aggregate desktop metrics (anonymous signal/bucket counts; no content); nil keeps the default enabled
 	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
+	ConversationWidth       string   `toml:"conversation_width"`         // standard|full; max transcript width; empty = standard
 }
 
 // DesktopExternalOpener returns the user-selected external opener id. The
@@ -210,18 +216,17 @@ func (c *Config) UIShortcutLayout() string {
 	}
 }
 
-// UICursorShape normalizes ui.cursor_shape. Defaults to "underline" to avoid
-// block-cursor visual corruption with CJK wide characters in the textarea
-// (Bubble Tea real-cursor + CJK column-counting drift). Valid values:
-// "block", "underline", "bar".
+// UICursorShape normalizes ui.cursor_shape. The slim "bar" default stays
+// visible without covering CJK wide characters. Valid values are "block",
+// "underline", and "bar".
 func (c *Config) UICursorShape() string {
 	switch strings.ToLower(strings.TrimSpace(c.UI.CursorShape)) {
 	case "block":
 		return "block"
-	case "bar":
-		return "bar"
-	default:
+	case "underline":
 		return "underline"
+	default:
+		return "bar"
 	}
 }
 
@@ -326,6 +331,15 @@ func (c *Config) DesktopDisplayMode() string {
 	default:
 		return "standard"
 	}
+}
+
+// DesktopConversationWidth returns the normalized desktop conversation width.
+// Unknown and missing values fall back to standard for backward compatibility.
+func (c *Config) DesktopConversationWidth() string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Desktop.ConversationWidth), "full") {
+		return "full"
+	}
+	return "standard"
 }
 
 // NormalizeToolApprovalMode returns the canonical desktop/session tool approval
@@ -904,7 +918,7 @@ func (c *Config) IsSkillDisabled(name string) bool {
 // (write_file / edit_file / multi_edit / move_file) may modify; empty means the
 // current working directory, so writes stay inside the project by default.
 // AllowWrite lists extra directories writers may also touch (e.g. a sibling repo
-// or a temp dir). ForbidRead lists directories the agent may not read or list at all
+// or a temp dir). ForbidRead lists files or directories the agent may not read or list
 // (e.g. ~/.ssh for secrets). Both support ${VAR} / ${VAR:-default} expansion. Reads are
 // unrestricted; confining `bash` is Phase 1 (OS-level sandbox).
 type SandboxConfig struct {
@@ -967,7 +981,7 @@ func (c *Config) AllowWriteRoots() []string {
 	return roots
 }
 
-// ForbidReadRoots returns the directories the agent is forbidden from reading
+// ForbidReadRoots returns the paths the agent is forbidden from reading
 // or listing, with ${VAR} expanded. Relative roots are resolved against the
 // current working directory; the confiner resolves them to symlink-free paths.
 // Empty when no forbid_read entries are configured.
@@ -1004,10 +1018,9 @@ func (c *Config) BashMode() string {
 }
 
 // BashModeForGOOS normalises the bash-sandbox mode for tests and cross-platform
-// rendering. Windows currently forces bash sandboxing off, even when older
-// configs explicitly requested "enforce", because the native backend still
-// breaks common Git Bash/MSYS2, Docker, and git workflows. macOS/Linux keep the
-// existing explicit-mode behavior.
+// rendering. Windows has no OS-level Bash sandbox and forces the effective mode
+// off, even when older configs explicitly requested "enforce". macOS/Linux keep
+// the existing explicit-mode behavior.
 func (c *Config) BashModeForGOOS(goos string) string {
 	if goos == "windows" {
 		return "off"
@@ -1030,10 +1043,13 @@ func (c *Config) BashModeForGOOS(goos string) string {
 // each model's prompt prefix stays cache-stable). SubagentModel is the optional
 // default for runAs=subagent skills; SubagentModels overrides it per skill name.
 type AgentConfig struct {
-	SystemPrompt        string            `toml:"system_prompt"`
-	SystemPromptFile    string            `toml:"system_prompt_file"`
-	MaxSteps            int               `toml:"max_steps"`         // tool-call rounds per turn; 0 = unlimited
-	PlannerMaxSteps     int               `toml:"planner_max_steps"` // planner read-only tool-call rounds; 0 = unlimited
+	SystemPrompt     string `toml:"system_prompt"`
+	SystemPromptFile string `toml:"system_prompt_file"`
+	// Deprecated compatibility fields. Old TOML and desktop clients may still
+	// send them, but config loading normalizes both to zero and rendering omits
+	// them. One-off CLI and unattended bot limits remain separate controls.
+	MaxSteps            int               `toml:"max_steps"`
+	PlannerMaxSteps     int               `toml:"planner_max_steps"`
 	Temperature         float64           `toml:"temperature"`
 	PlannerModel        string            `toml:"planner_model"`
 	GuardianModel       string            `toml:"guardian_model"`
@@ -1043,6 +1059,14 @@ type AgentConfig struct {
 	SubagentEffort      string            `toml:"subagent_effort"`
 	SubagentEfforts     map[string]string `toml:"subagent_efforts"`
 	MaxSubagentDepth    int               `toml:"max_subagent_depth"`
+	// MaxSubagentConcurrency bounds how many sub-agents (task, fleet items,
+	// profile skills, nested children) may run at once in one session.
+	// 0 means the default (6). Values outside 1–32 are clamped on load.
+	MaxSubagentConcurrency int `toml:"max_subagent_concurrency"`
+	// MaxParallelWriters bounds concurrent writer-capable sub-agents that
+	// declare non-overlapping write_paths. 0 means the default (3). Must not
+	// exceed MaxSubagentConcurrency after normalization.
+	MaxParallelWriters int `toml:"max_parallel_writers"`
 	// OutputStyle selects a persona/tone block folded into the system prompt at
 	// startup (a built-in like "explanatory"/"learning"/"concise", or a custom
 	// .reasonix/output-styles/<name>.md). Empty = the unmodified prompt.
@@ -1071,60 +1095,13 @@ type AgentConfig struct {
 	// ColdResumePrune elides stale tool results when a session reopens past the
 	// provider cache window. nil = default enabled.
 	ColdResumePrune *bool `toml:"cold_resume_prune"`
-	// PlanModeAllowedTools names extra custom tools the plan-mode policy may treat
-	// as read-only. It cannot unlock known blocked tools or unsafe bash commands.
+	// PlanModeAllowedTools is a legacy compatibility field. Concrete MCP names may
+	// still become local read-only trust aliases, but this field does not control
+	// main Plan workflow availability.
 	PlanModeAllowedTools []string `toml:"plan_mode_allowed_tools"`
-	// PlanModeReadOnlyCommands names concrete shell command prefixes that plan mode
-	// may treat as read-only. Shell operators, background execution, and shell
-	// interpreter prefixes remain blocked.
+	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
+	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
-	// MemoryCompiler controls the v5 execution-memory compiler. Missing configs
-	// default to enabled so users get the self-improving planner unless they opt
-	// out explicitly.
-	MemoryCompiler MemoryCompilerConfig `toml:"memory_compiler"`
-}
-
-// MemoryCompilerConfig controls the v5 execution-memory compiler.
-type MemoryCompilerConfig struct {
-	Enabled   *bool  `toml:"enabled"`
-	Verbosity string `toml:"verbosity"`
-}
-
-const (
-	MemoryCompilerVerbosityObserve = "observe"
-	MemoryCompilerVerbosityCompact = "compact"
-)
-
-// MemoryCompilerEnabled reports whether the v5 execution-memory compiler should
-// participate in future turns. Missing config defaults to true.
-func (c *Config) MemoryCompilerEnabled() bool {
-	if c == nil || c.Agent.MemoryCompiler.Enabled == nil {
-		return true
-	}
-	return *c.Agent.MemoryCompiler.Enabled
-}
-
-// MemoryCompilerVerbosity reports how much Memory v5 state should be injected
-// into model-facing turns. The default observes and learns without prompt
-// injection, so Memory v5 IR is not provider-visible unless opted in.
-func (c *Config) MemoryCompilerVerbosity() string {
-	if c == nil {
-		return MemoryCompilerVerbosityObserve
-	}
-	return NormalizeMemoryCompilerVerbosity(c.Agent.MemoryCompiler.Verbosity)
-}
-
-// NormalizeMemoryCompilerVerbosity accepts current and legacy spellings for the
-// Memory v5 injection mode.
-func NormalizeMemoryCompilerVerbosity(v string) string {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "", "observe", "observed", "silent", "minimal", "none":
-		return MemoryCompilerVerbosityObserve
-	case "compact", "inject", "injected", "contract", "on":
-		return MemoryCompilerVerbosityCompact
-	default:
-		return MemoryCompilerVerbosityObserve
-	}
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -1202,6 +1179,10 @@ type ProviderModelOverride struct {
 	SupportedEfforts  []string `toml:"supported_efforts"`
 	DefaultEffort     string   `toml:"default_effort"`
 	Vision            *bool    `toml:"vision"`
+	// ContextWindow overrides the provider-wide context budget for this model.
+	// Zero inherits ProviderEntry.ContextWindow so existing configurations keep
+	// their current compaction behavior.
+	ContextWindow int `toml:"context_window"`
 }
 
 // ModelList returns the models this provider exposes: the explicit `models` list,
@@ -1347,6 +1328,9 @@ func (e *ProviderEntry) applyModelOverride() {
 	if ov.Vision != nil {
 		e.visionOverride = ov.Vision
 	}
+	if ov.ContextWindow > 0 {
+		e.ContextWindow = ov.ContextWindow
+	}
 }
 
 func (e *ProviderEntry) modelOverrideForModel(model string) (ProviderModelOverride, bool) {
@@ -1460,6 +1444,33 @@ type PermissionsConfig struct {
 	Deny  []string `toml:"deny"`
 }
 
+// MCPToolPolicy is local execution policy for one raw server tool name. It is
+// intentionally absent from provider-visible tool schemas.
+type MCPToolPolicy struct {
+	ApprovalMode string `toml:"approval_mode" json:"approval_mode"`
+}
+
+// MCPConfigSource records where a merged MCP entry came from. It is runtime
+// provenance only and is never serialized back into TOML or .mcp.json.
+type MCPConfigSource string
+
+const (
+	MCPSourceUnknown        MCPConfigSource = ""
+	MCPSourceUserConfig     MCPConfigSource = "user_config"
+	MCPSourceProjectConfig  MCPConfigSource = "project_config"
+	MCPSourceProjectMCPJSON MCPConfigSource = "project_mcp_json"
+	MCPSourceLegacyUser     MCPConfigSource = "legacy_user_config"
+	MCPSourcePluginPackage  MCPConfigSource = "plugin_package"
+)
+
+func (s MCPConfigSource) UserAuthorized() bool {
+	return s == MCPSourceUserConfig || s == MCPSourceLegacyUser || s == MCPSourcePluginPackage
+}
+
+func (s MCPConfigSource) RequiresLaunchApproval() bool {
+	return s == MCPSourceProjectConfig || s == MCPSourceProjectMCPJSON
+}
+
 // PluginEntry declares an external MCP server. Type selects the transport:
 // "stdio" (default) launches Command/Args/Env as a subprocess; "http"
 // (a.k.a. streamable-http) and "sse" connect to a remote URL with optional
@@ -1482,10 +1493,18 @@ type PluginEntry struct {
 	// from this server. Keys are server-local tool names, not model-visible
 	// mcp__server__tool names.
 	ToolTimeoutSeconds map[string]int `toml:"tool_timeout_seconds"`
-	// TrustedReadOnlyTools names raw MCP tool names that Reasonix should treat as
-	// trusted read-only for planner / plan-mode / read-only research surfaces.
-	// Use this only for tools whose semantics are known to be side-effect free.
+	// TrustedReadOnlyTools is a local trust and compatibility override for
+	// audited readers. Third-party readOnlyHint alone is not a Plan-mode trust
+	// boundary.
 	TrustedReadOnlyTools []string `toml:"trusted_read_only_tools"`
+	// DefaultToolsApprovalMode is auto|prompt|writes|approve. Empty uses the
+	// source-aware runtime default (direct for user-authorized servers, auto for
+	// project-provided servers).
+	DefaultToolsApprovalMode string `toml:"default_tools_approval_mode"`
+	// Tools overrides approval policy by raw server-local tool name.
+	Tools map[string]MCPToolPolicy `toml:"tools"`
+	// ApprovalsReviewer is user|auto_review. Empty preserves legacy routing.
+	ApprovalsReviewer string `toml:"approvals_reviewer"`
 	// AutoStart controls whether the server connects during session startup.
 	// Nil preserves historical behavior: configured servers start automatically.
 	AutoStart *bool `toml:"auto_start"`
@@ -1499,7 +1518,8 @@ type PluginEntry struct {
 	//                  swap happens once the spawn finishes.
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier         string `toml:"tier"`
+	Tier         string          `toml:"tier"`
+	Source       MCPConfigSource `toml:"-" json:"-"`
 	expansionEnv map[string]string
 }
 
@@ -1561,7 +1581,7 @@ func Default() *Config {
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto"},
-		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto"},
+		Desktop:          DesktopConfig{DefaultToolApprovalMode: "auto", ConversationWidth: "standard"},
 		Notifications: NotificationsConfig{
 			Enabled:         false,
 			TurnDone:        true,
@@ -1570,25 +1590,25 @@ func Default() *Config {
 		},
 		Agent: AgentConfig{
 			SystemPrompt: DefaultSystemPrompt,
-			// 0 = no step cap: the agent loops until the model gives a final answer,
-			// the user cancels, or the provider errors. Context stays bounded by
-			// compaction, not by a round count. Set a positive agent.max_steps only
-			// if you want a hard guard against runaway.
-			MaxSteps:            0,
-			PlannerMaxSteps:     0,
-			AutoPlan:            "off",
-			SoftCompactRatio:    0.5,
-			ToolResultSnipRatio: 0.6,
-			CompactRatio:        0.8,
-			CompactForceRatio:   0.9,
-			MaxSubagentDepth:    2,
+			// Normal interactive execution has no configurable total round cap. It
+			// is bounded by adaptive progress guards and context compaction instead.
+			MaxSteps:               0,
+			PlannerMaxSteps:        0,
+			AutoPlan:               "off",
+			SoftCompactRatio:       0.5,
+			ToolResultSnipRatio:    0.6,
+			CompactRatio:           0.8,
+			CompactForceRatio:      0.9,
+			MaxSubagentDepth:       2,
+			MaxSubagentConcurrency: 6,
+			MaxParallelWriters:     3,
 		},
 		// Mode "ask" with no rules keeps `reasonix run` autonomous (no TTY → ask
 		// resolves to allow) while `reasonix` prompts before writers. Users add
 		// deny/allow rules to harden or quiet specific tools.
 		Permissions: PermissionsConfig{Mode: "ask"},
 		// Sandbox uses platform defaults: macOS/Linux jail bash by default;
-		// Windows forces bash off until the native sandbox backend is reliable.
+		// Windows has no OS-level Bash sandbox and always forces bash off.
 		// Network=true here so an absent [sandbox] in a user's file keeps egress
 		// (zero value would wrongly deny it).
 		Sandbox: SandboxConfig{Network: true},

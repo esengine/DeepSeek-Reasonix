@@ -44,7 +44,7 @@ func TestTryTakeSessionLockFileTreatsOpenHandleAsHeld(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if _, err := tryTakeSessionLockFile(lockPath); !errors.Is(err, errSessionFileLockHeld) {
-		t.Fatalf("tryTakeSessionLockFile with plain open handle = %v, want errSessionFileLockHeld", err)
+	if _, err := tryTakeSessionLockFile(lockPath); !errors.Is(err, ErrSessionFileLockHeld) {
+		t.Fatalf("tryTakeSessionLockFile with plain open handle = %v, want ErrSessionFileLockHeld", err)
 	}
 }

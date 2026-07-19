@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
+	"reasonix/internal/tool"
 )
 
 // approvalManager owns the approval/ask prompt bookkeeping and the runtime
@@ -38,17 +39,17 @@ type approvalManager struct {
 	nextID                   int
 	// toolApprovalMode is the runtime approval posture: "ask" prompts, "auto"
 	// lets the policy auto-approve the writer fallback while preserving ask/deny
-	// rules, and "yolo" skips every tool approval prompt except plan approval.
+	// rules, and "yolo" skips ordinary tool prompts while deny rules and fresh
+	// decisions remain enforced.
 	toolApprovalMode string
 	// approvalTimeout bounds how long requestApproval/Ask block on a user
 	// decision. Zero means wait indefinitely (correct for an interactive
 	// terminal); bot/headless frontends set it so a walked-away user can't wedge
 	// the session forever (#4626, #4402). Write-once at construction.
 	approvalTimeout time.Duration
-	// planAutoApprove auto-allows writer tool calls without prompting while a
-	// just-approved plan executes. Set by the turn loop, read by the bypass
-	// check. Plan approval is the go-ahead, so the model shouldn't re-prompt for
-	// every write of the work it just got cleared to do.
+	// planAutoApprove auto-allows the ordinary writer fallback while a
+	// just-approved plan executes. Explicit ask/deny rules and fresh decisions
+	// remain authoritative, matching Auto rather than YOLO semantics.
 	planAutoApprove bool
 
 	// promptMu serializes outstanding prompts so at most one user decision is in
@@ -92,7 +93,9 @@ func BuildHeadlessApprovalGate(policy permission.Policy, mode string) *freshHuma
 	switch normalizeToolApprovalMode(mode) {
 	case ToolApprovalYolo:
 		policy.Mode = permission.Allow
-		return NewHeadlessPermissionGate(policy)
+		gate := NewHeadlessPermissionGate(policy)
+		gate.bypassMCPAuto = true
+		return gate
 	case ToolApprovalAuto:
 		policy.Mode = permission.Allow
 		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, denyPermissionApprover{})}
@@ -148,8 +151,23 @@ func (g *SharedHeadlessGate) Check(ctx context.Context, toolName string, args js
 	return gate.Check(ctx, toolName, args, readOnly)
 }
 
+func (g *SharedHeadlessGate) CheckFresh(ctx context.Context, toolName, subject string, args json.RawMessage, readOnly bool) (bool, string, error) {
+	g.mu.RLock()
+	gate := g.gate
+	g.mu.RUnlock()
+	return gate.CheckFresh(ctx, toolName, subject, args, readOnly)
+}
+
+func (g *SharedHeadlessGate) CheckMCP(ctx context.Context, toolName, subject string, args json.RawMessage, readOnly, destructive bool, mode, reviewer string) (bool, string, error) {
+	g.mu.RLock()
+	gate := g.gate
+	g.mu.RUnlock()
+	return gate.CheckMCP(ctx, toolName, subject, args, readOnly, destructive, mode, reviewer)
+}
+
 type freshHumanHeadlessGate struct {
-	gate *permission.Gate
+	gate          *permission.Gate
+	bypassMCPAuto bool
 }
 
 func (g *freshHumanHeadlessGate) Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (bool, string, error) {
@@ -159,25 +177,36 @@ func (g *freshHumanHeadlessGate) Check(ctx context.Context, toolName string, arg
 	return g.gate.Check(ctx, toolName, args, readOnly)
 }
 
+func (g *freshHumanHeadlessGate) CheckFresh(context.Context, string, string, json.RawMessage, bool) (bool, string, error) {
+	return false, "this tool requires fresh human approval and cannot run in a non-interactive session.", nil
+}
+
+func (g *freshHumanHeadlessGate) CheckMCP(ctx context.Context, toolName, subject string, args json.RawMessage, readOnly, destructive bool, mode, reviewer string) (bool, string, error) {
+	if g.bypassMCPAuto && !destructive && tool.NormalizeMCPApprovalMode(mode) == tool.MCPApprovalAuto {
+		reviewer = ""
+	}
+	return g.gate.CheckMCP(ctx, toolName, subject, args, readOnly, destructive, mode, reviewer)
+}
+
 // preApproved reports whether a tool call can skip the prompt — either the
 // posture bypasses it (YOLO / plan-execution window) or a session grant already
 // covers the scope.
-func (a *approvalManager) preApproved(tool, subject string) bool {
+func (a *approvalManager) preApproved(tool, subject string, args json.RawMessage) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.bypassAllowsLocked(tool) || a.sessionGrantAllowsLocked(tool, subject)
+	return a.bypassAllowsLocked(tool, subject, args) || a.sessionGrantAllowsLocked(tool, subject)
 }
 
 // preApprovedForDecision reports whether a prompt can be skipped for a decision
 // class. Fresh user decisions may reuse an explicit session grant, but they are
 // never answered by YOLO/full-access or the approved-plan execution window.
-func (a *approvalManager) preApprovedForDecision(tool, subject string, fresh bool) bool {
+func (a *approvalManager) preApprovedForDecision(tool, subject string, args json.RawMessage, fresh bool) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if fresh {
 		return a.sessionGrantAllowsLocked(tool, subject)
 	}
-	return a.bypassAllowsLocked(tool) || a.sessionGrantAllowsLocked(tool, subject)
+	return a.bypassAllowsLocked(tool, subject, args) || a.sessionGrantAllowsLocked(tool, subject)
 }
 
 // register allocates an approval ID, records the pending prompt, and returns the
@@ -371,7 +400,7 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	defer a.mu.Unlock()
 	approvals := make([]event.Approval, 0, len(a.approvals))
 	for id, p := range a.approvals {
-		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason})
+		approvals = append(approvals, event.Approval{ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason, Fresh: p.fresh})
 	}
 	asks := make([]event.Ask, 0, len(a.asks))
 	for id, p := range a.asks {
@@ -386,11 +415,22 @@ func normalizePlanModeReadOnlyCommandPrefix(prefix string) string {
 
 // --- decision helpers (caller holds a.mu) ---
 
-func (a *approvalManager) bypassAllowsLocked(tool string) bool {
+func (a *approvalManager) bypassAllowsLocked(tool, subject string, args json.RawMessage) bool {
 	if requiresFreshApprovalTool(tool) {
 		return false
 	}
-	return a.toolApprovalMode == ToolApprovalYolo || a.planAutoApprove
+	if a.toolApprovalMode == ToolApprovalYolo {
+		return true
+	}
+	if !a.planAutoApprove {
+		return false
+	}
+	policy := a.policy
+	policy.Mode = permission.Allow
+	if len(args) > 0 {
+		return policy.Decide(tool, false, args) == permission.Allow
+	}
+	return policy.DecideSubject(tool, false, subject) == permission.Allow
 }
 
 func (a *approvalManager) autoApprovalWouldAllowLocked(tool, subject string) bool {

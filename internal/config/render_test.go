@@ -16,8 +16,15 @@ func isolateUserConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	for _, key := range []string{"REASONIX_HOME", "REASONIX_STATE_HOME", "REASONIX_CACHE_HOME"} {
+		t.Setenv(key, "")
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+	}
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
 	return home
 }
@@ -205,8 +212,6 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Notifications.TurnDone = true
 	orig.Notifications.ApprovalRequest = true
 	orig.Notifications.AskRequest = true
-	orig.Agent.MaxSteps = 30
-	orig.Agent.PlannerMaxSteps = 0
 	orig.Agent.AutoPlanClassifier = "deepseek-flash"
 	orig.Agent.ReasoningLanguage = "zh"
 	orig.Agent.ToolResultSnipRatio = 0.65
@@ -538,8 +543,8 @@ func TestRenderTOMLDocumentsPlanModeAllowedTools(t *testing.T) {
 	if !strings.Contains(rendered, `plan_mode_allowed_tools = ["custom_reader"]`) {
 		t.Fatalf("rendered config should preserve plan_mode_allowed_tools:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "extra read-only declarations") || !strings.Contains(rendered, "cannot unlock known blocked tools or unsafe bash") {
-		t.Fatalf("rendered config should document tightened plan_mode_allowed_tools semantics:\n%s", rendered)
+	if !strings.Contains(rendered, "legacy MCP read-only trust aliases") || !strings.Contains(rendered, "does not change Plan availability") {
+		t.Fatalf("rendered config should document legacy plan_mode_allowed_tools semantics:\n%s", rendered)
 	}
 
 	var got Config
@@ -552,15 +557,15 @@ func TestRenderTOMLDocumentsPlanModeAllowedTools(t *testing.T) {
 	if !strings.Contains(rendered, `plan_mode_read_only_commands = ["gh issue view"]`) {
 		t.Fatalf("rendered config should preserve plan_mode_read_only_commands:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "concrete read-only shell prefixes") {
-		t.Fatalf("rendered config should document plan_mode_read_only_commands semantics:\n%s", rendered)
+	if !strings.Contains(rendered, "legacy compatibility only") || !strings.Contains(rendered, "Plan bash uses Permissions") {
+		t.Fatalf("rendered config should document legacy plan_mode_read_only_commands semantics:\n%s", rendered)
 	}
 	if !reflect.DeepEqual(got.Agent.PlanModeReadOnlyCommands, cfg.Agent.PlanModeReadOnlyCommands) {
 		t.Fatalf("PlanModeReadOnlyCommands round trip = %v, want %v", got.Agent.PlanModeReadOnlyCommands, cfg.Agent.PlanModeReadOnlyCommands)
 	}
 }
 
-func TestRenderTOMLDocumentsPluginTrustedReadOnlyTools(t *testing.T) {
+func TestRenderTOMLPreservesLegacyPluginReadOnlyOverrides(t *testing.T) {
 	cfg := Default()
 	cfg.Plugins = []PluginEntry{{
 		Name:                 "github",
@@ -572,8 +577,8 @@ func TestRenderTOMLDocumentsPluginTrustedReadOnlyTools(t *testing.T) {
 	if !strings.Contains(rendered, `trusted_read_only_tools = ["issue_read", "pull_request_read"]`) {
 		t.Fatalf("rendered config should preserve trusted_read_only_tools:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, "optional pre-seeded MCP read-only trust") {
-		t.Fatalf("rendered config should document trusted_read_only_tools semantics:\n%s", rendered)
+	if !strings.Contains(rendered, "local Plan/read-only-research trust for audited raw MCP reader names") {
+		t.Fatalf("rendered config should document the legacy trusted_read_only_tools semantics:\n%s", rendered)
 	}
 
 	var got Config
@@ -622,6 +627,39 @@ func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Plugins[0].ToolTimeoutSeconds, cfg.Plugins[0].ToolTimeoutSeconds) {
 		t.Fatalf("ToolTimeoutSeconds round trip = %v, want %v", got.Plugins[0].ToolTimeoutSeconds, cfg.Plugins[0].ToolTimeoutSeconds)
+	}
+}
+
+func TestRenderTOMLPreservesMCPApprovalPolicy(t *testing.T) {
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{{
+		Name:                     "admin",
+		Command:                  "admin-mcp",
+		DefaultToolsApprovalMode: "writes",
+		Tools: map[string]MCPToolPolicy{
+			"delete/all": {ApprovalMode: "prompt"},
+			"status":     {ApprovalMode: "approve"},
+		},
+		ApprovalsReviewer: "auto_review",
+	}}
+
+	rendered := RenderTOML(cfg)
+	for _, want := range []string{
+		`default_tools_approval_mode = "writes"`,
+		`tools = { "delete/all" = { approval_mode = "prompt" }, status = { approval_mode = "approve" } }`,
+		`approvals_reviewer = "auto_review"`,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered config missing %q:\n%s", want, rendered)
+		}
+	}
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n%s", err, rendered)
+	}
+	if got.Plugins[0].DefaultToolsApprovalMode != "writes" || got.Plugins[0].ApprovalsReviewer != "auto_review" ||
+		!reflect.DeepEqual(got.Plugins[0].Tools, cfg.Plugins[0].Tools) {
+		t.Fatalf("approval policy round trip = %+v", got.Plugins[0])
 	}
 }
 
@@ -959,6 +997,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 				SupportedEfforts:  []string{"high", "max"},
 				DefaultEffort:     "high",
 				Vision:            boolPtr(false),
+				ContextWindow:     262_144,
 			},
 		},
 	}}
@@ -973,7 +1012,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	if !strings.Contains(rendered, `auth_header = true`) {
 		t.Fatalf("rendered TOML missing auth_header:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) {
+	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) || !strings.Contains(rendered, `context_window = 262144`) {
 		t.Fatalf("rendered TOML missing model overrides:\n%s", rendered)
 	}
 
@@ -999,8 +1038,26 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 		t.Fatalf("extra_body metadata after round trip = %+v", p.ExtraBody["metadata"])
 	}
 	ov := p.ModelOverrides["deepseek-v4-flash"]
-	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision {
+	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision || ov.ContextWindow != 262_144 {
 		t.Fatalf("model override after round trip = %+v", ov)
+	}
+
+	// Older releases do not know context_window inside model_overrides, but their
+	// TOML decoder must still accept a config written by this release.
+	type legacyModelOverride struct {
+		ReasoningProtocol string   `toml:"reasoning_protocol"`
+		SupportedEfforts  []string `toml:"supported_efforts"`
+		DefaultEffort     string   `toml:"default_effort"`
+		Vision            *bool    `toml:"vision"`
+	}
+	type legacyProvider struct {
+		ModelOverrides map[string]legacyModelOverride `toml:"model_overrides"`
+	}
+	var legacy struct {
+		Providers []legacyProvider `toml:"providers"`
+	}
+	if _, err := toml.Decode(rendered, &legacy); err != nil {
+		t.Fatalf("legacy config shape cannot read per-model context window: %v", err)
 	}
 }
 
@@ -1074,20 +1131,47 @@ func TestRenderTOMLPreservesDesktopDisplayMode(t *testing.T) {
 	}
 }
 
-func TestRenderTOMLDefaultStepsCommentedOut(t *testing.T) {
+func TestRenderTOMLConversationWidthRoundTrip(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopConversationWidth("full"); err != nil {
+		t.Fatalf("SetDesktopConversationWidth: %v", err)
+	}
+	rendered := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(rendered, `conversation_width = "full"`) {
+		t.Fatalf("rendered user config missing conversation_width:\n%s", rendered)
+	}
+	if project := RenderTOMLForScope(c, RenderScopeProject); strings.Contains(project, "conversation_width") {
+		t.Fatalf("project config leaked user-only conversation_width:\n%s", project)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+	if got.DesktopConversationWidth() != "full" {
+		t.Fatalf("conversation_width after round trip = %q, want full", got.DesktopConversationWidth())
+	}
+
+	if err := c.SetDesktopConversationWidth("standard"); err != nil {
+		t.Fatalf("reset conversation width: %v", err)
+	}
+	if rendered := RenderTOMLForScope(c, RenderScopeUser); strings.Contains(rendered, "conversation_width") {
+		t.Fatalf("default conversation_width should be omitted:\n%s", rendered)
+	}
+
+	c.Desktop.ConversationWidth = " FULL "
+	if rendered := RenderTOMLForScope(c, RenderScopeUser); !strings.Contains(rendered, `conversation_width = "full"`) {
+		t.Fatalf("manually edited full width was not normalized:\n%s", rendered)
+	}
+}
+
+func TestRenderTOMLDefaultStepsOmitted(t *testing.T) {
 	isolateUserConfigHome(t)
 	out := RenderTOML(Default())
 	agentLines := extractSectionLines(out, "[agent]")
 	for _, line := range agentLines {
-		if strings.HasPrefix(line, "max_steps ") || strings.HasPrefix(line, "max_steps=") {
-			if !strings.HasPrefix(line, "#") {
-				t.Errorf("default max_steps should be commented out in [agent], got: %s", line)
-			}
-		}
-		if strings.HasPrefix(line, "planner_max_steps ") || strings.HasPrefix(line, "planner_max_steps=") {
-			if !strings.HasPrefix(line, "#") {
-				t.Errorf("default planner_max_steps should be commented out in [agent], got: %s", line)
-			}
+		if strings.Contains(line, "max_steps") || strings.Contains(line, "planner_max_steps") {
+			t.Errorf("default step limits should be hidden from generated config, got: %s", line)
 		}
 	}
 }
@@ -1128,67 +1212,45 @@ func extractSectionLines(toml, section string) []string {
 	return lines
 }
 
-func TestRenderTOMLNonDefaultStepsWrittenExplicitly(t *testing.T) {
+func TestRenderTOMLOmitsDeprecatedAgentStepLimits(t *testing.T) {
 	isolateUserConfigHome(t)
 	c := Default()
 	c.Agent.MaxSteps = 5
 	c.Agent.PlannerMaxSteps = 7
 	out := RenderTOML(c)
-	agentLines := extractSectionLines(out, "[agent]")
-	foundMax, foundPlanner := false, false
-	for _, line := range agentLines {
-		if !strings.HasPrefix(line, "#") && strings.HasPrefix(line, "max_steps ") {
-			foundMax = true
+	for _, line := range extractSectionLines(out, "[agent]") {
+		if strings.Contains(line, "max_steps") || strings.Contains(line, "planner_max_steps") {
+			t.Fatalf("deprecated step limit should never be rendered, got: %s", line)
 		}
-		if !strings.HasPrefix(line, "#") && strings.HasPrefix(line, "planner_max_steps ") {
-			foundPlanner = true
-		}
-	}
-	if !foundMax {
-		t.Error("non-default max_steps should be written explicitly in [agent]")
-	}
-	if !foundPlanner {
-		t.Error("non-default planner_max_steps should be written explicitly in [agent]")
 	}
 }
 
-func TestRenderTOMLDefaultStepsDoNotOverrideGlobalConfig(t *testing.T) {
+func TestLoadForEditIgnoresAndDropsDeprecatedAgentStepLimitsOnSave(t *testing.T) {
 	isolateUserConfigHome(t)
-	globalDir := filepath.Dir(UserConfigPath())
-	if err := os.MkdirAll(globalDir, 0o755); err != nil {
+	path := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	globalPath := filepath.Join(globalDir, "config.toml")
-	if err := os.WriteFile(globalPath, []byte("[agent]\nplanner_max_steps = 9\nmax_steps = 100\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	projectDir := t.TempDir()
-	projectTOML := RenderTOML(Default())
-	projectPath := filepath.Join(projectDir, "reasonix.toml")
-	if err := os.WriteFile(projectPath, []byte(projectTOML), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("[agent]\nplanner_max_steps = 9\nmax_steps = 100\ntemperature = 0.4\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := Default()
-	if err := mergeFile(cfg, globalPath); err != nil {
-		t.Fatalf("global merge failed: %v", err)
+	cfg := LoadForEdit(path)
+	if cfg.Agent.MaxSteps != 0 || cfg.Agent.PlannerMaxSteps != 0 {
+		t.Fatalf("deprecated limits should normalize to zero, got max=%d planner=%d", cfg.Agent.MaxSteps, cfg.Agent.PlannerMaxSteps)
 	}
-	if cfg.Agent.PlannerMaxSteps != 9 {
-		t.Fatalf("after global: planner_max_steps = %d, want 9", cfg.Agent.PlannerMaxSteps)
+	if cfg.Agent.Temperature != 0.4 {
+		t.Fatalf("unrelated agent setting changed: temperature=%v", cfg.Agent.Temperature)
 	}
-	if cfg.Agent.MaxSteps != 100 {
-		t.Fatalf("after global: max_steps = %d, want 100", cfg.Agent.MaxSteps)
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatal(err)
 	}
-
-	if err := mergeFile(cfg, projectPath); err != nil {
-		t.Fatalf("project merge failed: %v", err)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if cfg.Agent.PlannerMaxSteps != 9 {
-		t.Errorf("after project: planner_max_steps = %d, want 9 (global should not be overridden by commented-out default)", cfg.Agent.PlannerMaxSteps)
-	}
-	if cfg.Agent.MaxSteps != 100 {
-		t.Errorf("after project: max_steps = %d, want 100 (global should not be overridden by commented-out default)", cfg.Agent.MaxSteps)
+	if _, changed := stripLegacyAgentStepLimitLines(string(raw)); changed {
+		t.Fatalf("saved config retained deprecated step limits:\n%s", raw)
 	}
 }
 
@@ -1319,8 +1381,7 @@ func TestMigrateLegacyIfNeededSkipsWhenIsolated(t *testing.T) {
 
 // TestProjectConfigCannotOverrideSecrets pins [secrets] as a user-global
 // security control: a cloned repository's reasonix.toml must not be able to
-// switch off tool-output redaction or opt the user into subprocess env
-// stripping / sensitive-path hiding.
+// opt the user into subprocess env stripping or sensitive-path hiding.
 func TestProjectConfigCannotOverrideSecrets(t *testing.T) {
 	isolateUserConfigHome(t)
 	t.Setenv("REASONIX_HOME", "")
@@ -1328,13 +1389,13 @@ func TestProjectConfigCannotOverrideSecrets(t *testing.T) {
 	if err := os.MkdirAll(globalDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	globalTOML := "[secrets]\nredact_tool_output = true\nfilter_subprocess_env = false\nprotect_sensitive_files = false\n"
+	globalTOML := "[secrets]\nfilter_subprocess_env = false\nprotect_sensitive_files = false\n"
 	if err := os.WriteFile(filepath.Join(globalDir, "config.toml"), []byte(globalTOML), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	project := t.TempDir()
-	projectTOML := "[secrets]\nredact_tool_output = false\nfilter_subprocess_env = true\nprotect_sensitive_files = true\n"
+	projectTOML := "[secrets]\nfilter_subprocess_env = true\nprotect_sensitive_files = true\n"
 	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(projectTOML), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1342,9 +1403,6 @@ func TestProjectConfigCannotOverrideSecrets(t *testing.T) {
 	cfg, err := LoadForRoot(project)
 	if err != nil {
 		t.Fatalf("LoadForRoot() error = %v", err)
-	}
-	if !cfg.SecretsRedactToolOutput() {
-		t.Error("project reasonix.toml disabled redact_tool_output; [secrets] must stay user-global")
 	}
 	if cfg.Secrets.FilterSubprocessEnv {
 		t.Error("project reasonix.toml enabled filter_subprocess_env; [secrets] must stay user-global")
@@ -1359,13 +1417,11 @@ func TestProjectConfigCannotOverrideSecrets(t *testing.T) {
 // silently drop the user's security toggles.
 func TestRenderTOMLPersistsSecretsSection(t *testing.T) {
 	cfg := Default()
-	off := false
-	cfg.Secrets.RedactToolOutput = &off
 	cfg.Secrets.FilterSubprocessEnv = true
 	cfg.Secrets.ProtectSensitiveFiles = true
 
 	out := RenderTOMLForScope(cfg, RenderScopeUser)
-	for _, want := range []string{"[secrets]", "redact_tool_output = false", "filter_subprocess_env = true", "protect_sensitive_files = true"} {
+	for _, want := range []string{"[secrets]", "filter_subprocess_env = true", "protect_sensitive_files = true"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("user-scope render missing %q:\n%s", want, out)
 		}
@@ -1379,9 +1435,6 @@ func TestRenderTOMLPersistsSecretsSection(t *testing.T) {
 	if err := mergeFile(back, path); err != nil {
 		t.Fatalf("round-trip decode: %v", err)
 	}
-	if back.SecretsRedactToolOutput() {
-		t.Fatal("redact_tool_output=false lost in render round-trip")
-	}
 	if !back.Secrets.FilterSubprocessEnv || !back.Secrets.ProtectSensitiveFiles {
 		t.Fatalf("secrets toggles lost in render round-trip: %+v", back.Secrets)
 	}
@@ -1389,5 +1442,8 @@ func TestRenderTOMLPersistsSecretsSection(t *testing.T) {
 	// Project scope must not render the section — LoadForRoot ignores it there.
 	if proj := RenderTOMLForScope(cfg, RenderScopeProject); strings.Contains(proj, "[secrets]") {
 		t.Fatalf("project scope rendered [secrets]:\n%s", proj)
+	}
+	if strings.Contains(out, "redact_tool_output") {
+		t.Fatalf("user-scope render still exposes removed live-redaction setting:\n%s", out)
 	}
 }

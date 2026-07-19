@@ -1,10 +1,16 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"reasonix/internal/mcptrust"
+	"reasonix/internal/sandbox"
+	"reasonix/internal/tool"
 )
 
 // redirectCache points config.CacheDir() at a fresh temp dir for the duration
@@ -38,6 +44,7 @@ func sampleCachedSchema(hash string) CachedSchema {
 			Description: "does a thing",
 			Schema:      json.RawMessage(`{"type":"object"}`),
 			ReadOnly:    true,
+			Destructive: true,
 		}},
 	}
 }
@@ -64,6 +71,9 @@ func TestCacheRoundTrip(t *testing.T) {
 	if !got.Tools[0].ReadOnly {
 		t.Error("ReadOnly: lost across save/load")
 	}
+	if !got.Tools[0].Destructive {
+		t.Error("Destructive: lost across save/load")
+	}
 	if !got.Capabilities["prompts"] || got.Capabilities["resources"] {
 		t.Errorf("Capabilities: %+v", got.Capabilities)
 	}
@@ -72,6 +82,84 @@ func TestCacheRoundTrip(t *testing.T) {
 	}
 	if got.LastValidated.IsZero() {
 		t.Error("LastValidated: expected non-zero after save")
+	}
+}
+
+func TestCachePersistsDeclaredReaderIndependentlyOfLocalTrust(t *testing.T) {
+	cached := cacheableToolsOf([]tool.Tool{&remoteTool{
+		rawName: "search", schema: json.RawMessage(`{"type":"object"}`),
+		declaredReadOnly: true, readOnly: false, readOnlyTrusted: false,
+	}})
+	if len(cached) != 1 || !cached[0].ReadOnly {
+		t.Fatalf("cached tool = %+v, want the server-declared reader snapshot", cached)
+	}
+}
+
+func TestCachedToolTrustForSpecRequiresMatchingExistingReceipt(t *testing.T) {
+	redirectCache(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), t.TempDir())
+	spec := Spec{
+		Name: "cached-reader", Type: "stdio", Command: exe,
+		ConfigSource: "workspace_config", TrustManager: manager,
+	}
+	reader := CachedTool{
+		Name: "search", Schema: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`), ReadOnly: true,
+	}
+	if err := SaveCachedSchema(spec.Name, CachedSchema{SpecHash: SpecFingerprint(spec), Tools: []CachedTool{reader}}); err != nil {
+		t.Fatal(err)
+	}
+	before, found, err := CachedToolTrustForSpec(context.Background(), spec, "search")
+	if err != nil || !found || before.TrustedReader {
+		t.Fatalf("before receipt = (%+v,%v,%v), want found but untrusted", before, found, err)
+	}
+	identity, err := specIdentityFingerprint(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := mcptrust.Capability{
+		RawName: "search", ModelName: toolName(spec.Name, "search"), InputSchema: reader.Schema, ReadOnly: true,
+	}
+	if err := manager.Trust(mcptrust.ScopeSession, mcptrust.SourceUser, spec.Name, trustConfigSource(spec), identity, "", []mcptrust.Capability{capability}); err != nil {
+		t.Fatal(err)
+	}
+	after, found, err := CachedToolTrustForSpec(context.Background(), spec, "search")
+	if err != nil || !found || !after.TrustedReader {
+		t.Fatalf("matching receipt = (%+v,%v,%v), want trusted reader", after, found, err)
+	}
+
+	reader.Schema = json.RawMessage(`{"type":"object","properties":{"q":{"type":"number"}}}`)
+	if err := SaveCachedSchema(spec.Name, CachedSchema{SpecHash: SpecFingerprint(spec), Tools: []CachedTool{reader}}); err != nil {
+		t.Fatal(err)
+	}
+	drifted, found, err := CachedToolTrustForSpec(context.Background(), spec, "search")
+	if err != nil || !found || drifted.TrustedReader || drifted.TrustState != mcptrust.TrustChanged {
+		t.Fatalf("schema drift = (%+v,%v,%v), want changed and untrusted", drifted, found, err)
+	}
+}
+
+func TestCacheLoadsLegacyToolWithoutDestructiveField(t *testing.T) {
+	redirectCache(t)
+	spec := sampleSpec()
+	hash := SpecFingerprint(spec)
+	p := cachePath(spec.Name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"version":2,"spec_hash":"` + hash + `","capabilities":{},"tools":[{"name":"read","description":"legacy","schema":{"type":"object"},"read_only":true}],"last_validated":"2026-01-01T00:00:00Z"}`
+	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := LoadCachedSchema(spec.Name, hash)
+	if !ok || len(got.Tools) != 1 {
+		t.Fatalf("legacy cache = (%+v,%v), want one tool", got, ok)
+	}
+	if got.Tools[0].Destructive {
+		t.Fatal("legacy cache without destructive field must default to false")
 	}
 }
 
@@ -197,8 +285,32 @@ func TestSpecFingerprintStable(t *testing.T) {
 	}
 }
 
-func TestSpecFingerprintChangesOnCommandEdit(t *testing.T) {
+func TestSpecFingerprintIgnoresHostLocalTrustAndIsolation(t *testing.T) {
+	base := sampleSpec()
+	changed := base
+	changed.TrustManager = mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
+	changed.ConfigSource = "project:.mcp.json"
+	changed.OfficialCatalogEntryID = "plugin@example.com@1.0.0"
+	changed.OfficialReaderNames = []string{"search"}
+	changed.PackageDigest = "sha256:package"
+	changed.VerifiedVersion = "1.0.0"
+	changed.CatalogSequence = 42
+	changed.ReaderSandbox = sandbox.Spec{Mode: "enforce", Network: true, WriteRoots: []string{"/host/state"}, MinimalWrites: true}
+	changed.WriterSandbox = sandbox.Spec{Mode: "enforce", WriteRoots: []string{"/workspace"}, MinimalWrites: true}
+	changed.StateDir = "/host/state"
+	if got, want := SpecFingerprint(changed), SpecFingerprint(base); got != want {
+		t.Fatalf("host-local security state changed provider cache fingerprint: %q != %q", got, want)
+	}
+}
+
+func TestSpecFingerprintTracksNonSecretIdentityOnly(t *testing.T) {
 	a := sampleSpec()
+	renamed := a
+	renamed.Name = "other-server"
+	if SpecFingerprint(a) == SpecFingerprint(renamed) {
+		t.Fatal("SpecFingerprint did not change when server name changed")
+	}
+
 	b := a
 	b.Command = "/usr/local/bin/other"
 	if SpecFingerprint(a) == SpecFingerprint(b) {
@@ -214,8 +326,35 @@ func TestSpecFingerprintChangesOnCommandEdit(t *testing.T) {
 
 	d := a
 	d.Env = map[string]string{"FOO": "1", "BAR": "different"}
-	if SpecFingerprint(a) == SpecFingerprint(d) {
-		t.Fatal("SpecFingerprint did not change when env value changed")
+	if SpecFingerprint(a) != SpecFingerprint(d) {
+		t.Fatal("SpecFingerprint changed when an environment credential value rotated")
+	}
+
+	e := a
+	e.Env = map[string]string{"FOO": "1", "NEW_KEY": "2"}
+	if SpecFingerprint(a) == SpecFingerprint(e) {
+		t.Fatal("SpecFingerprint did not change when environment key names changed")
+	}
+
+	f := a
+	f.Headers = map[string]string{"X-Custom": "rotated-secret"}
+	if SpecFingerprint(a) != SpecFingerprint(f) {
+		t.Fatal("SpecFingerprint changed when a header credential value rotated")
+	}
+
+	g := a
+	g.Headers = map[string]string{"Authorization": "secret"}
+	if SpecFingerprint(a) == SpecFingerprint(g) {
+		t.Fatal("SpecFingerprint did not change when header key names changed")
+	}
+
+	h := a
+	h.Type = "http"
+	h.URL = "https://user:secret@example.com/mcp?access_token=first&workspace=one"
+	i := h
+	i.URL = "https://other:rotated@example.com/mcp?access_token=second&workspace=two"
+	if SpecFingerprint(h) == SpecFingerprint(i) {
+		t.Fatal("SpecFingerprint did not bind URL credential/query values")
 	}
 }
 
@@ -227,16 +366,229 @@ func TestCacheMissForUnknownName(t *testing.T) {
 }
 
 func TestSlugSafeForFilesystem(t *testing.T) {
-	cases := map[string]string{
-		"My Server!":           "my-server",
-		"weird/name\\with:bad": "weird-name-with-bad",
-		"":                     "_",
-		"------":               "_",
-		"a_b-c":                "a_b-c",
+	if got := slug("a_b-c"); got != "a_b-c" {
+		t.Fatalf("safe slug changed: %q", got)
 	}
-	for in, want := range cases {
-		if got := slug(in); got != want {
-			t.Errorf("slug(%q) = %q want %q", in, got, want)
+	inputs := []string{"My Server!", "my-server", "weird/name\\with:bad", "weird-name-with-bad", "", "------", "Foo", "foo"}
+	seen := map[string]string{}
+	for _, in := range inputs {
+		got := slug(in)
+		if got == "" || strings.ContainsAny(got, `/\\:`) {
+			t.Fatalf("slug(%q) is not filesystem-safe: %q", in, got)
+		}
+		if previous, exists := seen[got]; exists {
+			t.Fatalf("slug collision: %q and %q both became %q", previous, in, got)
+		}
+		seen[got] = in
+	}
+}
+
+func TestMCPStateDirSeparatesConfusableServerNames(t *testing.T) {
+	home, workspace := t.TempDir(), t.TempDir()
+	names := []string{"foo", "Foo", "foo bar", "foo-bar", "foo/bar", "foo\\bar"}
+	seen := map[string]string{}
+	for _, name := range names {
+		dir := MCPStateDir(home, workspace, name)
+		if previous, exists := seen[dir]; exists {
+			t.Fatalf("state-directory collision: %q and %q both use %q", previous, name, dir)
+		}
+		seen[dir] = name
+	}
+}
+
+func TestSlugAppendsHashForWindowsReservedDeviceNames(t *testing.T) {
+	for _, name := range []string{"con", "CON", "prn", "aux", "nul", "com1", "COM9", "lpt1", "LPT9"} {
+		got := slug(name)
+		lowered := strings.ToLower(name)
+		if got == lowered {
+			t.Errorf("slug(%q) = %q names a Windows device", name, got)
+		}
+		if !strings.HasPrefix(got, lowered+"-") {
+			t.Errorf("slug(%q) = %q, want %q plus a hash suffix", name, got, lowered)
+		}
+	}
+	// Ordinary safe names must stay byte-identical: existing cache, stats, and
+	// state paths depend on it.
+	for _, name := range []string{"github", "context7", "a_b-c", "console", "com10", "naux"} {
+		if got := slug(name); got != name {
+			t.Errorf("slug(%q) = %q, want unchanged", name, got)
+		}
+	}
+}
+
+func TestSpecFingerprintRedactsURLCredentialsButKeepsResourceScope(t *testing.T) {
+	base := sampleSpec()
+	base.Type = "http"
+	base.URL = "https://user:first@example.com/mcp?access_token=one&workspace=alpha&tenant=t1"
+
+	rotated := base
+	rotated.URL = "https://user:second@example.com/mcp?access_token=two&workspace=alpha&tenant=t1"
+	if SpecFingerprint(base) != SpecFingerprint(rotated) {
+		t.Fatal("credential rotation changed the cache fingerprint")
+	}
+
+	reordered := base
+	reordered.URL = "https://user:first@example.com/mcp?tenant=t1&workspace=alpha&access_token=one"
+	if SpecFingerprint(base) != SpecFingerprint(reordered) {
+		t.Fatal("query parameter order changed the cache fingerprint")
+	}
+
+	movedWorkspace := base
+	movedWorkspace.URL = "https://user:first@example.com/mcp?access_token=one&workspace=beta&tenant=t1"
+	if SpecFingerprint(base) == SpecFingerprint(movedWorkspace) {
+		t.Fatal("workspace scope change did not change the cache fingerprint")
+	}
+
+	// Case/separator variants of credential keys are still recognized: their
+	// values redact, so rotating them never moves the fingerprint. The key
+	// spelling itself remains identity-bearing.
+	variant := base
+	variant.URL = "https://user:first@example.com/mcp?ACCESS-TOKEN=three&workspace=alpha&tenant=t1"
+	variantRotated := base
+	variantRotated.URL = "https://user:first@example.com/mcp?ACCESS-TOKEN=four&workspace=alpha&tenant=t1"
+	if SpecFingerprint(variant) != SpecFingerprint(variantRotated) {
+		t.Fatal("variant-spelled credential key leaked its value into the fingerprint")
+	}
+}
+
+func TestLoadCachedSchemaForSpecMigratesLegacyURLFingerprint(t *testing.T) {
+	redirectCache(t)
+	spec := sampleSpec()
+	spec.Name = "legacy-url"
+	spec.Type = "http"
+	spec.URL = "https://example.com/mcp?access_token=secret&workspace=alpha"
+
+	legacy, ok := legacySpecFingerprint(spec)
+	if !ok {
+		t.Fatal("legacy fingerprint unavailable for credential-bearing URL")
+	}
+	if err := SaveCachedSchema(spec.Name, CachedSchema{
+		SpecHash:     legacy,
+		Capabilities: map[string]bool{"tools": true},
+		Tools:        []CachedTool{{Name: "echo", Schema: json.RawMessage(`{"type":"object"}`)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cs, ok := LoadCachedSchemaForSpec(spec)
+	if !ok || len(cs.Tools) != 1 || cs.Tools[0].Name != "echo" {
+		t.Fatalf("legacy cache entry did not load: ok=%v cs=%+v", ok, cs)
+	}
+	if cs.SpecHash != SpecFingerprint(spec) {
+		t.Fatalf("loaded cache kept legacy hash %q", cs.SpecHash)
+	}
+	// The upgrade persists: a plain current-hash load now succeeds.
+	if _, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec)); !ok {
+		t.Fatal("legacy cache entry was not rewritten in place")
+	}
+}
+
+func TestNormalizeIdentityURLRedactsCredentialMaterial(t *testing.T) {
+	got := normalizeIdentityURL("HTTPS://User:Secret@Example.COM:443/mcp#frag?x=1")
+	if strings.Contains(got, "Secret") {
+		t.Fatalf("normalized URL leaked a password: %q", got)
+	}
+	rotatedA := normalizeIdentityURL("https://example.com/mcp?api_key=one&workspace=alpha")
+	rotatedB := normalizeIdentityURL("https://example.com/mcp?api_key=two&workspace=alpha")
+	if rotatedA != rotatedB {
+		t.Fatalf("credential rotation changed normalization: %q != %q", rotatedA, rotatedB)
+	}
+	if !strings.Contains(rotatedA, "workspace=alpha") {
+		t.Fatalf("non-sensitive query value dropped: %q", rotatedA)
+	}
+	userinfoOnly := normalizeIdentityURL("https://alice@example.com/mcp")
+	userinfoPassword := normalizeIdentityURL("https://alice:pw@example.com/mcp")
+	if userinfoOnly == userinfoPassword {
+		t.Fatal("userinfo structure (password presence) was not preserved")
+	}
+	if strings.Contains(userinfoOnly, "alice") || strings.Contains(userinfoPassword, "pw") {
+		t.Fatalf("userinfo values leaked: %q %q", userinfoOnly, userinfoPassword)
+	}
+}
+
+func TestManagerEvaluateMigratesLegacyURLIdentityWithoutRetrust(t *testing.T) {
+	m := mcptrust.NewManager(filepath.Join(t.TempDir(), mcptrust.StateFilename), "/workspace")
+	spec := Spec{
+		Name: "srv", Type: "http",
+		URL:          "https://example.com/mcp?access_token=first&workspace=alpha",
+		ConfigSource: "workspace_config", TrustManager: m,
+	}
+	caps := []mcptrust.Capability{{RawName: "read", ModelName: "mcp__srv__read", ReadOnly: true, InputSchema: json.RawMessage(`{"type":"object"}`)}}
+
+	legacyFP, ok := legacySpecIdentityFingerprint(spec)
+	if !ok {
+		t.Fatal("legacy identity fingerprint unavailable for credential-bearing URL")
+	}
+	if err := m.Trust(mcptrust.ScopeWorkspace, mcptrust.SourceUser, "srv", "workspace_config", legacyFP, "", caps); err != nil {
+		t.Fatal(err)
+	}
+
+	current, err := specIdentityFingerprint(context.Background(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == legacyFP {
+		t.Fatal("credential-aware fingerprint did not change; migration test is vacuous")
+	}
+	eval, err := managerEvaluate(m, spec, current, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eval.State != mcptrust.TrustWorkspace || eval.IdentityChanged || !eval.TrustedReaders["read"] {
+		t.Fatalf("legacy receipt did not migrate cleanly: %+v", eval)
+	}
+
+	// After migration, credential rotation keeps the identity stable...
+	rotated := spec
+	rotated.URL = "https://example.com/mcp?access_token=second&workspace=alpha"
+	rotatedFP, err := specIdentityFingerprint(context.Background(), rotated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotatedFP != current {
+		t.Fatal("credential rotation changed the migrated identity")
+	}
+	// ...while a resource-scope change still demands re-verification and must
+	// not silently migrate.
+	moved := spec
+	moved.URL = "https://example.com/mcp?access_token=first&workspace=beta"
+	movedFP, err := specIdentityFingerprint(context.Background(), moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eval, err = managerEvaluate(m, moved, movedFP, caps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eval.IdentityChanged {
+		t.Fatalf("workspace scope change was not flagged: %+v", eval)
+	}
+}
+
+func TestCredentialURLQueryKeyMatrix(t *testing.T) {
+	credentials := []string{
+		"token", "access_token", "auth_token", "refresh_token", "id_token",
+		"api_token", "session_token", "bearer_token", "sas_token", "csrf-token",
+		"api_key", "x-api-key", "apikey", "API-KEY", "key", "access_key",
+		"secret_key", "private_key", "auth_key", "app_key", "client_key",
+		"subscription-key", "shared_key",
+		"secret", "client_secret", "app_secret", "api_secret",
+		"password", "passwd", "user_password",
+		"signature", "sas_signature", "sig",
+		"auth", "authorization", "bearer", "credential", "credentials",
+	}
+	for _, key := range credentials {
+		if !credentialURLQueryKey(key) {
+			t.Errorf("credential key %q was not classified as sensitive", key)
+		}
+	}
+	resources := []string{
+		"workspace", "tenant", "region", "resource", "project", "org",
+		"scope", "version", "monkey", "keyboard", "market", "environment",
+	}
+	for _, key := range resources {
+		if credentialURLQueryKey(key) {
+			t.Errorf("resource key %q was misclassified as a credential", key)
 		}
 	}
 }

@@ -3,287 +3,71 @@ package planmode
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
-
-	"reasonix/internal/shellparse"
-	"reasonix/internal/shellsafe"
 )
 
 // Marker is the model-facing plan-mode instruction block. It rides in the user
 // turn, not the system prompt or tool schema, so plan toggles preserve cache shape.
-const Marker = "[Plan mode — planning only. You may research the codebase and web, ask clarifying questions with ask, maintain planning state with todo_write, and delegate isolated read-only research with read_only_task or read_only_skill. You must not write files, run unsafe shell commands, install capabilities, mutate memory, delegate to writer-capable sub-agents or skills, control long-lived processes, or mark execution steps complete. Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve before any changes are made.]"
+const Marker = "[Plan mode — planning workflow. Gather context, ask clarifying questions with ask, maintain planning state with todo_write, and delegate focused research when useful. Do not begin implementation in this mode: avoid file writes, unsafe shell commands, capability installation, memory mutation, writer-capable delegation, long-lived process control, or execution-step completion. This is a workflow instruction, not a permission boundary; every tool call remains governed by the active Permissions and Sandbox policy. Before planning, if a decision that is genuinely the user's — tech stack, an ambiguous requirement, scope, an irreversible choice — would materially shape the plan and you can't settle it from the codebase or a sensible default, use the ask tool to clarify it first; otherwise pick the obvious default and state the assumption in the plan instead of asking. Then present a LAYERED plan as your reply and stop. Structure the plan as a two-level markdown list so it becomes a layered task list: each PHASE is a top-level numbered list item (a coherent milestone, e.g. \"1. Add the config loader\"), and each phase's concrete, verifiable sub-steps are bullets indented beneath it (e.g. \"   - parse the TOML into Config\"). Use plain numbered list items for phases — do NOT write phases as markdown headings (##, ###) — so both levels parse. Keep phases few (about 2-6). The user will be asked to approve the plan before the workflow switches to implementation.]"
 
-// PlanSafety is a tool's self-reported stance on running during the planning
-// phase, surfaced via tool.PlanModeClassifier. It is deliberately distinct from
-// ReadOnly(): a tool can be side-effect-free (ReadOnly) yet still belong only to
-// the post-approval execution phase — complete_step is the canonical example.
+// PlanSafety is a tool's explicit stance on whether the action belongs in the
+// planning phase. It is deliberately not a write-safety classification: ordinary
+// readers and writers both continue to Permissions/Sandbox.
 type PlanSafety int
 
 const (
-	// PlanSafetyUnknown means the tool does not implement PlanModeClassifier, so
-	// the policy falls back to its audited read-only whitelist.
+	// PlanSafetyUnknown is the default. The call continues to Permissions/Sandbox.
 	PlanSafetyUnknown PlanSafety = iota
-	// PlanSafetySafe means the tool asserts it is safe to run while planning.
+	// PlanSafetySafe explicitly confirms that the call makes sense while planning.
 	PlanSafetySafe
-	// PlanSafetyUnsafe means the tool asserts it must not run while planning,
-	// even though ReadOnly() may be true.
+	// PlanSafetyUnsafe opts a tool out of the planning phase even when it is
+	// side-effect-free. complete_step is the canonical example.
 	PlanSafetyUnsafe
 )
 
-// Call is the plan-mode view of one tool invocation.
+// Call is the plan-mode view of one tool invocation. ReadOnly,
+// UntrustedReadOnly, and Args remain for source compatibility with older callers;
+// they do not decide phase availability because Permissions/Sandbox own safety.
 type Call struct {
-	Name     string
-	ReadOnly bool
-	// Untrusted is true when ReadOnly came from an external, untrusted source —
-	// an MCP server's readOnlyHint. Plan mode does not take such a flag at face
-	// value and gates the tool like a writer. Set by the agent from
-	// tool.PlanModeUntrustedReadOnly at the gate call site.
-	Untrusted bool
-	// Safety is the tool's self-reported plan-mode stance. It is Unknown when
-	// the tool does not implement tool.PlanModeClassifier; the agent translates
-	// the interface result into this field at the gate call site.
-	Safety PlanSafety
-	Args   json.RawMessage
+	Name              string
+	ReadOnly          bool
+	UntrustedReadOnly bool
+	Safety            PlanSafety
+	Args              json.RawMessage
 }
 
-// Decision reports whether plan mode refuses a call and why.
+// Decision reports whether phase semantics refuse a call and why.
 type Decision struct {
 	Blocked bool
 	Message string
-	// ReadOnlyCommandTrust, when set, means the bash command is syntactically safe
-	// enough to ask the user whether this concrete prefix should be trusted as a
-	// plan-mode read-only command.
-	ReadOnlyCommandTrust *ReadOnlyCommandTrust
 }
 
+// ReadOnlyCommandTrust is retained for source compatibility with the legacy
+// Plan bash trust bridge. Decide no longer produces this request: bash safety is
+// classified by Permissions, and read-only subagents enforce their own runner
+// boundary directly.
 type ReadOnlyCommandTrust struct {
 	Command string
 	Prefix  string
 }
 
-// Policy is the single plan-mode stage policy.
+// Policy is retained so existing config/assembly code can carry legacy
+// plan_mode_* fields without breaking old data. Those fields no longer grant or
+// revoke execution in the main Plan workflow.
 type Policy struct {
 	AllowedTools     []string
 	ReadOnlyCommands []string
 }
 
-var knownBlockedTools = map[string]bool{
-	"write_file":      true,
-	"edit_file":       true,
-	"multi_edit":      true,
-	"move_file":       true,
-	"apply_patch":     true,
-	"edit_notebook":   true,
-	"notebook_edit":   true,
-	"range_delete":    true,
-	"symbol_delete":   true,
-	"delete_range":    true,
-	"delete_symbol":   true,
-	"complete_step":   true,
-	"task":            true,
-	"parallel_tasks":  true,
-	"run_skill":       true,
-	"explore":         true,
-	"research":        true,
-	"review":          true,
-	"security_review": true,
-	"security-review": true,
-	"install_source":  true,
-	"install_skill":   true,
-	"remember":        true,
-	"forget":          true,
-	"kill_shell":      true,
-}
-
-var alwaysAllowedTools = map[string]bool{
-	"ask":        true,
-	"todo_write": true,
-}
-
-var unsafeDeclaredReadOnlyCommandBases = map[string]bool{
-	"bash":       true,
-	"sh":         true,
-	"zsh":        true,
-	"fish":       true,
-	"powershell": true,
-	"pwsh":       true,
-}
-
-var unsafeDeclaredReadOnlyCommandWords = map[string]bool{
-	"add":     true,
-	"apply":   true,
-	"approve": true,
-	"cancel":  true,
-	"close":   true,
-	"commit":  true,
-	"comment": true,
-	"create":  true,
-	"delete":  true,
-	"edit":    true,
-	"exec":    true,
-	"merge":   true,
-	"push":    true,
-	"remove":  true,
-	"restart": true,
-	"review":  true,
-	"rm":      true,
-	"scale":   true,
-	"set":     true,
-	"start":   true,
-	"stop":    true,
-	"submit":  true,
-	"update":  true,
-}
-
-var readOnlyCommandNeedsThreeTokenPrefixBases = map[string]bool{
-	"aws":    true,
-	"az":     true,
-	"gcloud": true,
-	"gh":     true,
-}
-
-// planSafeReadOnly is the audited set of read-only built-in tools confirmed safe
-// to run during planning. It is the AUDIT record, not Decide's allow path: Decide
-// already trusts any in-process ReadOnly()==true tool. reconcile_test.go uses this
-// map (via Classify) to force every built-in into an explicit bucket, so a newly
-// added built-in cannot merge without a reviewer recording its plan-mode stance —
-// here, in knownBlockedTools, or via tool.PlanModeClassifier.
-var planSafeReadOnly = map[string]bool{
-	"read_file":   true,
-	"ls":          true,
-	"glob":        true,
-	"grep":        true,
-	"code_index":  true,
-	"web_fetch":   true,
-	"bash_output": true, // observes an already-running job's buffered output; no new side effect
-	"wait":        true, // observes job status; cannot start, preserve, or kill processes
-}
-
-var findWriteArgs = map[string]bool{
-	"-delete":  true,
-	"-exec":    true,
-	"-execdir": true,
-	"-ok":      true,
-	"-okdir":   true,
-	"-fprint":  true,
-	"-fprintf": true,
-	"-fls":     true,
-}
-
-var goWriteOrExecArgs = map[string]bool{
-	"-fix":      true,
-	"-mod":      true,
-	"-modfile":  true,
-	"-toolexec": true,
-	"-vettool":  true,
-}
-
-// Decide applies the plan-mode stage gate before permission policy. The boundary
-// is fail-closed for untrusted tools: a tool whose ReadOnly() is false, or whose
-// ReadOnly() is asserted by an untrusted external source (an MCP server's
-// readOnlyHint, surfaced via Call.Untrusted), is refused unless it self-reports
-// plan-safe, is declared in plan_mode_allowed_tools, or is trusted by plugin
-// configuration before reaching this policy. A trustworthy ReadOnly()==true tool
-// — a built-in or a first-party/user MCP override — is allowed,
-// EXCEPT one that self-reports PlanSafetyUnsafe (complete_step: read-only yet
-// post-approval only), which is refused regardless. The invariant
-// PlanSafe ⇒ ReadOnly is enforced: a writer that claims plan-safe is a wiring
-// bug and is refused.
-func (p Policy) Decide(call Call) Decision {
+// Decide applies phase semantics only. Plan is a collaboration workflow, not a
+// security boundary: every ordinary call proceeds to the same permission and
+// sandbox gates used outside Plan. A tool may explicitly opt out when executing
+// it during planning is semantically invalid.
+func (Policy) Decide(call Call) Decision {
+	if call.Safety != PlanSafetyUnsafe {
+		return Decision{}
+	}
 	name := strings.TrimSpace(call.Name)
-	if name == "bash" {
-		return decideBash(call.Args, p.ReadOnlyCommands)
-	}
-	if knownBlockedTools[name] {
-		return blockKnown(name)
-	}
-	if call.Safety == PlanSafetyUnsafe {
-		return blockKnown(name)
-	}
-	if alwaysAllowedTools[name] {
-		return Decision{}
-	}
-	if call.Safety == PlanSafetySafe {
-		if !call.ReadOnly {
-			return planSafeContractViolation(name)
-		}
-		return Decision{}
-	}
-	if call.ReadOnly && !call.Untrusted {
-		// Trusted: built-ins and first-party MCP overrides report a trustworthy
-		// ReadOnly()==true. A read-only tool that is nonetheless unsafe while
-		// planning is caught above via PlanSafetyUnsafe / knownBlockedTools.
-		return Decision{}
-	}
-	if p.allowed(name) {
-		return Decision{}
-	}
-	if call.ReadOnly && call.Untrusted {
-		return Decision{
-			Blocked: true,
-			Message: fmt.Sprintf("blocked: %q reports read-only, but that flag is self-reported by an untrusted external source (e.g. an MCP server's readOnlyHint). Interactive sessions can ask once and remember the decision; non-interactive sessions should pre-seed trusted_read_only_tools or declare the concrete tool in plan_mode_allowed_tools.", name),
-		}
-	}
-	return Decision{
-		Blocked: true,
-		Message: fmt.Sprintf("blocked: %q is a writer tool and plan mode is read-only. Keep exploring with read-only tools, then write your plan as your reply — the user will be asked to approve it before any changes are made.", name),
-	}
-}
-
-// IgnoredAllowedTools names configured overrides that plan mode will not honor.
-func (p Policy) IgnoredAllowedTools() []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, name := range p.AllowedTools {
-		name = strings.TrimSpace(name)
-		if name == "" || seen[name] {
-			continue
-		}
-		if name == "bash" || knownBlockedTools[name] {
-			out = append(out, name)
-			seen[name] = true
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// IgnoredReadOnlyCommands names configured plan-mode read-only command prefixes
-// that are too broad to honor safely.
-func (p Policy) IgnoredReadOnlyCommands() []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, cmd := range p.ReadOnlyCommands {
-		cmd = strings.TrimSpace(cmd)
-		if cmd == "" || seen[cmd] {
-			continue
-		}
-		fields, err := shellFields(cmd)
-		if err != "" || len(fields) == 0 {
-			out = append(out, cmd)
-			seen[cmd] = true
-			continue
-		}
-		if unsafeDeclaredReadOnlyCommandPrefix(fields) {
-			out = append(out, cmd)
-			seen[cmd] = true
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-func (p Policy) allowed(name string) bool {
-	for _, allowed := range p.AllowedTools {
-		if strings.TrimSpace(allowed) == name {
-			return true
-		}
-	}
-	return false
-}
-
-func blockKnown(name string) Decision {
 	if name == "complete_step" {
 		return Decision{
 			Blocked: true,
@@ -292,317 +76,6 @@ func blockKnown(name string) Decision {
 	}
 	return Decision{
 		Blocked: true,
-		Message: fmt.Sprintf("blocked: %q is not available in plan mode. Keep exploring with read-only tools — the user will be asked to approve the plan before any changes are made.", name),
+		Message: fmt.Sprintf("blocked: %q is not available during the planning workflow. Finish or exit Plan mode before calling it.", name),
 	}
-}
-
-func planSafeContractViolation(name string) Decision {
-	return Decision{
-		Blocked: true,
-		Message: fmt.Sprintf("blocked: %q is classified plan-safe but reports ReadOnly()==false; refusing on the PlanSafe ⇒ ReadOnly invariant. This is a tool wiring bug — fix the tool's ReadOnly()/PlanModeSafe() contract.", name),
-	}
-}
-
-// Class is the plan-mode bucket a tool falls into, independent of any
-// plan_mode_allowed_tools override. It exists so reconcile_test.go and
-// marker_test.go can assert that every built-in is *explicitly* classified
-// rather than implicitly allowed. Branch order matches Decide; the override is
-// excluded on purpose because it is a deployment-specific escape valve, not part
-// of the built-in taxonomy.
-type Class int
-
-const (
-	// ClassBashGated is bash, whose safety is decided per-argument in decideBash.
-	ClassBashGated Class = iota
-	// ClassBlockedKnown is a tool in knownBlockedTools.
-	ClassBlockedKnown
-	// ClassBlockedUnsafe is a tool that self-reports PlanSafetyUnsafe.
-	ClassBlockedUnsafe
-	// ClassAlwaysAllowed is ask / todo_write.
-	ClassAlwaysAllowed
-	// ClassPlanSafeSelfReported is a tool that self-reports PlanSafetySafe.
-	ClassPlanSafeSelfReported
-	// ClassPlanSafeAudited is a tool in the planSafeReadOnly whitelist.
-	ClassPlanSafeAudited
-	// ClassDefaultBlocked is the fail-closed bucket: nothing classified the tool
-	// plan-safe, so plan mode refuses it.
-	ClassDefaultBlocked
-)
-
-// Classify reports the plan-mode bucket for a tool. It mirrors Decide's
-// classification (minus the override and the PlanSafe ⇒ ReadOnly invariant
-// check, which callers assert separately): a plan-safe class still requires
-// ReadOnly(), and reconcile_test.go enforces that.
-func Classify(name string, readOnly bool, safety PlanSafety) Class {
-	name = strings.TrimSpace(name)
-	if name == "bash" {
-		return ClassBashGated
-	}
-	if knownBlockedTools[name] {
-		return ClassBlockedKnown
-	}
-	if safety == PlanSafetyUnsafe {
-		return ClassBlockedUnsafe
-	}
-	if alwaysAllowedTools[name] {
-		return ClassAlwaysAllowed
-	}
-	if safety == PlanSafetySafe {
-		return ClassPlanSafeSelfReported
-	}
-	if planSafeReadOnly[name] {
-		return ClassPlanSafeAudited
-	}
-	return ClassDefaultBlocked
-}
-
-func decideBash(args json.RawMessage, readOnlyCommands []string) Decision {
-	var p struct {
-		Command                     string `json:"command"`
-		RunInBackground             bool   `json:"run_in_background"`
-		PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil || strings.TrimSpace(p.Command) == "" {
-		return Decision{
-			Blocked: true,
-			Message: "blocked: bash command in plan mode must include a valid read-only command.",
-		}
-	}
-	if p.RunInBackground {
-		return Decision{
-			Blocked: true,
-			Message: "blocked: bash background execution is not available in plan mode. Use foreground read-only commands while planning.",
-		}
-	}
-	if p.PreserveBackgroundProcesses {
-		return Decision{
-			Blocked: true,
-			Message: "blocked: bash process preservation is not available in plan mode. Use foreground read-only commands while planning.",
-		}
-	}
-	cmd := strings.TrimSpace(p.Command)
-	checkCmd, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(cmd)
-
-	if !safeRedirects || shellsafe.ContainsShellSyntax(checkCmd) {
-		if _, malformed := shellFields(cmd); malformedShellQuoting(malformed) {
-			return Decision{
-				Blocked: true,
-				Message: fmt.Sprintf("blocked: bash command in plan mode has malformed shell quoting (%s). Use a simple read-only command while planning.", malformed),
-			}
-		}
-		return Decision{
-			Blocked: true,
-			Message: "blocked: bash command in plan mode must not contain shell operators. Use separate calls for chained commands.",
-		}
-	}
-
-	base, sub, ok := shellsafe.CommandIsReadOnly(checkCmd)
-	if !ok {
-		if ok, malformed := declaredReadOnlyCommand(checkCmd, readOnlyCommands); malformed != "" {
-			return Decision{
-				Blocked: true,
-				Message: fmt.Sprintf("blocked: bash command in plan mode has malformed shell quoting (%s). Use a simple read-only command while planning.", malformed),
-			}
-		} else if ok {
-			return Decision{}
-		}
-		if trust := readOnlyCommandTrustCandidate(checkCmd); trust != nil {
-			return Decision{
-				Blocked:              true,
-				Message:              fmt.Sprintf("blocked: bash commands in plan mode must be read-only. %q is not a known read-only command. Ask the user whether to trust %q as a plan-mode read-only command prefix, or exit plan mode to run it.", checkCmd, trust.Prefix),
-				ReadOnlyCommandTrust: trust,
-			}
-		}
-		return Decision{
-			Blocked: true,
-			Message: fmt.Sprintf("blocked: bash commands in plan mode must be read-only. %q is not a known read-only command. Use read-only tools for exploration, declare a concrete prefix in plan_mode_read_only_commands, or exit plan mode to run this command.", checkCmd),
-		}
-	}
-	if arg, malformed := unsafePlanModeArg(checkCmd, base, sub); malformed != "" {
-		return Decision{
-			Blocked: true,
-			Message: fmt.Sprintf("blocked: bash command in plan mode has malformed shell quoting (%s). Use a simple read-only command while planning.", malformed),
-		}
-	} else if arg != "" {
-		return Decision{
-			Blocked: true,
-			Message: fmt.Sprintf("blocked: bash command in plan mode uses a write-capable argument (%q). Use a read-only command while planning.", arg),
-		}
-	}
-	return Decision{}
-}
-
-func declaredReadOnlyCommand(cmd string, prefixes []string) (bool, string) {
-	fields, malformed := shellFields(cmd)
-	if malformed != "" {
-		return false, malformed
-	}
-	if len(fields) == 0 {
-		return false, ""
-	}
-	for _, prefix := range prefixes {
-		prefix = strings.TrimSpace(prefix)
-		if prefix == "" {
-			continue
-		}
-		prefixFields, prefixMalformed := shellFields(prefix)
-		if prefixMalformed != "" || len(prefixFields) == 0 {
-			continue
-		}
-		if unsafeDeclaredReadOnlyCommandPrefix(prefixFields) {
-			continue
-		}
-		if len(prefixFields) > len(fields) {
-			continue
-		}
-		matches := true
-		for i, want := range prefixFields {
-			if fields[i] != want {
-				matches = false
-				break
-			}
-		}
-		if matches {
-			return true, ""
-		}
-	}
-	return false, ""
-}
-
-func readOnlyCommandTrustCandidate(cmd string) *ReadOnlyCommandTrust {
-	fields, malformed := shellFields(cmd)
-	if malformed != "" || len(fields) == 0 || unsafeDeclaredReadOnlyCommandPrefix(fields) {
-		return nil
-	}
-	prefixFields := readOnlyCommandTrustPrefixFields(fields)
-	if len(prefixFields) == 0 {
-		return nil
-	}
-	return &ReadOnlyCommandTrust{
-		Command: cmd,
-		Prefix:  strings.Join(prefixFields, " "),
-	}
-}
-
-func readOnlyCommandTrustPrefixFields(fields []string) []string {
-	if len(fields) < 2 {
-		return nil
-	}
-	out := []string{fields[0]}
-	for _, field := range fields[1:] {
-		if strings.HasPrefix(field, "-") {
-			out = append(out, field)
-			break
-		}
-		if !readOnlyCommandPrefixWord(field) {
-			break
-		}
-		out = append(out, field)
-		if len(out) >= 3 {
-			break
-		}
-	}
-	if len(out) < 2 || unsafeDeclaredReadOnlyCommandPrefix(out) {
-		return nil
-	}
-	return out
-}
-
-func readOnlyCommandPrefixWord(field string) bool {
-	if field == "" {
-		return false
-	}
-	for i, r := range field {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' {
-			continue
-		}
-		if i > 0 && (r >= '0' && r <= '9' || r == '_' || r == '-') {
-			continue
-		}
-		return false
-	}
-	return true
-}
-
-func unsafeDeclaredReadOnlyCommandPrefix(fields []string) bool {
-	if len(fields) < 2 {
-		return true
-	}
-	if readOnlyCommandNeedsThreeTokenPrefixBases[strings.ToLower(fields[0])] && len(fields) < 3 {
-		return true
-	}
-	if unsafeDeclaredReadOnlyCommandBases[strings.ToLower(fields[0])] {
-		return true
-	}
-	for _, field := range fields[1:] {
-		if unsafeDeclaredReadOnlyCommandWords[strings.ToLower(field)] {
-			return true
-		}
-	}
-	return false
-}
-
-// unsafePlanModeArg applies plan-mode's stricter, quote-aware argument check on
-// top of the shared read-only command classification: a write-capable flag on
-// an otherwise read-only command (git --output, git grep --open-files-in-pager,
-// find -exec, go list -mod=mod, …) is refused while planning even though the
-// base command is read-only. Returns the offending arg, or a malformed-quoting
-// description. Plan mode is intentionally stricter here than permission's
-// auto-approve arg check.
-func unsafePlanModeArg(cmd, base, sub string) (arg, malformed string) {
-	fields, err := shellFields(cmd)
-	if err != "" {
-		return "", err
-	}
-	skip := 1
-	if sub != "" {
-		skip = 2
-	}
-	if len(fields) <= skip {
-		return "", ""
-	}
-	args := fields[skip:]
-	lowerArgs := make([]string, len(args))
-	for i, a := range args {
-		lowerArgs[i] = strings.ToLower(a)
-	}
-	switch base {
-	case "git":
-		for i, la := range lowerArgs {
-			if la == "--output" || strings.HasPrefix(la, "--output=") || la == "--ext-diff" {
-				return args[i], ""
-			}
-		}
-		if sub == "grep" {
-			for i, a := range args {
-				la := lowerArgs[i]
-				if a == "-O" || strings.HasPrefix(a, "-O") || strings.HasPrefix(la, "--open-files-in-pager") {
-					return a, ""
-				}
-			}
-		}
-	case "find":
-		for i, la := range lowerArgs {
-			if findWriteArgs[la] {
-				return args[i], ""
-			}
-		}
-	case "go":
-		if sub == "list" || sub == "vet" {
-			for i, la := range lowerArgs {
-				if goWriteOrExecArgs[la] || strings.HasPrefix(la, "-mod=mod") || strings.HasPrefix(la, "-modfile=") || strings.HasPrefix(la, "-toolexec=") || strings.HasPrefix(la, "-vettool=") {
-					return args[i], ""
-				}
-			}
-		}
-	}
-	return "", ""
-}
-
-func shellFields(s string) ([]string, string) {
-	return shellparse.StaticFields(s)
-}
-
-func malformedShellQuoting(malformed string) bool {
-	return strings.Contains(malformed, "quote")
 }

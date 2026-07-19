@@ -172,28 +172,30 @@ func workspaceGitOutputWithTimeout(timeout time.Duration, args ...string) ([]byt
 }
 
 func workspaceGitStatus(base string) ([]gitStatusEntry, error) {
-	cmd := workspaceGit("-C", base, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	// Git's porcelain paths are repository-relative even when -C points at a
+	// subdirectory. Derive the textual repository prefix from Git itself instead
+	// of comparing absolute paths: Windows may spell the same directory once as
+	// an 8.3 path and once as a long path, which makes filepath.Rel reject every
+	// otherwise valid status entry.
+	prefixCmd := workspaceGit("-C", base, "rev-parse", "--show-prefix")
+	prefixRaw, err := prefixCmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.TrimSpace(string(prefixRaw))
+	cmd := workspaceGit("-C", base, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ".")
 	raw, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
 	entries := parseGitStatusPorcelainZ(raw)
-	topCmd := workspaceGit("-C", base, "rev-parse", "--show-toplevel")
-	topRaw, err := topCmd.Output()
-	if err != nil {
-		return nil, err
-	}
-	repoRoot := strings.TrimSpace(string(topRaw))
-	if repoRoot == "" {
-		return entries, nil
-	}
 	out := make([]gitStatusEntry, 0, len(entries))
 	for _, entry := range entries {
-		entry.Path = workspaceRelPathFromGitStatus(repoRoot, base, entry.Path)
+		entry.Path = workspaceRelPathFromGitPrefix(base, prefix, entry.Path)
 		if entry.Path == "" {
 			continue
 		}
-		entry.OldPath = workspaceRelPathFromGitStatus(repoRoot, base, entry.OldPath)
+		entry.OldPath = workspaceRelPathFromGitPrefix(base, prefix, entry.OldPath)
 		out = append(out, entry)
 	}
 	return out, nil
@@ -236,15 +238,19 @@ func normalizeWorkspaceRelPath(base, path string) string {
 	return filepath.ToSlash(path)
 }
 
-func workspaceRelPathFromGitStatus(repoRoot, base, path string) string {
-	path = strings.TrimSpace(path)
+func workspaceRelPathFromGitPrefix(base, prefix, path string) string {
+	path = filepath.ToSlash(strings.TrimSpace(path))
+	prefix = filepath.ToSlash(strings.TrimSpace(prefix))
 	if path == "" {
 		return ""
 	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(repoRoot, filepath.FromSlash(path))
+	if prefix != "" {
+		if !strings.HasPrefix(path, prefix) {
+			return ""
+		}
+		path = strings.TrimPrefix(path, prefix)
 	}
-	return normalizeWorkspaceRelPath(base, path)
+	return normalizeWorkspaceRelPath(base, filepath.FromSlash(path))
 }
 
 // workspaceGitBranchForMeta is the cached variant used by high-frequency UI

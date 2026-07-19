@@ -25,19 +25,22 @@ func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, so
 	norm, ok := normalizeTier(desired)
 	e.Tier = norm
 	a := action{
-		Kind:       "mcp",
-		Action:     "install_mcp_server",
-		Name:       e.Name,
-		Source:     source,
-		ConfigPath: t.configPath(scope),
-		Scope:      scope,
-		Transport:  pluginTransport(e),
-		URL:        e.URL,
-		Command:    e.Command,
-		Args:       e.Args,
-		Env:        e.Env,
-		Headers:    e.Headers,
-		entry:      e,
+		Kind:                     "mcp",
+		Action:                   "install_mcp_server",
+		Name:                     e.Name,
+		Source:                   source,
+		ConfigPath:               t.configPath(scope),
+		Scope:                    scope,
+		Transport:                pluginTransport(e),
+		URL:                      e.URL,
+		Command:                  e.Command,
+		Args:                     e.Args,
+		Env:                      e.Env,
+		Headers:                  e.Headers,
+		DefaultToolsApprovalMode: e.DefaultToolsApprovalMode,
+		ToolPolicies:             mcpToolPoliciesWithApprovalMode(e.Tools),
+		ApprovalsReviewer:        e.ApprovalsReviewer,
+		entry:                    e,
 	}
 	if !ok && strings.TrimSpace(desired) != "" {
 		a.RiskReasons = append(a.RiskReasons, fmt.Sprintf("tier %q is unknown; treating as background", desired))
@@ -165,14 +168,20 @@ func readMCPJSON(path string) ([]config.PluginEntry, []string, error) {
 func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 	var raw struct {
 		MCPServers map[string]struct {
-			Type      string            `json:"type"`
-			Command   string            `json:"command"`
-			Args      []string          `json:"args"`
-			Env       map[string]string `json:"env"`
-			URL       string            `json:"url"`
-			Headers   map[string]string `json:"headers"`
-			AutoStart *bool             `json:"auto_start"`
-			Tier      string            `json:"tier"`
+			Type                     string                          `json:"type"`
+			Command                  string                          `json:"command"`
+			Args                     []string                        `json:"args"`
+			Env                      map[string]string               `json:"env"`
+			URL                      string                          `json:"url"`
+			Headers                  map[string]string               `json:"headers"`
+			AutoStart                *bool                           `json:"auto_start"`
+			CallTimeoutSeconds       int                             `json:"call_timeout_seconds"`
+			ToolTimeoutSeconds       map[string]int                  `json:"tool_timeout_seconds"`
+			TrustedReadOnlyTools     []string                        `json:"trusted_read_only_tools"`
+			DefaultToolsApprovalMode string                          `json:"default_tools_approval_mode"`
+			Tools                    map[string]config.MCPToolPolicy `json:"tools"`
+			ApprovalsReviewer        string                          `json:"approvals_reviewer"`
+			Tier                     string                          `json:"tier"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -209,15 +218,21 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 			warnings = append(warnings, fmt.Sprintf("%s: tier %q is unknown; treating as background", name, s.Tier))
 		}
 		e := config.PluginEntry{
-			Name:      name,
-			Type:      typ,
-			Command:   strings.TrimSpace(s.Command),
-			Args:      append([]string(nil), s.Args...),
-			Env:       cleanMap(s.Env),
-			URL:       strings.TrimSpace(s.URL),
-			Headers:   cleanMap(s.Headers),
-			AutoStart: s.AutoStart,
-			Tier:      tier,
+			Name:                     name,
+			Type:                     typ,
+			Command:                  strings.TrimSpace(s.Command),
+			Args:                     append([]string(nil), s.Args...),
+			Env:                      cleanMap(s.Env),
+			URL:                      strings.TrimSpace(s.URL),
+			Headers:                  cleanMap(s.Headers),
+			AutoStart:                s.AutoStart,
+			CallTimeoutSeconds:       s.CallTimeoutSeconds,
+			ToolTimeoutSeconds:       s.ToolTimeoutSeconds,
+			TrustedReadOnlyTools:     append([]string(nil), s.TrustedReadOnlyTools...),
+			DefaultToolsApprovalMode: s.DefaultToolsApprovalMode,
+			Tools:                    mcpToolPoliciesWithApprovalMode(s.Tools),
+			ApprovalsReviewer:        s.ApprovalsReviewer,
+			Tier:                     tier,
 		}
 		// An empty Type is the canonical "stdio" form; keep it that way so
 		// the rest of the config layer (UpsertPlugin / ShouldAutoStart)
@@ -236,6 +251,22 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 		out = append(out, e)
 	}
 	return out, warnings, nil
+}
+
+func mcpToolPoliciesWithApprovalMode(values map[string]config.MCPToolPolicy) map[string]config.MCPToolPolicy {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]config.MCPToolPolicy, len(values))
+	for name, policy := range values {
+		if strings.TrimSpace(policy.ApprovalMode) != "" {
+			out[name] = policy
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // validateMCPEntry enforces the per-transport required fields. It is the
@@ -267,5 +298,32 @@ func validateMCPEntry(e config.PluginEntry) error {
 	default:
 		return newErr(ErrInvalidManifest, "MCP server %q has unknown transport %q", e.Name, e.Type)
 	}
+	// Reject invalid approval policy at plan time. Persisting is validated again
+	// by config, but that happens only after the server was already connected.
+	if !validApprovalModeValue(e.DefaultToolsApprovalMode) {
+		return newErr(ErrInvalidManifest, "MCP server %q has unknown default_tools_approval_mode %q (want auto|prompt|writes|approve)", e.Name, e.DefaultToolsApprovalMode)
+	}
+	for tool, policy := range e.Tools {
+		if strings.TrimSpace(tool) == "" {
+			return newErr(ErrInvalidManifest, "MCP server %q tools contains an empty tool name", e.Name)
+		}
+		if !validApprovalModeValue(policy.ApprovalMode) {
+			return newErr(ErrInvalidManifest, "MCP server %q tools[%q].approval_mode must be auto|prompt|writes|approve", e.Name, tool)
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(e.ApprovalsReviewer)) {
+	case "", "user", "auto_review":
+	default:
+		return newErr(ErrInvalidManifest, "MCP server %q has unknown approvals_reviewer %q (want user|auto_review)", e.Name, e.ApprovalsReviewer)
+	}
 	return nil
+}
+
+func validApprovalModeValue(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto", "prompt", "writes", "approve":
+		return true
+	default:
+		return false
+	}
 }

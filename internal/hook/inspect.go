@@ -203,13 +203,18 @@ func appendPluginInspect(out *Inspection, reasonixHomeDir, projectRoot string) {
 			// Keep unknown event names so diagnostics can report them.
 			for _, h := range pkg.Manifest.Hooks[eventName] {
 				count++
-				command := h.Command
+				command := expandPluginRoot(h.Command, pkg.Root)
 				if command != "" && !h.ShellCommand && !filepath.IsAbs(command) {
 					command = filepath.Join(pkg.Root, filepath.FromSlash(command))
 				}
-				contextFile := h.ContextFile
-				if contextFile != "" && !filepath.IsAbs(contextFile) {
-					contextFile = filepath.Join(pkg.Root, filepath.FromSlash(contextFile))
+				contextFile := expandPluginRoot(h.ContextFile, pkg.Root)
+				if contextFile != "" {
+					contextFile = filepath.FromSlash(contextFile)
+					if !filepath.IsAbs(contextFile) {
+						contextFile = filepath.Join(pkg.Root, contextFile)
+					} else {
+						contextFile = filepath.Clean(contextFile)
+					}
 				}
 				out.Entries = append(out.Entries, Entry{
 					Event:       event,

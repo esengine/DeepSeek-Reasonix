@@ -35,38 +35,6 @@ func TestTurnOrchestratorRunsForegroundUnit(t *testing.T) {
 	}
 }
 
-func TestTurnOrchestratorSkipsMemoryCompilerForSyntheticTurns(t *testing.T) {
-	// A genuine user turn supplies a Memory v5 source and is not skipped; a
-	// synthetic controller-injected turn (the goal-loop continuation) is marked
-	// to bypass compilation so its contract can't be re-injected and loop
-	// (#5342, #5329).
-	runner := &fakeTurnRunner{}
-	c := New(Options{Runner: runner})
-	o := newTurnOrchestrator(c)
-
-	real := "fix the login bug"
-	if err := o.runTurnWithRawDisplay(context.Background(), real, real, ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := o.runTurnWithRawDisplay(context.Background(), goalContinueTurn, goalContinueTurn, ""); err != nil {
-		t.Fatal(err)
-	}
-
-	if len(runner.memoryCompilerSkips) != 2 {
-		t.Fatalf("runs = %d, want 2", len(runner.memoryCompilerSkips))
-	}
-	if runner.memoryCompilerSkips[0] {
-		t.Fatalf("genuine user turn was marked skip-compile")
-	}
-	if !runner.memoryCompilerSkips[1] {
-		t.Fatalf("synthetic goal-continuation turn was NOT marked skip-compile")
-	}
-	// The genuine turn supplies a source; the synthetic one must not.
-	if len(runner.memoryCompilerInputs) != 1 || runner.memoryCompilerInputs[0] != real {
-		t.Fatalf("memory compiler sources = %v, want exactly [%q]", runner.memoryCompilerInputs, real)
-	}
-}
-
 func TestTurnOrchestratorTypedSyntheticTurnDoesNotDependOnPrefix(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	c := New(Options{AutoPlan: "on", Runner: runner})
@@ -85,28 +53,6 @@ func TestTurnOrchestratorTypedSyntheticTurnDoesNotDependOnPrefix(t *testing.T) {
 	}
 	if strings.HasPrefix(runner.inputs[0], PlanModeMarker) {
 		t.Fatalf("typed synthetic turn should not be auto-planned, got %q", runner.inputs[0])
-	}
-	if len(runner.memoryCompilerSkips) != 1 || !runner.memoryCompilerSkips[0] {
-		t.Fatalf("typed synthetic turn was not marked skip-compile: %+v", runner.memoryCompilerSkips)
-	}
-	if len(runner.memoryCompilerInputs) != 0 {
-		t.Fatalf("typed synthetic turn supplied Memory v5 source input: %+v", runner.memoryCompilerInputs)
-	}
-}
-
-func TestTurnOrchestratorLegacySyntheticPrefixStillSkipsMemoryCompiler(t *testing.T) {
-	runner := &fakeTurnRunner{}
-	c := New(Options{Runner: runner})
-	o := newTurnOrchestrator(c)
-
-	if err := o.runTurnWithRawDisplay(context.Background(), goalContinueTurn, goalContinueTurn, ""); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.memoryCompilerSkips) != 1 || !runner.memoryCompilerSkips[0] {
-		t.Fatalf("legacy synthetic prefix was not marked skip-compile: %+v", runner.memoryCompilerSkips)
-	}
-	if len(runner.memoryCompilerInputs) != 0 {
-		t.Fatalf("legacy synthetic prefix supplied Memory v5 source input: %+v", runner.memoryCompilerInputs)
 	}
 }
 
@@ -145,9 +91,8 @@ func TestTurnOrchestratorStopHookIgnoresCanceledTurnContext(t *testing.T) {
 }
 
 type recordingSessionRunner struct {
-	session              *agent.Session
-	inputs               []string
-	memoryCompilerInputs []string
+	session *agent.Session
+	inputs  []string
 }
 
 type deliveryScopeErrorRunner struct {
@@ -187,9 +132,6 @@ func TestGoalReadinessFailureBlocksAndKeepsDeliveryScope(t *testing.T) {
 
 func (r *recordingSessionRunner) Run(ctx context.Context, input string) error {
 	r.inputs = append(r.inputs, input)
-	if source, ok := agent.MemoryCompilerSourceInputFromContext(ctx); ok {
-		r.memoryCompilerInputs = append(r.memoryCompilerInputs, source)
-	}
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 	return nil
 }
@@ -324,9 +266,6 @@ func TestTurnOrchestratorRefTurnRecordsVisibleDisplay(t *testing.T) {
 	}
 	if !strings.Contains(runner.inputs[0], "Referenced context:") || !strings.Contains(runner.inputs[0], "referenced evidence") {
 		t.Fatalf("model input should include resolved reference context, got %q", runner.inputs[0])
-	}
-	if len(runner.memoryCompilerInputs) != 1 || runner.memoryCompilerInputs[0] != visible {
-		t.Fatalf("memory compiler source input = %+v, want %q", runner.memoryCompilerInputs, visible)
 	}
 	if gotDisplay != visible {
 		t.Fatalf("display recorder display = %q, want visible prompt %q", gotDisplay, visible)
@@ -514,6 +453,7 @@ func TestTurnOrchestratorCancelPreservesVisibleUserPrompt(t *testing.T) {
 
 	ex := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
 	c := New(Options{Runner: runner, Executor: ex})
+	c.SetPlanMode(true)
 	// Simulate a user-initiated cancel: set the cancelling flag.
 	c.mu.Lock()
 	c.canceling = true
@@ -538,7 +478,7 @@ func TestTurnOrchestratorCancelPreservesVisibleUserPrompt(t *testing.T) {
 	}
 	last := msgs[len(msgs)-1]
 	if last.Role != provider.RoleUser || last.Content != "add config file abc" {
-		t.Fatalf("last message after cancel = %+v, want preserved visible user prompt", last)
+		t.Fatalf("last message after cancel = %+v, want preserved user prompt without compose prefixes", last)
 	}
 	for _, m := range msgs[preCount+1:] {
 		if m.Role == provider.RoleAssistant || m.Role == provider.RoleTool {
@@ -550,6 +490,39 @@ func TestTurnOrchestratorCancelPreservesVisibleUserPrompt(t *testing.T) {
 	// cancelled turn must not survive the strip.
 	if todos := c.Todos(); len(todos) != 0 {
 		t.Fatalf("Todos() after cancel = %v, want empty — cancelled todo_write leaked into canonical state", todos)
+	}
+}
+
+func TestTurnOrchestratorCancelBeforeRunnerAddsUserPreservesVisiblePrompt(t *testing.T) {
+	workspace := t.TempDir()
+	writeVisionTestConfig(t, workspace)
+	imagePath := filepath.Join(workspace, "diagram.png")
+	if err := os.WriteFile(imagePath, mustBase64(t, tinyPNG), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess := agent.NewSession("system")
+	ex := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{
+		Runner:        cancelBeforeUserRunner{},
+		Executor:      ex,
+		WorkspaceRoot: workspace,
+		ModelRef:      "custom/vision-pro",
+	})
+	c.SetPlanMode(true)
+	c.mu.Lock()
+	c.canceling = true
+	c.mu.Unlock()
+
+	err := newTurnOrchestrator(c).runTurnWithRawDisplay(context.Background(), "inspect @diagram.png", "inspect @diagram.png", "")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	msgs := sess.Snapshot()
+	if len(msgs) != 2 || msgs[1].Role != provider.RoleUser || msgs[1].Content != "inspect @diagram.png" {
+		t.Fatalf("session after pre-executor cancel = %+v, want system + prefix-free visible user", msgs)
+	}
+	if len(msgs[1].Images) != 1 || !strings.HasPrefix(msgs[1].Images[0], "data:image/png;base64,") {
+		t.Fatalf("session after pre-executor cancel lost user image: %+v", msgs[1].Images)
 	}
 }
 
@@ -588,6 +561,7 @@ func TestTurnOrchestratorCancelFlushesCleanTranscriptToDisk(t *testing.T) {
 		Executor:    agent.New(nil, nil, sess, agent.Options{}, event.Discard),
 		SessionPath: sessionPath,
 	})
+	c.SetPlanMode(true)
 	c.mu.Lock()
 	c.canceling = true
 	c.mu.Unlock()
@@ -720,6 +694,12 @@ type cancelStrippingRunner struct {
 	session *agent.Session
 	add     []provider.Message
 	err     error
+}
+
+type cancelBeforeUserRunner struct{}
+
+func (cancelBeforeUserRunner) Run(context.Context, string) error {
+	return context.Canceled
 }
 
 func (r *cancelStrippingRunner) Run(ctx context.Context, input string) error {

@@ -171,7 +171,7 @@ func genManifest(dir, version, tag string) error {
 	}
 	m := update.Manifest{
 		Version:      version,
-		DownloadPage: "https://reasonix.io/#start",
+		DownloadPage: "https://reasonix.io/?download=desktop#start",
 		Platforms:    map[string]update.Asset{},
 	}
 	entries, err := os.ReadDir(dir)

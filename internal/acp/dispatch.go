@@ -119,9 +119,9 @@ func (s *updateSink) Emit(e event.Event) {
 		s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(e.Text)})
 
 	case event.ToolDispatch:
-		// Skip the early (Partial) dispatch: it carries no args, and the full one
-		// that follows is the single pending tool_call the protocol expects.
-		if e.Tool.Partial {
+		// Skip the early (Partial) dispatch and later same-ID preview refresh: ACP
+		// expects one pending tool_call and has no file-diff update payload.
+		if e.Tool.Partial || e.Tool.Refreshed {
 			return
 		}
 		// todo_write is the agent's task list; mirror it as an ACP plan update so
@@ -254,7 +254,7 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 	if a.Subject != "" {
 		title = a.Tool + " " + a.Subject
 	}
-	options := approvalOptions(a.Tool, a.Subject)
+	options := approvalOptions(a.Tool, a.Subject, a.Fresh)
 	params := PermissionRequestParams{
 		SessionID: s.sessionID,
 		ToolCall: PermissionToolCall{
@@ -361,8 +361,8 @@ func approvalSessionOptionName(tool, subject string) string {
 	return "Allow " + sessionRule + " for this session"
 }
 
-func approvalOptions(tool, subject string) []PermissionOption {
-	if control.RequiresFreshHumanApprovalTool(tool) {
+func approvalOptions(tool, subject string, fresh bool) []PermissionOption {
+	if fresh || control.RequiresFreshHumanApprovalTool(tool) {
 		if tool == control.SandboxEscapeApprovalTool {
 			return []PermissionOption{
 				{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},

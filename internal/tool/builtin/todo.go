@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/tool"
@@ -85,11 +86,70 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 			return "", fmt.Errorf("todo %d: invalid status %q (want pending|in_progress|completed)", i+1, t.Status)
 		}
 	}
+	if err := evidence.ValidateSerialTodos(toEvidenceTodos(p.Todos)); err != nil {
+		return "", err
+	}
+	if err := verifyTodoCurrentContinuity(ctx, p.Todos); err != nil {
+		return "", err
+	}
+	if err := verifyCompletedTodoPositions(ctx, p.Todos); err != nil {
+		return "", err
+	}
 	if err := verifyTodoCompletionTransitions(ctx, p.Todos); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Todos updated: %d total — %d completed, %d in progress, %d pending.",
 		len(p.Todos), done, active, pending), nil
+}
+
+func verifyTodoCurrentContinuity(ctx context.Context, todos []todoItem) error {
+	previous := todoBaseline(ctx)
+	if len(previous) == 0 {
+		return nil
+	}
+	// The single current item must survive the rewrite. In a layered phase this
+	// is either its active sub-step or, after all children finish, the phase
+	// header waiting for final sign-off.
+	for i, todo := range previous {
+		if strings.TrimSpace(todo.Status) != "in_progress" {
+			continue
+		}
+		match, found := evidence.MatchTodoIdentity(todo, toEvidenceTodos(todos))
+		if !found {
+			return fmt.Errorf("current todo %d %q cannot be removed or replaced while it is in_progress; complete it with complete_step before changing the remaining list", i+1, todo.Content)
+		}
+		if match.Status == "pending" || match.Status == "" {
+			return fmt.Errorf("current todo %d %q cannot move back to pending; keep it in_progress or complete it with complete_step", i+1, todo.Content)
+		}
+	}
+	return nil
+}
+
+func verifyCompletedTodoPositions(ctx context.Context, todos []todoItem) error {
+	previous := todoBaseline(ctx)
+	if len(previous) == 0 {
+		return nil
+	}
+	for i, todo := range todos {
+		if todo.Status != "completed" {
+			continue
+		}
+		match, found := evidence.MatchTodoIdentity(toEvidenceTodo(todo), previous)
+		if !found || match.Index != i+1 {
+			return fmt.Errorf("completed todo %d %q cannot be inserted, duplicated, or reordered; preserve the completed prefix and sign off the current item with complete_step", i+1, todo.Content)
+		}
+	}
+	return nil
+}
+
+func todoBaseline(ctx context.Context) []evidence.TodoItem {
+	if ledger, ok := evidence.FromContext(ctx); ok {
+		if previous, ok := ledger.LatestTodos(); ok && len(previous) > 0 {
+			return previous
+		}
+	}
+	previous, _ := evidence.TodoStateFromContext(ctx)
+	return previous
 }
 
 func verifyTodoCompletionTransitions(ctx context.Context, todos []todoItem) error {
@@ -98,7 +158,27 @@ func verifyTodoCompletionTransitions(ctx context.Context, todos []todoItem) erro
 		return nil
 	}
 	missing, hasBaseline := ledger.UnverifiedCompletedTodos(toEvidenceTodos(todos))
-	if !hasBaseline || len(missing) == 0 {
+	if !hasBaseline {
+		if previous, ok := evidence.TodoStateFromContext(ctx); ok && len(previous) > 0 {
+			for i, todo := range todos {
+				if todo.Status != "completed" {
+					continue
+				}
+				match, found := evidence.MatchTodoIdentity(toEvidenceTodo(todo), previous)
+				if !found || match.Status != "completed" {
+					return fmt.Errorf("todo %d %q cannot become completed without signing off the current item with complete_step", i+1, todo.Content)
+				}
+			}
+			return nil
+		}
+		for i, todo := range todos {
+			if todo.Status == "completed" {
+				return fmt.Errorf("initial todo %d %q cannot start completed; establish the task list before doing the work, then sign off the current item with complete_step", i+1, todo.Content)
+			}
+		}
+		return nil
+	}
+	if len(missing) == 0 {
 		return nil
 	}
 	const hint = "; sign each finished item off with complete_step first, then re-send this todo_write"
@@ -120,4 +200,13 @@ func toEvidenceTodos(todos []todoItem) []evidence.TodoItem {
 		})
 	}
 	return out
+}
+
+func toEvidenceTodo(todo todoItem) evidence.TodoItem {
+	return evidence.TodoItem{
+		Content:    todo.Content,
+		Status:     todo.Status,
+		ActiveForm: todo.ActiveForm,
+		Level:      todo.Level,
+	}
 }

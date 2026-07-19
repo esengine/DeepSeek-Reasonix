@@ -1,10 +1,11 @@
-import { type ReactNode } from "react";
-import { Activity, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, RefreshCw, Wallet, Zap } from "lucide-react";
+import { useRef, useState, type ReactNode } from "react";
+import { Activity, Check, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Laptop, Layers, Percent, RefreshCw, Server, Settings, Unplug, Wallet, Zap } from "lucide-react";
+import { AnchoredPopover } from "./AnchoredPopover";
 import { Tooltip } from "./Tooltip";
 import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import { type BalanceInfo, type ContextInfo, type UsageSourceStats, type WireUsage } from "../lib/types";
+import { type BalanceInfo, type ContextInfo, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
 
 type StatusBarLabelStyle = "icon" | "text";
 
@@ -165,6 +166,13 @@ export function StatusBar({
   workspacePath,
   workspaceName,
   gitBranch,
+  onConnectRemote,
+  onDisconnectRemote,
+  onManageRemote,
+  onOpenRemote,
+  onOpenRemoteWorkspace,
+  remoteHosts = [],
+  remoteStatuses = {},
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -182,6 +190,13 @@ export function StatusBar({
   workspacePath?: string;
   workspaceName?: string;
   gitBranch?: string;
+  onConnectRemote?: (host: RemoteHostView) => void;
+  onDisconnectRemote?: (hostId: string) => void;
+  onManageRemote?: () => void;
+  onOpenRemote?: (hostId: string) => void;
+  onOpenRemoteWorkspace?: (host: RemoteHostView) => void;
+  remoteHosts?: RemoteHostView[];
+  remoteStatuses?: Record<string, RemoteConnectionStatus>;
 }) {
   const { locale, t } = useI18n();
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
@@ -325,6 +340,15 @@ export function StatusBar({
   return (
     <div className={`statusbar statusbar--${metricLabelStyle}`}>
       <div className="statusbar__group statusbar__group--items">
+        <RemoteStatusBarChip
+          hosts={remoteHosts}
+          statuses={remoteStatuses}
+          onOpen={onOpenRemote}
+          onOpenWorkspace={onOpenRemoteWorkspace}
+          onConnect={onConnectRemote}
+          onDisconnect={onDisconnectRemote}
+          onManage={onManageRemote}
+        />
         {renderedItems.map(({ id, node }) => (
           <span className="statusbar__item" data-statusbar-item={id} key={id}>
             {node}
@@ -332,5 +356,160 @@ export function StatusBar({
         ))}
       </div>
     </div>
+  );
+}
+
+// This entry remains visible whenever an SSH host is configured. The popover
+// owns quick connection actions; remote files and services live in the dock.
+const REMOTE_STATE_SEVERITY: Record<string, number> = {
+  error: 5,
+  reconnecting: 4,
+  pending_hostkey: 4,
+  connecting: 3,
+  degraded: 2,
+  connected: 1,
+  stopped: 0,
+};
+
+function RemoteStatusBarChip({
+  hosts,
+  statuses,
+  onOpen,
+  onOpenWorkspace,
+  onConnect,
+  onDisconnect,
+  onManage,
+}: {
+  hosts: RemoteHostView[];
+  statuses: Record<string, RemoteConnectionStatus>;
+  onOpen?: (hostId: string) => void;
+  onOpenWorkspace?: (host: RemoteHostView) => void;
+  onConnect?: (host: RemoteHostView) => void;
+  onDisconnect?: (hostId: string) => void;
+  onManage?: () => void;
+}) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  if (hosts.length === 0) return null;
+
+  const entries = hosts.map((host) => statuses[host.id] ?? { hostId: host.id, state: "stopped" as const });
+  const worst = entries.reduce((a, b) => {
+    const aSeverity = a.error ? 6 : REMOTE_STATE_SEVERITY[a.state] ?? 0;
+    const bSeverity = b.error ? 6 : REMOTE_STATE_SEVERITY[b.state] ?? 0;
+    return bSeverity > aSeverity ? b : a;
+  });
+  const worstHost = hosts.find((host) => host.id === worst.hostId) ?? hosts[0];
+  const triggerState = worst.error ? "error" : worst.state;
+  const triggerStatus = worst.error ? t("remote.status.failed") : t(`remote.status.${worst.state}`);
+  const triggerLabel = worst.state === "stopped" && !worst.error
+    ? t("remote.statusBar.disconnected")
+    : t("remote.statusBar.summary", { host: worstHost.label, status: triggerStatus });
+
+  return (
+    <span className="statusbar__remote-wrap">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`statusbar__remote remote-chip remote-chip--${triggerState}`}
+        onClick={() => setOpen((value) => !value)}
+        aria-label={triggerLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={triggerLabel}
+      >
+        <Server size={11} aria-hidden="true" />
+        <span>{triggerLabel}</span>
+        <ChevronsUpDown size={10} aria-hidden="true" />
+      </button>
+      <AnchoredPopover
+        open={open}
+        anchorRef={triggerRef}
+        onClose={() => setOpen(false)}
+        className="remote-switcher"
+        align="start"
+      >
+        <section role="dialog" aria-label={t("remote.switcher.title")}>
+          <header className="remote-switcher__header">{t("remote.switcher.title")}</header>
+          <div className="remote-switcher__local" aria-current="true">
+            <span className="remote-switcher__icon"><Laptop size={14} aria-hidden="true" /></span>
+            <span className="remote-switcher__copy">
+              <strong>{t("remote.switcher.local")}</strong>
+              <small>{t("remote.switcher.currentSession")}</small>
+            </span>
+            <Check size={14} className="remote-switcher__check" aria-hidden="true" />
+          </div>
+          <div className="remote-switcher__section-label">{t("remote.switcher.hosts")}</div>
+          <div className="remote-switcher__hosts">
+            {hosts.map((host) => {
+              const status = statuses[host.id] ?? { hostId: host.id, state: "stopped" as const };
+              const connected = status.state === "connected" || status.state === "degraded";
+              const busy = status.state === "connecting" || status.state === "reconnecting" || status.state === "pending_hostkey";
+              const stateClass = status.error ? "error" : status.state;
+              const stateLabel = status.error ? t("remote.status.failed") : t(`remote.status.${status.state}`);
+              const target = `${host.user ? `${host.user}@` : ""}${host.host}${host.port && host.port !== 22 ? `:${host.port}` : ""}`;
+              return (
+                <div className={`remote-switcher__host remote-switcher__host--${stateClass}`} key={host.id}>
+                  <button
+                    type="button"
+                    className="remote-switcher__host-main"
+                    onClick={() => {
+                      setOpen(false);
+                      onOpen?.(host.id);
+                    }}
+                  >
+                    <span className={`remote-switcher__state remote-switcher__state--${stateClass}`} aria-hidden="true" />
+                    <span className="remote-switcher__copy">
+                      <strong>{host.label}</strong>
+                      <small>{stateLabel} · {host.defaultWorkspace || target}</small>
+                    </span>
+                  </button>
+                  <span className="remote-switcher__actions">
+                    <button
+                      type="button"
+                      className="btn btn--small btn--primary"
+                      disabled={busy}
+                      onClick={() => {
+                        if (connected) {
+                          setOpen(false);
+                          onOpenWorkspace?.(host);
+                        } else {
+                          setOpen(false);
+                          onConnect?.(host);
+                        }
+                      }}
+                    >
+                      {connected ? t("remote.openWorkspace") : busy ? stateLabel : t("remote.connectAndOpen")}
+                    </button>
+                    {connected && (
+                      <button
+                        type="button"
+                        className="remote-switcher__disconnect"
+                        onClick={() => onDisconnect?.(host.id)}
+                        aria-label={t("remote.disconnectHost", { host: host.label })}
+                        title={t("remote.disconnect")}
+                      >
+                        <Unplug size={13} aria-hidden="true" />
+                      </button>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="remote-switcher__manage"
+            onClick={() => {
+              setOpen(false);
+              onManage?.();
+            }}
+          >
+            <Settings size={13} aria-hidden="true" />
+            {t("remote.switcher.manage")}
+          </button>
+        </section>
+      </AnchoredPopover>
+    </span>
   );
 }

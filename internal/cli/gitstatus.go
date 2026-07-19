@@ -207,7 +207,7 @@ func (s gitStatus) dirtyPlain() string {
 	if len(parts) == 0 {
 		return ""
 	}
-	return " (" + strings.Join(parts, " ") + ")"
+	return "  " + strings.Join(parts, " ")
 }
 
 func (s gitStatus) render(repo, branch string) string {
@@ -217,7 +217,9 @@ func (s gitStatus) render(repo, branch string) string {
 	if s.Detached {
 		b.WriteString(yellow(branch))
 	} else {
-		b.WriteString(green(branch))
+		// A branch name is identity, not a success condition. Keep semantic green
+		// for additions and use the theme's readable neutral value colour here.
+		b.WriteString(footerValue(branch))
 	}
 
 	var parts []string
@@ -228,9 +230,8 @@ func (s gitStatus) render(repo, branch string) string {
 		parts = append(parts, yellow(fmt.Sprintf("?%d", s.Untracked)))
 	}
 	if len(parts) > 0 {
-		b.WriteString(dim(" ("))
+		b.WriteString("  ")
 		b.WriteString(strings.Join(parts, " "))
-		b.WriteString(dim(")"))
 	}
 	return b.String()
 }

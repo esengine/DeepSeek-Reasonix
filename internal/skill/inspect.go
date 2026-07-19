@@ -38,6 +38,9 @@ type Inspection struct {
 // candidates. Missing convention roots stay StatusMissing without issues.
 // Stderr parse warnings are suppressed so diagnostics stay quiet.
 func (s *Store) Inspect() Inspection {
+	if s == nil || s.disableDiscovery {
+		return Inspection{}
+	}
 	origStderr := s.stderr
 	s.stderr = io.Discard
 	defer func() { s.stderr = origStderr }()

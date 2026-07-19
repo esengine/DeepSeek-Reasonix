@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,17 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestPlanApprovedMessageStatesAutoSemantics(t *testing.T) {
+	for _, want := range []string{"ordinary writer fallback", "explicit ask/deny rules", "forced fresh reviews"} {
+		if !strings.Contains(planApprovedMessage, want) {
+			t.Fatalf("planApprovedMessage missing %q: %s", want, planApprovedMessage)
+		}
+	}
+	if strings.Contains(planApprovedMessage, "without asking again") {
+		t.Fatalf("planApprovedMessage overstates the approval window: %s", planApprovedMessage)
+	}
+}
 
 type recordingWriter struct {
 	mu    sync.Mutex
@@ -89,6 +101,138 @@ func TestApprovalToolWideEndToEnd(t *testing.T) {
 	defer writer.mu.Unlock()
 	if len(writer.paths) != 2 || writer.paths[0] != "a.txt" || writer.paths[1] != "b.txt" {
 		t.Errorf("executed writes = %v, want both a.txt and b.txt", writer.paths)
+	}
+}
+
+// TestPlanModeApprovalPostureMatrix proves Plan does not replace the active
+// approval policy. Ordinary writers still ask, auto-approve, bypass explicit
+// asks in YOLO, or stop at deny exactly as they do in Standard mode.
+func TestPlanModeApprovalPostureMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		mode        string
+		askRules    []string
+		denyRules   []string
+		wantPrompts int
+		wantWrites  int
+	}{
+		{name: "Ask prompts for fallback writer", mode: ToolApprovalAsk, wantPrompts: 1, wantWrites: 1},
+		{name: "Auto allows fallback writer", mode: ToolApprovalAuto, wantWrites: 1},
+		{name: "Auto preserves explicit ask", mode: ToolApprovalAuto, askRules: []string{"write_file"}, wantPrompts: 1, wantWrites: 1},
+		{name: "YOLO bypasses explicit ask", mode: ToolApprovalYolo, askRules: []string{"write_file"}, wantWrites: 1},
+		{name: "deny wins in YOLO", mode: ToolApprovalYolo, denyRules: []string{"write_file"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			writer := &recordingWriter{}
+			reg := tool.NewRegistry()
+			reg.Add(writer)
+			prov := &scriptedTurns{turns: [][]provider.Chunk{
+				toolCallTurn("write", "write_file", `{"path":"plan.txt"}`),
+				textTurn("Plan ready."),
+			}}
+			ag := agent.New(prov, reg, agent.NewSession(""), agent.Options{}, event.Discard)
+
+			approvalIDs := make(chan string, 1)
+			prompts := 0
+			c := New(Options{
+				Runner:   ag,
+				Executor: ag,
+				Policy:   permission.New("ask", nil, tc.askRules, tc.denyRules),
+				Sink: event.FuncSink(func(e event.Event) {
+					if e.Kind == event.ApprovalRequest {
+						prompts++
+						approvalIDs <- e.Approval.ID
+					}
+				}),
+			})
+			defer c.Close()
+			c.EnableInteractiveApproval()
+			c.SetPlanMode(true)
+			c.SetToolApprovalMode(tc.mode)
+			if got := c.ToolApprovalMode(); got != tc.mode {
+				t.Fatalf("Plan changed approval mode to %q, want %q", got, tc.mode)
+			}
+			if tc.wantPrompts > 0 {
+				go func() { c.Approve(<-approvalIDs, true, false, false) }()
+			}
+
+			if err := ag.Run(context.Background(), "draft a plan for this change"); err != nil {
+				t.Fatalf("Plan run: %v", err)
+			}
+			if prompts != tc.wantPrompts {
+				t.Fatalf("approval prompts = %d, want %d", prompts, tc.wantPrompts)
+			}
+			writer.mu.Lock()
+			writes := len(writer.paths)
+			writer.mu.Unlock()
+			if writes != tc.wantWrites {
+				t.Fatalf("executed writes = %d, want %d", writes, tc.wantWrites)
+			}
+		})
+	}
+}
+
+func TestApprovedPlanExecutionUsesAutoSemantics(t *testing.T) {
+	policy := permission.New("ask", nil, []string{"sensitive_writer"}, nil)
+	approvalTools := make(chan string, 3)
+	var c *Controller
+	c = New(Options{
+		Policy: policy,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind != event.ApprovalRequest {
+				return
+			}
+			approvalTools <- e.Approval.Tool
+			allow := e.Approval.Tool == planApprovalTool
+			go c.Approve(e.Approval.ID, allow, false, false)
+		}),
+	})
+	defer c.Close()
+	c.EnableInteractiveApproval()
+
+	runCalled := false
+	err := (plannerPlanApprover{c: c}).RunWithPlannerApproval(t.Context(), "1. Apply the change", func(ctx context.Context) error {
+		runCalled = true
+		gate := c.newInteractiveGate()
+		allow, _, err := gate.Check(ctx, "ordinary_writer", json.RawMessage(`{"path":"ordinary.txt"}`), false)
+		if err != nil {
+			return err
+		}
+		if !allow {
+			t.Error("ordinary writer fallback should be auto-approved in the approved-plan execution window")
+		}
+
+		allow, _, err = gate.Check(ctx, "sensitive_writer", json.RawMessage(`{"path":"sensitive.txt"}`), false)
+		if err != nil {
+			return err
+		}
+		if allow {
+			t.Error("explicit ask rule should still require and honor a decision after plan approval")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runCalled {
+		t.Fatal("approved plan did not enter its execution window")
+	}
+
+	for i, want := range []string{planApprovalTool, "sensitive_writer"} {
+		select {
+		case got := <-approvalTools:
+			if got != want {
+				t.Fatalf("approval prompt %d = %q, want %q", i+1, got, want)
+			}
+		default:
+			t.Fatalf("missing approval prompt %d for %q", i+1, want)
+		}
+	}
+	select {
+	case got := <-approvalTools:
+		t.Fatalf("unexpected approval prompt for %q; ordinary fallback should not prompt", got)
+	default:
 	}
 }
 

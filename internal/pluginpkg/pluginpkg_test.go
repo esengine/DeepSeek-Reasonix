@@ -7,7 +7,36 @@ import (
 	"testing"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
+	"reasonix/internal/mcpcatalog"
 )
+
+func TestModifiedInstalledPackageLosesOfficialVerification(t *testing.T) {
+	home := t.TempDir()
+	root := InstallRoot(home, "verified")
+	writeTestFile(t, filepath.Join(root, NativeManifest), `{"name":"verified","version":"1.0.0"}`)
+	digest, err := mcpcatalog.TreeSHA256(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Upsert(home, InstalledPlugin{
+		Name: "verified", Root: RelativeRoot(home, root), Version: "1.0.0", Enabled: true,
+		Verification: &Verification{CatalogEntryID: "verified@1.0.0", PackageSHA256: digest, CatalogSequence: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	installed, warnings := LoadInstalled(home)
+	if len(warnings) != 0 || len(installed) != 1 || installed[0].Installed.Verification == nil {
+		t.Fatalf("initial verified load = %+v, warnings=%v", installed, warnings)
+	}
+	writeTestFile(t, filepath.Join(root, "modified.txt"), "changed")
+	installed, warnings = LoadInstalled(home)
+	if len(installed) != 1 || installed[0].Installed.Verification != nil {
+		t.Fatalf("modified package retained verification: %+v", installed)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "official verification removed") {
+		t.Fatalf("modified package warnings = %v", warnings)
+	}
+}
 
 func TestParseCodexSuperpowersManifest(t *testing.T) {
 	root := t.TempDir()

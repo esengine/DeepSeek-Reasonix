@@ -10,6 +10,7 @@ import (
 
 	"reasonix/internal/capability"
 	"reasonix/internal/event"
+	"reasonix/internal/mcptrust"
 	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
@@ -125,21 +126,27 @@ func (t *UseCapabilityTool) ResolveCall(ctx context.Context, args json.RawMessag
 		if reason == "" {
 			return tool.ResolvedCall{}, fmt.Errorf("reason is required for action=decline")
 		}
-		// Decline must not skip require.
+		// Decline must not skip require. The mutation itself is delayed until the
+		// agent has applied its post-resolution host boundary.
 		if t.ledger != nil {
 			if e, ok := t.ledger.Get(id); ok && e.Policy == capability.AutoUseRequire {
 				return tool.ResolvedCall{}, fmt.Errorf("cannot decline a require capability %q", id)
 			}
-			if err := t.ledger.MarkDeclined(id, reason); err != nil {
-				return tool.ResolvedCall{}, err
-			}
-		}
-		if t.audit != nil {
-			t.audit.RecordDecline()
 		}
 		base.SkipExecute = true
 		base.Result = fmt.Sprintf("declined capability %s: %s", id, reason)
 		base.ReadOnly = true
+		base.Commit = func() error {
+			if t.ledger != nil {
+				if err := t.ledger.MarkDeclined(id, reason); err != nil {
+					return err
+				}
+			}
+			if t.audit != nil {
+				t.audit.RecordDecline()
+			}
+			return nil
+		}
 		return base, nil
 	case "call":
 		return t.resolveCall(ctx, id, p.Arguments, base)
@@ -154,6 +161,11 @@ func (t *UseCapabilityTool) Execute(ctx context.Context, args json.RawMessage) (
 		return "", err
 	}
 	if resolved.SkipExecute {
+		if resolved.Commit != nil {
+			if err := resolved.Commit(); err != nil {
+				return "", err
+			}
+		}
 		if resolved.ProxyAction == "call" && !resolved.Unavailable {
 			if t.ledger != nil {
 				t.ledger.MarkSucceeded(resolved.CapabilityID)
@@ -231,7 +243,7 @@ func (t *UseCapabilityTool) inspect(ctx context.Context, id string) (string, err
 					return string(b) + "\n\nTools:\n" + inspectToolListJSON(server, tools), nil
 				}
 				if spec, ok := t.specFor(server); ok {
-					if cs, ok := plugin.LoadCachedSchema(server, plugin.SpecFingerprint(spec)); ok && len(cs.Tools) > 0 {
+					if cs, ok := plugin.LoadCachedSchemaForSpec(spec); ok && len(cs.Tools) > 0 {
 						var list []inspectToolInfo
 						for _, ct := range cs.Tools {
 							list = append(list, inspectToolInfo{
@@ -347,7 +359,33 @@ func (t *UseCapabilityTool) resolveCall(ctx context.Context, id string, args jso
 	if !ok {
 		return t.resolveUnavailable(base, id, modelName, fmt.Sprintf("MCP server %q is not configured", server)), nil
 	}
-	lazy := &onDemandMCPTool{proxy: t, spec: spec, server: server, raw: raw, modelName: modelName}
+	destructive := false
+	if t.catalog != nil {
+		if entry, found := t.catalog().Lookup(id); found {
+			destructive = entry.Destructive
+		}
+	}
+	trustedReader := false
+	capabilityFingerprint := ""
+	trustReason := ""
+	if cached, found, trustErr := plugin.CachedToolTrustForSpec(ctx, spec, raw); trustErr != nil {
+		trustReason = trustErr.Error()
+	} else if found {
+		destructive = destructive || cached.Destructive
+		trustedReader = cached.TrustedReader
+		capabilityFingerprint = cached.CapabilityFingerprint
+	} else if spec.TrustManager == nil {
+		// Compatibility for direct library users that have no host trust store.
+		trustedReader = spec.ReadOnlyToolNames[raw] || spec.ReadOnlyModelToolNames[modelName]
+	}
+	lazy := &onDemandMCPTool{proxy: t, spec: spec, server: server, raw: raw, modelName: modelName, destructive: destructive}
+	lazy.readOnlyTrusted = trustedReader
+	lazy.capabilityFingerprint = capabilityFingerprint
+	lazy.trustReason = trustReason
+	// Strict read-only execution requires a positive receipt authority: the
+	// hint/legacy compatibility path above keeps its historical classification
+	// for ordinary sessions but cannot admit tools into a strict child.
+	lazy.trustAuthority = spec.TrustManager != nil
 	base.Target = lazy
 	base.TargetName = modelName
 	// Conservative: an unstarted tool counts as a writer unless the user
@@ -371,11 +409,14 @@ func (t *UseCapabilityTool) resolveUnavailable(base tool.ResolvedCall, id, model
 	base.Result = "capability unavailable: " + reason
 	base.TargetName = modelName
 	base.ReadOnly = false
-	if t.ledger != nil {
-		t.ledger.MarkUnavailable(id, reason)
-	}
-	if t.audit != nil {
-		t.audit.RecordMCPProxy(false, true, true)
+	base.Commit = func() error {
+		if t.ledger != nil {
+			t.ledger.MarkUnavailable(id, reason)
+		}
+		if t.audit != nil {
+			t.audit.RecordMCPProxy(false, true, true)
+		}
+		return nil
 	}
 	return base
 }
@@ -395,16 +436,22 @@ func findMCPTool(tools []tool.Tool, raw, modelName string) tool.Tool {
 }
 
 // onDemandMCPTool defers MCP server startup to Execute so permission and hook
-// gates always run before any subprocess or network side effect. It reports
-// itself read-only only under config-level trust; everything else is treated
-// as a writer until the live handshake proves otherwise, so plan mode and
-// permission prompts see the conservative classification.
+// gates always run before any subprocess or network side effect. Before the live
+// handshake it can only use a backward-compatible local read-only override;
+// otherwise it remains write-capable until the resolved MCP tool is classified.
 type onDemandMCPTool struct {
 	proxy     *UseCapabilityTool
 	spec      plugin.Spec
 	server    string
 	raw       string
 	modelName string
+	// destructive comes from the schema cache when available. A live promotion
+	// is detected in Execute and deferred to a fresh-approved retry.
+	destructive           bool
+	readOnlyTrusted       bool
+	capabilityFingerprint string
+	trustReason           string
+	trustAuthority        bool
 }
 
 func (o *onDemandMCPTool) Name() string { return o.modelName }
@@ -416,18 +463,43 @@ func (o *onDemandMCPTool) Description() string {
 func (o *onDemandMCPTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
 
 func (o *onDemandMCPTool) ReadOnly() bool {
-	return o.spec.ReadOnlyToolNames[o.raw] || o.spec.ReadOnlyModelToolNames[o.modelName]
+	return o.readOnlyTrusted
 }
 
-// PlanModeUntrustedReadOnly is false because ReadOnly() is true only under an
-// explicit user config assertion (trusted_read_only_tools), never a server
-// hint — there is no server yet.
+// ReadOnly is true only after the cached snapshot matches an established local
+// receipt, never from an unauthenticated server hint.
 func (o *onDemandMCPTool) PlanModeUntrustedReadOnly() bool { return false }
 
+func (o *onDemandMCPTool) ReadOnlyExecutionHostMutation() bool { return true }
+
+func (o *onDemandMCPTool) ReadOnlyExecutionTrustAuthority() bool { return o.trustAuthority }
+
+func (o *onDemandMCPTool) ReadOnlyExecutionBlockReason() string {
+	reason := "start this MCP capability; ask the parent session to trust, re-review, or execute it"
+	if strings.TrimSpace(o.trustReason) != "" {
+		reason += " (local verification failed: " + o.trustReason + ")"
+	}
+	return reason
+}
+
 // MCPServerName/MCPRawToolName expose the deferred target for audit and
-// plan-mode trust prompts (tool.MCPMetadata).
+// diagnostics (tool.MCPMetadata).
 func (o *onDemandMCPTool) MCPServerName() string  { return o.server }
 func (o *onDemandMCPTool) MCPRawToolName() string { return o.raw }
+func (o *onDemandMCPTool) MCPCapabilityFingerprint() string {
+	return o.capabilityFingerprint
+}
+func (o *onDemandMCPTool) MCPDestructiveHint() bool {
+	return o.destructive
+}
+
+func (o *onDemandMCPTool) MCPApprovalMode() string {
+	return o.spec.ToolApprovalMode(o.raw)
+}
+
+func (o *onDemandMCPTool) MCPApprovalReviewer() string {
+	return tool.NormalizeMCPApprovalReviewer(o.spec.ApprovalsReviewer)
+}
 
 func (o *onDemandMCPTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	tools, err := o.proxy.ensureServerTools(ctx, o.server)
@@ -447,7 +519,25 @@ func (o *onDemandMCPTool) Execute(ctx context.Context, args json.RawMessage) (st
 		}
 		return "", fmt.Errorf("%s", msg)
 	}
+	for _, status := range o.proxy.host.SecurityStatuses() {
+		if status.Name == o.server && status.TrustState == mcptrust.TrustChanged {
+			return "", fmt.Errorf("MCP server %q security attributes changed; the current call was blocked before tools/call and requires parent-session re-verification", o.server)
+		}
+	}
+	if live, ok := target.(tool.MCPCapabilityFingerprint); ok && o.capabilityFingerprint != "" && live.MCPCapabilityFingerprint() != "" && live.MCPCapabilityFingerprint() != o.capabilityFingerprint {
+		return "", fmt.Errorf("MCP server %q changed the security schema for tool %q; the current call was blocked before tools/call and requires parent-session re-verification", o.server, o.raw)
+	}
+	if o.readOnlyTrusted && (!target.ReadOnly() || planModeUntrustedReadOnly(target)) {
+		return "", fmt.Errorf("MCP server %q no longer exposes tool %q as a trusted reader; the current call was blocked before tools/call and requires parent-session re-verification", o.server, o.raw)
+	}
+	if annotations, ok := target.(tool.MCPAnnotations); ok && annotations.MCPDestructiveHint() && !o.destructive {
+		return "", destructiveMCPDiscoveryError(o.server, o.raw)
+	}
 	return target.Execute(ctx, args)
+}
+
+func destructiveMCPDiscoveryError(server, rawTool string) error {
+	return fmt.Errorf("MCP server %q marks tool %q as destructive; retry so Reasonix can request fresh approval before execution", server, rawTool)
 }
 
 func (t *UseCapabilityTool) ensureServerTools(ctx context.Context, server string) ([]tool.Tool, error) {
@@ -511,6 +601,7 @@ func (t *UseCapabilityTool) serverTools(ctx context.Context, server string) ([]t
 			Description: tl.Description(),
 			Schema:      tl.Schema(),
 			ReadOnly:    tl.ReadOnly(),
+			Destructive: mcpDestructiveHint(tl),
 		})
 	}
 	t.mu.Lock()
@@ -594,8 +685,9 @@ func (t *UseCapabilityTool) resolveServerConnect(ctx context.Context, server str
 	// rules. It cannot collide with a real mcp__ tool, and rules do not need to
 	// rely on unsupported tool-name glob matching.
 	base.TargetName = connect.Name()
-	// Connecting spawns a subprocess — never a read-only fast path; plan mode
-	// blocks it and Ask-style gates prompt before any process starts.
+	// Connecting spawns a subprocess, so it is never a read-only fast path.
+	// The active Permissions gate decides before any process starts, including
+	// while the parent is in Plan.
 	base.ReadOnly = false
 	base.Args = json.RawMessage(`{}`)
 	return base, nil

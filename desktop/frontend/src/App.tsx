@@ -14,6 +14,7 @@ import {
   Download,
   Minus,
   Search,
+  Server,
   Square,
   SquarePen,
   PanelLeft,
@@ -23,7 +24,6 @@ import {
   FileText,
   FileJson,
   GitBranch,
-  History,
   MessageSquare,
   Settings as SettingsIcon,
   Pencil,
@@ -39,7 +39,7 @@ import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT, type Translator } from "./lib/i18n";
 import { localizedNoticeText, useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered } from "./lib/bridge";
+import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered, openExternal } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
@@ -54,6 +54,9 @@ import { ClearContextCard } from "./components/ClearContextCard";
 /** Footer decision surface kinds. Priority: tool/plan approval > ask > clear context. */
 type DecisionSurfaceKind = "tool_approval" | "plan_approval" | "ask" | "clear_context";
 import { StatusBar } from "./components/StatusBar";
+import { RemoteHostKeyDialog } from "./components/RemoteHostKeyDialog";
+import { onRemoteStatus, onRemoteForwards, onRemoteServer } from "./lib/bridge";
+import { useRemoteStore, waitForRemoteConnection } from "./store/remote";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { ContextPanel } from "./components/ContextPanel";
@@ -64,6 +67,7 @@ import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { AppChrome } from "./components/AppChrome";
 import { ShortcutsCheatsheet } from "./components/ShortcutsCheatsheet";
 import { ProjectTree } from "./components/ProjectTree";
+import { WorktreeBadge } from "./components/WorktreeBadge";
 import { HeartbeatPanel } from "./custom/features/heartbeat/HeartbeatPanel";
 import "./custom/features/heartbeat/heartbeat.css";
 import { CopyButton } from "./components/CopyButton";
@@ -88,6 +92,7 @@ import {
   type Mode,
   modeHasPlan,
   type ProjectNode,
+  type RemoteHostView,
   type SessionMeta,
   type SettingsView,
   type TabMeta,
@@ -146,6 +151,7 @@ import {
   saveRightDockPreviewWidth,
   saveRightDockTreeWidth,
   saveSidebarCollapsed,
+  saveWorkspacePanelOpen,
   saveSidebarWidth,
   useLayoutStore,
 } from "./store/layout";
@@ -165,6 +171,9 @@ import {
   readLegacyThemePreference,
   type Theme,
 } from "./lib/theme";
+import { applyConversationWidth } from "./lib/conversationWidth";
+import { applyConfiguredBaseAppearance, applyThemePack, applyThemeScene, clearThemePack } from "./lib/themePack";
+import { ThemeBackground } from "./components/ThemeBackground";
 import { applyTextSize, DEFAULT_TEXT_SIZE, getTextSize, nextTextSize } from "./lib/textSize";
 import { useViewportHeightVar, useWindowStatePersistence } from "./lib/windowState";
 import { availableWorkspacePanelWidth, resolveLiveWorkspacePanelWidth, resolveWorkspacePanelWidth, workspacePanelAriaMinWidth } from "./lib/workspaceLayout";
@@ -250,6 +259,7 @@ function NoticePreviewPanel() {
 
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
+const RemotePanel = lazy(() => import("./components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -288,25 +298,48 @@ type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string }
 type WorkspaceInsertTarget = "composer" | "planRevision";
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
-function WindowsWindowControls() {
+function useWindowsMaximised(enabled: boolean): readonly [boolean, () => void] {
   const [maximised, setMaximised] = useState(false);
+  const syncGenerationRef = useRef(0);
 
   const syncMaximised = useCallback(() => {
+    if (!enabled) return;
+    const generation = ++syncGenerationRef.current;
     void app.IsMainWindowMaximised()
-      .then(setMaximised)
-      .catch(() => setMaximised(false));
-  }, []);
+      .then((value) => {
+        if (generation === syncGenerationRef.current) setMaximised(value);
+      })
+      .catch(() => {
+        if (generation === syncGenerationRef.current) setMaximised(false);
+      });
+  }, [enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      syncGenerationRef.current += 1;
+      setMaximised(false);
+      return;
+    }
     syncMaximised();
     window.addEventListener("resize", syncMaximised);
     window.addEventListener("focus", syncMaximised);
     return () => {
+      syncGenerationRef.current += 1;
       window.removeEventListener("resize", syncMaximised);
       window.removeEventListener("focus", syncMaximised);
     };
-  }, [syncMaximised]);
+  }, [enabled, syncMaximised]);
 
+  return [maximised, syncMaximised] as const;
+}
+
+function WindowsWindowControls({
+  maximised,
+  syncMaximised,
+}: {
+  maximised: boolean;
+  syncMaximised: () => void;
+}) {
   const toggleMaximise = useCallback(() => {
     void app.ToggleMaximiseMainWindow()
       .then(() => window.setTimeout(syncMaximised, 80))
@@ -374,6 +407,7 @@ type SidebarImConnection = {
 type DesktopNavigationInput =
   | { kind: "topic"; scope: string; workspaceRoot: string; topicId: string; sessionPath?: string }
   | { kind: "blank"; scope: string; workspaceRoot: string }
+  | { kind: "delivery-worktree"; workspaceRoot: string }
   | { kind: "sidebar-im"; connection: SidebarImConnection }
   | { kind: "resume-session"; session: SessionMeta };
 type PendingDesktopNavigationRequest = PendingNavigationRequest<DesktopNavigationInput>;
@@ -998,6 +1032,7 @@ export default function App() {
     state,
     activeTabId,
     sendToTab,
+    recoverDeliveryToTab,
     runShellForTab,
     steerForTab,
     notice,
@@ -1033,11 +1068,13 @@ export default function App() {
     setTokenMode,
     switchTab,
     openProjectTab,
+    createDeliveryWorktree,
     openGlobalTab,
     closeTab,
     reorderTabs,
     openTopicSession,
     activateTopic,
+    noteNavigationIntent,
     syncActiveTab,
     ensureBlankTab,
     ensureBlankSurface,
@@ -1064,11 +1101,23 @@ export default function App() {
   const settingsFocus = useOverlayStore((s) => s.settingsFocus);
   const setSettingsFocus = useOverlayStore((s) => s.setSettingsFocus);
   const [desktopLayoutStyle, setDesktopLayoutStyle] = useState<DesktopLayoutStyle>("workbench");
+  const [safeMode, setSafeMode] = useState(false);
   const singleSurfaceLayout = desktopLayoutStyle === "workbench" || desktopLayoutStyle === "creation";
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
   const paletteOpen = useOverlayStore((s) => s.paletteOpen);
   const setPaletteOpen = useOverlayStore((s) => s.setPaletteOpen);
+  const remoteExplorerOpen = useRemoteStore((s) => s.explorerOpen);
+  const remoteExplorerHostId = useRemoteStore((s) => s.explorerHostId);
+  const remoteHosts = useRemoteStore((s) => s.hosts);
+  const remoteStatuses = useRemoteStore((s) => s.statuses);
+  const setRemoteHosts = useRemoteStore((s) => s.setHosts);
+  const hydrateRemoteStatuses = useRemoteStore((s) => s.hydrateStatuses);
+  const requestRemoteExplorer = useRemoteStore((s) => s.openExplorer);
+  const closeRemoteExplorerRequest = useRemoteStore((s) => s.closeExplorer);
+  const applyRemoteStatus = useRemoteStore((s) => s.applyStatus);
+  const setRemoteForwards = useRemoteStore((s) => s.setForwards);
+  const setRemoteServer = useRemoteStore((s) => s.setServer);
   const shortcutsOpen = useOverlayStore((s) => s.shortcutsOpen);
   const setShortcutsOpen = useOverlayStore((s) => s.setShortcutsOpen);
   const paletteSessions = useOverlayStore((s) => s.paletteSessions);
@@ -1173,7 +1222,9 @@ export default function App() {
   const transientOverlayDismissSignal = useOverlayStore((s) => s.transientOverlayDismissSignal);
   const setTransientOverlayDismissSignal = useOverlayStore((s) => s.setTransientOverlayDismissSignal);
   const [desktopPlatform, setDesktopPlatform] = useState<DesktopPlatform>(detectBrowserPlatform);
-  useWailsResizeFix(desktopPlatform === "windows");
+  const windowsFramelessChrome = desktopPlatform === "windows";
+  const [mainWindowMaximised, syncMainWindowMaximised] = useWindowsMaximised(windowsFramelessChrome);
+  useWailsResizeFix(windowsFramelessChrome, mainWindowMaximised);
   const [statusBarStyle, setStatusBarStyle] = useState<"icon" | "text">("text");
   const [statusBarItems, setStatusBarItems] = useState<StatusBarItemId[]>(() => [...DEFAULT_STATUS_BAR_ITEMS]);
   const [renamingTopicId, setRenamingTopicId] = useState<string | null>(null);
@@ -1305,10 +1356,11 @@ export default function App() {
   }, []);
 
   const applyDesktopPreferences = useCallback(
-    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopLayoutStyle" | "desktopLanguage" | "checkUpdates" | "statusBarStyle" | "statusBarItems">) => {
+    (settings: Pick<SettingsView, "desktopTheme" | "desktopThemeStyle" | "desktopLayoutStyle" | "desktopLanguage" | "checkUpdates" | "statusBarStyle" | "statusBarItems" | "conversationWidth">) => {
       const nextTheme = normalizeThemePreference(settings.desktopTheme);
       const nextStyle = normalizeThemeStyleForTheme(settings.desktopThemeStyle, nextTheme);
-      applyTheme(nextTheme, nextStyle, { persist: false });
+      applyConfiguredBaseAppearance(nextTheme, nextStyle);
+      applyConversationWidth(settings.conversationWidth);
       const nextLayoutStyle = normalizeDesktopLayoutStyle(settings.desktopLayoutStyle);
       setDesktopLayoutStyle(nextLayoutStyle);
       applyLayoutStyleDefaults(nextLayoutStyle);
@@ -1336,9 +1388,31 @@ export default function App() {
       ]);
       if (cancelled) return;
       applyDesktopPreferences(settings);
+      setSafeMode(settings.safeMode === true);
       hydrateDisplayMode(settings.displayMode);
       setSidebarImConnections(sidebarImConnectionsFromBot(settings.bot, t, runtimeStatus));
       setImTopicSources(sidebarImTopicSourcesFromBot(settings.bot, t));
+      // Load unified theme experience after base appearance so pack tokens win.
+      if (settings.safeMode === true) {
+        clearThemePack();
+      } else {
+        try {
+          const { loadThemeExperience, applyExperienceToDOM } = await import("./lib/themeExperience");
+          const exp = await loadThemeExperience();
+          if (cancelled) return;
+          applyExperienceToDOM(exp);
+        } catch (err) {
+          console.warn("theme experience load failed", err);
+          try {
+            const active = await app.GetActiveThemePack();
+            if (cancelled) return;
+            if (active?.pack) applyThemePack(active.pack);
+            else clearThemePack();
+          } catch {
+            clearThemePack();
+          }
+        }
+      }
     };
     void syncDesktopPreferences().catch((e) => {
       console.warn("desktop preferences sync failed", e);
@@ -1785,6 +1859,11 @@ export default function App() {
 
   const sessionTitle = topicTitle(activeTab);
   const sessionHasContent = state.items.length > 0 || Boolean(state.live?.text || state.live?.reasoning);
+
+  // Theme pack scene: home when the session is empty, task once content exists.
+  useEffect(() => {
+    applyThemeScene(sessionHasContent ? "task" : "home");
+  }, [sessionHasContent]);
   const getSessionMarkdown = useCallback(
     () => sessionItemsToMarkdown(sessionTitle, state.items, state.live),
     [sessionTitle, state.items, state.live],
@@ -1811,28 +1890,46 @@ export default function App() {
       try {
         if (format === "json") {
           const path = await app.PickExportFile(`${base}.json`, "application/json");
-          if (path) await app.SaveExportFile(path, getSessionJson(), false);
+          if (path) {
+            await app.SaveExportFile(path, getSessionJson(), false);
+            showToast(t("topicBar.exportSuccess", { count: 1 }), "info");
+          }
         } else if (format === "pdf") {
           const path = await app.PickExportFile(`${base}.pdf`, "application/pdf");
           if (!path) return;
           const { blobToBase64, renderSessionPdfBlob } = await import("./lib/sessionExport");
           const blob = await renderSessionPdfBlob(getSessionMarkdown(), sessionTitle);
           await app.SaveExportFile(path, await blobToBase64(blob), true);
+          showToast(t("topicBar.exportSuccess", { count: 1 }), "info");
         } else if (format === "image") {
           const path = await app.PickExportFile(`${base}.png`, "image/png");
           if (!path) return;
-          const { blobToBase64, renderSessionImageBlob } = await import("./lib/sessionExport");
-          const blob = await renderSessionImageBlob(getSessionMarkdown());
-          await app.SaveExportFile(path, await blobToBase64(blob), true);
+          const { renderSessionImageBase64Payloads } = await import("./lib/sessionExport");
+          const payloads = await renderSessionImageBase64Payloads(getSessionMarkdown());
+          await app.SaveExportImageFiles(path, payloads);
+          showToast(
+            payloads.length > 1
+              ? t("topicBar.exportImageParts", { count: payloads.length })
+              : t("topicBar.exportSuccess", { count: 1 }),
+            "info",
+          );
         } else {
           const path = await app.PickExportFile(`${base}.md`, "text/markdown");
-          if (path) await app.SaveExportFile(path, getSessionMarkdown(), false);
+          if (path) {
+            await app.SaveExportFile(path, getSessionMarkdown(), false);
+            showToast(t("topicBar.exportSuccess", { count: 1 }), "info");
+          }
         }
       } catch (err) {
         console.error("Failed to export session", err);
+        showToast(
+          t("topicBar.exportFailed", { error: err instanceof Error ? err.message : String(err) }),
+          "error",
+          { durationMs: 8000 },
+        );
       }
     },
-    [getSessionJson, getSessionMarkdown, sessionTitle],
+    [getSessionJson, getSessionMarkdown, sessionTitle, showToast, t],
   );
 
   useEffect(() => {
@@ -1955,6 +2052,16 @@ export default function App() {
           notice(t("settings.themeCurrent", { theme: cur, style: getThemeStyle(cur) }));
           return;
         }
+        if (arg === "reset" || arg === "default" || arg === "clear") {
+          try {
+            await app.ResetThemePack();
+            clearThemePack();
+            notice(t("settings.themeReset"));
+          } catch (err) {
+            showToast(err instanceof Error ? err.message : String(err), "error");
+          }
+          return;
+        }
         if (isThemeMode(arg)) {
           const next = arg;
           const style = getThemeStyle(next);
@@ -2068,6 +2175,36 @@ export default function App() {
       void refreshTabMetas();
     });
   }, [refreshTabMetas]);
+
+  // Bridge remote:* events into the remote store once, app-wide, so the
+  // StatusBar chip, host manager, and explorer all see the same live state.
+  useEffect(() => {
+    const offStatus = onRemoteStatus((s) => applyRemoteStatus(s));
+    const offForwards = onRemoteForwards((e) => setRemoteForwards(e.hostId, e.forwards));
+    const offServer = onRemoteServer((s) => setRemoteServer(s));
+    return () => {
+      offStatus();
+      offForwards();
+      offServer();
+    };
+  }, [applyRemoteStatus, setRemoteForwards, setRemoteServer]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void app.RemoteHosts()
+      .then((hosts) => {
+        if (!cancelled) setRemoteHosts(hosts);
+      })
+      .catch(() => {});
+    void app.RemoteConnectionStatuses()
+      .then((statuses) => {
+        if (!cancelled) hydrateRemoteStatuses(statuses);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrateRemoteStatuses, setRemoteHosts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2352,6 +2489,7 @@ export default function App() {
         return;
       }
       setWorkspacePanelOpen(true);
+      saveWorkspacePanelOpen(true);
     },
     [closeTransientOverlays, rightDockMode, workspacePanelMaximized, workspacePanelOpen],
   );
@@ -2364,6 +2502,7 @@ export default function App() {
     setLiveWorkspacePanelRenderWidth(null);
     setWorkspacePanelMaximized(false);
     setWorkspacePanelOpen(false);
+    saveWorkspacePanelOpen(false);
   }, [closeTransientOverlays, workspacePanelOpen]);
 
   const toggleWorkspacePanel = useCallback(() => {
@@ -2387,6 +2526,61 @@ export default function App() {
     },
     [openWorkspacePanel],
   );
+
+  useEffect(() => {
+    if (!remoteExplorerOpen) return;
+    openRightDockMode("remote");
+    closeRemoteExplorerRequest();
+  }, [closeRemoteExplorerRequest, openRightDockMode, remoteExplorerOpen]);
+
+  useEffect(() => {
+    if (remoteHosts.length > 0 || rightDockMode !== "remote") return;
+    setRightDockMode("files");
+  }, [remoteHosts.length, rightDockMode, setRightDockMode]);
+
+  const openRemoteDock = useCallback(() => {
+    const fallback = remoteHosts.find((host) => {
+      const state = useRemoteStore.getState().statuses[host.id]?.state;
+      return state === "connected" || state === "degraded";
+    }) ?? remoteHosts[0];
+    const hostId = remoteExplorerHostId && remoteHosts.some((host) => host.id === remoteExplorerHostId)
+      ? remoteExplorerHostId
+      : fallback?.id;
+    if (hostId) requestRemoteExplorer(hostId);
+  }, [remoteExplorerHostId, remoteHosts, requestRemoteExplorer]);
+
+  const launchRemoteWorkspace = useCallback(async (host: RemoteHostView) => {
+    const workspace = host.defaultWorkspace.trim();
+    if (!workspace) {
+      useRemoteStore.getState().setExplorerTab("server");
+      requestRemoteExplorer(host.id);
+      return;
+    }
+    await app.OpenRemoteWorkspace(host.id, workspace);
+  }, [requestRemoteExplorer]);
+
+  const openRemoteWorkspaceFromStatus = useCallback((host: RemoteHostView) => {
+    void launchRemoteWorkspace(host).catch((err) => {
+      showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
+    });
+  }, [launchRemoteWorkspace, showToast]);
+
+  const connectAndOpenRemoteWorkspace = useCallback((host: RemoteHostView) => {
+    void (async () => {
+      const status = useRemoteStore.getState().statuses[host.id]?.state;
+      if (status !== "connected" && status !== "degraded") {
+        // Clear any stale failure before the new generation starts; otherwise a
+        // previous stopped+error snapshot could make the waiter reject before
+        // the kernel's fresh connecting event reaches the frontend.
+        useRemoteStore.getState().applyStatus({ hostId: host.id, state: "connecting" });
+        await app.ConnectRemoteHost(host.id);
+        await waitForRemoteConnection(host.id);
+      }
+      await launchRemoteWorkspace(host);
+    })().catch((err) => {
+      showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
+    });
+  }, [launchRemoteWorkspace, showToast]);
 
   const handleWorkspacePreviewModeChange = useCallback(
     (active: boolean) => {
@@ -2655,9 +2849,9 @@ export default function App() {
       goal: state.meta?.goal,
       activeTabId: () => activeTabIdRef.current,
       resumeGoal: resumeControllerGoalForTab,
-      send: (tabId) => commitThenSend(tabId, t("notice.deliveryIncompleteContinuePrompt")),
+      send: (tabId) => recoverDeliveryToTab(tabId, t("notice.deliveryIncompleteContinuePrompt")),
     });
-  }, [commitThenSend, controllerReady, resumeControllerGoalForTab, state.meta?.goal, t]);
+  }, [controllerReady, recoverDeliveryToTab, resumeControllerGoalForTab, state.meta?.goal, t]);
   commitThenSendRef.current = commitThenSend;
 
   const handleMessageAction = useCallback((turn: number, scope: string) => {
@@ -2778,17 +2972,6 @@ export default function App() {
     }
   }, [activeTab?.readOnly, activeTabId, clearContextPending, controllerReady, hydratePlaceholderActive, sendToTab, state.approval, state.ask, state.items, state.messageAction, state.running, rewindForTab]);
 
-  // History drawer: project menus can open a scoped saved-session list. Idle row
-  // clicks resume; running row clicks only preview through PreviewSession.
-  const openProjectHistory = useCallback(async (scope: "global" | "project", workspaceRoot: string) => {
-    closeTransientOverlays();
-    const filter = { scope, workspaceRoot };
-    setHistView({ kind: "history", source: "scope", filter, sessions: sessionsForScope(await listSessions(), filter) });
-  }, [closeTransientOverlays, listSessions]);
-  const openAllHistory = useCallback(async () => {
-    closeTransientOverlays();
-    setHistView({ kind: "history", source: "all", sessions: await listSessions() });
-  }, [closeTransientOverlays, listSessions]);
   const openTrash = useCallback(async () => {
     closeTransientOverlays();
     setHistView({ kind: "trash", sessions: await listTrashedSessions() });
@@ -2853,6 +3036,25 @@ export default function App() {
         return;
       }
 
+      if (request.kind === "delivery-worktree") {
+        const result = await createDeliveryWorktree(request.workspaceRoot);
+        if (!latest()) return;
+        seedActiveTabMeta(result.tab);
+        setProjectRevision((value) => value + 1);
+        await refreshLatestTabMetas();
+        if (!latest()) return;
+        showToast(
+          result.sourceDirty
+            ? t("projectTree.worktreeCreatedDirty", { branch: result.branch })
+            : t("projectTree.worktreeCreated", { branch: result.branch }),
+          result.sourceDirty ? "warn" : "info",
+          { durationMs: result.sourceDirty ? 7000 : 3500 },
+        );
+        setTabRevealSignal((signal) => signal + 1);
+        setTranscriptRevealSignal((signal) => signal + 1);
+        return;
+      }
+
       if (request.kind === "sidebar-im") {
         const { connection } = request;
         const target = sidebarImSessionTarget(connection);
@@ -2912,6 +3114,11 @@ export default function App() {
         void refreshLatestTabMetas();
         return;
       }
+      if (request.kind === "delivery-worktree") {
+        console.warn("isolated Delivery workspace creation failed", err);
+        showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
+        return;
+      }
       if (request.kind === "sidebar-im") {
         console.warn("bot sidebar open failed", err);
         showToast(t("sidebar.imOpenFailed", { name: request.connection.title }));
@@ -2929,13 +3136,22 @@ export default function App() {
         showToast(err?.message || String(err));
       }
     }
-  }, [activateTopic, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
+  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
 
-  const enqueueNavigation = useCallback((input: DesktopNavigationInput): Promise<void> => enqueueNavigationRequest(
-    { seqRef: navigationSeqRef, runningRef: navigationRunningRef, pendingRef: navigationPendingRef },
-    input,
-    runNavigationRequest,
-  ), [runNavigationRequest]);
+  const enqueueNavigation = useCallback((input: DesktopNavigationInput): Promise<void> => {
+    // Invalidate any in-flight activation's stale apply at ENQUEUE time. The
+    // queue serializes requests, so a click made while another request runs
+    // only advances the controller's navigation epoch when it eventually
+    // starts — too late: the running request's ActivateTopic would resolve,
+    // pass the controller-local guard, flip the visible tab, and prune the
+    // newer surface's cached state (#6613 review).
+    noteNavigationIntent();
+    return enqueueNavigationRequest(
+      { seqRef: navigationSeqRef, runningRef: navigationRunningRef, pendingRef: navigationPendingRef },
+      input,
+      runNavigationRequest,
+    );
+  }, [noteNavigationIntent, runNavigationRequest]);
 
   const openBlankSession = useCallback((scope: string, workspaceRoot: string): Promise<void> =>
     enqueueNavigation({ kind: "blank", scope, workspaceRoot: scope === "project" ? workspaceRoot : "" }),
@@ -3023,10 +3239,25 @@ export default function App() {
   const paletteItems = useMemo<PaletteItem[]>(() => {
     const cmds: PaletteItem[] = [
       { id: "cmd-new", group: t("palette.group.commands"), title: t("palette.cmd.newSession"), icon: <SquarePen size={15} />, compact: true, keywords: ["new", "新建"], run: () => void handleNewTab() },
-      { id: "cmd-history", group: t("palette.group.commands"), title: t("palette.cmd.history"), icon: <History size={15} />, compact: true, keywords: ["history", "历史"], run: () => void openAllHistory() },
       { id: "cmd-trash", group: t("palette.group.commands"), title: t("palette.cmd.trash"), icon: <Trash2 size={15} />, compact: true, keywords: ["trash", "回收站"], run: () => void openTrash() },
       { id: "cmd-settings", group: t("palette.group.commands"), title: t("palette.cmd.settings"), icon: <SettingsIcon size={15} />, compact: true, keywords: ["settings", "设置"], run: () => setSettingsTarget("general") },
       { id: "cmd-appearance", group: t("palette.group.commands"), title: t("palette.cmd.appearance"), icon: <Palette size={15} />, compact: true, keywords: ["theme", "appearance", "外观", "主题"], run: () => setSettingsTarget("appearance") },
+      {
+        id: "cmd-theme-reset",
+        group: t("palette.group.commands"),
+        title: t("settings.themeLibrary.reset"),
+        icon: <Palette size={15} />,
+        compact: true,
+        keywords: ["theme", "reset", "default", "恢复默认", "主题"],
+        run: () => {
+          void app.ResetThemePack()
+            .then(() => {
+              clearThemePack();
+              notice(t("settings.themeReset"));
+            })
+            .catch((err) => showToast(err instanceof Error ? err.message : String(err), "error"));
+        },
+      },
       { id: "cmd-memory", group: t("palette.group.commands"), title: t("palette.cmd.memory"), icon: <Brain size={15} />, compact: true, keywords: ["memory", "记忆"], run: () => setSettingsTarget("memory") },
       { id: "cmd-models", group: t("palette.group.commands"), title: t("palette.cmd.models"), icon: <Cpu size={15} />, compact: true, keywords: ["model", "模型"], run: () => setSettingsTarget("models") },
     ];
@@ -3047,8 +3278,27 @@ export default function App() {
       badge: t(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns }),
       run: () => void onResumeSession(s),
     }));
-    return [...cmds, ...sessionItems];
-  }, [t, paletteSessions, handleNewTab, openAllHistory, openTrash, onResumeSession]);
+    const remoteItems: PaletteItem[] = remoteHosts.map((host) => {
+      const status = remoteStatuses[host.id];
+      const connected = status?.state === "connected" || status?.state === "degraded";
+      const target = `${host.user ? `${host.user}@` : ""}${host.host}${host.port && host.port !== 22 ? `:${host.port}` : ""}`;
+      return {
+        id: `remote-${host.id}`,
+        group: t("palette.group.remote"),
+        title: connected
+          ? t("palette.remote.open", { host: host.label })
+          : t("palette.remote.connect", { host: host.label }),
+        hint: host.defaultWorkspace || target,
+        icon: <Server size={15} />,
+        keywords: ["ssh", "remote", "远程", "连接", host.label, host.host],
+        run: () => {
+          if (connected) openRemoteWorkspaceFromStatus(host);
+          else connectAndOpenRemoteWorkspace(host);
+        },
+      };
+    });
+    return [...cmds, ...remoteItems, ...sessionItems];
+  }, [t, paletteSessions, remoteHosts, remoteStatuses, handleNewTab, openTrash, onResumeSession, openRemoteWorkspaceFromStatus, connectAndOpenRemoteWorkspace]);
   // Delete / rename act on disk, then re-fetch so the panel reflects the change.
   const onDeleteSession = useCallback(
     async (path: string) => {
@@ -3236,15 +3486,16 @@ export default function App() {
   const topicbarCanRename = !sidebarImDetailConnection && Boolean(activeTab?.topicId);
   const topicbarTitleEditSize = Math.min(56, Math.max(4, topicTitleDraft.length || topicbarTitle.length || 1));
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const windowsFramelessChrome = desktopPlatform === "windows";
   const handleWindowsTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!windowsFramelessChrome) return;
     const target = event.target as HTMLElement | null;
     if (!target?.closest(".app-chrome, .topicbar, .workbench-dock__tools")) return;
     if (target.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
     event.preventDefault();
-    void app.ToggleMaximiseMainWindow();
-  }, [windowsFramelessChrome]);
+    void app.ToggleMaximiseMainWindow()
+      .then(() => window.setTimeout(syncMainWindowMaximised, 80))
+      .catch(() => undefined);
+  }, [syncMainWindowMaximised, windowsFramelessChrome]);
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
   const appChromeHidden = sidebarWorkbench || sidebarCreation;
@@ -3272,6 +3523,7 @@ export default function App() {
         !sidebarWorkbench && !sidebarCreation ? "app--classic" : "",
       ].filter(Boolean).join(" ")}
     >
+      <ThemeBackground />
       <div
         ref={layoutRef}
         className={[
@@ -3417,8 +3669,8 @@ export default function App() {
               activeSessionPath={activeTab?.sessionPath}
               imTopicSources={imTopicSources}
               onOpenTopic={handleOpenTopic}
-              onOpenProjectHistory={openProjectHistory}
               onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
+              onCreateDeliveryWorktree={(workspaceRoot) => enqueueNavigation({ kind: "delivery-worktree", workspaceRoot })}
               onTopicsChanged={refreshProjectsAndTabs}
               onRenameTopic={renameTopic}
               refreshSignal={projectRevision}
@@ -3439,16 +3691,6 @@ export default function App() {
           {sidebarWorkbench ? (
             <nav className="sidebar__nav sidebar__nav--footer">
               <div className="sidebar__utility-row" aria-label={t("sidebar.utilityActions")}>
-                <Tooltip label={t("sidebar.allHistory")} fill side="top">
-                  <button
-                    className="sidebar__utility-button"
-                    type="button"
-                    onClick={() => void openAllHistory()}
-                  >
-                    <History size={16} aria-hidden="true" />
-                    <span className="sr-only">{t("sidebar.allHistory")}</span>
-                  </button>
-                </Tooltip>
                 <Tooltip label={t("sidebar.trash")} fill side="top">
                   <button
                     className="sidebar__utility-button"
@@ -3503,15 +3745,6 @@ export default function App() {
                   </button>
                 </Tooltip>
               )}
-              <Tooltip label={t("sidebar.allHistory")} fill side="right" disabled={sidebarNavTooltipDisabled}>
-                <button
-                  className="sidebar__navitem"
-                  onClick={() => void openAllHistory()}
-                >
-                  <History size={15} />
-                  <span>{t("sidebar.allHistory")}</span>
-                </button>
-              </Tooltip>
               <Tooltip label={t("sidebar.trash")} fill side="right" disabled={sidebarNavTooltipDisabled}>
                 <button
                   className="sidebar__navitem"
@@ -3650,6 +3883,7 @@ export default function App() {
               {topicbarSubtitleVisible && (
                 <div className="topicbar__subtitle" title={topicbarSubtitleTitle}>
                   {topicbarWorkspaceLabel && <span>{topicbarWorkspaceLabel}</span>}
+                  {activeTab?.isolatedWorktree && <WorktreeBadge size={11} />}
                   {topicbarImSourcePlatform && (
                     <span className={`topicbar__source-chip topicbar__source-chip--${topicbarImSourcePlatform}`}>
                       {topicbarImSourceLabel}
@@ -3795,8 +4029,17 @@ export default function App() {
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
+          {safeMode && (
+            <div className="banner banner--warning">{t("guard.safeMode")}</div>
+          )}
 
-          <UpdateBanner enabled={startupUpdateChecksEnabled === true} />
+          <UpdateBanner
+            enabled={startupUpdateChecksEnabled === true}
+            onShowReleaseNotes={(latest) => {
+              const version = latest.replace(/^(?:desktop-)?v/, "");
+              void openExternal(`https://reasonix.io/changelog/v${version}/`);
+            }}
+          />
 
           <main className="main">
             {sidebarImDetailConnection ? (
@@ -3998,6 +4241,13 @@ export default function App() {
 	              workspacePath={state.meta?.workspacePath || state.meta?.workspaceRoot || state.meta?.cwd}
 	              workspaceName={state.meta?.workspaceName}
 	              gitBranch={state.meta?.gitBranch}
+              onConnectRemote={connectAndOpenRemoteWorkspace}
+              onDisconnectRemote={(hostId) => void app.DisconnectRemoteHost(hostId).catch(() => {})}
+              onManageRemote={() => setSettingsTarget("remote")}
+              onOpenRemote={requestRemoteExplorer}
+              onOpenRemoteWorkspace={openRemoteWorkspaceFromStatus}
+              remoteHosts={remoteHosts}
+              remoteStatuses={remoteStatuses}
             />
           </footer>
           )}
@@ -4062,10 +4312,26 @@ export default function App() {
                   <GitBranch size={13} />
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
                 </button>
+                {remoteHosts.length > 0 && (
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={rightDockMode === "remote"}
+                    className={`workbench-dock__tab${rightDockMode === "remote" ? " workbench-dock__tab--active" : ""}`}
+                    onClick={openRemoteDock}
+                  >
+                    <Server size={13} />
+                    <span className="workbench-dock__tab-label">{t("rightDock.remote")}</span>
+                  </button>
+                )}
               </div>
             </div>
             <div className="workbench-dock__body">
-              {rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
+              {rightDockMode === "remote" ? (
+                <Suspense fallback={null}>
+                  <RemotePanel onClose={() => setWorkspacePanel(false)} />
+                </Suspense>
+              ) : rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
                 <ContextPanel
                   tabId={activeTabId}
                   context={state.context}
@@ -4158,6 +4424,8 @@ export default function App() {
         </Suspense>
       )}
 
+      <RemoteHostKeyDialog />
+
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}
@@ -4187,7 +4455,12 @@ export default function App() {
         resetKey={activeTabId ?? ""}
         onAddToChat={addSelectedTextToComposer}
       />
-      {windowsFramelessChrome && <WindowsWindowControls />}
+      {windowsFramelessChrome && (
+        <WindowsWindowControls
+          maximised={mainWindowMaximised}
+          syncMaximised={syncMainWindowMaximised}
+        />
+      )}
     </div>
     </ShellExpandProvider>
   );

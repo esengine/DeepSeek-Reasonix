@@ -46,6 +46,7 @@ type Entry struct {
 	Source           string
 	Status           Status
 	ReadOnly         bool
+	Destructive      bool
 	Cost             string
 	AutoUse          AutoUse
 	Triggers         []string

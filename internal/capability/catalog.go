@@ -199,6 +199,7 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 				Source:        name,
 				Status:        toolStatus,
 				ReadOnly:      ct.ReadOnly,
+				Destructive:   ct.Destructive,
 				ToolName:      plugin.ModelToolName(name, raw),
 				ConnectSource: "mcp",
 				ConnectName:   name,

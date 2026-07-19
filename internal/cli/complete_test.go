@@ -523,20 +523,6 @@ func TestSlashArgCompletionReasoningLanguage(t *testing.T) {
 	}
 }
 
-func TestSlashArgCompletionMemoryV5(t *testing.T) {
-	m := newTestChatTUI()
-	m.input.SetValue("/memory-v5 ")
-	m.updateCompletion()
-	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("/memory-v5 should open arg completion: %+v", m.completion)
-	}
-	for _, want := range []string{"status", "off", "observe", "compact", "on", "learnings"} {
-		if !hasLabel(m.completion.items, want) {
-			t.Fatalf("/memory-v5 completion missing %q: %v", want, labels(m.completion.items))
-		}
-	}
-}
-
 func labels(items []compItem) []string {
 	out := make([]string, len(items))
 	for i, it := range items {

@@ -559,7 +559,7 @@ func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home string, issu
 	for _, s := range host.Servers() {
 		tools := make([]MCPToolInfo, 0, len(s.ToolList))
 		for _, t := range s.ToolList {
-			tools = append(tools, MCPToolInfo{Name: t.Name, ReadOnlyHint: t.ReadOnlyHint})
+			tools = append(tools, MCPToolInfo{Name: t.Name, ReadOnlyHint: t.ReadOnlyHint, DestructiveHint: t.DestructiveHint})
 		}
 		if i, ok := byName[s.Name]; ok {
 			rep.Servers[i].RuntimeStatus = "connected"

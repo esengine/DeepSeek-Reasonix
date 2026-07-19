@@ -15,11 +15,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/command"
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
+	"reasonix/internal/mcpcatalog"
 )
 
 const (
@@ -161,13 +163,23 @@ type State struct {
 }
 
 type InstalledPlugin struct {
-	Name         string `json:"name"`
-	Source       string `json:"source,omitempty"`
-	Root         string `json:"root"`
-	Version      string `json:"version,omitempty"`
-	Description  string `json:"description,omitempty"`
-	ManifestKind string `json:"manifestKind,omitempty"`
-	Enabled      bool   `json:"enabled"`
+	Name         string        `json:"name"`
+	Source       string        `json:"source,omitempty"`
+	Root         string        `json:"root"`
+	Version      string        `json:"version,omitempty"`
+	Description  string        `json:"description,omitempty"`
+	ManifestKind string        `json:"manifestKind,omitempty"`
+	Enabled      bool          `json:"enabled"`
+	Commit       string        `json:"commit,omitempty"`
+	Verification *Verification `json:"verification,omitempty"`
+}
+
+type Verification struct {
+	CatalogEntryID  string    `json:"catalogEntryId"`
+	Commit          string    `json:"commit"`
+	PackageSHA256   string    `json:"packageSha256"`
+	VerifiedAt      time.Time `json:"verifiedAt"`
+	CatalogSequence uint64    `json:"catalogSequence"`
 }
 
 type InstalledPackage struct {
@@ -293,6 +305,10 @@ func LoadInstalled(reasonixHome string) ([]InstalledPackage, []string) {
 		if !installed.Enabled {
 			continue
 		}
+		if installed.Verification != nil && !VerificationValid(reasonixHome, installed) {
+			warnings = append(warnings, fmt.Sprintf("%s: installed package content changed; official verification removed", installed.Name))
+			installed.Verification = nil
+		}
 		root := ResolveRoot(reasonixHome, installed.Root)
 		pkg, pkgWarnings, err := ParseDir(root)
 		if err != nil {
@@ -310,6 +326,17 @@ func ResolveRoot(reasonixHome, root string) string {
 		return filepath.Clean(root)
 	}
 	return filepath.Join(reasonixHome, filepath.Clean(root))
+}
+
+// VerificationValid recomputes the installed package tree on every load/use.
+// A modified package immediately loses official status before any MCP reader is
+// auto-trusted.
+func VerificationValid(reasonixHome string, installed InstalledPlugin) bool {
+	if installed.Verification == nil || strings.TrimSpace(installed.Verification.PackageSHA256) == "" {
+		return false
+	}
+	digest, err := mcpcatalog.TreeSHA256(ResolveRoot(reasonixHome, installed.Root))
+	return err == nil && strings.EqualFold(digest, installed.Verification.PackageSHA256)
 }
 
 func RelativeRoot(reasonixHome, root string) string {

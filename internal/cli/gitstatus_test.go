@@ -29,12 +29,12 @@ func TestCountUntracked(t *testing.T) {
 
 func TestGitStatusRender(t *testing.T) {
 	got := ansi.Strip(gitStatus{Repo: "mySkills", Branch: "main", Added: 15}.Render())
-	if got != "mySkills@main (+15 -0)" {
+	if got != "mySkills@main  +15 -0" {
 		t.Fatalf("Render = %q", got)
 	}
 
 	got = ansi.Strip(gitStatus{Repo: "repo", Branch: "abc1234", Detached: true, Untracked: 2}.Render())
-	if got != "repo@abc1234 (?2)" {
+	if got != "repo@abc1234  ?2" {
 		t.Fatalf("detached Render = %q", got)
 	}
 }
@@ -79,7 +79,7 @@ func TestGitStatusRenderWithinKeepsDirtySuffix(t *testing.T) {
 	if ansi.StringWidth(got) > 35 {
 		t.Fatalf("compacted dirty status width = %d, want <= 35: %q", ansi.StringWidth(got), got)
 	}
-	if !strings.Contains(got, "(+12 -3 ?4)") {
+	if !strings.Contains(got, "+12 -3 ?4") {
 		t.Fatalf("dirty suffix should be preserved: %q", got)
 	}
 	if !strings.Contains(got, "@") || !strings.Contains(got, "…") {

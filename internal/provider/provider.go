@@ -43,6 +43,7 @@ type Message struct {
 	Name               string           `json:"name,omitempty"`            // tool message: tool name
 	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
 	WorkDurationMs     int64            `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
+	CreatedAt          int64            `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
 	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
 	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
 }

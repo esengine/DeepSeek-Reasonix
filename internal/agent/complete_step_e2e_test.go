@@ -174,6 +174,38 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 	}
 }
 
+func TestE2ECrossTurnPendingSignoffIsRejectedUntilCurrentAdvances(t *testing.T) {
+	sess := NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+		ID: "t0", Name: "todo_write",
+		Arguments: `{"todos":[{"content":"alpha","status":"in_progress"},{"content":"beta","status":"pending"}]}`}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "t0", Name: "todo_write", Content: "Todos updated"})
+
+	mp := testutil.NewMock("m",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c0", Name: "complete_step",
+			Arguments: `{"step":"beta","result":"done","evidence":[{"kind":"manual","summary":"claimed"}]}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
+			Arguments: `{"step":"alpha","result":"done","evidence":[{"kind":"manual","summary":"checked"}]}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
+			Arguments: `{"step":"beta","result":"done","evidence":[{"kind":"manual","summary":"checked"}]}`}}},
+		testutil.Turn{Text: "all done"},
+	)
+	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
+	a.SetSession(sess)
+
+	if err := a.Run(context.Background(), "continue"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !sessionContains(a, "only signs the current in_progress item") {
+		t.Fatal("cross-turn pending signoff was not rejected")
+	}
+	for i, td := range a.todoState {
+		if canonicalTodoStatus(td.Status) != "completed" {
+			t.Fatalf("canonical todo %d (%q) = %s, want completed", i+1, td.Content, td.Status)
+		}
+	}
+}
+
 // Cross-turn diff evidence: a file edited in an earlier turn is signed off in a
 // later turn whose per-turn ledger is empty. The session-history fallback must
 // resolve the path receipt that the ledger no longer holds.

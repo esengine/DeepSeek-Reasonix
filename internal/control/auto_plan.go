@@ -38,6 +38,13 @@ func normalizeAutoPlan(mode string) string {
 }
 
 func (c *Controller) maybeAutoPlan(ctx context.Context, input string) {
+	c.mu.Lock()
+	suppressed := c.suppressAutoPlan
+	c.suppressAutoPlan = false
+	c.mu.Unlock()
+	if suppressed {
+		return
+	}
 	if c.shouldAutoPlan(ctx, input) {
 		c.SetPlanMode(true)
 		c.noticeDetail("Planning mode enabled for this multi-step task.", "auto plan: task looks multi-step; drafting a plan first")

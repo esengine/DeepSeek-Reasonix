@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -160,6 +161,68 @@ func TestSendWithRetryAuthGivesUpAfterMaxAuthRetries(t *testing.T) {
 	var authErr *AuthError
 	if !errors.As(err, &authErr) || !authErr.HasKey {
 		t.Fatalf("want *AuthError with HasKey=true, got %v", err)
+	}
+}
+
+// stallingBody sends headers' worth of promise and then never delivers: Read
+// blocks until Close, mimicking a half-open 502/524 gateway that stalls after
+// the status line. Close is what the errorBodyReadTimeout timer fires.
+type stallingBody struct {
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func newStallingBody() *stallingBody { return &stallingBody{closed: make(chan struct{})} }
+
+func (b *stallingBody) Read(p []byte) (int, error) {
+	<-b.closed
+	return 0, errors.New("body closed")
+}
+
+func (b *stallingBody) Close() error {
+	b.closeOnce.Do(func() { close(b.closed) })
+	return nil
+}
+
+// TestSendWithRetryUnblocksStalledErrorBody locks in the #6607 freeze fix: a
+// retryable status whose body never arrives must not wedge the retry loop —
+// the deadline closes the body, the attempt is retried, and the eventual OK
+// response is returned. Without the timer in readErrorBody this test hangs on
+// the first 502 body and fails via the watchdog below.
+func TestSendWithRetryUnblocksStalledErrorBody(t *testing.T) {
+	prev := errorBodyReadTimeout
+	errorBodyReadTimeout = 50 * time.Millisecond
+	defer func() { errorBodyReadTimeout = prev }()
+
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return &http.Response{StatusCode: 502, Body: newStallingBody(), Header: http.Header{}}, nil
+		}
+		return statusResp(200, nil), nil
+	})}
+
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		resp, err := SendWithRetry(context.Background(), cl, SendOptions{Provider: "p", KeyEnv: "KEY"}, newDummyReq)
+		done <- result{resp, err}
+	}()
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("should recover after the stalled 502: %v", r.err)
+		}
+		if r.resp.StatusCode != 200 || calls != 2 {
+			t.Fatalf("status=%d calls=%d, want 200 after 2 calls", r.resp.StatusCode, calls)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SendWithRetry wedged on a stalled error body — read deadline did not fire")
 	}
 }
 

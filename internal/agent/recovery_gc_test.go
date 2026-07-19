@@ -188,12 +188,12 @@ func TestRecoveryParentGuardBlocksRewindAfterValidation(t *testing.T) {
 	// concurrent rewind tries to take the parent's save lock before purge. The
 	// guard must keep that lock unavailable until the caller finishes deleting
 	// the redundant branch.
-	if lock, err := tryTakeSessionLockFile(store.SessionLockFile(parentPath)); !errors.Is(err, errSessionFileLockHeld) {
+	if lock, err := tryTakeSessionLockFile(store.SessionLockFile(parentPath)); !errors.Is(err, ErrSessionFileLockHeld) {
 		if lock != nil {
 			lock.Unlock()
 		}
 		guard.Release()
-		t.Fatalf("parent save lock after coverage validation = %v, want errSessionFileLockHeld", err)
+		t.Fatalf("parent save lock after coverage validation = %v, want ErrSessionFileLockHeld", err)
 	}
 	guard.Release()
 

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/memory"
@@ -159,11 +158,6 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "auto") || !has(items, "zh") || !has(items, "en") || has(items, "中文") {
 		t.Errorf("/reasoning-language should offer only auto/zh/en; got %v", labelsOf(items))
 	}
-	// /memory-v5
-	items, _ = SlashArgItems("/memory-v5 ", data)
-	if !has(items, "status") || !has(items, "off") || !has(items, "observe") || !has(items, "compact") || !has(items, "on") || !has(items, "learnings") {
-		t.Errorf("/memory-v5 should offer status/off/observe/compact/on/learnings; got %v", labelsOf(items))
-	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
 	if !has(items, "auto") || !has(items, "light") || !has(items, "graphite") || !has(items, "glacier") {
@@ -251,51 +245,6 @@ func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
 	}
 	if !hook.IsTrusted(project, "") {
 		t.Fatal("/hooks trust did not trust the controller workspace root")
-	}
-}
-
-func TestManagementMemoryV5WritesUserConfig(t *testing.T) {
-	isolateControlConfigHome(t)
-	var notices []string
-	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
-			notices = append(notices, e.Text)
-		}
-	})})
-
-	if !c.managementNotice("/memory-v5 off") {
-		t.Fatal("/memory-v5 was not handled")
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.MemoryCompilerEnabled() {
-		t.Fatal("memory_compiler.enabled = true, want false")
-	}
-	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
-		t.Fatalf("memory_compiler.verbosity = %q, want observe", got)
-	}
-	if !strings.Contains(strings.Join(notices, "\n"), "memory-v5 set to off") {
-		t.Fatalf("missing memory-v5 notice: %v", notices)
-	}
-}
-
-func TestManagementMemoryV5LearningsNotice(t *testing.T) {
-	isolateControlConfigHome(t)
-	var notices []string
-	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
-			notices = append(notices, e.Text)
-		}
-	})})
-
-	if !c.managementNotice("/memory-v5 learnings") {
-		t.Fatal("/memory-v5 learnings was not handled")
-	}
-	joined := strings.Join(notices, "\n")
-	// A fresh controller has no learned state; either the no-state or the
-	// no-directory notice is acceptable, but it must not fall through to the
-	// usage error.
-	if !strings.Contains(joined, "memory-v5: no") {
-		t.Fatalf("missing learnings notice: %v", notices)
 	}
 }
 

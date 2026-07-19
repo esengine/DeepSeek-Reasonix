@@ -48,8 +48,8 @@ Skill/MCP 的 require/prefer 路由受门禁约束（只读回答同样不能跳
 强制结构化 review/security_review，且 `review_report` 的 `reviewed_paths` 必须有宿主观测到的
 read/diff 证据。
 
-`use_capability` 的解析阶段无副作用：对未连接服务器的 `action=call` 只生成惰性目标，plan mode 会
-对真实目标重新执行只读校验，服务器进程只在权限门禁与 PreToolUse Hook 放行之后才启动。按需启动的
+`use_capability` 的解析阶段无副作用：对未连接服务器的 `action=call` 只生成惰性目标；Plan 只会对
+真实目标重新检查显式阶段 opt-out，服务器进程只在权限门禁与 PreToolUse Hook 放行之后才启动。按需启动的
 子进程随会话存活（不会随单次调用结束而退出）；`action=inspect` 对已连接服务器列出实时工具，未连接
 时只读取缓存 schema，绝不启动进程。无 schema 缓存的服务器首次发现走 `mcp-server:` id 的
 `action=call`：解析为受门禁保护的连接目标（权限名为独立的
@@ -57,7 +57,7 @@ read/diff 证据。
 会在进程启动前拦截），放行后连接并返回实时工具目录。MCP 工具名规则仍为精确匹配，
 `mcp__github__*` 不是工具名通配规则。
 
-`ask`, `explore`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
@@ -80,8 +80,7 @@ token economy 模式只带 9 个初始工具：4 个直接编码工具、3 个�
 `workflow`（`todo_write`、`complete_step`）、`sessions`（`history`、
 `list_sessions`、`read_session`）、`memory`（`memory`、`remember`、`forget`）、
 `commands`（`slash_command`）、`skills`、`read_only_skill`、`mcp`、`lsp`、
-`web_fetch`、`install_source`、`task` 和 `read_only_task`。`search`、`sessions`
-与 `commands` 是只读来源，可在 plan mode 中启用；`workflow` 也可在 plan mode 中连接，
-但规划期间只安装 `todo_write`，`complete_step` 需退出 plan mode 后重新连接 `workflow`
-才会加入。包含其他写入工具的来源继续阻断。
+`web_fetch`、`install_source`、`task` 和 `read_only_task`。所有来源都可在 Plan 中连接；后续 reader
+与 writer 调用和常规模式一样进入 Permissions/Sandbox。`workflow` 是阶段性例外：规划期间只安装
+`todo_write`，`complete_step` 需在计划批准后重新连接 `workflow` 才会加入。
 需要专用 `search` 来源之前，使用 `bash` 完成目录查看与搜索。

@@ -88,6 +88,12 @@ func (a *App) flushPendingCrash() {
 	if version == "dev" {
 		return
 	}
+	// Safe Mode boots from built-in defaults and cannot read the user's real
+	// telemetry preference, so it must neither send the pending report nor
+	// consume it: leave the file for the next normal boot to decide.
+	if config.SafeModeRequested() {
+		return
+	}
 	path := pendingCrashPath()
 	body, err := readFileUTF8(path)
 	if err != nil {

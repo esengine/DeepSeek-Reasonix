@@ -1,13 +1,19 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
+	"reasonix/internal/mcpcatalog"
+	"reasonix/internal/mcptrust"
+	"reasonix/internal/plugin"
 )
 
 // mcp.go holds the MCP server-management surface shared by the `reasonix mcp`
@@ -168,6 +174,14 @@ func mcpCommand(args []string) int {
 		return mcpRemoveCLI(args[1:])
 	case "import":
 		return mcpImportCLI()
+	case "trust":
+		return mcpTrustCLI(args[1:])
+	case "untrust":
+		return mcpUntrustCLI(args[1:])
+	case "verify":
+		return mcpVerifyCLI(args[1:])
+	case "catalog":
+		return mcpCatalogCLI(args[1:])
 	case "help", "-h", "--help":
 		mcpUsage()
 		return 0
@@ -176,6 +190,126 @@ func mcpCommand(args []string) int {
 		mcpUsage()
 		return 2
 	}
+}
+
+func mcpTrustCLI(args []string) int {
+	if len(args) < 2 || (args[1] != "--session" && args[1] != "--workspace") {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp trust <name> --session|--workspace")
+		return 2
+	}
+	spec, err := mcpSecuritySpec(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	decision := strings.TrimPrefix(args[1], "--")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := plugin.SetSpecTrust(ctx, spec, decision); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("trusted MCP server %q for %s (reader snapshots only; writers remain approval-gated)\n", spec.Name, decision)
+	return 0
+}
+
+func mcpUntrustCLI(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp untrust <name>")
+		return 2
+	}
+	spec, err := mcpSecuritySpec(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := plugin.SetSpecTrust(context.Background(), spec, "revoke"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("revoked MCP trust for %q\n", spec.Name)
+	return 0
+}
+
+func mcpVerifyCLI(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp verify <name>")
+		return 2
+	}
+	spec, err := mcpSecuritySpec(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	inspection, err := plugin.InspectSpec(ctx, spec)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("name: %s\ntrust: %s\nisolation: %s\nreaders: %s\nwriters: %s\ndestructive: %s\n",
+		spec.Name, inspection.Security.TrustState, inspection.Security.IsolationState,
+		strings.Join(inspection.Readers, ", "), strings.Join(inspection.Writers, ", "), strings.Join(inspection.Destructive, ", "))
+	if len(inspection.Security.ChangedTools) > 0 {
+		fmt.Printf("changed_tools: %s\n", strings.Join(inspection.Security.ChangedTools, ", "))
+	}
+	return 0
+}
+
+func mcpCatalogCLI(args []string) int {
+	if len(args) != 1 || args[0] != "refresh" {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp catalog refresh")
+		return 2
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := (mcpcatalog.Loader{CacheDir: config.CacheDir()}).Load(ctx, true)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Printf("MCP catalog sequence %d (%s", result.Index.Sequence, result.Source)
+	if result.Offline {
+		fmt.Print(", offline verified snapshot")
+	}
+	if result.Stale {
+		fmt.Print(", stale snapshot")
+	}
+	fmt.Println(")")
+	return 0
+}
+
+func mcpSecuritySpec(name string) (plugin.Spec, error) {
+	root, err := os.Getwd()
+	if err != nil {
+		return plugin.Spec{}, err
+	}
+	cfg, err := config.LoadForRoot(root)
+	if err != nil {
+		return plugin.Spec{}, err
+	}
+	var entry *config.PluginEntry
+	for i := range cfg.Plugins {
+		if cfg.Plugins[i].Name == name {
+			entry = &cfg.Plugins[i]
+			break
+		}
+	}
+	if entry == nil {
+		return plugin.Spec{}, fmt.Errorf("no MCP server named %q in config", name)
+	}
+	specs := boot.PluginSpecsForRootWithOptions([]config.PluginEntry{*entry}, root, boot.PluginSpecOptions{
+		DefaultCallTimeout: time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
+		TrustManager:       mcptrust.ForWorkspace(config.ReasonixHomeDir(), root), ConfigSource: "workspace_config",
+		StateHome: config.ReasonixHomeDir(), WriterRoots: cfg.WriteRootsForRoot(root),
+		ForbidReadRoots: boot.RuntimeForbidReadRoots(cfg, root), Network: cfg.Sandbox.Network,
+		OfficialServers: boot.LoadOfficialMCPTrust(context.Background(), cfg),
+	})
+	if len(specs) != 1 {
+		return plugin.Spec{}, fmt.Errorf("failed to build MCP server %q", name)
+	}
+	return specs[0], nil
 }
 
 func mcpImportCLI() int {
@@ -396,6 +530,10 @@ Usage:
   reasonix mcp add <name> --sse  <url>               remote (legacy SSE)
   reasonix mcp import                                import MCP servers from cc-switch
   reasonix mcp remove <name>
+  reasonix mcp verify <name>
+  reasonix mcp trust <name> --session|--workspace
+  reasonix mcp untrust <name>
+  reasonix mcp catalog refresh
 
 Flags for add:
   --http <url> | --sse <url>   remote transport (omit for a stdio command)
@@ -409,8 +547,8 @@ Examples:
 Changes take effect on the next session; inside a running chat, use /mcp add to
 connect a server live.
 
-MCP tools that report readOnlyHint are confirmed on first plan-mode use. Choose
-"always allow" in the approval prompt to remember that read-only trust; advanced
-users may pre-seed trusted_read_only_tools in config. Auto/YOLO tool approval
-does not answer this trust prompt.`)
+Third-party readOnlyHint metadata becomes reader authority only after the exact
+server identity and tool snapshot is trusted. MCP writers are blocked in Plan;
+destructive tools require a fresh user decision on every call. stdio servers run
+inside the MCP sandbox when available and are reported as unisolated otherwise.`)
 }

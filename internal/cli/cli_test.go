@@ -200,12 +200,31 @@ func isolateCLIConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Keep tests on the default-path code path while preventing a caller's
+	// higher-priority REASONIX_HOME from escaping this temporary home.
+	t.Setenv("REASONIX_HOME", "")
+	if err := os.Unsetenv("REASONIX_HOME"); err != nil {
+		t.Fatalf("unset REASONIX_HOME: %v", err)
+	}
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(t.TempDir())
 	return home
+}
+
+func TestIsolateCLIConfigHomeOverridesExistingReasonixHome(t *testing.T) {
+	externalHome := t.TempDir()
+	t.Setenv("REASONIX_HOME", externalHome)
+
+	home := isolateCLIConfigHome(t)
+
+	got := config.UserConfigPath()
+	rel, err := filepath.Rel(home, got)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("UserConfigPath() = %q, outside isolated home %q", got, home)
+	}
 }
 
 func TestMCPMigrationWaitsForCLIWorkspace(t *testing.T) {
@@ -575,67 +594,6 @@ func TestConfigAutoPlanLocalIsRejected(t *testing.T) {
 	}
 	if cfg.Agent.AutoPlan != "off" {
 		t.Fatalf("auto_plan = %q, want global off", cfg.Agent.AutoPlan)
-	}
-}
-
-func TestConfigMemoryV5CommandWritesUserConfig(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	out := captureStdout(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "off"}, "test-version"); rc != 0 {
-			t.Fatalf("config memory-v5 rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, "memory_compiler.enabled = false") {
-		t.Fatalf("config memory-v5 output = %q", out)
-	}
-	if !strings.Contains(out, `memory_compiler.verbosity = "observe"`) {
-		t.Fatalf("config memory-v5 output missing verbosity = %q", out)
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.MemoryCompilerEnabled() {
-		t.Fatalf("saved memory_compiler.enabled = true, want false")
-	}
-	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
-		t.Fatalf("saved memory_compiler.verbosity = %q, want observe", got)
-	}
-
-	out = captureStdout(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "status"}, "test-version"); rc != 0 {
-			t.Fatalf("config memory-v5 status rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, "memory_compiler.enabled = false") {
-		t.Fatalf("config memory-v5 status output = %q", out)
-	}
-	if !strings.Contains(out, `memory_compiler.verbosity = "observe"`) {
-		t.Fatalf("config memory-v5 status output = %q", out)
-	}
-
-	out = captureStdout(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "compact"}, "test-version"); rc != 0 {
-			t.Fatalf("config memory-v5 compact rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, "memory_compiler.enabled = true") ||
-		!strings.Contains(out, `memory_compiler.verbosity = "compact"`) {
-		t.Fatalf("config memory-v5 compact output = %q", out)
-	}
-}
-
-func TestConfigMemoryV5LocalIsRejected(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	errOut := captureStderr(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "--local", "off"}, "test-version"); rc != 2 {
-			t.Fatalf("config memory-v5 --local rc = %d, want 2", rc)
-		}
-	})
-	if !strings.Contains(errOut, "--local is not supported") {
-		t.Fatalf("config memory-v5 --local stderr = %q", errOut)
-	}
-	if _, err := os.Stat("reasonix.toml"); !os.IsNotExist(err) {
-		t.Fatalf("reasonix.toml should not be written, stat err=%v", err)
 	}
 }
 
@@ -1300,6 +1258,7 @@ func TestAPIKeyEnvFromProviderName(t *testing.T) {
 		{"custom host slug", "custom-token-sensenova-cn", "CUSTOM_TOKEN_SENSENOVA_CN_API_KEY"},
 		{"localhost slug with port", "custom-localhost-11434", "CUSTOM_LOCALHOST_11434_API_KEY"},
 		{"desktop-style custom name", "Local Gateway", "LOCAL_GATEWAY_API_KEY"},
+		{"digit-leading provider name", "9router", "CUSTOM_9ROUTER_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

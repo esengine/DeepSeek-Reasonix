@@ -11,7 +11,7 @@ import (
 	"reasonix/internal/provider"
 )
 
-const autoPlanClassifierPrompt = `You classify whether a coding-agent user request should first enter read-only planning mode.
+const autoPlanClassifierPrompt = `You classify whether a coding-agent user request should first enter a plan-first workflow.
 Return ONLY JSON: {"needs_plan":true|false,"reason":"short reason"}.
 Use true for multi-step implementation, refactors, migrations, unclear cross-file work, PRD/spec/issue work, or tasks needing investigation before edits.
 Use false for explanations, simple questions, single obvious edits, direct commands, or requests that should be answered without changing files.`

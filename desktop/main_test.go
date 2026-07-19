@@ -9,6 +9,25 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 )
 
+func TestParseDesktopLaunchArgsSafeMode(t *testing.T) {
+	if !parseDesktopLaunchArgs([]string{"--safe-mode"}).SafeMode {
+		t.Fatal("--safe-mode was not recognized")
+	}
+	if parseDesktopLaunchArgs([]string{"--other"}).SafeMode {
+		t.Fatal("unrelated argument enabled safe mode")
+	}
+}
+
+func TestParseDesktopLaunchArgsRemoteWindowTicket(t *testing.T) {
+	got := parseDesktopLaunchArgs([]string{"--other", remoteWindowTicketArgPrefix + ".remote-window-123"})
+	if got.RemoteWindowTicket != ".remote-window-123" {
+		t.Fatalf("RemoteWindowTicket = %q", got.RemoteWindowTicket)
+	}
+	if got.SafeMode {
+		t.Fatal("remote window ticket unexpectedly enabled safe mode")
+	}
+}
+
 // TestMain isolates user config/state/cache dirs for the whole package. Without
 // this, tests that persist desktop state, sessions, cache, or CLI-style config
 // can leak into the developer's real Reasonix directories.

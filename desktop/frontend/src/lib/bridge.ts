@@ -14,12 +14,23 @@ import { addBreadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
 import { providerRequiresKey } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
+import { registerTrustedThemeBackgroundURLs } from "./themePack";
 import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 
 import type {
   AutoResearchFindingView,
   AutoResearchEvidenceView,
   AutoResearchStatusView,
+  RemoteHostView,
+  RemoteHostInput,
+  RemoteConnectionStatus,
+  RemoteDirEntry,
+  RemoteFilePreview,
+  RemoteWriteResult,
+  RemoteForwardInput,
+  RemoteForwardView,
+  RemoteServerView,
+  RemoteForwardsEvent,
   BalanceInfo,
   BotConnectionDiagnostic,
   BotInstallPollResult,
@@ -34,6 +45,8 @@ import type {
   ContextPanelInfo,
   DirEntry,
   DesktopStartupSettingsView,
+  DeliveryWorktreeAvailability,
+  DeliveryWorktreeOpenResult,
   DroppedItem,
   EffortInfo,
   FilePreview,
@@ -44,6 +57,8 @@ import type {
   HooksSettingsView,
   JobView,
   MCPServerInput,
+  MCPTrustInspectionView,
+  MCPCatalogRefreshView,
   MCPToolView,
   MemorySuggestion,
   MemorySuggestionsView,
@@ -142,6 +157,7 @@ export interface AppBindings {
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitDeliveryRecoveryToTab(tabID: string, display: string, input: string): Promise<void>;
   SubmitInvocationsToTab(tabID: string, display: string, input: string, invocations: InvocationRequest[]): Promise<void>;
   SubmitEditedDisplayToTab(tabID: string, display: string, input: string, original: string): Promise<void>;
   RunShell(command: string): Promise<void>;
@@ -230,6 +246,9 @@ export interface AppBindings {
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
+  InspectMCPTrust(name: string): Promise<MCPTrustInspectionView>;
+  SetMCPTrust(name: string, decision: "session" | "workspace" | "revoke"): Promise<void>;
+  RefreshMCPCatalog(): Promise<MCPCatalogRefreshView>;
   SkillsSettings(): Promise<SkillsSettingsView>;
   CapabilityDiagnostics(includeSessionRuntime: boolean): Promise<CapabilityDiagnosticsReport>;
   Plugins(): Promise<PluginView[]>;
@@ -244,9 +263,6 @@ export interface AppBindings {
   RemoveMCPServer(name: string): Promise<void>;
   ReconnectMCPServer(name: string): Promise<void>;
   ClearMCPServerAuthentication(name: string): Promise<void>;
-  TrustMCPServerTool(name: string, toolName: string): Promise<void>;
-  TrustMCPServerTools(name: string, toolNames: string[]): Promise<void>;
-  UntrustMCPServerTool(name: string, toolName: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   PickPluginFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
@@ -290,6 +306,7 @@ export interface AppBindings {
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
   PickExportFile(defaultFilename: string, mimeType: string): Promise<string>;
   SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
+  SaveExportImageFiles(path: string, payloads: string[]): Promise<void>;
   AttachDropped(path: string): Promise<DroppedItem>;
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
@@ -328,6 +345,8 @@ export interface AppBindings {
   SetSubagentModel(ref: string): Promise<void>;
   SetSubagentEffort(level: string): Promise<void>;
   SetMaxSubagentDepth(depth: number): Promise<void>;
+  SetMaxSubagentConcurrency(n: number): Promise<void>;
+  SetMaxParallelWriters(n: number): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
   SetDefaultToolApprovalMode(mode: string): Promise<void>;
   SaveProvider(p: ProviderView): Promise<void>;
@@ -362,6 +381,20 @@ export interface AppBindings {
   SetStatusBarItems(items: string[]): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
+  ListThemePacks(): Promise<import("./themePack").ThemePackView[]>;
+  GetActiveThemePack(): Promise<import("./themePack").ThemeActiveView>;
+  GetThemeExperience(): Promise<import("./themeExperience").ThemeExperienceView>;
+  ActivateThemePack(id: string): Promise<void>;
+  ActivateBaseStyle(style: string): Promise<void>;
+  DisableThemePack(): Promise<void>;
+  RestoreGraphiteAppearance(): Promise<void>;
+  ResetThemePack(): Promise<void>;
+  SaveThemePack(input: import("./themePack").ThemeSaveInput): Promise<import("./themePack").ThemePackView>;
+  DeleteThemePack(id: string): Promise<void>;
+  CopyThemePack(sourceID: string, newID: string, newName: string): Promise<import("./themePack").ThemePackView>;
+  ImportThemePack(sourcePath: string, replace: boolean): Promise<import("./themePack").ThemeImportResult>;
+  ExportThemePack(id: string, destPath: string): Promise<string>;
+  PickThemeBackground(): Promise<string>;
   SetDesktopLayoutStyle(style: string): Promise<void>;
   SetDesktopZoomFactor(factor: number): Promise<void>;
   GetDesktopZoomFactor(): Promise<number>;
@@ -369,8 +402,8 @@ export interface AppBindings {
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
   SetDesktopTelemetry(enabled: boolean): Promise<void>;
   SetDesktopMetrics(enabled: boolean): Promise<void>;
-  SetMemoryCompilerEnabled(enabled: boolean): Promise<void>;
   SetExpandThinking(on: boolean): Promise<void>;
+  SetDesktopConversationWidth(width: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
@@ -393,6 +426,8 @@ export interface AppBindings {
   ReportCrash(kind: string, detail: string): Promise<void>;
   ListTabs(): Promise<TabMeta[]>;
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
+  DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
+  CreateDeliveryWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
   OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
   EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
@@ -415,6 +450,31 @@ export interface AppBindings {
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
   SaveWindowState(state: DesktopWindowState): Promise<void>;
+  // ── Remote (SSH) ──
+  RemoteHosts(): Promise<RemoteHostView[]>;
+  AddRemoteHost(input: RemoteHostInput): Promise<RemoteHostView>;
+  UpdateRemoteHost(id: string, input: RemoteHostInput): Promise<RemoteHostView>;
+  RemoveRemoteHost(id: string): Promise<void>;
+  ScanSSHConfig(): Promise<RemoteHostInput[]>;
+  ConnectRemoteHost(id: string): Promise<void>;
+  DisconnectRemoteHost(id: string): Promise<void>;
+  RemoteConnectionStatuses(): Promise<RemoteConnectionStatus[]>;
+  ConfirmRemoteHostKey(hostId: string, accept: boolean): Promise<void>;
+  ListRemoteDir(hostId: string, path: string): Promise<RemoteDirEntry[]>;
+  ReadRemoteFile(hostId: string, path: string): Promise<RemoteFilePreview>;
+  WriteRemoteFile(hostId: string, path: string, body: string, expectMtimeUnix: number): Promise<RemoteWriteResult>;
+  MkdirRemote(hostId: string, path: string): Promise<void>;
+  RenameRemotePath(hostId: string, oldPath: string, newPath: string): Promise<void>;
+  DeleteRemotePath(hostId: string, path: string, recursive: boolean): Promise<void>;
+  RemoteForwards(hostId: string): Promise<RemoteForwardView[]>;
+  AddRemoteForward(hostId: string, input: RemoteForwardInput): Promise<RemoteForwardView>;
+  RemoveRemoteForward(hostId: string, forwardId: string): Promise<void>;
+  EnsureRemoteServer(hostId: string, workspace: string): Promise<void>;
+  OpenRemoteWorkspace(hostId: string, workspace: string): Promise<void>;
+  StopRemoteServer(hostId: string): Promise<void>;
+  RemoteServerStatus(hostId: string): Promise<RemoteServerView>;
+  RemoteServerLogs(hostId: string, tailLines: number): Promise<string>;
+  RemoteLastWorkspace(hostId: string): Promise<string>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -651,25 +711,62 @@ export function onSessionRecoveryFailed(cb: (payload: SessionRecoveryFailedEvent
   return () => {};
 }
 
+export function onRemoteStatus(cb: (s: RemoteConnectionStatus) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:status", (payload?: unknown) => cb((payload ?? {}) as RemoteConnectionStatus));
+  }
+  return registerMockRemoteListener("status", cb as (v: unknown) => void);
+}
+
+export function onRemoteForwards(cb: (e: RemoteForwardsEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:forwards", (payload?: unknown) => cb((payload ?? {}) as RemoteForwardsEvent));
+  }
+  return registerMockRemoteListener("forwards", cb as (v: unknown) => void);
+}
+
+export function onRemoteServer(cb: (s: RemoteServerView) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:server", (payload?: unknown) => cb((payload ?? {}) as RemoteServerView));
+  }
+  return registerMockRemoteListener("server", cb as (v: unknown) => void);
+}
+
+// Mock event fan-out so browser-dev and tsx tests can drive remote:* events
+// without a Wails runtime.
+type MockRemoteChannel = "status" | "forwards" | "server";
+const mockRemoteListeners: Record<MockRemoteChannel, Set<(v: unknown) => void>> = {
+  status: new Set(),
+  forwards: new Set(),
+  server: new Set(),
+};
+function registerMockRemoteListener(ch: MockRemoteChannel, cb: (v: unknown) => void): () => void {
+  mockRemoteListeners[ch].add(cb);
+  return () => mockRemoteListeners[ch].delete(cb);
+}
+export function __emitMockRemote(ch: MockRemoteChannel, payload: unknown): void {
+  for (const cb of mockRemoteListeners[ch]) cb(payload);
+}
+
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
 function bridgeBreadcrumb(method: string): string {
   if (method === "ReportCrash") return "";
   if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
     return `turn ${method}`;
-  if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth)/.test(method))
+  if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetMemoryCompilerEnabled|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetReasoningLanguage)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|AddOfficialProviderAccess|AddProviderPresetAccess|ResetProviderPresetAccess|RemoveProviderAccess|DeleteProvider|SaveProviderKey|SetProviderKey|ClearProviderKey|FetchProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
   if (/^(CheckUpdate|DownloadUpdate|InstallUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
-  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|TrustMCPServerTool|TrustMCPServerTools|UntrustMCPServerTool|SetMCPServer)/.test(method))
+  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
     return `mcp ${method}`;
   if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
     return `nav ${method}`;
   return "";
 }
@@ -964,6 +1061,63 @@ function makeMockApp(): AppBindings {
   let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
   let mockDesktopZoomFactor = 1.0;
+  let mockActiveThemeId = "";
+  let mockBaseStyle = "graphite";
+  let mockThemeMode: "auto" | "light" | "dark" = "dark";
+  // Vite rewrites these literal asset URLs in both dev and production builds.
+  // Keeping them on the browser mock makes local visual acceptance match the
+  // Wails bridge, whose ListThemePacks response carries the same two URLs.
+  const mockOfficialThemeAssets = {
+    "official-rose-dawn": {
+      previewUrl: new URL("../../../themes/official/official-rose-dawn/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-rose-dawn/background.webp", import.meta.url).href,
+    },
+    "official-fortune-forge": {
+      previewUrl: new URL("../../../themes/official/official-fortune-forge/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-fortune-forge/background.webp", import.meta.url).href,
+    },
+    "official-crimson-horizon": {
+      previewUrl: new URL("../../../themes/official/official-crimson-horizon/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-crimson-horizon/background.webp", import.meta.url).href,
+    },
+    "official-sage-breeze": {
+      previewUrl: new URL("../../../themes/official/official-sage-breeze/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-sage-breeze/background.webp", import.meta.url).href,
+    },
+    "official-spark-notebook": {
+      previewUrl: new URL("../../../themes/official/official-spark-notebook/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-spark-notebook/background.webp", import.meta.url).href,
+    },
+    "official-violet-starlight": {
+      previewUrl: new URL("../../../themes/official/official-violet-starlight/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-violet-starlight/background.webp", import.meta.url).href,
+    },
+    "official-cyan-stage": {
+      previewUrl: new URL("../../../themes/official/official-cyan-stage/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-cyan-stage/background.webp", import.meta.url).href,
+    },
+    "official-noir-gold": {
+      previewUrl: new URL("../../../themes/official/official-noir-gold/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-noir-gold/background.webp", import.meta.url).href,
+    },
+  } as const;
+  registerTrustedThemeBackgroundURLs(Object.values(mockOfficialThemeAssets).map((asset) => asset.backgroundUrl));
+  let mockThemePacks: import("./themePack").ThemePackView[] = [
+    { id: "graphite", name: "Graphite", author: "Reasonix", baseStyle: "graphite", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "aurora", name: "Aurora", author: "Reasonix", baseStyle: "aurora", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "slate", name: "Slate", author: "Reasonix", baseStyle: "slate", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "carbon", name: "Carbon", author: "Reasonix", baseStyle: "carbon", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "nocturne", name: "Nocturne", author: "Reasonix", baseStyle: "nocturne", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "amber", name: "Amber", author: "Reasonix", baseStyle: "amber", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { ...mockOfficialThemeAssets["official-rose-dawn"], id: "official-rose-dawn", name: "Rose Dawn", author: "Reasonix Contributors", license: "MIT", baseStyle: "graphite", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-rose-dawn.name", descriptionKey: "settings.themes.official.official-rose-dawn.description", tokens: { light: { bg: "#FFF7F8", fg: "#3A252C", accent: "#B43F65" }, dark: { bg: "#1E1419", fg: "#FFF3F6", accent: "#E26D91" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.72, focusY: 0.43, safeArea: "left", homeOpacity: 1, taskOpacity: 0.2, overlayStrength: 0.68, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-fortune-forge"], id: "official-fortune-forge", name: "Fortune Forge", author: "Reasonix Contributors", license: "MIT", baseStyle: "amber", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-fortune-forge.name", descriptionKey: "settings.themes.official.official-fortune-forge.description", tokens: { light: { bg: "#FFF8E8", fg: "#382116", accent: "#A92D22" }, dark: { bg: "#1D140D", fg: "#FFF2D1", accent: "#E8AD38" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.74, focusY: 0.44, safeArea: "left", homeOpacity: 1, taskOpacity: 0.2, overlayStrength: 0.7, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-crimson-horizon"], id: "official-crimson-horizon", name: "Crimson Horizon", author: "Reasonix Contributors", license: "MIT", baseStyle: "graphite", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-crimson-horizon.name", descriptionKey: "settings.themes.official.official-crimson-horizon.description", tokens: { light: { bg: "#FFF8F7", fg: "#301D1D", accent: "#B92B38" }, dark: { bg: "#190D11", fg: "#FFF1F2", accent: "#FF6772" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.75, focusY: 0.45, safeArea: "left", homeOpacity: 0.98, taskOpacity: 0.22, overlayStrength: 0.66, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-sage-breeze"], id: "official-sage-breeze", name: "Sage Breeze", author: "Reasonix Contributors", license: "MIT", baseStyle: "slate", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-sage-breeze.name", descriptionKey: "settings.themes.official.official-sage-breeze.description", tokens: { light: { bg: "#F7F7EF", fg: "#26332D", accent: "#47735F" }, dark: { bg: "#101814", fg: "#EEF6F0", accent: "#84CBA7" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.73, focusY: 0.44, safeArea: "left", homeOpacity: 1, taskOpacity: 0.2, overlayStrength: 0.68, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-spark-notebook"], id: "official-spark-notebook", name: "Spark Notebook", author: "Reasonix Contributors", license: "MIT", baseStyle: "aurora", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-spark-notebook.name", descriptionKey: "settings.themes.official.official-spark-notebook.description", tokens: { light: { bg: "#FFF9ED", fg: "#2B2F35", accent: "#007B78" }, dark: { bg: "#14171A", fg: "#F8F5E9", accent: "#42D1C6" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.74, focusY: 0.46, safeArea: "left", homeOpacity: 0.98, taskOpacity: 0.2, overlayStrength: 0.68, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-violet-starlight"], id: "official-violet-starlight", name: "Violet Starlight", author: "Reasonix Contributors", license: "MIT", baseStyle: "nocturne", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-violet-starlight.name", descriptionKey: "settings.themes.official.official-violet-starlight.description", tokens: { light: { bg: "#F7F4FF", fg: "#251F3C", accent: "#6242C7" }, dark: { bg: "#0C1022", fg: "#F4F2FF", accent: "#9B86FF" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.73, focusY: 0.44, safeArea: "left", homeOpacity: 0.96, taskOpacity: 0.18, overlayStrength: 0.72, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-cyan-stage"], id: "official-cyan-stage", name: "Cyan Stage", author: "Reasonix Contributors", license: "MIT", baseStyle: "carbon", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-cyan-stage.name", descriptionKey: "settings.themes.official.official-cyan-stage.description", tokens: { light: { bg: "#F1FCFD", fg: "#173238", accent: "#007C92" }, dark: { bg: "#07181D", fg: "#E9FCFF", accent: "#37D7E4" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.74, focusY: 0.45, safeArea: "left", homeOpacity: 0.96, taskOpacity: 0.18, overlayStrength: 0.72, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-noir-gold"], id: "official-noir-gold", name: "Noir Gold", author: "Reasonix Contributors", license: "MIT", baseStyle: "carbon", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-noir-gold.name", descriptionKey: "settings.themes.official.official-noir-gold.description", tokens: { light: { bg: "#FCF8EE", fg: "#2A241B", accent: "#7A5A16" }, dark: { bg: "#0D0B09", fg: "#F8F1DF", accent: "#D9B45B" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.73, focusY: 0.43, safeArea: "left", homeOpacity: 0.94, taskOpacity: 0.18, overlayStrength: 0.74, paneOpacity: 0.50 } },
+  ];
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
@@ -1154,7 +1308,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: !freshMock,
       model: "",
@@ -1293,6 +1447,7 @@ function makeMockApp(): AppBindings {
     desktopLayoutStyle: "workbench",
     desktopTheme: "auto",
     desktopThemeStyle: "graphite",
+    conversationWidth: "standard",
     closeBehavior: "background",
     displayMode: "compact",
     statusBarStyle: "text",
@@ -1301,7 +1456,6 @@ function makeMockApp(): AppBindings {
     checkUpdates: true,
     telemetry: true,
     metrics: true,
-    memoryCompilerEnabled: true,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai", "anthropic"],
     autoApproveTools: false,
@@ -1449,6 +1603,7 @@ function makeMockApp(): AppBindings {
       out.push({
         role: "user",
         content: `第 ${i} 轮：检查聊天滚动定位，切换会话后应该自动停在最新消息底部。`,
+        createdAt: t0 - (19 - i) * 15 * 60_000,
       });
       if (i === 4) {
         out.push({ role: "phase", content: "复现切换会话后的滚动位置" });
@@ -2143,6 +2298,9 @@ function makeMockApp(): AppBindings {
         async SubmitDisplayToTab(_tabID, display, input) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
+        async SubmitDeliveryRecoveryToTab(_tabID, display, input) {
+          await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
+        },
         async SubmitInvocationsToTab(_tabID, display, input, _invocations) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
@@ -2668,6 +2826,33 @@ function makeMockApp(): AppBindings {
     async MCPServers() {
       return capServers.map((s) => ({ ...s }));
     },
+    async InspectMCPTrust(name: string) {
+      const server = capServers.find((s) => s.name === name);
+      if (!server) throw new Error(`MCP server ${name} not found`);
+      return {
+        name, trustState: server.trustState || "untrusted",
+        trustSource: server.trustSource, trustScope: server.trustScope,
+        isolationState: server.isolationState || (server.transport === "stdio" ? "enforced" : "not_applicable"),
+        isolationReason: server.isolationReason,
+        identityChanged: server.identityChanged, changedTools: [...(server.changedTools || [])],
+        readers: (server.toolList || []).filter((tool) => tool.readOnlyHint).map((tool) => tool.name),
+        writers: (server.toolList || []).filter((tool) => !tool.readOnlyHint && !tool.destructiveHint).map((tool) => tool.name),
+        destructive: (server.toolList || []).filter((tool) => tool.destructiveHint).map((tool) => tool.name),
+      };
+    },
+    async SetMCPTrust(name: string, decision: "session" | "workspace" | "revoke") {
+      capServers = capServers.map((server) => server.name === name ? {
+        ...server,
+        trustState: decision === "revoke" ? "untrusted" : decision,
+        trustSource: decision === "revoke" ? undefined : "user",
+        trustScope: decision === "revoke" ? undefined : decision,
+        identityChanged: false,
+        changedTools: [],
+      } : server);
+    },
+    async RefreshMCPCatalog() {
+      return { source: "bundled", sequence: 0, offline: false, stale: false };
+    },
     async SkillsSettings() {
       return {
         skills: capSkills.map((s) => ({ ...s })),
@@ -2823,6 +3008,9 @@ function makeMockApp(): AppBindings {
         tools,
         prompts: 0,
         resources: 0,
+        trustState: "untrusted",
+        isolationState: input.transport === "stdio" ? "enforced" : "not_applicable",
+        changedTools: [],
         toolList: Array.from({ length: tools }, (_, i) => ({
           name: `${input.name}_tool_${i + 1}`,
           description: `Mock tool ${i + 1} exposed by ${input.name}.`,
@@ -2881,33 +3069,6 @@ function makeMockApp(): AppBindings {
             }
           : s,
       );
-    },
-    async TrustMCPServerTool(name: string, toolName: string) {
-      const normalizedTool = toolName.trim();
-      if (!normalizedTool) return;
-      capServers = capServers.map((s) => {
-        if (s.name !== name) return s;
-        const trusted = Array.from(new Set([...(s.trustedReadOnlyTools ?? []), normalizedTool]));
-        return { ...s, trustedReadOnlyTools: trusted };
-      });
-    },
-    async TrustMCPServerTools(name: string, toolNames: string[]) {
-      const normalizedTools = toolNames.map((tool) => tool.trim()).filter(Boolean);
-      if (normalizedTools.length === 0) return;
-      capServers = capServers.map((s) => {
-        if (s.name !== name) return s;
-        const trusted = Array.from(new Set([...(s.trustedReadOnlyTools ?? []), ...normalizedTools]));
-        return { ...s, trustedReadOnlyTools: trusted };
-      });
-    },
-    async UntrustMCPServerTool(name: string, toolName: string) {
-      const normalizedTool = toolName.trim();
-      if (!normalizedTool) return;
-      capServers = capServers.map((s) => {
-        if (s.name !== name) return s;
-        const trusted = (s.trustedReadOnlyTools ?? []).filter((tool) => tool !== normalizedTool);
-        return { ...s, trustedReadOnlyTools: trusted };
-      });
     },
     async PickSkillFolder() {
       return "~/my-skills";
@@ -3203,6 +3364,20 @@ function makeMockApp(): AppBindings {
       a.remove();
       if (!base64Encoded) URL.revokeObjectURL(url);
     },
+    async SaveExportImageFiles(path: string, payloads: string[]) {
+      if (payloads.length === 0) throw new Error("No image payloads to export");
+      const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+      const dot = path.lastIndexOf(".");
+      const extensionStart = dot > slash ? dot : path.length;
+      const stem = path.slice(0, extensionStart);
+      const extension = path.slice(extensionStart);
+      for (let index = 0; index < payloads.length; index++) {
+        const partPath = payloads.length > 1
+          ? `${stem}-${index + 1}-of-${payloads.length}${extension}`
+          : path;
+        await this.SaveExportFile(partPath, payloads[index], true);
+      }
+    },
     async AttachDropped(path: string) {
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
       const hasExt = /\.\w{1,6}$/i.test(name);
@@ -3366,7 +3541,7 @@ function makeMockApp(): AppBindings {
       return this.SaveDoc(path, body);
     },
     async DesktopStartupSettings() {
-      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, statusBarStyle, statusBarItems, checkUpdates } = settings;
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
       return JSON.parse(JSON.stringify({
         bot,
         desktopLanguage,
@@ -3377,6 +3552,7 @@ function makeMockApp(): AppBindings {
         statusBarStyle,
         statusBarItems,
         checkUpdates,
+        conversationWidth,
       })) as DesktopStartupSettingsView;
     },
     async Settings() {
@@ -3416,6 +3592,16 @@ function makeMockApp(): AppBindings {
     },
     async SetMaxSubagentDepth(depth: number) {
       settings.agent = { ...settings.agent, maxSubagentDepth: depth <= 1 ? 1 : 2 };
+    },
+    async SetMaxSubagentConcurrency(n: number) {
+      const total = Math.max(1, Math.min(32, Math.floor(n) || 6));
+      const writers = Math.min(total, Math.max(1, settings.agent.maxParallelWriters || 3));
+      settings.agent = { ...settings.agent, maxSubagentConcurrency: total, maxParallelWriters: writers };
+    },
+    async SetMaxParallelWriters(n: number) {
+      const total = Math.max(1, Math.min(32, settings.agent.maxSubagentConcurrency || 6));
+      const writers = Math.max(1, Math.min(total, Math.floor(n) || 3));
+      settings.agent = { ...settings.agent, maxParallelWriters: writers };
     },
     async SetAutoPlan(mode: string) {
       settings.autoPlan = mode;
@@ -3653,6 +3839,126 @@ function makeMockApp(): AppBindings {
         async SetDesktopAppearance(theme: string, style: string) {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
+          mockThemeMode = settings.desktopTheme as "auto" | "light" | "dark";
+          if (["graphite","aurora","slate","carbon","nocturne","amber"].includes(style)) {
+            mockBaseStyle = style;
+          }
+        },
+        async ListThemePacks() {
+          const baseActive = !mockActiveThemeId;
+          return mockThemePacks.map((p) => {
+            const kind = p.kind || (p.builtin ? "base" : "user");
+            let active = false;
+            if (kind === "base") active = baseActive && p.id === mockBaseStyle;
+            else active = p.id === mockActiveThemeId;
+            return { ...p, active, tokens: { light: { ...(p.tokens.light || {}) }, dark: { ...(p.tokens.dark || {}) } }, recipes: { ...p.recipes } };
+          });
+        },
+        async GetActiveThemePack() {
+          // Base style ids are never active packs in the redesigned model.
+          const pack = mockActiveThemeId && !["graphite","aurora","slate","carbon","nocturne","amber"].includes(mockActiveThemeId)
+            ? mockThemePacks.find((p) => p.id === mockActiveThemeId)
+            : null;
+          return { activeThemeId: pack ? mockActiveThemeId : "", pack: pack ? { ...pack, active: true } : null, safeMode: false };
+        },
+        async GetThemeExperience() {
+          const pack = mockActiveThemeId && !["graphite","aurora","slate","carbon","nocturne","amber"].includes(mockActiveThemeId)
+            ? mockThemePacks.find((p) => p.id === mockActiveThemeId)
+            : null;
+          return {
+            themeMode: mockThemeMode,
+            baseStyle: mockBaseStyle,
+            effectiveStyle: pack?.baseStyle || mockBaseStyle,
+            activeThemeId: pack ? mockActiveThemeId : "",
+            activePack: pack ? { ...pack, active: true } : null,
+            safeMode: false,
+          };
+        },
+        async ActivateThemePack(id: string) {
+          const next = String(id || "").trim();
+          if (["graphite","aurora","slate","carbon","nocturne","amber"].includes(next)) {
+            throw new Error(`base style ${next} is not a theme pack; use ActivateBaseStyle`);
+          }
+          mockActiveThemeId = next;
+        },
+        async ActivateBaseStyle(style: string) {
+          const s = String(style || "").trim().toLowerCase();
+          if (!["graphite","aurora","slate","carbon","nocturne","amber"].includes(s)) {
+            throw new Error(`unknown base style ${s}`);
+          }
+          mockBaseStyle = s;
+          mockActiveThemeId = "";
+        },
+        async DisableThemePack() {
+          mockActiveThemeId = "";
+        },
+        async RestoreGraphiteAppearance() {
+          mockBaseStyle = "graphite";
+          mockActiveThemeId = "";
+        },
+        async ResetThemePack() {
+          mockActiveThemeId = "";
+        },
+        async SaveThemePack(input: import("./themePack").ThemeSaveInput) {
+          const pack: import("./themePack").ThemePackView = {
+            id: input.id,
+            name: input.name,
+            author: input.author,
+            description: input.description,
+            license: input.license,
+            baseStyle: input.baseStyle,
+            builtin: false,
+            kind: "user",
+            active: Boolean(input.activate),
+            hasBackground: Boolean(
+              (input.background && (input.backgroundDataUrl || input.background.image)) ||
+              (input.taskBackground && (input.taskBackgroundDataUrl || input.taskBackground.image)),
+            ),
+            backgroundUrl: input.backgroundDataUrl || "",
+            taskBackgroundUrl: input.taskBackgroundDataUrl || "",
+            tokens: input.tokens || {},
+            recipes: input.recipes || { density: "comfortable", corners: "soft" },
+            background: input.background ?? undefined,
+            taskBackground: input.taskBackground ?? undefined,
+          };
+          const idx = mockThemePacks.findIndex((p) => p.id === pack.id);
+          if (idx >= 0) mockThemePacks[idx] = pack;
+          else mockThemePacks.push(pack);
+          if (input.activate) mockActiveThemeId = pack.id;
+          return pack;
+        },
+        async DeleteThemePack(id: string) {
+          mockThemePacks = mockThemePacks.filter((p) => p.id !== id || p.builtin);
+          if (mockActiveThemeId === id) mockActiveThemeId = "";
+        },
+        async CopyThemePack(sourceID: string, newID: string, newName: string) {
+          const src = mockThemePacks.find((p) => p.id === sourceID);
+          if (!src) throw new Error("source theme not found");
+          const pack: import("./themePack").ThemePackView = {
+            ...src,
+            id: newID,
+            name: newName || `${src.name} Copy`,
+            builtin: false,
+            kind: "user",
+            nameKey: undefined,
+            descriptionKey: undefined,
+            active: false,
+          };
+          mockThemePacks.push(pack);
+          return pack;
+        },
+        async ImportThemePack(_sourcePath: string, replace: boolean) {
+          if (replace) {
+            return { pack: mockThemePacks[0], replaced: true };
+          }
+          // Simulate conflict path without re-prompting for a file on confirm.
+          return { pack: mockThemePacks[0], replaced: false, needsReplace: true, pendingId: "pending-mock" };
+        },
+        async ExportThemePack(_id: string, _destPath: string) {
+          return "";
+        },
+        async PickThemeBackground() {
+          return "";
         },
         async SetDesktopLayoutStyle(style: string) {
           settings.desktopLayoutStyle = style === "workbench" || style === "creation" ? style : "classic";
@@ -3675,8 +3981,8 @@ function makeMockApp(): AppBindings {
         async SetDesktopMetrics(enabled: boolean) {
           settings.metrics = enabled;
         },
-        async SetMemoryCompilerEnabled(enabled: boolean) {
-          settings.memoryCompilerEnabled = enabled;
+        async SetDesktopConversationWidth(width: string) {
+          settings.conversationWidth = width;
         },
         async SetExpandThinking(_on: boolean) {},
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
@@ -3753,7 +4059,7 @@ function makeMockApp(): AppBindings {
     },
     async OpenDownloadPage() {
       if (typeof window !== "undefined") {
-        window.open("https://reasonix.io/#start", "_blank", "noopener");
+        window.open("https://reasonix.io/?download=desktop#start", "_blank", "noopener");
       }
     },
     // Dev seam: drives the overlay flow in the browser until ConnectKey sets the
@@ -3807,6 +4113,29 @@ function makeMockApp(): AppBindings {
       };
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
+    },
+    async DeliveryWorktreeAvailability(workspaceRoot: string) {
+      return workspaceRoot
+        ? { available: true, repoRoot: workspaceRoot, branch: "main", sourceDirty: false }
+        : { available: false, reason: "project folder is required" };
+    },
+    async CreateDeliveryWorktree(workspaceRoot: string) {
+      if (!workspaceRoot) throw new Error("project folder is required");
+      const suffix = Date.now().toString(36);
+      const isolatedRoot = `/mock/reasonix-worktrees/${suffix}/${workspaceRoot.split("/").filter(Boolean).pop() ?? "project"}`;
+      const topicID = `topic_worktree_${suffix}`;
+      const tab = await this.OpenProjectTab(isolatedRoot, topicID);
+      tab.isolatedWorktree = true;
+      tab.gitBranch = `reasonix/delivery-${suffix}`;
+      mockTabs = mockTabs.map((candidate) => candidate.id === tab.id ? { ...tab } : candidate);
+      return {
+        workspaceRoot: isolatedRoot,
+        worktreeRoot: isolatedRoot,
+        sourceRoot: workspaceRoot,
+        branch: tab.gitBranch,
+        sourceDirty: false,
+        tab,
+      };
     },
     async OpenGlobalTab(_topicID: string) {
       const existing = mockTabs.find((tab) => tab.scope === "global" && tab.topicId === _topicID);
@@ -4097,5 +4426,102 @@ function makeMockApp(): AppBindings {
         ],
       };
     },
+
+    // ── Remote (SSH) mock ──
+    async RemoteHosts() {
+      return mockRemoteHosts.slice();
+    },
+    async AddRemoteHost(input) {
+      const view: RemoteHostView = { id: input.label, ...input };
+      mockRemoteHosts = [...mockRemoteHosts.filter((h) => h.id !== view.id), view];
+      return view;
+    },
+    async UpdateRemoteHost(id, input) {
+      const view: RemoteHostView = { id, ...input };
+      mockRemoteHosts = mockRemoteHosts.map((h) => (h.id === id ? view : h));
+      return view;
+    },
+    async RemoveRemoteHost(id) {
+      mockRemoteHosts = mockRemoteHosts.filter((h) => h.id !== id);
+      delete mockRemoteConn[id];
+    },
+    async ScanSSHConfig() {
+      return [
+        { label: "gpu-box", host: "203.0.113.7", port: 22, user: "dev", identityFile: "~/.ssh/id_ed25519", proxyJump: "", defaultWorkspace: "", serveInstall: "auto", useSSHConfig: true },
+      ];
+    },
+    async ConnectRemoteHost(id) {
+      mockRemoteConn[id] = "connecting";
+      __emitMockRemote("status", { hostId: id, state: "connecting" });
+      setTimeout(() => {
+        mockRemoteConn[id] = "connected";
+        __emitMockRemote("status", { hostId: id, state: "connected" });
+      }, 300);
+    },
+    async DisconnectRemoteHost(id) {
+      mockRemoteConn[id] = "stopped";
+      __emitMockRemote("status", { hostId: id, state: "stopped" });
+    },
+    async RemoteConnectionStatuses() {
+      return Object.entries(mockRemoteConn).map(([hostId, state]) => ({ hostId, state: state as RemoteConnectionStatus["state"] }));
+    },
+    async ConfirmRemoteHostKey(hostId, accept) {
+      mockRemoteConn[hostId] = accept ? "connected" : "stopped";
+      __emitMockRemote("status", { hostId, state: mockRemoteConn[hostId] });
+    },
+    async ListRemoteDir(_hostId, path) {
+      const base = path.replace(/\/$/, "");
+      return [
+        { name: "src", path: `${base}/src`, isDir: true, size: 0, mtimeUnix: 1_700_000_000, symlink: false },
+        { name: "README.md", path: `${base}/README.md`, isDir: false, size: 1024, mtimeUnix: 1_700_000_500, symlink: false },
+      ];
+    },
+    async ReadRemoteFile(_hostId, path) {
+      return { path, body: `# Mock remote file\n${path}\n`, size: 40, mtimeUnix: 1_700_000_500, truncated: false, binary: false };
+    },
+    async WriteRemoteFile(_hostId, _path, _body, _expectMtimeUnix) {
+      return { ok: true, conflict: false, newMtimeUnix: 1_700_000_900 };
+    },
+    async MkdirRemote() {},
+    async RenameRemotePath() {},
+    async DeleteRemotePath() {},
+    async RemoteForwards(hostId) {
+      return mockRemoteForwards[hostId] ?? [];
+    },
+    async AddRemoteForward(hostId, input) {
+      const view: RemoteForwardView = { id: `L:${input.localPort}`, hostId, ...input, state: "active" };
+      mockRemoteForwards[hostId] = [...(mockRemoteForwards[hostId] ?? []), view];
+      __emitMockRemote("forwards", { hostId, forwards: mockRemoteForwards[hostId] });
+      return view;
+    },
+    async RemoveRemoteForward(hostId, forwardId) {
+      mockRemoteForwards[hostId] = (mockRemoteForwards[hostId] ?? []).filter((f) => f.id !== forwardId);
+      __emitMockRemote("forwards", { hostId, forwards: mockRemoteForwards[hostId] });
+    },
+    async EnsureRemoteServer(hostId, workspace) {
+      for (const state of ["starting", "detect", "launch", "ready"] as const) {
+        __emitMockRemote("server", { hostId, workspace, state, localUrl: state === "ready" ? "http://127.0.0.1:44321/" : "" });
+      }
+    },
+    async OpenRemoteWorkspace() {},
+    async StopRemoteServer(hostId) {
+      __emitMockRemote("server", { hostId, workspace: "", state: "stopped" });
+    },
+    async RemoteServerStatus(hostId) {
+      return { hostId, workspace: "~/app", state: "stopped" };
+    },
+    async RemoteServerLogs() {
+      return "mock serve log line 1\nmock serve log line 2\n";
+    },
+    async RemoteLastWorkspace() {
+      return "~/app";
+    },
   };
 }
+
+// Mock remote state, module-scoped so it survives across mock method calls.
+let mockRemoteHosts: RemoteHostView[] = [
+  { id: "demo", label: "demo", host: "192.168.1.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
+];
+const mockRemoteConn: Record<string, RemoteConnectionStatus["state"]> = {};
+const mockRemoteForwards: Record<string, RemoteForwardView[]> = {};

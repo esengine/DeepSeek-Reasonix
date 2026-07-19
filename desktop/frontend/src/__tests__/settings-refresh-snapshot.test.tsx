@@ -78,7 +78,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     permissions: { mode: "ask", allow: [], ask: [], deny: [] },
     sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto" },
     network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },
-    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: false,
       model: "",
@@ -136,7 +136,6 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     checkUpdates: true,
     telemetry: true,
     metrics: true,
-    memoryCompilerEnabled: true,
     configPath: "/tmp/reasonix/config.toml",
     providerKinds: [],
     autoApproveTools: false,
@@ -240,6 +239,8 @@ await act(async () => {
 
 const compactButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Compact") as HTMLButtonElement | undefined;
 if (!compactButton) throw new Error("compact display mode button did not render");
+eq(document.querySelectorAll(".step-limit-control").length, 0, "general settings hide executor and planner step-limit controls");
+ok(!document.body.textContent?.includes("step limit"), "general settings keep automatic progress free of step-limit copy");
 
 await act(async () => {
   compactButton.click();
@@ -302,6 +303,51 @@ ok(document.body.textContent?.includes("Settings could not be loaded.") === fals
 
 await act(async () => {
   retryRoot.unmount();
+});
+
+const windowsSandboxRootEl = document.createElement("div");
+document.body.appendChild(windowsSandboxRootEl);
+const windowsSandboxRoot = createRoot(windowsSandboxRootEl);
+let windowsSetSandboxCalls = 0;
+window.go = {
+  main: {
+    App: {
+      // Deliberately return a stale enforce value: the Windows UI must still
+      // render the effective immutable off state.
+      Settings: async () => baseSettings("standard"),
+      SetSandbox: async () => {
+        windowsSetSandboxCalls += 1;
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  windowsSandboxRoot.render(
+    <LocaleProvider>
+      <SettingsPanel
+        initialTab="sandbox"
+        desktopPlatform="windows"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+await waitFor("Windows Bash sandbox control", () => document.body.textContent?.includes("This setting is fixed to off.") === true);
+
+const windowsBashSelect = Array.from(windowsSandboxRootEl.querySelectorAll("select")).find((select) =>
+  Array.from(select.options).some((option) => option.value === "off"),
+);
+if (!windowsBashSelect) throw new Error("Windows Bash sandbox select did not render");
+ok(windowsBashSelect.disabled, "Windows Bash sandbox selector is disabled");
+eq(windowsBashSelect.value, "off", "Windows Bash sandbox selector is fixed to off");
+ok(!Array.from(windowsBashSelect.options).some((option) => option.value === "enforce"), "Windows Bash sandbox selector omits enforce");
+eq(windowsSetSandboxCalls, 0, "Windows immutable Bash sandbox state does not save enforce");
+
+await act(async () => {
+  windowsSandboxRoot.unmount();
 });
 
 const zoomRootEl = document.createElement("div");

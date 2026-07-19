@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, DragEvent as ReactDragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, History, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2 } from "lucide-react";
+import { Archive, ArrowDown, Pencil, Plus, Folder, FolderPlus, Search, BriefcaseBusiness, Copy, FolderOpen, XCircle, Check, ListCollapse, ListRestart, MessageSquare, Clock, Pin, MoreHorizontal, Minimize2, Maximize2, GitBranch } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useToast } from "../lib/toast";
 import { app } from "../lib/bridge";
@@ -17,6 +17,7 @@ import { topicShortcutLabel, type TopicShortcutEntry } from "../lib/topicShortcu
 import type { ShortcutPlatform } from "../lib/keyboardShortcuts";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { Tooltip } from "./Tooltip";
+import { WorktreeBadge } from "./WorktreeBadge";
 
 type ProjectTreeVariant = "classic" | "workbench" | "creation";
 
@@ -28,9 +29,9 @@ interface ProjectTreeProps {
   imTopicSources?: Record<string, ProjectTreeImTopicSource>;
   variant?: ProjectTreeVariant;
   onOpenTopic: (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string) => Promise<void> | void;
-  onOpenProjectHistory: (scope: "global" | "project", workspaceRoot: string) => Promise<void> | void;
   onAddProject: () => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
+  onCreateDeliveryWorktree?: (workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
@@ -588,9 +589,9 @@ export function ProjectTree({
   imTopicSources = {},
   variant = "classic",
   onOpenTopic,
-  onOpenProjectHistory,
   onAddProject,
   onCreateTopic,
+  onCreateDeliveryWorktree,
   onRenameTopic,
   onTopicsChanged,
   refreshSignal,
@@ -619,6 +620,8 @@ export function ProjectTree({
   const [editingProject, setEditingProject] = useState<{ key: string; root: string } | null>(null);
   const [projectDraft, setProjectDraft] = useState("");
   const [addingProject, setAddingProject] = useState(false);
+  const [isolatingProject, setIsolatingProject] = useState<string | null>(null);
+  const [worktreeAvailability, setWorktreeAvailability] = useState<Record<string, { available: boolean; reason?: string }>>({});
   const [confirmAction, setConfirmAction] = useState<{ topicId: string; action: "trash" } | null>(null);
   const [confirmRemoveProject, setConfirmRemoveProject] = useState<string | null>(null);
   const [dragProjectRoot, setDragProjectRoot] = useState<string | null>(null);
@@ -970,6 +973,19 @@ export function ProjectTree({
     } finally {
       creatingRef.current = false;
       setCreatingProject(null);
+    }
+  };
+
+  const handleCreateDeliveryWorktree = async (workspaceRoot: string) => {
+    if (!workspaceRoot || isolatingProject) return;
+    setIsolatingProject(workspaceRoot);
+    closeMenu();
+    try {
+      await onCreateDeliveryWorktree?.(workspaceRoot);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
+    } finally {
+      setIsolatingProject(null);
     }
   };
 
@@ -1602,7 +1618,29 @@ export function ProjectTree({
       setMenuPoint(contextMenuPointFromEvent(event));
       setMenuProject({ key, root: projectRoot, path: projectPath, scope, label: projectLabel });
       setConfirmRemoveProject(null);
+      if (scope === "project" && projectRoot) {
+        void app.DeliveryWorktreeAvailability(projectRoot).then((availability) => {
+          setWorktreeAvailability((current) => ({
+            ...current,
+            [projectRoot]: { available: availability.available, reason: availability.reason },
+          }));
+        }).catch(() => {});
+      }
     };
+    const isolationAvailability = worktreeAvailability[projectRoot];
+    const isolatedWorkspaceItems: ContextMenuItem[] = scope === "project"
+      ? [{
+          key: "isolated-delivery-workspace",
+          icon: <GitBranch size={13} />,
+          label: (
+            <span title={isolationAvailability?.reason || t("projectTree.createWorktreeHint")}>
+              {isolatingProject === projectRoot ? t("projectTree.creatingWorktree") : t("projectTree.createWorktree")}
+            </span>
+          ),
+          disabled: isolatingProject !== null || isolationAvailability?.available === false,
+          onSelect: () => { void handleCreateDeliveryWorktree(projectRoot); },
+        }]
+      : [];
     const projectMenuItems: ContextMenuItem[] = [
       {
         key: "new-session",
@@ -1612,19 +1650,7 @@ export function ProjectTree({
           void handleCreateTopic(scope, projectRoot, key);
         },
       },
-      ...(scope === "project"
-        ? [
-            {
-              key: "project-history",
-              icon: <History size={13} />,
-              label: t("projectTree.projectHistory"),
-              onSelect: () => {
-                closeMenu();
-                void onOpenProjectHistory(scope, projectRoot);
-              },
-            },
-          ]
-        : []),
+      ...isolatedWorkspaceItems,
       {
         key: "rename",
         icon: <Pencil size={13} />,
@@ -1689,6 +1715,7 @@ export function ProjectTree({
             },
           ]
         : []),
+      ...isolatedWorkspaceItems,
       {
         key: "reveal",
         icon: <FolderOpen size={13} />,
@@ -1699,19 +1726,6 @@ export function ProjectTree({
           closeMenu();
         },
       },
-      ...(scope === "project"
-        ? [
-            {
-              key: "project-history",
-              icon: <History size={13} />,
-              label: t("projectTree.projectHistory"),
-              onSelect: () => {
-                closeMenu();
-                void onOpenProjectHistory(scope, projectRoot);
-              },
-            },
-          ]
-        : []),
       {
         key: "rename",
         icon: <Pencil size={13} />,
@@ -1844,7 +1858,10 @@ export function ProjectTree({
               {folderDisclosure.isOpen ? <FolderOpen size={14} className="project-tree__folder-icon" /> : <Folder size={14} className="project-tree__folder-icon" />}
             </span>
             <span className="project-tree__folder-color" aria-hidden="true" />
-            <span className={`project-tree__folder-label${!hasChildren ? " project-tree__folder-label--empty" : ""}`}>{projectLabel}</span>
+            <span className={`project-tree__folder-label${!hasChildren ? " project-tree__folder-label--empty" : ""}`}>
+              {projectLabel}
+              {node.isolatedWorktree && <WorktreeBadge size={11} />}
+            </span>
           </button>
           {compactTopics && (
             <Tooltip label={t("projectTree.projectActions")} className="project-tree__folder-action-slot">

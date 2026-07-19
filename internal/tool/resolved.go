@@ -35,6 +35,10 @@ type ResolvedCall struct {
 	Unavailable bool
 	// UnavailableReason is the host-proven failure detail.
 	UnavailableReason string
+	// Commit applies a resolve-only state transition after the host has checked
+	// the resolved call. Proxy resolvers must not mutate host state before this
+	// callback runs: read-only agents may reject the action after resolution.
+	Commit func() error
 }
 
 // CallResolver is implemented by proxy tools that map a model-visible call onto

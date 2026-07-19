@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/autoresearch"
@@ -49,7 +50,7 @@ func (o *turnOrchestrator) runSyntheticTurnWithRawDisplay(ctx context.Context, i
 
 func (o *turnOrchestrator) runComposedSyntheticTurn(ctx context.Context, text string) error {
 	c := o.c
-	return c.runner.Run(agent.WithMemoryCompilerSkip(ctx), c.ComposeSynthetic(text))
+	return c.runner.Run(ctx, c.ComposeSynthetic(text))
 }
 
 // runSubagentSkillGoalLoop executes a slash-invoked runAs=subagent skill as a
@@ -114,7 +115,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	if c.executor == nil {
 		return fmt.Errorf("subagent slash invocation requires an active session")
 	}
-	c.executor.Session().Add(provider.Message{Role: provider.RoleUser, Content: input, Images: images})
+	c.executor.Session().Add(provider.Message{Role: provider.RoleUser, Content: input, Images: images, CreatedAt: time.Now().UnixMilli()})
 
 	for _, sk := range skills {
 		callID := fmt.Sprintf("slash-skill-%d", c.slashSkillSeq.Add(1))
@@ -123,7 +124,7 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 			ID:       callID,
 			Name:     "run_skill",
 			Args:     string(args),
-			ReadOnly: planMode || sk.ReadOnly,
+			ReadOnly: sk.ReadOnly,
 		}
 		if c.skillProfile != nil {
 			toolEvent.Profile = c.skillProfile(sk)
@@ -159,16 +160,8 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	parentSession := c.parentSessionID()
 	ctx = agent.WithParentSession(ctx, parentSession)
 	ctx = jobs.WithSession(ctx, parentSession)
-	ctx = agent.WithUserImages(ctx, c.inputImages(turn.input))
-	// Synthetic, controller-injected turns (goal-loop continuation,
-	// plan-approved execution, …) must not be Memory v5-compiled: compiling them
-	// re-injects a contract the model echoes back, which spins the goal loop
-	// forever (#5342, #5329). Only genuine user turns supply a compiler source.
-	if turn.synthetic || IsSyntheticUserMessage(turn.raw) {
-		ctx = agent.WithMemoryCompilerSkip(ctx)
-	} else {
-		ctx = agent.WithMemoryCompilerSourceInput(ctx, turn.raw)
-	}
+	userImages := c.inputImages(turn.input)
+	ctx = agent.WithUserImages(ctx, userImages)
 	input := c.compose(turn.input, turn.raw, !turn.synthetic)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
@@ -230,7 +223,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 			if turn.synthetic || IsSyntheticUserMessage(turn.raw) {
 				c.stripTurnMessagesAfter(startMessages)
 			} else {
-				c.stripCancelledVisibleTurnMessagesAfter(startMessages)
+				c.stripCancelledVisibleTurnMessagesAfterWithFallback(startMessages, provider.Message{
+					Role:      provider.RoleUser,
+					Content:   input,
+					Images:    append([]string(nil), userImages...),
+					CreatedAt: time.Now().UnixMilli(),
+				})
 			}
 		}
 		c.clearInFlightTurn()
@@ -253,6 +251,14 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return err
 	}
 	if !allow {
+		// When plan mode is already off, the user explicitly exited plan mode
+		// while the approval was pending. Suppress auto-plan for the next turn
+		// so it does not immediately re-enter the mode the user just left.
+		c.mu.Lock()
+		if !c.planMode {
+			c.suppressAutoPlan = true
+		}
+		c.mu.Unlock()
 		return nil // keep planning; plan mode stays on
 	}
 	c.SetPlanMode(false)

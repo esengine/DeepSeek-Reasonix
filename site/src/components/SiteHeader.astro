@@ -1,0 +1,72 @@
+---
+type ActiveItem = 'features' | 'how' | 'skills' | 'community' | 'docs' | 'changelog' | 'start';
+
+const {
+  active,
+  scrolled = false,
+  accountSlot = false,
+} = Astro.props as {
+  active?: ActiveItem;
+  scrolled?: boolean;
+  accountSlot?: boolean;
+};
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const items: Array<{
+  id: ActiveItem;
+  href: string;
+  en: string;
+  zh: string;
+  secondary?: boolean;
+}> = [
+  { id: 'features', href: `${base}/#features`, en: 'Features', zh: '特性' },
+  { id: 'how', href: `${base}/#how`, en: 'How it works', zh: '工作原理', secondary: true },
+  { id: 'skills', href: `${base}/skills/`, en: 'Skills', zh: '技能市场' },
+  { id: 'community', href: `${base}/#community`, en: 'Community', zh: '社区', secondary: true },
+  { id: 'docs', href: `${base}/docs/`, en: 'Docs', zh: '文档' },
+  { id: 'changelog', href: `${base}/changelog/`, en: 'Changelog', zh: '更新日志' },
+  { id: 'start', href: `${base}/#start`, en: 'Get started', zh: '快速开始', secondary: true },
+];
+---
+
+<header class:list={['nav', { scrolled }]}>
+  <div class="nav-inner">
+    <a class="brand" href={`${base}/`}>
+      <img src={`${base}/logo.svg`} alt="Reasonix logo" />
+      <span>Reasonix</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary navigation">
+      {items.map((item) => (
+        <a
+          class:list={[{ here: active === item.id, 'nav-link--secondary': item.secondary }]}
+          href={item.href}
+          aria-current={active === item.id ? 'page' : undefined}
+        >
+          <span class="l-en">{item.en}</span>
+          <span class="l-zh">{item.zh}</span>
+        </a>
+      ))}
+    </nav>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="en" class="active">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+    </div>
+    <div class="theme-switch" role="group" aria-label="Theme">
+      <button type="button" data-theme="system" class="active" aria-label="System theme"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></button>
+      <button type="button" data-theme="light" aria-label="Light theme"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="4.2" y1="4.2" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.8" y2="19.8"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/><line x1="4.2" y1="19.8" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.8" y2="4.2"/></svg></button>
+      <button type="button" data-theme="dark" aria-label="Dark theme"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </div>
+    {accountSlot ? (
+      <span class="nav-acct" data-account-slot></span>
+    ) : (
+      <a class="btn btn-ghost nav-sign-in" href={`${base}/login/`}>
+        <span class="l-en">Sign in</span>
+        <span class="l-zh">登录</span>
+      </a>
+    )}
+    <a class="btn btn-dark nav-install" href={`${base}/#start`}>
+      <span class="l-en">Install</span>
+      <span class="l-zh">安装</span>
+    </a>
+  </div>
+</header>

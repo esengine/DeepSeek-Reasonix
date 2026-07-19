@@ -7,6 +7,7 @@ import "fmt"
 type FinalReadinessError struct {
 	Attempts int
 	Reason   string
+	Missing  []string
 }
 
 func (e *FinalReadinessError) Error() string {

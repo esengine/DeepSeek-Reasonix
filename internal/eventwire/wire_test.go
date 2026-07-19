@@ -81,8 +81,6 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 		"retryMax?: number;",
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
-		"memoryCompiler?: MemoryCompilerStats;",
-		"export interface MemoryCompilerStats",
 		"cacheDiagnostics?: WireCacheDiagnostics;",
 		"export interface WireCacheDiagnostics",
 		"prefixHash: string;",
@@ -114,18 +112,19 @@ func TestToWireNoticeDetail(t *testing.T) {
 
 func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	readiness := ToWire(event.Event{
-		Kind:    event.TurnDone,
-		Err:     errors.New("final-answer readiness failed 3 times: missing verification"),
-		Outcome: event.TurnOutcomeFinalReadiness,
+		Kind:      event.TurnDone,
+		Err:       errors.New("final-answer readiness failed 3 times: missing verification"),
+		Outcome:   event.TurnOutcomeFinalReadiness,
+		Readiness: &event.FinalReadiness{Attempts: 3, Missing: []string{"verification", "review"}},
 	})
-	if readiness.Outcome != event.TurnOutcomeFinalReadiness || readiness.Err == "" {
+	if readiness.Outcome != event.TurnOutcomeFinalReadiness || readiness.Err == "" || readiness.Readiness == nil || readiness.Readiness.Attempts != 3 {
 		t.Fatalf("readiness wire event = %+v", readiness)
 	}
 	b, err := json.Marshal(readiness)
 	if err != nil {
 		t.Fatalf("marshal readiness: %v", err)
 	}
-	if !strings.Contains(string(b), `"outcome":"final_readiness"`) {
+	if !strings.Contains(string(b), `"outcome":"final_readiness"`) || !strings.Contains(string(b), `"missing":["verification","review"]`) {
 		t.Fatalf("readiness JSON = %s, want structured outcome", b)
 	}
 
@@ -135,41 +134,6 @@ func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	}
 	if strings.Contains(string(ordinary), `"outcome"`) {
 		t.Fatalf("ordinary error JSON must omit outcome: %s", ordinary)
-	}
-}
-
-func TestToWireMemoryCompilerStats(t *testing.T) {
-	w := ToWire(event.Event{
-		Kind: event.MemoryCompilerStatsEvent,
-		MemoryCompiler: &event.MemoryCompilerStats{
-			Injected:         true,
-			UsefulIR:         true,
-			CompiledTokens:   1200,
-			IROverheadTokens: 300,
-			MemoryReferences: 3,
-			Constraints:      2,
-			RiskNotes:        1,
-			ExecutionSteps:   4,
-			TotalNodes:       42,
-			HighSignalNodes:  11,
-			ToolResultNodes:  7,
-			DecisionNodes:    5,
-			StrategyCount:    3,
-			LearningCount:    6,
-		},
-	})
-	if w.Kind != "memory_compiler_stats" || w.MemoryCompiler == nil {
-		t.Fatalf("wire memory compiler stats = %+v", w)
-	}
-	if !w.MemoryCompiler.Injected || w.MemoryCompiler.TotalNodes != 42 || w.MemoryCompiler.CompiledTokens != 1200 {
-		t.Fatalf("wire memory compiler payload = %+v", w.MemoryCompiler)
-	}
-	b, err := json.Marshal(w)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(b), "secret") || !strings.Contains(string(b), `"memoryCompiler":`) {
-		t.Fatalf("memory compiler stats JSON should contain only metrics payload: %s", string(b))
 	}
 }
 
@@ -220,7 +184,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID: "call-1", Name: "task", Args: `{"prompt":"x"}`, Output: "ignored",
 		Err: "blocked", ReadOnly: true, Truncated: true, DurationMs: 522,
-		Partial: true, ParentID: "parent-1",
+		Partial: true, Refreshed: true, ParentID: "parent-1",
 		FileDiff: event.FileDiff{Diff: "@@ -1 +1 @@\n-old\n+new\n", Added: 1, Removed: 1},
 		Profile:  &event.Profile{Model: "deepseek-pro", Effort: "max"},
 	}})
@@ -232,7 +196,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 	for _, want := range []string{
 		`"kind":"tool_dispatch"`, `"id":"call-1"`, `"name":"task"`,
 		`"args":"{\"prompt\":\"x\"}"`, `"output":"ignored"`, `"err":"blocked"`,
-		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`,
+		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`, `"refreshed":true`,
 		`"parentId":"parent-1"`, `"diff":"@@ -1 +1 @@\n-old\n+new\n"`,
 		`"added":1`, `"removed":1`, `"profile":{"model":"deepseek-pro","effort":"max"}`,
 	} {
@@ -286,6 +250,27 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 			name: "approval",
 			in:   event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "a1", Tool: "bash", Subject: "rm"}},
 			want: []string{`"kind":"approval_request"`, `"approval":{"id":"a1","tool":"bash","subject":"rm"}`},
+		},
+		{
+			name: "fresh approval",
+			in:   event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "a2", Tool: "mcp__srv__wipe", Subject: "srv/wipe", Fresh: true}},
+			want: []string{`"kind":"approval_request"`, `"tool":"mcp__srv__wipe"`, `"fresh":true`},
+		},
+		{
+			name: "MCP trust approval payload",
+			in: event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+				ID: "a3", Tool: "mcp__srv__write", Subject: "srv/write",
+				MCPTrust: &event.MCPTrust{
+					Server: "srv", TrustState: "workspace", TrustSource: "user", TrustScope: "workspace",
+					IsolationState: "unavailable_unconfined", IsolationReason: "sandbox backend unavailable",
+					ChangedTools: []string{"write"}, ToolChanges: []event.MCPToolChange{{Name: "write", Kind: "schema_changed"}},
+					Readers: []string{"search"}, Writers: []string{"write"}, Destructive: []string{},
+				},
+			}},
+			want: []string{`"mcpTrust":{"server":"srv"`, `"trustState":"workspace"`, `"trustSource":"user"`,
+				`"isolationState":"unavailable_unconfined"`, `"changedTools":["write"]`,
+				`"toolChanges":[{"name":"write","kind":"schema_changed"}]`, `"readers":["search"]`,
+				`"writers":["write"]`, `"destructive":[]`},
 		},
 		{
 			name: "ask",

@@ -170,6 +170,7 @@ func (m chatTUI) chooserActivate(row int) (tea.Model, tea.Cmd) {
 		c.cursor = row
 		m.input.Reset()
 		m.input.SetHeight(1)
+		m.refreshInputPlaceholder()
 		return m, nil
 	default: // Chat about this
 		return m.chooserAnswer(nil)
@@ -195,6 +196,7 @@ func (m chatTUI) chooserAdvance() (tea.Model, tea.Cmd) {
 func (m chatTUI) chooserAnswer(answers []event.AskAnswer) (tea.Model, tea.Cmd) {
 	m.ctrl.AnswerQuestion(m.chooser.id, answers)
 	m.chooser = nil
+	m.refreshInputPlaceholder()
 	return m, nil
 }
 

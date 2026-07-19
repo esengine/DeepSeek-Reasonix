@@ -186,6 +186,7 @@ type MCPServerInfo struct {
 
 // MCPToolInfo is one tool discovered during live/runtime probe.
 type MCPToolInfo struct {
-	Name         string `json:"name"`
-	ReadOnlyHint bool   `json:"read_only_hint,omitempty"`
+	Name            string `json:"name"`
+	ReadOnlyHint    bool   `json:"read_only_hint,omitempty"`
+	DestructiveHint bool   `json:"destructive_hint,omitempty"`
 }

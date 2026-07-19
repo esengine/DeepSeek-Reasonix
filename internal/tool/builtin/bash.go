@@ -28,12 +28,6 @@ import (
 
 const (
 	bashWaitDelay = 5 * time.Second
-	// windowsBackgroundSandboxLockWait is the Windows sandbox root-lock wait
-	// budget for background jobs. A detached job blocks nobody while it queues,
-	// so it keeps the patient wait; a foreground command uses the sandbox's
-	// short default and fails fast with the lock holder named instead of
-	// hanging the whole turn.
-	windowsBackgroundSandboxLockWait = 10 * time.Minute
 )
 
 var errBashTimeout = errors.New("bash foreground timeout")
@@ -43,9 +37,8 @@ func init() { tool.RegisterBuiltin(bash{}) }
 var bashShellPATH = cachedBashShellPATH
 
 var (
-	bashSandboxCommand               = sandbox.Command
-	bashSandboxEscapePromptEnabled   = func() bool { return runtime.GOOS == "windows" }
-	bashWindowsSandboxRuntimeFailure = isWindowsSandboxRuntimeFailure
+	bashSandboxCommand             = sandbox.Command
+	bashSandboxEscapePromptEnabled = func() bool { return runtime.GOOS == "windows" }
 )
 
 // cachedBashShellPATH memoizes the login-shell PATH probe per login shell so a
@@ -187,11 +180,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	}
 
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	sbSpec := b.sb
-	if p.RunInBackground {
-		sbSpec.WindowsLockWait = windowsBackgroundSandboxLockWait
-	}
-	argv, wrapped := bashSandboxCommand(sbSpec, sh, p.Command)
+	argv, wrapped := bashSandboxCommand(b.sb, sh, p.Command)
 	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, p.Command, args) {
 		argv = unconfinedShellArgv(sh, p.Command)
 		wrapped = false
@@ -236,19 +225,6 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	}
 
 	out, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv)
-	if bashWindowsSandboxRuntimeFailure(argv, out, err) {
-		allow, reason, approveErr := approveBashSandboxEscape(ctx, p.Command, args, i18n.M.SandboxEscapeRuntimeReason)
-		if approveErr != nil {
-			return out, approveErr
-		}
-		if !allow {
-			if reason != "" {
-				return out, fmt.Errorf("%s", reason)
-			}
-			return out, err
-		}
-		out, err = b.runForeground(ctx, p, sh, unconfinedShellArgv(sh, p.Command), false, cmdEnv)
-	}
 	return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
 }
 
@@ -301,26 +277,6 @@ func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args j
 		Args:    append(json.RawMessage(nil), args...),
 		Reason:  i18n.M.SandboxEscapeRuntimeReason,
 	})
-}
-
-func isWindowsSandboxRuntimeFailure(argv []string, out string, err error) bool {
-	if !bashSandboxEscapePromptEnabled() || err == nil {
-		return false
-	}
-	code, ok := bashExitCode(err)
-	if !ok || code != 126 {
-		return false
-	}
-	marker, ok := sandbox.WindowsSandboxFailureMarkerFromCommand(argv)
-	return ok && strings.Contains(out, marker+" windows sandbox:")
-}
-
-func bashExitCode(err error) (int, bool) {
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		return 0, false
-	}
-	return exitErr.ExitCode(), true
 }
 
 func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string) (string, error) {

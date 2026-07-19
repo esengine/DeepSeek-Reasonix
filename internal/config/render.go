@@ -77,7 +77,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if strings.TrimSpace(c.UI.CursorShape) != "" {
 			fmt.Fprintf(&b, "cursor_shape = %q   # block|underline|bar; text input cursor shape\n", c.UICursorShape())
 		} else {
-			b.WriteString("# cursor_shape = \"underline\"   # block|underline|bar; text input cursor shape\n")
+			b.WriteString("# cursor_shape = \"bar\"   # block|underline|bar; text input cursor shape\n")
 		}
 		if strings.TrimSpace(c.UI.CloseBehavior) != "" && scope == RenderScopeProject {
 			fmt.Fprintf(&b, "close_behavior = %q   # legacy desktop close behavior; prefer [desktop].close_behavior in user config\n", c.DesktopCloseBehavior())
@@ -124,6 +124,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		fmt.Fprintf(&b, "expand_thinking = %v   # desktop: show reasoning text expanded by default; false = collapsed\n", c.Desktop.ExpandThinking)
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
+		if width := c.DesktopConversationWidth(); width == "full" {
+			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)
+		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {
 		// provider_access is intentionally mergeable across user and project
@@ -201,18 +204,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # overrides system_prompt when set\n")
 	}
-	if scope != RenderScopeProject {
-		if c.Agent.MaxSteps != defaults.Agent.MaxSteps {
-			fmt.Fprintf(&b, "max_steps         = %d   # executor tool-call rounds; 0 = no limit\n", c.Agent.MaxSteps)
-		} else {
-			b.WriteString("# max_steps         = 0   # executor tool-call rounds; 0 = no limit\n")
-		}
-		if c.Agent.PlannerMaxSteps != defaults.Agent.PlannerMaxSteps {
-			fmt.Fprintf(&b, "planner_max_steps = %d   # planner read-only tool-call rounds; 0 = no limit\n", c.Agent.PlannerMaxSteps)
-		} else {
-			b.WriteString("# planner_max_steps = 0    # planner read-only tool-call rounds; 0 = no limit\n")
-		}
-	}
 	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
 	if scope != RenderScopeProject {
 		autoPlan := c.Agent.AutoPlan
@@ -223,7 +214,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			autoPlan = "off"
 		}
 		fmt.Fprintf(&b, "auto_plan   = %q   # user-level only: off|on; off keeps plan mode manual\n", autoPlan)
-		fmt.Fprintf(&b, "memory_compiler = { enabled = %v, verbosity = %q }   # user-level only: observe|compact\n", c.MemoryCompilerEnabled(), c.MemoryCompilerVerbosity())
 	}
 	if lang := c.ReasoningLanguage(); lang != "auto" {
 		fmt.Fprintf(&b, "reasoning_language = %q   # visible reasoning language: auto|zh|en\n", lang)
@@ -251,14 +241,14 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	fmt.Fprintf(&b, "cold_resume_prune   = %v   # elide stale tool results when reopening a session past the provider cache window\n", c.ColdResumePruneEnabled())
 	if len(c.Agent.PlanModeAllowedTools) > 0 {
-		fmt.Fprintf(&b, "plan_mode_allowed_tools = %s   # extra read-only declarations for custom tools; cannot unlock known blocked tools or unsafe bash\n", renderStringArray(c.Agent.PlanModeAllowedTools))
+		fmt.Fprintf(&b, "plan_mode_allowed_tools = %s   # legacy MCP read-only trust aliases; does not change Plan availability\n", renderStringArray(c.Agent.PlanModeAllowedTools))
 	} else {
-		b.WriteString("# plan_mode_allowed_tools = [\"custom_reader\"]   # extra read-only declarations; cannot unlock known blocked tools or unsafe bash\n")
+		b.WriteString("# plan_mode_allowed_tools = [\"mcp__legacy__reader\"]   # legacy MCP read-only trust alias; does not change Plan availability\n")
 	}
 	if len(c.Agent.PlanModeReadOnlyCommands) > 0 {
-		fmt.Fprintf(&b, "plan_mode_read_only_commands = %s   # concrete read-only shell prefixes available while planning\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
+		fmt.Fprintf(&b, "plan_mode_read_only_commands = %s   # legacy compatibility only; Plan bash uses Permissions\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
 	} else {
-		b.WriteString("# plan_mode_read_only_commands = [\"gh issue view\", \"gh pr diff\"]   # concrete read-only shell prefixes; does not allow shell operators or shell interpreters\n")
+		b.WriteString("# plan_mode_read_only_commands = [\"gh issue view\"]   # legacy compatibility only; Plan bash uses Permissions\n")
 	}
 	if c.Agent.PlannerModel != "" {
 		fmt.Fprintf(&b, "planner_model = %q   # low-frequency planner (two-model collaboration)\n", c.Agent.PlannerModel)
@@ -289,6 +279,16 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "max_subagent_depth = %d   # nested subagent delegation depth; 1 restores the old single-layer boundary\n", c.Agent.MaxSubagentDepth)
 	} else {
 		b.WriteString("# max_subagent_depth = 2   # nested subagent delegation depth; set 1 to disable nested delegation\n")
+	}
+	if c.Agent.MaxSubagentConcurrency != defaults.Agent.MaxSubagentConcurrency {
+		fmt.Fprintf(&b, "max_subagent_concurrency = %d   # session-wide sub-agent concurrency (task/fleet/skills)\n", c.Agent.MaxSubagentConcurrency)
+	} else {
+		b.WriteString("# max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)\n")
+	}
+	if c.Agent.MaxParallelWriters != defaults.Agent.MaxParallelWriters {
+		fmt.Fprintf(&b, "max_parallel_writers = %d   # concurrent writers with non-overlapping write_paths\n", c.Agent.MaxParallelWriters)
+	} else {
+		b.WriteString("# max_parallel_writers = 3   # concurrent writers with non-overlapping write_paths\n")
 	}
 	if c.Agent.OutputStyle != "" {
 		fmt.Fprintf(&b, "output_style = %q   # persona/tone folded into the prompt\n", c.Agent.OutputStyle)
@@ -370,7 +370,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "default_effort    = %q   # used when /effort is auto or unset; must be one of supported_efforts\n", p.DefaultEffort)
 			}
 			if len(p.ModelOverrides) > 0 {
-				fmt.Fprintf(&b, "model_overrides   = %s   # per-model reasoning/vision overrides for mixed gateways\n", renderModelOverrides(p.ModelOverrides))
+				fmt.Fprintf(&b, "model_overrides   = %s   # per-model context/reasoning/vision overrides for mixed gateways\n", renderModelOverrides(p.ModelOverrides))
 			}
 			if p.NoProxy {
 				b.WriteString("no_proxy    = true   # reach this base_url directly, never via the proxy\n")
@@ -453,7 +453,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("# may only write under workspace_root (empty = current dir) and allow_write extras.\n")
 	b.WriteString("# bash = \"enforce\" jails each command in an OS sandbox when available;\n")
 	b.WriteString("# without one, bash execution is refused. Empty defaults to enforce on macOS/Linux.\n")
-	b.WriteString("# Windows currently forces bash = \"off\" to restore pre-1.16 unconfined shell execution.\n")
+	b.WriteString("# Windows has no OS-level Bash sandbox and fixes bash = \"off\".\n")
 	b.WriteString("# network allows sandboxed bash egress.\n")
 	if c.Sandbox.WorkspaceRoot != "" {
 		fmt.Fprintf(&b, "workspace_root = %q\n", c.Sandbox.WorkspaceRoot)
@@ -650,11 +650,6 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	// whole file from the struct).
 	if scope != RenderScopeProject {
 		b.WriteString("[secrets]   # credential protection; user/global only, ./reasonix.toml cannot override\n")
-		if c.Secrets.RedactToolOutput != nil {
-			fmt.Fprintf(&b, "redact_tool_output = %v   # mask secret-shaped values in tool output before model context/UI; transcripts and job artifacts are always redacted on disk\n", *c.Secrets.RedactToolOutput)
-		} else {
-			b.WriteString("# redact_tool_output = true   # default on; set false only if masking breaks fixture-heavy edit workflows\n")
-		}
 		if c.Secrets.FilterSubprocessEnv {
 			b.WriteString("filter_subprocess_env = true   # strip credential-named env vars from tool/hook/LSP/MCP subprocesses\n")
 		} else {
@@ -663,7 +658,56 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if c.Secrets.ProtectSensitiveFiles {
 			b.WriteString("protect_sensitive_files = true   # hide .env/.git-credentials/key files/~/.ssh from read tools\n")
 		} else {
-			b.WriteString("# protect_sensitive_files = false   # opt-in; values are already masked by redaction even when files stay readable\n")
+			b.WriteString("# protect_sensitive_files = false   # opt-in; hiding credential files can break legitimate edit workflows\n")
+		}
+		b.WriteString("\n")
+	}
+
+	// [remote] is user/global only like [secrets]: LoadForRoot discards project
+	// values so a cloned repo can never inject SSH hosts. Rendered here so
+	// saved hosts survive full-file config rewrites.
+	if scope != RenderScopeProject && (c.Remote.ImportSSHConfig || len(c.Remote.Hosts) > 0) {
+		b.WriteString("[remote]   # SSH remote hosts; user/global only, ./reasonix.toml cannot override\n")
+		if c.Remote.ImportSSHConfig {
+			b.WriteString("import_ssh_config = true   # surface ~/.ssh/config aliases in `reasonix remote import`\n")
+		}
+		for _, h := range c.Remote.Hosts {
+			b.WriteString("\n[[remote.hosts]]\n")
+			fmt.Fprintf(&b, "name = %q\n", h.Name)
+			fmt.Fprintf(&b, "host = %q\n", h.Host)
+			if h.Port > 0 {
+				fmt.Fprintf(&b, "port = %d\n", h.Port)
+			}
+			if h.User != "" {
+				fmt.Fprintf(&b, "user = %q\n", h.User)
+			}
+			if h.IdentityFile != "" {
+				fmt.Fprintf(&b, "identity_file = %q   # key file path; Reasonix never stores key material\n", h.IdentityFile)
+			}
+			if h.PassphraseEnv != "" {
+				fmt.Fprintf(&b, "passphrase_env = %q   # env var name; value lives in Reasonix's global .env\n", h.PassphraseEnv)
+			}
+			if h.PasswordEnv != "" {
+				fmt.Fprintf(&b, "password_env = %q   # env var name; value lives in Reasonix's global .env\n", h.PasswordEnv)
+			}
+			if h.ProxyJump != "" {
+				fmt.Fprintf(&b, "proxy_jump = %q   # OpenSSH ProxyJump chain\n", h.ProxyJump)
+			}
+			if h.Workspace != "" {
+				fmt.Fprintf(&b, "workspace = %q   # default remote workspace dir\n", h.Workspace)
+			}
+			if h.ServeInstall != "" {
+				fmt.Fprintf(&b, "serve_install = %q   # auto|npm|upload|never\n", h.ServeInstall)
+			}
+			if h.UseSSHConfig {
+				b.WriteString("use_ssh_config = true   # layer ~/.ssh/config values under unset fields\n")
+			}
+			for _, f := range h.Forwards {
+				b.WriteString("\n[[remote.hosts.forwards]]\n")
+				fmt.Fprintf(&b, "type = %q   # local (-L) | remote (-R)\n", f.Type)
+				fmt.Fprintf(&b, "bind = %q\n", f.Bind)
+				fmt.Fprintf(&b, "target = %q\n", f.Target)
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -676,7 +720,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# command = \"reasonix-plugin-example\"\n")
 		b.WriteString("# call_timeout_seconds = 600       # optional per-server MCP call timeout\n")
 		b.WriteString("# tool_timeout_seconds = { \"generate_video\" = 1800 }   # raw MCP tool names\n")
-		b.WriteString("# trusted_read_only_tools = [\"search\"]   # optional pre-seeded MCP read-only trust\n")
+		b.WriteString("# default_tools_approval_mode = \"auto\"   # auto|prompt|writes|approve\n")
+		b.WriteString("# tools = { \"delete_all\" = { approval_mode = \"prompt\" } }\n")
+		b.WriteString("# approvals_reviewer = \"user\"   # user|auto_review\n")
 		b.WriteString("# [[plugins]]                                  # a remote server over Streamable HTTP\n")
 		b.WriteString("# name    = \"stripe\"\n")
 		b.WriteString("# type    = \"http\"\n")
@@ -713,8 +759,17 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 			}
 			if len(pl.TrustedReadOnlyTools) > 0 {
-				b.WriteString("# optional pre-seeded MCP read-only trust; the approval prompt can also remember this\n")
+				b.WriteString("# local Plan/read-only-research trust for audited raw MCP reader names\n")
 				fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
+			}
+			if strings.TrimSpace(pl.DefaultToolsApprovalMode) != "" {
+				fmt.Fprintf(&b, "default_tools_approval_mode = %q\n", pl.DefaultToolsApprovalMode)
+			}
+			if len(pl.Tools) > 0 {
+				fmt.Fprintf(&b, "tools = %s\n", renderMCPToolPolicies(pl.Tools))
+			}
+			if strings.TrimSpace(pl.ApprovalsReviewer) != "" {
+				fmt.Fprintf(&b, "approvals_reviewer = %q\n", pl.ApprovalsReviewer)
 			}
 			if pl.AutoStart != nil {
 				fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
@@ -1136,8 +1191,17 @@ func RenderTOMLProjectDelta(c *Config) string {
 			fmt.Fprintf(&b, "tool_timeout_seconds = %s\n", renderIntMap(pl.ToolTimeoutSeconds))
 		}
 		if len(pl.TrustedReadOnlyTools) > 0 {
-			b.WriteString("# optional pre-seeded MCP read-only trust; the approval prompt can also remember this\n")
+			b.WriteString("# local Plan/read-only-research trust for audited raw MCP reader names\n")
 			fmt.Fprintf(&b, "trusted_read_only_tools = %s\n", renderStringArray(pl.TrustedReadOnlyTools))
+		}
+		if strings.TrimSpace(pl.DefaultToolsApprovalMode) != "" {
+			fmt.Fprintf(&b, "default_tools_approval_mode = %q\n", pl.DefaultToolsApprovalMode)
+		}
+		if len(pl.Tools) > 0 {
+			fmt.Fprintf(&b, "tools = %s\n", renderMCPToolPolicies(pl.Tools))
+		}
+		if strings.TrimSpace(pl.ApprovalsReviewer) != "" {
+			fmt.Fprintf(&b, "approvals_reviewer = %q\n", pl.ApprovalsReviewer)
 		}
 		if pl.AutoStart != nil {
 			fmt.Fprintf(&b, "auto_start = %v\n", *pl.AutoStart)
@@ -1375,6 +1439,26 @@ func renderStringMap(m map[string]string) string {
 	return b.String()
 }
 
+func renderMCPToolPolicies(policies map[string]MCPToolPolicy) string {
+	keys := make([]string, 0, len(policies))
+	for name := range policies {
+		if strings.TrimSpace(name) != "" {
+			keys = append(keys, name)
+		}
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString("{ ")
+	for i, name := range keys {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s = { approval_mode = %q }", renderTOMLKeyPart(name), policies[name].ApprovalMode)
+	}
+	b.WriteString(" }")
+	return b.String()
+}
+
 func renderAnyMap(m map[string]any) string {
 	keys := make([]string, 0, len(m))
 	for k, v := range m {
@@ -1490,11 +1574,14 @@ func renderModelOverride(ov ProviderModelOverride) string {
 	if ov.Vision != nil {
 		parts = append(parts, fmt.Sprintf("vision = %t", *ov.Vision))
 	}
+	if ov.ContextWindow > 0 {
+		parts = append(parts, fmt.Sprintf("context_window = %d", ov.ContextWindow))
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 func modelOverrideEmpty(ov ProviderModelOverride) bool {
-	return ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil
+	return ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow <= 0
 }
 
 func hasPositiveIntMap(m map[string]int) bool {

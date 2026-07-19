@@ -10,14 +10,15 @@ import (
 )
 
 // TestFailedCallsSurfaceError guards the bug where a failed tool call (an unknown
-// tool, e.g. a hallucinated "find", or a plan-mode-blocked writer) was reported
+// tool, e.g. a hallucinated "find", or a permission-denied writer) was reported
 // with an empty Err and so rendered with a success check. A failed call must set
 // errMsg; a successful one must not.
 func TestFailedCallsSurfaceError(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeTool{name: "ok_tool", readOnly: true})
 	reg.Add(fakeTool{name: "writer", readOnly: false})
-	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	gate := &recordingPermissionGate{allow: true}
+	a := New(nil, reg, NewSession(""), Options{Gate: gate}, event.Discard)
 
 	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "ok_tool"}); o.errMsg != "" {
 		t.Errorf("successful call should have empty errMsg, got %q", o.errMsg)
@@ -27,7 +28,9 @@ func TestFailedCallsSurfaceError(t *testing.T) {
 	}
 
 	a.SetPlanMode(true)
+	gate.allow = false
+	gate.reason = "denied by permission policy"
 	if o := a.executeOne(context.Background(), provider.ToolCall{Name: "writer"}); o.errMsg == "" {
-		t.Errorf("plan-mode-blocked writer should surface an errMsg, got %+v", o)
+		t.Errorf("permission-denied writer should surface an errMsg, got %+v", o)
 	}
 }

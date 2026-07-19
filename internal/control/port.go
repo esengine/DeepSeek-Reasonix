@@ -50,6 +50,7 @@ type Lifecycle interface {
 type TurnControl interface {
 	Submit(input string)
 	SubmitDisplay(display, input string)
+	SubmitDeliveryRecovery(display, input string)
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
 	SubmitEditedDisplay(display, input, original string)
 	SubmitHTTP(input string)
@@ -181,6 +182,7 @@ type Status interface {
 // state.
 type SessionPersistence interface {
 	Snapshot() error
+	SnapshotForShutdown() error
 	SnapshotActivity() error
 	SessionCache() (hit, miss int)
 	BeginDestroySession(sessionPath string) SessionDestroyHandle
@@ -204,8 +206,6 @@ type Input interface {
 type Settings interface {
 	SetResponseLanguage(lang string)
 	SetReasoningLanguage(lang string)
-	SetMemoryCompilerEnabled(enabled bool)
-	SetMemoryCompilerVerbosity(verbosity string)
 	SetDisplayRecorder(fn func(content, display string))
 }
 

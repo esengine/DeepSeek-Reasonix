@@ -15,7 +15,7 @@ type workModeOption struct {
 	desc string
 }
 
-func runtimeProfileDisplay(profile string) string {
+func runtimeProfileName(profile string) string {
 	switch boot.NormalizeTokenMode(profile) {
 	case boot.TokenModeEconomy:
 		return "economy"
@@ -23,6 +23,17 @@ func runtimeProfileDisplay(profile string) string {
 		return "delivery"
 	default:
 		return "balanced"
+	}
+}
+
+func runtimeProfileDisplay(profile string) string {
+	switch boot.NormalizeTokenMode(profile) {
+	case boot.TokenModeEconomy:
+		return i18n.M.WorkModeEconomyLabel
+	case boot.TokenModeDelivery:
+		return i18n.M.WorkModeDeliveryLabel
+	default:
+		return i18n.M.WorkModeBalancedLabel
 	}
 }
 
@@ -48,12 +59,12 @@ func workModeOptions() []workModeOption {
 }
 
 func renderWorkModes(width int, current string) string {
-	current = runtimeProfileDisplay(current)
+	currentName := runtimeProfileName(current)
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", viewHeader(i18n.M.WorkModeListHeaderFmt, current))
+	fmt.Fprintf(&b, "%s\n", viewHeader(i18n.M.WorkModeListHeaderFmt, runtimeProfileDisplay(current)))
 	for _, option := range workModeOptions() {
 		status := ""
-		if option.name == current {
+		if option.name == currentName {
 			status = "  " + viewStatus(i18n.M.ArgModelCurrent)
 		}
 		nameWidth := viewPadWidth(option.name, 10)
@@ -159,7 +170,7 @@ func (m *chatTUI) workModeArgItems(val string) ([]compItem, int, bool) {
 		return nil, from, true
 	}
 	query := strings.ToLower(val[from:])
-	current := runtimeProfileDisplay(m.runtimeProfile)
+	current := runtimeProfileName(m.runtimeProfile)
 	var out []compItem
 	for _, option := range workModeOptions() {
 		if query != "" && !strings.HasPrefix(option.name, query) {

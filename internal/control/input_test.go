@@ -34,17 +34,11 @@ func (f *fakeAutoPlanClassifier) NeedsPlan(ctx context.Context, input string, sc
 }
 
 type fakeTurnRunner struct {
-	inputs               []string
-	memoryCompilerInputs []string
-	memoryCompilerSkips  []bool
+	inputs []string
 }
 
 func (f *fakeTurnRunner) Run(ctx context.Context, input string) error {
 	f.inputs = append(f.inputs, input)
-	f.memoryCompilerSkips = append(f.memoryCompilerSkips, agent.MemoryCompilerSkipFromContext(ctx))
-	if source, ok := agent.MemoryCompilerSourceInputFromContext(ctx); ok {
-		f.memoryCompilerInputs = append(f.memoryCompilerInputs, source)
-	}
 	return nil
 }
 
@@ -252,7 +246,7 @@ func TestSubmitInvocationDisplayRunsInlineSkillWithoutArguments(t *testing.T) {
 	}
 }
 
-func TestSubmitSlashSubagentUsesReadOnlyRunnerInPlanMode(t *testing.T) {
+func TestSubmitSlashSubagentUsesPermissionedRunnerInPlanMode(t *testing.T) {
 	sess := agent.NewSession("parent system")
 	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
 	events := make(chan event.Event, 12)
@@ -266,26 +260,64 @@ func TestSubmitSlashSubagentUsesReadOnlyRunnerInPlanMode(t *testing.T) {
 			Name: "helper", Description: "isolated helper", Body: "child prompt",
 			RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
 		}},
-		SkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+		SkillRunner: func(ctx context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
 			normalCalls++
-			return "", nil
-		},
-		ReadOnlySkillRunner: func(ctx context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
-			readOnlyCalls++
 			gotTask = task
 			gotPlanMode = agent.PlanModeFromContext(ctx)
-			return "read-only answer", nil
+			return "permissioned answer", nil
+		},
+		ReadOnlySkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			readOnlyCalls++
+			return "", nil
 		},
 	})
 	c.SetPlanMode(true)
 	c.Submit("/helper inspect only")
 	gotEvents := waitForTurnEvents(t, events)
-	if normalCalls != 0 || readOnlyCalls != 1 || !gotPlanMode || !strings.Contains(gotTask, PlanModeMarker) {
+	if normalCalls != 1 || readOnlyCalls != 0 || !gotPlanMode || !strings.Contains(gotTask, PlanModeMarker) {
 		t.Fatalf("plan-mode runners normal=%d readonly=%d plan=%v task=%q", normalCalls, readOnlyCalls, gotPlanMode, gotTask)
 	}
 	for _, e := range gotEvents {
-		if e.Kind == event.ToolDispatch && e.Tool.Name == "run_skill" && !e.Tool.ReadOnly {
-			t.Fatal("plan-mode slash skill dispatch must be marked read-only")
+		if e.Kind == event.ToolDispatch && e.Tool.Name == "run_skill" && e.Tool.ReadOnly {
+			t.Fatal("Plan must not relabel a writer-capable slash skill as read-only")
+		}
+	}
+}
+
+func TestSubmitStructuredSubagentUsesPermissionedRunnerInPlanMode(t *testing.T) {
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 12)
+	var normalCalls, readOnlyCalls int
+	var gotTask string
+	var gotPlanMode bool
+	c := New(Options{
+		Executor: exec,
+		Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{{
+			Name: "helper", Description: "isolated helper", Body: "child prompt",
+			RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(ctx context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+			normalCalls++
+			gotTask = task
+			gotPlanMode = agent.PlanModeFromContext(ctx)
+			return "permissioned answer", nil
+		},
+		ReadOnlySkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			readOnlyCalls++
+			return "", nil
+		},
+	})
+	c.SetPlanMode(true)
+	c.SubmitInvocationDisplay("inspect only", "inspect only", []InvocationRequest{{Name: "helper", Kind: "subagent"}})
+	gotEvents := waitForTurnEvents(t, events)
+	if normalCalls != 1 || readOnlyCalls != 0 || !gotPlanMode || !strings.Contains(gotTask, PlanModeMarker) {
+		t.Fatalf("plan structured runners normal=%d readonly=%d plan=%v task=%q", normalCalls, readOnlyCalls, gotPlanMode, gotTask)
+	}
+	for _, e := range gotEvents {
+		if e.Kind == event.ToolDispatch && e.Tool.Name == "run_skill" && e.Tool.ReadOnly {
+			t.Fatal("Plan must not relabel a writer-capable structured subagent as read-only")
 		}
 	}
 }
@@ -437,20 +469,10 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
-func TestPlanModeMarkerMatchesPolicy(t *testing.T) {
-	for _, want := range []string{"research", "ask", "todo_write", "read_only_task", "read_only_skill"} {
+func TestPlanModeMarkerSeparatesWorkflowFromPermissions(t *testing.T) {
+	for _, want := range []string{"planning workflow", "research", "ask", "todo_write", "Do not begin implementation", "not a permission boundary", "Permissions and Sandbox"} {
 		if !strings.Contains(PlanModeMarker, want) {
-			t.Fatalf("PlanModeMarker should describe %q as available:\n%s", want, PlanModeMarker)
-		}
-	}
-	for _, forbidden := range []string{"task", "complete_step"} {
-		if strings.Contains(PlanModeMarker, forbidden+" are available") || strings.Contains(PlanModeMarker, forbidden+",") {
-			t.Fatalf("PlanModeMarker must not list blocked tool %q as available:\n%s", forbidden, PlanModeMarker)
-		}
-	}
-	for _, blocked := range []string{"write files", "unsafe shell commands", "install capabilities", "mutate memory", "delegate", "mark execution steps complete"} {
-		if !strings.Contains(PlanModeMarker, blocked) {
-			t.Fatalf("PlanModeMarker should mention blocked capability %q:\n%s", blocked, PlanModeMarker)
+			t.Fatalf("PlanModeMarker missing %q:\n%s", want, PlanModeMarker)
 		}
 	}
 }

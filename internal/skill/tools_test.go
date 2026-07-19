@@ -146,7 +146,7 @@ func TestReadOnlySkillInlineAndIsReadOnly(t *testing.T) {
 	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
 
 	if !tl.ReadOnly() {
-		t.Fatal("read_only_skill must be ReadOnly so it works in plan mode")
+		t.Fatal("read_only_skill must report ReadOnly for permission and restricted-runner classification")
 	}
 	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"note","arguments":"with args"}`))
 	if err != nil {

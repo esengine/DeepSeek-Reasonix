@@ -70,7 +70,7 @@ func (c *Config) SetPlannerModel(name string) error {
 }
 
 // SetAutoPlan sets the interactive auto-plan gate. "off" keeps plan mode manual;
-// "on" opts into automatic read-only planning for complex-looking turns.
+// "on" opts into the automatic plan-first workflow for complex-looking turns.
 // "ask" is accepted as a legacy synonym for "on" but is never written back.
 func (c *Config) SetAutoPlan(mode string) error {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
@@ -97,27 +97,6 @@ func (c *Config) SetDesktopDefaultToolApprovalMode(mode string) error {
 	default:
 		return fmt.Errorf("default_tool_approval_mode %q: must be ask|auto|yolo", mode)
 	}
-	return nil
-}
-
-// SetMemoryCompilerEnabled toggles the v5 execution-memory compiler.
-func (c *Config) SetMemoryCompilerEnabled(enabled bool) error {
-	c.Agent.MemoryCompiler.Enabled = &enabled
-	return nil
-}
-
-// SetMemoryCompilerVerbosity controls whether Memory v5 only observes turns or
-// also injects compact execution contracts into provider-visible messages.
-func (c *Config) SetMemoryCompilerVerbosity(verbosity string) error {
-	normalized := NormalizeMemoryCompilerVerbosity(verbosity)
-	if strings.TrimSpace(verbosity) != "" && normalized == MemoryCompilerVerbosityObserve {
-		switch strings.ToLower(strings.TrimSpace(verbosity)) {
-		case "observe", "observed", "silent", "minimal", "none":
-		default:
-			return fmt.Errorf("memory_compiler.verbosity %q: must be observe|compact", verbosity)
-		}
-	}
-	c.Agent.MemoryCompiler.Verbosity = normalized
 	return nil
 }
 
@@ -386,6 +365,21 @@ func (c *Config) SetDesktopTelemetry(enabled bool) error {
 // SetDesktopMetrics sets whether the desktop sends aggregate desktop metrics.
 func (c *Config) SetDesktopMetrics(enabled bool) error {
 	c.Desktop.Metrics = &enabled
+	return nil
+}
+
+// SetDesktopConversationWidth sets the max transcript width preference.
+// standard = 960px fixed; full = 90% of the parent, with a 960px floor.
+// An empty value resets to standard.
+func (c *Config) SetDesktopConversationWidth(width string) error {
+	switch strings.ToLower(strings.TrimSpace(width)) {
+	case "", "standard":
+		c.Desktop.ConversationWidth = "standard"
+	case "full":
+		c.Desktop.ConversationWidth = "full"
+	default:
+		return fmt.Errorf("conversation width %q: must be standard|full", width)
+	}
 	return nil
 }
 
@@ -802,35 +796,6 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 	return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
 }
 
-// TrustPluginReadOnlyTool adds one raw MCP tool name to a plugin's trusted
-// read-only list. It reports changed=false when the entry already contains it.
-func (c *Config) TrustPluginReadOnlyTool(name, toolName string) (PluginEntry, bool, error) {
-	name = strings.TrimSpace(name)
-	toolName = strings.TrimSpace(toolName)
-	if name == "" {
-		return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: plugin name is required")
-	}
-	if toolName == "" {
-		return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: tool name is required")
-	}
-	for i := range c.Plugins {
-		if c.Plugins[i].Name != name {
-			continue
-		}
-		trusted := uniqueStrings(c.Plugins[i].TrustedReadOnlyTools)
-		for _, existing := range trusted {
-			if existing == toolName {
-				c.Plugins[i].TrustedReadOnlyTools = trusted
-				return c.Plugins[i], false, nil
-			}
-		}
-		trusted = append(trusted, toolName)
-		c.Plugins[i].TrustedReadOnlyTools = trusted
-		return c.Plugins[i], true, nil
-	}
-	return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: no plugin %q", name)
-}
-
 // ClearPluginAuthenticationInSource clears auth material in the file that actually
 // owns the MCP server. Load() merges user/project TOML and project .mcp.json into
 // one Config, so callers must not mutate that merged view and Save() it back: a
@@ -860,6 +825,26 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 
 func pluginTOMLSourcePath(name string) string {
 	return pluginTOMLSourcePathForRoot(".", name)
+}
+
+func pluginTOMLSourcePathForRoot(root, name string) string {
+	projectTOML := "reasonix.toml"
+	if resolved := resolveRoot(root); resolved != "." {
+		projectTOML = filepath.Join(resolved, "reasonix.toml")
+	}
+	paths := append([]string{projectTOML}, userConfigCandidatePaths()...)
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		cfg := LoadForEdit(path)
+		for _, p := range cfg.Plugins {
+			if p.Name == name {
+				return path
+			}
+		}
+	}
+	return ""
 }
 
 type configSourceEdit struct {
@@ -1099,58 +1084,6 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 	return true, nil
 }
 
-// TrustPluginReadOnlyToolInSourceForRoot persists one trusted MCP read-only tool
-// into the file that owns the server for root. TOML declarations win over
-// .mcp.json, matching LoadForRoot merge precedence.
-func TrustPluginReadOnlyToolInSourceForRoot(root, name, toolName string) (PluginEntry, bool, string, error) {
-	if path := pluginTOMLSourcePathForRoot(root, name); path != "" {
-		cfg := LoadForEdit(path)
-		updated, changed, err := cfg.TrustPluginReadOnlyTool(name, toolName)
-		if err != nil {
-			return PluginEntry{}, false, path, err
-		}
-		if changed {
-			if err := cfg.SaveTo(path); err != nil {
-				return PluginEntry{}, false, path, err
-			}
-		}
-		return updated, changed, path, nil
-	}
-	mcpPath := mcpJSONFile
-	if resolved := resolveRoot(root); resolved != "." {
-		mcpPath = filepath.Join(resolved, mcpJSONFile)
-	}
-	updated, changed, err := trustMCPJSONReadOnlyTool(mcpPath, name, toolName)
-	if err != nil {
-		return PluginEntry{}, false, mcpPath, err
-	}
-	return updated, changed, mcpPath, nil
-}
-
-func TrustPluginReadOnlyToolInSource(name, toolName string) (PluginEntry, bool, string, error) {
-	return TrustPluginReadOnlyToolInSourceForRoot(".", name, toolName)
-}
-
-func pluginTOMLSourcePathForRoot(root, name string) string {
-	projectTOML := "reasonix.toml"
-	if resolved := resolveRoot(root); resolved != "." {
-		projectTOML = filepath.Join(resolved, "reasonix.toml")
-	}
-	paths := append([]string{projectTOML}, userConfigCandidatePaths()...)
-	for _, path := range paths {
-		if strings.TrimSpace(path) == "" {
-			continue
-		}
-		cfg := LoadForEdit(path)
-		for _, p := range cfg.Plugins {
-			if p.Name == name {
-				return path
-			}
-		}
-	}
-	return ""
-}
-
 // validatePlugin checks a plugin entry by transport. An empty Type means stdio.
 func validatePlugin(e PluginEntry) error {
 	if strings.TrimSpace(e.Name) == "" {
@@ -1167,6 +1100,22 @@ func validatePlugin(e PluginEntry) error {
 			return fmt.Errorf("plugin %q: tool_timeout_seconds[%q] must be >= 0", e.Name, name)
 		}
 	}
+	if !validMCPApprovalMode(e.DefaultToolsApprovalMode, true) {
+		return fmt.Errorf("plugin %q: unknown default_tools_approval_mode %q (want auto|prompt|writes|approve)", e.Name, e.DefaultToolsApprovalMode)
+	}
+	for name, policy := range e.Tools {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("plugin %q: tools contains an empty tool name", e.Name)
+		}
+		if !validMCPApprovalMode(policy.ApprovalMode, false) {
+			return fmt.Errorf("plugin %q: tools[%q].approval_mode must be auto|prompt|writes|approve", e.Name, name)
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(e.ApprovalsReviewer)) {
+	case "", "user", "auto_review":
+	default:
+		return fmt.Errorf("plugin %q: unknown approvals_reviewer %q (want user|auto_review)", e.Name, e.ApprovalsReviewer)
+	}
 	switch strings.ToLower(strings.TrimSpace(e.Type)) {
 	case "", "stdio":
 		if strings.TrimSpace(e.Command) == "" {
@@ -1180,6 +1129,17 @@ func validatePlugin(e PluginEntry) error {
 		return fmt.Errorf("plugin %q: unknown type %q (want stdio|http|sse)", e.Name, e.Type)
 	}
 	return nil
+}
+
+func validMCPApprovalMode(mode string, allowEmpty bool) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "auto", "prompt", "writes", "approve":
+		return true
+	case "":
+		return allowEmpty
+	default:
+		return false
+	}
 }
 
 // SaveTo writes the configuration to path as annotated TOML, atomically: it

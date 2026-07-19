@@ -309,6 +309,13 @@ console.log("\ncomposer goal toggle");
   const taskModeItems = document.querySelectorAll(".composer-intent-menu__item");
   eq(taskModeItems.length, 3, "task method menu exposes three mutually exclusive choices");
   eq(document.querySelectorAll(".composer-intent-switch").length, 0, "task method menu does not present independent switches");
+  const planButton = taskModeItems[1] as HTMLButtonElement | undefined;
+  if (!planButton) throw new Error("composer Plan menu item did not render");
+  ok(planButton.textContent?.includes("tool use follows current permissions and sandbox settings") === true, "Plan menu explains that permissions and sandbox still govern tools");
+  ok(planButton.textContent?.toLowerCase().includes("read-only") === false, "Plan menu does not present Plan as a read-only permission mode");
+  const askApprovalButton = document.querySelector(".composer-modebar__item--ask") as HTMLButtonElement | null;
+  if (!askApprovalButton) throw new Error("composer Ask approval button did not render");
+  ok(askApprovalButton.title.includes("Ask is not read-only"), "Ask tooltip distinguishes approval policy from read-only sandboxing");
   const goalButton = taskModeItems[2] as HTMLButtonElement | undefined;
   if (!goalButton) throw new Error("composer goal menu item did not render");
 

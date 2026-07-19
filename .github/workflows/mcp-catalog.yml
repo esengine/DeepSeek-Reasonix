@@ -1,0 +1,104 @@
+name: MCP catalog
+
+on:
+  pull_request:
+    paths:
+      - "cmd/mcp-catalog/**"
+      - "internal/mcpcatalog/**"
+      - "catalog/mcp/**"
+      - ".github/workflows/mcp-catalog.yml"
+  push:
+    branches: [main-v2]
+    paths:
+      - "cmd/mcp-catalog/**"
+      - "internal/mcpcatalog/**"
+      - "catalog/mcp/**"
+      - ".github/workflows/mcp-catalog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate schema, duplicate entries, reader declarations, and bundled signature
+        run: |
+          go test ./internal/mcpcatalog
+          go run ./cmd/mcp-catalog validate \
+            --index internal/mcpcatalog/catalog-v1.json \
+            --signature internal/mcpcatalog/catalog-v1.json.minisig \
+            --packages catalog/mcp/packages
+
+  sign:
+    # A manually selected feature branch must never be able to publish a new
+    # trust root payload. Catalog releases only run from the protected branch.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main-v2'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Sign catalog with the dedicated release secret
+        env:
+          MCP_CATALOG_MINISIGN_PRIVATE_KEY: ${{ secrets.MCP_CATALOG_MINISIGN_PRIVATE_KEY }}
+          MCP_CATALOG_MINISIGN_PASSWORD: ${{ secrets.MCP_CATALOG_MINISIGN_PASSWORD }}
+        run: |
+          go run ./cmd/mcp-catalog sign \
+            --index internal/mcpcatalog/catalog-v1.json \
+            --output index.json.minisig
+          cp internal/mcpcatalog/catalog-v1.json index.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mcp-catalog-v1-${{ github.run_id }}
+          path: |
+            index.json
+            index.json.minisig
+          if-no-files-found: error
+      - name: Publish the signed catalog to the Reasonix R2 origin
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          test -n "$R2_ACCOUNT_ID"
+          test -n "$R2_BUCKET"
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          sequence="$(jq -er '.sequence' index.json)"
+          if aws s3 cp "s3://${R2_BUCKET}/plugins/catalog/v1/index.json" current-index.json --endpoint-url "$endpoint"; then
+            current_sequence="$(jq -er '.sequence' current-index.json)"
+            if [ "$sequence" -lt "$current_sequence" ]; then
+              echo "catalog sequence rollback: new=$sequence current=$current_sequence" >&2
+              exit 1
+            fi
+            if [ "$sequence" -eq "$current_sequence" ] && ! cmp -s index.json current-index.json; then
+              echo "catalog content changed without increasing sequence $sequence" >&2
+              exit 1
+            fi
+          fi
+          prefix="plugins/catalog/v1/history/${sequence}"
+          aws s3 cp index.json "s3://${R2_BUCKET}/${prefix}/index.json" \
+            --endpoint-url "$endpoint" --content-type application/json --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp index.json.minisig "s3://${R2_BUCKET}/${prefix}/index.json.minisig" \
+            --endpoint-url "$endpoint" --content-type application/octet-stream --cache-control "public, max-age=31536000, immutable"
+          # Readers retain their last-known-good copy across the brief pair
+          # update; a mismatched pair therefore fails closed instead of running.
+          aws s3 cp index.json "s3://${R2_BUCKET}/plugins/catalog/v1/index.json" \
+            --endpoint-url "$endpoint" --content-type application/json --cache-control "public, max-age=300"
+          aws s3 cp index.json.minisig "s3://${R2_BUCKET}/plugins/catalog/v1/index.json.minisig" \
+            --endpoint-url "$endpoint" --content-type application/octet-stream --cache-control "public, max-age=300"

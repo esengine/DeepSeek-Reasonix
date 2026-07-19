@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -104,7 +105,7 @@ func resumeWithFreshSystemPromptAndGoal(ctrl control.SessionAPI, messages []prov
 	}
 	_, sidecarErr := os.Stat(store.SessionGoalState(path))
 	resumeWithFreshSystemPrompt(ctrl, messages, path)
-	if os.IsNotExist(sidecarErr) {
+	if os.IsNotExist(sidecarErr) && strings.TrimSpace(legacyGoal) != "" {
 		ctrl.SetGoal(strings.TrimSpace(legacyGoal))
 	}
 }
@@ -115,7 +116,72 @@ func resumeLoadedSessionAndGoal(ctrl control.SessionAPI, session *agent.Session,
 	}
 	_, sidecarErr := os.Stat(store.SessionGoalState(path))
 	ctrl.Resume(sessionWithFreshSystemPrompt(session, systemPromptFrom(ctrl.History())), path)
-	if os.IsNotExist(sidecarErr) {
+	if os.IsNotExist(sidecarErr) && strings.TrimSpace(legacyGoal) != "" {
 		ctrl.SetGoal(strings.TrimSpace(legacyGoal))
 	}
+}
+
+// configureControllerRuntime applies the non-persisted runtime posture before
+// Resume. Session grants are copied before a lease is acquired so a replacement
+// is fully configured but cannot run against the session until ownership is
+// established.
+func configureControllerRuntime(ctrl, oldCtrl control.SessionAPI, runtime normalizedTabRuntime) {
+	if ctrl == nil {
+		return
+	}
+	ctrl.EnableInteractiveApproval()
+	applyTabModeToController(ctrl, runtime.tabMode())
+	applyTabToolApprovalModeToController(ctrl, runtime.toolApprovalMode)
+	if next, ok := ctrl.(*control.Controller); ok {
+		if prev, ok := oldCtrl.(*control.Controller); ok {
+			next.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+		}
+	}
+}
+
+func normalizeRestoredControllerRuntime(ctrl control.SessionAPI, requested normalizedTabRuntime) (normalizedTabRuntime, error) {
+	if ctrl == nil {
+		return normalizedTabRuntime{}, fmt.Errorf("replacement controller is nil")
+	}
+	plan := requested.collaborationMode == "plan"
+	ctrl.SetPlanMode(plan)
+	applyTabToolApprovalModeToController(ctrl, requested.toolApprovalMode)
+	if plan && ctrl.GoalStatus() == control.GoalStatusRunning {
+		// Explicit Plan wins over inconsistent legacy data. Clearing the running
+		// Goal also prevents a stale scope from being executed after approval.
+		ctrl.ClearGoal()
+	}
+
+	actual := requested
+	actual.collaborationMode = "normal"
+	actual.legacyGoal = ""
+	switch {
+	case ctrl.PlanMode():
+		actual.collaborationMode = "plan"
+	case ctrl.GoalStatus() == control.GoalStatusRunning && strings.TrimSpace(ctrl.Goal()) != "":
+		actual.collaborationMode = "goal"
+		actual.legacyGoal = strings.TrimSpace(ctrl.Goal())
+	}
+	actual.toolApprovalMode = normalizeToolApprovalMode(ctrl.ToolApprovalMode())
+	if ctrl.PlanMode() != (actual.collaborationMode == "plan") {
+		return normalizedTabRuntime{}, fmt.Errorf("replacement collaboration mode validation failed")
+	}
+	if actual.toolApprovalMode != normalizeToolApprovalMode(requested.toolApprovalMode) {
+		return normalizedTabRuntime{}, fmt.Errorf("replacement tool approval mode = %q, want %q", actual.toolApprovalMode, requested.toolApprovalMode)
+	}
+	return actual, nil
+}
+
+func resumeControllerRuntimeWithMessages(ctrl control.SessionAPI, messages []provider.Message, path string, requested normalizedTabRuntime) (normalizedTabRuntime, error) {
+	resumeWithFreshSystemPromptAndGoal(ctrl, messages, path, requested.legacyGoal)
+	return normalizeRestoredControllerRuntime(ctrl, requested)
+}
+
+func resumeControllerRuntimeWithSession(ctrl control.SessionAPI, session *agent.Session, path string, requested normalizedTabRuntime) (normalizedTabRuntime, error) {
+	if session != nil {
+		resumeLoadedSessionAndGoal(ctrl, session, path, requested.legacyGoal)
+	} else {
+		resumeWithFreshSystemPromptAndGoal(ctrl, nil, path, requested.legacyGoal)
+	}
+	return normalizeRestoredControllerRuntime(ctrl, requested)
 }

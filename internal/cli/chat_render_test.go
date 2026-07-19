@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"charm.land/bubbles/v2/textarea"
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // newTestChatTUI builds a chatTUI with just the pieces the streaming/commit and
@@ -33,7 +35,6 @@ func newTestChatTUI() chatTUI {
 		reasoning:            &strings.Builder{},
 		pending:              &strings.Builder{},
 		pendingCommit:        &commit,
-		renderer:             newMarkdownRenderer(80),
 		shellOutputs:         shellOut,
 		shellExpanded:        shellExp,
 		shellTranscriptIdx:   shellIdx,
@@ -69,8 +70,11 @@ func TestIngestSeparatesReasoningFromAnswer(t *testing.T) {
 	}
 
 	m.ingestEvent(event.Event{Kind: event.Text, Text: "Hello answer"}) // answer begins → block collapses
-	if len(m.transcript) != 1 || !strings.Contains(m.transcript[0], "thought for") {
-		t.Fatalf("block should collapse to a duration summary, transcript=%v", m.transcript)
+	if len(m.transcript) != 2 || !strings.Contains(m.transcript[0], "thought for") {
+		t.Fatalf("block should collapse to a duration summary plus answer separator, transcript=%v", m.transcript)
+	}
+	if strings.TrimSpace(m.transcript[1]) != "" {
+		t.Fatalf("reasoning/answer separator = %q, want one blank block", m.transcript[1])
 	}
 	if strings.Contains(strings.Join(m.transcript, "\n"), "…reasoning…") {
 		t.Fatalf("collapsed reasoning text should be removed, transcript=%v", m.transcript)
@@ -83,8 +87,43 @@ func TestIngestSeparatesReasoningFromAnswer(t *testing.T) {
 	}
 
 	m.commitPending() // turn end
-	if len(m.transcript) != 2 || !strings.Contains(m.transcript[1], "Hello") {
+	if len(m.transcript) != 3 || !strings.Contains(m.transcript[2], "Hello") {
 		t.Fatalf("answer should commit as a separate entry, transcript=%v", m.transcript)
+	}
+	if plain := ansi.Strip(m.transcript[2]); !strings.HasPrefix(plain, "  ◆ Reasonix\n\n  Hello answer") {
+		t.Fatalf("answer should have an explicit assistant identity and indented body, got %q", plain)
+	}
+}
+
+func TestAssistantAnswerWithoutReasoningHasNoLeadingSpacer(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Direct answer"})
+	m.ingestEvent(event.Event{Kind: event.Message})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("direct answer should remain one compact block, got %d: %v", len(m.transcript), m.transcript)
+	}
+	if plain := ansi.Strip(m.transcript[0]); !strings.HasPrefix(plain, "  ◆ Reasonix\n\n  Direct answer") {
+		t.Fatalf("direct answer block = %q", plain)
+	}
+}
+
+func TestTurnReceiptLeavesOneBlankRowAfterAssistantAnswer(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Answer"})
+	m.ingestEvent(event.Event{Kind: event.Message})
+	m.ingestEvent(event.Event{Kind: event.Usage, Usage: &provider.Usage{
+		PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12,
+	}})
+
+	if len(m.transcript) != 3 {
+		t.Fatalf("answer + spacer + receipt should be three blocks, got %d: %v", len(m.transcript), m.transcript)
+	}
+	if strings.TrimSpace(m.transcript[1]) != "" {
+		t.Fatalf("answer/receipt separator = %q, want one blank block", m.transcript[1])
+	}
+	if !strings.Contains(ansi.Strip(m.transcript[2]), "TURN") {
+		t.Fatalf("last block should be the turn receipt, got %q", m.transcript[2])
 	}
 }
 
@@ -98,14 +137,17 @@ func TestVerboseReasoningInsertsTextUnderSummary(t *testing.T) {
 	m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "step two"})
 	m.ingestEvent(event.Event{Kind: event.Text, Text: "Answer"}) // closes the block
 
-	if len(m.transcript) != 2 {
-		t.Fatalf("verbose block should be summary + text, transcript=%v", m.transcript)
+	if len(m.transcript) != 3 {
+		t.Fatalf("verbose block should be summary + text + answer separator, transcript=%v", m.transcript)
 	}
 	if !strings.Contains(m.transcript[0], "thought for") {
 		t.Errorf("first line should be the duration summary, got %q", m.transcript[0])
 	}
 	if !strings.Contains(m.transcript[1], "step one") || !strings.Contains(m.transcript[1], "step two") {
 		t.Errorf("verbose text should appear under the summary, got %q", m.transcript[1])
+	}
+	if strings.TrimSpace(m.transcript[2]) != "" {
+		t.Errorf("verbose reasoning/answer separator = %q, want blank block", m.transcript[2])
 	}
 }
 

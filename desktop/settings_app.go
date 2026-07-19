@@ -92,6 +92,7 @@ type ProviderModelOverrideView struct {
 	SupportedEfforts  []string `json:"supportedEfforts"`
 	DefaultEffort     string   `json:"defaultEffort"`
 	Vision            *bool    `json:"vision"`
+	ContextWindow     int      `json:"contextWindow,omitempty"`
 }
 
 type PermissionsView struct {
@@ -128,13 +129,15 @@ type NetworkView struct {
 }
 
 type AgentView struct {
-	Temperature       float64 `json:"temperature"`
-	MaxSteps          int     `json:"maxSteps"`
-	PlannerMaxSteps   int     `json:"plannerMaxSteps"`
-	MaxSubagentDepth  int     `json:"maxSubagentDepth"`
-	SystemPrompt      string  `json:"systemPrompt"`
-	ColdResumePrune   bool    `json:"coldResumePrune"`
-	ReasoningLanguage string  `json:"reasoningLanguage"`
+	Temperature            float64 `json:"temperature"`
+	MaxSteps               int     `json:"maxSteps"`
+	PlannerMaxSteps        int     `json:"plannerMaxSteps"`
+	MaxSubagentDepth       int     `json:"maxSubagentDepth"`
+	MaxSubagentConcurrency int     `json:"maxSubagentConcurrency"`
+	MaxParallelWriters     int     `json:"maxParallelWriters"`
+	SystemPrompt           string  `json:"systemPrompt"`
+	ColdResumePrune        bool    `json:"coldResumePrune"`
+	ReasoningLanguage      string  `json:"reasoningLanguage"`
 }
 
 type BotAllowlistView struct {
@@ -274,8 +277,8 @@ type SettingsView struct {
 	CheckUpdates            bool                 `json:"checkUpdates"`
 	Telemetry               bool                 `json:"telemetry"`
 	Metrics                 bool                 `json:"metrics"`
-	MemoryCompiler          bool                 `json:"memoryCompilerEnabled"`
 	ExpandThinking          bool                 `json:"expandThinking"`
+	ConversationWidth       string               `json:"conversationWidth,omitempty"`
 	ConfigPath              string               `json:"configPath"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
@@ -302,6 +305,8 @@ type DesktopStartupSettingsView struct {
 	StatusBarStyle     string          `json:"statusBarStyle"`
 	StatusBarItems     []string        `json:"statusBarItems"`
 	CheckUpdates       bool            `json:"checkUpdates"`
+	SafeMode           bool            `json:"safeMode,omitempty"`
+	ConversationWidth  string          `json:"conversationWidth,omitempty"`
 }
 
 func nonNil(s []string) []string {
@@ -354,6 +359,7 @@ func providerModelOverridesForView(overrides map[string]config.ProviderModelOver
 			SupportedEfforts:  nonNil(ov.SupportedEfforts),
 			DefaultEffort:     ov.DefaultEffort,
 			Vision:            ov.Vision,
+			ContextWindow:     ov.ContextWindow,
 		})
 	}
 	return out
@@ -378,8 +384,9 @@ func providerModelOverridesForSave(overrides []ProviderModelOverrideView, models
 			SupportedEfforts:  nonNil(item.SupportedEfforts),
 			DefaultEffort:     strings.TrimSpace(item.DefaultEffort),
 			Vision:            item.Vision,
+			ContextWindow:     max(item.ContextWindow, 0),
 		}
-		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil {
+		if strings.TrimSpace(ov.ReasoningProtocol) == "" && len(ov.SupportedEfforts) == 0 && strings.TrimSpace(ov.DefaultEffort) == "" && ov.Vision == nil && ov.ContextWindow == 0 {
 			continue
 		}
 		out[model] = ov
@@ -756,6 +763,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 			StatusBarStyle:     "text",
 			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:       true,
+			ConversationWidth:  "standard",
 		}
 	}
 	return DesktopStartupSettingsView{
@@ -768,6 +776,8 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
 		StatusBarItems:     cfg.DesktopStatusBarItems(),
 		CheckUpdates:       cfg.DesktopCheckUpdates(),
+		SafeMode:           cfg.SafeMode(),
+		ConversationWidth:  cfg.DesktopConversationWidth(),
 	}
 }
 
@@ -777,9 +787,13 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 func (a *App) DesktopStartupSettings() DesktopStartupSettingsView {
 	cfg, _, err := a.loadDesktopUserConfigForView()
 	if err != nil {
-		return desktopStartupSettingsFromConfig(nil)
+		view := desktopStartupSettingsFromConfig(nil)
+		view.SafeMode = config.SafeModeRequested()
+		return view
 	}
-	return desktopStartupSettingsFromConfig(cfg)
+	view := desktopStartupSettingsFromConfig(cfg)
+	view.SafeMode = config.SafeModeRequested()
+	return view
 }
 
 // Settings returns the current configuration for the Settings panel.
@@ -797,8 +811,15 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox:                 SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
-			Agent:                   AgentView{PlannerMaxSteps: 0, MaxSubagentDepth: agent.DefaultMaxSubagentDepth, ColdResumePrune: true, ReasoningLanguage: "auto"},
+			Sandbox: SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
+			Agent: AgentView{
+				PlannerMaxSteps:        0,
+				MaxSubagentDepth:       agent.DefaultMaxSubagentDepth,
+				MaxSubagentConcurrency: agent.DefaultMaxSubagentConcurrency,
+				MaxParallelWriters:     agent.DefaultMaxParallelWriters,
+				ColdResumePrune:        true,
+				ReasoningLanguage:      "auto",
+			},
 			Bot:                     botSettingsView(config.BotConfig{}),
 			AutoPlan:                "off",
 			DesktopLayoutStyle:      "workbench",
@@ -812,8 +833,8 @@ func (a *App) Settings() SettingsView {
 			CheckUpdates:            true,
 			Telemetry:               true,
 			Metrics:                 true,
-			MemoryCompiler:          true,
 			ExpandThinking:          false,
+			ConversationWidth:       "standard",
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -862,7 +883,17 @@ func (a *App) Settings() SettingsView {
 				Password: cfg.Network.Proxy.Password,
 			},
 		},
-		Agent:                   AgentView{Temperature: cfg.Agent.Temperature, MaxSteps: cfg.Agent.MaxSteps, PlannerMaxSteps: cfg.Agent.PlannerMaxSteps, MaxSubagentDepth: desktopMaxSubagentDepth(cfg.Agent.MaxSubagentDepth), SystemPrompt: cfg.Agent.SystemPrompt, ColdResumePrune: cfg.ColdResumePruneEnabled(), ReasoningLanguage: cfg.ReasoningLanguage()},
+		Agent: AgentView{
+			Temperature:            cfg.Agent.Temperature,
+			MaxSteps:               cfg.Agent.MaxSteps,
+			PlannerMaxSteps:        cfg.Agent.PlannerMaxSteps,
+			MaxSubagentDepth:       desktopMaxSubagentDepth(cfg.Agent.MaxSubagentDepth),
+			MaxSubagentConcurrency: desktopSubagentConcurrency(cfg.Agent.MaxSubagentConcurrency),
+			MaxParallelWriters:     desktopParallelWriters(cfg.Agent.MaxParallelWriters, cfg.Agent.MaxSubagentConcurrency),
+			SystemPrompt:           cfg.Agent.SystemPrompt,
+			ColdResumePrune:        cfg.ColdResumePruneEnabled(),
+			ReasoningLanguage:      cfg.ReasoningLanguage(),
+		},
 		Bot:                     botSettingsView(cfg.Bot),
 		DesktopLanguage:         cfg.DesktopLanguage(),
 		DesktopLayoutStyle:      cfg.DesktopLayoutStyle(),
@@ -876,8 +907,8 @@ func (a *App) Settings() SettingsView {
 		CheckUpdates:            cfg.DesktopCheckUpdates(),
 		Telemetry:               cfg.DesktopTelemetry(),
 		Metrics:                 cfg.DesktopMetrics(),
-		MemoryCompiler:          cfg.MemoryCompilerEnabled(),
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
+		ConversationWidth:       cfg.DesktopConversationWidth(),
 		ConfigPath:              cfgPath,
 		ProviderKinds:           nonNil(provider.Kinds()),
 		AutoApproveTools:        ctrl != nil && ctrl.AutoApproveTools(),
@@ -1558,6 +1589,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 		carried = oldCtrl.History()
 	}
 	snap := a.tabRuntimeSnapshot(tab)
+	runtime := snap.normalizedRuntime()
 	model := snap.model
 	if cfg, err := config.LoadForRoot(snap.workspaceRoot); err == nil {
 		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
@@ -1574,7 +1606,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
 		EffortOverride:           cloneStringPtr(snap.effort),
-		TokenMode:                snap.currentTokenMode(),
+		TokenMode:                runtime.tokenMode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
@@ -1595,27 +1627,17 @@ func (a *App) rebuildSettingLocked(setting string) error {
 		return err
 	}
 	a.bindControllerDisplayRecorder(ctrl)
-	ctrl.EnableInteractiveApproval()
-	applyTabModeToController(ctrl, snap.mode)
-	// applyTabModeToController only encodes plan+yolo from tab.mode.
-	// Apply the explicit toolApprovalMode (ask/auto/yolo) afterwards so
-	// "auto" is not lost — otherwise rebuild would silently downgrade
-	// auto to ask (#5424 regression).
-	if mode := strings.TrimSpace(snap.toolApprovalMode); mode != "" {
-		applyTabToolApprovalModeToController(ctrl, mode)
-	}
-	// A rebuild must not force the user to re-approve tools already granted
-	// this session, or re-trust Plan-mode read-only commands already trusted
-	// this session.
-	if prev, ok := oldCtrl.(*control.Controller); ok {
-		ctrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
-	}
+	configureControllerRuntime(ctrl, oldCtrl, runtime)
 	path := agent.ContinueSessionPath(prevPath, ctrl.SessionDir(), ctrl.Label())
 	if err := a.ensureTabSessionLeaseForRebuild(tab, path, setting); err != nil {
 		ctrl.Close()
 		return err
 	}
-	resumeWithFreshSystemPromptAndGoal(ctrl, carried, path, snap.goal)
+	restoredRuntime, err := resumeControllerRuntimeWithMessages(ctrl, carried, path, runtime)
+	if err != nil {
+		ctrl.Close()
+		return err
+	}
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current != tab {
 		a.mu.Unlock()
@@ -1626,6 +1648,7 @@ func (a *App) rebuildSettingLocked(setting string) error {
 	tab.Ctrl = ctrl
 	tab.model = model
 	tab.Label = ctrl.Label()
+	applyNormalizedRuntimeToTabLocked(tab, restoredRuntime)
 	clearTabStartupError(tab)
 	tab.Ready = true
 	// Supersede any in-flight startup build: it would otherwise finish later,
@@ -1842,7 +1865,37 @@ func (a *App) SetMaxSubagentDepth(depth int) error {
 	})
 }
 
-// SetAutoPlan updates the automatic plan-mode gate (off|on).
+func desktopSubagentConcurrency(n int) int {
+	total, _ := agent.NormalizeConcurrencyLimits(n, 0)
+	return total
+}
+
+func desktopParallelWriters(writers, total int) int {
+	_, w := agent.NormalizeConcurrencyLimits(total, writers)
+	return w
+}
+
+// SetMaxSubagentConcurrency sets the session-wide sub-agent concurrency cap (1–32).
+func (a *App) SetMaxSubagentConcurrency(n int) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		total, writers := agent.NormalizeConcurrencyLimits(n, c.Agent.MaxParallelWriters)
+		c.Agent.MaxSubagentConcurrency = total
+		c.Agent.MaxParallelWriters = writers
+		return nil
+	})
+}
+
+// SetMaxParallelWriters sets the concurrent writer cap (1–32, ≤ total concurrency).
+func (a *App) SetMaxParallelWriters(n int) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		total, writers := agent.NormalizeConcurrencyLimits(c.Agent.MaxSubagentConcurrency, n)
+		c.Agent.MaxSubagentConcurrency = total
+		c.Agent.MaxParallelWriters = writers
+		return nil
+	})
+}
+
+// SetAutoPlan updates the automatic plan-first workflow setting (off|on).
 func (a *App) SetAutoPlan(mode string) error {
 	if err := a.ensureLiveControllersRuntimeMutationAllowed("auto-plan"); err != nil {
 		return err
@@ -1886,57 +1939,6 @@ func (a *App) SetDefaultToolApprovalMode(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error {
 		return c.SetDesktopDefaultToolApprovalMode(mode)
 	})
-}
-
-// SetMemoryCompilerEnabled toggles the Memory v5 execution compiler.
-func (a *App) SetMemoryCompilerEnabled(enabled bool) error {
-	// Lock only the load-modify-save cycle; the live-controller fan-out below
-	// must not hold the config edit lock.
-	if err := func() error {
-		unlock := config.LockUserConfigEdits()
-		defer unlock()
-		cfg, path, err := a.loadDesktopUserConfigForEdit()
-		if err != nil {
-			return err
-		}
-		if err := cfg.SetMemoryCompilerEnabled(enabled); err != nil {
-			return err
-		}
-		return cfg.SaveTo(path)
-	}(); err != nil {
-		return err
-	}
-	a.applyMemoryCompilerToLiveControllers(enabled)
-	return nil
-}
-
-func (a *App) applyMemoryCompilerToLiveControllers(enabled bool) {
-	if a == nil {
-		return
-	}
-	var controllers []memoryCompilerTarget
-	a.mu.RLock()
-	for _, id := range a.orderedTabIDsLocked() {
-		tab := a.tabs[id]
-		if tab == nil || tab.Ctrl == nil {
-			continue
-		}
-		controllers = append(controllers, tab.Ctrl)
-	}
-	a.mu.RUnlock()
-	applyMemoryCompilerToControllers(enabled, controllers)
-}
-
-type memoryCompilerTarget interface {
-	SetMemoryCompilerEnabled(enabled bool)
-}
-
-func applyMemoryCompilerToControllers(enabled bool, controllers []memoryCompilerTarget) {
-	for _, ctrl := range controllers {
-		if ctrl != nil {
-			ctrl.SetMemoryCompilerEnabled(enabled)
-		}
-	}
 }
 
 func desktopAutoPlanMode(mode string) string {
@@ -3048,6 +3050,12 @@ func (a *App) SetExpandThinking(on bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetExpandThinking(on) })
 }
 
+// SetDesktopConversationWidth sets the max transcript width preference.
+// standard = 960px fixed; full = 90% of the parent, with a 960px floor. Pure config-only.
+func (a *App) SetDesktopConversationWidth(width string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopConversationWidth(width) })
+}
+
 // MigrateDesktopPreferences imports old browser-local desktop preferences into
 // the user config once. Existing [desktop] values win so stale localStorage never
 // overwrites an explicit config edit.
@@ -3067,13 +3075,14 @@ func (a *App) MigrateDesktopPreferences(language, theme, style string) error {
 	})
 }
 
-// SetAgentParams updates sampling temperature, optional step guards, and the
-// base system prompt.
+// SetAgentParams updates sampling temperature and the base system prompt. The
+// step arguments remain in the Wails contract for older frontends, but are
+// retired and deliberately normalized to automatic execution.
 func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps int, systemPrompt string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Agent.Temperature = temperature
-		c.Agent.MaxSteps = maxSteps
-		c.Agent.PlannerMaxSteps = plannerMaxSteps
+		c.Agent.MaxSteps = 0
+		c.Agent.PlannerMaxSteps = 0
 		c.Agent.SystemPrompt = systemPrompt
 		return nil
 	})

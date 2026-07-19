@@ -135,6 +135,9 @@ commands, `@` references, and two-model setup are all in the
 - **[Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md)** —
   `reasonix doctor capabilities`, desktop Settings → Diagnostics, and the
   `/reasonix-guide` skill for skills/hooks/MCP/plugin troubleshooting.
+- **[Recovery and Safe Mode](./docs/RECOVERY.md)** — Guard diagnostics,
+  configuration snapshots, native recovery, update rollback, and optional
+  AI-assisted repair plans.
 - **[Bot guide](./docs/BOT_GUIDE.md)** — connect Feishu, Lark, and WeChat bots
   from the desktop app, then use approvals, YOLO, and commands from IM.
 - **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,

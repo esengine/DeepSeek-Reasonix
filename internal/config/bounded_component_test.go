@@ -17,8 +17,7 @@ func TestWorkspaceSlugShortPathUnchanged(t *testing.T) {
 
 // TestWorkspaceSlugBoundsDeepPaths: a workspace path whose flattened slug
 // exceeds the 255-byte filename component limit used to make every derived
-// directory (project sessions, MemoryCompiler, auto-memory) uncreatable with
-// ENAMETOOLONG.
+// directory (project sessions, auto-memory) uncreatable with ENAMETOOLONG.
 func TestWorkspaceSlugBoundsDeepPaths(t *testing.T) {
 	deep := "/data/" + strings.Repeat("deeply-nested-workspace-segment/", 12) + "proj"
 	slug := WorkspaceSlug(deep)

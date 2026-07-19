@@ -32,6 +32,32 @@ func ConfineBash(spec sandbox.Spec, guard SessionDataGuard, timeout ...time.Dura
 	return b
 }
 
+// RebindBashWriteRoots returns a copy of bash with its complete write surface
+// narrowed to roots. ok is false when tl is not a confined bash tool, when the
+// sandbox is not enforcing (cannot honour narrower roots), or when roots is empty.
+// Callers that wrap bash (e.g. foreground-only subagent wrappers) must unwrap
+// before calling and re-wrap the result.
+func RebindBashWriteRoots(tl tool.Tool, roots []string) (tool.Tool, bool) {
+	b, ok := tl.(bash)
+	if !ok || !b.sb.Enforce() {
+		return nil, false
+	}
+	rs := realRoots(roots)
+	if len(rs) == 0 {
+		return nil, false
+	}
+	spec := b.sb
+	spec.WriteRoots = rs
+	// Sub-agent claims are strict capability boundaries. Do not add the normal
+	// build-cache and temporary-directory allowances outside the claimed roots.
+	spec.MinimalWrites = true
+	// Do not inherit a wider AppContainer write lane from the parent workspace
+	// confinement — the claim roots are the only allowed write surface.
+	spec.AppContainerWriteRoots = append([]string(nil), rs...)
+	b.sb = spec
+	return b, true
+}
+
 // ConfineWebFetch returns the web_fetch built-in bound to Reasonix proxy
 // settings while preserving its SSRF-guarded dialer.
 func ConfineWebFetch(proxySpec netclient.ProxySpec) tool.Tool {

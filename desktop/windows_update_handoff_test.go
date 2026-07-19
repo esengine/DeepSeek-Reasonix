@@ -23,10 +23,12 @@ func TestWindowsUpdateHandoffArgsCarryParentInstallAndRelaunch(t *testing.T) {
 		`C:\Users\Jane Doe\AppData\Local\Reasonix\updates\Reasonix-windows-amd64-installer.exe`,
 		`D:\Tools\Reasonix App`,
 		`D:\Tools\Reasonix App\reasonix-desktop.exe`,
+		"v1.6.0",
 	)
 	want := []string{
 		"--parent-pid", "4242",
 		"--installer", `C:\Users\Jane Doe\AppData\Local\Reasonix\updates\Reasonix-windows-amd64-installer.exe`,
+		"--to-version", "v1.6.0",
 		"--install-dir", `D:\Tools\Reasonix App`,
 		"--relaunch", `D:\Tools\Reasonix App\reasonix-desktop.exe`,
 	}
@@ -43,12 +45,23 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	script := string(data)
 	for _, want := range []string{
 		`!define REASONIX_UPDATE_HELPER "reasonix-update-helper.exe"`,
+		`!define REASONIX_GUARD "reasonix-guard.exe"`,
+		`!define REASONIX_LAUNCHER "reasonix-launcher.exe"`,
+		`!define REASONIX_CLI "reasonix.exe"`,
+		`!define REASONIX_PORTABLE_ENTRY "Reasonix.exe"`,
 		"Function reasonix.waitForExecutableUnlock",
 		`FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a`,
+		`FileOpen $1 "$INSTDIR\${REASONIX_GUARD}" a`,
+		`FileOpen $1 "$INSTDIR\${REASONIX_LAUNCHER}" a`,
+		`FileOpen $1 "$INSTDIR\${REASONIX_CLI}" a`,
+		`FileOpen $1 "$INSTDIR\${REASONIX_PORTABLE_ENTRY}" a`,
 		"SetErrorLevel 1618",
 		"Call reasonix.waitForExecutableUnlock",
 		`File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"`,
+		`File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"`,
+		`File "/oname=${REASONIX_PORTABLE_ENTRY}" "${REASONIX_LAUNCHER}"`,
 		`Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"`,
+		`Delete "$INSTDIR\${REASONIX_CLI}"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("project.nsi missing %q", want)
@@ -69,13 +82,29 @@ func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) 
 	script := string(data)
 	for _, want := range []string{
 		`UPDATE_HELPER="reasonix-update-helper.exe"`,
+		`go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource`,
 		`GOOS=windows GOARCH="$arch" go build`,
 		`./cmd/update-helper`,
 		`build/windows/installer/$UPDATE_HELPER`,
+		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER"`,
 		`cp "$helper" "$staging/$UPDATE_HELPER"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh missing %q", want)
 		}
+	}
+}
+
+func TestWindowsUpdateRequiresObservedHelperHandoff(t *testing.T) {
+	data, err := os.ReadFile("updater_windows.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(data)
+	if !strings.Contains(source, "return startWindowsUpdateHelper(") {
+		t.Fatal("Windows update handoff does not require the observed helper path")
+	}
+	if strings.Contains(source, "return installerCommand(installerPath, installDir).Start()") {
+		t.Fatal("Windows update silently falls back to an unobserved installer")
 	}
 }

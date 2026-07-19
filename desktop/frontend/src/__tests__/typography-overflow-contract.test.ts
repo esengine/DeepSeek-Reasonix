@@ -172,6 +172,10 @@ eq(finalDeclaration(".composer-meta__control--intent", "max-width"), "72px", "ta
 eq(finalDeclaration(".composer-task-mode-trigger__value", "text-overflow"), "ellipsis", "task method selector truncates its value only when constrained");
 eq(finalDeclaration(".composer-meta .modelsw__trigger", "font-weight"), "var(--composer-control-font-weight)", "model selector uses the shared control weight");
 eq(finalDeclaration(".composer-meta__divider", "height"), "18px", "execution policy and model settings have a compact visual divider");
+ok(
+  /@container \(max-width: 560px\)\s*\{[\s\S]*?\.composer-meta__control--more\s*\{[\s\S]*?flex-basis:\s*38px;/.test(styles),
+  "composer enters icon-only mode before model and effort controls overlap",
+);
 eq(finalDeclaration(".composer-modebar--approval", "--composer-modebar-active-bg"), "var(--mode-auto-bg)", "ask approval restores the solid semantic fill");
 eq(finalDeclaration('.composer-modebar--approval[data-mode="auto"]', "--composer-modebar-active-fg"), "#fff", "auto approval keeps high-contrast text on its solid fill");
 eq(finalDeclaration('.composer-modebar--approval[data-mode="yolo"]', "--composer-modebar-active-bg"), "var(--mode-yolo-bg)", "yolo approval restores the solid warning fill");
@@ -188,13 +192,102 @@ eq(finalDeclaration(".composer-meta .modelsw__trigger:focus-visible", "box-shado
 eq(finalDeclaration(":root[data-theme-style] .composer-modebar__item--active:focus-visible", "box-shadow"), "var(--focus-ring)", "active permission options retain keyboard focus feedback");
 eq(
   finalDeclaration(".app--creation .msg--assistant .msg__body", "font-size"),
-  "calc(14px * var(--font-scale))",
-  "creation assistant body text follows interface text size",
+  "var(--font-content)",
+  "creation assistant body text follows the conversation text size",
+);
+eq(
+  finalDeclaration(":root[data-theme-style] .msg--assistant .msg__body", "font-size"),
+  "var(--font-content)",
+  "themed assistant body text follows the conversation text size",
+);
+eq(
+  finalDeclaration(".app--creation .msg--assistant .msg__body", "font-family"),
+  "var(--font-content-family)",
+  "creation assistant body follows the conversation font family",
+);
+eq(
+  finalDeclaration(".app--creation .md", "font-family"),
+  "var(--font-content-family)",
+  "creation markdown follows the conversation font family",
 );
 eq(
   finalDeclaration(".app--creation .composer__input", "font-size"),
-  "calc(14.5px * var(--font-scale))",
-  "creation composer input follows interface text size",
+  "var(--font-content)",
+  "creation composer input follows the composer text size",
+);
+eq(
+  finalDeclaration("body", "--text-base"),
+  "var(--typography-interface-size, calc(14px * var(--font-scale)))",
+  "interface text resolves its own exact regional size",
+);
+eq(
+  finalDeclaration(".transcript", "--text-base"),
+  "var(--typography-conversation-size, calc(14px * var(--font-scale)))",
+  "conversation text resolves its own exact regional size",
+);
+eq(
+  finalDeclaration(".composer-wrap", "--text-base"),
+  "var(--typography-composer-size, calc(14px * var(--font-scale)))",
+  "composer text resolves its own exact regional size",
+);
+eq(
+  finalDeclaration(".code", "--font-code"),
+  "var(--typography-code-size, calc(12px * var(--font-scale)))",
+  "code text resolves its own exact regional size",
+);
+eq(finalDeclaration(".code", "font-family"), "var(--font-code-family)", "code blocks keep the regional code font");
+eq(finalDeclaration(".md-code", "font-family"), "var(--font-code-family)", "inline code keeps the regional code font");
+eq(
+  finalDeclaration(".diff", "font-size"),
+  "var(--typography-code-size, calc(12.5px * var(--global-font-scale)))",
+  "diff text follows the global scale until the code region is customized",
+);
+eq(finalDeclaration(".msg-meta", "font-size"), "var(--font-status)", "message metadata keeps its regional size");
+eq(
+  finalDeclaration(".composer-meta", "font-family"),
+  "var(--font-metadata-family)",
+  "composer metadata keeps the regional font",
+);
+eq(finalDeclaration(".statusbar", "font-family"), "var(--font-metadata-family)", "status bar keeps the regional font");
+eq(
+  finalDeclaration(".typography-settings__preview", "--preview-size"),
+  "var(--typography-conversation-size, calc(14px * var(--global-font-scale)))",
+  "conversation preview uses the exact conversation size",
+);
+eq(
+  finalDeclaration(".typography-settings__preview--interface", "--preview-size"),
+  "var(--typography-interface-size, calc(14px * var(--global-font-scale)))",
+  "interface preview uses the exact interface size",
+);
+eq(
+  finalDeclaration(".typography-settings__preview--composer", "--preview-size"),
+  "var(--typography-composer-size, calc(14px * var(--global-font-scale)))",
+  "composer preview uses the exact composer size",
+);
+eq(
+  finalDeclaration(".typography-settings__preview--code", "--preview-size"),
+  "var(--typography-code-size, calc(12px * var(--global-font-scale)))",
+  "code preview uses the exact code size",
+);
+eq(
+  finalDeclaration(".typography-settings__preview--metadata", "--preview-size"),
+  "var(--typography-metadata-size, calc(12px * var(--global-font-scale)))",
+  "metadata preview uses the exact supporting-text size",
+);
+eq(
+  finalDeclaration(".typography-settings__preview-body", "font-size"),
+  "var(--preview-size)",
+  "live preview renders the selected region's exact size",
+);
+eq(
+  finalDeclaration(".app--creation .reasoning__body", "font-family"),
+  "var(--font-content-family)",
+  "creation reasoning keeps the conversation font",
+);
+eq(
+  finalDeclaration(".app--creation .tool__name", "font-family"),
+  "var(--font-code-family)",
+  "creation tool names keep the code font",
 );
 ok(
   !/\.app--creation[^{]*\{[^}]*font-size:\s*[0-9.]+px\s*(?:!important\s*)?;/.test(styles),

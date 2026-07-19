@@ -41,6 +41,18 @@ func TestWithReasoningLanguageOnlySkipsLeadingInjectedBlock(t *testing.T) {
 	}
 }
 
+func TestReasoningLanguageBlockZhStaysImperative(t *testing.T) {
+	// The imperative form measurably outperforms soft "偏好" phrasing on
+	// Chinese prompts that embed English logs/code; keep it from regressing
+	// back into a suggestion.
+	block := ReasoningLanguageBlock("zh")
+	for _, want := range []string{"必须使用简体中文", "整轮", "不覆盖用户对最终回答语言的明确要求"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("zh reasoning block lost required anchor %q:\n%s", want, block)
+		}
+	}
+}
+
 func TestWithReasoningLanguageAutoInfersFromSource(t *testing.T) {
 	chinese := WithReasoningLanguage("解释 AuthHandler 的 panic", "auto")
 	if !strings.HasPrefix(chinese, "<reasoning-language>") || !strings.Contains(chinese, "简体中文") {

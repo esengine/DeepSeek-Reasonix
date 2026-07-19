@@ -84,6 +84,29 @@ func TestProviderViewFromEntry_FiltersNonChatModels(t *testing.T) {
 	}
 }
 
+func TestProviderModelOverridesPreservePerModelContextWindow(t *testing.T) {
+	overrides := map[string]config.ProviderModelOverride{
+		"short-model": {ContextWindow: 32_768},
+		"long-model":  {ContextWindow: 1_000_000},
+		"removed":     {ContextWindow: 8_192},
+	}
+	models := []string{"short-model", "long-model"}
+
+	view := providerModelOverridesForView(overrides, models)
+	if len(view) != 2 || view[0].Model != "long-model" || view[0].ContextWindow != 1_000_000 || view[1].Model != "short-model" || view[1].ContextWindow != 32_768 {
+		t.Fatalf("provider model override view = %+v", view)
+	}
+
+	view[0].ContextWindow = -1
+	saved := providerModelOverridesForSave(view, models)
+	if _, ok := saved["long-model"]; ok {
+		t.Fatalf("non-positive context-only override should be removed: %+v", saved)
+	}
+	if got := saved["short-model"].ContextWindow; got != 32_768 {
+		t.Fatalf("saved short-model context window = %d, want 32768", got)
+	}
+}
+
 func TestProviderViewFromEntry_MigratesProviderWideVision(t *testing.T) {
 	p := config.ProviderEntry{
 		Name:   "custom",
@@ -727,7 +750,7 @@ func TestOfficialDeepSeekTemplateDefaultsToRMBPricing(t *testing.T) {
 	}
 }
 
-func TestSetAgentParamsPersistsStepLimitsToUserConfig(t *testing.T) {
+func TestSetAgentParamsIgnoresDeprecatedStepLimits(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -736,16 +759,16 @@ func TestSetAgentParamsPersistsStepLimitsToUserConfig(t *testing.T) {
 	}
 
 	view := app.Settings()
-	if view.Agent.MaxSteps != 37 || view.Agent.PlannerMaxSteps != 9 {
-		t.Fatalf("Settings().Agent = %+v, want maxSteps=37 plannerMaxSteps=9", view.Agent)
+	if view.Agent.MaxSteps != 0 || view.Agent.PlannerMaxSteps != 0 {
+		t.Fatalf("Settings().Agent = %+v, want deprecated step limits normalized to zero", view.Agent)
 	}
 	if view.Agent.Temperature != 0.35 || view.Agent.SystemPrompt != "custom system" {
 		t.Fatalf("Settings().Agent did not preserve other agent params: %+v", view.Agent)
 	}
 
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.MaxSteps != 37 || cfg.Agent.PlannerMaxSteps != 9 {
-		t.Fatalf("saved config agent steps = max:%d planner:%d, want 37/9", cfg.Agent.MaxSteps, cfg.Agent.PlannerMaxSteps)
+	if cfg.Agent.MaxSteps != 0 || cfg.Agent.PlannerMaxSteps != 0 {
+		t.Fatalf("saved config agent steps = max:%d planner:%d, want automatic 0/0", cfg.Agent.MaxSteps, cfg.Agent.PlannerMaxSteps)
 	}
 	if cfg.Agent.Temperature != 0.35 || cfg.Agent.SystemPrompt != "custom system" {
 		t.Fatalf("saved config did not preserve other agent params: %+v", cfg.Agent)
@@ -1033,6 +1056,46 @@ func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	}
 }
 
+func TestSetDesktopConversationWidthPersistsToUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if got := app.Settings().ConversationWidth; got != "standard" {
+		t.Fatalf("Settings().ConversationWidth default = %q, want standard", got)
+	}
+	if got := app.DesktopStartupSettings().ConversationWidth; got != "standard" {
+		t.Fatalf("DesktopStartupSettings().ConversationWidth default = %q, want standard", got)
+	}
+	if err := app.SetDesktopConversationWidth("full"); err != nil {
+		t.Fatalf("SetDesktopConversationWidth: %v", err)
+	}
+	if got := app.Settings().ConversationWidth; got != "full" {
+		t.Fatalf("Settings().ConversationWidth = %q, want full", got)
+	}
+	if got := app.DesktopStartupSettings().ConversationWidth; got != "full" {
+		t.Fatalf("DesktopStartupSettings().ConversationWidth = %q, want full", got)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.DesktopConversationWidth(); got != "full" {
+		t.Fatalf("persisted conversation width = %q, want full", got)
+	}
+
+	if err := app.SetDesktopConversationWidth("wide"); err == nil {
+		t.Fatal("SetDesktopConversationWidth(wide) unexpectedly succeeded")
+	}
+	if got := config.LoadForEdit(config.UserConfigPath()).DesktopConversationWidth(); got != "full" {
+		t.Fatalf("invalid update changed persisted conversation width to %q", got)
+	}
+
+	raw, err := json.Marshal(app.DesktopStartupSettings())
+	if err != nil {
+		t.Fatalf("marshal DesktopStartupSettings: %v", err)
+	}
+	if !strings.Contains(string(raw), `"conversationWidth":"full"`) {
+		t.Fatalf("startup bridge payload omitted conversationWidth: %s", raw)
+	}
+}
+
 func TestSetDefaultToolApprovalModePersistsToUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1076,51 +1139,6 @@ func TestSetDesktopMetricsDefaultsOnAndPersistsOff(t *testing.T) {
 	}
 	if cfg.DesktopMetrics() {
 		t.Fatal("DesktopMetrics() = true, want false")
-	}
-}
-
-func TestSetMemoryCompilerDefaultsOnAndPersistsOff(t *testing.T) {
-	isolateDesktopUserDirs(t)
-
-	app := NewApp()
-	if !app.Settings().MemoryCompiler {
-		t.Fatal("Settings().MemoryCompiler default = false, want true")
-	}
-	if err := app.SetMemoryCompilerEnabled(false); err != nil {
-		t.Fatalf("SetMemoryCompilerEnabled: %v", err)
-	}
-	view := app.Settings()
-	if view.MemoryCompiler {
-		t.Fatal("Settings().MemoryCompiler = true, want false")
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.MemoryCompiler.Enabled == nil || *cfg.Agent.MemoryCompiler.Enabled {
-		t.Fatalf("agent.memory_compiler.enabled = %+v, want false", cfg.Agent.MemoryCompiler.Enabled)
-	}
-	if cfg.MemoryCompilerEnabled() {
-		t.Fatal("MemoryCompilerEnabled() = true, want false")
-	}
-}
-
-type memoryCompilerTargetFake struct {
-	calls []bool
-}
-
-func (f *memoryCompilerTargetFake) SetMemoryCompilerEnabled(enabled bool) {
-	f.calls = append(f.calls, enabled)
-}
-
-func TestApplyMemoryCompilerToControllersBroadcastsToAllTargets(t *testing.T) {
-	first := &memoryCompilerTargetFake{}
-	second := &memoryCompilerTargetFake{}
-
-	applyMemoryCompilerToControllers(false, []memoryCompilerTarget{first, nil, second})
-
-	if !reflect.DeepEqual(first.calls, []bool{false}) {
-		t.Fatalf("first calls = %v, want [false]", first.calls)
-	}
-	if !reflect.DeepEqual(second.calls, []bool{false}) {
-		t.Fatalf("second calls = %v, want [false]", second.calls)
 	}
 }
 
@@ -1225,7 +1243,7 @@ func TestSaveHooksSettingsNormalizesQuotedNodeEvalHookCommand(t *testing.T) {
 }
 
 func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
-	home := isolateDesktopUserDirs(t)
+	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	app := NewApp()
 	app.tabs = map[string]*WorkspaceTab{
@@ -1243,7 +1261,7 @@ func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
 	if err := app.TrustProjectHooks(); err != nil {
 		t.Fatalf("TrustProjectHooks: %v", err)
 	}
-	if !hook.IsTrusted(project, home) {
+	if !hook.IsTrusted(project, "") {
 		t.Fatal("project hooks were not trusted")
 	}
 	view := app.HooksSettings("project")
@@ -1259,7 +1277,7 @@ func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
 }
 
 func TestTrustProjectHooksForRootUsesDisplayedProjectRoot(t *testing.T) {
-	home := isolateDesktopUserDirs(t)
+	isolateDesktopUserDirs(t)
 	projectA := t.TempDir()
 	projectB := t.TempDir()
 	app := NewApp()
@@ -1272,10 +1290,10 @@ func TestTrustProjectHooksForRootUsesDisplayedProjectRoot(t *testing.T) {
 	if err := app.TrustProjectHooksForRoot(projectA); err != nil {
 		t.Fatalf("TrustProjectHooksForRoot: %v", err)
 	}
-	if !hook.IsTrusted(projectA, home) {
+	if !hook.IsTrusted(projectA, "") {
 		t.Fatal("displayed project root was not trusted")
 	}
-	if hook.IsTrusted(projectB, home) {
+	if hook.IsTrusted(projectB, "") {
 		t.Fatal("active project root was trusted instead of displayed project root")
 	}
 }

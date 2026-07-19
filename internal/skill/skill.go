@@ -78,7 +78,7 @@ type Skill struct {
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
 	// ReadOnly, when true, runs a subagent skill against the read-only tool
-	// registry: writer tools are stripped and bash enforces the plan-mode safe
+	// registry: writer tools are stripped and bash enforces the read-only
 	// command policy at execution time (frontmatter `read-only:`). This is a
 	// tool-boundary contract, not a prompt promise.
 	ReadOnly bool
@@ -138,6 +138,10 @@ type Options struct {
 	DisabledNames    []string
 	MaxDepth         int
 	DisableBuiltins  bool // suppress shipped built-ins (test-only knob)
+	// DisableDiscovery returns an empty store without probing project, custom,
+	// global, plugin, or built-in skill sources. Recovery safe mode uses this so
+	// a broken or unreadable skill tree cannot interfere with startup.
+	DisableDiscovery bool
 	// Stderr is the writer for diagnostic warnings. When nil, defaults to
 	// os.Stderr. Set to io.Discard to suppress output (e.g. during model
 	// switch inside a bubbletea session).
@@ -156,6 +160,7 @@ type Store struct {
 	disabled         map[string]bool
 	maxDepth         int
 	disableBuiltins  bool
+	disableDiscovery bool
 	stderr           io.Writer
 	runtimeProfile   string
 	requiresReady    func([]string) []string
@@ -212,6 +217,7 @@ func New(opts Options) *Store {
 		disabled:         disabledNameSet(opts.DisabledNames),
 		maxDepth:         normalizeMaxDepth(opts.MaxDepth),
 		disableBuiltins:  opts.DisableBuiltins,
+		disableDiscovery: opts.DisableDiscovery,
 		stderr:           stderr,
 	}
 }
@@ -321,6 +327,9 @@ type discoveryRoot struct {
 // under the project root → custom paths → the Reasonix home skills dir → other
 // home-dir convention dirs. A later root never overrides an earlier one.
 func (s *Store) roots() []discoveryRoot {
+	if s == nil || s.disableDiscovery {
+		return nil
+	}
 	type de struct {
 		dir               string
 		scope             Scope
@@ -454,6 +463,9 @@ func pathStatus(dir string) PathStatus {
 }
 
 func (s *Store) discoveredSkills() []Skill {
+	if s == nil || s.disableDiscovery {
+		return nil
+	}
 	var out []Skill
 	for _, r := range s.roots() {
 		if r.Status != StatusOK {

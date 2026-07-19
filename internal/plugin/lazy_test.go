@@ -13,6 +13,35 @@ import (
 	"reasonix/internal/tool"
 )
 
+type destructiveLazyTarget struct {
+	name  string
+	calls int
+}
+
+type mutableLazyTarget struct {
+	name  string
+	calls int
+}
+
+func (t *mutableLazyTarget) Name() string            { return t.name }
+func (t *mutableLazyTarget) Description() string     { return "writer test target" }
+func (t *mutableLazyTarget) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (t *mutableLazyTarget) ReadOnly() bool          { return false }
+func (t *mutableLazyTarget) Execute(context.Context, json.RawMessage) (string, error) {
+	t.calls++
+	return "executed", nil
+}
+
+func (t *destructiveLazyTarget) Name() string             { return t.name }
+func (t *destructiveLazyTarget) Description() string      { return "destructive test target" }
+func (t *destructiveLazyTarget) Schema() json.RawMessage  { return json.RawMessage(`{"type":"object"}`) }
+func (t *destructiveLazyTarget) ReadOnly() bool           { return true }
+func (t *destructiveLazyTarget) MCPDestructiveHint() bool { return true }
+func (t *destructiveLazyTarget) Execute(context.Context, json.RawMessage) (string, error) {
+	t.calls++
+	return "executed", nil
+}
+
 // helperSpec returns a Spec that re-invokes this test binary as a minimal MCP
 // stdio server (see TestHelperProcess in plugin_test.go). Reused across every
 // lazy_test case so the helper-process contract — "echo: <msg>" responder with
@@ -206,6 +235,66 @@ func TestLazyCacheHitReusesExistingSharedHostClient(t *testing.T) {
 	}
 	if got := host.ServerNames(); len(got) != 1 || got[0] != "mock" {
 		t.Fatalf("shared host should still have exactly one mock server, got %v", got)
+	}
+}
+
+func TestLazyRemoveCancelsInFlightGenerationWithoutResurrection(t *testing.T) {
+	redirectCache(t)
+	spec := helperSpec()
+	spec.Env["GO_WANT_HELPER_INIT_MS"] = "500"
+	host := NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for _, placeholder := range LazyToolset(spec, nil, host, reg, ctx, true) {
+		reg.Add(placeholder)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		host.spawningMu.Lock()
+		spawning := len(host.spawning) > 0
+		host.spawningMu.Unlock()
+		if spawning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("lazy spawn never entered the in-flight state")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	prefix, found := host.Remove(spec.Name)
+	if !found {
+		t.Fatal("Host.Remove did not cancel the in-flight lazy generation")
+	}
+	reg.RemovePrefix(prefix)
+	done := make(chan struct{})
+	go func() {
+		host.deferredWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled lazy generation did not finish")
+	}
+	if host.HasClient(spec.Name) || len(host.ServerNames()) != 0 {
+		t.Fatalf("removed lazy server was resurrected: %v", host.ServerNames())
+	}
+	if _, ok := reg.Get(ToolPrefix(spec.Name) + "connect"); ok {
+		t.Fatal("removed lazy placeholder was re-registered")
+	}
+	if _, ok := LoadCachedSchema(spec.Name, SpecFingerprint(spec)); ok {
+		t.Fatal("cancelled lazy generation wrote a new schema cache")
+	}
+	tools, err := host.Add(ctx, spec)
+	if err != nil {
+		t.Fatalf("re-add after cancelled generation: %v", err)
+	}
+	if len(tools) == 0 || !host.HasClient(spec.Name) {
+		t.Fatalf("new generation did not connect after removal: tools=%d clients=%v", len(tools), host.ServerNames())
 	}
 }
 
@@ -790,8 +879,8 @@ func TestLazyCacheHitPinsToolBytesAcrossDivergentHandshake(t *testing.T) {
 	// Let the background handshake finish and give trySwap every chance to run.
 	waitForServer(t, host, "mock", 5*time.Second)
 	echo, _ := reg.Get("mcp__mock__echo")
-	if out, err := echo.Execute(ctx, json.RawMessage(`{"msg":"pin"}`)); err != nil || out != "echo: pin" {
-		t.Fatalf("Execute after ready = %q, %v", out, err)
+	if out, err := echo.Execute(ctx, json.RawMessage(`{"msg":"pin"}`)); err == nil || out != "" || !strings.Contains(err.Error(), "changed the security schema") {
+		t.Fatalf("Execute after schema drift = %q, %v; want a pre-execution drift block", out, err)
 	}
 
 	if got := registrySchemaBytes(t, reg); got != bootBytes {
@@ -823,6 +912,62 @@ func TestLazyCacheHitPinsToolBytesAcrossDivergentHandshake(t *testing.T) {
 			t.Fatal("cached schema never became loadable")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestLazyToolPromotesLiveDestructiveHintBeforeExecution(t *testing.T) {
+	const name = "mcp__srv__wipe"
+	target := &destructiveLazyTarget{name: name}
+	shared := &lazySpawn{
+		spec:    Spec{Name: "srv"},
+		state:   spawnReady,
+		real:    map[string]tool.Tool{name: target},
+		swapped: true,
+	}
+	lazy := &lazyTool{
+		shared:   shared,
+		name:     name,
+		rawName:  "wipe",
+		readOnly: true,
+		hasCache: true,
+	}
+
+	if out, err := lazy.Execute(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "retry") || out != "" {
+		t.Fatalf("first Execute = (%q,%v), want retry before destructive execution", out, err)
+	}
+	if target.calls != 0 || !lazy.MCPDestructiveHint() {
+		t.Fatalf("after promotion calls=%d destructive=%v, want 0/true", target.calls, lazy.MCPDestructiveHint())
+	}
+
+	out, err := lazy.Execute(context.Background(), nil)
+	if err != nil || out != "executed" || target.calls != 1 {
+		t.Fatalf("second Execute = (%q,%v), calls=%d, want execution after approval retry", out, err, target.calls)
+	}
+}
+
+func TestLazyToolDemotesStaleReaderBeforeExecution(t *testing.T) {
+	const name = "mcp__srv__mutate"
+	target := &mutableLazyTarget{name: name}
+	shared := &lazySpawn{
+		spec:    Spec{Name: "srv"},
+		state:   spawnReady,
+		real:    map[string]tool.Tool{name: target},
+		swapped: true,
+	}
+	lazy := &lazyTool{
+		shared: shared, name: name, rawName: "mutate", readOnly: true, hasCache: true,
+	}
+
+	if out, err := lazy.Execute(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "writer approval") || out != "" {
+		t.Fatalf("first Execute = (%q,%v), want retry before writer execution", out, err)
+	}
+	if target.calls != 0 || lazy.ReadOnly() {
+		t.Fatalf("after demotion calls=%d readOnly=%v, want 0/false", target.calls, lazy.ReadOnly())
+	}
+
+	out, err := lazy.Execute(context.Background(), nil)
+	if err != nil || out != "executed" || target.calls != 1 {
+		t.Fatalf("second Execute = (%q,%v), calls=%d", out, err, target.calls)
 	}
 }
 

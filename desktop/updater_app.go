@@ -9,6 +9,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/desktop/internal/update"
+	"reasonix/internal/repair"
 )
 
 // updater_app.go is the auto-updater's bound command surface — the App methods the
@@ -125,17 +126,41 @@ func (a *App) InstallUpdate() error {
 		return a.failUpdate(err)
 	}
 	a.emitProgress("installing", meta.Size, meta.Size, "")
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
+		// Back up the complete release unit (main binary + Guard/launcher
+		// siblings the installer also replaces) so rollback never leaves a
+		// mixed-version install.
+		if _, err := repair.PrepareFileUpdate(version, meta.Version, currentExecutablePath(), updateSiblingArtifacts()...); err != nil {
+			return a.failUpdate(err)
+		}
+	}
 	switch runtime.GOOS {
 	case "windows":
-		err = applyWindowsFile(meta.Path)
+		err = applyWindowsFile(meta.Path, meta.Version)
 	case "darwin":
-		err = applyMac(meta.Path)
+		err = applyMac(meta.Path, meta.Version)
 	case "linux":
 		err = applyLinux(data)
 	default:
 		err = fmt.Errorf("self-update unsupported on %s", runtime.GOOS)
 	}
 	if err != nil {
+		if runtime.GOOS == "linux" {
+			// applyLinux replaces the Guard binary before the main-binary
+			// swap, so a failure here can already have produced a mixed
+			// install. Restore the recorded release unit instead of
+			// discarding the rollback metadata; if the restore itself fails,
+			// keep the pending transaction so Guard can retry the rollback on
+			// the next launch.
+			if _, rollbackErr := repair.RollbackPendingUpdate(); rollbackErr != nil {
+				a.recordUpdateError(rollbackErr)
+			}
+		} else {
+			// Windows hands off to an installer process and macOS cancels its
+			// own transaction inside applyMac: a failure here means nothing
+			// was replaced yet, so just drop the pending transaction.
+			_ = repair.CancelPendingUpdate(meta.Version)
+		}
 		return a.failUpdate(err)
 	}
 
@@ -146,7 +171,7 @@ func (a *App) InstallUpdate() error {
 	// macOS the installer/helper we launched takes over once we exit.
 	a.shutdown(a.ctx)
 	if runtime.GOOS == "linux" {
-		_ = relaunch()
+		_ = relaunchThroughGuard()
 	}
 	os.Exit(0)
 	return nil

@@ -3,6 +3,8 @@ package evidence
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -494,6 +496,311 @@ func TestLedgerNoBaselineDoesNotConstrainCompletedTodos(t *testing.T) {
 	}
 }
 
+func TestValidateSerialTodosRejectsInvalidOrdering(t *testing.T) {
+	tests := []struct {
+		name  string
+		todos []TodoItem
+		want  string
+	}{
+		{
+			name: "completed after current",
+			todos: []TodoItem{
+				{Content: "first", Status: "in_progress"},
+				{Content: "second", Status: "completed"},
+			},
+			want: "completed after unfinished",
+		},
+		{
+			name: "multiple current items",
+			todos: []TodoItem{
+				{Content: "first", Status: "in_progress"},
+				{Content: "second", Status: "in_progress"},
+			},
+			want: "second in_progress",
+		},
+		{
+			name:  "pending without current",
+			todos: []TodoItem{{Content: "first", Status: "pending"}},
+			want:  "no in_progress",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateSerialTodos(tc.todos); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateSerialTodos() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	valid := []TodoItem{
+		{Content: "done", Status: "completed"},
+		{Content: "current", Status: "in_progress"},
+		{Content: "later", Status: "pending"},
+	}
+	if err := ValidateSerialTodos(valid); err != nil {
+		t.Fatalf("valid serial list rejected: %v", err)
+	}
+}
+
+func TestNormalizeSerialTodosRepairsLegacyOutOfOrderState(t *testing.T) {
+	got := NormalizeSerialTodos([]TodoItem{
+		{Content: "first", Status: "in_progress"},
+		{Content: "second", Status: "completed"},
+		{Content: "third", Status: "in_progress"},
+	})
+	want := []string{"in_progress", "pending", "pending"}
+	for i := range want {
+		if got[i].Status != want[i] {
+			t.Fatalf("todo %d status = %q, want %q: %+v", i+1, got[i].Status, want[i], got)
+		}
+	}
+}
+
+func TestValidateSerialTodosAcceptsPhaseChains(t *testing.T) {
+	tests := []struct {
+		name  string
+		todos []TodoItem
+	}{
+		{
+			name: "entered phase with an active sub-step",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "pending"},
+				{Content: "sub one", Status: "in_progress", Level: 1},
+			},
+		},
+		{
+			name: "single current item mid-chain",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "pending"},
+				{Content: "sub one", Status: "completed", Level: 1},
+				{Content: "sub two", Status: "in_progress", Level: 1},
+				{Content: "sub three", Status: "pending", Level: 1},
+				{Content: "Later phase", Status: "pending"},
+				{Content: "later sub", Status: "pending", Level: 1},
+			},
+		},
+		{
+			name: "phase awaiting sign-off after its sub-steps",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "in_progress"},
+				{Content: "sub one", Status: "completed", Level: 1},
+				{Content: "sub two", Status: "completed", Level: 1},
+				{Content: "next", Status: "pending"},
+			},
+		},
+		{
+			name: "completed phase segment before the current one",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "completed"},
+				{Content: "sub one", Status: "completed", Level: 1},
+				{Content: "Second phase", Status: "pending"},
+				{Content: "sub two", Status: "in_progress", Level: 1},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateSerialTodos(tc.todos); err != nil {
+				t.Fatalf("valid phase chain rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateSerialTodosRejectsInvalidPhaseChains(t *testing.T) {
+	tests := []struct {
+		name  string
+		todos []TodoItem
+		want  string
+	}{
+		{
+			name: "phase completed before its sub-steps",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "completed"},
+				{Content: "sub one", Status: "in_progress", Level: 1},
+			},
+			want: "sub-step 2 \"sub one\" is unfinished",
+		},
+		{
+			name: "phase in_progress while sub-steps are unfinished",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "in_progress"},
+				{Content: "sub one", Status: "pending", Level: 1},
+			},
+			want: "cannot be in_progress while sub-step 2",
+		},
+		{
+			name: "phase and sub-step both in_progress",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "in_progress"},
+				{Content: "sub one", Status: "in_progress", Level: 1},
+			},
+			want: "second in_progress item",
+		},
+		{
+			name: "orphan sub-step with no phase above it",
+			todos: []TodoItem{
+				{Content: "sub one", Status: "in_progress", Level: 1},
+				{Content: "Next", Status: "pending"},
+			},
+			want: "no phase above it",
+		},
+		{
+			name: "completed segment after the current chain",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "pending"},
+				{Content: "sub one", Status: "in_progress", Level: 1},
+				{Content: "Second phase", Status: "completed"},
+				{Content: "sub two", Status: "completed", Level: 1},
+			},
+			want: "completed after unfinished",
+		},
+		{
+			name: "stale sub-step progress before the current item",
+			todos: []TodoItem{
+				{Content: "Phase", Status: "pending"},
+				{Content: "sub one", Status: "completed", Level: 1},
+				{Content: "sub two", Status: "pending", Level: 1},
+				{Content: "Second phase", Status: "pending"},
+				{Content: "sub three", Status: "in_progress", Level: 1},
+			},
+			want: "in_progress after pending work",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateSerialTodos(tc.todos); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ValidateSerialTodos() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeSerialTodosRepairsPhaseChains(t *testing.T) {
+	got := NormalizeSerialTodos([]TodoItem{
+		{Content: "Phase", Status: "completed"},
+		{Content: "sub one", Status: "completed", Level: 1},
+		{Content: "sub two", Status: "pending", Level: 1},
+		{Content: "Second phase", Status: "completed"},
+		{Content: "sub three", Status: "completed", Level: 1},
+	})
+	want := []string{"pending", "completed", "in_progress", "pending", "pending"}
+	for i := range want {
+		if got[i].Status != want[i] {
+			t.Fatalf("todo %d status = %q, want %q: %+v", i+1, got[i].Status, want[i], got)
+		}
+	}
+
+	signable := NormalizeSerialTodos([]TodoItem{
+		{Content: "Phase", Status: "pending"},
+		{Content: "sub one", Status: "completed", Level: 1},
+		{Content: "sub two", Status: "completed", Level: 1},
+	})
+	if signable[0].Status != "in_progress" {
+		t.Fatalf("phase with completed sub-steps should normalize to in_progress for sign-off: %+v", signable)
+	}
+}
+
+func TestAdvanceSerialTodoWalksPhaseChain(t *testing.T) {
+	todos := []TodoItem{
+		{Content: "Phase", Status: "pending"},
+		{Content: "sub one", Status: "in_progress", Level: 1},
+		{Content: "sub two", Status: "pending", Level: 1},
+		{Content: "Second phase", Status: "pending"},
+		{Content: "sub three", Status: "pending", Level: 1},
+	}
+	statuses := func() []string {
+		out := make([]string, len(todos))
+		for i, todo := range todos {
+			out[i] = todo.Status
+		}
+		return out
+	}
+
+	if AdvanceSerialTodo(todos, 0) {
+		t.Fatalf("pending phase completed ahead of its sub-steps: %v", statuses())
+	}
+	if !AdvanceSerialTodo(todos, 1) {
+		t.Fatal("current sub-step did not complete")
+	}
+	if got, want := statuses(), []string{"pending", "completed", "in_progress", "pending", "pending"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after first sub-step statuses = %v, want %v", got, want)
+	}
+	if !AdvanceSerialTodo(todos, 2) {
+		t.Fatal("last sub-step did not complete")
+	}
+	if got := todos[0].Status; got != "in_progress" {
+		t.Fatalf("phase status after its sub-steps = %q, want in_progress for sign-off", got)
+	}
+	if !AdvanceSerialTodo(todos, 0) {
+		t.Fatal("phase with completed sub-steps did not complete")
+	}
+	if got, want := statuses(), []string{"completed", "completed", "completed", "pending", "in_progress"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after phase sign-off statuses = %v, want next sub-step promoted under its pending phase: %v", got, want)
+	}
+	if !AdvanceSerialTodo(todos, 4) {
+		t.Fatal("second chain sub-step did not complete")
+	}
+	if got := todos[3].Status; got != "in_progress" {
+		t.Fatalf("second phase after its sub-step = %q, want in_progress", got)
+	}
+	if !AdvanceSerialTodo(todos, 3) {
+		t.Fatal("second phase did not sign off")
+	}
+	for i, todo := range todos {
+		if todo.Status != "completed" {
+			t.Fatalf("todo %d = %+v, want completed", i+1, todo)
+		}
+	}
+}
+
+func TestAdvanceSerialTodoAdvancesOrphanSubStep(t *testing.T) {
+	todos := []TodoItem{
+		{Content: "orphan sub", Status: "in_progress", Level: 1},
+		{Content: "Next step", Status: "pending"},
+	}
+	if !AdvanceSerialTodo(todos, 0) {
+		t.Fatal("orphan sub-step did not complete")
+	}
+	if todos[0].Status != "completed" || todos[1].Status != "in_progress" {
+		t.Fatalf("orphan completion must promote the next pending unit: %+v", todos)
+	}
+
+	chained := []TodoItem{
+		{Content: "orphan sub", Status: "in_progress", Level: 1},
+		{Content: "Phase", Status: "pending"},
+		{Content: "sub one", Status: "pending", Level: 1},
+	}
+	if !AdvanceSerialTodo(chained, 0) {
+		t.Fatal("orphan sub-step before a phase did not complete")
+	}
+	if chained[1].Status != "pending" || chained[2].Status != "in_progress" {
+		t.Fatalf("orphan completion before a phase must promote the phase's first sub-step: %+v", chained)
+	}
+}
+
+func TestSuccessfulProgressSignaturesIgnoreExactRepeatsAndBookkeeping(t *testing.T) {
+	ledger := NewLedger()
+	read := ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"a.go"}`), true, true)
+	read.OutputBytes = 10
+	ledger.Record(read)
+	ledger.Record(read)
+	ledger.Record(ReceiptFromToolCall("todo_write", json.RawMessage(`{"todos":[]}`), true, true))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"a.go","old_string":"a","new_string":"b"}`), true, false))
+	ledger.Record(ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, false))
+
+	sigs := ledger.SuccessfulProgressSignaturesSince(0)
+	if len(sigs) != 4 {
+		t.Fatalf("progress signatures = %d, want two reads plus mutation and command", len(sigs))
+	}
+	if sigs[0] != sigs[1] {
+		t.Fatalf("exact repeated reads should have the same signature: %q != %q", sigs[0], sigs[1])
+	}
+	if sigs[1] == sigs[2] || sigs[2] == sigs[3] {
+		t.Fatalf("distinct host work collapsed to one signature: %v", sigs)
+	}
+}
+
 func TestLedgerNumericCompleteStepAuthorizesRephrasedTodo(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{
@@ -651,6 +958,85 @@ func TestToolCallRequiresDeliveryCriteriaForExecutionCommands(t *testing.T) {
 	}
 	if !ToolCallRequiresDeliveryCriteria("bash", json.RawMessage(`{"command":"node --check app.js"}`), false) {
 		t.Fatal("node --check is a verification command and should require acceptance criteria")
+	}
+}
+
+func TestBashToolCallMixesMutationAndVerification(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		want    bool
+	}{
+		{
+			name:    "temporary JavaScript extraction",
+			command: `python3 -c 'open("/tmp/snake_check.js","w").write("x")' && node --check /tmp/snake_check.js`,
+			want:    true,
+		},
+		{name: "generated code before tests", command: "go generate ./... && go test ./...", want: true},
+		{name: "read-only extraction pipeline", command: "tail -n +2 snake.js | head -n 20 | node --check -"},
+		{name: "plain verifier", command: "go test ./..."},
+		{name: "plain mutation", command: "gofmt -w main.go"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args, err := json.Marshal(map[string]string{"command": tt.command})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := BashToolCallMixesMutationAndVerification(args); got != tt.want {
+				t.Fatalf("BashToolCallMixesMutationAndVerification(%q) = %v, want %v", tt.command, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBashToolCallMasksVerificationExit(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: `tail -n +2 snake.html | head -n 20 | node --check -; echo "EXIT: $?"`, want: true},
+		{command: `go test ./...; printf 'status=%s\n' "$?"`, want: true},
+		{command: `tail -n +2 snake.html | head -n 20 | node --check -`},
+		{command: `go test ./...`},
+		{command: `echo "$?"`},
+		{command: `echo done; go test ./...`},
+	}
+	for _, tt := range tests {
+		args, err := json.Marshal(map[string]string{"command": tt.command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := BashToolCallMasksVerificationExit(args); got != tt.want {
+			t.Errorf("BashToolCallMasksVerificationExit(%q) = %v, want %v", tt.command, got, tt.want)
+		}
+	}
+}
+
+func TestBashToolCallUsesOpaqueInlineInterpreter(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: `node -e 'require("fs").readFileSync("snake.html")'`, want: true},
+		{command: `node --input-type=module --eval 'console.log(1)'`, want: true},
+		{command: `python3 -c 'print(open("snake.html").read())'`, want: true},
+		{command: `ruby -e 'puts 1'`, want: true},
+		{command: `php -r 'echo 1;'`, want: true},
+		{command: `deno eval 'console.log(1)'`, want: true},
+		{command: "tail -n +2 snake.html | node --check -"},
+		{command: "node --test"},
+		{command: "python3 -m pytest"},
+		{command: "node scripts/check.js"},
+	}
+	for _, tt := range tests {
+		args, err := json.Marshal(map[string]string{"command": tt.command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := BashToolCallUsesOpaqueInlineInterpreter(args); got != tt.want {
+			t.Errorf("BashToolCallUsesOpaqueInlineInterpreter(%q) = %v, want %v", tt.command, got, tt.want)
+		}
 	}
 }
 

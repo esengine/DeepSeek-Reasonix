@@ -13,6 +13,8 @@ import {
   __setMermaidRenderAdapterForTest,
   isOpenableMermaidHref,
   isSafeMermaidHref,
+  safelyRunPanZoom,
+  safelySyncPanZoom,
   sanitizeMermaidSvg,
 } from "../components/MermaidDiagram";
 import { LocaleProvider } from "../lib/i18n";
@@ -76,6 +78,10 @@ function installDom() {
   globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  Object.defineProperty(dom.window.HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, width: 640, height: 360, top: 0, right: 640, bottom: 360, left: 0, toJSON: () => ({}) }),
+  });
   Object.defineProperty(dom.window, "matchMedia", {
     configurable: true,
     value: (query: string) => ({
@@ -96,6 +102,27 @@ function installDom() {
   document.head.appendChild(style);
 
   return dom;
+}
+
+{
+  const dom = installDom();
+  const container = document.createElement("div");
+  const throwing = {
+    destroy: () => {},
+    resize: () => { throw new DOMException("matrix is not invertible", "InvalidStateError"); },
+    fit: () => { throw new DOMException("matrix is not invertible", "InvalidStateError"); },
+    center: () => {},
+    zoomIn: () => { throw new DOMException("matrix is not invertible", "InvalidStateError"); },
+    zoomOut: () => {},
+    reset: () => {},
+  };
+  eq(safelySyncPanZoom(throwing, container), false, "matrix failures are contained during pan/zoom layout sync");
+  eq(safelyRunPanZoom(throwing, () => throwing.zoomIn()), false, "matrix failures are contained during toolbar actions");
+  Object.defineProperty(container, "getBoundingClientRect", {
+    value: () => ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) }),
+  });
+  eq(safelySyncPanZoom(throwing, container), false, "zero-sized layouts are deferred before SVG matrix work");
+  dom.window.close();
 }
 
 function parseSvg(svg: string): Document {

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/guardian"
 	"reasonix/internal/hook"
@@ -1108,6 +1111,55 @@ func TestConcurrentSnapshotsShareSingleRecoveryHandoff(t *testing.T) {
 	recoveries := recoveryTranscriptPaths(matches)
 	if len(recoveries) != 1 || recoveries[0] != first.recoveryPath {
 		t.Fatalf("recovery branches = %v err=%v, want only %q", matches, err, first.recoveryPath)
+	}
+}
+
+func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	base := agent.NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "persisted"})
+	if err := base.SaveSnapshot(path); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	current, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "shutdown tail"})
+	exec := agent.New(nil, nil, current, agent.Options{}, event.Discard)
+	var handoff SessionRecoveryInfo
+	c := New(Options{
+		Executor:    exec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "shutdown",
+		OnSessionRecovered: func(info SessionRecoveryInfo) error {
+			handoff = info
+			return nil
+		},
+	})
+
+	recoveryPath, err := c.recoverShutdownSnapshot(path, agent.ErrSessionFileLockHeld)
+	if err != nil {
+		t.Fatalf("recoverShutdownSnapshot: %v", err)
+	}
+	if recoveryPath == "" || recoveryPath == path {
+		t.Fatalf("recovery path = %q, want a distinct session", recoveryPath)
+	}
+	if c.SessionPath() != recoveryPath {
+		t.Fatalf("controller session path = %q, want %q", c.SessionPath(), recoveryPath)
+	}
+	if handoff.OriginalPath != path || handoff.RecoveryPath != recoveryPath || handoff.Reason != "shutdown session file lock timeout" {
+		t.Fatalf("shutdown recovery handoff = %+v", handoff)
+	}
+	recovered, err := agent.LoadSession(recoveryPath)
+	if err != nil {
+		t.Fatalf("load shutdown recovery: %v", err)
+	}
+	if got := recovered.Snapshot(); len(got) != 3 || got[2].Content != "shutdown tail" {
+		t.Fatalf("shutdown recovery transcript = %+v", got)
 	}
 }
 
@@ -2336,6 +2388,120 @@ func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 	}
 }
 
+func TestAddMCPServerAuthorizesExplicitUserAddBeforeConnecting(t *testing.T) {
+	var configured plugin.Spec
+	c := New(Options{
+		MCPConfigureSpec: func(spec *plugin.Spec) { configured = *spec },
+	})
+
+	if _, err := c.AddMCPServer(config.PluginEntry{Name: "user-added"}); err == nil {
+		t.Fatal("AddMCPServer without a command unexpectedly succeeded")
+	}
+	if configured.ConfigSource != string(config.MCPSourceUserConfig) ||
+		!configured.AutoTrust || !configured.ImplicitApproval || configured.RequireLaunchApproval {
+		t.Fatalf("configured spec = %+v, want user-authorized add-and-use policy", configured)
+	}
+}
+
+func TestConnectMCPServerAppliesConfiguredCallTimeouts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "timeout-test", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "slow",
+				"description": "Wait until the caller cancels.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		case "tools/call":
+			<-r.Context().Done()
+			return
+		default:
+			result = map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name           string
+		defaultTimeout time.Duration
+		entry          config.PluginEntry
+	}{
+		{
+			name:           "global default",
+			defaultTimeout: time.Second,
+		},
+		{
+			name:           "server override",
+			defaultTimeout: 10 * time.Second,
+			entry:          config.PluginEntry{CallTimeoutSeconds: 1},
+		},
+		{
+			name:           "tool override",
+			defaultTimeout: 10 * time.Second,
+			entry: config.PluginEntry{
+				CallTimeoutSeconds: 10,
+				ToolTimeoutSeconds: map[string]int{"slow": 1},
+			},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			host := plugin.NewHost()
+			defer host.Close()
+			reg := tool.NewRegistry()
+			ctrl := New(Options{
+				Host:                  host,
+				Registry:              reg,
+				MCPDefaultCallTimeout: tc.defaultTimeout,
+			})
+			entry := tc.entry
+			entry.Name = fmt.Sprintf("timeout%d", i)
+			entry.Type = "http"
+			entry.URL = server.URL
+			if _, err := ctrl.ConnectMCPServer(entry); err != nil {
+				t.Fatalf("ConnectMCPServer: %v", err)
+			}
+			connected, ok := reg.Get("mcp__" + entry.Name + "__slow")
+			if !ok {
+				t.Fatalf("connected tool missing; names=%v", reg.Names())
+			}
+			started := time.Now()
+			_, err := connected.Execute(context.Background(), json.RawMessage(`{}`))
+			elapsed := time.Since(started)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("slow tool error = %v, want deadline exceeded", err)
+			}
+			if elapsed < 750*time.Millisecond || elapsed > 3*time.Second {
+				t.Fatalf("slow tool elapsed = %v, want configured 1s timeout", elapsed)
+			}
+		})
+	}
+}
+
 func TestUnregisterMCPServerToolsBlocksLateSharedHostSwap(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
@@ -2855,6 +3021,172 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 	}
 }
 
+// TestSessionGrantShortCircuitsGuardianReview: a session grant (or YOLO / the
+// approved-plan window) answers an ordinary approval before any guardian review
+// or prompt is attempted. Absorbed from PR #6413 by @myipanta.
+func TestSessionGrantShortCircuitsGuardianReview(t *testing.T) {
+	guardianProv := &recordingProvider{
+		name:    "guardian",
+		streams: [][]provider.Chunk{textTurn(`{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"should never run"}`)},
+	}
+	guardianSess := guardian.NewSession(guardianProv, tool.NewRegistry(), guardian.PolicyPrompt(), "guardian-test", 0, nil, event.Discard)
+	exec := agent.New(&recordingProvider{name: "executor"}, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)
+	prompts := 0
+	c := New(Options{
+		Executor: exec,
+		Guardian: guardianSess,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				prompts++
+			}
+		}),
+	})
+	subject := approvalDisplaySubject("write_file", "main.go", nil)
+	c.approval.grantSession("write_file", subject)
+
+	allow, remember, _, err := gateApprover{c}.ApproveWithReason(context.Background(), "write_file", "main.go", nil)
+	if err != nil || !allow || remember {
+		t.Fatalf("session-granted approval = (%v,%v,%v), want plain allow", allow, remember, err)
+	}
+	if len(guardianProv.requests) != 0 || prompts != 0 {
+		t.Fatalf("session grant must bypass guardian and prompts, reviews=%d prompts=%d", len(guardianProv.requests), prompts)
+	}
+}
+
+func TestMCPAutoReviewerIsFinalAndDoesNotPromptHuman(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		outcome string
+		risk    string
+		allow   bool
+	}{
+		{name: "allow", outcome: "allow", risk: "low", allow: true},
+		{name: "deny", outcome: "deny", risk: "high", allow: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			guardianProv := &recordingProvider{
+				name:    "guardian",
+				streams: [][]provider.Chunk{textTurn(fmt.Sprintf(`{"risk_level":%q,"user_authorization":"unknown","outcome":%q,"rationale":"reviewed"}`, tc.risk, tc.outcome))},
+			}
+			guardianSess := guardian.NewSession(guardianProv, tool.NewRegistry(), guardian.PolicyPrompt(), "guardian-test", 0, nil, event.Discard)
+			exec := agent.New(&recordingProvider{name: "executor"}, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)
+			prompts := 0
+			c := New(Options{
+				Executor: exec,
+				Guardian: guardianSess,
+				Sink: event.FuncSink(func(e event.Event) {
+					if e.Kind == event.ApprovalRequest {
+						prompts++
+					}
+				}),
+			})
+			gate := permission.NewGate(permission.New("allow", nil, nil, nil), gateApprover{c})
+			allow, _, err := gate.CheckMCP(context.Background(), "mcp__srv__write", "srv/write", json.RawMessage(`{"target":"one"}`), false, false, "prompt", "auto_review")
+			if err != nil || allow != tc.allow || prompts != 0 || len(guardianProv.requests) != 1 {
+				t.Fatalf("auto reviewer result allow=%v err=%v prompts=%d reviews=%d", allow, err, prompts, len(guardianProv.requests))
+			}
+		})
+	}
+}
+
+// TestMCPAutoModeGlobalAllowSkipsMissingReviewer: approval_mode=auto inherits
+// the global posture. When the global policy already allows the call, no
+// reviewer runs at all — this is mode inheritance, not a reviewer fallback.
+func TestMCPAutoModeGlobalAllowSkipsMissingReviewer(t *testing.T) {
+	prompts := 0
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.ApprovalRequest {
+			prompts++
+		}
+	})})
+	c.SetToolApprovalMode(ToolApprovalAuto)
+	gate := permission.NewGate(permission.New("allow", nil, nil, nil), gateApprover{c})
+	allow, reason, err := gate.CheckMCP(context.Background(), "mcp__srv__write", "srv/write", nil, false, false, "auto", "auto_review")
+	if err != nil || !allow || reason != "" || prompts != 0 {
+		t.Fatalf("globally allowed auto call = (%v,%q,%v), prompts=%d", allow, reason, err, prompts)
+	}
+}
+
+type erroringProvider struct{ requests int }
+
+func (p *erroringProvider) Name() string { return "guardian-down" }
+
+func (p *erroringProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.requests++
+	return nil, fmt.Errorf("guardian transport down")
+}
+
+// TestMCPAutoReviewerUnavailableDegradesToStrictFreshHuman: when auto_review is
+// configured but the reviewer errors out, the call degrades to a fresh human
+// decision. Session grants must neither answer it nor be minted by it, so a
+// second identical call prompts again.
+func TestMCPAutoReviewerUnavailableDegradesToStrictFreshHuman(t *testing.T) {
+	guardianProv := &erroringProvider{}
+	guardianSess := guardian.NewSession(guardianProv, tool.NewRegistry(), guardian.PolicyPrompt(), "guardian-test", 0, nil, event.Discard)
+	exec := agent.New(&recordingProvider{name: "executor"}, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)
+	approvals := make(chan event.Approval, 2)
+	c := New(Options{
+		Executor: exec,
+		Guardian: guardianSess,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvals <- e.Approval
+			}
+		}),
+	})
+	gate := permission.NewGate(permission.New("ask", nil, nil, nil), gateApprover{c})
+	type result struct {
+		allow  bool
+		reason string
+		err    error
+	}
+	run := func() chan result {
+		done := make(chan result, 1)
+		go func() {
+			allow, reason, err := gate.CheckMCP(context.Background(), "mcp__srv__write", "srv/write", json.RawMessage(`{"target":"one"}`), false, false, "auto", "auto_review")
+			done <- result{allow: allow, reason: reason, err: err}
+		}()
+		return done
+	}
+
+	done := run()
+	var approval event.Approval
+	select {
+	case approval = <-approvals:
+	case <-time.After(30 * time.Second):
+		t.Fatal("reviewer failure did not degrade to a human prompt")
+	}
+	// Answer with a session grant: the strict decision must not persist it.
+	c.Approve(approval.ID, true, true, false)
+	select {
+	case got := <-done:
+		if got.err != nil || !got.allow {
+			t.Fatalf("approved degraded call = %+v", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("degraded approval never completed")
+	}
+
+	done = run()
+	select {
+	case approval = <-approvals:
+	case <-time.After(30 * time.Second):
+		t.Fatal("second call reused a grant; strict fresh approval must prompt every time")
+	}
+	c.Approve(approval.ID, false, false, false)
+	select {
+	case got := <-done:
+		if got.err != nil || got.allow || !strings.Contains(got.reason, "reviewer was unavailable") {
+			t.Fatalf("declined degraded call = %+v", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("degraded decline never completed")
+	}
+	if guardianProv.requests != 2 {
+		t.Fatalf("guardian consulted %d times, want 2", guardianProv.requests)
+	}
+}
+
 func TestHeadlessGateRefusesFreshHumanApprovalTools(t *testing.T) {
 	gate := NewHeadlessPermissionGate(permission.New("ask", nil, nil, nil))
 
@@ -3168,63 +3500,6 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 	}
 }
 
-func TestPlanModeReadOnlyTrustApprovalPersistsMCPTrust(t *testing.T) {
-	ids := make(chan string, 2)
-	var approval event.Approval
-	var notices []string
-	var rememberedServer, rememberedTool string
-	prompts := 0
-	c := New(Options{
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.ApprovalRequest {
-				prompts++
-				approval = e.Approval
-				ids <- e.Approval.ID
-			}
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
-		}),
-		OnRememberMCPReadOnlyTrust: func(serverName, rawToolName string) MCPReadOnlyTrustResult {
-			rememberedServer, rememberedTool = serverName, rawToolName
-			return MCPReadOnlyTrustResult{Server: serverName, Tool: rawToolName, Path: "reasonix.toml", Saved: true}
-		},
-	})
-
-	go func() {
-		c.Approve(<-ids, true, true, true)
-	}()
-	req := agent.PlanModeReadOnlyTrustRequest{
-		ToolName:    "mcp__github__issue_read",
-		ServerName:  "github",
-		RawToolName: "issue/read",
-		Args:        json.RawMessage(`{"issue":1}`),
-	}
-	allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-	if err != nil || !allow || reason != "" {
-		t.Fatalf("CheckPlanModeReadOnlyTrust = (%v,%q,%v), want allow", allow, reason, err)
-	}
-	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") || !strings.Contains(approval.Reason, "read-only") {
-		t.Fatalf("approval = %+v, want MCP read-only trust prompt", approval)
-	}
-	if rememberedServer != "github" || rememberedTool != "issue/read" {
-		t.Fatalf("remembered MCP trust = %s/%s, want github/issue/read", rememberedServer, rememberedTool)
-	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "github/issue/read") {
-		t.Fatalf("notices = %v, want MCP trust saved notice", notices)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	allow, reason, err = planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(ctx, req)
-	if err != nil || !allow || reason != "" {
-		t.Fatalf("second CheckPlanModeReadOnlyTrust = (%v,%q,%v), want session grant", allow, reason, err)
-	}
-	if prompts != 1 {
-		t.Fatalf("approval prompts = %d, want 1", prompts)
-	}
-}
-
 func TestPlanModeReadOnlyTrustApprovalPersistsBashCommandTrust(t *testing.T) {
 	ids := make(chan string, 2)
 	var approval event.Approval
@@ -3350,64 +3625,6 @@ func TestPlanModeReadOnlyTrustApprovalUsesChineseCatalog(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("plan-mode bash trust approval stayed blocked after rejection")
-	}
-}
-
-func TestPlanModeReadOnlyTrustApprovalIgnoresToolAutoApproval(t *testing.T) {
-	approvalRequests := make(chan event.Approval, 1)
-	c := New(Options{
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.ApprovalRequest {
-				approvalRequests <- e.Approval
-			}
-		}),
-	})
-	c.SetAutoApproveTools(true)
-
-	type trustResult struct {
-		allow  bool
-		reason string
-		err    error
-	}
-	done := make(chan trustResult, 1)
-	req := agent.PlanModeReadOnlyTrustRequest{
-		ToolName:    "mcp__github__issue_read",
-		ServerName:  "github",
-		RawToolName: "issue/read",
-	}
-	go func() {
-		allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-		done <- trustResult{allow: allow, reason: reason, err: err}
-	}()
-
-	var approval event.Approval
-	select {
-	case approval = <-approvalRequests:
-	case <-time.After(30 * time.Second):
-		t.Fatal("MCP read-only trust prompt was not emitted under tool auto-approval")
-	}
-	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") {
-		t.Fatalf("approval = %+v, want MCP read-only trust prompt", approval)
-	}
-	select {
-	case got := <-done:
-		t.Fatalf("tool auto-approval must not answer MCP read-only trust, got %+v", got)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	c.Approve(approval.ID, true, true, false)
-	select {
-	case got := <-done:
-		if got.err != nil || !got.allow || got.reason != "" {
-			t.Fatalf("CheckPlanModeReadOnlyTrust after approval = %+v, want allow", got)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("MCP read-only trust prompt stayed blocked after Approve")
-	}
-
-	allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-	if err != nil || !allow || reason != "" {
-		t.Fatalf("session-granted MCP read-only trust under YOLO = (%v,%q,%v), want allow", allow, reason, err)
 	}
 }
 

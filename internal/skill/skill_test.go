@@ -60,6 +60,38 @@ func find(skills []Skill, name string) (Skill, bool) {
 	return Skill{}, false
 }
 
+func TestDisableDiscoveryReturnsEmptyStore(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	custom := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/global.md", "---\ndescription: global\n---\nbody")
+	writeSkill(t, project, ".reasonix/skills/project.md", "---\ndescription: project\n---\nbody")
+	writeSkill(t, custom, "custom.md", "---\ndescription: custom\n---\nbody")
+
+	store := New(Options{
+		HomeDir:          home,
+		ProjectRoot:      project,
+		CustomPaths:      []string{custom},
+		DisableDiscovery: true,
+	})
+
+	if roots := store.Roots(); len(roots) != 0 {
+		t.Fatalf("disabled store roots = %+v, want none", roots)
+	}
+	if skills := store.List(); len(skills) != 0 {
+		t.Fatalf("disabled store skills = %+v, want none", skills)
+	}
+	if skills := store.SlashList(); len(skills) != 0 {
+		t.Fatalf("disabled store slash skills = %+v, want none", skills)
+	}
+	if inspection := store.Inspect(); len(inspection.Roots) != 0 || len(inspection.Candidates) != 0 {
+		t.Fatalf("disabled store inspection = %+v, want empty", inspection)
+	}
+	if _, ok := store.Read("project"); ok {
+		t.Fatal("disabled store read discovered a skill")
+	}
+}
+
 func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 	home := t.TempDir()
 	proj := t.TempDir()

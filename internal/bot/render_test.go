@@ -181,6 +181,8 @@ func TestRenderSinkSendsProgressWithoutToolOutput(t *testing.T) {
 
 	sink.Emit(event.Event{Kind: event.TurnStarted})
 	sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "tool-1", Name: "read_file", ReadOnly: true}})
+	sink.lastProgress = time.Now().Add(-renderProgressMinInterval)
+	sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "tool-1", Name: "read_file", ReadOnly: true, Refreshed: true}})
 	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "tool-1", Name: "read_file", Output: "secret output that should stay out of IM"}})
 	sink.Emit(event.Event{Kind: event.Text, Text: "完成。"})
 	sink.Emit(event.Event{Kind: event.TurnDone})

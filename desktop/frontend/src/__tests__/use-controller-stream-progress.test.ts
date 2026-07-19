@@ -52,6 +52,11 @@ function ev(s: typeof initialState, e: WireEvent) {
     "partial + full dispatch never duplicate the card",
   );
 
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c1", name: "write_file", args: '{"path":"a"}', readOnly: false, refreshed: true, diff: "@@ -1 +1 @@\n-old\n+new\n", added: 1, removed: 1 } } as WireEvent);
+  const refreshed = s.items.find((it) => it.kind === "tool" && it.id === "c1");
+  eq(refreshed?.kind === "tool" ? refreshed.fileDiff?.diff : "", "@@ -1 +1 @@\n-old\n+new\n", "same-ID refresh replaces the live preview");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c1").length, 1, "preview refresh never duplicates the card");
+
   s = ev(s, { kind: "usage", usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150, cacheHitTokens: 0, cacheMissTokens: 0 } } as WireEvent);
   eq(s.turnArgChars, 0, "usage event resets the streaming estimate");
 }

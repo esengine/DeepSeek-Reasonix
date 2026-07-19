@@ -851,6 +851,7 @@ export function WorkspacePanel({
     getScrollElement: () => treeRef.current,
     estimateSize: () => 24,
     overscan: 10,
+    directDomUpdates: true,
   });
 
   const searchPlaceholder = t(scopedFilePaths ? "workspace.filterReferencedFiles" : changedMode ? "workspace.filterChanges" : "workspace.filter");
@@ -1744,9 +1745,9 @@ export function WorkspacePanel({
         >
           {treeRows.length > 0 ? (
             <div
+              ref={virtualizer.containerRef}
               className="workspace-tree__sizer"
               style={{
-                height: virtualizer.getTotalSize(),
                 width: "100%",
                 position: "relative",
               }}
@@ -1764,7 +1765,6 @@ export function WorkspacePanel({
                       top: 0,
                       left: 0,
                       width: "100%",
-                      transform: `translateY(${row.start}px)`,
                     }}
                   >
                     {item.isSearch ? renderSearchRow(item) : renderNormalRow(item)}

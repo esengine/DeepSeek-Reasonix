@@ -107,6 +107,9 @@ func (s *renderSink) Emit(e event.Event) {
 		// full message received, do nothing extra
 
 	case event.ToolDispatch:
+		if e.Tool.Refreshed {
+			break
+		}
 		name := renderToolName(e.Tool)
 		s.toolNames[e.Tool.ID] = name
 		s.sendProgress(fmt.Sprintf("正在执行: %s", name), false)

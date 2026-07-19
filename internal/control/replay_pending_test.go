@@ -41,6 +41,34 @@ func TestReplayPendingPromptsReEmitsBlockedApproval(t *testing.T) {
 	<-done
 }
 
+func TestReplayPendingPromptsPreservesFreshApproval(t *testing.T) {
+	reqs := make(chan event.Approval, 8)
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		if e.Kind == event.ApprovalRequest {
+			reqs <- e.Approval
+		}
+	})})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _, _ = (gateApprover{c}).ApproveFresh(context.Background(), "mcp__srv__wipe", "srv/wipe", nil)
+	}()
+
+	first := <-reqs
+	if !first.Fresh {
+		t.Fatalf("first request = %+v, want fresh approval", first)
+	}
+	c.ReplayPendingPrompts()
+	replayed := <-reqs
+	if replayed != first || !replayed.Fresh {
+		t.Fatalf("replayed = %+v, want identical fresh re-emit of %+v", replayed, first)
+	}
+
+	c.Approve(first.ID, false, false, false)
+	<-done
+}
+
 // TestReplayPendingPromptsReEmitsBlockedAsk proves the same for a blocked `ask`
 // question, including its question payload (which the controller now retains).
 func TestReplayPendingPromptsReEmitsBlockedAsk(t *testing.T) {

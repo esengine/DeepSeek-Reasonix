@@ -44,12 +44,20 @@ reasonix/
     ├── permission/          # per-call Policy: allow/ask/deny rules → Decision
     ├── command/             # custom slash commands loaded from .reasonix/commands/*.md
     ├── plugin/              # stdio JSON-RPC (MCP) client; adapts remote tools
+    ├── remote/              # SSH transport for the Remote-SSH module
+    │   ├── forward/         # -L / -R port-forward lifecycle
+    │   ├── sftpfs/          # SFTP file layer (quarantines pkg/sftp)
+    │   └── bootstrap/       # detached `reasonix serve` bootstrap over SSH
     └── agent/               # Session + harness loop
 ```
 
 Dependency direction (acyclic): `cli → {agent, plugin, config} → {tool, provider}`.
 Built-in subpackages (`provider/openai`, `tool/builtin`) import their parent to
-self-register; parents never import children.
+self-register; parents never import children. The Remote-SSH module layers
+`cli → remote/bootstrap → remote → {remote/forward, remote/sftpfs, config,
+netclient}`; `remote` and its subpackages never import `cli`, `agent`, or
+`serve`, and all interactivity flows through callbacks (host-key / secret
+prompts) so the desktop module consumes the same surface. See §Remote below.
 
 ## 3. Core Abstractions
 
@@ -91,9 +99,9 @@ type Config struct {
   one vendor expose several models without re-declaring the endpoint/key. A
   **model reference** (`default_model`, the `--model` flag, the desktop switcher)
   resolves via `Config.ResolveModel`, which accepts a provider name (→ its default
-  model), a bare model name, or an explicit `provider/model`. `context_window` /
-  `price` are per-provider, so models that need distinct values stay separate
-  single-`model` entries.
+  model), a bare model name, or an explicit `provider/model`. `context_window` is
+  the provider-wide fallback; `model_overrides.<model>.context_window` can replace
+  it for one model. Per-model `prices` use model IDs as keys.
 - Streaming tool-call deltas are accumulated by index inside the provider; only
   complete `ToolCall`s are emitted.
 
@@ -141,6 +149,18 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
   and `headers` so secrets come from the environment, not the config file.
 - Lifecycle: `initialize` → `notifications/initialized` → `tools/list`;
   invocation via `tools/call {name, arguments}`.
+- A stdio server uses one persistent transport for initialize, reads, and
+  writes, preserving state such as browser sessions across tool calls. The
+  process uses the server's writer sandbox because process confinement cannot
+  change per RPC; read-only eligibility and destructive approval remain local
+  dispatch gates rather than separate process sandboxes.
+- Configuration provenance is runtime metadata. User config, legacy user MCP,
+  and verified plugin-package servers are authorized by installation: the host
+  records their current trust snapshot automatically and ordinary calls default
+  to direct approval. Project `reasonix.toml` and `.mcp.json` servers require a
+  session/workspace launch grant for the exact stable identity before any
+  process or network transport is created. Existing receipts count as launch
+  grants for backward compatibility; identity changes invalidate the grant.
 - Each remote tool is adapted to the `Tool` interface and injected into the run
   registry, namespaced `mcp__<server>__<tool>` (spaces normalised to `_`) to
   match Claude Code and avoid clashes.
@@ -173,8 +193,8 @@ prefix cache-stable:
 - The **planner** (low-frequency) runs in its own session with the same standing
   memory context plus a filtered read-only research tool set, then produces a
   concise plan. It can inspect files/docs before planning, but writer and
-  workflow tools are not exposed to it. `agent.planner_max_steps` bounds this
-  read-only exploration independently from the executor's `agent.max_steps`.
+  workflow tools are not exposed to it. It has no user-configured total-round
+  cap; caller cancellation and context safeguards remain available.
 - The plan is handed off as structured text to the **executor** — a full
   tool-using `Agent` in its own session — which carries it out.
 - The sessions never mix, so neither model's prefix is disturbed by the other's
@@ -196,6 +216,9 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   pruning still leaves the prompt above the threshold does summary compaction
   run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
   may proceed even when the fold economics would normally skip it.
+- A positive `model_overrides.<model>.context_window` replaces the provider-wide
+  value after model resolution. Missing or zero model overrides inherit the
+  provider value; provider-level `context_window = 0` disables compaction.
 - Tool-result snip/prune never removes messages, so assistant `tool_calls` and
   tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
   and the recent tail is not rewritten. Snipped results can later be upgraded to
@@ -302,50 +325,50 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
   "blocked" result it can adapt to (the same shape as a plan-mode refusal).
-- **Relationship to plan mode.** Plan mode (§3.4) is an orthogonal, coarser gate
-  checked before the permission layer. Its boundary is fail-closed for untrusted
-  tools: while planning, a tool runs only if it reports a *trustworthy*
-  `ReadOnly()==true` — a built-in, a first-party MCP `ReadOnlyToolNames`
-  override, a plugin-level `trusted_read_only_tools` declaration, or a concrete
-  MCP name listed in `[agent].plan_mode_allowed_tools` — or self-reports
-  plan-safe via `tool.PlanModeClassifier`. An MCP tool's `ReadOnly()` may
-  instead come from the server's self-reported `readOnlyHint`, which plan mode
-  treats as untrusted (`tool.PlanModeUntrustedReadOnly`): interactive
-  controllers may ask once before executing it and may remember a persistent
-  approval as `trusted_read_only_tools`. This trust prompt is a fresh user
-  decision: `auto`, `yolo`, and the approved-plan execution window do not answer
-  it, but an explicit session grant still prevents repeat prompts for the same
-  tool. Non-interactive sessions and declined approvals remain fail-closed.
-  Bash is gated separately: built-in read-only commands and concrete prefixes
-  declared in `[agent].plan_mode_read_only_commands` may run. Interactive
-  controllers may also ask once before running an unknown query-shaped prefix
-  and may remember a persistent approval as the same
-  `plan_mode_read_only_commands` entry. This bash trust prompt is also a fresh
-  user decision: `auto`, `yolo`, and the approved-plan execution window do not
-  answer it, while explicit session/persistent trust prevents repeat prompts for
-  that prefix. Shell operators, background execution, shell interpreters, and
-  unsafe arguments stay blocked while planning. Writers, installers, memory
-  mutation, process control, and `complete_step` (read-only yet post-approval only, so it
-  self-reports plan-unsafe) are refused; the enforced invariant is
-  PlanSafe ⇒ ReadOnly. An untrusted read-only MCP/plugin tool is therefore
-  blocked until the user approves or pre-trusts it, and it is excluded from
-  planner/read-only research sub-agents until the tool is part of the trusted
-  read-only registry. Plan mode still allows `read_only_task` and
-  `read_only_skill`, whose sub-agents receive only read-only research tools and
-  safe foreground bash; writer-capable `task` delegation and full skill execution
-  remain blocked. The desktop MCP panel writes the same
-  `trusted_read_only_tools` raw-name list as an advanced management surface:
-  **Pre-trust read-only** adds currently listed `readOnlyHint` tools, per-tool
-  **Pre-trust** adds an audited reader manually, and **Untrust** removes it
-  again. These UI actions do not make MCP `readOnlyHint` globally trusted by
-  default.
+- **MCP approval policy.** Installed MCP tools may set a server default and raw
+  tool overrides using `auto|prompt|writes|approve`. Precedence is explicit deny,
+  `destructiveHint`, raw-tool mode, server default, then global Ask/Auto/YOLO.
+  A user-authorized server with no explicit MCP approval fields defaults to
+  `approve`; project-provided servers retain `auto`. `auto` delegates to the ordinary permission decision; `prompt` reviews every
+  call; `writes` reviews writers only; and `approve` allows ordinary calls.
+  `approvals_reviewer = "user"` uses the interactive user, while `auto_review`
+  sends the calls that need review (`prompt`, writer hits under `writes`, and
+  `auto` calls the global posture would Ask about) to the session Guardian; a
+  successful allow/deny verdict is final. A missing, timed-out, failed, or
+  indeterminate reviewer degrades to fresh human approval — a prompt that
+  Auto/YOLO, the approved-plan window, and session grants cannot answer — and
+  non-interactive sessions fail closed. A destructive call always requires a
+  fresh human approval on every invocation: no reviewer, session grant, or
+  Auto/YOLO posture can authorize it. All of this is local metadata and is
+  absent from provider-visible tool schemas.
+- **Relationship to plan mode.** Plan mode (§3.4) is a plan-first collaboration
+  workflow, not an all-tools read-only mode. Before Permissions/Sandbox, the
+  host enforces explicit phase opt-outs (`complete_step` is read-only but
+  belongs to the post-approval execution phase, so it self-reports plan-unsafe
+  and is refused) and hard-blocks installed MCP and proxy-resolved MCP
+  writer/destructive targets plus untrusted readers for the entire planning
+  phase — no approval releases them while Plan is active.
+  Ordinary built-in and Bash calls then use the same Ask/Auto/YOLO, explicit
+  `ask`/`deny`, and Sandbox path as Standard mode; blocked MCP writers regain
+  their normal approval flow after Plan exits. A third-party MCP `readOnlyHint` affects ordinary permission and dispatch
+  classification, but it does not grant trust to the dedicated planner or
+  read-only sub-agent registries; use a locally audited
+  `trusted_read_only_tools` entry for those. The legacy
+  `[agent].plan_mode_allowed_tools` field is still decoded and can act as a
+  concrete MCP read-only trust alias, while `plan_mode_read_only_commands` is
+  retained for config/session round trips. Neither field grants or revokes calls
+  in the main Plan workflow. `read_only_task` and `read_only_skill` remain strict
+  read-only capabilities with their own tool registry and safe foreground Bash;
+  writer-capable `task` and skill execution remain permission-gated instead of
+  Plan-blocked, and their child turns inherit the Plan workflow marker and
+  explicit phase opt-outs.
 - **User decisions are separate from tool approvals.** Runtime tool approval has
   three user-facing postures: `ask` ("需要批准"), `auto` ("自动批准"), and
   `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
-  fallback while preserving explicit ask/deny rules; `yolo` skips all tool
-  permission approvals for approval-gated tools such as writers and Bash.
-  Neither posture answers `ask` questions, approves `exit_plan_mode` plans, or
-  confirms MCP read-only trust prompts for the user.
+  fallback while preserving explicit ask/deny rules; `yolo` skips ordinary tool
+  permission prompts for approval-gated tools such as writers and Bash. Explicit
+  deny rules and forced fresh reviews still apply.
+  Neither posture answers `ask` questions or approves `exit_plan_mode` plans.
   Auto-plan is also a separate feature flag: when enabled, a complex task may
   still enter plan mode in any tool approval posture. After a user approves a
   plan, the controller opens a short `approvedPlanAutoApproveTools` execution
@@ -390,12 +413,12 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   desktop UI so the collaboration mode remains one of the three choices, while
   the underlying tool approval posture is preserved.
 
-| Tool approval posture | Tool approvals | Plan approval | MCP read-only trust | `ask` questions |
-| --- | --- | --- | --- | --- |
-| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user unless session-granted | Waits for user |
-| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user unless session-granted | Waits for user |
-| YOLO approval / `yolo` | Approval prompts auto-allowed unless denied | Waits for user | Waits for user unless session-granted | Waits for user |
-| Approved-plan execution window | Approved plan's tool calls auto-allowed unless denied | Future plans still wait | Waits for user unless session-granted | Waits for user |
+| Tool approval posture | Tool approvals | Plan approval | `ask` questions |
+| --- | --- | --- | --- |
+| Need approval / `ask` | Follow permission policy (`Ask` prompts interactively) | Waits for user | Waits for user |
+| Auto approve / `auto` | Writer fallback auto-allowed; explicit ask/deny rules still apply | Waits for user | Waits for user |
+| YOLO approval / `yolo` | Ordinary prompts auto-allowed; deny rules and fresh reviews remain | Waits for user | Waits for user |
+| Approved-plan execution window | Approved plan's writer fallback is auto-allowed; explicit `ask` / `deny`, MCP `prompt` / `writes`, and fresh reviews remain | Future plans still wait | Waits for user |
 
 Out of the box (`mode = "ask"`, no rules) `reasonix run` behaves exactly as before
 (writers resolve `Ask`→allow with no TTY), while `reasonix` now prompts before
@@ -502,10 +525,19 @@ refused so an editor cannot silently flatten or discard rich Skill content.
 Built-in profiles support configuration overrides but have no writable file.
 
 Effective model and effort precedence is: per-profile
-`agent.subagent_models` / `agent.subagent_efforts`, profile frontmatter,
-`agent.subagent_model` / `agent.subagent_effort`, then executor/default model
-configuration. See [Subagent profiles](./SUBAGENT_PROFILES.md) for the user-facing
-command and file-format contract.
+`agent.subagent_models` / `agent.subagent_efforts`, this call's `model` /
+`effort` on `task`/`fleet`, profile frontmatter, `agent.subagent_model` /
+`agent.subagent_effort`, then executor/default model configuration.
+
+`task` accepts optional `profile` and `write_paths`. `fleet` dispatches 2–64
+profile-aware tasks under a session scheduler
+(`agent.max_subagent_concurrency`, default 6; `agent.max_parallel_writers`,
+default 3). Profile names are resolved at runtime from the Skill store and
+must never enter tool schemas or the parent system prompt. Custom and named
+built-in profile bodies are the full child system prompt (no implicit
+concise default). `parallel_tasks` remains the compatible read-only batch
+API on the same scheduler. See [Subagent profiles](./SUBAGENT_PROFILES.md)
+for the user-facing command and file-format contract.
 
 ## 4. Data Types (`internal/provider`)
 
@@ -544,18 +576,13 @@ Resolution order: **flag > project `./reasonix.toml` > the user config file
 at `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows. See
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
-Fields marked user/global only, including agent step limits, are not overridden
-by project `reasonix.toml`.
+Fields marked user/global only are not overridden by project `reasonix.toml`.
 Provider entries name secrets with `api_key_env`; saved key values live in
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
 and the OS keyring are not provider-key runtime fallbacks. Project `.env` still
 feeds workspace-scoped, non-provider `${VAR}` expansion for MCP/plugin settings
-without importing provider keys or Reasonix control variables. Step-limit
-preferences belong in the user config.
-Project `reasonix.toml` does not override `agent.max_steps` or
-`agent.planner_max_steps`, and it does not override the user-level Memory v5
-compiler switch.
+without importing provider keys or Reasonix control variables.
 
 ```toml
 default_model = "deepseek"   # provider name (→ its default model) or "provider/model"
@@ -563,18 +590,14 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 
 [ui]
 # shortcut_layout = "desktop"       # classic|desktop; compatibility setting
-# cursor_shape = "underline"        # CLI/TUI textarea cursor: underline|block|bar
+# cursor_shape = "bar"              # CLI/TUI textarea cursor: underline|block|bar
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
-max_steps         = 0    # user/global only; executor tool-call rounds; 0 = no limit
-planner_max_steps = 0    # user/global only; planner read-only tool-call rounds; 0 = no limit
 temperature       = 0.0
-memory_compiler = { enabled = true, verbosity = "observe" }   # user/global only; observe|compact; CLI: reasonix config memory-v5 off|observe|compact|on|status
 reasoning_language = "auto"       # visible reasoning text: auto|zh|en
-# plan_mode_allowed_tools = ["custom_reader"]   # extra read-only declarations for custom tools;
-#                                                # cannot unlock known blocked tools or unsafe bash
-# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # extra read-only shell prefixes for plan mode
+# plan_mode_allowed_tools = ["mcp__legacy__reader"]   # legacy MCP read-only trust alias; does not change Plan availability
+# plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash uses Permissions
 # planner_model = "deepseek-pro"   # optional: two-model collaboration (low-frequency planner)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_effort = "high"           # optional default reasoning effort for subagents
@@ -592,6 +615,7 @@ models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
+# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.
 
@@ -626,7 +650,7 @@ ask   = []                                 # force a prompt even if otherwise al
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = cwd
 # allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may modify
-# forbid_read    = ["${HOME}/.ssh"]   # dirs read/list/search tools and sandboxed bash may not inspect
+# forbid_read    = ["${HOME}/.ssh"]   # paths read/list/search tools and sandboxed bash may not inspect
 
 [serve]
 auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
@@ -641,8 +665,10 @@ args    = []
 # env   = { FOO = "bar" }
 # call_timeout_seconds = 600            # per-server MCP call timeout; 0 = global/default cap
 # tool_timeout_seconds = { "generate_video" = 1800 }   # raw MCP tool names
-# trusted_read_only_tools = ["search"]   # optional pre-seeded MCP read-only trust
-
+# trusted_read_only_tools = ["search"]   # locally audited Plan/read-only-research readers
+# default_tools_approval_mode = "auto"   # auto|prompt|writes|approve
+# tools = { "delete_all" = { approval_mode = "prompt" } }
+# approvals_reviewer = "user"            # user|auto_review
 # [[plugins]]                   # a remote MCP server over Streamable HTTP
 # name    = "stripe"
 # type    = "http"             # "stdio" (default) | "http" | "sse"
@@ -650,10 +676,24 @@ args    = []
 # headers = { Authorization = "Bearer ${STRIPE_KEY}" }   # ${VAR} / ${VAR:-default} expanded
 ```
 
+The executor tracks an adaptive progress lease while a todo is active. A new
+completion, unique successful read, command, or mutation renews the lease;
+exact repeats do not. After 8 no-progress tool-call rounds the host appends a
+one-shot reassessment nudge. After 16 it pauses and preserves work for a later
+user turn. The serial contract is level-aware while preserving the
+single-in_progress rule: in a two-level list the active level-1 sub-step is
+the only `in_progress` item and its level-0 phase stays `pending`; sub-steps
+complete in order, and the phase becomes `in_progress` — and signs off — only
+after all of its sub-steps have completed. A level-1 item with no phase above
+it is rejected. Retired `[agent].max_steps` and `planner_max_steps` keys remain
+parseable for upgrade compatibility, but are ignored and removed by a one-time
+migration. The CLI `--max-steps` flag and `[bot].max_steps` remain separate,
+explicit controls for one-off and unattended execution.
+
 `reasonix setup` writes this default config so the CLI is usable out of the box.
 
 `[ui].cursor_shape` is normalized to `underline`, `block`, or `bar`; empty or
-unknown values fall back to `underline`. It applies to the Bubble Tea CLI/TUI
+unknown values fall back to `bar`. It applies to the Bubble Tea CLI/TUI
 textarea only, while desktop and browser inputs keep their platform-native
 cursor behavior.
 
@@ -686,40 +726,21 @@ config dir, plus `allow_write`: a write whose target — resolved to an absolute
 symlink-free path so a symlinked dir or `..` cannot tunnel out — falls outside
 every root is refused, and the error is fed back to the model. Confinement is on
 by default (root = cwd), so edits stay in the project while the agent can still
-update its own global config. `forbid_read` lists directories the agent should
+update its own global config. `forbid_read` lists files or directories the agent should
 not read, list, or search; entries support `${VAR}` / `${VAR:-default}` expansion
 and should be absolute, or use `${HOME}` for home-relative secrets such as
 `${HOME}/.ssh`. `bash` is itself jailed by default when an OS sandbox is
-available (`[sandbox] bash = "enforce"`: Seatbelt on macOS, bubblewrap on
-Linux, and a native helper on Windows): each command is allowed to write only
+available (`[sandbox] bash = "enforce"`: Seatbelt on macOS and bubblewrap on
+Linux): each command is allowed to write only
 the same roots plus platform-specific command temp/cache roots, denied reads
 under `forbid_read`, and allowed to reach the network only when
 `network = true`.
-**Current status:** stable builds force the effective Bash sandbox mode to
-`off` on Windows — even an explicit `bash = "enforce"` resolves to `off` (and
-`reasonix doctor` flags the ignored setting) — because the native backend
-described below still breaks common Git Bash/MSYS2, Docker, and git workflows.
-The description is kept as the design of record until the backend is reliable
-enough to re-enable.
-The native Windows helper uses Reasonix's bundled Windows sandbox backend:
-AppContainer for read-only commands and a low-integrity token for writable
-commands, with temporary ACL grants for
-writable roots and tool executables, a per-command temp root instead of mutating
-the global Temp directory, temporary deny ACEs for `forbid_read` (files and
-directories), best-effort restoration from pre-run DACL snapshots for touched
-directories, and a kill-on-close Job Object. Because the sandbox works by
-temporarily mutating shared-path ACLs and integrity labels, concurrent commands
-against the same root are serialized with a per-root lock, and residue from a
-force-killed command (a lingering low-integrity label or `forbid_read` deny ACE)
-is swept by the next run so a crash cannot durably lower a workspace's integrity
-or lock the user out of a `forbid_read` path. A writable command runs under a
-low-integrity token, so beyond the configured roots it retains write access to
-the narrow set of locations Windows leaves writable to any low-integrity process
-(e.g. `AppData\LocalLow`); the workspace boundary and `forbid_read` denials are
-unaffected. Read-only AppContainer commands omit network capabilities when
-networking is disabled; writable Windows commands fail closed when
-`network = false` because the low-integrity token does not provide a reliable
-per-process network block without elevated firewall/WFP setup.
+**Windows status:** Reasonix does not ship an OS-level Bash sandbox on Windows.
+The effective mode is fixed to `off`; an older config containing
+`bash = "enforce"` remains readable but resolves to `off`, `reasonix doctor`
+reports the ignored value, and the desktop control is read-only. Bash therefore
+runs unconfined on Windows. The in-process file tools continue to enforce
+`workspace_root`, `allow_write`, and `forbid_read`.
 When no OS sandbox is available, `bash = "enforce"` refuses bash execution
 instead of running unconfined. Install the platform sandbox backend
 (bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set
@@ -752,16 +773,12 @@ behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9)
 
 - Sandbox Phase 1: an OS-level jail for `bash` so commands — not just the
   file-writer built-ins (Phase 0) — are confined to the workspace. **Seatbelt on
-  macOS, bubblewrap on Linux, and a native Windows helper ship, on by default
-  when available** (see §5).
-  Remaining: (a)
-  the escape-prompt — detect sandbox-unavailable or sandbox-denied failures and
+  macOS and bubblewrap on Linux ship, on by default when available** (see §5).
+  Remaining: the escape-prompt — detect sandbox-unavailable or sandbox-denied failures and
   offer an explicit, permission-gated unconfined rerun (in `reasonix run`, the
   command just fails and the model adapts), which completes the "allow inside the
-  box, prompt at its edge" model; (b) an optional elevated Windows backend with a
-  dedicated sandbox user for enterprise hardening. Shells out to OS tooling so
-  the binary stays dependency-free. With this in
-  place, "always allow" rule persistence becomes optional rather than load-bearing.
+  box, prompt at its edge" model. With this in place, "always allow" rule
+  persistence becomes optional rather than load-bearing.
 - MCP long tail (deferred deliberately — no consumer / no foundation yet): OAuth
   2.0 + `headersHelper` auth for remote servers; the remaining `.mcp.json` scopes
   (local / user — project scope shipped, see §5); tool-search deferral;

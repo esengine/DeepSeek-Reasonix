@@ -8,6 +8,7 @@ import { projectColorValue } from "../lib/projectColors";
 import { useT } from "../lib/i18n";
 import { Tooltip } from "./Tooltip";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
+import { WorktreeBadge } from "./WorktreeBadge";
 
 interface TabBarProps {
   tabs: TabMeta[];
@@ -246,6 +247,7 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
                 />
               )}
               <span className="tabbar__tab-label">{displayTitle}</span>
+              {tab.isolatedWorktree && <WorktreeBadge size={11} />}
               {planMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">plan</span>}
               {goalMode && <span className="tabbar__mode-badge tabbar__mode-badge--plan">goal</span>}
               {toolApprovalMode === "auto" && <span className="tabbar__mode-badge tabbar__mode-badge--plan">auto</span>}

@@ -328,8 +328,16 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   failure error text becomes `stderr`), which the official security-guidance
   plugin's commit/push checks read; other tools' responses pass through as
   the raw result. Imported hooks receive Claude-compatible snake_case stdin
-  payloads, including `hook_event_name`, and `${CLAUDE_PLUGIN_ROOT}` is
-  expanded by the host before process launch. A `PreToolUse` or
+  payloads, including `hook_event_name`. Before process launch, the host
+  expands `${CLAUDE_PLUGIN_ROOT}` and `${REASONIX_PLUGIN_ROOT}` (plus their
+  unbraced `$NAME` and Windows `%NAME%` spellings), so plugin-relative paths
+  do not depend on the target shell's environment-variable syntax. On Windows,
+  a bare `sh -c` or `bash -c` hook is routed through a discovered Git for
+  Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
+  interpreter path remains untouched. If no usable Bash is installed, the hook
+  reports a clear prerequisite error instead of the localized `sh is not
+  recognized` output. Captured legacy-code-page output is normalized to UTF-8
+  before it reaches the UI. A `PreToolUse` or
   `UserPromptSubmit` hook can still deny via exit code 2 or its JSON deny
   shape on exit 0 (`hookSpecificOutput.permissionDecision` for `PreToolUse`,
   top-level `decision:"block"` for `UserPromptSubmit`); an imported

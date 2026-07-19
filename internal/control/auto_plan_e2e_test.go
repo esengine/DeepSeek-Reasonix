@@ -188,4 +188,67 @@ func TestAutoPlanGateRejectionStaysInPlan(t *testing.T) {
 	if prov.call != 1 {
 		t.Fatalf("provider called %d times, want 1 (plan only, no execution)", prov.call)
 	}
+	c.mu.Lock()
+	suppressed := c.suppressAutoPlan
+	c.mu.Unlock()
+	if suppressed {
+		t.Fatal("denying a plan while plan mode stays on must not suppress auto-plan")
+	}
+}
+
+// TestAutoPlanSuppressedAfterUserExitsPlanMode: when the user turns plan mode
+// off and then denies the pending plan approval, the next turn must not
+// auto-plan straight back into the mode the user just left. The suppression is
+// one-shot. Absorbed from PR #6413 by @myipanta.
+func TestAutoPlanSuppressedAfterUserExitsPlanMode(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("Plan:\n1. Add the config field\n2. Add tests"),
+		textTurn("done without planning"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+
+	approvalID := make(chan string, 1)
+	c := New(Options{
+		AutoPlan: "on",
+		Runner:   ag,
+		Executor: ag,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvalID <- e.Approval.ID
+			}
+		}),
+	})
+
+	go func() {
+		id := <-approvalID
+		c.SetPlanMode(false) // the user exits plan mode from the UI...
+		c.Approve(id, false, false, false)
+	}()
+
+	input := "实现 issue #2395：新增配置项、自动判断复杂任务、补测试和文档"
+	if err := c.runTurnWithRaw(context.Background(), input, input); err != nil {
+		t.Fatalf("runTurnWithRaw: %v", err)
+	}
+	if c.PlanMode() {
+		t.Fatal("plan mode should stay off after the user exited it")
+	}
+	c.mu.Lock()
+	suppressed := c.suppressAutoPlan
+	c.mu.Unlock()
+	if !suppressed {
+		t.Fatal("denying the plan after exiting plan mode should suppress the next auto-plan")
+	}
+
+	if err := c.runTurnWithRaw(context.Background(), input, input); err != nil {
+		t.Fatalf("second runTurnWithRaw: %v", err)
+	}
+	if c.PlanMode() {
+		t.Fatal("auto-plan must not re-enter plan mode on the turn right after the user exited it")
+	}
+	c.mu.Lock()
+	suppressed = c.suppressAutoPlan
+	c.mu.Unlock()
+	if suppressed {
+		t.Fatal("auto-plan suppression should be one-shot")
+	}
 }

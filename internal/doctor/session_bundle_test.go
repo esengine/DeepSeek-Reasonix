@@ -40,6 +40,7 @@ func TestWriteSessionBundleIncludesRecoveryChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, store.SessionEventLog(recovery), `{"type":"replace"}`+"\n")
+	writeFile(t, store.SessionEventLogDamaged(recovery), `{"damaged_tail":true}`+"\ntorn"+"\n")
 	writeFile(t, store.SessionEventIndex(recovery), `{"log_size":19}`+"\n")
 	writeFile(t, store.SessionConflictLog(recovery), `{"outcome":"forked_recovery_branch"}`+"\n")
 	writeFile(t, store.SessionLeaseInfo(recovery), `{"pid":1234}`+"\n")
@@ -68,6 +69,7 @@ func TestWriteSessionBundleIncludesRecoveryChain(t *testing.T) {
 		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.jsonl",
 		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.jsonl.meta",
 		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.events.jsonl",
+		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.events.jsonl.damaged",
 		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.event-index.json",
 		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.conflicts.jsonl",
 		"sessions/parent-session-recovery-deadbeef/parent-session-recovery-deadbeef.jsonl.lease.json",

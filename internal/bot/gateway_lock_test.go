@@ -394,6 +394,10 @@ func TestBotGatewayToolApprovalModeConcurrentWithConfigReaders(t *testing.T) {
 			gw.updateToolApprovalModeDefaultLocked(InboundMessage{Platform: PlatformFeishu}, mode)
 			gw.updateToolApprovalModeDefaultLocked(InboundMessage{}, mode)
 			gw.mu.Unlock()
+			// This is a lock-discipline test, not a maximum-rate writer stress
+			// test. Keep the reader and writer concurrent without spinning hard
+			// enough to turn uninstrumented Windows runs into a GC stress test.
+			time.Sleep(time.Millisecond)
 		}
 	}()
 
