@@ -53,9 +53,9 @@ func LoadCCSwitchMCPCandidates() ([]MCPImportCandidate, error) {
 // them to Reasonix plugin entries. Newer cc-switch stores servers in SQLite;
 // older installs kept them in config.json(.migrated/.bak), so we support both.
 //
-// Patched for cc-switch Reasonix parity: prefer enabled_reasonix / apps.reasonix
-// (falls back to Codex flags so older DB rows still import until users flip the
-// Reasonix MCP toggle).
+// CC Switch v16+ stores dedicated enabled_reasonix / apps.reasonix flags.
+// Treat those as authoritative when present, and fall back to Codex only for
+// pre-v16 SQLite schemas or legacy JSON entries without Reasonix enablement.
 func LoadCCSwitchMCP() ([]PluginEntry, error) {
 	if IsolatedHomeDir() != "" {
 		return nil, nil
