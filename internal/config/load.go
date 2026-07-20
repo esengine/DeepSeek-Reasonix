@@ -71,6 +71,15 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 		}
 		userDefaultModelExplicit = tomlFileDefinesKey(uc, "default_model")
 	}
+	globalMemoryRecall := cfg.Agent.MemoryRecall
+	if cfg.Agent.MemoryRecall.Diversity != nil {
+		v := *cfg.Agent.MemoryRecall.Diversity
+		globalMemoryRecall.Diversity = &v
+	}
+	if cfg.Agent.MemoryRecall.Staleness != nil {
+		v := *cfg.Agent.MemoryRecall.Staleness
+		globalMemoryRecall.Staleness = &v
+	}
 	userDefaultModel := cfg.DefaultModel
 	globalSecrets := cfg.Secrets
 	globalRemote := cfg.Remote.Clone()
@@ -79,6 +88,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	if err := mergeTOML(cfg, projectTOML); err != nil {
 		return nil, err
 	}
+	cfg.Agent.MemoryRecall = globalMemoryRecall
 	// Secret protection is a user-global security control: a cloned repo's
 	// reasonix.toml must not be able to flip on the workflow-breaking env/path
 	// protections.

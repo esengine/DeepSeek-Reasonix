@@ -14,6 +14,25 @@ func TestDefaultReasoningLanguageAuto(t *testing.T) {
 	}
 }
 
+func TestDefaultMemoryRecallPolicy(t *testing.T) {
+	policy := Default().MemoryRecallPolicy()
+	if policy.Diversity == nil || !*policy.Diversity || policy.Staleness == nil || !*policy.Staleness {
+		t.Fatalf("default memory recall policy should enable diversity and staleness: %+v", policy)
+	}
+	if policy.DiversityWeight != DefaultMemoryRecallDiversityWeight ||
+		policy.DuplicateThreshold != DefaultMemoryRecallDuplicateThreshold ||
+		policy.StalenessHalfLifeDays != DefaultMemoryRecallStalenessHalfLifeDays {
+		t.Fatalf("unexpected default memory recall policy: %+v", policy)
+	}
+	disabled := false
+	cfg := Default()
+	cfg.Agent.MemoryRecall.Diversity = &disabled
+	cfg.Agent.MemoryRecall.Staleness = &disabled
+	policy = cfg.MemoryRecallPolicy()
+	if *policy.Diversity || *policy.Staleness {
+		t.Fatalf("explicit memory recall opt-out was not preserved: %+v", policy)
+	}
+}
 func TestDefaultDesktopAppearanceAutoGraphite(t *testing.T) {
 	cfg := Default()
 	if got := cfg.DesktopTheme(); got != "auto" {

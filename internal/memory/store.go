@@ -62,6 +62,12 @@ type Memory struct {
 	Description string // one-line summary used for the index and recall
 	Type        Type
 	Body        string // the fact itself (Markdown)
+	// Optional provenance metadata. Zero values preserve compatibility with
+	// hand-authored and pre-metadata memory files.
+	CreatedAt       time.Time
+	LastConfirmedAt time.Time
+	SourceScope     string
+	SourceKind      string
 }
 
 // ArchivedMemory is a saved fact that has been removed from active memory but
@@ -176,6 +182,13 @@ func (s Store) Path(name string) string {
 // editor, and any future importer all go through here so the index never drifts
 // from the files. Returns the path written.
 func (s Store) Save(m Memory) (string, error) {
+	return s.SaveAt(m, time.Now())
+}
+
+// SaveAt is Save with an explicit clock for deterministic importers and tests.
+// Updating an existing fact preserves its creation time and provenance unless
+// the caller explicitly supplies replacements, while confirmation time advances.
+func (s Store) SaveAt(m Memory, now time.Time) (string, error) {
 	dir := s.DirFor(m.Type)
 	if dir == "" {
 		return "", fmt.Errorf("memory store unavailable (no user config dir)")
@@ -186,6 +199,34 @@ func (s Store) Save(m Memory) (string, error) {
 	name := slug(m.Name)
 	if name == "" {
 		return "", fmt.Errorf("memory name needs at least one letter or digit")
+	}
+	now = now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if existing, ok := loadMemory(s.Path(name)); ok {
+		if m.CreatedAt.IsZero() {
+			m.CreatedAt = existing.CreatedAt
+		}
+		if strings.TrimSpace(m.SourceScope) == "" {
+			m.SourceScope = existing.SourceScope
+		}
+		if strings.TrimSpace(m.SourceKind) == "" {
+			m.SourceKind = existing.SourceKind
+		}
+	}
+	if m.CreatedAt.IsZero() {
+		m.CreatedAt = now
+	}
+	if m.LastConfirmedAt.IsZero() {
+		m.LastConfirmedAt = now
+	}
+	if strings.TrimSpace(m.SourceScope) == "" {
+		if m.Type == TypeUser || m.Type == TypeFeedback {
+			m.SourceScope = "global"
+		} else {
+			m.SourceScope = "project"
+		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
@@ -391,7 +432,11 @@ type memoryFrontmatter struct {
 	Title    string `yaml:"title,omitempty"`
 	Desc     string `yaml:"description"`
 	Metadata struct {
-		Type string `yaml:"type"`
+		Type            string `yaml:"type"`
+		CreatedAt       string `yaml:"created_at,omitempty"`
+		LastConfirmedAt string `yaml:"last_confirmed_at,omitempty"`
+		SourceScope     string `yaml:"source_scope,omitempty"`
+		SourceKind      string `yaml:"source_kind,omitempty"`
 	} `yaml:"metadata"`
 }
 
@@ -399,6 +444,10 @@ type memoryFrontmatter struct {
 func render(m Memory, name string) string {
 	fm := memoryFrontmatter{Name: name, Title: oneLine(m.Title), Desc: oneLine(m.Description)}
 	fm.Metadata.Type = string(NormalizeType(string(m.Type)))
+	fm.Metadata.CreatedAt = formatMetadataTime(m.CreatedAt)
+	fm.Metadata.LastConfirmedAt = formatMetadataTime(m.LastConfirmedAt)
+	fm.Metadata.SourceScope = strings.TrimSpace(m.SourceScope)
+	fm.Metadata.SourceKind = strings.TrimSpace(m.SourceKind)
 	var b strings.Builder
 	b.WriteString("---\n")
 	enc := yaml.NewEncoder(&b)
@@ -608,16 +657,35 @@ func loadMemory(path string) (Memory, bool) {
 	}
 	fm, body := splitFrontmatter(string(b))
 	m := Memory{
-		Name:        fm["name"],
-		Title:       fm["title"],
-		Description: fm["description"],
-		Type:        NormalizeType(fm["type"]),
-		Body:        strings.TrimSpace(body),
+		Name:            fm["name"],
+		Title:           fm["title"],
+		Description:     fm["description"],
+		Type:            NormalizeType(fm["type"]),
+		Body:            strings.TrimSpace(body),
+		CreatedAt:       parseMetadataTime(fm["created_at"]),
+		LastConfirmedAt: parseMetadataTime(fm["last_confirmed_at"]),
+		SourceScope:     strings.TrimSpace(fm["source_scope"]),
+		SourceKind:      strings.TrimSpace(fm["source_kind"]),
 	}
 	if m.Name == "" {
 		m.Name = strings.TrimSuffix(filepath.Base(path), ".md")
 	}
 	return m, true
+}
+
+func formatMetadataTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func parseMetadataTime(value string) time.Time {
+	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // splitFrontmatter is a thin wrapper; the real parser lives in

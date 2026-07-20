@@ -4,24 +4,49 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"reasonix/internal/retrieval"
 	"reasonix/internal/tool"
 )
 
 const (
-	defaultRecallLimit = 8
-	maxRecallLimit     = 20
-	maxRecallSnippet   = 260
-	recallScoreFloor   = 0.15
+	defaultRecallLimit        = 8
+	maxRecallLimit            = 20
+	maxRecallSnippet          = 260
+	recallScoreFloor          = 0.15
+	defaultDiversityWeight    = 0.35
+	defaultDuplicateThreshold = 0.82
+	defaultStalenessHalfLife  = 365 * 24 * time.Hour
 )
 
-type recallTool struct{ store Store }
+// RecallOptions controls the post-BM25 ranking layer. Nil booleans use the
+// production defaults (enabled); pointers let callers explicitly disable each
+// behavior without changing legacy constructor semantics.
+type RecallOptions struct {
+	Diversity          *bool
+	DiversityWeight    float64
+	DuplicateThreshold float64
+	Staleness          *bool
+	StalenessHalfLife  time.Duration
+	Now                func() time.Time
+}
+
+type recallTool struct {
+	store   Store
+	options RecallOptions
+}
 
 // NewRecallTool returns the read-only `memory` tool for searching saved facts.
 func NewRecallTool(store Store) tool.Tool { return recallTool{store: store} }
+
+// NewRecallToolWithOptions returns a recall tool with explicit ranking policy.
+func NewRecallToolWithOptions(store Store, options RecallOptions) tool.Tool {
+	return recallTool{store: store, options: options}
+}
 
 func (recallTool) Name() string { return "memory" }
 
@@ -66,7 +91,7 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	limit := clampRecallLimit(in.Limit)
 	switch strings.TrimSpace(in.Operation) {
 	case "search":
-		hits, err := searchMemories(ctx, t.store, in.Query, memType, limit)
+		hits, err := searchMemoriesWithOptions(ctx, t.store, in.Query, memType, limit, t.options)
 		if err != nil {
 			return "", err
 		}
@@ -89,10 +114,14 @@ func (t recallTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 func (recallTool) ReadOnly() bool { return true }
 
 type memoryHit struct {
-	Memory  Memory
-	Path    string
-	Score   float64
-	Snippet string
+	Memory           Memory
+	Path             string
+	Score            float64
+	RankScore        float64
+	DiversityPenalty float64
+	StalenessFactor  float64
+	Snippet          string
+	terms            []string
 }
 
 type memoryDoc struct {
@@ -104,6 +133,10 @@ type memoryDoc struct {
 }
 
 func searchMemories(ctx context.Context, store Store, query string, typ Type, limit int) ([]memoryHit, error) {
+	return searchMemoriesWithOptions(ctx, store, query, typ, limit, RecallOptions{})
+}
+
+func searchMemoriesWithOptions(ctx context.Context, store Store, query string, typ Type, limit int, options RecallOptions) ([]memoryHit, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("query is required")
@@ -154,6 +187,7 @@ func searchMemories(ctx context.Context, store Store, query string, typ Type, li
 			Path:    doc.path,
 			Score:   score,
 			Snippet: retrieval.MakeSnippet(doc.text, query, queryTerms, maxRecallSnippet),
+			terms:   retrieval.Unique(retrieval.Tokens(memorySimilarityText(doc.memory))),
 		})
 	}
 	sort.Slice(hits, func(i, j int) bool {
@@ -165,10 +199,130 @@ func searchMemories(ctx context.Context, store Store, query string, typ Type, li
 	hits = retrieval.KeepTopRelativeScore(hits, recallScoreFloor, func(hit memoryHit) float64 {
 		return hit.Score
 	})
-	if len(hits) > limit {
-		hits = hits[:limit]
+	return rerankMemoryHits(hits, limit, normalizeRecallOptions(options)), nil
+}
+
+type normalizedRecallOptions struct {
+	diversity          bool
+	diversityWeight    float64
+	duplicateThreshold float64
+	staleness          bool
+	stalenessHalfLife  time.Duration
+	now                time.Time
+}
+
+func normalizeRecallOptions(in RecallOptions) normalizedRecallOptions {
+	out := normalizedRecallOptions{
+		diversity:          in.Diversity == nil || *in.Diversity,
+		diversityWeight:    in.DiversityWeight,
+		duplicateThreshold: in.DuplicateThreshold,
+		staleness:          in.Staleness == nil || *in.Staleness,
+		stalenessHalfLife:  in.StalenessHalfLife,
+		now:                time.Now().UTC(),
 	}
-	return hits, nil
+	if out.diversityWeight <= 0 || out.diversityWeight > 1 {
+		out.diversityWeight = defaultDiversityWeight
+	}
+	if out.duplicateThreshold <= 0 || out.duplicateThreshold > 1 {
+		out.duplicateThreshold = defaultDuplicateThreshold
+	}
+	if out.stalenessHalfLife <= 0 {
+		out.stalenessHalfLife = defaultStalenessHalfLife
+	}
+	if in.Now != nil {
+		out.now = in.Now().UTC()
+	}
+	return out
+}
+
+func rerankMemoryHits(hits []memoryHit, limit int, options normalizedRecallOptions) []memoryHit {
+	if len(hits) == 0 || limit <= 0 {
+		return nil
+	}
+	for i := range hits {
+		hits[i].StalenessFactor = memoryStalenessFactor(hits[i].Memory, options)
+		hits[i].RankScore = hits[i].Score * hits[i].StalenessFactor
+	}
+	if !options.diversity {
+		if options.staleness && len(hits) > 2 {
+			// Preserve the strongest lexical hit, but let confirmation age
+			// influence the remaining order even when diversity is disabled.
+			sort.SliceStable(hits[1:], func(i, j int) bool {
+				left := &hits[i+1]
+				right := &hits[j+1]
+				if left.RankScore == right.RankScore {
+					return left.Memory.Name < right.Memory.Name
+				}
+				return left.RankScore > right.RankScore
+			})
+		}
+		if len(hits) > limit {
+			hits = hits[:limit]
+		}
+		return hits
+	}
+
+	// Keep the strongest lexical hit stable, then greedily choose complementary
+	// evidence. Near-identical notes are omitted rather than consuming context.
+	selected := []memoryHit{hits[0]}
+	remaining := append([]memoryHit(nil), hits[1:]...)
+	topScore := hits[0].Score
+	for len(selected) < limit && len(remaining) > 0 {
+		best := -1
+		for i := range remaining {
+			maxSimilarity := 0.0
+			for _, prior := range selected {
+				maxSimilarity = math.Max(maxSimilarity, tokenJaccard(remaining[i].terms, prior.terms))
+			}
+			if maxSimilarity >= options.duplicateThreshold {
+				continue
+			}
+			remaining[i].DiversityPenalty = maxSimilarity
+			remaining[i].RankScore = remaining[i].Score*remaining[i].StalenessFactor - options.diversityWeight*maxSimilarity*topScore
+			if best < 0 || remaining[i].RankScore > remaining[best].RankScore ||
+				(remaining[i].RankScore == remaining[best].RankScore && remaining[i].Memory.Name < remaining[best].Memory.Name) {
+				best = i
+			}
+		}
+		if best < 0 {
+			break
+		}
+		selected = append(selected, remaining[best])
+		remaining = append(remaining[:best], remaining[best+1:]...)
+	}
+	return selected
+}
+
+func memoryStalenessFactor(m Memory, options normalizedRecallOptions) float64 {
+	if !options.staleness || m.LastConfirmedAt.IsZero() || !options.now.After(m.LastConfirmedAt) {
+		return 1
+	}
+	age := options.now.Sub(m.LastConfirmedAt)
+	factor := math.Exp2(-float64(age) / float64(options.stalenessHalfLife))
+	return math.Max(0.5, factor)
+}
+
+func tokenJaccard(a, b []string) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, term := range a {
+		set[term] = struct{}{}
+	}
+	intersection := 0
+	union := len(set)
+	for _, term := range b {
+		if _, ok := set[term]; ok {
+			intersection++
+		} else {
+			union++
+		}
+	}
+	if union == 0 {
+		return 0
+	}
+	return float64(intersection) / float64(union)
 }
 
 func recallTypeFilter(s string) (Type, error) {
@@ -218,6 +372,18 @@ func memorySearchText(m Memory) string {
 	}, "\n")
 }
 
+// memorySimilarityText intentionally excludes the memory name and filesystem
+// path. Those identifiers help exact BM25 lookup, but treating them as semantic
+// content makes otherwise identical notes appear artificially different.
+func memorySimilarityText(m Memory) string {
+	return strings.Join([]string{
+		m.Title,
+		m.Description,
+		string(NormalizeType(string(m.Type))),
+		m.Body,
+	}, "\n")
+}
+
 func formatMemoryHits(query string, hits []memoryHit) string {
 	if len(hits) == 0 {
 		return strings.Join([]string{
@@ -233,11 +399,18 @@ func formatMemoryHits(query string, hits []memoryHit) string {
 	fmt.Fprintf(&b, "Memory search results for %s:\n", strconvQuote(query))
 	for i, hit := range hits {
 		m := hit.Memory
-		fmt.Fprintf(&b, "\n%d. score=%.3f name=%s type=%s title=%s\n   description: %s\n   path: %s\n   snippet: %s\n",
-			i+1, hit.Score, m.Name, NormalizeType(string(m.Type)), displayTitle(m.Title, m.Name), oneLine(m.Description), hit.Path, hit.Snippet)
+		fmt.Fprintf(&b, "\n%d. score=%.3f rank=%.3f diversity=%.3f staleness=%.3f name=%s type=%s source=%s/%s title=%s\n   description: %s\n   path: %s\n   snippet: %s\n",
+			i+1, hit.Score, hit.RankScore, hit.DiversityPenalty, hit.StalenessFactor, m.Name, NormalizeType(string(m.Type)), emptyLabel(m.SourceScope), emptyLabel(m.SourceKind), displayTitle(m.Title, m.Name), oneLine(m.Description), hit.Path, hit.Snippet)
 	}
 	b.WriteString("\nUse operation=\"read\" with a memory name to inspect the full saved fact.")
 	return strings.TrimSpace(b.String())
+}
+
+func emptyLabel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "legacy"
+	}
+	return strings.TrimSpace(value)
 }
 
 func formatMemory(store Store, m Memory) string {
