@@ -517,6 +517,18 @@ func TestServeLifecycle(t *testing.T) {
 	if ir.AgentCapabilities.PromptCapabilities.Image {
 		t.Errorf("image must not be advertised")
 	}
+	var extensions struct {
+		AgentCapabilities struct {
+			Meta map[string]ReasonixExtensionCapabilities `json:"_meta"`
+		} `json:"agentCapabilities"`
+	}
+	if err := json.Unmarshal(initResp.Result, &extensions); err != nil {
+		t.Fatalf("initialize extensions: %v", err)
+	}
+	steer := extensions.AgentCapabilities.Meta["reasonix.io"].SessionSteer
+	if steer == nil || steer.Method != sessionSteerMethod {
+		t.Errorf("sessionSteer capability = %+v, want method %q", steer, sessionSteerMethod)
+	}
 	if len(ir.AuthMethods) != 1 || ir.AuthMethods[0].ID != "reasonix-setup" || ir.AuthMethods[0].Type != "terminal" {
 		t.Fatalf("authMethods = %+v, want terminal reasonix setup", ir.AuthMethods)
 	}
@@ -1563,12 +1575,20 @@ func TestServeSteerInjectsIntoActivePrompt(t *testing.T) {
 		t.Fatal("prompt never reached the tool boundary")
 	}
 
-	steerResp := client.call(t, "session/steer", SessionSteerParams{
+	legacyResp := client.call(t, "session/steer", SessionSteerParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "legacy route"}},
+	})
+	if legacyResp.Error == nil || legacyResp.Error.Code != ErrMethodNotFound {
+		t.Fatalf("legacy session/steer = %+v, want method not found", legacyResp.Error)
+	}
+
+	steerResp := client.call(t, sessionSteerMethod, SessionSteerParams{
 		SessionID: nr.SessionID,
 		Prompt:    []ContentBlock{{Type: "text", Text: "use plan B"}},
 	})
 	if steerResp.Error != nil {
-		t.Fatalf("session/steer errored: %+v", steerResp.Error)
+		t.Fatalf("%s errored: %+v", sessionSteerMethod, steerResp.Error)
 	}
 	close(barrier.release)
 	_, promptResp := drainPrompt(t, client, promptCh)
@@ -1591,12 +1611,12 @@ func TestServeSteerInjectsIntoActivePrompt(t *testing.T) {
 		t.Fatalf("second provider request did not contain the steer: %+v", reqs[1].Messages)
 	}
 
-	idleResp := client.call(t, "session/steer", SessionSteerParams{
+	idleResp := client.call(t, sessionSteerMethod, SessionSteerParams{
 		SessionID: nr.SessionID,
 		Prompt:    []ContentBlock{{Type: "text", Text: "too late"}},
 	})
 	if idleResp.Error == nil || idleResp.Error.Code != ErrInvalidRequest {
-		t.Fatalf("idle session/steer = %+v, want invalid request", idleResp.Error)
+		t.Fatalf("idle %s = %+v, want invalid request", sessionSteerMethod, idleResp.Error)
 	}
 }
 

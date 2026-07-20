@@ -125,7 +125,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle("session/load", svc.sessionLoad)
 	conn.Handle("session/resume", svc.sessionResume)
 	conn.Handle("session/prompt", svc.sessionPrompt)
-	conn.Handle("session/steer", svc.sessionSteer)
+	conn.Handle(sessionSteerMethod, svc.sessionSteer)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
 	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/set_mode", svc.sessionSetMode)
@@ -535,6 +535,11 @@ func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error
 				EmbeddedContext: true,
 			},
 			MCPCapabilities: MCPCapabilities{HTTP: true, SSE: false},
+			Meta: map[string]any{
+				"reasonix.io": ReasonixExtensionCapabilities{
+					SessionSteer: &SessionSteerCapability{Method: sessionSteerMethod},
+				},
+			},
 		},
 		AgentInfo:   Implementation{Name: s.info.Name, Version: s.info.Version},
 		AuthMethods: []AuthMethod{reasonixSetupAuthMethod()},
@@ -1073,18 +1078,18 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 func (s *service) sessionSteer(_ context.Context, raw json.RawMessage) (any, error) {
 	var p SessionSteerParams
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/steer: " + err.Error()}
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": " + err.Error()}
 	}
 	sess := s.session(p.SessionID)
 	if sess == nil {
-		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/steer: unknown session " + p.SessionID}
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": unknown session " + p.SessionID}
 	}
 	text := FlattenPrompt(p.Prompt)
 	if text == "" {
-		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/steer: empty prompt"}
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": empty prompt"}
 	}
 	if !sess.currentCtrl().TrySteer(text) {
-		return nil, &RPCError{Code: ErrInvalidRequest, Message: "session/steer: session has no active prompt"}
+		return nil, &RPCError{Code: ErrInvalidRequest, Message: sessionSteerMethod + ": session has no active prompt"}
 	}
 	return SessionSteerResult{}, nil
 }
