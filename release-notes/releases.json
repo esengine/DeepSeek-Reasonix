@@ -6,17 +6,45 @@
       "date": "2026-07-20",
       "channel": "stable",
       "title": {
-        "en": "Reasonix Desktop 1.17.16",
-        "zh": "Reasonix 桌面版 1.17.16"
+        "en": "Reasonix 1.17.16",
+        "zh": "Reasonix 1.17.16"
       },
       "summary": {
-        "en": "Remote SSH, subagent fleets, regional typography, customizable shortcuts, and many fixes.",
-        "zh": "远程 SSH、子智能体舰队、分区域字体设置、可自定义快捷键以及大量修复。"
+        "en": "Remote SSH and parallel subagent fleets lead this release, alongside regional typography, customizable composer shortcuts, reliable exports, and stronger session and MCP recovery.",
+        "zh": "本次发布重点带来远程 SSH 与并行子智能体舰队，同时新增分区域字体和可自定义输入快捷键，并提升会话导出、会话恢复与 MCP 可靠性。"
       },
       "surfaces": [
-        "desktop"
+        "desktop",
+        "cli",
+        "agent",
+        "mcp",
+        "plugin",
+        "provider",
+        "security"
       ],
       "guides": [
+        {
+          "title": {
+            "en": "Remote SSH guide",
+            "zh": "远程 SSH 指南"
+          },
+          "body": {
+            "en": "Configure hosts, connect from the CLI or Desktop, browse remote files, and manage forwarded ports.",
+            "zh": "配置远程主机，通过 CLI 或 Desktop 连接、浏览远程文件并管理端口转发。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/43993f5a10cd4afa46febf53ed9f7ab2a1ceab5b/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Remote SSH guide (Chinese)",
+            "zh": "远程 SSH 指南（中文）"
+          },
+          "body": {
+            "en": "Chinese guide for Remote SSH host setup, connections, files, and port forwarding.",
+            "zh": "远程 SSH 主机配置、连接、文件浏览与端口转发的中文指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/43993f5a10cd4afa46febf53ed9f7ab2a1ceab5b/docs/GUIDE.zh-CN.md"
+        },
         {
           "title": {
             "en": "Subagent Profiles & Fleet",
@@ -283,19 +311,6 @@
             "refs": [
               6632
             ]
-          },
-          {
-            "title": {
-              "en": "Agent complete_step by index",
-              "zh": "通过索引完成步骤"
-            },
-            "body": {
-              "en": "The built‑in complete_step tool now accepts an optional step_index for unambiguous todo completion.",
-              "zh": "内置 complete_step 工具现在接受可选的 step_index，以便明确完成待办事项。"
-            },
-            "refs": [
-              5530
-            ]
           }
         ],
         "fixed": [
@@ -455,19 +470,6 @@
             "refs": [
               6630
             ]
-          },
-          {
-            "title": {
-              "en": "Language preference persistence",
-              "zh": "语言偏好持久化"
-            },
-            "body": {
-              "en": "User‑selected language is now correctly read from localStorage after restart.",
-              "zh": "重启后用户选择的语言现在能从 localStorage 正确读取。"
-            },
-            "refs": [
-              5507
-            ]
           }
         ]
       },
@@ -487,13 +489,38 @@
           ]
         }
       ],
-      "risks": [],
+      "risks": [
+        {
+          "title": {
+            "en": "Remote host support",
+            "zh": "远程主机支持范围"
+          },
+          "body": {
+            "en": "Remote SSH V1 supports Linux and macOS remote hosts. Windows remote hosts are not yet supported and return a clear error.",
+            "zh": "远程 SSH V1 支持 Linux 与 macOS 远程主机；Windows 远程主机暂不支持，并会返回明确错误。"
+          },
+          "refs": [
+            6673
+          ]
+        },
+        {
+          "title": {
+            "en": "One-time prompt-cache cold start",
+            "zh": "一次性提示缓存冷启动"
+          },
+          "body": {
+            "en": "The new fleet tool and extended task schema intentionally cause one prompt-cache cold start after upgrading. Tool order and schemas remain stable afterward.",
+            "zh": "新的 fleet 工具与扩展后的 task schema 会在升级后触发一次提示缓存冷启动；此后工具顺序与 schema 保持稳定。"
+          },
+          "refs": [
+            6636
+          ]
+        }
+      ],
       "contributors": [
         "SivanCola",
         "sudoviber",
         "yuanchenglu",
-        "HUQIANTAO",
-        "cyq1017",
         "HaoyueQin",
         "SauronSkywalker",
         "ffff2004",
