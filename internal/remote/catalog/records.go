@@ -83,7 +83,8 @@ func (c *Catalog) ListTopics(ctx context.Context, params protocol.TopicListParam
 		return protocol.TopicListResult{}, err
 	}
 	end := minInt(start+limit, len(items))
-	page := append([]protocol.TopicSummary(nil), items[start:end]...)
+	page := make([]protocol.TopicSummary, end-start)
+	copy(page, items[start:end])
 	hasMore := end < len(items)
 	var next protocol.Cursor
 	if hasMore {

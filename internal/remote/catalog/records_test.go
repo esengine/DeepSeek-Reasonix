@@ -1,7 +1,9 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -14,6 +16,29 @@ import (
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/store"
 )
+
+func TestListTopicsEmptyWorkspaceUsesJSONArray(t *testing.T) {
+	f := newCatalogFixture(t)
+	workspaceID := f.openWorkspace()
+
+	topics, err := f.catalog.ListTopics(context.Background(), protocol.TopicListParams{
+		ExpectedHostEpoch: testHostEpoch,
+		WorkspaceID:       workspaceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if topics.Items == nil || len(topics.Items) != 0 || topics.HasMore || topics.NextCursor != "" {
+		t.Fatalf("empty topic/list = %+v", topics)
+	}
+	payload, err := json.Marshal(topics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"items":[]`)) {
+		t.Fatalf("empty topic/list JSON must contain an array: %s", payload)
+	}
+}
 
 func TestTopicAndSessionColdLifecycleMovesEveryArtifact(t *testing.T) {
 	f := newCatalogFixture(t)

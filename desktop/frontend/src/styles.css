@@ -32763,7 +32763,18 @@ body > .mermaid-diagram--fullscreen {
   backdrop-filter: blur(12px);
 }
 
+.remote-target-surface--collapsed {
+  width: min(320px, calc(100vw - 28px));
+}
+
+.remote-target-surface__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .remote-target-surface__identity {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -32794,6 +32805,10 @@ body > .mermaid-diagram--fullscreen {
   margin-top: 7px;
   color: var(--danger);
   overflow-wrap: anywhere;
+}
+
+.remote-target-surface__toggle {
+  flex: 0 0 auto;
 }
 
 .remote-target-surface__actions {

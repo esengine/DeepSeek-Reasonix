@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { AlertTriangle, Loader2, RotateCw, Server } from "lucide-react";
+import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCw, Server } from "lucide-react";
 
 import { app, onRemoteAskPass, onRemoteTargetState } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -38,6 +38,8 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
   const [targetError, setTargetError] = useState("");
   const [responseError, setResponseError] = useState("");
   const [confirmLocal, setConfirmLocal] = useState(false);
+  const [targetSurfaceCollapsed, setTargetSurfaceCollapsed] = useState(false);
+  const targetSurfaceDetailsId = useId();
 
   useEffect(() => {
     let active = true;
@@ -54,6 +56,7 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
       setStatus(next);
       setConfirmLocal(false);
       setTargetError("");
+      if (next.state !== "RemoteConnected" || next.failure) setTargetSurfaceCollapsed(false);
     });
     const offAskPass = onRemoteAskPass((next) => {
       if (!next.requestId || !next.prompt) return;
@@ -131,42 +134,66 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
     void respondToPrompt(false);
   }, [respondToPrompt]);
 
+  const toggleTargetSurface = useCallback(() => {
+    if (!targetSurfaceCollapsed) setConfirmLocal(false);
+    setTargetSurfaceCollapsed((collapsed) => !collapsed);
+  }, [targetSurfaceCollapsed]);
+
   const hostKeyConfirm = prompt?.kind === "host_key_confirm";
   const hostKeyChanged = prompt?.kind === "host_key_changed";
   const promptNeedsValue = Boolean(prompt && !hostKeyConfirm && !hostKeyChanged);
   const remoteActive = status?.state === "RemoteConnected" || status?.state === "RemoteReconnecting";
+  const targetSurfaceCollapsible = status?.state === "RemoteConnected" && !status.failure && !targetError;
+  const targetSurfaceIsCollapsed = targetSurfaceCollapsible && targetSurfaceCollapsed;
 
   return (
     <>
       {statusNeedsSurface(status) && (
-        <aside className={`remote-target-surface remote-target-surface--${status.state.toLowerCase()}`} aria-live="polite">
-          <div className="remote-target-surface__identity">
-            {status.failure ? <AlertTriangle size={16} aria-hidden="true" /> : <Server size={16} aria-hidden="true" />}
-            <span>
-              <strong>{t(targetStateKey(status.state))}</strong>
-              {status.hostLabel && <small>{status.hostLabel}</small>}
-            </span>
+        <aside className={`remote-target-surface remote-target-surface--${status.state.toLowerCase()}${targetSurfaceIsCollapsed ? " remote-target-surface--collapsed" : ""}`} aria-live="polite">
+          <div className="remote-target-surface__head">
+            <div className="remote-target-surface__identity">
+              {status.failure ? <AlertTriangle size={16} aria-hidden="true" /> : <Server size={16} aria-hidden="true" />}
+              <span>
+                <strong>{t(targetStateKey(status.state))}</strong>
+                {status.hostLabel && <small>{status.hostLabel}</small>}
+              </span>
+            </div>
+            {targetSurfaceCollapsible && (
+              <button
+                className="btn btn--small remote-target-surface__toggle"
+                type="button"
+                disabled={targetBusy}
+                aria-expanded={!targetSurfaceIsCollapsed}
+                aria-controls={targetSurfaceDetailsId}
+                onClick={toggleTargetSurface}
+              >
+                {targetSurfaceIsCollapsed ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronUp size={13} aria-hidden="true" />}
+                {t(targetSurfaceIsCollapsed ? "common.expand" : "common.collapse")}
+              </button>
+            )}
           </div>
-          {(status.failure || targetError) && <div className="remote-target-surface__failure" role="alert">{status.failure || targetError}</div>}
-          <div className="remote-target-surface__actions">
-            {status.canReconnect && (
-              <button className="btn btn--small" type="button" disabled={targetBusy} onClick={() => void reconnect()}>
-                {targetBusy ? <Loader2 className="spin" size={13} aria-hidden="true" /> : <RotateCw size={13} aria-hidden="true" />}
-                {t("remote.action.reconnect")}
-              </button>
-            )}
-            {remoteActive && !confirmLocal && (
-              <button className="btn btn--small" type="button" disabled={targetBusy || status.state === "RemoteReconnecting"} onClick={() => setConfirmLocal(true)}>
-                {t("remote.action.switchLocal")}
-              </button>
-            )}
-            {confirmLocal && (
-              <div className="remote-target-surface__confirm" role="group" aria-label={t("remote.switch.confirmTitle")}>
-                <span>{t("remote.switch.confirm")}</span>
-                <button className="btn btn--small btn--danger" type="button" disabled={targetBusy} onClick={() => void switchLocal()}>{t("common.confirm")}</button>
-                <button className="btn btn--small" type="button" disabled={targetBusy} onClick={() => setConfirmLocal(false)}>{t("common.cancel")}</button>
-              </div>
-            )}
+          <div className="remote-target-surface__details" id={targetSurfaceDetailsId} hidden={targetSurfaceIsCollapsed}>
+            {(status.failure || targetError) && <div className="remote-target-surface__failure" role="alert">{status.failure || targetError}</div>}
+            <div className="remote-target-surface__actions">
+              {status.canReconnect && (
+                <button className="btn btn--small" type="button" disabled={targetBusy} onClick={() => void reconnect()}>
+                  {targetBusy ? <Loader2 className="spin" size={13} aria-hidden="true" /> : <RotateCw size={13} aria-hidden="true" />}
+                  {t("remote.action.reconnect")}
+                </button>
+              )}
+              {remoteActive && !confirmLocal && (
+                <button className="btn btn--small" type="button" disabled={targetBusy || status.state === "RemoteReconnecting"} onClick={() => setConfirmLocal(true)}>
+                  {t("remote.action.switchLocal")}
+                </button>
+              )}
+              {confirmLocal && (
+                <div className="remote-target-surface__confirm" role="group" aria-label={t("remote.switch.confirmTitle")}>
+                  <span>{t("remote.switch.confirm")}</span>
+                  <button className="btn btn--small btn--danger" type="button" disabled={targetBusy} onClick={() => void switchLocal()}>{t("common.confirm")}</button>
+                  <button className="btn btn--small" type="button" disabled={targetBusy} onClick={() => setConfirmLocal(false)}>{t("common.cancel")}</button>
+                </div>
+              )}
+            </div>
           </div>
         </aside>
       )}

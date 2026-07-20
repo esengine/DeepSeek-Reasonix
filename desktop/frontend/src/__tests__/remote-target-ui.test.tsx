@@ -501,6 +501,32 @@ console.log("\nRemote target UI");
 
   const { root, rootElement } = render(React.createElement(RemoteTargetSurfaces));
   await waitFor("Remote connection surface", () => rootElement.textContent?.includes("Remote connected") === true);
+  const remoteSurface = rootElement.querySelector<HTMLElement>(".remote-target-surface");
+  const remoteSurfaceDetails = rootElement.querySelector<HTMLElement>(".remote-target-surface__details");
+  const collapseSurface = button(rootElement, "Collapse");
+  ok(collapseSurface.getAttribute("aria-expanded") === "true", "Remote connection card starts expanded");
+  ok(collapseSurface.getAttribute("aria-controls") === remoteSurfaceDetails?.id && !remoteSurfaceDetails.hidden, "Remote connection card toggle controls its visible details");
+  ok(collapseSurface.closest(".remote-target-surface__head") !== null, "Remote connection card exposes its collapse control in the card header");
+  await act(async () => {
+    button(rootElement, "Switch to Local").click();
+    await flush();
+  });
+  ok(rootElement.querySelector(".remote-target-surface__confirm") !== null, "Remote target confirmation can be opened before collapsing the card");
+  act(() => collapseSurface.click());
+  ok(remoteSurface?.classList.contains("remote-target-surface--collapsed"), "collapse control switches the Remote connection card to compact mode");
+  ok(rootElement.textContent?.includes("Remote connected") && rootElement.textContent.includes("Linux Host"), "collapsed Remote connection card keeps the target identity visible");
+  ok(remoteSurfaceDetails?.hidden, "collapsed Remote connection card hides its action details while preserving the controlled element");
+  const expandSurface = button(rootElement, "Expand");
+  ok(expandSurface.getAttribute("aria-expanded") === "false", "collapsed Remote connection card exposes an accessible expand control");
+  act(() => expandSurface.click());
+  ok(!remoteSurface?.classList.contains("remote-target-surface--collapsed") && !remoteSurfaceDetails?.hidden && button(rootElement, "Switch to Local"), "expanding the Remote connection card restores its actions");
+  ok(rootElement.querySelector(".remote-target-surface__confirm") === null, "collapsing clears an unfinished switch-to-Local confirmation");
+  act(() => button(rootElement, "Collapse").click());
+  act(() => dom.emit("remote:target-state", { state: "Disconnected", hostId: target.hostId, hostLabel: target.hostLabel, failure: "ssh exited", canReconnect: true } satisfies RemoteTargetStatusView));
+  ok(!remoteSurfaceDetails?.hidden && rootElement.textContent?.includes("ssh exited") && button(rootElement, "Reconnect"), "connection failure automatically expands the card and keeps recovery actions visible");
+  ok(rootElement.querySelector(".remote-target-surface__toggle") === null, "connection failure cannot be collapsed over its recovery actions");
+  act(() => dom.emit("remote:target-state", target));
+  ok(button(rootElement, "Collapse").getAttribute("aria-expanded") === "true" && !remoteSurfaceDetails?.hidden, "a healthy Remote target restores the card in expanded mode after recovery");
   ok(rootElement.querySelector(".remote-workspace-modal") === null, "unattached Remote target does not open a blocking workspace dialog automatically");
   ok(browseInputs.length === 0, "unattached Remote target does not start workspace creation browsing without Add Project");
 

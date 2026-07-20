@@ -197,6 +197,12 @@ func TestCatalogLifecycleWireUsesRealCatalogAndColdRuntimeTransitions(t *testing
 	if workspaceCatalog.Revision == "" || len(workspaceCatalog.Models) != 1 || workspaceCatalog.Models[0].Ref != "test/test-model" {
 		t.Fatalf("catalog/workspace = %+v", workspaceCatalog)
 	}
+	emptyTopics := requestResult[protocol.TopicListResult](t, peer, protocol.MethodTopicList, protocol.TopicListParams{
+		ExpectedHostEpoch: "host-test", WorkspaceID: workspaceID,
+	})
+	if emptyTopics.Items == nil || len(emptyTopics.Items) != 0 || emptyTopics.HasMore || emptyTopics.NextCursor != "" {
+		t.Fatalf("empty topic/list must return an empty JSON array: %+v", emptyTopics)
+	}
 
 	topic := requestResult[protocol.TopicCreateResult](t, peer, protocol.MethodTopicCreate, protocol.TopicCreateParams{
 		HostMutation: protocol.HostMutation{RequestID: "topic-create", ExpectedHostEpoch: "host-test"},
