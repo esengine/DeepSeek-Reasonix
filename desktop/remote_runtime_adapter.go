@@ -712,11 +712,10 @@ func (a *RemoteRuntimeAdapter) CreateSession(ctx context.Context, input runtimea
 	if result.Target.WorkspaceID != protocol.WorkspaceID(input.WorkspaceID) {
 		return runtimeapi.CreatedSession{}, errors.New("session/create returned a Session in a different workspace")
 	}
-	a.mu.Lock()
-	binding := a.sessionBindingLocked(result.Target)
-	binding.runtimeEpoch = result.RuntimeEpoch
-	binding.generation = status.Generation
-	a.mu.Unlock()
+	// session/create returns an identity, not an atomic Session view. Do not
+	// install a binding until session/subscribe supplies the paired snapshot.
+	// A current-generation binding without a snapshot is reserved for an
+	// in-flight replacement/resync and must keep blocking speculative attaches.
 	return runtimeapi.CreatedSession{
 		Session: mapRemoteSessionRef(result.Target), TopicID: runtimeapi.TopicID(result.TopicID), TopicTitle: result.TopicTitle,
 		ResolvedProfile: mapRemoteResolvedProfile(result.ResolvedProfile),

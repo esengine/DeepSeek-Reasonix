@@ -380,6 +380,87 @@ func TestRemoteWorkbenchTrackedRollbackForgetsDisconnectedRecovery(t *testing.T)
 	}
 }
 
+func TestRemoteRuntimeAdapterFreshCandidateSubscribesNewlyCreatedSession(t *testing.T) {
+	buildID := remoteAdapterTestBuildID()
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace-fresh-create", SessionID: "session-fresh-create"}
+	snapshot := remoteAdapterSnapshot(target, "runtime-fresh-create", "snapshot-fresh-create", 0, nil)
+	subscribeInputs := make(chan protocol.SessionSubscribeParams, 1)
+	factory := &remoteAdapterScriptedFactory{scripts: []remoteAdapterPeerScript{
+		remoteAdapterBasePeer(buildID, "lease-fresh-create", "", func(wire *rpcwire.Conn, _ net.Conn) {
+			wire.Handle(string(protocol.MethodSessionCreate), func(_ context.Context, payload json.RawMessage) (any, error) {
+				var params protocol.SessionCreateParams
+				if err := json.Unmarshal(payload, &params); err != nil {
+					return nil, err
+				}
+				if params.WorkspaceID != target.WorkspaceID {
+					return nil, fmt.Errorf("session/create workspace = %q", params.WorkspaceID)
+				}
+				return protocol.SessionCreateResult{
+					Target: target, RuntimeEpoch: snapshot.RuntimeEpoch, TopicID: snapshot.Meta.TopicID,
+					TopicTitle: snapshot.Meta.Title, ResolvedProfile: snapshot.Meta.ResolvedProfile,
+				}, nil
+			})
+			wire.Handle(string(protocol.MethodSessionSubscribe), func(_ context.Context, payload json.RawMessage) (any, error) {
+				var params protocol.SessionSubscribeParams
+				if err := json.Unmarshal(payload, &params); err != nil {
+					return nil, err
+				}
+				subscribeInputs <- params
+				return protocol.SessionSubscribeResult{SubscriptionID: "subscription-fresh-create", Snapshot: snapshot}, nil
+			})
+		}),
+	}}
+	connector, _, entry := newRemoteAdapterTestConnector(t, factory)
+	ctx, cancel := remoteAdapterContext(t)
+	adapterValue, err := connector.Connect(ctx, TargetDescriptor{Kind: TargetRemote, ID: entry.ID, Label: entry.Label})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := adapterValue.(*RemoteRuntimeAdapter)
+	t.Cleanup(func() { adapter.shutdown(false) })
+
+	ctx, cancel = remoteAdapterContext(t)
+	created, err := adapter.CreateSession(ctx, runtimeapi.CreateSessionInput{
+		WorkspaceID: runtimeapi.WorkspaceID(target.WorkspaceID),
+		Topic:       runtimeapi.TopicSelection{Kind: runtimeapi.TopicNew, Title: "Fresh Remote Session"},
+	})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel = remoteAdapterContext(t)
+	mapped, rollback, err := adapter.attachRemoteWorkbenchFreshCandidate(ctx, runtimeapi.AttachAndSubscribeInput{
+		Session: created.Session, HistoryTurns: 20,
+	})
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rollback == nil || mapped.Session != created.Session {
+		t.Fatalf("fresh candidate attach = %+v, rollback=%v", mapped, rollback != nil)
+	}
+	select {
+	case params := <-subscribeInputs:
+		if params.Target != target || params.PageTurns != 20 || params.ReplaceSubscriptionID != "" {
+			t.Fatalf("session/subscribe params = %+v", params)
+		}
+	case <-time.After(remoteAdapterTestTimeout):
+		t.Fatal("fresh candidate attach did not subscribe")
+	}
+	adapter.mu.RLock()
+	binding := adapter.sessions[target]
+	var bindingCopy remoteSessionBinding
+	if binding != nil {
+		bindingCopy = *binding
+	}
+	adapter.mu.RUnlock()
+	if binding == nil || !bindingCopy.hasSnapshot || bindingCopy.subscription != "subscription-fresh-create" {
+		t.Fatalf("fresh candidate binding = %+v", bindingCopy)
+	}
+}
+
 func TestRemoteRuntimeAdapterRealPhase5ClosedLoopAndLosslessMapping(t *testing.T) {
 	buildID := remoteAdapterTestBuildID()
 	target := protocol.RuntimeTarget{WorkspaceID: "workspace-opaque", SessionID: "session-opaque"}
@@ -923,9 +1004,11 @@ func TestRemoteRuntimeAdapterComposerAcceptsOnlyValidSessionReplacement(t *testi
 	source := protocol.RuntimeTarget{WorkspaceID: "workspace-replacement", SessionID: "session-source"}
 	replacement := protocol.RuntimeTarget{WorkspaceID: source.WorkspaceID, SessionID: "session-replacement"}
 	snapshot := remoteAdapterSnapshot(source, "runtime-source", "snapshot-source", 0, nil)
+	var subscribeCalls atomic.Int32
 	factory := &remoteAdapterScriptedFactory{scripts: []remoteAdapterPeerScript{
 		remoteAdapterBasePeer(buildID, "lease-replacement", "", func(wire *rpcwire.Conn, _ net.Conn) {
 			wire.Handle(string(protocol.MethodSessionSubscribe), func(context.Context, json.RawMessage) (any, error) {
+				subscribeCalls.Add(1)
 				return protocol.SessionSubscribeResult{SubscriptionID: "subscription-source", Snapshot: snapshot}, nil
 			})
 			wire.Handle(string(protocol.MethodSessionSubmit), func(_ context.Context, payload json.RawMessage) (any, error) {
@@ -974,6 +1057,17 @@ func TestRemoteRuntimeAdapterComposerAcceptsOnlyValidSessionReplacement(t *testi
 	adapter.mu.RUnlock()
 	if binding == nil || binding.runtimeEpoch != "runtime-replacement" || binding.hasSnapshot {
 		t.Fatalf("replacement binding = %+v, want epoch with mutation admission blocked until migrated snapshot", binding)
+	}
+	ctx, cancel = remoteAdapterContext(t)
+	_, _, err = adapter.attachRemoteWorkbenchFreshCandidate(ctx, runtimeapi.AttachAndSubscribeInput{
+		Session: mapRemoteSessionRef(replacement), HistoryTurns: 20,
+	})
+	cancel()
+	if err == nil || !containsError(err, "no atomic snapshot") {
+		t.Fatalf("fresh attach during replacement resync = %v", err)
+	}
+	if subscribeCalls.Load() != 1 {
+		t.Fatalf("fresh attach issued %d subscriptions during replacement resync, want 1", subscribeCalls.Load())
 	}
 }
 
