@@ -10,6 +10,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
@@ -203,8 +204,12 @@ func (s *updateSink) replay(msgs []provider.Message) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleUser:
-			if m.Content != "" {
-				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(m.Content)})
+			text := m.Content
+			if steer, ok := agent.SteerText(text); ok {
+				text = steer
+			}
+			if text != "" {
+				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
 			}
 		case provider.RoleAssistant:
 			if m.ReasoningContent != "" {

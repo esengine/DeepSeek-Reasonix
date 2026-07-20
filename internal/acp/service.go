@@ -125,6 +125,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle("session/load", svc.sessionLoad)
 	conn.Handle("session/resume", svc.sessionResume)
 	conn.Handle("session/prompt", svc.sessionPrompt)
+	conn.Handle("session/steer", svc.sessionSteer)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
 	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/set_mode", svc.sessionSetMode)
@@ -187,6 +188,7 @@ func (s *service) bindClientIO(p *SessionParams, sessionID string) {
 type acpController interface {
 	control.Lifecycle
 	control.TurnControl
+	TrySteer(text string) bool
 	control.Approvals
 	control.Capabilities
 	control.SessionPersistence
@@ -1064,6 +1066,27 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		res.TranscriptPath = &sess.transcript
 	}
 	return res, nil
+}
+
+// sessionSteer injects user guidance into an active turn and acknowledges once
+// the agent has queued it for the next safe loop boundary.
+func (s *service) sessionSteer(_ context.Context, raw json.RawMessage) (any, error) {
+	var p SessionSteerParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/steer: " + err.Error()}
+	}
+	sess := s.session(p.SessionID)
+	if sess == nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/steer: unknown session " + p.SessionID}
+	}
+	text := FlattenPrompt(p.Prompt)
+	if text == "" {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/steer: empty prompt"}
+	}
+	if !sess.currentCtrl().TrySteer(text) {
+		return nil, &RPCError{Code: ErrInvalidRequest, Message: "session/steer: session has no active prompt"}
+	}
+	return SessionSteerResult{}, nil
 }
 
 // finishTurn reconciles controller-side drift and drains any config switch

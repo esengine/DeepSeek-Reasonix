@@ -427,6 +427,16 @@ type SessionPromptParams struct {
 	Prompt    []ContentBlock `json:"prompt"`
 }
 
+// SessionSteerParams is the Reasonix ACP v1 extension for injecting user
+// guidance into an active prompt without cancelling it.
+type SessionSteerParams struct {
+	SessionID string         `json:"sessionId"`
+	Prompt    []ContentBlock `json:"prompt"`
+}
+
+// SessionSteerResult acknowledges that the active turn accepted the guidance.
+type SessionSteerResult struct{}
+
 // StopReason tells the client why a turn ended. Values match main's wire.
 type StopReason string
 
