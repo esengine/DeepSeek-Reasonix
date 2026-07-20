@@ -32312,6 +32312,8 @@ body > .mermaid-diagram--fullscreen {
 
 /* Align topicbar (replaces app-chrome in Creation mode) with Windows controls */
 .app--windows.app--creation .topicbar {
+  position: relative;
+  z-index: var(--z-app-chrome);
   transform: translateY(-4px) !important;
 }
 

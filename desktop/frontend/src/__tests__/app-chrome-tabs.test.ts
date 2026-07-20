@@ -410,6 +410,13 @@ ok(
   "Windows sidebar avoids native window drag without changing other platforms",
 );
 
+ok(
+  finalDeclaration(".app--windows.app--creation .topicbar", "position") === "relative" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "z-index") === "var(--z-app-chrome)" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "transform") === "translateY(-4px) !important",
+  "Windows Creation topic bar lifts its menus above conversation content without changing titlebar alignment",
+);
+
 for (const selector of [
   ".layout--workbench-chrome-hidden",
   ":root[data-theme-style] .layout--workbench-chrome-hidden",
