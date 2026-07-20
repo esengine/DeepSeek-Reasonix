@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, Loader2, RotateCw, Server } from "lucide-react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { AlertTriangle, Loader2, RotateCw, Server } from "lucide-react";
 
-import { app, onRemoteAskPass, onRemoteTargetState } from "../lib/bridge";
+import { app, onRemoteAskPass } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import type { RemoteAskPassKind, RemoteAskPassView, RemoteTargetStatusView } from "../lib/types";
 import { RemoteWorkspaceSetup } from "./RemoteWorkspaceSetup";
@@ -21,43 +21,32 @@ function targetStateKey(state: RemoteTargetStatusView["state"]) {
   return `remote.state.${state}` as const;
 }
 
-function statusNeedsSurface(status: RemoteTargetStatusView | null): status is RemoteTargetStatusView {
-  return Boolean(status && (status.state !== "LocalConnected" || status.failure || status.canReconnect));
+function statusNeedsSurface(status: RemoteTargetStatusView | null, targetError: string): status is RemoteTargetStatusView {
+  return Boolean(status && (
+    targetError ||
+    status.failure ||
+    status.canReconnect ||
+    status.state === "RemoteConnecting" ||
+    status.state === "RemoteReconnecting" ||
+    status.state === "Switching"
+  ));
 }
 
 export interface RemoteTargetSurfacesProps {
+  target?: RemoteTargetStatusView | null;
   workspaceSetupRequest?: number;
 }
 
-export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTargetSurfacesProps) {
+export function RemoteTargetSurfaces({ target: status = null, workspaceSetupRequest = 0 }: RemoteTargetSurfacesProps) {
   const t = useT();
-  const [status, setStatus] = useState<RemoteTargetStatusView | null>(null);
   const [prompt, setPrompt] = useState<RemoteAskPassView | null>(null);
   const [answer, setAnswer] = useState("");
   const [targetBusy, setTargetBusy] = useState(false);
   const [targetError, setTargetError] = useState("");
   const [responseError, setResponseError] = useState("");
   const [confirmLocal, setConfirmLocal] = useState(false);
-  const [targetSurfaceCollapsed, setTargetSurfaceCollapsed] = useState(false);
-  const targetSurfaceDetailsId = useId();
 
   useEffect(() => {
-    let active = true;
-    void (async () => {
-      try {
-        const next = await app.RemoteTargetStatus();
-        if (active) setStatus(next);
-      } catch {
-        // During a rolling Desktop upgrade an older backend can briefly lack the
-        // new binding. Do not replace the real workbench with mock connection UI.
-      }
-    })();
-    const offStatus = onRemoteTargetState((next) => {
-      setStatus(next);
-      setConfirmLocal(false);
-      setTargetError("");
-      if (next.state !== "RemoteConnected" || next.failure) setTargetSurfaceCollapsed(false);
-    });
     const offAskPass = onRemoteAskPass((next) => {
       if (!next.requestId || !next.prompt) return;
       setAnswer("");
@@ -65,11 +54,14 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
       setPrompt(next);
     });
     return () => {
-      active = false;
-      offStatus();
       offAskPass();
     };
   }, []);
+
+  useEffect(() => {
+    setConfirmLocal(false);
+    setTargetError("");
+  }, [status]);
 
   useEffect(() => {
     if (!prompt) return;
@@ -82,36 +74,30 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
     return () => document.removeEventListener("keydown", onKey);
   }, [prompt]);
 
-  const refreshStatus = useCallback(async () => {
-    setStatus(await app.RemoteTargetStatus());
-  }, []);
-
   const reconnect = useCallback(async () => {
     setTargetBusy(true);
     setTargetError("");
     try {
       await app.ReconnectRemoteTarget();
-      await refreshStatus();
     } catch (cause) {
       setTargetError(errorText(cause));
     } finally {
       setTargetBusy(false);
     }
-  }, [refreshStatus]);
+  }, []);
 
   const switchLocal = useCallback(async () => {
     setTargetBusy(true);
     setTargetError("");
     try {
       await app.SwitchToLocalTarget(true);
-      await refreshStatus();
       setConfirmLocal(false);
     } catch (cause) {
       setTargetError(errorText(cause));
     } finally {
       setTargetBusy(false);
     }
-  }, [refreshStatus]);
+  }, []);
 
   const respondToPrompt = useCallback(async (cancelled: boolean) => {
     const current = prompt;
@@ -134,22 +120,15 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
     void respondToPrompt(false);
   }, [respondToPrompt]);
 
-  const toggleTargetSurface = useCallback(() => {
-    if (!targetSurfaceCollapsed) setConfirmLocal(false);
-    setTargetSurfaceCollapsed((collapsed) => !collapsed);
-  }, [targetSurfaceCollapsed]);
-
   const hostKeyConfirm = prompt?.kind === "host_key_confirm";
   const hostKeyChanged = prompt?.kind === "host_key_changed";
   const promptNeedsValue = Boolean(prompt && !hostKeyConfirm && !hostKeyChanged);
   const remoteActive = status?.state === "RemoteConnected" || status?.state === "RemoteReconnecting";
-  const targetSurfaceCollapsible = status?.state === "RemoteConnected" && !status.failure && !targetError;
-  const targetSurfaceIsCollapsed = targetSurfaceCollapsible && targetSurfaceCollapsed;
 
   return (
     <>
-      {statusNeedsSurface(status) && (
-        <aside className={`remote-target-surface remote-target-surface--${status.state.toLowerCase()}${targetSurfaceIsCollapsed ? " remote-target-surface--collapsed" : ""}`} aria-live="polite">
+      {statusNeedsSurface(status, targetError) && (
+        <aside className={`remote-target-surface remote-target-surface--${status.state.toLowerCase()}`} aria-live="polite">
           <div className="remote-target-surface__head">
             <div className="remote-target-surface__identity">
               {status.failure ? <AlertTriangle size={16} aria-hidden="true" /> : <Server size={16} aria-hidden="true" />}
@@ -158,21 +137,8 @@ export function RemoteTargetSurfaces({ workspaceSetupRequest = 0 }: RemoteTarget
                 {status.hostLabel && <small>{status.hostLabel}</small>}
               </span>
             </div>
-            {targetSurfaceCollapsible && (
-              <button
-                className="btn btn--small remote-target-surface__toggle"
-                type="button"
-                disabled={targetBusy}
-                aria-expanded={!targetSurfaceIsCollapsed}
-                aria-controls={targetSurfaceDetailsId}
-                onClick={toggleTargetSurface}
-              >
-                {targetSurfaceIsCollapsed ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronUp size={13} aria-hidden="true" />}
-                {t(targetSurfaceIsCollapsed ? "common.expand" : "common.collapse")}
-              </button>
-            )}
           </div>
-          <div className="remote-target-surface__details" id={targetSurfaceDetailsId} hidden={targetSurfaceIsCollapsed}>
+          <div className="remote-target-surface__details">
             {(status.failure || targetError) && <div className="remote-target-surface__failure" role="alert">{status.failure || targetError}</div>}
             <div className="remote-target-surface__actions">
               {status.canReconnect && (

@@ -32763,10 +32763,6 @@ body > .mermaid-diagram--fullscreen {
   backdrop-filter: blur(12px);
 }
 
-.remote-target-surface--collapsed {
-  width: min(320px, calc(100vw - 28px));
-}
-
 .remote-target-surface__head {
   display: flex;
   align-items: center;
@@ -32807,10 +32803,6 @@ body > .mermaid-diagram--fullscreen {
   overflow-wrap: anywhere;
 }
 
-.remote-target-surface__toggle {
-  flex: 0 0 auto;
-}
-
 .remote-target-surface__actions {
   flex-wrap: wrap;
   margin-top: 8px;
@@ -32825,6 +32817,51 @@ body > .mermaid-diagram--fullscreen {
 
 .remote-target-surface__confirm > span {
   flex: 1 1 220px;
+}
+
+.remote-target-toolbar-btn {
+  position: relative;
+}
+
+.remote-target-toolbar-btn__indicator {
+  position: absolute;
+  right: 4px;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--bg-elev);
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+
+.remote-target-toolbar-btn--connected {
+  --remote-target-toolbar-tone: var(--ok);
+}
+
+.remote-target-toolbar-btn--transition {
+  --remote-target-toolbar-tone: var(--accent);
+}
+
+.remote-target-toolbar-btn--attention {
+  --remote-target-toolbar-tone: var(--danger);
+}
+
+.topicbar__actions .topicbar__action-btn.remote-target-toolbar-btn:not(.remote-target-toolbar-btn--local),
+:root[data-theme-style] .topicbar__actions .topicbar__action-btn.remote-target-toolbar-btn:not(.remote-target-toolbar-btn--local),
+.app--creation .topicbar__actions .topicbar__action-btn.remote-target-toolbar-btn:not(.remote-target-toolbar-btn--local),
+:root[data-theme-style] .app--creation .topicbar__actions .topicbar__action-btn.remote-target-toolbar-btn:not(.remote-target-toolbar-btn--local) {
+  color: var(--remote-target-toolbar-tone);
+  border-color: color-mix(in srgb, var(--remote-target-toolbar-tone) 34%, var(--border));
+  background: color-mix(in srgb, var(--remote-target-toolbar-tone) 7%, var(--bg-elev));
+  opacity: 1;
+}
+
+.remote-target-toolbar-btn:not(.remote-target-toolbar-btn--local) .remote-target-toolbar-btn__indicator {
+  background: var(--remote-target-toolbar-tone);
+}
+
+.remote-target-toolbar-btn .spin {
+  animation: spin 0.8s linear infinite;
 }
 
 .remote-workspace-backdrop {

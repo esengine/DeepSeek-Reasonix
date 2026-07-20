@@ -1789,6 +1789,7 @@ export function useController() {
   const targetProjectionAttemptedRef = useRef(false);
   const targetHydrationRequiredRef = useRef(false);
   const [targetIdentityGen, setTargetIdentityGen] = useState(0);
+  const [targetStatus, setTargetStatus] = useState<RemoteTargetStatusView | null>(null);
   // A render-triggering counter so that mutations to a non-active tab's state still
   // cause a re-render when that tab becomes active.
   const [, setVersion] = useState(0);
@@ -2299,6 +2300,7 @@ export function useController() {
       });
     };
     const observeTargetStatus = (status: RemoteTargetStatusView) => {
+      setTargetStatus(status);
       if (status.state === "RemoteReconnecting") {
         // Keep the last atomic Remote snapshot visible during transport loss,
         // but require the ordered reattach-ready snapshot to replace it even
@@ -2451,7 +2453,7 @@ export function useController() {
       const queryEventSeq = targetEventSeq;
       try {
         const status = await app.RemoteTargetStatus();
-        if (targetEventSeq === queryEventSeq) observeTargetStatus(status);
+        if (!disposed && targetEventSeq === queryEventSeq) observeTargetStatus(status);
       } catch {
         // Compatibility with Local-only and older test bindings.
       }
@@ -3410,6 +3412,7 @@ export function useController() {
     state: activeState,
     activeTabId,
     targetIdentityGen,
+    targetStatus,
     send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, answerQuestion, setControllerMode,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,

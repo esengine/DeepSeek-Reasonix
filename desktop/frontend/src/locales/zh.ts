@@ -1193,6 +1193,7 @@ export const zh: Record<DictKey, string> = {
   "remote.state.RemoteConnected": "远程已连接",
   "remote.state.RemoteReconnecting": "正在重连远程目标",
   "remote.state.Switching": "正在切换目标",
+  "remote.toolbar.connect": "连接远程主机",
   "remote.action.connect": "连接",
   "remote.action.reconnect": "重新连接",
   "remote.action.switchLocal": "切换到本地",

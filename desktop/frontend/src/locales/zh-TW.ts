@@ -924,6 +924,7 @@ export const zhTW: Record<DictKey, string> = {
   "remote.state.RemoteConnected": "遠端已連線",
   "remote.state.RemoteReconnecting": "正在重新連線遠端目標",
   "remote.state.Switching": "正在切換目標",
+  "remote.toolbar.connect": "連線遠端主機",
   "remote.action.connect": "連線",
   "remote.action.reconnect": "重新連線",
   "remote.action.switchLocal": "切換到本機",

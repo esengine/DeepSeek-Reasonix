@@ -451,6 +451,8 @@ await waitFor("initial Remote projection", () =>
   controller?.activeTabId === "remote-initial" && transcriptText(controller) === "remote-before" && controller.state.context.used === 10,
 );
 eq(controller?.targetIdentityGen, 1, "first stable target advances the App-visible authority generation");
+eq(controller?.targetStatus?.state, "RemoteConnected", "late initial target query cannot overwrite the newer toolbar target state");
+eq(controller?.targetStatus?.hostId, "host-a", "toolbar target state preserves the Host from the winning event");
 await act(async () => {
   holdAnimationFrames = false;
   const callbacks = Array.from(heldAnimationFrames.values());
@@ -566,6 +568,7 @@ await act(async () => {
 });
 eq(transcriptText(controller), "remote-after", "same-Host transport loss keeps the last atomic Remote transcript visible");
 eq(controller?.state.context.used, 222, "same-Host transport loss keeps the last atomic Remote metrics visible");
+eq(controller?.targetStatus?.state, "RemoteReconnecting", "toolbar target state observes same-Host transport recovery");
 
 backend = {
   ...backend,

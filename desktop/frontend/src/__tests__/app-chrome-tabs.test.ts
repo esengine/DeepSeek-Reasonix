@@ -194,6 +194,16 @@ ok(
 );
 
 ok(
+  /<RemoteTargetToolbarButton[\s\S]*?status=\{targetStatus\}[\s\S]*?setSettingsTarget\("remote"\)[\s\S]*?\/>/.test(appSource) &&
+    /<RemoteTargetSurfaces target=\{targetStatus\}/.test(appSource) &&
+    /setTargetStatus\(status\)/.test(controllerSource) &&
+    /if \(!disposed && targetEventSeq === queryEventSeq\) observeTargetStatus\(status\)/.test(controllerSource) &&
+    /\.remote-target-toolbar-btn \.spin\s*\{[^}]*animation:\s*spin/.test(stylesSource) &&
+    /--remote-target-toolbar-tone/.test(stylesSource),
+  "topic bar Remote entry shares authoritative target state and opens Remote connection settings",
+);
+
+ok(
   /const \[transcriptRevealSignal, setTranscriptRevealSignal\] = useState\(0\);/.test(appSource) &&
     /revealActiveSignal=\{tabRevealSignal\}/.test(appSource) &&
     /revealSignal=\{transcriptRevealSignal\}/.test(appSource),

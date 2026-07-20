@@ -69,6 +69,7 @@ import { HeartbeatPanel } from "./custom/features/heartbeat/HeartbeatPanel";
 import "./custom/features/heartbeat/heartbeat.css";
 import { CopyButton } from "./components/CopyButton";
 import { ExternalOpener } from "./components/ExternalOpener";
+import { RemoteTargetToolbarButton } from "./components/RemoteTargetToolbarButton";
 import { parseTodos } from "./lib/tools";
 import {
   dismissedTodoKeyForScope,
@@ -1008,6 +1009,7 @@ export default function App() {
     state,
     activeTabId,
     targetIdentityGen,
+    targetStatus,
     sendToTab,
     recoverDeliveryToTab,
     runShellForTab,
@@ -3863,6 +3865,14 @@ export default function App() {
               {!sidebarImDetailConnection && activeTab?.scope === "project" && activeTab.targetKind !== "remote" && (
                 <ExternalOpener tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
               )}
+              <RemoteTargetToolbarButton
+                status={targetStatus}
+                onOpen={() => {
+                  closeTransientOverlays();
+                  setSettingsFocus(null);
+                  setSettingsTarget("remote");
+                }}
+              />
               <Tooltip label={t("shortcuts.cheatsheetTitle")}>
                 <button
                   className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
@@ -4286,7 +4296,7 @@ export default function App() {
       )}
 
       <Suspense fallback={null}>
-        <RemoteTargetSurfaces workspaceSetupRequest={remoteWorkspaceSetupRequest} />
+        <RemoteTargetSurfaces target={targetStatus} workspaceSetupRequest={remoteWorkspaceSetupRequest} />
       </Suspense>
 
       <CommandPalette

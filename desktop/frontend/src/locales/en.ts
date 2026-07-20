@@ -1191,6 +1191,7 @@ export const en = {
   "remote.state.RemoteConnected": "Remote connected",
   "remote.state.RemoteReconnecting": "Reconnecting to Remote",
   "remote.state.Switching": "Switching target",
+  "remote.toolbar.connect": "Connect to Remote",
   "remote.action.connect": "Connect",
   "remote.action.reconnect": "Reconnect",
   "remote.action.switchLocal": "Switch to Local",

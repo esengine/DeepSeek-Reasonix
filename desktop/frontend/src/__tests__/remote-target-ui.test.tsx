@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 
 import { RemoteSettingsPage } from "../components/RemoteSettingsPage";
 import { RemoteTargetSurfaces } from "../components/RemoteTargetSurfaces";
+import { RemoteTargetToolbarButton } from "../components/RemoteTargetToolbarButton";
 import { RemoteWorkspaceSetup } from "../components/RemoteWorkspaceSetup";
 import type { AppBindings } from "../lib/bridge";
 import { LocaleProvider } from "../lib/i18n";
@@ -135,6 +136,44 @@ ok(workspaceCreationRoute({ state: "RemoteConnected", hostId: "host-route", canR
 ok(workspaceCreationRoute({ state: "RemoteReconnecting", hostId: "host-route", canReconnect: true }) === "blocked", "project creation never falls back to a local picker while Remote recovery is pending");
 
 console.log("\nRemote target UI");
+
+// The topic-bar entry is always available for connection management and folds
+// the stable Remote identity into the existing compact action row.
+{
+  const dom = installDOM();
+  let opens = 0;
+  const localTarget: RemoteTargetStatusView = { state: "LocalConnected", canReconnect: false };
+  const connectedTarget: RemoteTargetStatusView = {
+    state: "RemoteConnected",
+    hostId: "host-toolbar",
+    hostLabel: "Linux Host",
+    canReconnect: false,
+  };
+  const renderButton = (status: RemoteTargetStatusView) => React.createElement(RemoteTargetToolbarButton, {
+    status,
+    onOpen: () => { opens += 1; },
+  });
+  const { root, rootElement } = render(renderButton(localTarget));
+  const toolbarButton = () => rootElement.querySelector<HTMLButtonElement>(".remote-target-toolbar-btn");
+
+  ok(toolbarButton()?.getAttribute("aria-label") === "Connect to Remote", "Local target exposes a direct Remote connection entry");
+  ok(toolbarButton()?.dataset.remoteState === "LocalConnected", "Remote toolbar entry exposes the current target state to compact chrome");
+  act(() => toolbarButton()?.click());
+  ok(opens === 1, "Remote toolbar entry invokes its connection-management action");
+
+  act(() => root.render(React.createElement(LocaleProvider, null, renderButton(connectedTarget))));
+  ok(toolbarButton()?.classList.contains("remote-target-toolbar-btn--connected") === true, "healthy Remote target renders a compact connected state");
+  ok(toolbarButton()?.getAttribute("aria-label") === "Remote connected · Linux Host", "connected toolbar state exposes both target state and Host identity");
+
+  act(() => root.render(React.createElement(LocaleProvider, null, renderButton({ ...connectedTarget, state: "RemoteReconnecting", canReconnect: true }))));
+  ok(toolbarButton()?.classList.contains("remote-target-toolbar-btn--transition") === true && toolbarButton()?.querySelector(".spin") !== null, "Remote transition uses the in-row progress state");
+
+  act(() => root.render(React.createElement(LocaleProvider, null, renderButton({ ...connectedTarget, state: "Disconnected", failure: "ssh exited", canReconnect: true }))));
+  ok(toolbarButton()?.classList.contains("remote-target-toolbar-btn--attention") === true, "Remote failure remains visible as an actionable in-row state");
+
+  await act(async () => root.unmount());
+  dom.close();
+}
 
 // Host CRUD, backend errors, connection state, reconnect, and destructive
 // switch confirmation all exercise the actual bridge-facing component contract.
@@ -456,6 +495,7 @@ console.log("\nRemote target UI");
   let createFailure = "workspace lease changed";
   let holdCreate = false;
   let releaseCreate: (() => void) | null = null;
+  let reconnects = 0;
 
   const home: RemoteDirectoryView = { ref: "dir-home", name: "dev", displayPath: "/home/dev" };
   const projects: RemoteDirectoryView = { ref: "dir-projects", name: "projects", displayPath: "/home/dev/projects", parentRef: home.ref };
@@ -492,46 +532,41 @@ console.log("\nRemote target UI");
           dom.emit("remote:workbench-state", workbench);
           return { ...workbench };
         },
-        ReconnectRemoteTarget: async () => {},
+        ReconnectRemoteTarget: async () => { reconnects += 1; },
         SwitchToLocalTarget: async () => {},
         RespondRemoteAskPass: async () => {},
       } as Partial<AppBindings> as AppBindings,
     },
   };
 
-  const { root, rootElement } = render(React.createElement(RemoteTargetSurfaces));
-  await waitFor("Remote connection surface", () => rootElement.textContent?.includes("Remote connected") === true);
-  const remoteSurface = rootElement.querySelector<HTMLElement>(".remote-target-surface");
-  const remoteSurfaceDetails = rootElement.querySelector<HTMLElement>(".remote-target-surface__details");
-  const collapseSurface = button(rootElement, "Collapse");
-  ok(collapseSurface.getAttribute("aria-expanded") === "true", "Remote connection card starts expanded");
-  ok(collapseSurface.getAttribute("aria-controls") === remoteSurfaceDetails?.id && !remoteSurfaceDetails.hidden, "Remote connection card toggle controls its visible details");
-  ok(collapseSurface.closest(".remote-target-surface__head") !== null, "Remote connection card exposes its collapse control in the card header");
-  await act(async () => {
-    button(rootElement, "Switch to Local").click();
-    await flush();
-  });
-  ok(rootElement.querySelector(".remote-target-surface__confirm") !== null, "Remote target confirmation can be opened before collapsing the card");
-  act(() => collapseSurface.click());
-  ok(remoteSurface?.classList.contains("remote-target-surface--collapsed"), "collapse control switches the Remote connection card to compact mode");
-  ok(rootElement.textContent?.includes("Remote connected") && rootElement.textContent.includes("Linux Host"), "collapsed Remote connection card keeps the target identity visible");
-  ok(remoteSurfaceDetails?.hidden, "collapsed Remote connection card hides its action details while preserving the controlled element");
-  const expandSurface = button(rootElement, "Expand");
-  ok(expandSurface.getAttribute("aria-expanded") === "false", "collapsed Remote connection card exposes an accessible expand control");
-  act(() => expandSurface.click());
-  ok(!remoteSurface?.classList.contains("remote-target-surface--collapsed") && !remoteSurfaceDetails?.hidden && button(rootElement, "Switch to Local"), "expanding the Remote connection card restores its actions");
-  ok(rootElement.querySelector(".remote-target-surface__confirm") === null, "collapsing clears an unfinished switch-to-Local confirmation");
-  act(() => button(rootElement, "Collapse").click());
-  act(() => dom.emit("remote:target-state", { state: "Disconnected", hostId: target.hostId, hostLabel: target.hostLabel, failure: "ssh exited", canReconnect: true } satisfies RemoteTargetStatusView));
-  ok(!remoteSurfaceDetails?.hidden && rootElement.textContent?.includes("ssh exited") && button(rootElement, "Reconnect"), "connection failure automatically expands the card and keeps recovery actions visible");
-  ok(rootElement.querySelector(".remote-target-surface__toggle") === null, "connection failure cannot be collapsed over its recovery actions");
-  act(() => dom.emit("remote:target-state", target));
-  ok(button(rootElement, "Collapse").getAttribute("aria-expanded") === "true" && !remoteSurfaceDetails?.hidden, "a healthy Remote target restores the card in expanded mode after recovery");
+  const { root, rootElement } = render(React.createElement(RemoteTargetSurfaces, { target }));
+  ok(rootElement.querySelector(".remote-target-surface") === null, "healthy Remote connection no longer renders a floating card over the workbench");
   ok(rootElement.querySelector(".remote-workspace-modal") === null, "unattached Remote target does not open a blocking workspace dialog automatically");
   ok(browseInputs.length === 0, "unattached Remote target does not start workspace creation browsing without Add Project");
 
+  const disconnectedTarget: RemoteTargetStatusView = {
+    state: "Disconnected",
+    hostId: target.hostId,
+    hostLabel: target.hostLabel,
+    failure: "ssh exited",
+    canReconnect: true,
+  };
   await act(async () => {
-    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 1 })));
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { target: disconnectedTarget })));
+    await flush();
+  });
+  ok(rootElement.textContent?.includes("ssh exited") === true && button(rootElement, "Reconnect") !== null, "connection failure keeps its recovery card and action visible");
+  ok(rootElement.querySelector(".remote-target-surface__toggle") === null, "connection failure recovery cannot be collapsed away");
+  await act(async () => {
+    button(rootElement, "Reconnect").click();
+    await flush();
+  });
+  ok(reconnects === 1, "connection failure recovery still invokes the backend reconnect action");
+  act(() => root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { target }))));
+  ok(rootElement.querySelector(".remote-target-surface") === null, "healthy recovery returns status ownership to the toolbar without a floating card");
+
+  await act(async () => {
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { target, workspaceSetupRequest: 1 })));
     await flush();
   });
   await waitFor("explicit Remote workspace setup", () => rootElement.textContent?.includes("Open a Remote workspace") === true);
@@ -594,7 +629,7 @@ console.log("\nRemote target UI");
   ok(!rootElement.textContent?.includes("Open a Remote workspace"), "successful Remote Session creation closes setup instead of rendering a second chat surface");
 
   await act(async () => {
-    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 2 })));
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { target, workspaceSetupRequest: 2 })));
     await flush();
   });
   await waitFor("explicit Remote workspace setup", () => rootElement.querySelector(".remote-workspace-modal") !== null);
@@ -608,7 +643,7 @@ console.log("\nRemote target UI");
   ok(rootElement.querySelector(".remote-workspace-modal") === null && workbench.sessionAttached, "closing explicit setup preserves the attached Remote Session");
 
   await act(async () => {
-    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { workspaceSetupRequest: 3 })));
+    root.render(React.createElement(LocaleProvider, null, React.createElement(RemoteTargetSurfaces, { target, workspaceSetupRequest: 3 })));
     await flush();
   });
   await waitFor("second explicit Remote workspace setup", () => rootElement.textContent?.includes("Use as primary") === true);
