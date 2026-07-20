@@ -368,6 +368,7 @@ const REMOTE_STATE_SEVERITY: Record<string, number> = {
   error: 5,
   reconnecting: 4,
   pending_hostkey: 4,
+  pending_secret: 4,
   connecting: 3,
   degraded: 2,
   connected: 1,
@@ -457,7 +458,7 @@ function RemoteStatusBarChip({
             {hosts.map((host) => {
               const status = statuses[host.id] ?? { hostId: host.id, state: "stopped" as const };
               const connected = status.state === "connected" || status.state === "degraded";
-              const busy = status.state === "connecting" || status.state === "reconnecting" || status.state === "pending_hostkey";
+              const busy = status.state === "connecting" || status.state === "reconnecting" || status.state === "pending_hostkey" || status.state === "pending_secret";
               const terminalFailure = isRemoteTerminalFailure(status);
               const degradedWarning = isRemoteDegradedWarning(status);
               const stateClass = terminalFailure ? "error" : status.state;

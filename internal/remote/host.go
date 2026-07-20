@@ -14,17 +14,20 @@ import (
 // ResolvedHost is a fully resolved dial target: explicit [remote] TOML fields
 // layered over ~/.ssh/config values (when use_ssh_config) over defaults.
 type ResolvedHost struct {
-	Name          string // config entry name, or the raw target for ad-hoc dials
-	HostName      string // network address to dial
-	Port          int
-	User          string
-	IdentityFile  string   // explicit key path; empty => agent/default identities
-	PassphraseEnv string   // credential env var name for the key passphrase
-	PasswordEnv   string   // credential env var name for password auth
-	ProxyJump     []string // resolved jump chain, in dial order
-	Workspace     string   // default remote workspace directory
-	ServeInstall  string   // auto|npm|upload|never
-	Forwards      []config.RemoteForwardEntry
+	Name             string // config entry name, or the raw target for ad-hoc dials
+	HostName         string // network address to dial
+	Port             int
+	User             string
+	IdentityFile     string   // explicit key path; empty => agent/default identities
+	IdentityFiles    []string // ordered effective ssh_config identities
+	IdentityFileNone bool     // ssh_config explicitly suppresses default identity files
+	IdentitiesOnly   bool     // ssh_config IdentitiesOnly: never offer unrelated agent keys
+	PassphraseEnv    string   // credential env var name for the key passphrase
+	PasswordEnv      string   // credential env var name for password auth
+	ProxyJump        []string // resolved jump chain, in dial order
+	Workspace        string   // default remote workspace directory
+	ServeInstall     string   // auto|npm|upload|never
+	Forwards         []config.RemoteForwardEntry
 }
 
 // Addr is the host:port dial string.
@@ -117,7 +120,9 @@ func ResolveHost(cfg *config.Config, nameOrTarget string, sshCfg *SSHConfigSourc
 		return ResolvedHost{}, err
 	}
 	r := ResolvedHost{Name: nameOrTarget, HostName: host, Port: port, User: userName}
-	applySSHConfig(&r, host, sshCfg)
+	if err := applySSHConfig(&r, host, sshCfg); err != nil {
+		return ResolvedHost{}, err
+	}
 	applyHostDefaults(&r)
 	return r, nil
 }
@@ -157,9 +162,12 @@ func resolveEntry(e config.RemoteHostEntry, sshCfg *SSHConfigSource) (ResolvedHo
 		r.ProxyJump = splitJumpChain(j)
 	}
 	if e.UseSSHConfig {
-		// The TOML host field doubles as the ssh_config alias lookup key; the
-		// resolved HostName may differ (ssh_config HostName wins for unset).
-		applySSHConfig(&r, r.HostName, sshCfg)
+		// Host is the persisted lookup key. New imports store the SSH alias here;
+		// legacy imports store a resolved hostname snapshot. Never substitute Name:
+		// it is a user-facing label and may collide with an unrelated SSH alias.
+		if err := applySSHConfig(&r, r.HostName, sshCfg); err != nil {
+			return ResolvedHost{}, err
+		}
 	}
 	applyHostDefaults(&r)
 	if r.HostName == "" {
@@ -169,29 +177,42 @@ func resolveEntry(e config.RemoteHostEntry, sshCfg *SSHConfigSource) (ResolvedHo
 }
 
 // applySSHConfig fills unset fields from ~/.ssh/config for alias.
-func applySSHConfig(r *ResolvedHost, alias string, sshCfg *SSHConfigSource) {
+func applySSHConfig(r *ResolvedHost, alias string, sshCfg *SSHConfigSource) error {
 	if sshCfg == nil || alias == "" {
-		return
+		return nil
 	}
-	if hn := sshCfg.HostName(alias); hn != "" {
+	effective, err := sshCfg.EffectiveWithError(alias)
+	if err != nil {
+		return err
+	}
+	if hn := effective.HostName; hn != "" && hn != alias {
 		// An explicit TOML host that matched an alias keeps the alias only as
 		// the lookup key; the network target comes from ssh_config.
 		r.HostName = hn
 	}
 	if r.Port == 0 {
-		r.Port = sshCfg.Port(alias)
+		r.Port = effective.Port
 	}
 	if r.User == "" {
-		r.User = sshCfg.User(alias)
+		r.User = effective.User
 	}
 	if r.IdentityFile == "" {
-		r.IdentityFile = sshCfg.IdentityFile(alias)
+		r.IdentityFiles = append([]string(nil), effective.IdentityFiles...)
+		r.IdentityFileNone = effective.IdentityFileNone
+		if len(r.IdentityFiles) > 0 {
+			r.IdentityFile = r.IdentityFiles[0]
+		}
+	} else if len(r.IdentityFiles) == 0 {
+		r.IdentityFiles = []string{r.IdentityFile}
+		r.IdentityFileNone = false
 	}
 	if len(r.ProxyJump) == 0 {
-		if j := sshCfg.ProxyJump(alias); j != "" {
+		if j := effective.ProxyJump; j != "" {
 			r.ProxyJump = splitJumpChain(j)
 		}
 	}
+	r.IdentitiesOnly = effective.IdentitiesOnly
+	return nil
 }
 
 func applyHostDefaults(r *ResolvedHost) {

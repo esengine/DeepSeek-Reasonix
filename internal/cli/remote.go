@@ -107,7 +107,20 @@ func remoteAddCLI(args []string) int {
 		PassphraseEnv: *passphraseEnv,
 		PasswordEnv:   *passwordEnv,
 	}
-	if err := editUserConfig(func(c *config.Config) error { return c.UpsertRemoteHost(entry) }); err != nil {
+	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
+		var removalCandidates []string
+		if existing, ok := c.RemoteHost(entry.Name); ok {
+			for _, key := range []string{existing.PasswordEnv, existing.PassphraseEnv} {
+				if config.IsGeneratedRemoteCredential(entry.Name, key) {
+					removalCandidates = append(removalCandidates, key)
+				}
+			}
+		}
+		if err := c.UpsertRemoteHost(entry); err != nil {
+			return nil, err
+		}
+		return config.UnusedGeneratedRemoteCredentialChanges(c, removalCandidates), nil
+	}); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
@@ -152,9 +165,17 @@ func remoteRemoveCLI(args []string) int {
 	}
 	name := args[0]
 	removed := false
-	if err := editUserConfig(func(c *config.Config) error {
+	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
+		var removalCandidates []string
+		if existing, ok := c.RemoteHost(name); ok {
+			for _, key := range []string{existing.PasswordEnv, existing.PassphraseEnv} {
+				if config.IsGeneratedRemoteCredential(name, key) {
+					removalCandidates = append(removalCandidates, key)
+				}
+			}
+		}
 		removed = c.RemoveRemoteHost(name)
-		return nil
+		return config.UnusedGeneratedRemoteCredentialChanges(c, removalCandidates), nil
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -180,7 +201,7 @@ func remoteImportCLI(args []string) int {
 	}
 	candidates := src.Aliases()
 	if len(candidates) == 0 {
-		fmt.Println("no importable hosts found in ~/.ssh/config (Match blocks are not evaluated)")
+		fmt.Println("no importable aliases found in ~/.ssh/config")
 		return 0
 	}
 	wanted := map[string]bool{}
@@ -188,7 +209,7 @@ func remoteImportCLI(args []string) int {
 		wanted[a] = true
 	}
 	imported := 0
-	err = editUserConfig(func(c *config.Config) error {
+	err = config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
 		for _, cand := range candidates {
 			if !*all && len(wanted) > 0 && !wanted[cand.Alias] {
 				continue
@@ -196,25 +217,24 @@ func remoteImportCLI(args []string) int {
 			if !*all && len(wanted) == 0 {
 				continue // neither --all nor explicit aliases: nothing to do
 			}
-			host := cand.HostName
-			if host == "" {
-				host = cand.Alias
-			}
 			entry := config.RemoteHostEntry{
 				Name:         cand.Alias,
-				Host:         host,
-				Port:         cand.Port,
-				User:         cand.User,
-				IdentityFile: cand.IdentityFile,
-				ProxyJump:    cand.ProxyJump,
+				Host:         cand.Alias,
 				UseSSHConfig: true,
 			}
+			if existing, ok := c.RemoteHost(entry.Name); ok {
+				entry.PassphraseEnv = existing.PassphraseEnv
+				entry.PasswordEnv = existing.PasswordEnv
+				entry.Workspace = existing.Workspace
+				entry.ServeInstall = existing.ServeInstall
+				entry.Forwards = append([]config.RemoteForwardEntry(nil), existing.Forwards...)
+			}
 			if err := c.UpsertRemoteHost(entry); err != nil {
-				return err
+				return nil, err
 			}
 			imported++
 		}
-		return nil
+		return nil, nil
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)

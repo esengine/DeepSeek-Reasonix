@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/agent/testutil"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -20,6 +21,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+	"reasonix/internal/tool"
 )
 
 // --- fakes: a Factory wrapping a behavior-driven runner in a real Controller ---
@@ -44,6 +46,39 @@ type fakeFactory struct {
 func (f *fakeFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
 	runner := &fakeRunner{sink: p.Sink, behavior: f.behavior}
 	return control.New(control.Options{Runner: runner, Sink: p.Sink}), nil
+}
+
+type steerBarrierTool struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (t *steerBarrierTool) Name() string        { return "steer_barrier" }
+func (t *steerBarrierTool) Description() string { return "waits for a steer" }
+func (t *steerBarrierTool) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (t *steerBarrierTool) ReadOnly() bool { return true }
+func (t *steerBarrierTool) Execute(ctx context.Context, _ json.RawMessage) (string, error) {
+	close(t.started)
+	select {
+	case <-t.release:
+		return "released", nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+type steerFactory struct {
+	provider *testutil.MockProvider
+	barrier  *steerBarrierTool
+}
+
+func (f *steerFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
+	tools := tool.NewRegistry()
+	tools.Add(f.barrier)
+	executor := agent.New(f.provider, tools, agent.NewSession(""), agent.Options{MaxSteps: 2}, p.Sink)
+	return control.New(control.Options{Runner: executor, Executor: executor, Sink: p.Sink}), nil
 }
 
 type commandFactory struct {
@@ -481,6 +516,18 @@ func TestServeLifecycle(t *testing.T) {
 	}
 	if ir.AgentCapabilities.PromptCapabilities.Image {
 		t.Errorf("image must not be advertised")
+	}
+	var extensions struct {
+		AgentCapabilities struct {
+			Meta map[string]ReasonixExtensionCapabilities `json:"_meta"`
+		} `json:"agentCapabilities"`
+	}
+	if err := json.Unmarshal(initResp.Result, &extensions); err != nil {
+		t.Fatalf("initialize extensions: %v", err)
+	}
+	steer := extensions.AgentCapabilities.Meta["reasonix.io"].SessionSteer
+	if steer == nil || steer.Method != sessionSteerMethod {
+		t.Errorf("sessionSteer capability = %+v, want method %q", steer, sessionSteerMethod)
 	}
 	if len(ir.AuthMethods) != 1 || ir.AuthMethods[0].ID != "reasonix-setup" || ir.AuthMethods[0].Type != "terminal" {
 		t.Fatalf("authMethods = %+v, want terminal reasonix setup", ir.AuthMethods)
@@ -1499,6 +1546,77 @@ func TestServeCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("cancel did not end the prompt")
+	}
+}
+
+func TestServeSteerInjectsIntoActivePrompt(t *testing.T) {
+	barrier := &steerBarrierTool{started: make(chan struct{}), release: make(chan struct{})}
+	prov := testutil.NewMock("steer",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: barrier.Name(), Arguments: `{}`}}},
+		testutil.Turn{Text: "done"},
+	)
+	client, stop := startServer(t, &steerFactory{provider: prov, barrier: barrier})
+	defer stop()
+
+	client.call(t, "initialize", InitializeParams{ProtocolVersion: 1})
+	newResp := client.call(t, "session/new", SessionNewParams{})
+	var nr SessionNewResult
+	if err := json.Unmarshal(newResp.Result, &nr); err != nil {
+		t.Fatalf("session/new: %v", err)
+	}
+
+	promptCh := client.callAsync("session/prompt", SessionPromptParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "start"}},
+	})
+	select {
+	case <-barrier.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt never reached the tool boundary")
+	}
+
+	legacyResp := client.call(t, "session/steer", SessionSteerParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "legacy route"}},
+	})
+	if legacyResp.Error == nil || legacyResp.Error.Code != ErrMethodNotFound {
+		t.Fatalf("legacy session/steer = %+v, want method not found", legacyResp.Error)
+	}
+
+	steerResp := client.call(t, sessionSteerMethod, SessionSteerParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "use plan B"}},
+	})
+	if steerResp.Error != nil {
+		t.Fatalf("%s errored: %+v", sessionSteerMethod, steerResp.Error)
+	}
+	close(barrier.release)
+	_, promptResp := drainPrompt(t, client, promptCh)
+	if promptResp.Error != nil {
+		t.Fatalf("session/prompt errored: %+v", promptResp.Error)
+	}
+
+	reqs := prov.Requests()
+	if len(reqs) != 2 {
+		t.Fatalf("provider requests = %d, want 2", len(reqs))
+	}
+	found := false
+	for _, m := range reqs[1].Messages {
+		if text, ok := agent.SteerText(m.Content); ok && text == "use plan B" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("second provider request did not contain the steer: %+v", reqs[1].Messages)
+	}
+
+	idleResp := client.call(t, sessionSteerMethod, SessionSteerParams{
+		SessionID: nr.SessionID,
+		Prompt:    []ContentBlock{{Type: "text", Text: "too late"}},
+	})
+	if idleResp.Error == nil || idleResp.Error.Code != ErrInvalidRequest {
+		t.Fatalf("idle %s = %+v, want invalid request", sessionSteerMethod, idleResp.Error)
 	}
 }
 

@@ -11,7 +11,7 @@ func TestHopAuthDropsTargetCredentials(t *testing.T) {
 	targetAuth := &AuthOptions{
 		Password:     func() (string, error) { return "target-secret", nil },
 		Passphrase:   func() (string, error) { return "target-key-pass", nil },
-		SecretPrompt: func(_ context.Context, _ SecretKind, _ string) (string, error) { return "", nil },
+		SecretPrompt: func(_ context.Context, _ SecretKind, _, _ string) (string, error) { return "", nil },
 		DisableAgent: true,
 	}
 	cfg := dialConfig{auth: targetAuth}

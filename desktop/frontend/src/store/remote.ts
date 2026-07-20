@@ -12,6 +12,7 @@ import type {
   RemoteForwardView,
   RemoteHostView,
   RemoteServerView,
+  RemoteSecretPromptView,
 } from "../lib/types";
 
 export type RemoteExplorerTab = "files" | "ports" | "server";
@@ -37,6 +38,7 @@ export type RemoteState = {
   forwards: Record<string, RemoteForwardView[]>;
   servers: Record<string, RemoteServerView>;
   pendingFingerprint: RemoteFingerprintView | null;
+  pendingSecretPrompt: RemoteSecretPromptView | null;
   statusPopoverRequest: RemoteStatusPopoverRequest | null;
   explorerOpen: boolean;
   explorerHostId: string | null;
@@ -49,6 +51,7 @@ export type RemoteState = {
   setForwards: (hostId: string, forwards: RemoteForwardView[]) => void;
   setServer: (s: RemoteServerView) => void;
   clearPendingFingerprint: (expected?: RemoteFingerprintView) => void;
+  clearPendingSecretPrompt: (expected?: RemoteSecretPromptView) => void;
   requestStatusPopover: (hostId: string) => void;
   clearStatusPopoverRequest: (expected: RemoteStatusPopoverRequest) => void;
   openExplorer: (hostId: string) => void;
@@ -62,6 +65,7 @@ export const useRemoteStore = create<RemoteState>((set) => ({
   forwards: {},
   servers: {},
   pendingFingerprint: null,
+  pendingSecretPrompt: null,
   statusPopoverRequest: null,
   explorerOpen: false,
   explorerHostId: null,
@@ -79,6 +83,11 @@ export const useRemoteStore = create<RemoteState>((set) => ({
       } else if (state.pendingFingerprint?.hostId === s.hostId) {
         // The pending prompt for this host resolved.
         next.pendingFingerprint = null;
+      }
+      if (s.state === "pending_secret" && s.secretPrompt) {
+        next.pendingSecretPrompt = s.secretPrompt;
+      } else if (state.pendingSecretPrompt?.hostId === s.hostId) {
+        next.pendingSecretPrompt = null;
       }
       return next;
     }),
@@ -112,6 +121,17 @@ export const useRemoteStore = create<RemoteState>((set) => ({
         state.pendingFingerprint?.sha256 !== expected.sha256
       )) return state;
       return { pendingFingerprint: null };
+    }),
+
+  clearPendingSecretPrompt: (expected) =>
+    set((state) => {
+      if (expected && (
+        state.pendingSecretPrompt?.promptId !== expected.promptId ||
+        state.pendingSecretPrompt?.hostId !== expected.hostId ||
+        state.pendingSecretPrompt?.kind !== expected.kind ||
+        state.pendingSecretPrompt?.identity !== expected.identity
+      )) return state;
+      return { pendingSecretPrompt: null };
     }),
 
   requestStatusPopover: (hostId) =>

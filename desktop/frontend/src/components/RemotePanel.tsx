@@ -24,7 +24,7 @@ export function RemotePanel({ onClose }: { onClose: () => void }) {
 
   if (!hostId) return null;
   const connected = status?.state === "connected" || status?.state === "degraded";
-  const busy = status?.state === "connecting" || status?.state === "reconnecting" || status?.state === "pending_hostkey";
+  const busy = status?.state === "connecting" || status?.state === "reconnecting" || status?.state === "pending_hostkey" || status?.state === "pending_secret";
   const terminalFailure = isRemoteTerminalFailure(status);
   const degradedWarning = isRemoteDegradedWarning(status);
   const target = host ? `${host.user ? `${host.user}@` : ""}${host.host}${host.port && host.port !== 22 ? `:${host.port}` : ""}` : hostId;

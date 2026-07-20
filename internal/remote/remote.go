@@ -95,7 +95,9 @@ func classifyDialError(err error) error {
 	msg := strings.ToLower(err.Error())
 	if strings.Contains(msg, "unable to authenticate") ||
 		strings.Contains(msg, "no supported methods remain") ||
-		strings.Contains(msg, "permission denied") {
+		strings.Contains(msg, "permission denied") ||
+		strings.Contains(msg, "password required but no prompt available") ||
+		strings.Contains(msg, "key passphrase required but no prompt available") {
 		return errAuth{err}
 	}
 	return err

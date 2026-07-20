@@ -34229,6 +34229,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .remote-chip--reconnecting,
 .remote-chip--pending_hostkey,
+.remote-chip--pending_secret,
 .remote-chip--degraded {
   color: var(--warn);
   border-color: color-mix(in srgb, var(--warn) 50%, var(--border));
@@ -34268,6 +34269,22 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+}
+.remote-host-form__credential {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.remote-host-form__credential-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg-faint);
+  font-size: var(--text-xs);
+}
+.remote-host-form__credential-meta .btn {
+  flex-shrink: 0;
 }
 .remote-host-form__error,
 .remote-panel__error {
@@ -34508,6 +34525,21 @@ body > .mermaid-diagram--fullscreen {
   gap: 8px;
   margin-top: 12px;
 }
+.remote-secret-dialog__input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 8px 10px;
+  color: var(--fg);
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+}
+.remote-secret-dialog__input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 .remote-connection-error-dialog__summary {
   margin: 0;
   color: var(--fg-dim);
@@ -34739,6 +34771,7 @@ body > .mermaid-diagram--fullscreen {
 .remote-switcher__state--connecting,
 .remote-switcher__state--reconnecting,
 .remote-switcher__state--pending_hostkey,
+.remote-switcher__state--pending_secret,
 .remote-switcher__state--degraded { background: var(--warn); }
 .remote-switcher__state--error { background: var(--danger); }
 .remote-switcher__manage {

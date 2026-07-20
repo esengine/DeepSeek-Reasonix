@@ -9,6 +9,8 @@
   &nbsp;·&nbsp;
   <a href="./docs/GUIDE.md">Guide</a>
   &nbsp;·&nbsp;
+  <a href="./docs/ACP.md">ACP</a>
+  &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
@@ -130,6 +132,8 @@ commands, `@` references, and two-model setup are all in the
   structured output, resume, permission modes, and searchable pickers.
 - **[Guide](./docs/GUIDE.md)** — configuration, permissions & sandbox, plugins
   (MCP), slash commands, `@` references, two-model collaboration.
+- **[ACP editor integration](./docs/ACP.md)** — launch Reasonix from an ACP
+  host, manage sessions and configuration, and integrate mid-turn steering.
 - **[Subagent profiles](./docs/SUBAGENT_PROFILES.md)** — create, share, preview,
   run, edit, and safely delete isolated agent profiles from desktop or CLI.
 - **[Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md)** —

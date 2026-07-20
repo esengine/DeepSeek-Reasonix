@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { useConfirmDialog } from "./ConfirmDialog";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { isRemoteDegradedWarning, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
@@ -26,6 +27,8 @@ export function RemoteHostsPage() {
   const t = useT();
   const [hosts, setHosts] = useState<RemoteHostView[]>([]);
   const [screen, setScreen] = useState<Screen>({ kind: "list" });
+  const [pageError, setPageError] = useState("");
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
   const statuses = useRemoteStore((s) => s.statuses);
   const setStoreHosts = useRemoteStore((s) => s.setHosts);
   const hydrateStatuses = useRemoteStore((s) => s.hydrateStatuses);
@@ -38,17 +41,20 @@ export function RemoteHostsPage() {
   }, [setStoreHosts]);
 
   useEffect(() => {
-    void refresh();
-    void app.RemoteConnectionStatuses().then(hydrateStatuses);
+    void refresh().catch((error) => setPageError(String(error)));
+    void app.RemoteConnectionStatuses().then(hydrateStatuses).catch((error) => setPageError(String(error)));
   }, [refresh, hydrateStatuses]);
 
   if (screen.kind === "add" || screen.kind === "edit") {
+    const editingHost = screen.kind === "edit" ? hosts.find((h) => h.id === screen.id) : undefined;
     const initial =
-      screen.kind === "edit" ? hostToInput(hosts.find((h) => h.id === screen.id)) : EMPTY_INPUT;
+      screen.kind === "edit" ? hostToInput(editingHost) : EMPTY_INPUT;
     return (
       <RemoteHostForm
         initial={initial}
         editingId={screen.kind === "edit" ? screen.id : null}
+        passwordSet={editingHost?.passwordSet ?? false}
+        keyPassphraseSet={editingHost?.keyPassphraseSet ?? false}
         onDone={async () => {
           await refresh();
           setScreen({ kind: "list" });
@@ -70,40 +76,57 @@ export function RemoteHostsPage() {
   }
 
   return (
-    <div className="remote-hosts">
-      <div className="remote-hosts__toolbar">
-        <h2>{t("remote.hosts.title")}</h2>
-        <div className="remote-hosts__actions">
-          <button className="btn" onClick={() => setScreen({ kind: "import" })}>
-            {t("remote.hosts.import")}
-          </button>
-          <button className="btn btn--primary" onClick={() => setScreen({ kind: "add" })}>
-            {t("remote.hosts.add")}
-          </button>
+    <>
+      <div className="remote-hosts">
+        <div className="remote-hosts__toolbar">
+          <h2>{t("remote.hosts.title")}</h2>
+          <div className="remote-hosts__actions">
+            <button className="btn" onClick={() => setScreen({ kind: "import" })}>
+              {t("remote.hosts.import")}
+            </button>
+            <button className="btn btn--primary" onClick={() => setScreen({ kind: "add" })}>
+              {t("remote.hosts.add")}
+            </button>
+          </div>
         </div>
+        {pageError && <p className="remote-host-form__error" role="alert">{pageError}</p>}
+        {hosts.length === 0 ? (
+          <p className="remote-hosts__empty">{t("remote.hosts.empty")}</p>
+        ) : (
+          <ul className="remote-hosts__list">
+            {hosts.map((h) => (
+              <RemoteHostRow
+                key={h.id}
+                host={h}
+                status={statuses[h.id]}
+                onConnect={() => void app.ConnectRemoteHost(h.id).catch(() => {})}
+                onDisconnect={() => void app.DisconnectRemoteHost(h.id).catch(() => {})}
+                onOpen={() => openExplorer(h.id)}
+                onEdit={() => setScreen({ kind: "edit", id: h.id })}
+                onRemove={async () => {
+                  const confirmed = await confirm({
+                    title: t("remote.host.removeConfirmTitle"),
+                    message: t("remote.host.removeConfirm", { host: h.label }),
+                    confirmLabel: t("remote.host.remove"),
+                    cancelLabel: t("remote.host.cancel"),
+                    tone: "danger",
+                  });
+                  if (!confirmed) return;
+                  setPageError("");
+                  try {
+                    await app.RemoveRemoteHost(h.id);
+                    await refresh();
+                  } catch (error) {
+                    setPageError(String(error));
+                  }
+                }}
+              />
+            ))}
+          </ul>
+        )}
       </div>
-      {hosts.length === 0 ? (
-        <p className="remote-hosts__empty">{t("remote.hosts.empty")}</p>
-      ) : (
-        <ul className="remote-hosts__list">
-          {hosts.map((h) => (
-            <RemoteHostRow
-              key={h.id}
-              host={h}
-              status={statuses[h.id]}
-              onConnect={() => void app.ConnectRemoteHost(h.id).catch(() => {})}
-              onDisconnect={() => void app.DisconnectRemoteHost(h.id).catch(() => {})}
-              onOpen={() => openExplorer(h.id)}
-              onEdit={() => setScreen({ kind: "edit", id: h.id })}
-              onRemove={async () => {
-                await app.RemoveRemoteHost(h.id);
-                await refresh();
-              }}
-            />
-          ))}
-        </ul>
-      )}
-    </div>
+      {confirmDialog}
+    </>
   );
 }
 
@@ -152,12 +175,7 @@ function RemoteHostRow(props: {
         <button className="btn" onClick={props.onEdit}>
           {t("remote.host.edit")}
         </button>
-        <button
-          className="btn btn--danger"
-          onClick={() => {
-            if (confirm(t("remote.host.removeConfirm"))) props.onRemove();
-          }}
-        >
+        <button className="btn btn--danger" onClick={props.onRemove}>
           {t("remote.host.remove")}
         </button>
       </div>
@@ -177,6 +195,8 @@ export function RemoteStatusChip({ state }: { state: RemoteConnState }) {
 function RemoteHostForm(props: {
   initial: RemoteHostInput;
   editingId: string | null;
+  passwordSet: boolean;
+  keyPassphraseSet: boolean;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -214,7 +234,7 @@ function RemoteHostForm(props: {
       </label>
       <label>
         {t("remote.host.port")}
-        <input type="number" min={1} max={65535} value={form.port} onChange={(e) => set("port", Number(e.target.value) || 0)} />
+        <input type="number" min={form.useSSHConfig ? 0 : 1} max={65535} value={form.port} onChange={(e) => set("port", Number(e.target.value) || 0)} />
       </label>
       <label>
         <input type="checkbox" checked={form.useSSHConfig} onChange={(e) => set("useSSHConfig", e.target.checked)} />
@@ -228,6 +248,66 @@ function RemoteHostForm(props: {
         {t("remote.host.identityFile")}
         <input value={form.identityFile} onChange={(e) => set("identityFile", e.target.value)} />
       </label>
+      <div className="remote-host-form__credential">
+        <label>
+          {t("remote.host.password")}
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={form.password ?? ""}
+            placeholder={props.passwordSet ? t("remote.host.credentialSavedPlaceholder") : ""}
+            onChange={(e) => setForm((current) => ({ ...current, password: e.target.value, clearPassword: false }))}
+          />
+        </label>
+        <div className="remote-host-form__credential-meta">
+          <span>
+            {form.clearPassword
+              ? t("remote.host.passwordRemoveHint")
+              : props.passwordSet
+                ? t("remote.host.passwordSavedHint")
+                : t("remote.host.passwordHint")}
+          </span>
+          {props.passwordSet && (
+            <button
+              className="btn btn--small"
+              type="button"
+              onClick={() => setForm((current) => ({ ...current, password: "", clearPassword: !current.clearPassword }))}
+            >
+              {form.clearPassword ? t("remote.host.keepPassword") : t("remote.host.clearPassword")}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="remote-host-form__credential">
+        <label>
+          {t("remote.host.keyPassphrase")}
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={form.keyPassphrase ?? ""}
+            placeholder={props.keyPassphraseSet ? t("remote.host.credentialSavedPlaceholder") : ""}
+            onChange={(e) => setForm((current) => ({ ...current, keyPassphrase: e.target.value, clearPassphrase: false }))}
+          />
+        </label>
+        <div className="remote-host-form__credential-meta">
+          <span>
+            {form.clearPassphrase
+              ? t("remote.host.keyPassphraseRemoveHint")
+              : props.keyPassphraseSet
+                ? t("remote.host.keyPassphraseSavedHint")
+                : t("remote.host.keyPassphraseHint")}
+          </span>
+          {props.keyPassphraseSet && (
+            <button
+              className="btn btn--small"
+              type="button"
+              onClick={() => setForm((current) => ({ ...current, keyPassphrase: "", clearPassphrase: !current.clearPassphrase }))}
+            >
+              {form.clearPassphrase ? t("remote.host.keepKeyPassphrase") : t("remote.host.clearKeyPassphrase")}
+            </button>
+          )}
+        </div>
+      </div>
       <label>
         {t("remote.host.proxyJump")}
         <input value={form.proxyJump} onChange={(e) => set("proxyJump", e.target.value)} />
@@ -248,7 +328,7 @@ function RemoteHostForm(props: {
       {err && <p className="remote-host-form__error" role="alert">{err}</p>}
       <div className="remote-host-form__actions">
         <button className="btn" onClick={props.onCancel}>{t("remote.host.cancel")}</button>
-        <button className="btn btn--primary" disabled={busy || !form.label.trim() || !form.host.trim() || form.port < 1 || form.port > 65535} onClick={() => void submit()}>
+        <button className="btn btn--primary" disabled={busy || !form.label.trim() || !form.host.trim() || (!form.useSSHConfig && form.port < 1) || form.port > 65535} onClick={() => void submit()}>
           {t("remote.host.save")}
         </button>
       </div>
@@ -325,5 +405,9 @@ function hostToInput(h?: RemoteHostView): RemoteHostInput {
     defaultWorkspace: h.defaultWorkspace,
     serveInstall: h.serveInstall,
     useSSHConfig: h.useSSHConfig,
+    password: "",
+    keyPassphrase: "",
+    clearPassword: false,
+    clearPassphrase: false,
   };
 }

@@ -113,7 +113,7 @@ func dialSSH(ctx context.Context, cfg dialConfig) (*ssh.Client, []*ssh.Client, e
 // dial, not the version/key exchange, so a host that accepts TCP but never
 // sends a banner would otherwise hang NewClientConn — and Close — forever).
 func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *AuthOptions, hostKeys *HostKeyPolicy, timeout time.Duration) (*ssh.Client, error) {
-	methods, cleanupAuth, err := buildAuthMethods(ctx, host, auth)
+	methods, authCallback, cleanupAuth, err := buildAuthMethods(ctx, host, auth)
 	if err != nil {
 		conn.Close()
 		return nil, err
@@ -132,6 +132,7 @@ func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *A
 	clientCfg := &ssh.ClientConfig{
 		User:              host.User,
 		Auth:              methods,
+		AuthCallback:      authCallback,
 		HostKeyCallback:   hkCallback,
 		HostKeyAlgorithms: hostKeyAlgorithms,
 		Timeout:           timeout,

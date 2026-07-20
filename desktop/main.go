@@ -187,6 +187,7 @@ func main() {
 			Middleware: assetserver.ChainMiddleware(
 				app.remoteWindowAssetMiddleware(),
 				app.jsProfilingMiddleware(),
+				app.remoteMarkdownImageMiddleware(),
 				app.workspaceMediaMiddleware(),
 				app.themeAssetMiddleware(),
 			),

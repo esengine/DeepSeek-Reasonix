@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,14 +15,16 @@ import (
 
 // fakeRemoteKernel implements remoteKernel for binding-layer tests.
 type fakeRemoteKernel struct {
-	hosts        []RemoteHostView
-	statuses     []RemoteConnectionStatusView
-	writeResult  RemoteWriteResult
-	ensureView   RemoteServerView
-	ensureToken  string
-	ensureErr    error
-	resolveCalls []bool
-	closed       bool
+	hosts           []RemoteHostView
+	statuses        []RemoteConnectionStatusView
+	writeResult     RemoteWriteResult
+	ensureView      RemoteServerView
+	ensureToken     string
+	ensureErr       error
+	resolveCalls    []bool
+	secretCalls     []remoteSecretAnswer
+	secretPromptIDs []string
+	closed          bool
 }
 
 func TestRemoteConnectionErrorDetailsPreserveHostKeyMismatch(t *testing.T) {
@@ -74,6 +77,11 @@ func (f *fakeRemoteKernel) Disconnect(hostID string) error            { return n
 func (f *fakeRemoteKernel) Statuses() []RemoteConnectionStatusView    { return f.statuses }
 func (f *fakeRemoteKernel) ResolveHostKey(hostID string, accept bool) error {
 	f.resolveCalls = append(f.resolveCalls, accept)
+	return nil
+}
+func (f *fakeRemoteKernel) ResolveSecret(hostID, promptID, secret string, accept bool) error {
+	f.secretPromptIDs = append(f.secretPromptIDs, promptID)
+	f.secretCalls = append(f.secretCalls, remoteSecretAnswer{secret: secret, accept: accept})
 	return nil
 }
 func (f *fakeRemoteKernel) ListDir(context.Context, string, string) ([]RemoteDirEntry, error) {
@@ -141,6 +149,17 @@ func TestConfirmRemoteHostKeyDelegates(t *testing.T) {
 	}
 }
 
+func TestConfirmRemoteSecretDelegatesWithoutPersisting(t *testing.T) {
+	fake := &fakeRemoteKernel{}
+	a := appWithFakeKernel(fake)
+	if err := a.ConfirmRemoteSecret("box", "prompt-7", "one-shot-secret", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.secretCalls) != 1 || fake.secretCalls[0].secret != "one-shot-secret" || !fake.secretCalls[0].accept || fake.secretPromptIDs[0] != "prompt-7" {
+		t.Fatalf("secret calls = %+v", fake.secretCalls)
+	}
+}
+
 // TestRemoteStatusBridgesToAsyncEmitter verifies a kernel status callback lands
 // on the async emitter as a remote:status event.
 func TestRemoteStatusBridgesToAsyncEmitter(t *testing.T) {
@@ -178,9 +197,8 @@ func TestStopRemoteRuntimeClosesKernel(t *testing.T) {
 	}
 }
 
-// TestUpdateHostPreservesHiddenFields pins the data-loss fix: editing a host in
-// the desktop UI (whose input lacks passphrase_env/password_env/forwards) must
-// not wipe those stored fields.
+// TestUpdateHostPreservesHiddenFields pins the data-loss fix: blank secret
+// inputs and an edit that does not model forwards must not wipe those fields.
 func TestUpdateHostPreservesHiddenFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
@@ -199,7 +217,7 @@ func TestUpdateHostPreservesHiddenFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Edit via the desktop input (no hidden fields), changing only the user.
+	// Edit via the desktop input with blank secrets, changing only the user.
 	if _, err := mgr.UpdateHost("box", RemoteHostInput{Label: "box", Host: "10.0.0.9", Port: 22, User: "ops", ServeInstall: "auto"}); err != nil {
 		t.Fatalf("UpdateHost: %v", err)
 	}
@@ -223,12 +241,196 @@ func TestUpdateHostPreservesHiddenFields(t *testing.T) {
 	}
 }
 
+func TestSSHConfigReimportPreservesReasonixSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	if err := editUserConfig(func(c *config.Config) error {
+		return c.UpsertRemoteHost(config.RemoteHostEntry{
+			Name: "box", Host: "old.example", Workspace: "/srv/app", ServeInstall: "never",
+			PasswordEnv: "REMOTE_BOX_PASSWORD",
+			Forwards:    []config.RemoteForwardEntry{{Type: "local", Bind: "127.0.0.1:8080", Target: "127.0.0.1:80"}},
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := newDesktopRemoteManager(&App{})
+	if _, err := mgr.AddHost(RemoteHostInput{
+		Label: "box", Host: "box", UseSSHConfig: true, PreserveExistingSettings: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, ok := cfg.RemoteHost("box")
+	if !ok {
+		t.Fatal("reimported host is missing")
+	}
+	if host.Host != "box" || !host.UseSSHConfig || host.Workspace != "/srv/app" || host.ServeInstall != "never" {
+		t.Fatalf("reimported host settings = %+v", host)
+	}
+	if host.PasswordEnv != "REMOTE_BOX_PASSWORD" || len(host.Forwards) != 1 {
+		t.Fatalf("reimport wiped hidden settings: %+v", host)
+	}
+}
+
+func TestRemoteHostCredentialsStayOutOfConfigAndCanBeCleared(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+
+	mgr := newDesktopRemoteManager(&App{})
+	in := RemoteHostInput{
+		Label: "secure-box", Host: "10.0.0.12", Port: 22, User: "dev", ServeInstall: "auto",
+		Password: "server-password", KeyPassphrase: "private-key-passphrase",
+	}
+	view, err := mgr.AddHost(in)
+	if err != nil {
+		t.Fatalf("AddHost: %v", err)
+	}
+	if !view.PasswordSet || !view.KeyPassphraseSet {
+		t.Fatalf("credential flags = password:%v passphrase:%v", view.PasswordSet, view.KeyPassphraseSet)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, ok := cfg.RemoteHost("secure-box")
+	if !ok {
+		t.Fatal("saved host missing")
+	}
+	wantPasswordEnv := config.RemotePasswordCredentialEnvName("secure-box")
+	wantPassphraseEnv := config.RemotePassphraseCredentialEnvName("secure-box")
+	if host.PasswordEnv != wantPasswordEnv || host.PassphraseEnv != wantPassphraseEnv {
+		t.Fatalf("credential refs = password:%q passphrase:%q", host.PasswordEnv, host.PassphraseEnv)
+	}
+	t.Cleanup(func() {
+		_ = config.RemoveCredential(wantPasswordEnv)
+		_ = config.RemoveCredential(wantPassphraseEnv)
+	})
+	if got := config.ResolveCredentialForRootGlobalFirst(home, wantPasswordEnv); !got.Set || got.Value != in.Password {
+		t.Fatalf("stored password = set:%v value:%q", got.Set, got.Value)
+	}
+	if got := config.ResolveCredentialForRootGlobalFirst(home, wantPassphraseEnv); !got.Set || got.Value != in.KeyPassphrase {
+		t.Fatalf("stored passphrase = set:%v value:%q", got.Set, got.Value)
+	}
+	configBytes, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(configBytes), in.Password) || strings.Contains(string(configBytes), in.KeyPassphrase) {
+		t.Fatalf("plaintext secret leaked into config.toml:\n%s", configBytes)
+	}
+
+	// Blank secret fields preserve both references and stored values.
+	if _, err := mgr.UpdateHost("secure-box", RemoteHostInput{
+		Label: "secure-box", Host: "10.0.0.12", Port: 22, User: "ops", ServeInstall: "auto",
+	}); err != nil {
+		t.Fatalf("UpdateHost blank credentials: %v", err)
+	}
+	if got := config.ResolveCredentialForRootGlobalFirst(home, wantPasswordEnv); !got.Set || got.Value != in.Password {
+		t.Fatalf("blank edit changed password: %+v", got)
+	}
+
+	view, err = mgr.UpdateHost("secure-box", RemoteHostInput{
+		Label: "secure-box", Host: "10.0.0.12", Port: 22, User: "ops", ServeInstall: "auto", ClearPassword: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateHost clear password: %v", err)
+	}
+	if view.PasswordSet || !view.KeyPassphraseSet {
+		t.Fatalf("credential flags after clear = password:%v passphrase:%v", view.PasswordSet, view.KeyPassphraseSet)
+	}
+	if got := config.ResolveCredentialForRootGlobalFirst(home, wantPasswordEnv); got.Set {
+		t.Fatal("generated password credential remains after explicit clear")
+	}
+
+	if err := mgr.RemoveHost("secure-box"); err != nil {
+		t.Fatalf("RemoveHost: %v", err)
+	}
+	if got := config.ResolveCredentialForRootGlobalFirst(home, wantPassphraseEnv); got.Set {
+		t.Fatal("generated passphrase credential remains after host removal")
+	}
+}
+
+func TestClearRemoteHostCredentialDoesNotDeleteUserManagedEnv(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	const key = "TEAM_SHARED_SSH_PASSWORD"
+	if _, err := config.SetCredential(key, "shared-secret"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = config.RemoveCredential(key) })
+	if err := editUserConfig(func(c *config.Config) error {
+		return c.UpsertRemoteHost(config.RemoteHostEntry{
+			Name: "shared-box", Host: "10.0.0.15", User: "dev", PasswordEnv: key,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := newDesktopRemoteManager(&App{})
+	if _, err := mgr.UpdateHost("shared-box", RemoteHostInput{
+		Label: "shared-box", Host: "10.0.0.15", Port: 22, User: "dev", ServeInstall: "auto", ClearPassword: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, ok := cfg.RemoteHost("shared-box")
+	if !ok || host.PasswordEnv != "" {
+		t.Fatalf("password reference was not cleared: %+v", host)
+	}
+	if got := config.ResolveCredentialForRootGlobalFirst(home, key); !got.Set || got.Value != "shared-secret" {
+		t.Fatalf("user-managed credential was deleted: %+v", got)
+	}
+}
+
+func TestRemoteHostCredentialWriteRollsBackOnFailure(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+
+	mgr := newDesktopRemoteManager(&App{})
+	_, err := mgr.AddHost(RemoteHostInput{
+		Label: "rollback-box", Host: "10.0.0.19", Port: 22, User: "dev", ServeInstall: "auto",
+		Password: "must-not-remain", KeyPassphrase: "invalid\npassphrase",
+	})
+	if err == nil {
+		t.Fatal("expected credential validation failure")
+	}
+	passwordEnv := config.RemotePasswordCredentialEnvName("rollback-box")
+	passphraseEnv := config.RemotePassphraseCredentialEnvName("rollback-box")
+	t.Cleanup(func() {
+		_ = config.RemoveCredential(passwordEnv)
+		_ = config.RemoveCredential(passphraseEnv)
+	})
+	if got := config.ResolveCredentialForRootGlobalFirst(home, passwordEnv); got.Set {
+		t.Fatal("first credential write was not rolled back after the second failed")
+	}
+	cfg, loadErr := config.Load()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if _, ok := cfg.RemoteHost("rollback-box"); ok {
+		t.Fatal("host config was saved despite credential write failure")
+	}
+}
+
 // TestScanSSHConfigReturnsNonNil pins the JSON-contract fix: an empty scan must
 // encode as [] (not null), which the React import page iterates safely.
 func TestScanSSHConfigReturnsNonNil(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("HOME", home) // no ~/.ssh/config here => empty result
+	t.Setenv("USERPROFILE", home)
 	mgr := newDesktopRemoteManager(&App{})
 	out, err := mgr.ScanSSHConfig()
 	if err != nil {
@@ -236,6 +438,36 @@ func TestScanSSHConfigReturnsNonNil(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("ScanSSHConfig returned nil slice (would encode as JSON null and crash the import page)")
+	}
+}
+
+func TestScanSSHConfigPreservesAliasInsteadOfSnapshottingEffectiveFields(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configBody := "Host live-box\n  HostName 192.0.2.40\n  User dev\n  Port 2202\n  IdentityFile ~/.ssh/live-box\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(configBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mgr := newDesktopRemoteManager(&App{})
+	out, err := mgr.ScanSSHConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("scan = %+v", out)
+	}
+	got := out[0]
+	if got.Label != "live-box" || got.Host != "live-box" || !got.UseSSHConfig || !got.PreserveExistingSettings {
+		t.Fatalf("alias was not preserved: %+v", got)
+	}
+	if got.Port != 0 || got.User != "" || got.IdentityFile != "" || got.ProxyJump != "" {
+		t.Fatalf("effective config was snapshotted instead of resolved live: %+v", got)
 	}
 }
 

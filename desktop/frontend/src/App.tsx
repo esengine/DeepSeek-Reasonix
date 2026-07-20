@@ -55,6 +55,7 @@ import { ClearContextCard } from "./components/ClearContextCard";
 type DecisionSurfaceKind = "tool_approval" | "plan_approval" | "ask" | "clear_context";
 import { StatusBar } from "./components/StatusBar";
 import { RemoteHostKeyDialog } from "./components/RemoteHostKeyDialog";
+import { RemoteSecretDialog } from "./components/RemoteSecretDialog";
 import { onRemoteStatus, onRemoteForwards, onRemoteServer } from "./lib/bridge";
 import { RemoteConnectionTimeoutError, useRemoteStore, waitForRemoteConnection } from "./store/remote";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
@@ -4452,6 +4453,7 @@ export default function App() {
       )}
 
       <RemoteHostKeyDialog />
+      <RemoteSecretDialog />
 
       <CommandPalette
         open={paletteOpen}

@@ -167,19 +167,10 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 
 ## 通过 ACP 接入编辑器
 
-`reasonix acp` 向 ACP 编辑器客户端公开三条彼此独立的会话轴：
-
-- `modes`：`normal`、`plan`、`goal`。选择 Goal 后，下一条用户输入会成为活动目标，
-  并启动 Reasonix 现有的 Goal 持续推进循环。
-- `work_mode`：`economy`、`balanced`、`delivery`。切换时会原子重建 Controller，
-  同时保留历史、协作方式和工具权限。`reasonix acp --profile ...` 仍可设置启动默认值。
-- `tool_approval`：`ask`、`auto`、`yolo`。切换权限不会重建 Controller，也不会改变
-  协作方式或工作模式。
-
-模型和推理强度仍是独立的 ACP 配置项。Reasonix 会按 ACP 会话持久化这三条轴；旧会话元数据
-缺少新字段时，工作模式继承 ACP 进程的启动 profile（未传 `--profile` 时为均衡），权限和
-协作方式使用“询问 + 常规”。为兼容旧版混合 mode 列表，`session/set_mode` 仍接受
-`default`（常规 + 询问）和 `auto`（常规 + Yolo），新客户端应使用拆分后的独立选择器。
+`reasonix acp` 把 Reasonix 作为 ACP v1 stdio agent 提供给编辑器和其他 host 客户端。
+独立的 **[ACP 编辑器接入](./ACP.zh-CN.md)** 文档集中说明启动方式、能力协商、会话生命周期、
+彼此独立的模型/工作/协作/审批控制轴、客户端文件与 terminal 能力、MCP server、权限请求，
+以及 Reasonix 的回合中引导扩展。
 
 ## 远程 SSH
 
@@ -213,12 +204,16 @@ target = "127.0.0.1:5432"
 
 ```bash
 reasonix remote add gpu-box dev@203.0.113.7 --workspace '~/projects/app'
-reasonix remote import --all              # 从 ~/.ssh/config 导入(跳过 Match 块)
+reasonix remote import --all              # 导入别名；连接时通过 ssh -G 解析 Include/Match 等规则
 reasonix remote test gpu-box              # 拨号 + 认证 + 主机密钥确认
 reasonix remote connect gpu-box --open    # 引导 serve、建隧道、打开 URL
 reasonix remote serve status gpu-box
 reasonix remote fs ls gpu-box:'~/projects/app'
 ```
+
+启用 `use_ssh_config` 的主机会通过本机 OpenSSH `ssh -G` 获取最终有效配置，因此支持
+`Include`、通配 `Host`、`Match`（包括 `Match exec`）、多个 `IdentityFile`、`ProxyJump` 和
+`IdentitiesOnly`。导入时只保存原始别名，不复制一份容易过期的解析结果。
 
 `connect` 是前台守护(相当于 `ssh -N` 加上 serve 引导):它保持隧道与已配置的转发存活,断线时
 以指数退避自动重连,并在重连后重新挂载转发。Ctrl-C 只断开本地一侧 —— 远端 serve 继续运行,

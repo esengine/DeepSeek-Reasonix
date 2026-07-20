@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertCircle, Code2, Maximize2, Minimize2, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { openExternal } from "../lib/bridge";
+import { markdownImageSource } from "../lib/markdownImage";
 
 interface MermaidDiagramProps {
   definition: string;
@@ -264,8 +265,18 @@ export function sanitizeMermaidSvg(svg: string): string {
         element.removeAttribute(attrName);
         continue;
       }
-      if (localName === "href" && !isSafeMermaidHref(attr.value)) {
-        element.removeAttribute(attrName);
+      if (localName === "href") {
+        if (!isSafeMermaidHref(attr.value)) {
+          element.removeAttribute(attrName);
+          continue;
+        }
+        if (name === "image" || name === "feimage") {
+          attr.value = markdownImageSource(attr.value);
+        } else if (name === "use" && !attr.value.trim().startsWith("#")) {
+          // External <use> references can load arbitrary SVG documents. Mermaid
+          // only needs local fragment references, so keep those and drop the rest.
+          element.removeAttribute(attrName);
+        }
       }
     }
   }

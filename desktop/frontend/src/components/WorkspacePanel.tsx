@@ -845,11 +845,13 @@ export function WorkspacePanel({
     build("", 0);
     return acc;
   }, [flattened, entriesByDir, openDirs, selectedPath]);
+  const getTreeRowKey = useCallback((index: number) => treeRows[index]?.key ?? index, [treeRows]);
 
   const virtualizer = useVirtualizer({
     count: treeRows.length,
     getScrollElement: () => treeRef.current,
     estimateSize: () => 24,
+    getItemKey: getTreeRowKey,
     overscan: 10,
     directDomUpdates: true,
   });

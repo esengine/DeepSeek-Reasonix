@@ -456,6 +456,7 @@ export interface AppBindings {
   DisconnectRemoteHost(id: string): Promise<void>;
   RemoteConnectionStatuses(): Promise<RemoteConnectionStatus[]>;
   ConfirmRemoteHostKey(hostId: string, accept: boolean): Promise<void>;
+  ConfirmRemoteSecret(hostId: string, promptId: string, secret: string, accept: boolean): Promise<void>;
   ListRemoteDir(hostId: string, path: string): Promise<RemoteDirEntry[]>;
   ReadRemoteFile(hostId: string, path: string): Promise<RemoteFilePreview>;
   WriteRemoteFile(hostId: string, path: string, body: string, expectMtimeUnix: number): Promise<RemoteWriteResult>;
@@ -4412,12 +4413,13 @@ function makeMockApp(): AppBindings {
       return mockRemoteHosts.slice();
     },
     async AddRemoteHost(input) {
-      const view: RemoteHostView = { id: input.label, ...input };
+      const view = mockRemoteHostView(input.label, input);
       mockRemoteHosts = [...mockRemoteHosts.filter((h) => h.id !== view.id), view];
       return view;
     },
     async UpdateRemoteHost(id, input) {
-      const view: RemoteHostView = { id, ...input };
+      const previous = mockRemoteHosts.find((h) => h.id === id);
+      const view = mockRemoteHostView(id, input, previous);
       mockRemoteHosts = mockRemoteHosts.map((h) => (h.id === id ? view : h));
       return view;
     },
@@ -4427,7 +4429,7 @@ function makeMockApp(): AppBindings {
     },
     async ScanSSHConfig() {
       return [
-        { label: "gpu-box", host: "203.0.113.7", port: 22, user: "dev", identityFile: "~/.ssh/id_ed25519", proxyJump: "", defaultWorkspace: "", serveInstall: "auto", useSSHConfig: true },
+        { label: "gpu-box", host: "gpu-box", port: 0, user: "", identityFile: "", proxyJump: "", defaultWorkspace: "", serveInstall: "auto", useSSHConfig: true, preserveExistingSettings: true },
       ];
     },
     async ConnectRemoteHost(id) {
@@ -4446,6 +4448,10 @@ function makeMockApp(): AppBindings {
       return Object.entries(mockRemoteConn).map(([hostId, state]) => ({ hostId, state: state as RemoteConnectionStatus["state"] }));
     },
     async ConfirmRemoteHostKey(hostId, accept) {
+      mockRemoteConn[hostId] = accept ? "connected" : "stopped";
+      __emitMockRemote("status", { hostId, state: mockRemoteConn[hostId] });
+    },
+    async ConfirmRemoteSecret(hostId, _promptId, _secret, accept) {
       mockRemoteConn[hostId] = accept ? "connected" : "stopped";
       __emitMockRemote("status", { hostId, state: mockRemoteConn[hostId] });
     },
@@ -4500,6 +4506,23 @@ function makeMockApp(): AppBindings {
 }
 
 // Mock remote state, module-scoped so it survives across mock method calls.
+function mockRemoteHostView(id: string, input: RemoteHostInput, previous?: RemoteHostView): RemoteHostView {
+  return {
+    id,
+    label: input.label,
+    host: input.host,
+    port: input.port,
+    user: input.user,
+    identityFile: input.identityFile,
+    proxyJump: input.proxyJump,
+    defaultWorkspace: input.defaultWorkspace,
+    serveInstall: input.serveInstall,
+    useSSHConfig: input.useSSHConfig,
+    passwordSet: input.password ? true : input.clearPassword ? false : previous?.passwordSet,
+    keyPassphraseSet: input.keyPassphrase ? true : input.clearPassphrase ? false : previous?.keyPassphraseSet,
+  };
+}
+
 let mockRemoteHosts: RemoteHostView[] = [
   { id: "demo", label: "demo", host: "192.168.1.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
 ];

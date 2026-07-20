@@ -61,10 +61,39 @@ function installDom() {
   globalThis.PointerEvent = dom.window.MouseEvent as unknown as typeof PointerEvent;
   globalThis.MutationObserver = dom.window.MutationObserver;
   globalThis.ResizeObserver = TestResizeObserver;
+  dom.window.ResizeObserver = TestResizeObserver;
   globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
   Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => {} });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get: () => 320,
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get: function offsetHeight(this: HTMLElement) {
+      return this.classList.contains("workspace-tree") ? 300 : this.dataset.index ? 24 : 0;
+    },
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: function getBoundingClientRect(this: HTMLElement) {
+      const width = 320;
+      const height = this.classList.contains("workspace-tree") ? 300 : this.dataset.index ? 24 : 0;
+      return {
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: width,
+        bottom: height,
+        width,
+        height,
+        toJSON: () => ({}),
+      } as DOMRect;
+    },
+  });
   return dom;
 }
 
@@ -223,6 +252,68 @@ console.log("\nworkspace changes git errors");
   });
   await waitFor("expanded creation commit history", () => document.body.textContent?.includes("older commit") === true);
   ok(document.body.textContent?.includes("older commit") === true, "Creation commit history expands on demand");
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const { dom, root } = await renderFilesWorkspace({
+    ListDirForTab: async (_tabId, dir) => {
+      if (dir === "") {
+        return [
+          { name: "src", isDir: true },
+          { name: "tail-a.ts", isDir: false },
+          { name: "tail-b.ts", isDir: false },
+        ];
+      }
+      if (dir === "src/") {
+        return [
+          { name: "child-a.ts", isDir: false },
+          { name: "child-b.ts", isDir: false },
+        ];
+      }
+      return [];
+    },
+  });
+
+  const positionedRows = () =>
+    Array.from(document.querySelectorAll<HTMLElement>(".workspace-tree__sizer > div")).map((wrapper) => ({
+      path: wrapper.querySelector<HTMLElement>("[data-workspace-path]")?.dataset.workspacePath ?? "",
+      transform: wrapper.style.transform,
+    }));
+  const positionsAreUnique = (paths: string[]) => {
+    const rows = positionedRows().filter((row) => paths.includes(row.path));
+    return rows.length === paths.length && new Set(rows.map((row) => row.transform)).size === paths.length;
+  };
+
+  const collapsedPaths = ["src/", "tail-a.ts", "tail-b.ts"];
+  await waitFor("initial positioned workspace rows", () => positionsAreUnique(collapsedPaths));
+
+  const toggleSrc = () => document.querySelector<HTMLButtonElement>('[data-workspace-path="src/"]');
+  await act(async () => {
+    toggleSrc()?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  const expandedPaths = ["src/", "src/child-a.ts", "src/child-b.ts", "tail-a.ts", "tail-b.ts"];
+  await waitFor("expanded workspace rows", () => document.body.textContent?.includes("child-b.ts") === true);
+  ok(positionsAreUnique(expandedPaths), "expanded workspace rows keep unique virtual positions");
+
+  await act(async () => {
+    toggleSrc()?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("collapsed workspace rows", () => document.body.textContent?.includes("child-a.ts") === false);
+  ok(positionsAreUnique(collapsedPaths), "collapsed workspace rows keep unique virtual positions");
+
+  await act(async () => {
+    toggleSrc()?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("re-expanded workspace rows", () => document.body.textContent?.includes("child-b.ts") === true);
+  ok(positionsAreUnique(expandedPaths), "re-expanded workspace rows keep unique virtual positions");
+
   await act(async () => {
     root.unmount();
   });

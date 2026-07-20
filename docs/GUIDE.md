@@ -185,23 +185,11 @@ user-global `default_model`.
 
 ## Editor integrations over ACP
 
-`reasonix acp` exposes three independent session axes to ACP editor clients:
-
-- `modes`: `normal`, `plan`, or `goal`. Selecting Goal makes the next user
-  prompt the active goal and starts Reasonix's normal Goal continuation loop.
-- `work_mode`: `economy`, `balanced`, or `delivery`. Changing it atomically
-  rebuilds the controller while preserving history, collaboration mode, and
-  tool approval. It is also available as the startup-only
-  `reasonix acp --profile ...` default.
-- `tool_approval`: `ask`, `auto`, or `yolo`. Changing approval does not rebuild
-  the controller or alter the collaboration/work mode.
-
-Model and reasoning effort remain independent ACP config options. Reasonix
-persists all three axes per ACP session. Older session metadata defaults to
-the ACP process's startup profile (Balanced unless `--profile` overrides it) +
-Ask + Normal. For compatibility with clients built against the old mixed mode
-list, `session/set_mode` still accepts `default` as Normal + Ask and `auto` as
-Normal + Yolo, but new clients should use the independent selectors.
+`reasonix acp` exposes Reasonix as an ACP v1 stdio agent for editors and other
+host clients. The dedicated **[ACP editor integration](./ACP.md)** guide covers
+startup, capability negotiation, session lifecycle, independent model/work/
+collaboration/approval controls, client filesystem and terminal capabilities,
+MCP servers, permission requests, and the Reasonix mid-turn steering extension.
 
 ## Remote SSH
 
@@ -239,12 +227,17 @@ CLI:
 
 ```bash
 reasonix remote add gpu-box dev@203.0.113.7 --workspace '~/projects/app'
-reasonix remote import --all              # from ~/.ssh/config (Match blocks skipped)
+reasonix remote import --all              # import aliases; ssh -G resolves Include/Match rules when connecting
 reasonix remote test gpu-box              # dial + auth + host-key confirmation
 reasonix remote connect gpu-box --open    # bootstrap serve, tunnel, open the URL
 reasonix remote serve status gpu-box
 reasonix remote fs ls gpu-box:'~/projects/app'
 ```
+
+Hosts with `use_ssh_config` enabled resolve the final effective configuration
+through the local OpenSSH `ssh -G`, including `Include`, wildcard `Host`,
+`Match` (including `Match exec`), repeated `IdentityFile`, `ProxyJump`, and
+`IdentitiesOnly`. Import stores the original alias instead of a stale snapshot.
 
 `connect` is a foreground supervisor (like `ssh -N` plus the serve bootstrap):
 it keeps the tunnel and configured forwards alive, auto-reconnects with

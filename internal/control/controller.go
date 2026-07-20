@@ -2017,13 +2017,18 @@ func (c *Controller) refreshInteractiveGate() {
 	}
 }
 
-// Steer queues mid-turn guidance without interrupting the in-flight request.
-func (c *Controller) Steer(text string) {
+// TrySteer queues mid-turn guidance only when the active agent turn accepts it.
+func (c *Controller) TrySteer(text string) bool {
 	c.mu.Lock()
 	exec := c.executor
 	running := c.running
 	c.mu.Unlock()
-	if running && exec != nil && exec.Steer(text) {
+	return running && exec != nil && exec.Steer(text)
+}
+
+// Steer queues mid-turn guidance without interrupting the in-flight request.
+func (c *Controller) Steer(text string) {
+	if c.TrySteer(text) {
 		return
 	}
 	// No active turn accepted the steer: the frontend's runningRef was stale,

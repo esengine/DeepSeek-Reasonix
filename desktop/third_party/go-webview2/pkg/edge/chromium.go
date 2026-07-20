@@ -26,7 +26,10 @@ type Rect = w32.Rect
 // WebView2 must remain the sole owner of its rasterization scale. Disabling
 // monitor-scale detection leaves frameless windows with stale bounds after a
 // minimise/restore cycle on mixed-DPI displays (Reasonix #5862, Wails #5544).
-const shouldDetectMonitorScaleChanges = true
+const (
+	shouldDetectMonitorScaleChanges = true
+	reasonixNoProxyServerBrowserArg = "--no-proxy-server"
+)
 
 func globalErrorHandler(err error) {
 	if err == nil {
@@ -106,7 +109,10 @@ type Chromium struct {
 }
 
 func NewChromium() *Chromium {
-	e := &Chromium{}
+	// Reasonix's WebView only loads embedded assets and loopback remote-workspace
+	// pages. Keep that native UI independent from a stale Windows system proxy;
+	// provider, updater, MCP, and SSH traffic use Reasonix's separate Go client.
+	e := &Chromium{AdditionalBrowserArgs: []string{reasonixNoProxyServerBrowserArg}}
 	/*
 	 All these handlers are passed to native code through syscalls with 'uintptr(unsafe.Pointer(handler))' and we know
 	 that a pointer to those will be kept in the native code. Furthermore these handlers als contain pointer to other Go

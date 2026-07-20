@@ -451,6 +451,7 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startWindowsWebView2StartupFallback(ctx)
 	if a.remoteWindow != nil {
 		return
 	}

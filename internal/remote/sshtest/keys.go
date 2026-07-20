@@ -48,3 +48,21 @@ func GenerateKeyPEM() (pemBytes []byte, pub ssh.PublicKey, err error) {
 	}
 	return pem.EncodeToMemory(block), signer.PublicKey(), nil
 }
+
+// GenerateEncryptedKeyPEM returns an encrypted OpenSSH private key PEM and its
+// public key, for tests that exercise passphrase-backed identity files.
+func GenerateEncryptedKeyPEM(passphrase string) (pemBytes []byte, pub ssh.PublicKey, err error) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
+	if err != nil {
+		return nil, nil, err
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pem.EncodeToMemory(block), signer.PublicKey(), nil
+}
