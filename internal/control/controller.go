@@ -747,7 +747,10 @@ func (c *Controller) finishGuardedTurn(err error) {
 	c.mu.Lock()
 	cancelRequested := c.canceling
 	c.running = false
-	c.finishing = true
+	// A live controller keeps admission closed until TurnDone fan-out finishes.
+	// Close has already sealed admission permanently, so a late completion must
+	// not resurrect a finishing state after teardown.
+	c.finishing = !c.closed
 	c.cancel = nil
 	c.canceling = false
 	c.mu.Unlock()
@@ -4644,6 +4647,7 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 	c.closeOnce.Do(func() {
 		c.mu.Lock()
 		started := c.startedOnce
+		cancel := c.cancel
 		// Seal turn admission and drop anything already parked: a parked turn
 		// must not start against a controller that is being torn down, and
 		// without the closed flag a submit landing after this critical
@@ -4651,11 +4655,21 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 		// flight) would park again and start after teardown.
 		c.closed = true
 		c.parkedTurns = nil
-		c.running = false
+		// A finishing-only controller no longer needs the delivery gate because
+		// closed seals every admission path. Keep running truthful until the
+		// foreground goroutine actually exits; clearing it here would report idle
+		// while tools and prompt waiters were still live.
 		c.finishing = false
-		c.canceling = false
+		if cancel != nil {
+			c.canceling = true
+		}
 		c.mu.Unlock()
-		c.approval.clearAll()
+		if cancel != nil {
+			// clearAll deliberately does not signal waiters. Pair it with the
+			// foreground cancellation so approval/ask waits always unblock.
+			c.approval.clearAll()
+			cancel()
+		}
 		if fireSessionEnd && started {
 			c.hooks.SessionEnd(context.Background(), "other")
 		}

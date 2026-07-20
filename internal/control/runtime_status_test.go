@@ -105,6 +105,69 @@ func TestCancelClearsPendingAskRuntimeStatus(t *testing.T) {
 	}
 }
 
+func TestCloseCancelsPendingAskRuntimeStatus(t *testing.T) {
+	asks := make(chan event.Ask, 1)
+	done := make(chan event.Event, 1)
+	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
+		switch e.Kind {
+		case event.AskRequest:
+			asks <- e.Ask
+		case event.TurnDone:
+			done <- e
+		}
+	})})
+	c.runner = &askBlockingRunner{c: c}
+
+	c.Send("ask user")
+	select {
+	case <-asks:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ask request")
+	}
+
+	c.Close()
+	select {
+	case e := <-done:
+		if !e.Cancelled {
+			t.Fatal("closed turn_done event was not marked as cancelled")
+		}
+	case <-time.After(time.Second):
+		c.Cancel()
+		t.Fatal("Close did not cancel the pending ask waiter")
+	}
+	waitIdle(t, c)
+	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
+		t.Fatalf("status after Close = %+v, want idle", st)
+	}
+}
+
+func TestCloseDoesNotResurrectFinishingState(t *testing.T) {
+	turnStarted := make(chan struct{})
+	turnDoneEntered := make(chan struct{}, 1)
+	releaseTurnDone := make(chan struct{})
+	c := New(Options{Sink: holdFinishingWindow(releaseTurnDone, turnDoneEntered, nil)})
+
+	c.runGuarded(func(ctx context.Context) error {
+		close(turnStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	<-turnStarted
+
+	c.Close()
+	select {
+	case <-turnDoneEntered:
+	case <-time.After(time.Second):
+		c.Cancel()
+		t.Fatal("Close did not cancel the active turn")
+	}
+	defer close(releaseTurnDone)
+
+	if st := c.RuntimeStatus(); st.Running || st.PendingPrompt || st.Cancellable || st.CancelRequested {
+		t.Fatalf("closed controller resurrected active state during TurnDone delivery: %+v", st)
+	}
+}
+
 func assertCancelClearedPendingRuntimeStatus(t *testing.T, st RuntimeStatus) {
 	t.Helper()
 	if st.PendingPrompt {
