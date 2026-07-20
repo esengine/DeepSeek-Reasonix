@@ -26,7 +26,8 @@ type ccSwitchLegacyServer struct {
 	Name   string        `json:"name"`
 	Server mcpServerSpec `json:"server"`
 	Apps   struct {
-		Codex bool `json:"codex"`
+		Codex    bool `json:"codex"`
+		Reasonix bool `json:"reasonix"`
 	} `json:"apps"`
 }
 
@@ -48,9 +49,13 @@ func LoadCCSwitchMCPCandidates() ([]MCPImportCandidate, error) {
 	return candidates, nil
 }
 
-// LoadCCSwitchMCP reads MCP servers enabled for Codex from cc-switch and maps
+// LoadCCSwitchMCP reads MCP servers enabled for Reasonix from cc-switch and maps
 // them to Reasonix plugin entries. Newer cc-switch stores servers in SQLite;
 // older installs kept them in config.json(.migrated/.bak), so we support both.
+//
+// Patched for cc-switch Reasonix parity: prefer enabled_reasonix / apps.reasonix
+// (falls back to Codex flags so older DB rows still import until users flip the
+// Reasonix MCP toggle).
 func LoadCCSwitchMCP() ([]PluginEntry, error) {
 	if IsolatedHomeDir() != "" {
 		return nil, nil
@@ -71,7 +76,6 @@ func loadCCSwitchMCPFromRoot(root string) ([]PluginEntry, error) {
 		}
 		return entries, nil
 	} else if !os.IsNotExist(err) {
-		// A present but unreadable/corrupt database should be visible to the user.
 		return nil, err
 	}
 
@@ -84,7 +88,7 @@ func loadCCSwitchMCPFromRoot(root string) ([]PluginEntry, error) {
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("cc-switch import: no Codex-enabled MCP servers found in %s", root)
+	return nil, fmt.Errorf("cc-switch import: no Reasonix-enabled MCP servers found in %s", root)
 }
 
 func ImportCCSwitchMCPEntries(entries []PluginEntry) (total, added, updated int, err error) {
@@ -95,7 +99,7 @@ func ImportCCSwitchMCPEntries(entries []PluginEntry) (total, added, updated int,
 	return importMCPEntries(cfg, entries)
 }
 
-// ImportCCSwitchMCP upserts cc-switch's Codex-enabled MCP servers into the
+// ImportCCSwitchMCP upserts cc-switch's Reasonix-enabled MCP servers into the
 // active Reasonix config and saves it.
 func ImportCCSwitchMCP() (total, added, updated int, err error) {
 	entries, err := LoadCCSwitchMCP()
@@ -139,7 +143,8 @@ func loadCCSwitchMCPDB(path string) ([]PluginEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cc-switch import: sqlite3 not found to read %s", path)
 	}
-	query := `SELECT id, name, server_config FROM mcp_servers WHERE enabled_codex = 1 ORDER BY name, id`
+	// Prefer enabled_reasonix; keep enabled_codex as transitional fallback.
+	query := `SELECT id, name, server_config FROM mcp_servers WHERE enabled_reasonix = 1 OR enabled_codex = 1 ORDER BY name, id`
 	cmd := exec.Command(sqlite, "-readonly", "-json", path, query)
 	cmd.Env = secrets.ProcessEnv()
 	out, err := cmd.Output()
@@ -197,7 +202,7 @@ func loadCCSwitchLegacyConfig(path string) ([]PluginEntry, error) {
 	var entries []PluginEntry
 	for _, key := range keys {
 		srv := doc.MCP.Servers[key]
-		if !srv.Apps.Codex {
+		if !srv.Apps.Reasonix && !srv.Apps.Codex {
 			continue
 		}
 		name := srv.Name
