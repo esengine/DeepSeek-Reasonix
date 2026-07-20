@@ -26,8 +26,8 @@ type ccSwitchLegacyServer struct {
 	Name   string        `json:"name"`
 	Server mcpServerSpec `json:"server"`
 	Apps   struct {
-		Codex    bool `json:"codex"`
-		Reasonix bool `json:"reasonix"`
+		Codex    bool  `json:"codex"`
+		Reasonix *bool `json:"reasonix"`
 	} `json:"apps"`
 }
 
@@ -143,8 +143,14 @@ func loadCCSwitchMCPDB(path string) ([]PluginEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cc-switch import: sqlite3 not found to read %s", path)
 	}
-	// Prefer enabled_reasonix; keep enabled_codex as transitional fallback.
-	query := `SELECT id, name, server_config FROM mcp_servers WHERE enabled_reasonix = 1 OR enabled_codex = 1 ORDER BY name, id`
+	query := `SELECT id, name, server_config FROM mcp_servers WHERE enabled_codex = 1 ORDER BY name, id`
+	hasReasonix, err := ccSwitchDBHasReasonixColumn(sqlite, path)
+	if err != nil {
+		return nil, err
+	}
+	if hasReasonix {
+		query = `SELECT id, name, server_config FROM mcp_servers WHERE enabled_reasonix = 1 ORDER BY name, id`
+	}
 	cmd := exec.Command(sqlite, "-readonly", "-json", path, query)
 	cmd.Env = secrets.ProcessEnv()
 	out, err := cmd.Output()
@@ -159,6 +165,24 @@ func loadCCSwitchMCPDB(path string) ([]PluginEntry, error) {
 		return nil, fmt.Errorf("cc-switch import: parse sqlite output: %w", err)
 	}
 	return ccSwitchRowsToPlugins(rows)
+}
+
+func ccSwitchDBHasReasonixColumn(sqlite, path string) (bool, error) {
+	const query = `SELECT COUNT(*) FROM pragma_table_info('mcp_servers') WHERE name = 'enabled_reasonix'`
+	cmd := exec.Command(sqlite, "-readonly", path, query)
+	cmd.Env = secrets.ProcessEnv()
+	out, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("cc-switch import: inspect %s: %w", path, err)
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "0":
+		return false, nil
+	case "1":
+		return true, nil
+	default:
+		return false, fmt.Errorf("cc-switch import: inspect %s: unexpected enabled_reasonix column count %q", path, strings.TrimSpace(string(out)))
+	}
 }
 
 func ccSwitchRowsToPlugins(rows []ccSwitchMCPRow) ([]PluginEntry, error) {
@@ -202,7 +226,11 @@ func loadCCSwitchLegacyConfig(path string) ([]PluginEntry, error) {
 	var entries []PluginEntry
 	for _, key := range keys {
 		srv := doc.MCP.Servers[key]
-		if !srv.Apps.Reasonix && !srv.Apps.Codex {
+		enabled := srv.Apps.Codex
+		if srv.Apps.Reasonix != nil {
+			enabled = *srv.Apps.Reasonix
+		}
+		if !enabled {
 			continue
 		}
 		name := srv.Name
