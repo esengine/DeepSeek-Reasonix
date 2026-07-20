@@ -34126,7 +34126,8 @@ body > .mermaid-diagram--fullscreen {
 .theme-editor__recipe-groups .set-seg,
 .theme-editor__base-styles { width: 100%; }
 .theme-editor__recipe-groups .set-seg__btn,
-.theme-editor__base-styles .set-seg__btn { flex: 1; min-width: 0; }
+.theme-editor__base-styles .set-seg__btn,
+.theme-editor__setting-row .set-seg__btn { flex: 1; min-width: 0; }
 .theme-editor__fields--grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
