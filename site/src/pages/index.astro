@@ -26,7 +26,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open-source AI coding agent for your terminal and browser, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop · web UI. MIT.";
+const desc = "Open-source AI coding agent for your terminal, browser, and ACP-compatible editor, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop · web UI. MIT.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -61,8 +61,8 @@ const ld = {
         <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 <span class="tt">Agent</span>。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, or local browser UI.</span>
-        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。CLI/TUI、桌面端和本地浏览器 UI 共用同一引擎。</span>
+        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, local browser UI, or an ACP-compatible editor.</span>
+        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。CLI/TUI、桌面端、本地浏览器 UI 和兼容 ACP 的编辑器共用同一引擎。</span>
       </p>
       <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
         <div class="install-option install-option--desktop">
@@ -76,7 +76,7 @@ const ld = {
           <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
         </div>
       </div>
-      <div class="also reveal" style="--d:0.22s"><span class="l-en">Prefer package managers? Use <a href="#start" data-goto="brew">Homebrew</a>. Need a local browser UI? Run <code>reasonix serve</code>.</span><span class="l-zh">偏好包管理器? 可用 <a href="#start" data-goto="brew">Homebrew</a>。需要本地浏览器 UI? 运行 <code>reasonix serve</code>。</span></div>
+      <div class="also reveal" style="--d:0.22s"><span class="l-en">Prefer package managers? Use <a href="#start" data-goto="brew">Homebrew</a>. Need a local browser UI? Run <code>reasonix serve</code>. Integrating an editor? Start <code>reasonix acp</code> and read the <a href={`${base}/docs/#acp`}>ACP guide</a>.</span><span class="l-zh">偏好包管理器? 可用 <a href="#start" data-goto="brew">Homebrew</a>。需要本地浏览器 UI? 运行 <code>reasonix serve</code>。接入编辑器时启动 <code>reasonix acp</code>，并查看 <a href={`${base}/docs/#acp`}>ACP 指南</a>。</span></div>
 
       <div class="term-stage reveal" style="--d:0.26s">
         <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
@@ -125,10 +125,10 @@ const ld = {
           <p><span class="l-en">explore / research / review / security-review agents, plus Markdown skill scripts with isolated tools.</span><span class="l-zh">explore / research / review / security-review 子智能体,加 Markdown 技能脚本与隔离工具。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
-          <span class="tag">06 / cli + web</span>
-          <h3><span class="l-en">Terminal or browser</span><span class="l-zh">终端或浏览器</span></h3>
-          <p><span class="l-en">Use <code>reasonix</code> in a full-screen TUI with a responsive localized footer, verified local text copy, terminal-native text paste, and explicit image paste; or run <code>reasonix serve</code> for a local browser UI.</span><span class="l-zh">在全屏 TUI 中使用 <code>reasonix</code>，获得响应式本地化底栏、可验证的本地文本复制、终端原生文本粘贴和独立图片粘贴；也可运行 <code>reasonix serve</code> 打开本地浏览器 UI。</span></p>
-          <code class="feat-chip">$ reasonix serve --auth token</code>
+          <span class="tag">06 / cli + web + acp</span>
+          <h3><span class="l-en">Terminal, browser, or editor</span><span class="l-zh">终端、浏览器或编辑器</span></h3>
+          <p><span class="l-en">Use the full-screen TUI, run <code>reasonix serve</code> for a local browser UI, or launch <code>reasonix acp</code> from an ACP-compatible editor. Every surface uses the same local engine.</span><span class="l-zh">使用全屏 TUI、通过 <code>reasonix serve</code> 打开本地浏览器 UI，或从兼容 ACP 的编辑器启动 <code>reasonix acp</code>；所有入口都使用同一套本地引擎。</span></p>
+          <code class="feat-chip">$ reasonix acp</code>
         </div>
       </div>
     </div>

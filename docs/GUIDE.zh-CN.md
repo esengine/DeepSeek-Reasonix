@@ -167,19 +167,10 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 
 ## 通过 ACP 接入编辑器
 
-`reasonix acp` 向 ACP 编辑器客户端公开三条彼此独立的会话轴：
-
-- `modes`：`normal`、`plan`、`goal`。选择 Goal 后，下一条用户输入会成为活动目标，
-  并启动 Reasonix 现有的 Goal 持续推进循环。
-- `work_mode`：`economy`、`balanced`、`delivery`。切换时会原子重建 Controller，
-  同时保留历史、协作方式和工具权限。`reasonix acp --profile ...` 仍可设置启动默认值。
-- `tool_approval`：`ask`、`auto`、`yolo`。切换权限不会重建 Controller，也不会改变
-  协作方式或工作模式。
-
-模型和推理强度仍是独立的 ACP 配置项。Reasonix 会按 ACP 会话持久化这三条轴；旧会话元数据
-缺少新字段时，工作模式继承 ACP 进程的启动 profile（未传 `--profile` 时为均衡），权限和
-协作方式使用“询问 + 常规”。为兼容旧版混合 mode 列表，`session/set_mode` 仍接受
-`default`（常规 + 询问）和 `auto`（常规 + Yolo），新客户端应使用拆分后的独立选择器。
+`reasonix acp` 把 Reasonix 作为 ACP v1 stdio agent 提供给编辑器和其他 host 客户端。
+独立的 **[ACP 编辑器接入](./ACP.zh-CN.md)** 文档集中说明启动方式、能力协商、会话生命周期、
+彼此独立的模型/工作/协作/审批控制轴、客户端文件与 terminal 能力、MCP server、权限请求，
+以及 Reasonix 的回合中引导扩展。
 
 ## 远程 SSH
 

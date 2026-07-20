@@ -742,6 +742,7 @@ body.how-flat .how-stage { position: static; min-height: 0; display: block; }
 .docs-main h2 {
   font-size: 25px; letter-spacing: -0.012em; font-weight: 600;
   margin: 56px 0 8px; padding-top: 28px; border-top: 1px solid var(--line);
+  scroll-margin-top: 88px;
 }
 .docs-main h2:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
 .docs-main h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; margin: 28px 0 6px; }

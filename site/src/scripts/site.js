@@ -115,13 +115,17 @@ import { initTheme } from "./theme.js";
   /* language switch */
   const LANG_KEY = "reasonix-lang";
   const langBtns = Array.from(document.querySelectorAll(".lang-switch button"));
-  const setLang = (l) => {
+  const setLang = (l, alignHash) => {
     document.body.dataset.lang = l;
     document.documentElement.lang = l === "zh" ? "zh-CN" : "en";
     const t = document.body.dataset[l === "zh" ? "titleZh" : "titleEn"];
     if (t) document.title = t;
     langBtns.forEach((b) => b.classList.toggle("active", b.dataset.lang === l));
     try { localStorage.setItem(LANG_KEY, l); } catch (e) {}
+    if (alignHash && window.location.hash) {
+      const target = document.getElementById(window.location.hash.slice(1));
+      if (target) requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
+    }
   };
   langBtns.forEach((b) => b.addEventListener("click", () => setLang(b.dataset.lang)));
   let savedLang = "";
@@ -130,7 +134,7 @@ import { initTheme } from "./theme.js";
   const initialLang = requestedLang === "zh" || requestedLang === "en"
     ? requestedLang
     : savedLang || ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
-  setLang(initialLang);
+  setLang(initialLang, true);
 
   /* docs scrollspy */
   const sideLinks = Array.from(document.querySelectorAll(".docs-side a[href^='#']"));
