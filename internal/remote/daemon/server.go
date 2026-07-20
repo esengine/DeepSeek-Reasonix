@@ -1315,6 +1315,14 @@ func (t *transport) handleSubmit(ctx context.Context, value any) (any, error) {
 	}
 	result, err := runtime.ComposerSubmitMutation(ctx, t.server.requests, params, t.sessionMutationGuard())
 	if err == nil {
+		if result.Kind == protocol.SubmitTurn {
+			changed, titleErr := t.server.catalog.AutoTitleTopicFromSession(result.Target)
+			if titleErr != nil {
+				t.server.reportInternal(protocol.MethodSessionSubmit, fmt.Errorf("auto-title Remote Topic: %w", titleErr))
+			} else if changed {
+				return t.catalogMutationResponse(result, protocol.CatalogWorkspace, []protocol.WorkspaceID{result.Target.WorkspaceID}, protocol.CatalogTopics, protocol.CatalogSessions), nil
+			}
+		}
 		return result, nil
 	}
 	var delegation *host.ComposerDelegationError

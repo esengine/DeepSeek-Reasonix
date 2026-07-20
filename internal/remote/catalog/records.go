@@ -167,6 +167,48 @@ func (c *Catalog) RenameTopic(params protocol.TopicRenameParams) (protocol.Topic
 	return protocol.TopicRenameResult{Title: title}, nil
 }
 
+// AutoTitleTopicFromSession replaces only the default Topic title with the
+// Session's first user-message preview.
+func (c *Catalog) AutoTitleTopicFromSession(target protocol.RuntimeTarget) (bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	record, _, err := c.liveRecordLocked(target)
+	if err != nil {
+		return false, err
+	}
+	topic, ok := c.state.Topics[target.WorkspaceID][record.TopicID]
+	if !ok || topic.Trashed {
+		return false, catalogError(protocol.ErrTopicNotFound, errors.New("unknown Topic identity"))
+	}
+	if strings.TrimSpace(topic.Title) != c.defaultTopicTitle {
+		return false, nil
+	}
+	meta, ok, err := agent.LoadBranchMeta(record.Path)
+	if err != nil || !ok {
+		if err == nil {
+			err = errors.New("Session sidecar is missing")
+		}
+		return false, catalogError(protocol.ErrSessionPersistFailed, err)
+	}
+	title := strings.TrimSpace(meta.Preview)
+	if strings.TrimSpace(meta.CustomTitle) != "" || title == "" || title == c.defaultTopicTitle {
+		return false, nil
+	}
+	backups, err := c.rewriteTopicSidecarsLocked(target.WorkspaceID, record.TopicID, title)
+	if err != nil {
+		return false, err
+	}
+	topic.Title = title
+	if err := c.mutateLocked(func() error {
+		c.state.Topics[target.WorkspaceID][record.TopicID] = topic
+		return nil
+	}); err != nil {
+		c.restoreSidecarBackups(backups)
+		return false, err
+	}
+	return true, nil
+}
+
 func (c *Catalog) DeleteTopic(params protocol.TopicDeleteParams) (protocol.TopicDeleteResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -84,6 +84,51 @@ func (f *snapshotWireFactory) count() int {
 	return len(f.controllers)
 }
 
+func TestNormalSubmitAutoTitlesDefaultTopicFromSessionPreview(t *testing.T) {
+	server, factory, buildID := newLifecycleComposerWireServer(t)
+	changes := make(chan protocol.CatalogChanged, 8)
+	peer := openDaemonPeer(t, server, nil, func(connection *rpcwire.Conn) {
+		connection.HandleNotify(string(protocol.MethodCatalogChanged), func(_ context.Context, raw json.RawMessage) {
+			var change protocol.CatalogChanged
+			if json.Unmarshal(raw, &change) == nil {
+				changes <- change
+			}
+		})
+	})
+	initializePeer(t, peer, buildID, "auto-title-client", "")
+	opened := openLifecycleWorkspace(t, peer, t.TempDir())
+	created := createSessionPeer(t, peer, "auto-title-create", opened.Workspace.WorkspaceID)
+	resolved, err := server.catalog.ResolveRuntimeTarget(context.Background(), created.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const title = "first Remote prompt"
+	if err := agent.UpdateSessionMeta(resolved.SessionPath, "", title, 1, true); err != nil {
+		t.Fatal(err)
+	}
+	drainCatalogChanges(changes)
+
+	result := requestResult[protocol.SessionSubmitResult](t, peer, protocol.MethodSessionSubmit, protocol.SessionSubmitParams{
+		SessionMutation: mutation("auto-title-submit", created.Target, created.RuntimeEpoch),
+		Input:           title, DisplayText: title,
+	})
+	if result.Kind != protocol.SubmitTurn {
+		t.Fatalf("session/submit = %+v, want Turn", result)
+	}
+	topics := requestResult[protocol.TopicListResult](t, peer, protocol.MethodTopicList, protocol.TopicListParams{
+		ExpectedHostEpoch: "host-test", WorkspaceID: created.Target.WorkspaceID,
+	})
+	if len(topics.Items) != 1 || topics.Items[0].TopicID != created.TopicID || topics.Items[0].Title != title {
+		t.Fatalf("topic/list after first prompt = %+v, want title %q", topics, title)
+	}
+	change := requireCatalogChange(t, changes, created.Target.WorkspaceID, protocol.CatalogTopics)
+	if !containsCatalogKind(change.Kinds, protocol.CatalogSessions) {
+		t.Fatalf("auto-title catalog kinds = %+v, want sessions", change.Kinds)
+	}
+
+	factory.controller(t, 0).releaseTurn()
+}
+
 func TestRawComposerLifecycleWireUsesSubmitUnionExactReplayAndCatalogNotifications(t *testing.T) {
 	server, factory, buildID := newDaemonTestServer(t)
 	changes := make(chan protocol.CatalogChanged, 32)
