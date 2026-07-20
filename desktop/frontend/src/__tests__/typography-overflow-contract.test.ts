@@ -117,6 +117,9 @@ eq(finalDeclaration(".provider-template-grid", "grid-auto-rows"), "92px", "provi
 eq(finalDeclaration(".provider-template-card", "height"), "100%", "provider preset cards stretch to the grid row height");
 eq(finalDeclaration(".provider-template-card strong", "-webkit-line-clamp"), "1", "provider preset card titles clamp to one line");
 eq(finalDeclaration(".provider-template-card span", "-webkit-line-clamp"), "2", "provider preset card descriptions clamp to two lines");
+eq(finalDeclaration(".provider-model-draft__list", "grid-auto-rows"), "min-content", "provider model rows grow with their content");
+eq(finalDeclaration(".provider-model-draft__option", "min-height"), undefined, "provider model cards do not force undersized rows");
+eq(finalDeclaration(".provider-model-draft__option", "overflow"), "hidden", "provider model cards contain overflowing controls");
 
 eq(finalDeclaration(".statusbar", "white-space"), "nowrap", "status bar keeps metrics on one row");
 eq(finalDeclaration(".statusbar", "overflow"), "hidden", "status bar clips instead of overflowing");
