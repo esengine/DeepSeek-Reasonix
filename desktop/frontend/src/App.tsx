@@ -1865,7 +1865,11 @@ export default function App() {
     return null;
   }, [state.items]);
   const todoItem = todoEntry?.item ?? null;
-  const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
+  const metaTodos = state.meta?.canonicalTodos;
+  const todos = useMemo(() => {
+    if (metaTodos && metaTodos.length > 0) return metaTodos;
+    return todoItem ? parseTodos(todoItem.args) : [];
+  }, [metaTodos, todoItem]);
   const [dismissedTodoKeys, setDismissedTodoKeys] = useState<Set<string>>(loadDismissedTodoKeys);
   const todoKey = useMemo(() => todoDismissalKey(todos), [todos]);
   const todoBatch = useMemo(() => todoBatchKey(todos), [todos]);
