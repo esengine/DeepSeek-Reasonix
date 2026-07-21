@@ -5879,7 +5879,8 @@ type Meta struct {
 	TokenMode         string                   `json:"tokenMode"`
 	Goal              string                   `json:"goal,omitempty"`
 	GoalStatus        string                   `json:"goalStatus,omitempty"`
-	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
+	AutoResearch      *AutoResearchCompactView  `json:"autoResearch,omitempty"`
+	CanonicalTodos    []evidence.TodoItem        `json:"canonicalTodos,omitempty"`
 }
 
 type AutoResearchCompactView struct {
@@ -6007,6 +6008,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		Goal:              goal,
 		GoalStatus:        goalStatus,
 		AutoResearch:      compactAutoResearchFromController(snap.ctrl),
+		CanonicalTodos:    ctrlTodos(snap.ctrl),
 	}
 }
 
@@ -6014,6 +6016,7 @@ func compactAutoResearchFromController(ctrl control.SessionAPI) *AutoResearchCom
 	if ctrl == nil {
 		return nil
 	}
+
 	summary, ok := ctrl.AutoResearchSummary()
 	if !ok || summary == nil || summary.TaskID == "" {
 		return nil
@@ -6025,6 +6028,16 @@ func compactAutoResearchFromController(ctrl control.SessionAPI) *AutoResearchCom
 		PivotRequired: summary.PivotRequired,
 		StaleCount:    summary.StaleCount,
 	}
+}
+
+// ctrlTodos returns the canonical task list from a session controller, or nil
+// if the controller is not yet bound. Used by MetaForTab so the frontend
+// task panel has access to the authoritative server-side todo state.
+func ctrlTodos(ctrl control.SessionAPI) []evidence.TodoItem {
+	if ctrl == nil {
+		return nil
+	}
+	return ctrl.Todos()
 }
 
 func compactAutoResearch(tab *WorkspaceTab) *AutoResearchCompactView {
