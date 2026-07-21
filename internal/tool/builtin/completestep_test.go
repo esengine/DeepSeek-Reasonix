@@ -440,7 +440,7 @@ func TestCompleteStepMatchesParaphrasedCommands(t *testing.T) {
 
 func TestCompleteStepAcceptsSuccessfulReviewEvidence(t *testing.T) {
 	ledger := evidence.NewLedger()
-	ledger.Record(evidence.ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
 	ctx := evidence.WithLedger(context.Background(), ledger)
 
 	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
@@ -452,7 +452,7 @@ func TestCompleteStepAcceptsSuccessfulReviewEvidence(t *testing.T) {
 
 func TestCompleteStepRejectsFailedReviewEvidence(t *testing.T) {
 	ledger := evidence.NewLedger()
-	ledger.Record(evidence.ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), false, true))
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), false, true))
 	ctx := evidence.WithLedger(context.Background(), ledger)
 
 	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{

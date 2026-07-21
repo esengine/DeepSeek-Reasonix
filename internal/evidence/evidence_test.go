@@ -31,8 +31,13 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 
 func TestLedgerMatchesSuccessfulReviewReceipt(t *testing.T) {
 	ledger := NewLedger()
-	ledger.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	ledger.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
 	if !ledger.HasSuccessfulReview() {
+		t.Fatal("successful dedicated review tool should verify review evidence")
+	}
+	legacy := NewLedger()
+	legacy.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	if !legacy.HasSuccessfulReview() {
 		t.Fatal("successful task(profile=review) should verify review evidence")
 	}
 	failed := NewLedger()

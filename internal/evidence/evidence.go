@@ -140,9 +140,10 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	return false
 }
 
-// HasSuccessfulReview reports whether the built-in review task completed in
-// this turn. Review is a tool receipt, not a shell command, so it must not be
-// cited as verification evidence with a command string.
+// HasSuccessfulReview reports whether the built-in review completed in this
+// turn. The current host exposes it as the dedicated `review` tool; the
+// task(profile="review") form is retained for compatibility with hosts that
+// provide that adapter.
 func (l *Ledger) HasSuccessfulReview() bool {
 	if l == nil {
 		return false
@@ -150,7 +151,7 @@ func (l *Ledger) HasSuccessfulReview() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
-		if r.Success && r.ToolName == "task" && r.Profile == "review" {
+		if r.Success && (r.ToolName == "review" || (r.ToolName == "task" && r.Profile == "review")) {
 			return true
 		}
 	}

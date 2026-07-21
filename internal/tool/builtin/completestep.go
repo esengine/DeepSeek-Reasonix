@@ -178,7 +178,7 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 			hostVerified++
 		case "review":
 			if !ledger.HasSuccessfulReview() {
-				return 0, 0, fmt.Errorf("evidence %d: review evidence requires a successful task(profile=\"review\") receipt in this turn", i+1)
+				return 0, 0, fmt.Errorf("evidence %d: review evidence requires a successful review tool receipt in this turn", i+1)
 			}
 			hostVerified++
 		case "diff":
