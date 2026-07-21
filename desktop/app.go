@@ -5880,7 +5880,7 @@ type Meta struct {
 	Goal              string                   `json:"goal,omitempty"`
 	GoalStatus        string                   `json:"goalStatus,omitempty"`
 	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
-	CanonicalTodos    []evidence.TodoItem       `json:"canonicalTodos,omitempty"`
+	CanonicalTodos    []evidence.TodoItem      `json:"canonicalTodos,omitempty"`
 }
 
 type AutoResearchCompactView struct {
