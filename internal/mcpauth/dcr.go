@@ -63,7 +63,9 @@ func (c *Client) registerClient(ctx context.Context, registrationEndpoint, redir
 // clients, HTTP Basic for confidential ones).
 func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values, auth clientAuth) ([]byte, error) {
 	if auth != nil {
-		auth.enrich(form)
+		if err := auth.enrich(form); err != nil {
+			return nil, err
+		}
 	}
 	body := form.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader([]byte(body)))
@@ -89,8 +91,10 @@ func (c *Client) postForm(ctx context.Context, endpoint string, form url.Values,
 
 // clientAuth abstracts how the token endpoint authenticates the client.
 type clientAuth interface {
-	// enrich adds client credentials to the form body (public clients).
-	enrich(form url.Values)
+	// enrich adds client credentials to the form body before it is encoded.
+	// Returning an error (e.g. a JWT signing failure) fails the request loudly
+	// rather than sending an unauthenticated token call.
+	enrich(form url.Values) error
 	// apply sets request authentication (confidential clients use HTTP Basic).
 	apply(req *http.Request)
 }
@@ -98,15 +102,15 @@ type clientAuth interface {
 // noneAuth authenticates a public client by putting client_id in the body.
 type noneAuth struct{ clientID string }
 
-func (a noneAuth) enrich(form url.Values) { form.Set("client_id", a.clientID) }
-func (a noneAuth) apply(*http.Request)    {}
+func (a noneAuth) enrich(form url.Values) error { form.Set("client_id", a.clientID); return nil }
+func (a noneAuth) apply(*http.Request)          {}
 
 // basicAuth authenticates a confidential client with HTTP Basic (RFC 6749
 // §2.3.1). We still send client_id in the body as a fallback for servers that
 // reject Basic on public-style flows.
 type basicAuth struct{ clientID, clientSecret string }
 
-func (a basicAuth) enrich(form url.Values) { form.Set("client_id", a.clientID) }
+func (a basicAuth) enrich(form url.Values) error { form.Set("client_id", a.clientID); return nil }
 func (a basicAuth) apply(req *http.Request) {
 	req.SetBasicAuth(url.QueryEscape(a.clientID), url.QueryEscape(a.clientSecret))
 }

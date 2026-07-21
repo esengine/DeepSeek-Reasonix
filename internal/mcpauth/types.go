@@ -76,6 +76,14 @@ type AuthorizationServerMetadata struct {
 	ResponseTypesSupported        []string `json:"response_types_supported,omitempty"`
 	GrantTypesSupported           []string `json:"grant_types_supported,omitempty"`
 	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported,omitempty"`
+	// TokenEndpointAuthMethodsSupported advertises how clients may authenticate
+	// at the token endpoint (none, client_secret_basic, client_secret_post,
+	// private_key_jwt, client_secret_jwt). Omitted/empty is treated as
+	// permissive (RFC 8414 §2).
+	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+	// TokenEndpointAuthSigningAlgValuesSupported lists the JWS algorithms the AS
+	// accepts for JWT client assertions. Used to validate a configured algorithm.
+	TokenEndpointAuthSigningAlgValuesSupported []string `json:"token_endpoint_auth_signing_alg_values_supported,omitempty"`
 	// RequirePushedAuthorizationRequests, when true, mandates PAR (RFC 9126),
 	// which this client does not implement yet.
 	RequirePushedAuthorizationRequests bool `json:"require_pushed_authorization_requests,omitempty"`
@@ -176,4 +184,43 @@ type Config struct {
 	// origin. By default metadata must come from the server origin or its
 	// advertised auth server; this is an escape hatch for federated deployments.
 	TrustedOrigins []string `json:"trusted_origins,omitempty" toml:"trusted_origins,omitempty"`
+	// TokenEndpointAuthMethod selects how the client authenticates at the token
+	// endpoint. One of "none" (public, default), "client_secret_basic",
+	// "client_secret_post", "private_key_jwt", "client_secret_jwt". Empty lets
+	// the client choose based on available credentials and server metadata.
+	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method,omitempty" toml:"token_endpoint_auth_method,omitempty"`
+	// PrivateKeyPEM is a PEM-encoded private key (RSA/EC/Ed25519) used to sign
+	// private_key_jwt client assertions. Mutually exclusive with PrivateKeyPath;
+	// PrivateKeyPath is preferred so the key stays out of config.
+	PrivateKeyPEM string `json:"private_key_pem,omitempty" toml:"private_key_pem,omitempty"`
+	// PrivateKeyPath loads a PEM-encoded private key from a file for
+	// private_key_jwt assertions. Read at most once per server.
+	PrivateKeyPath string `json:"private_key_path,omitempty" toml:"private_key_path,omitempty"`
+	// ClientAssertionSigningAlg overrides the JWS algorithm used to sign
+	// private_key_jwt / client_secret_jwt assertions (e.g. RS256, ES256, PS256,
+	// HS256, EdDSA). Empty picks a default matching the key type.
+	ClientAssertionSigningAlg string `json:"client_assertion_signing_alg,omitempty" toml:"client_assertion_signing_alg,omitempty"`
+	// JWTBearerGrant enables the RFC 7523 §1 JWT bearer assertion grant: a
+	// non-interactive authorization (no browser) where the client signs a JWT
+	// assertion that the AS exchanges for a token. Used for service credentials.
+	// When set, Authorize never opens a browser.
+	JWTBearerGrant *JWTBearerGrant `json:"jwt_bearer_grant,omitempty" toml:"jwt_bearer_grant,omitempty"`
+}
+
+// JWTBearerGrant enables the RFC 7523 §1 JWT bearer assertion grant: a
+// non-interactive authorization where the client signs a JWT assertion that the
+// authorization server exchanges for an access token, with no browser step.
+// Used for service-to-service / machine credentials.
+type JWTBearerGrant struct {
+	// Issuer is the assertion issuer (iss) claim. Usually the client id.
+	Issuer string `json:"issuer,omitempty" toml:"issuer,omitempty"`
+	// Subject is the assertion subject (sub) claim. Defaults to Issuer.
+	Subject string `json:"subject,omitempty" toml:"subject,omitempty"`
+	// PrivateKeyPEM or PrivateKeyPath supply the signing key (required).
+	PrivateKeyPEM  string `json:"private_key_pem,omitempty" toml:"private_key_pem,omitempty"`
+	PrivateKeyPath string `json:"private_key_path,omitempty" toml:"private_key_path,omitempty"`
+	// SigningAlg is the JWS algorithm (RS256, ES256, ...). Empty = default for key.
+	SigningAlg string `json:"signing_alg,omitempty" toml:"signing_alg,omitempty"`
+	// Scopes requests specific OAuth scopes. Empty lets the AS decide.
+	Scopes []string `json:"scopes,omitempty" toml:"scopes,omitempty"`
 }

@@ -1551,18 +1551,64 @@ type MCPOAuthConfig struct {
 	// TrustedOrigins authorizes metadata/issuer origins outside the server
 	// origin (escape hatch for federated deployments).
 	TrustedOrigins []string `toml:"trusted_origins" json:"trusted_origins,omitempty"`
+	// TokenEndpointAuthMethod selects how the client authenticates at the token
+	// endpoint: none|client_secret_basic|client_secret_post|private_key_jwt|
+	// client_secret_jwt. Empty auto-selects. private_key_jwt/client_secret_jwt
+	// use RFC 7523 JWT assertions.
+	TokenEndpointAuthMethod string `toml:"token_endpoint_auth_method" json:"token_endpoint_auth_method,omitempty"`
+	// PrivateKeyPath points to a PEM-encoded private key (RSA/EC/Ed25519) used
+	// to sign private_key_jwt assertions. Preferred over PrivateKeyPEM so the
+	// key stays out of config files.
+	PrivateKeyPath string `toml:"private_key_path" json:"private_key_path,omitempty"`
+	// PrivateKeyPEM is an inline PEM-encoded private key for private_key_jwt.
+	PrivateKeyPEM string `toml:"private_key_pem" json:"private_key_pem,omitempty"`
+	// ClientAssertionSigningAlg overrides the JWS alg for JWT assertions
+	// (RS256, ES256, PS256, HS256, EdDSA, ...). Empty = key-type default.
+	ClientAssertionSigningAlg string `toml:"client_assertion_signing_alg" json:"client_assertion_signing_alg,omitempty"`
+	// JWTBearerGrant enables the RFC 7523 §1 JWT bearer assertion grant for
+	// non-interactive (service) authorization. When set, no browser opens.
+	JWTBearerGrant *MCPJWTBearerGrant `toml:"jwt_bearer_grant,omitempty" json:"jwt_bearer_grant,omitempty"`
 }
 
-// ClearOAuthSecret returns a copy of cfg with any embedded client_secret
-// removed, and whether anything changed. The clear-auth path uses it so a
-// shared config never carries a confidential OAuth client secret. Public PKCE
-// clients (the common case) have no secret, so this is a no-op for them.
+// MCPJWTBearerGrant configures the RFC 7523 §1 JWT bearer assertion grant
+// (service-to-service, no browser).
+type MCPJWTBearerGrant struct {
+	Issuer         string   `toml:"issuer" json:"issuer,omitempty"`
+	Subject        string   `toml:"subject" json:"subject,omitempty"`
+	PrivateKeyPath string   `toml:"private_key_path" json:"private_key_path,omitempty"`
+	PrivateKeyPEM  string   `toml:"private_key_pem" json:"private_key_pem,omitempty"`
+	SigningAlg     string   `toml:"signing_alg" json:"signing_alg,omitempty"`
+	Scopes         []string `toml:"scopes" json:"scopes,omitempty"`
+}
+
+// ClearOAuthSecret returns a copy of cfg with any embedded secrets removed
+// (client_secret and inline private keys), and whether anything changed. The
+// clear-auth path uses it so a shared config never carries confidential
+// material. File-based keys (PrivateKeyPath) are kept since they are a path,
+// not a secret; private_key_pem and jwt_bearer_grant.private_key_pem are stripped.
 func ClearOAuthSecret(cfg *MCPOAuthConfig) (*MCPOAuthConfig, bool) {
-	if cfg == nil || strings.TrimSpace(cfg.ClientSecret) == "" {
+	if cfg == nil {
 		return cfg, false
 	}
+	changed := false
 	out := *cfg
-	out.ClientSecret = ""
+	if strings.TrimSpace(out.ClientSecret) != "" {
+		out.ClientSecret = ""
+		changed = true
+	}
+	if strings.TrimSpace(out.PrivateKeyPEM) != "" {
+		out.PrivateKeyPEM = ""
+		changed = true
+	}
+	if out.JWTBearerGrant != nil && strings.TrimSpace(out.JWTBearerGrant.PrivateKeyPEM) != "" {
+		g := *out.JWTBearerGrant
+		g.PrivateKeyPEM = ""
+		out.JWTBearerGrant = &g
+		changed = true
+	}
+	if !changed {
+		return cfg, false
+	}
 	return &out, true
 }
 

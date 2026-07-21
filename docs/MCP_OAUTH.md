@@ -99,6 +99,82 @@ server that accepts a static bearer token configured in `headers` instead.
   OAuth `client_secret` before sharing config.
 - **Redirect isolation.** The configured `Authorization` header is never sent
   across an origin redirect.
+- **Key handling.** Inline private keys (`private_key_pem`) are stripped by
+  `clear-auth` like any other secret; key file paths (`private_key_path`) are
+  preserved since they are pointers, not secrets.
+
+## OAuth 2.1 compliance
+
+The client follows the [OAuth 2.1](https://datatracker.ietf.org/doc/draft-ietf-oauth-v2-1/)
+best-current-practice profile, which is a constrained subset of OAuth 2.0:
+
+- **PKCE is always used** (S256 only; the `plain` method is never sent), even
+  for confidential clients.
+- **Only the authorization-code grant** is used for interactive flows. The
+  implicit and resource-owner-password grants are never sent.
+- **Exact `redirect_uri` matching** — the same loopback URI is sent to both the
+  authorize and token endpoints.
+- **`state` CSRF protection** on every authorization.
+- JWT-based token-endpoint authentication (`private_key_jwt`,
+  `client_secret_jwt`) is supported per OAuth 2.1's recommendation for
+  confidential clients.
+
+## OAuth/JWT (RFC 7523)
+
+The client supports the JWT Profile for OAuth 2.0 (RFC 7523) in two ways,
+implemented with the Go standard library only (no JOSE dependency):
+
+### JWT access tokens
+
+JWT-format access tokens returned by a server are consumed transparently: any
+token string the server returns is sent as `Bearer <token>`. No configuration
+is needed.
+
+### JWT client authentication (`private_key_jwt` / `client_secret_jwt`)
+
+Instead of sending a `client_secret`, the client signs a short-lived JWT
+assertion that authenticates it at the token endpoint (RFC 7523 §2). This is how
+services prove identity with an asymmetric key and is recommended for
+confidential clients.
+
+```toml
+[[plugins]]
+name = "svc"
+type = "http"
+url  = "https://mcp.example.com/mcp"
+
+[plugins.oauth]
+client_id = "my-client"
+token_endpoint_auth_method = "private_key_jwt"
+private_key_path = "/etc/reasonix/svc.pem"   # RSA/EC/Ed25519 PEM
+client_assertion_signing_alg = "RS256"        # optional; defaults to key type
+```
+
+Supported signing algorithms: `RS256/384/512`, `PS256/384/512`, `ES256/384/512`,
+`HS256/384/512` (for `client_secret_jwt`), and `EdDSA`. The auth method must be
+advertised in the server's `token_endpoint_auth_methods_supported` or the
+authorization fails loudly.
+
+### JWT bearer assertion grant (service-to-service)
+
+For non-interactive machine authorization (no browser), configure a JWT bearer
+assertion grant (RFC 7523 §1). The client signs a fresh assertion for each token
+request:
+
+```toml
+[[plugins]]
+name = "robot"
+type = "http"
+url  = "https://mcp.example.com/mcp"
+
+[plugins.oauth.jwt_bearer_grant]
+issuer = "service-account-1"
+private_key_path = "/etc/reasonix/robot.pem"
+signing_alg = "RS256"
+scopes = ["tools:call"]
+```
+
+When a `jwt_bearer_grant` is set, `Authorize` never opens a browser.
 
 ## Troubleshooting
 

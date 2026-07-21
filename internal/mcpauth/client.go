@@ -45,10 +45,11 @@ type Options struct {
 // from the Config registered with SetConfig; servers with no config use the
 // auto-discovery defaults.
 type Client struct {
-	store   *Store
-	http    *http.Client
-	out     io.Writer
-	openURL func(string) error
+	store     *Store
+	http      *http.Client
+	out       io.Writer
+	openURL   func(string) error
+	keyLoader *keyLoader // memoizes private-key file reads for JWT assertions
 
 	mu      sync.RWMutex
 	configs map[string]Config // keyed by server name
@@ -70,11 +71,12 @@ func New(opts Options) (*Client, error) {
 		open = openBrowser
 	}
 	return &Client{
-		store:   NewStore(path),
-		http:    httpClient,
-		out:     opts.Out,
-		openURL: open,
-		configs: map[string]Config{},
+		store:     NewStore(path),
+		http:      httpClient,
+		out:       opts.Out,
+		openURL:   open,
+		keyLoader: newKeyLoader(),
+		configs:   map[string]Config{},
 	}, nil
 }
 
@@ -161,6 +163,22 @@ func (c *Client) Authorize(ctx context.Context, serverName, serverURL string) (s
 	if err != nil {
 		return "", fmt.Errorf("discover OAuth metadata for %q: %w", serverName, err)
 	}
+
+	// JWT bearer assertion grant (RFC 7523 §1): non-interactive service auth,
+	// no browser. The grant is replayable (a fresh assertion per request) so
+	// there is no refresh token to cache; we exchange and return directly.
+	if cfg.JWTBearerGrant != nil {
+		tok, err := c.exchangeAssertionGrant(flowCtx, server.AuthServer.TokenEndpoint, *cfg.JWTBearerGrant)
+		if err != nil {
+			return "", fmt.Errorf("jwt bearer grant for %q: %w", serverName, err)
+		}
+		cred := &StoredCredential{Token: *tok, Server: server}
+		if err := c.store.Put(origin, cred); err != nil {
+			return "", fmt.Errorf("persist OAuth token for %q: %w", serverName, err)
+		}
+		return tok.headerValue(), nil
+	}
+
 	cred, err := c.runAuthorizationFlow(flowCtx, serverName, serverURL, cfg, server)
 	if err != nil {
 		return "", err

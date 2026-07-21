@@ -542,7 +542,9 @@ func isZeroOAuthConfig(cfg *MCPOAuthConfig) bool {
 	}
 	return cfg.ClientID == "" && cfg.ClientSecret == "" && cfg.RedirectPort == 0 &&
 		!cfg.SkipBrowser && !cfg.SkipDynamicRegistration && len(cfg.Scopes) == 0 &&
-		len(cfg.TrustedOrigins) == 0
+		len(cfg.TrustedOrigins) == 0 && cfg.TokenEndpointAuthMethod == "" &&
+		cfg.PrivateKeyPath == "" && cfg.PrivateKeyPEM == "" &&
+		cfg.ClientAssertionSigningAlg == "" && cfg.JWTBearerGrant == nil
 }
 
 func setMCPJSONStringArray(server map[string]json.RawMessage, key string, values []string) {

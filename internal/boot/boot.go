@@ -2344,15 +2344,30 @@ func isRemoteTransport(typ string) bool {
 
 // toMCPOAuthConfig converts the config-layer OAuth type to the runtime one.
 func toMCPOAuthConfig(c config.MCPOAuthConfig) mcpauth.Config {
-	return mcpauth.Config{
-		ClientID:                c.ClientID,
-		ClientSecret:            c.ClientSecret,
-		Scopes:                  c.Scopes,
-		RedirectPort:            c.RedirectPort,
-		SkipBrowser:             c.SkipBrowser,
-		SkipDynamicRegistration: c.SkipDynamicRegistration,
-		TrustedOrigins:          c.TrustedOrigins,
+	out := mcpauth.Config{
+		ClientID:                  c.ClientID,
+		ClientSecret:              c.ClientSecret,
+		Scopes:                    c.Scopes,
+		RedirectPort:              c.RedirectPort,
+		SkipBrowser:               c.SkipBrowser,
+		SkipDynamicRegistration:   c.SkipDynamicRegistration,
+		TrustedOrigins:            c.TrustedOrigins,
+		TokenEndpointAuthMethod:   c.TokenEndpointAuthMethod,
+		PrivateKeyPEM:             c.PrivateKeyPEM,
+		PrivateKeyPath:            c.PrivateKeyPath,
+		ClientAssertionSigningAlg: c.ClientAssertionSigningAlg,
 	}
+	if c.JWTBearerGrant != nil {
+		out.JWTBearerGrant = &mcpauth.JWTBearerGrant{
+			Issuer:         c.JWTBearerGrant.Issuer,
+			Subject:        c.JWTBearerGrant.Subject,
+			PrivateKeyPEM:  c.JWTBearerGrant.PrivateKeyPEM,
+			PrivateKeyPath: c.JWTBearerGrant.PrivateKeyPath,
+			SigningAlg:     c.JWTBearerGrant.SigningAlg,
+			Scopes:         c.JWTBearerGrant.Scopes,
+		}
+	}
+	return out
 }
 
 // sinkNoticeWriter is an io.Writer that emits each line written to it as a

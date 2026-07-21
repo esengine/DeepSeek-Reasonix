@@ -78,6 +78,84 @@ func TestClearOAuthSecretNil(t *testing.T) {
 	}
 }
 
+func TestClearOAuthSecretStripsInlinePrivateKey(t *testing.T) {
+	in := &MCPOAuthConfig{
+		ClientID:                "c",
+		TokenEndpointAuthMethod: "private_key_jwt",
+		PrivateKeyPEM:           "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----",
+		PrivateKeyPath:          "/etc/keys/svc.pem",
+	}
+	out, changed := ClearOAuthSecret(in)
+	if !changed {
+		t.Fatal("expected changed=true when inline key present")
+	}
+	if out.PrivateKeyPEM != "" {
+		t.Fatal("inline private key PEM must be stripped")
+	}
+	// The path is a pointer, not a secret — it must survive clear-auth.
+	if out.PrivateKeyPath != "/etc/keys/svc.pem" {
+		t.Fatalf("private_key_path must be preserved: %q", out.PrivateKeyPath)
+	}
+	if out.TokenEndpointAuthMethod != "private_key_jwt" {
+		t.Fatal("auth method must be preserved")
+	}
+}
+
+func TestClearOAuthSecretStripsJWTBearerGrantKey(t *testing.T) {
+	in := &MCPOAuthConfig{
+		JWTBearerGrant: &MCPJWTBearerGrant{
+			Issuer:         "svc",
+			PrivateKeyPEM:  "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----",
+			PrivateKeyPath: "/etc/keys/grant.pem",
+		},
+	}
+	out, changed := ClearOAuthSecret(in)
+	if !changed {
+		t.Fatal("expected changed=true")
+	}
+	if out.JWTBearerGrant.PrivateKeyPEM != "" {
+		t.Fatal("grant inline key must be stripped")
+	}
+	if out.JWTBearerGrant.PrivateKeyPath != "/etc/keys/grant.pem" {
+		t.Fatal("grant private_key_path must be preserved")
+	}
+}
+
+func TestPluginEntryOAuthJWTFieldsFromTOML(t *testing.T) {
+	src := `
+[[plugins]]
+name = "svc"
+type = "http"
+url = "https://mcp.example.com/mcp"
+[plugins.oauth]
+token_endpoint_auth_method = "private_key_jwt"
+private_key_path = "/etc/keys/svc.pem"
+client_assertion_signing_alg = "RS256"
+[plugins.oauth.jwt_bearer_grant]
+issuer = "service-account-1"
+private_key_path = "/etc/keys/grant.pem"
+signing_alg = "ES256"
+scopes = ["read"]
+`
+	cfg, err := loadConfigForTest(t, src)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	o := cfg.Plugins[0].OAuth
+	if o.TokenEndpointAuthMethod != "private_key_jwt" {
+		t.Fatalf("method = %q", o.TokenEndpointAuthMethod)
+	}
+	if o.PrivateKeyPath != "/etc/keys/svc.pem" || o.ClientAssertionSigningAlg != "RS256" {
+		t.Fatalf("jwt fields: %+v", o)
+	}
+	if o.JWTBearerGrant == nil || o.JWTBearerGrant.Issuer != "service-account-1" {
+		t.Fatalf("grant not parsed: %+v", o.JWTBearerGrant)
+	}
+	if o.JWTBearerGrant.SigningAlg != "ES256" || len(o.JWTBearerGrant.Scopes) != 1 {
+		t.Fatalf("grant fields: %+v", o.JWTBearerGrant)
+	}
+}
+
 // loadConfigForTest decodes a TOML document into a Config the same way the
 // loader does, without touching the filesystem.
 func loadConfigForTest(t *testing.T, src string) (*Config, error) {

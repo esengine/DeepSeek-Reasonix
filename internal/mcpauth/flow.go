@@ -101,7 +101,7 @@ func (c *Client) runAuthorizationFlow(ctx context.Context, serverName, serverURL
 		}
 
 		// 6. Exchange the code for a token.
-		token, err := c.exchangeCode(ctx, as.TokenEndpoint, res.code, redirectURI, verifier, reg)
+		token, err := c.exchangeCode(ctx, as.TokenEndpoint, res.code, redirectURI, verifier, cfg, reg, as)
 		if err != nil {
 			return nil, fmt.Errorf("exchange authorization code for %q: %w", serverName, err)
 		}
@@ -176,14 +176,17 @@ func describeError(q url.Values) string {
 }
 
 // exchangeCode trades an authorization code for tokens at the token endpoint.
-func (c *Client) exchangeCode(ctx context.Context, tokenEndpoint, code, redirectURI, verifier string, reg *ClientRegistration) (*Token, error) {
+func (c *Client) exchangeCode(ctx context.Context, tokenEndpoint, code, redirectURI, verifier string, cfg Config, reg *ClientRegistration, as *AuthorizationServerMetadata) (*Token, error) {
 	form := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
 		"redirect_uri":  {redirectURI},
 		"code_verifier": {verifier},
 	}
-	auth := clientAuthFor(reg)
+	auth, err := c.resolveTokenEndpointAuth(cfg, reg, as)
+	if err != nil {
+		return nil, fmt.Errorf("token endpoint auth: %w", err)
+	}
 	respBody, err := c.postForm(ctx, tokenEndpoint, form, auth)
 	if err != nil {
 		return nil, err
@@ -205,7 +208,10 @@ func (c *Client) refresh(ctx context.Context, cred *StoredCredential, cfg Config
 	if scopes := effectiveScopes(cfg, cred.Server.AuthServer); len(scopes) > 0 {
 		form.Set("scope", strings.Join(scopes, " "))
 	}
-	auth := clientAuthFor(cred.Client)
+	auth, err := c.resolveTokenEndpointAuth(cfg, cred.Client, cred.Server.AuthServer)
+	if err != nil {
+		return nil, fmt.Errorf("token endpoint auth: %w", err)
+	}
 	respBody, err := c.postForm(ctx, cred.Server.AuthServer.TokenEndpoint, form, auth)
 	if err != nil {
 		return nil, err
@@ -223,20 +229,6 @@ func (c *Client) refresh(ctx context.Context, cred *StoredCredential, cfg Config
 }
 
 var errNoRefreshToken = errors.New("no refresh token available")
-
-// clientAuthFor picks the token-endpoint authentication based on the registered
-// client. A confidential client (with a secret) uses HTTP Basic; a public client
-// sends client_id in the body.
-func clientAuthFor(reg *ClientRegistration) clientAuth {
-	id := ""
-	if reg != nil {
-		id = reg.ClientID
-	}
-	if reg != nil && reg.hasSecret() {
-		return basicAuth{clientID: id, clientSecret: reg.ClientSecret}
-	}
-	return noneAuth{clientID: id}
-}
 
 // parseTokenResponse decodes a token-endpoint JSON response into a Token.
 func parseTokenResponse(body []byte) (*Token, error) {
