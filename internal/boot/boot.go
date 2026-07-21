@@ -1708,8 +1708,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 	path := rememberPermissionConfigPath(workspaceRoot)
-	edit := config.LoadForEdit(path)
 	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
+	unlock, err := config.LockConfigFileEdits(path)
+	if err != nil {
+		slog.Warn("lock config for permission rule", "path", path, "err", err)
+		result.Err = err
+		return result
+	}
+	defer unlock()
+
+	edit, err := config.LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		slog.Warn("load config for permission rule", "path", path, "err", err)
+		result.Err = err
+		return result
+	}
 	if coveredBy := coveredPermissionRule(edit.Permissions.Allow, result.Rule); coveredBy != "" {
 		result.CoveredBy = coveredBy
 		return result
@@ -1720,7 +1733,7 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 		result.Err = err
 		return result
 	}
-	if err := config.WritePermissionsSection(path, edit.Permissions.Allow); err != nil {
+	if err := config.WritePermissionsAllow(path, edit.Permissions.Allow); err != nil {
 		slog.Warn("save config after permission rule", "err", err)
 		result.Err = err
 		return result

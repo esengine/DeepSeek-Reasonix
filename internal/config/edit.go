@@ -1313,10 +1313,11 @@ func configFilePerm(path string) os.FileMode {
 	return 0o644
 }
 
-// WritePermissionsSection replaces or creates the [permissions] section in a
-// TOML file, preserving all other sections verbatim. When the file doesn't
-// exist yet, it creates one containing only the permissions section.
-func WritePermissionsSection(path string, allow []string) error {
+// WritePermissionsAllow updates only permissions.allow in a TOML file. All
+// other permission policy fields and unrelated content remain byte-for-byte
+// unchanged. Callers must validate and lock the latest file across their full
+// read-modify-write transaction before calling this function.
+func WritePermissionsAllow(path string, allow []string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("write permissions: empty config path")
 	}
@@ -1329,14 +1330,13 @@ func WritePermissionsSection(path string, allow []string) error {
 		raw = nil
 	}
 
-	newBlock := fmt.Sprintf("[permissions]\nallow = %s\n", renderStringArray(allow))
-
 	body := string(raw)
 	if body == "" {
-		return writeConfigFile(path, newBlock)
+		body = fmt.Sprintf("[permissions]\nallow = %s\n", renderStringArray(allow))
+		return writeConfigFile(path, body)
 	}
 
-	body = replaceTOMLSection(body, "permissions", newBlock)
+	body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderStringArray(allow))
 	return writeConfigFile(path, body)
 }
 
@@ -1410,7 +1410,16 @@ func upsertTOMLSectionKey(body, sectionName, key, line string) string {
 		}
 		if sectionIdx >= 0 {
 			if got, _, ok := tomlKeyValue(span.text); ok && got == key {
-				return body[:span.start] + line + body[span.end:]
+				endIdx := tomlValueEndSpan(spans, i)
+				end := spans[endIdx].end
+				if endIdx > i {
+					if comments := tomlCommentsInSpans(spans, i, endIdx); len(comments) > 0 {
+						line = strings.Join(comments, "\n") + "\n" + line
+					}
+				} else if comment := tomlInlineComment(spans[endIdx].text); comment != "" {
+					line = strings.TrimRight(line, "\r\n") + " " + comment + "\n"
+				}
+				return body[:span.start] + line + body[end:]
 			}
 		}
 	}
@@ -1423,6 +1432,109 @@ func upsertTOMLSectionKey(body, sectionName, key, line string) string {
 		prefix += "\n"
 	}
 	return prefix + line + body[sectionEnd:]
+}
+
+type tomlLexState struct {
+	inBasic   bool
+	inLiteral bool
+	escaped   bool
+}
+
+func scanTOMLLine(line string, state *tomlLexState, outsideString func(byte)) int {
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if state.escaped {
+			state.escaped = false
+			continue
+		}
+		if state.inBasic {
+			switch ch {
+			case '\\':
+				state.escaped = true
+			case '"':
+				state.inBasic = false
+			}
+			continue
+		}
+		if state.inLiteral {
+			if ch == '\'' {
+				state.inLiteral = false
+			}
+			continue
+		}
+		switch ch {
+		case '#':
+			return i
+		case '"':
+			state.inBasic = true
+		case '\'':
+			state.inLiteral = true
+		default:
+			if outsideString != nil {
+				outsideString(ch)
+			}
+		}
+	}
+	return -1
+}
+
+func tomlValueEndSpan(spans []tomlLineSpan, start int) int {
+	if start < 0 || start >= len(spans) {
+		return start
+	}
+	_, value, ok := tomlKeyValue(spans[start].text)
+	if !ok || !strings.HasPrefix(strings.TrimSpace(value), "[") {
+		return start
+	}
+	depth := 0
+	seenArray := false
+	state := tomlLexState{}
+	for i := start; i < len(spans); i++ {
+		closed := false
+		scanTOMLLine(spans[i].text, &state, func(ch byte) {
+			switch ch {
+			case '[':
+				seenArray = true
+				depth++
+			case ']':
+				if seenArray {
+					depth--
+					closed = depth == 0
+				}
+			}
+		})
+		if closed {
+			return i
+		}
+	}
+	return start
+}
+
+func tomlInlineComment(line string) string {
+	state := tomlLexState{}
+	if i := scanTOMLLine(line, &state, nil); i >= 0 {
+		return strings.TrimRight(line[i:], "\r\n")
+	}
+	return ""
+}
+
+func tomlCommentsInSpans(spans []tomlLineSpan, start, end int) []string {
+	state := tomlLexState{}
+	var comments []string
+	for i := start; i <= end; i++ {
+		line := spans[i].text
+		commentAt := scanTOMLLine(line, &state, nil)
+		if commentAt < 0 {
+			continue
+		}
+		indentEnd := 0
+		for indentEnd < len(line) && (line[indentEnd] == ' ' || line[indentEnd] == '\t') {
+			indentEnd++
+		}
+		comment := strings.TrimRight(line[commentAt:], "\r\n")
+		comments = append(comments, line[:indentEnd]+comment)
+	}
+	return comments
 }
 
 func removeTOMLSection(body, sectionName string) string {

@@ -1819,6 +1819,58 @@ func TestSaveToExistingProjectPersistsProviderAccessWithoutReplacingDesktopSecti
 	}
 }
 
+func TestWritePermissionsAllowUpdatesOnlyAllow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	original := `[permissions]
+# Keep the policy rationale.
+mode = "deny"
+allow = [
+  # Keep the list rationale.
+  "Bash(existing)", # Keep the existing rule rationale.
+] # Keep the allow rationale.
+ask = ["Edit(*.env)"]
+deny = ["Bash(rm:*)"]
+future_policy = "keep"
+
+[desktop]
+legacy_preference = "keep"
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WritePermissionsAllow(path, []string{"Bash(existing)", "Edit(src/app.go)"}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatalf("updated config does not parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.Permissions.Allow, []string{"Bash(existing)", "Edit(src/app.go)"}) {
+		t.Fatalf("permissions.allow = %v", got.Permissions.Allow)
+	}
+	if got.Permissions.Mode != "deny" || !reflect.DeepEqual(got.Permissions.Ask, []string{"Edit(*.env)"}) || !reflect.DeepEqual(got.Permissions.Deny, []string{"Bash(rm:*)"}) {
+		t.Fatalf("permission policy changed: %+v", got.Permissions)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"# Keep the policy rationale.",
+		"# Keep the list rationale.",
+		"# Keep the existing rule rationale.",
+		"# Keep the allow rationale.",
+		`future_policy = "keep"`,
+		"[desktop]\nlegacy_preference = \"keep\"",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("updated config missing %q:\n%s", want, body)
+		}
+	}
+}
+
 func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) {
 	a := ProviderEntry{Name: "relay", Kind: "openai", BaseURL: "https://relay.example/v1", Model: "m", APIKeyEnv: "RELAY_API_KEY"}
 	b := a

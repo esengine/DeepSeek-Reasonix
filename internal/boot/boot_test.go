@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -3263,6 +3264,221 @@ allow = ["Bash(workspace*)"]
 	workspaceCfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
 	if !hasPermissionRule(workspaceCfg.Permissions.Allow, rule) {
 		t.Fatalf("remembered rule missing from workspace config: %v", workspaceCfg.Permissions.Allow)
+	}
+}
+
+func TestRememberPermissionRulePreservesPermissionPolicyAndComments(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+# Keep this rationale with the policy.
+mode = "deny"
+allow = ["Bash(existing)"] # Keep this allow rationale.
+ask = ["Edit(*.env)"]
+deny = ["Bash(rm:*)"]
+future_policy = "keep"
+
+[desktop]
+legacy_preference = "keep"
+`)
+
+	const rule = "Edit(src/app.go)"
+	result := rememberPermissionRule(workspace, rule)
+	if result.Err != nil || !result.Saved {
+		t.Fatalf("remember result = %+v, want saved without error", result)
+	}
+
+	path := filepath.Join(workspace, "reasonix.toml")
+	got := config.LoadForEdit(path)
+	if got.Permissions.Mode != "deny" {
+		t.Errorf("permissions.mode = %q, want deny", got.Permissions.Mode)
+	}
+	if !reflect.DeepEqual(got.Permissions.Ask, []string{"Edit(*.env)"}) {
+		t.Errorf("permissions.ask = %v, want existing ask policy", got.Permissions.Ask)
+	}
+	if !reflect.DeepEqual(got.Permissions.Deny, []string{"Bash(rm:*)"}) {
+		t.Errorf("permissions.deny = %v, want existing deny policy", got.Permissions.Deny)
+	}
+	if !hasPermissionRule(got.Permissions.Allow, "Bash(existing)") || !hasPermissionRule(got.Permissions.Allow, rule) {
+		t.Errorf("permissions.allow = %v, want existing and remembered rules", got.Permissions.Allow)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"# Keep this rationale with the policy.",
+		"# Keep this allow rationale.",
+		`future_policy = "keep"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("permissions content %q was not preserved:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "[desktop]\nlegacy_preference = \"keep\"") {
+		t.Errorf("unrelated section was not preserved:\n%s", body)
+	}
+}
+
+func TestRememberPermissionRuleRejectsMalformedConfigWithoutWriting(t *testing.T) {
+	workspace := robustTempDir(t)
+	path := filepath.Join(workspace, "reasonix.toml")
+	original := []byte("[permissions]\nmode = \"deny\"\nallow = [\n")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := rememberPermissionRule(workspace, "Edit(src/app.go)")
+	if result.Err == nil || result.Saved {
+		t.Fatalf("remember result = %+v, want parse error without save", result)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("malformed config changed:\ngot:\n%s\nwant:\n%s", got, original)
+	}
+}
+
+func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = []\n")
+
+	const writers = 32
+	start := make(chan struct{})
+	results := make(chan control.RememberResult, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+			results <- rememberPermissionRule(workspace, fmt.Sprintf("Edit(file-%02d)", n))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if result.Err != nil || !result.Saved {
+			t.Errorf("remember result = %+v, want saved without error", result)
+		}
+	}
+
+	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	for i := 0; i < writers; i++ {
+		rule := fmt.Sprintf("Edit(file-%02d)", i)
+		if !hasPermissionRule(got.Permissions.Allow, rule) {
+			t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
+		}
+	}
+}
+
+func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = []\n")
+	readyDir := robustTempDir(t)
+	startPath := filepath.Join(readyDir, "start")
+
+	const workers = 4
+	const rulesPerWorker = 8
+	commands := make([]*exec.Cmd, 0, workers)
+	outputs := make([]bytes.Buffer, workers)
+	for worker := 0; worker < workers; worker++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRememberPermissionRuleProcessHelper$")
+		cmd.Stdout = &outputs[worker]
+		cmd.Stderr = &outputs[worker]
+		cmd.Env = append(os.Environ(),
+			"REASONIX_PERMISSION_HELPER=1",
+			"REASONIX_PERMISSION_WORKSPACE="+workspace,
+			"REASONIX_PERMISSION_READY_DIR="+readyDir,
+			"REASONIX_PERMISSION_START="+startPath,
+			fmt.Sprintf("REASONIX_PERMISSION_WORKER=%d", worker),
+			fmt.Sprintf("REASONIX_PERMISSION_RULES=%d", rulesPerWorker),
+		)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		commands = append(commands, cmd)
+	}
+	t.Cleanup(func() {
+		for _, cmd := range commands {
+			if cmd.ProcessState == nil {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+			}
+		}
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for worker := 0; worker < workers; {
+		if _, err := os.Stat(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker))); err == nil {
+			worker++
+			continue
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("permission helper processes did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.WriteFile(startPath, []byte("start"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("permission helper failed: %v\n%s", err, outputs[i].String())
+		}
+	}
+
+	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	for worker := 0; worker < workers; worker++ {
+		for n := 0; n < rulesPerWorker; n++ {
+			rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
+			if !hasPermissionRule(got.Permissions.Allow, rule) {
+				t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
+			}
+		}
+	}
+}
+
+func TestRememberPermissionRuleProcessHelper(t *testing.T) {
+	if os.Getenv("REASONIX_PERMISSION_HELPER") != "1" {
+		return
+	}
+	workspace := os.Getenv("REASONIX_PERMISSION_WORKSPACE")
+	readyDir := os.Getenv("REASONIX_PERMISSION_READY_DIR")
+	startPath := os.Getenv("REASONIX_PERMISSION_START")
+	t.Setenv("REASONIX_CACHE_HOME", readyDir)
+	worker, err := strconv.Atoi(os.Getenv("REASONIX_PERMISSION_WORKER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := strconv.Atoi(os.Getenv("REASONIX_PERMISSION_RULES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker)), []byte("ready"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for permission helper start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for n := 0; n < rules; n++ {
+		rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
+		result := rememberPermissionRule(workspace, rule)
+		if result.Err != nil || !result.Saved {
+			t.Fatalf("remember result = %+v, want saved without error", result)
+		}
 	}
 }
 
