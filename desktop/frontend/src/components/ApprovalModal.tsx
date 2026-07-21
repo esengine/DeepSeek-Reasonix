@@ -3,6 +3,9 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import gsap from "gsap";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
+import { fileDiffFromWire } from "../lib/tools";
+import { RenameCard } from "./RenameCard";
+import { DiffView } from "./DiffView";
 import {
   DecisionConfirmBar,
   PromptAction,
@@ -225,6 +228,19 @@ export function ApprovalModal({
   // Immediate Plan/Auto decisions have no hidden selection. Ordinary tool
   // approvals retain select-then-confirm and default to Allow once.
   const [selectedIndex, setSelectedIndex] = useState(() => (isPlanApproval || isRecoveryApproval ? -1 : 0));
+  // Approval wire uses changeKind for file previews so it does not collide with
+  // kind=tool|plan|recovery. fileDiffFromWire still accepts kind for tool events;
+  // map changeKind onto kind for rename detection.
+  const previewDiff = fileDiffFromWire({
+    diff: approval.diff,
+    added: approval.added,
+    removed: approval.removed,
+    kind: approval.changeKind,
+    srcPath: approval.srcPath,
+    dstPath: approval.dstPath,
+  });
+  const hasRenamePreview = previewDiff?.kind === "rename";
+  const hasDiffPreview = !hasRenamePreview && Boolean(previewDiff?.diff && previewDiff.diff.trim());
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionText, setRevisionText] = useState("");
   const [recoveryGuidanceOpen, setRecoveryGuidanceOpen] = useState(false);
@@ -780,13 +796,23 @@ export function ApprovalModal({
           )
         }
       >
+        {/* Guard the whole block: PromptShelf only renders its body when children
+            are truthy, and a fragment of false branches would still count. */}
         {(approvalModeRelaxed ||
           isRecoveryApproval ||
+          hasRenamePreview ||
+          hasDiffPreview ||
           (!isPlanApproval && !isRecoveryApproval && (subject || (reasonOpen && reason))) ||
           (isPlanApproval && revisionOpen)) && (
           <>
             {approvalModeRelaxed && !isRecoveryApproval && (
               <div className="approval-mode-hint">{t("approval.modeSwitchPendingHint")}</div>
+            )}
+            {hasRenamePreview && previewDiff && previewDiff.srcPath && previewDiff.dstPath && (
+              <RenameCard srcPath={previewDiff.srcPath} dstPath={previewDiff.dstPath} className="approval-rename" />
+            )}
+            {hasDiffPreview && previewDiff && (
+              <DiffView diff={previewDiff.diff} maxHeight={220} />
             )}
             {isRecoveryApproval && (
               <section className="recovery-summary" aria-label={t("approval.recoverySummaryLabel")}>

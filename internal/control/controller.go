@@ -5724,7 +5724,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 		id, reply = c.approval.register(tool, subject, reason)
 	}
 
-	c.sink.Emit(c.approvalRequestEvent(event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason, Fresh: opts.fresh}))
+	c.sink.Emit(c.approvalRequestEvent(c.approvalWithPreview(ctx, id, tool, subject, reason, args, opts.fresh)))
 	// The agent now needs the user's attention; a Notification hook can ping an
 	// external channel (desktop notice, phone) while the run blocks on the reply.
 	go c.hooks.Notification(ctx, approvalNotificationText(tool, subject), "permission_prompt")
@@ -5743,6 +5743,58 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 
 func (c *Controller) approvalRequestEvent(approval event.Approval) event.Event {
 	return event.Event{Kind: event.ApprovalRequest, Approval: approval}
+}
+
+// approvalWithPreview builds an event.Approval and, when the tool implements
+// tool.Previewer, attaches the Preview-computed change so a frontend can
+// render a diff / "src → dst" card in the approval prompt. A Preview error is
+// ignored (the approval still emits; the call will likely fail on Execute
+// anyway), and non-Previewer tools get empty preview fields (all omitempty).
+//
+// ChangeKind/SrcPath/DstPath are distinct from Approval.Kind (tool|plan|recovery)
+// so Auto Guard surface classification is never overwritten by a file-change kind.
+func (c *Controller) approvalWithPreview(ctx context.Context, id, toolName, subject, reason string, args json.RawMessage, fresh bool) event.Approval {
+	ap := event.Approval{ID: id, Tool: toolName, Subject: subject, Reason: reason, Fresh: fresh}
+	if len(args) == 0 {
+		return ap
+	}
+	reg := c.mcp.registry()
+	if reg == nil {
+		return ap
+	}
+	t, ok := reg.Get(toolName)
+	if !ok {
+		return ap
+	}
+	// Preview runs synchronously on the approval-emit path and may touch a
+	// third-party (MCP/custom) tool. A panic here must not unwind past the
+	// caller — that would leave the already-registered reply channel orphaned
+	// and the run blocked until the wait context times out. Recover and emit
+	// the approval without a preview instead.
+	//
+	// PreviewMemoized reuses the result under ctx's per-call memo (seeded by the
+	// agent's executeOne), so the checkpoint preview that follows approval does
+	// not recompute the same diff. ok=false means the tool isn't a Previewer.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Warn("approval preview panicked", "tool", toolName, "panic", r)
+			}
+		}()
+		if ch, perr, ok := tool.PreviewMemoized(ctx, t, args); ok {
+			if perr != nil {
+				slog.Debug("approval preview failed", "tool", toolName, "err", perr)
+				return
+			}
+			ap.Diff = ch.Diff
+			ap.Added = ch.Added
+			ap.Removed = ch.Removed
+			ap.ChangeKind = string(ch.Kind)
+			ap.SrcPath = ch.Path
+			ap.DstPath = ch.DestPath
+		}
+	}()
+	return ap
 }
 
 func (c *Controller) emitRememberResult(r RememberResult) {

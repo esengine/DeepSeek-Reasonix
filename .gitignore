@@ -71,3 +71,5 @@ temp/
 # Official theme art intermediate outputs / caches
 scripts/official-theme-art/out/
 scripts/official-theme-art/__pycache__/
+
+**/.omc/

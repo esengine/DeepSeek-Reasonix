@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -354,7 +355,8 @@ type Agent struct {
 	// just before it runs — the seam the checkpoint store uses to snapshot a
 	// file's pre-edit content. Only fires for non-ReadOnly tools that implement
 	// tool.Previewer (so bash, whose targets are unknowable, is never tracked).
-	// Set via SetPreEditHook.
+	// Rename is included: the checkpoint store records the path change (not
+	// content) so rewind can reverse the move. Set via SetPreEditHook.
 	onPreEdit func(diff.Change)
 
 	// jobs, when non-nil, is the session's background-job manager. executeOne
@@ -2645,10 +2647,20 @@ func (a *Agent) emitFullToolDispatch(c provider.ToolCall, refreshed bool) {
 	t, _, ambiguous := a.tools.ResolveCall(c.Name)
 	ok := t != nil && len(ambiguous) == 0
 	ev := event.Tool{ID: c.ID, Name: c.Name, Args: c.Arguments, ReadOnly: ok && t.ReadOnly(), Refreshed: refreshed}
-	ev.FileDiff = event.FileDiff{Diff: c.Diff, Added: c.Added, Removed: c.Removed}
-	if ok && ev.Diff == "" && ev.Added == 0 && ev.Removed == 0 {
+	ev.FileDiff = event.FileDiff{
+		Diff: c.Diff, Added: c.Added, Removed: c.Removed,
+		Kind: c.Kind, SrcPath: c.SrcPath, DstPath: c.DstPath,
+	}
+	if ok && ev.Kind == "" && ev.Diff == "" && ev.Added == 0 && ev.Removed == 0 {
 		if ch, ok := tool.PreviewChange(t, json.RawMessage(c.Arguments)); ok {
-			ev.FileDiff = event.FileDiff{Diff: ch.Diff, Added: ch.Added, Removed: ch.Removed}
+			ev.FileDiff = event.FileDiff{
+				Diff:    ch.Diff,
+				Added:   ch.Added,
+				Removed: ch.Removed,
+				Kind:    string(ch.Kind),
+				SrcPath: ch.Path,
+				DstPath: ch.DestPath,
+			}
 		}
 	}
 	if ok {
@@ -2674,12 +2686,19 @@ func refreshCurrentFileDiff(t tool.Tool, call provider.ToolCall) (provider.ToolC
 	refreshed.Diff = ""
 	refreshed.Added = 0
 	refreshed.Removed = 0
+	refreshed.Kind = ""
+	refreshed.SrcPath = ""
+	refreshed.DstPath = ""
 	if change, err := pv.Preview(json.RawMessage(call.Arguments)); err == nil {
 		refreshed.Diff = change.Diff
 		refreshed.Added = change.Added
 		refreshed.Removed = change.Removed
+		refreshed.Kind = string(change.Kind)
+		refreshed.SrcPath = change.Path
+		refreshed.DstPath = change.DestPath
 	}
-	changed := refreshed.Diff != call.Diff || refreshed.Added != call.Added || refreshed.Removed != call.Removed
+	changed := refreshed.Diff != call.Diff || refreshed.Added != call.Added || refreshed.Removed != call.Removed ||
+		refreshed.Kind != call.Kind || refreshed.SrcPath != call.SrcPath || refreshed.DstPath != call.DstPath
 	return refreshed, changed
 }
 
@@ -2689,8 +2708,12 @@ func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolC
 	}
 	out := make([]provider.ToolCall, len(calls))
 	copy(out, calls)
+	// pending tracks the on-disk effects of earlier calls in this batch so a
+	// chained rename (a→b; b→c) previews correctly: the second call's source is
+	// absent now but will exist once the first runs. Keyed by resolved path.
+	pending := tool.PendingBatchState{Created: map[string]bool{}, Removed: map[string]bool{}}
 	for i := range out {
-		if out[i].Diff != "" || out[i].Added != 0 || out[i].Removed != 0 {
+		if out[i].Kind != "" || out[i].Diff != "" || out[i].Added != 0 || out[i].Removed != 0 {
 			continue
 		}
 		t, _, ambiguous := a.tools.ResolveCall(out[i].Name)
@@ -2698,10 +2721,24 @@ func (a *Agent) withPreviewFileDiffs(calls []provider.ToolCall) []provider.ToolC
 		if !ok {
 			continue
 		}
-		if ch, ok := tool.PreviewChange(t, json.RawMessage(out[i].Arguments)); ok {
+		if ch, ok := tool.PreviewChangeInBatch(t, json.RawMessage(out[i].Arguments), pending); ok {
 			out[i].Diff = ch.Diff
 			out[i].Added = ch.Added
 			out[i].Removed = ch.Removed
+			out[i].Kind = string(ch.Kind)
+			out[i].SrcPath = ch.Path
+			out[i].DstPath = ch.DestPath
+			// Fold this rename's effect into pending so a later call in the same
+			// batch sees the moved file at its new path. Only renames relocate a
+			// path; other writers leave the path set unchanged.
+			if ch.Kind == diff.Rename && ch.DestPath != "" {
+				src := filepath.Clean(ch.Path)
+				dst := filepath.Clean(ch.DestPath)
+				delete(pending.Created, src)
+				pending.Removed[src] = true
+				delete(pending.Removed, dst)
+				pending.Created[dst] = true
+			}
 		}
 	}
 	return out
@@ -2965,6 +3002,11 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			errMsg: fmt.Sprintf("unknown tool %q", call.Name),
 		}
 	}
+	// Seed a per-call preview memo so the approval-prompt preview (via the gate)
+	// and the checkpoint preview below reuse one Preview instead of each
+	// recomputing it. Scoped to this call: disk changes between batch calls, so
+	// the memo must not outlive one executeOne.
+	ctx = tool.WithPreviewMemo(ctx)
 	if out, blocked := a.repeatedSuccessBlock(call, t); blocked {
 		return toolOutcome{
 			output:  out,
@@ -3270,11 +3312,13 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	// rewound. Fires after all gating (the edit is cleared to run) and only for
 	// tools that can describe their change; a Preview error means the edit will
 	// likely fail anyway, so we skip rather than snapshot a stale state.
+	// Rename is included: the checkpoint store records path + content so rewind
+	// can reverse the move. PreviewMemoized reuses the approval-prompt preview
+	// when the gate already computed it for this call (same ctx memo).
+	// Snapshot on any nil-error preview (binary included), skip on error.
 	if a.onPreEdit != nil && !readOnly {
-		if pv, ok := execTool.(tool.Previewer); ok {
-			if change, perr := pv.Preview(execArgs); perr == nil {
-				a.onPreEdit(change)
-			}
+		if change, perr, ok := tool.PreviewMemoized(ctx, execTool, execArgs); ok && perr == nil {
+			a.onPreEdit(change)
 		}
 	}
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker, a.planMode.Load())

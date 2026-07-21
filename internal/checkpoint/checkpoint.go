@@ -12,7 +12,9 @@ package checkpoint
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -21,15 +23,21 @@ import (
 	"time"
 
 	"reasonix/internal/diff"
+	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
 // FileSnap is one file's state at the moment it was first touched in a turn.
 // Content == nil means the file did not exist then, so a restore deletes it.
+// DestPath, when set, marks a move-back pointer: the rename moved Path→DestPath
+// and could not be content-captured, so restore reverses it by moving DestPath
+// back to Path. Renames whose source content was readable are stored as ordinary
+// content snapshots instead and never set DestPath.
 type FileSnap struct {
 	Path     string        `json:"path"`
 	Content  *string       `json:"content"`
 	Encoding *fileenc.Kind `json:"encoding,omitempty"`
+	DestPath string        `json:"dest_path,omitempty"`
 }
 
 // FileState is the earliest pre-edit state recorded for a file in this
@@ -98,9 +106,29 @@ func (s *Store) load() {
 			continue
 		}
 		var c Checkpoint
-		if json.Unmarshal(b, &c) == nil {
-			s.done = append(s.done, &c)
+		if json.Unmarshal(b, &c) != nil {
+			continue
 		}
+		// 防御：丢弃逃逸工作区的快照路径（篡改的检查点文件可能包含恶意路径）。
+		// safePath 在 RestoreCode 中也会检查，但在此处尽早拒绝更清晰。
+		if s.root != "" {
+			filtered := c.Files[:0]
+			for _, f := range c.Files {
+				if _, err := safePath(s.root, f.Path); err != nil {
+					slog.Warn("checkpoint: dropping snapshot with path escaping workspace", "path", f.Path, "turn", c.Turn)
+					continue
+				}
+				if f.DestPath != "" {
+					if _, err := safePath(s.root, f.DestPath); err != nil {
+						slog.Warn("checkpoint: dropping snapshot with dest path escaping workspace", "destPath", f.DestPath, "turn", c.Turn)
+						continue
+					}
+				}
+				filtered = append(filtered, f)
+			}
+			c.Files = filtered
+		}
+		s.done = append(s.done, &c)
 	}
 	sort.Slice(s.done, func(i, j int) bool { return s.done[i].Turn < s.done[j].Turn })
 }
@@ -137,10 +165,21 @@ func (s *Store) Bounds() map[int]int {
 // Snapshot records the pre-edit state of the file a writer is about to change.
 // Only the first touch of a path in the current turn is kept (that is its
 // turn-start content). A no-op before the first Begin.
+//
+// Rename is special: Preview carries no OldText, so Snapshot reads the source
+// and destination from disk and records both paths' actual turn-start state.
+// Content-based restore remains correct if the destination is later edited,
+// deleted, or renamed again in the same or a later turn.
 func (s *Store) Snapshot(ch diff.Change) {
 	if ch.Path == "" {
 		return
 	}
+
+	if ch.Kind == diff.Rename {
+		s.snapshotRename(ch)
+		return
+	}
+
 	var enc *fileenc.Kind
 	if ch.Kind != diff.Create {
 		enc = s.detectEncoding(ch.Path)
@@ -159,6 +198,85 @@ func (s *Store) Snapshot(ch diff.Change) {
 	}
 	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, Content: content, Encoding: enc})
 	s.persist(s.cur)
+}
+
+// snapshotRename captures enough turn-start state to reverse a move. When the
+// source content is readable it records both paths as ordinary content
+// snapshots (src's turn-start content, dst's turn-start state) — content-based
+// restore stays correct even if dst is later edited, deleted, or renamed again.
+// When the source cannot be content-captured (unreadable, or resolving outside
+// the checkpoint root) it falls back to a move-back pointer: a FileSnap whose
+// DestPath tells RestoreCode to move dst back to src with a rename, so a
+// transient read error never silently forfeits reversibility.
+func (s *Store) snapshotRename(ch diff.Change) {
+	src, srcOK := s.snapshotDiskPath(ch.Path)
+	dst, dstOK := s.snapshotDiskPath(ch.DestPath)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cur == nil {
+		return
+	}
+
+	if srcOK {
+		// Content path: record src's turn-start content and dst's turn-start
+		// state (nil when absent → restore deletes the moved copy), each deduped
+		// independently on first touch. Independent dedup is what preserves a
+		// chained rename (a→b→c): the second rename's src (b) was already the
+		// first's dst, so it is skipped, but its dst (c) is still recorded as nil
+		// so restore removes it.
+		if !s.seen[ch.Path] {
+			s.seen[ch.Path] = true
+			s.cur.Files = append(s.cur.Files, src)
+		}
+		if dstOK && ch.DestPath != "" && !s.seen[ch.DestPath] {
+			s.seen[ch.DestPath] = true
+			s.cur.Files = append(s.cur.Files, dst)
+		}
+		s.persist(s.cur)
+		return
+	}
+
+	// Fallback: source content is unknown (unreadable, or resolving outside the
+	// checkpoint root). Record a move-back pointer instead of a content snapshot
+	// so a transient read error never silently forfeits reversibility.
+	// Deliberately no paired nil-dst snapshot — that could delete the moved file
+	// before the reversal runs. If src resolves outside the checkpoint root,
+	// RestoreCode's safePath rejects the pointer and leaves dst intact rather
+	// than destroying the only copy.
+	if ch.DestPath == "" || s.seen[ch.Path] {
+		return
+	}
+	s.seen[ch.Path] = true
+	s.cur.Files = append(s.cur.Files, FileSnap{Path: ch.Path, DestPath: ch.DestPath})
+	s.persist(s.cur)
+}
+
+// snapshotDiskPath captures a path exactly as it exists immediately before a
+// rename. A missing path is a valid nil-content snapshot; other read failures
+// are not recorded because treating them as missing would make rewind delete a
+// file whose original state was unknown.
+func (s *Store) snapshotDiskPath(path string) (FileSnap, bool) {
+	snap := FileSnap{Path: path}
+	if path == "" {
+		return snap, false
+	}
+	abs, err := safePath(s.root, path)
+	if err != nil {
+		return snap, false
+	}
+	b, err := os.ReadFile(abs)
+	if os.IsNotExist(err) {
+		return snap, true
+	}
+	if err != nil {
+		return snap, false
+	}
+	enc, raw := fileenc.Detect(b)
+	content := string(fileenc.Decode(raw, enc))
+	snap.Content = &content
+	snap.Encoding = &enc
+	return snap, true
 }
 
 func (s *Store) detectEncoding(p string) *fileenc.Kind {
@@ -324,23 +442,60 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 	root := s.root
 	s.mu.Unlock()
 
+	protected := map[string]bool{}
 	for _, p := range order {
-		abs, gerr := safePath(root, p)
-		if gerr != nil {
-			err = gerr
+		if protected[p] {
 			continue
 		}
 		snap := earliest[p]
+		// DestPath marks a move-back pointer: the rename could not be content-
+		// captured, so reverse it by moving DestPath back to Path. Content-captured
+		// renames are restored by the ordinary content branch below and never
+		// set DestPath.
+		if snap.DestPath != "" {
+			dstAbs, gerr := safePath(root, snap.DestPath)
+			if gerr != nil {
+				err = errors.Join(err, gerr)
+				protected[snap.DestPath] = true
+				continue
+			}
+			srcAbs, gerr := safePath(root, snap.Path)
+			if gerr != nil {
+				err = errors.Join(err, gerr)
+				protected[snap.DestPath] = true
+				continue
+			}
+			if _, statErr := os.Stat(dstAbs); statErr == nil {
+				if moveErr := moveForRestore(dstAbs, srcAbs); moveErr == nil {
+					written = append(written, snap.Path)
+					deleted = append(deleted, snap.DestPath)
+				} else {
+					err = errors.Join(err, moveErr)
+					// The destination may be the only remaining copy. Do not let
+					// its paired nil snapshot delete it after a failed reversal.
+					protected[snap.DestPath] = true
+				}
+			} else if !os.IsNotExist(statErr) {
+				err = errors.Join(err, statErr)
+				protected[snap.DestPath] = true
+			}
+			continue
+		}
+		abs, gerr := safePath(root, p)
+		if gerr != nil {
+			err = errors.Join(err, gerr)
+			continue
+		}
 		if snap.Content == nil {
 			if rmErr := os.Remove(abs); rmErr == nil {
 				deleted = append(deleted, p)
 			} else if !os.IsNotExist(rmErr) {
-				err = rmErr
+				err = errors.Join(err, rmErr)
 			}
 			continue
 		}
 		if mkErr := os.MkdirAll(filepath.Dir(abs), 0o755); mkErr != nil {
-			err = mkErr
+			err = errors.Join(err, mkErr)
 			continue
 		}
 		enc := fileenc.UTF8
@@ -350,12 +505,84 @@ func (s *Store) RestoreCode(fromTurn int) (written, deleted []string, err error)
 			enc = *current
 		}
 		if wErr := os.WriteFile(abs, fileenc.Encode(*snap.Content, enc), 0o644); wErr != nil {
-			err = wErr
+			err = errors.Join(err, wErr)
 			continue
 		}
 		written = append(written, p)
 	}
 	return written, deleted, err
+}
+
+var renameForRestore = os.Rename
+
+// moveForRestore mirrors move_file's cross-filesystem fallback for legacy
+// rename checkpoints. `from` is the current (post-rename) path; `to` is the
+// original path to restore. The source is removed only after a complete
+// destination copy exists, so failures retain at least one intact copy.
+func moveForRestore(from, to string) error {
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	if err := renameForRestore(from, to); err == nil {
+		return nil
+	} else if !fileutil.IsCrossDeviceError(err) {
+		return err
+	}
+
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	inClosed := false
+	closeIn := func() {
+		if !inClosed {
+			inClosed = true
+			_ = in.Close()
+		}
+	}
+	defer closeIn()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("checkpoint restore source %q is not a regular file", from)
+	}
+	if _, err := os.Stat(to); err == nil {
+		return fmt.Errorf("checkpoint restore destination %q already exists", to)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(to), ".reasonix-restore-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	keepTemp := false
+	defer func() {
+		if !keepTemp {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err = io.Copy(tmp, in); err == nil {
+		err = tmp.Chmod(info.Mode().Perm())
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	closeIn()
+	if err != nil {
+		return err
+	}
+	if err = os.Rename(tmpName, to); err != nil {
+		return err
+	}
+	keepTemp = true // tmpName is now `to`; never remove the completed copy.
+	if err = os.Remove(from); err != nil {
+		return err
+	}
+	return nil
 }
 
 func detectCurrentEncoding(path string) *fileenc.Kind {
@@ -369,7 +596,10 @@ func detectCurrentEncoding(path string) *fileenc.Kind {
 
 // safePath resolves p against root and rejects anything escaping it — restore
 // must never write outside the workspace, even if a snapshot path is hostile or
-// the project moved since it was taken.
+// the project moved since it was taken. After the lexical check, existing paths
+// are symlink-resolved and re-checked so a symlink created after the snapshot
+// can't redirect a restore outside the workspace. Non-existent paths (files yet
+// to be written) keep the lexical result since EvalSymlinks fails on them.
 func safePath(root, p string) (string, error) {
 	abs := p
 	if !filepath.IsAbs(abs) {
@@ -381,6 +611,13 @@ func safePath(root, p string) (string, error) {
 		rel, err := filepath.Rel(r, abs)
 		if err != nil || !filepath.IsLocal(rel) {
 			return "", fmt.Errorf("checkpoint path %q escapes workspace %q", p, root)
+		}
+		if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+			rel2, err := filepath.Rel(r, resolved)
+			if err != nil || !filepath.IsLocal(rel2) {
+				return "", fmt.Errorf("checkpoint path %q resolves outside workspace %q", p, root)
+			}
+			abs = resolved
 		}
 	}
 	return abs, nil

@@ -1001,6 +1001,9 @@ func recordHistoryDisplayEvent(buffer *displayTurnBuffer, e event.Event) {
 			Diff:      e.Tool.Diff,
 			Added:     e.Tool.Added,
 			Removed:   e.Tool.Removed,
+			Kind:      e.Tool.Kind,
+			SrcPath:   e.Tool.SrcPath,
+			DstPath:   e.Tool.DstPath,
 		}
 		replaced := false
 		if call.ID != "" {

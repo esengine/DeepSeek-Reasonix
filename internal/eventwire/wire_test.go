@@ -54,6 +54,47 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 }
 
+func TestToWireRenameFileDiff(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "rename", Name: "move_file",
+		FileDiff: event.FileDiff{Kind: "rename", SrcPath: "old.txt", DstPath: "new.txt"},
+	}})
+	if w.Tool == nil || w.Tool.Kind != "rename" || w.Tool.SrcPath != "old.txt" || w.Tool.DstPath != "new.txt" {
+		t.Fatalf("wire rename tool = %+v", w.Tool)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"rename"`, `"srcPath":"old.txt"`, `"dstPath":"new.txt"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("rename JSON = %s, want %s", b, want)
+		}
+	}
+}
+
+func TestToWireApprovalCarriesRenameFileDiff(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "apr-1", Tool: "move_file", Subject: "rename old.txt to new.txt",
+		ChangeKind: "rename", SrcPath: "old.txt", DstPath: "new.txt",
+	}})
+	if w.Approval == nil {
+		t.Fatal("approval wire is nil")
+	}
+	if w.Approval.ChangeKind != "rename" || w.Approval.SrcPath != "old.txt" || w.Approval.DstPath != "new.txt" {
+		t.Fatalf("wire approval rename = %+v", w.Approval)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{`"changeKind":"rename"`, `"srcPath":"old.txt"`, `"dstPath":"new.txt"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("approval rename JSON = %s, want %s", s, want)
+		}
+	}
+}
 func TestKindNamesComplete(t *testing.T) {
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {

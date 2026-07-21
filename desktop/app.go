@@ -4713,6 +4713,9 @@ type HistoryToolCall struct {
 	Diff              string `json:"diff,omitempty"`
 	Added             int    `json:"added,omitempty"`
 	Removed           int    `json:"removed,omitempty"`
+	Kind              string `json:"kind,omitempty"`
+	SrcPath           string `json:"srcPath,omitempty"`
+	DstPath           string `json:"dstPath,omitempty"`
 	ArgumentsArchived bool   `json:"argumentsArchived,omitempty"`
 }
 
@@ -5218,6 +5221,9 @@ func historyToolCall(tc provider.ToolCall, args string, result provider.Message)
 		Diff:    tc.Diff,
 		Added:   tc.Added,
 		Removed: tc.Removed,
+		Kind:    tc.Kind,
+		SrcPath: tc.SrcPath,
+		DstPath: tc.DstPath,
 	}
 	if tc.Name == "todo_write" {
 		call.Arguments = args

@@ -2,8 +2,10 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Compass } from "lucide-react";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
+import { RenameCard } from "./RenameCard";
 import { useT } from "../lib/i18n";
-import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
+import { languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
+import { toolPresentation } from "../lib/toolPresentation";
 import { useShellExpand } from "../lib/shellExpand";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import type { Item } from "../lib/useController";
@@ -93,25 +95,36 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
 
-  // All tools default to collapsed. Sub-agent tools open while running so the
-  // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
-  // also opens while streaming and closes on finish.
-  const defaultOpen = hasNested ? item.status === "running" : false;
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? defaultOpen;
-  const openRef = useRef(open);
-  openRef.current = open;
-  const [showAll, setShowAll] = useState(false);
-  const [showErrorDetails, setShowErrorDetails] = useState(false);
-  // Lazy-load full tool data from the backend when the card is expanded and
-  // the in-memory copy was archived for memory efficiency.
+  // Write/edit tools show their diff inline — that's the primary signal — so they
+  // default to OPEN. Sub-agent tools open while running so the user sees nested
+  // calls; they collapse when done. All other tools default to collapsed.
+  // toolPresentation 集中了"是否写工具 / 有无可渲染 diff / 默认是否展开"的决策，ToolCard 只消费结果。
   const [fullData, setFullData] = useState<{ args: string; output?: string } | null>(null);
   const archivedWithoutFullData = Boolean(item.dataArchived && !fullData);
   const effectiveArgs = archivedWithoutFullData ? "" : fullData?.args ?? item.args;
   const effectiveOutput = fullData?.output ?? item.output;
   const displayOutput = toolOutputDuplicatesError(effectiveOutput, item.error) ? undefined : effectiveOutput;
-  const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
-  const diffs = previewDiff || archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
+
+  const { detail, defaultOpen } = toolPresentation({
+    name: item.name,
+    args: effectiveArgs,
+    fileDiff: item.fileDiff,
+    archivedWithoutFullData,
+    hasNested,
+    status: item.status,
+  });
+  const hasDiff = detail.kind !== "none";
+
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? defaultOpen;
+  const openRef = useRef(open);
+  openRef.current = open;
+
+  const [showAll, setShowAll] = useState(false);
+  const [showErrorDetails, setShowErrorDetails] = useState(false);
+
+  // Lazy-load full tool data from the backend when the card is expanded and
+  // the in-memory copy was archived for memory efficiency.
   const subject = fullData ? subjectOf(item.name, effectiveArgs) : item.subject || subjectOf(item.name, effectiveArgs);
   // Reset cached fullData when the item identity changes (e.g. after rewind).
   useEffect(() => {
@@ -122,12 +135,17 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // else folds its args/output away by default.  Open while running so the
   // user sees progress; closed by default once settled.
   const hasArchivedOnDemandBody = Boolean(item.dataArchived && tabId);
-  const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody);
+  // rename 卡片上方已渲染 "src → dst"，其 args（源/目标路径）只是重复，故 rename 时
+  // 不显示 args JSON，但仍显示 output 确认文本与归档懒加载内容。kind "none" 时两者都显示。
+  const showArgsBlock = detail.kind === "none" && !!effectiveArgs;
+  const hasArgsOrOutput =
+    (detail.kind === "none" && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody)) ||
+    (detail.kind === "rename" && (!!displayOutput || hasArchivedOnDemandBody));
 
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && displayOutput ? displayOutput : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
+  const hasBody = Boolean(hasDiff || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
   const errorText = item.error ? normalizeErrorText(item.error) : "";
   const errorSummary = errorText ? summarizeToolError(errorText, t("tool.errorReceiptMismatch")) : "";
   const hasErrorDetails = errorText ? errorNeedsDetails(errorText, errorSummary) : false;
@@ -136,7 +154,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
     let cancelled = false;
     import("../lib/bridge").then(({ app }) =>
       app.ToolResultForTab(tabId, item.id).then((d) => {
-        if (!cancelled && d) setFullData(d);
+        if (!cancelled && d) {
+          setFullData(d);
+        }
       }).catch(() => {}),
     ).catch(() => {});
     return () => { cancelled = true; };
@@ -210,16 +230,18 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
 
       <div ref={toolBodyRef} className="tool__body">
 
-        {previewDiff ? (
-          <DiffView diff={previewDiff.diff} language={languageForToolArgs(fullData?.args ?? item.args)} maxHeight={260} />
-        ) : (
-          diffs.map((d, i) => (
+        {detail.kind === "rename" ? (
+          <RenameCard srcPath={detail.srcPath} dstPath={detail.dstPath} />
+        ) : detail.kind === "unified-diff" ? (
+          <DiffView diff={detail.preview.diff} language={languageForToolArgs(fullData?.args ?? item.args)} maxHeight={260} />
+        ) : detail.kind === "inline-diffs" ? (
+          detail.diffs.map((d, i) => (
             <div key={i}>
               {d.label && <div className="tool__difflabel">{d.label}</div>}
               <DiffView original={d.original} modified={d.modified} language={d.lang} maxHeight={260} />
             </div>
           ))
-        )}
+        ) : null}
 
         {hasNested && (
           <div className="tool__nested">
@@ -259,7 +281,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
 
         {!shellPreview && hasArgsOrOutput && (
           <>
-            {effectiveArgs && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
+            {showArgsBlock && <CodeViewer value={pretty(effectiveArgs)} language="json" maxHeight={180} />}
             {displayOutput && (
               <>
                 <CodeViewer value={displayOutput} maxHeight={280} />

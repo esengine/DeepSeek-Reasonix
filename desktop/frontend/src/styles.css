@@ -4350,8 +4350,9 @@ a[href] {
   align-items: center;
   gap: 6px;
   min-height: 24px;
-  padding: 0;
+  padding: 2px 7px;
   border: none;
+  border-radius: 6px;
   background: transparent;
   color: var(--fg-faint);
   font-family: inherit;
@@ -4364,6 +4365,7 @@ a[href] {
 }
 .turn-collapse__reasoning-head:hover {
   color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
 }
 .turn-collapse__reasoning-head .reasoning__chevron {
   flex: 0 0 auto;
@@ -4633,7 +4635,6 @@ a[href] {
 .reasoning__body,
 .turn-collapse__inline-reasoning {
   overflow: hidden;
-  margin: 2px 0 6px 8px;
   border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
   padding-left: 12px;
   color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
@@ -4642,6 +4643,11 @@ a[href] {
   font-style: normal;
   line-height: 1.72;
   white-space: pre-wrap;
+}
+/* .reasoning__body 保留外边距缩进；.turn-collapse__inline-reasoning 由 GSAP 折叠，
+   不能带竖直外边距（否则折叠高度动画残留间距）。 */
+.reasoning__body {
+  margin: 2px 0 6px 8px;
 }
 /* ── markdown prose ──────────────────────────────────────────────────────── */
 .md {
@@ -19137,6 +19143,27 @@ body > .mermaid-diagram--fullscreen {
 }
 .tool__body + .tool__body .tool__difflabel {
   margin-top: 2px;
+}
+/* rename 卡片：move_file 的路径变更用 "src → dst" 一行展示，无内容 diff */
+.tool__rename {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tool__rename-path {
+  color: var(--fg);
+  word-break: break-all;
+}
+.tool__rename-arrow {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+}
+/* 审批弹窗内的 rename 卡片：紧凑 shelf 里去掉 tool body 的上下留白。 */
+.approval-rename {
+  padding: 2px 0 0;
 }
 /* sub-agent calls render indented under their parent task card — the base
    tool__body already provides border-left + 12px padding, so subagent just

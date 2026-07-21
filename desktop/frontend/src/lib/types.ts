@@ -50,6 +50,9 @@ export interface WireTool {
   diff?: string;
   added?: number;
   removed?: number;
+  kind?: "create" | "modify" | "delete" | "rename"; // create/modify/delete/rename for tool FileDiff
+  srcPath?: string;
+  dstPath?: string;
   profile?: WireProfile; // subagent model/effort resolved for this call
 }
 
@@ -104,8 +107,17 @@ export interface WireApproval {
   subject: string;
   reason?: string;
   fresh?: boolean;
+  /** Approval surface: tool | plan | recovery (Auto Guard). */
   kind?: "tool" | "plan" | "recovery" | string;
   recovery?: WireRecoveryApproval;
+  /** Previewed unified diff when the tool implements Previewer. */
+  diff?: string;
+  added?: number;
+  removed?: number;
+  /** File-change kind for previews (create/modify/delete/rename); distinct from kind. */
+  changeKind?: "create" | "modify" | "delete" | "rename";
+  srcPath?: string;
+  dstPath?: string;
 }
 
 export interface WireGuardian {
@@ -383,6 +395,9 @@ export interface HistoryToolCall {
   diff?: string;
   added?: number;
   removed?: number;
+  kind?: string;
+  srcPath?: string;
+  dstPath?: string;
   argumentsArchived?: boolean;
 }
 

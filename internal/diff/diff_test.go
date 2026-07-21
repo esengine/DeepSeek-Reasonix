@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+func TestBuildRename(t *testing.T) {
+	ch := BuildRename("src/old.ts", "src/new.ts")
+
+	// rename 的核心语义：Path=源，DestPath=目标，Kind=Rename
+	if ch.Path != "src/old.ts" {
+		t.Errorf("Path = %q, want src/old.ts", ch.Path)
+	}
+	if ch.Kind != Rename {
+		t.Errorf("Kind = %q, want %q", ch.Kind, Rename)
+	}
+	if ch.DestPath != "src/new.ts" {
+		t.Errorf("DestPath = %q, want src/new.ts", ch.DestPath)
+	}
+
+	// rename 不改变内容，内容相关字段应为空
+	if ch.OldText != "" || ch.NewText != "" {
+		t.Errorf("OldText=%q NewText=%q, want empty (rename 不读内容)", ch.OldText, ch.NewText)
+	}
+	if ch.Diff != "" {
+		t.Errorf("Diff = %q, want empty (rename 无内容 diff)", ch.Diff)
+	}
+	if ch.Added != 0 || ch.Removed != 0 {
+		t.Errorf("Added=%d Removed=%d, want 0/0 (rename 保留内容)", ch.Added, ch.Removed)
+	}
+	if ch.Binary {
+		t.Error("Binary = true, want false")
+	}
+}
+
 func TestBuild_NoChange(t *testing.T) {
 	c := Build("f.txt", "a\nb\n", "a\nb\n", Modify)
 	if c.Diff != "" || c.Added != 0 || c.Removed != 0 {

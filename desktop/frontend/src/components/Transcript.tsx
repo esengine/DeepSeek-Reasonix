@@ -83,8 +83,10 @@ const LiveAssistantMessage = memo(function LiveAssistantMessage({
 function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
   const t = useT();
   const live = useContext(LiveStreamContext);
-  const [open, setOpen] = useState(true);
+  // Default collapsed so long chain-of-thought does not dominate the transcript.
+  const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const reasoningContentId = useRef(`reasoning-content-${item.id}`).current;
   useGSAPCollapse(bodyRef, open);
   const shown = live && live.id === item.id
     ? {
@@ -108,12 +110,13 @@ function InlineAssistantReasoning({ item }: { item: AssistantItem }) {
         data-running={running ? "" : undefined}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        aria-controls={reasoningContentId}
       >
         <ProcessBrainIcon size={12} />
         <span>{running ? t("msg.thinkingRunning") : t("msg.thinking")}</span>
         <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />
       </button>
-      <div ref={bodyRef} className="turn-collapse__inline-reasoning">{visibleReasoning}</div>
+      <div ref={bodyRef} id={reasoningContentId} className="turn-collapse__inline-reasoning">{visibleReasoning}</div>
     </div>
   );
 }

@@ -53,6 +53,7 @@ func ToWire(e event.Event) Event {
 			ArgChars: e.Tool.ArgChars, Refreshed: e.Tool.Refreshed,
 			ParentID: e.Tool.ParentID,
 			Diff:     e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
+			Kind: e.Tool.Kind, SrcPath: e.Tool.SrcPath, DstPath: e.Tool.DstPath,
 		}
 		if e.Tool.Profile != nil {
 			wt.Profile = &Profile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
@@ -81,6 +82,8 @@ func ToWire(e event.Event) Event {
 		w.Approval = &Approval{
 			ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject,
 			Reason: e.Approval.Reason, Fresh: e.Approval.Fresh, Kind: e.Approval.Kind,
+			Diff: e.Approval.Diff, Added: e.Approval.Added, Removed: e.Approval.Removed,
+			ChangeKind: e.Approval.ChangeKind, SrcPath: e.Approval.SrcPath, DstPath: e.Approval.DstPath,
 		}
 		if e.Approval.Recovery != nil {
 			r := e.Approval.Recovery
@@ -208,6 +211,9 @@ type Tool struct {
 	Diff       string   `json:"diff,omitempty" externalizable:"true"`
 	Added      int      `json:"added,omitempty"`
 	Removed    int      `json:"removed,omitempty"`
+	Kind       string   `json:"kind,omitempty"`
+	SrcPath    string   `json:"srcPath,omitempty"`
+	DstPath    string   `json:"dstPath,omitempty"`
 	Profile    *Profile `json:"profile,omitempty"`
 }
 
@@ -244,14 +250,22 @@ type CacheDiagnostics struct {
 }
 
 // Approval is the JSON form of an event.Approval.
+// Kind is the approval surface (tool|plan|recovery). ChangeKind is the
+// previewed file-change kind (create|modify|delete|rename) when present.
 type Approval struct {
-	ID       string            `json:"id"`
-	Tool     string            `json:"tool"`
-	Subject  string            `json:"subject" externalizable:"true"`
-	Reason   string            `json:"reason,omitempty" externalizable:"true"`
-	Fresh    bool              `json:"fresh,omitempty"`
-	Kind     string            `json:"kind,omitempty"` // tool | plan | recovery
-	Recovery *RecoveryApproval `json:"recovery,omitempty"`
+	ID         string            `json:"id"`
+	Tool       string            `json:"tool"`
+	Subject    string            `json:"subject" externalizable:"true"`
+	Reason     string            `json:"reason,omitempty" externalizable:"true"`
+	Fresh      bool              `json:"fresh,omitempty"`
+	Kind       string            `json:"kind,omitempty"` // tool | plan | recovery
+	Recovery   *RecoveryApproval `json:"recovery,omitempty"`
+	Diff       string            `json:"diff,omitempty" externalizable:"true"`
+	Added      int               `json:"added,omitempty"`
+	Removed    int               `json:"removed,omitempty"`
+	ChangeKind string            `json:"changeKind,omitempty"` // create|modify|delete|rename
+	SrcPath    string            `json:"srcPath,omitempty"`
+	DstPath    string            `json:"dstPath,omitempty"`
 }
 
 // RecoveryApproval is the JSON form of an event.RecoveryApproval.
