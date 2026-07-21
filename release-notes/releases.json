@@ -6,15 +6,19 @@
       "date": "2026-07-21",
       "channel": "stable",
       "title": {
-        "en": "Reasonix Desktop v1.17.17",
-        "zh": "Reasonix 桌面版 v1.17.17"
+        "en": "Reasonix 1.17.17",
+        "zh": "Reasonix 1.17.17"
       },
       "summary": {
         "en": "This release brings ACP mid-turn steering, workspace diffs in Changes, retirement of automatic Plan Mode, and various UI and lifecycle fixes.",
         "zh": "此版本带来 ACP 回合中引导、改动面板工作区差异、退役自动计划模式以及多项界面和生命周期修复。"
       },
       "surfaces": [
-        "desktop"
+        "desktop",
+        "cli",
+        "agent",
+        "mcp",
+        "security"
       ],
       "guides": [
         {
