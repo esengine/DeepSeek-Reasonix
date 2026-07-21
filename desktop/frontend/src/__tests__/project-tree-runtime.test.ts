@@ -8,6 +8,7 @@ import {
   projectTreeShouldSuppressOpenForRename,
   projectTreeReadActivityKey,
   projectTreeTopicHasUnreadActivity,
+  projectTreeTopicArchiveBlocked,
   projectTreeShouldRenderTopicActions,
   projectTreeTopicMetaLine,
   arrangeClassicProjectTree,
@@ -182,6 +183,46 @@ eq(
   projectTreeTopicHasUnreadActivity({ ...completedTopic, status: "streaming", running: true }, { [completedTopicKey]: 1000 }, "project", "/repo", "other-topic"),
   false,
   "running topic keeps runtime status instead of completed-unread attention",
+);
+
+for (const status of ["thinking", "streaming", "waiting_confirmation", "background_job"] as const) {
+  eq(
+    projectTreeTopicArchiveBlocked({ ...completedTopic, status, running: true }),
+    true,
+    `${status} topic blocks archive`,
+  );
+}
+
+for (const status of ["paused", "error"] as const) {
+  eq(
+    projectTreeTopicArchiveBlocked({ ...completedTopic, status, running: true }),
+    false,
+    `${status} topic remains archivable despite the legacy running flag`,
+  );
+}
+
+eq(
+  projectTreeTopicArchiveBlocked({ ...completedTopic, running: true }),
+  true,
+  "legacy running topic without a detailed status blocks archive",
+);
+
+eq(
+  projectTreeTopicArchiveBlocked(completedTopic),
+  false,
+  "idle topic remains archivable",
+);
+
+eq(
+  projectTreeTopicArchiveBlocked({
+    ...completedTopic,
+    children: [
+      { ...completedTopic, key: "idle-child", kind: "session", sessionPath: "/tmp/idle.jsonl" },
+      { ...completedTopic, key: "busy-child", kind: "session", sessionPath: "/tmp/busy.jsonl", status: "background_job", running: true },
+    ],
+  }),
+  true,
+  "topic blocks archive when any runtime child has active work",
 );
 
 eq(

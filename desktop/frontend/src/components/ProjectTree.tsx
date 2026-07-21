@@ -194,6 +194,14 @@ function topicStatus(node: ProjectNode): ProjectTopicStatus | "" {
   return normalizeTopicStatus(node.status) || (node.running ? "streaming" : "");
 }
 
+export function projectTreeTopicArchiveBlocked(node: ProjectNode): boolean {
+  if (asArray(node.children).some(projectTreeTopicArchiveBlocked)) return true;
+  const status = normalizeTopicStatus(node.status);
+  if (status === "thinking" || status === "streaming" || status === "waiting_confirmation" || status === "background_job") return true;
+  if (status === "paused" || status === "error") return false;
+  return Boolean(node.running);
+}
+
 function topicStatusLabel(node: ProjectNode, t: Translator): string {
   const status = topicStatus(node);
   return status ? t(topicStatusLabels[status]) : "";
@@ -1305,6 +1313,7 @@ export function ProjectTree({
       const metaFull = projectTreeTopicMetaLine(node, t, compactTopics);
       const status = topicStatus(node);
       const statusLabel = topicStatusLabel(node, t);
+      const archiveBlocked = projectTreeTopicArchiveBlocked(node);
       const waitingConfirmation = status === "waiting_confirmation";
       // Compact workbench: waiting shows an amber "待确认" pill instead of a
       // spinning orange dot, and that pill replaces the relative time so the
@@ -1354,6 +1363,7 @@ export function ProjectTree({
           key: "trash",
           icon: <Archive size={13} />,
           label: confirmAction?.topicId === topicId && confirmAction.action === "trash" ? t("history.confirmMoveToTrash") : t("history.moveToTrash"),
+          disabled: archiveBlocked,
           danger: true,
           onSelect: () => {
             if (confirmAction?.topicId === topicId && confirmAction.action === "trash") void trashTopic(topicId);
@@ -1522,6 +1532,7 @@ export function ProjectTree({
                   className="project-tree__topic-action project-tree__topic-action--archive"
                   type="button"
                   aria-label={t("projectTree.archiveTopic")}
+                  disabled={archiveBlocked}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -1577,6 +1588,11 @@ export function ProjectTree({
     const projectActive = activeScope === scope && (scope === "global" || activeWorkspaceRoot === node.root);
     const projectMenuOpen = menuProject?.key === key;
     const activeTopicInProject = Boolean(activeTopicId) && activeScope === scope && (scope === "global" || activeWorkspaceRoot === projectRoot);
+    const sourceProjectNode = tree.find((candidate) => scope === "global"
+      ? candidate.kind === "global_folder"
+      : candidate.kind === "project" && candidate.root === projectRoot);
+    const activeTopicArchiveBlocked = asArray(sourceProjectNode?.children).some((candidate) =>
+      isTopicNode(candidate) && candidate.topicId === activeTopicId && projectTreeTopicArchiveBlocked(candidate));
     const draggableProject = section !== "pinned" && projectDragEnabled && depth === 0 && Boolean(projectDragKey) && editingProject?.key !== key;
     const projectDropPosition = dropProject?.root === projectDragKey ? dropProject.position : null;
     const handleProjectDragStart = (event: ReactDragEvent<HTMLElement>) => {
@@ -1738,7 +1754,7 @@ export function ProjectTree({
         label: activeTopicId && confirmAction?.topicId === activeTopicId && confirmAction.action === "trash"
           ? t("history.confirmMoveToTrash")
           : t("projectTree.archiveConversation"),
-        disabled: !activeTopicInProject || !activeTopicId,
+        disabled: !activeTopicInProject || !activeTopicId || activeTopicArchiveBlocked,
         danger: true,
         onSelect: () => {
           if (!activeTopicId) return;

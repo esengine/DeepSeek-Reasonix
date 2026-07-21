@@ -6810,12 +6810,26 @@ func (a *App) SetTopicPinned(topicID string, pinned bool) error {
 	return nil
 }
 
-// TrashTopic removes a topic from the project tree and moves its saved session
-// records into the session trash. Any in-process runtimes for the topic are
-// cancelled and detached from the app first, so their autosave/jobs cannot
-// recreate state after the topic is gone.
+var errTopicHasActiveWork = errors.New("wait for the session to finish, answer pending prompts, and stop background jobs before archiving this topic")
+
+// TrashTopic removes an idle topic from the project tree and moves its saved
+// session records into the session trash. Idle in-process runtimes are detached
+// first, so their autosave cannot recreate state after the topic is gone.
 func (a *App) TrashTopic(topicID string) error {
 	return friendlySessionFileError(a.trashTopic(topicID))
+}
+
+func (a *App) topicHasActiveRuntimeWork(topicID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, tabs := range []map[string]*WorkspaceTab{a.tabs, a.detachedSessions} {
+		for _, tab := range tabs {
+			if tab != nil && tab.TopicID == topicID && tab.hasActiveRuntimeWork() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *App) trashTopic(topicID string) error {
@@ -6828,6 +6842,9 @@ func (a *App) trashTopic(topicID string) error {
 		defer a.lockRuntimeMutation("trash-topic")()
 		a.sessionRemovalMu.Lock()
 		defer a.sessionRemovalMu.Unlock()
+		if a.topicHasActiveRuntimeWork(topicID) {
+			return errTopicHasActiveWork
+		}
 
 		targets, err := a.topicTrashTargets(topicID)
 		if err != nil {

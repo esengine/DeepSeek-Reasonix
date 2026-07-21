@@ -6339,7 +6339,7 @@ func TestDeleteSessionCancelsInactiveOpenRuntime(t *testing.T) {
 	}
 }
 
-func TestTrashTopicWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
+func TestTrashTopicRejectsBackgroundJob(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
@@ -6356,9 +6356,7 @@ func TestTrashTopicWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
 	}
 	sessionPath := writeTopicSession(t, dir, "stuck-topic.jsonl", topicID, "Stuck trash", projectRoot)
 
-	grace := 500 * time.Millisecond
-	teardownNotices := make(chan event.Event, 2)
-	jm := jobs.NewManager(teardownNoticeSink(teardownNotices), jobs.WithTeardownGrace(grace))
+	jm := jobs.NewManager(event.Discard)
 	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: sessionPath, Label: "test", Jobs: jm, WorkspaceRoot: projectRoot})
 	releaseJob := startNonCooperativeSessionJob(t, jm, sessionPath)
 	defer func() {
@@ -6392,20 +6390,24 @@ func TestTrashTopicWithStuckJobReturnsAfterSingleGrace(t *testing.T) {
 		activeTabID: "stuck",
 	}
 
-	start := time.Now()
-	if err := app.TrashTopic(topicID); err != nil {
-		t.Fatalf("TrashTopic(stuck job): %v", err)
+	if err := app.TrashTopic(topicID); !errors.Is(err, errTopicHasActiveWork) {
+		t.Fatalf("TrashTopic(background job) error = %v, want %v", err, errTopicHasActiveWork)
 	}
-	elapsed := time.Since(start)
-	if elapsed > grace+2*time.Second {
-		t.Fatalf("TrashTopic took %s, want one teardown grace plus bounded metadata I/O", elapsed)
+	if _, ok := app.tabs["stuck"]; !ok {
+		t.Fatal("rejected archive should keep the background-job topic tab")
 	}
-	assertSingleTeardownTimeoutNotice(t, teardownNotices, grace)
-	if !agent.IsCleanupPending(sessionPath) {
-		t.Fatalf("stuck topic trash should mark cleanup pending")
+	if agent.IsCleanupPending(sessionPath) {
+		t.Fatal("rejected archive should not mark session cleanup pending")
 	}
 	if _, err := os.Stat(sessionPath); err != nil {
-		t.Fatalf("stuck topic session should remain until delayed trash: %v", err)
+		t.Fatalf("rejected archive should preserve the live session: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "stuck-topic.jsonl", "stuck-topic.jsonl")
+	if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
+		t.Fatalf("rejected archive created a trash entry, stat err = %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "Stuck trash" {
+		t.Fatalf("rejected archive topic title = %q, want Stuck trash", got)
 	}
 }
 

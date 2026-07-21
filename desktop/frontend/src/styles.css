@@ -28055,6 +28055,16 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
 }
 
+.sidebar--workbench .project-tree__topic-action:disabled,
+.sidebar--workbench .project-tree__topic-action:disabled:hover,
+.app--classic .project-tree__topic-action:disabled,
+.app--classic .project-tree__topic-action:disabled:hover {
+  cursor: not-allowed;
+  opacity: 0.4;
+  color: var(--fg-faint);
+  transform: none;
+}
+
 .sidebar--workbench .sidebar__nav--footer {
   flex: 0 0 auto;
   gap: 5px;
