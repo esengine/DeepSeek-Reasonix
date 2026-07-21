@@ -3425,7 +3425,11 @@ export function Composer({
     }
     // Esc interrupts the in-flight turn (matches the Stop button's hint), and
     // restores the text if the server hadn't replied yet.
-    if (e.key === "Escape" && running) {
+    // Guard against IME: pressing ESC to dismiss the Chinese/Japanese
+    // candidate window must not be treated as an interrupt. `composing`
+    // already folds in composingRef + nativeEvent.isComposing + keyCode 229 +
+    // the post-compositionend grace window (see isImeKeyEvent).
+    if (e.key === "Escape" && running && !composing) {
       e.preventDefault();
       handleCancel();
     }
