@@ -29,6 +29,19 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	}
 }
 
+func TestLedgerMatchesSuccessfulReviewReceipt(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	if !ledger.HasSuccessfulReview() {
+		t.Fatal("successful task(profile=review) should verify review evidence")
+	}
+	failed := NewLedger()
+	failed.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), false, true))
+	if failed.HasSuccessfulReview() {
+		t.Fatal("failed review task must not verify review evidence")
+	}
+}
+
 func TestLedgerHasWriteOrCommandSince(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{ToolName: "todo_write", Success: true, Todos: []TodoItem{{Content: "edit", Status: "in_progress"}}})

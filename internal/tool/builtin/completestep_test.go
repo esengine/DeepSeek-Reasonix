@@ -438,6 +438,30 @@ func TestCompleteStepMatchesParaphrasedCommands(t *testing.T) {
 	}
 }
 
+func TestCompleteStepAcceptsSuccessfulReviewEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review passed",
+		"evidence":[{"kind":"review","summary":"task(profile=review) returned no blocking issues"}]}`)); err != nil {
+		t.Fatalf("successful review evidence rejected: %v", err)
+	}
+}
+
+func TestCompleteStepRejectsFailedReviewEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), false, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review passed",
+		"evidence":[{"kind":"review","summary":"task(profile=review) returned no blocking issues"}]}`)); err == nil {
+		t.Fatal("failed review task must not satisfy review evidence")
+	}
+}
+
 func TestCompleteStepExplainsFailedCommandReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{ToolName: "bash", Success: false, Command: "ls scripts/test_lines.txt 2>&1"})

@@ -36,6 +36,7 @@ type stepEvidence struct {
 // (main's fourth kind) is omitted — v2 has no checkpoint system.
 var validEvidenceKinds = map[string]bool{
 	"verification": true, // a command/test was run; cite it and its outcome
+	"review":       true, // a successful built-in review task returned a report
 	"diff":         true, // a concrete code change; cite what changed
 	"files":        true, // files created/edited/inspected; cite the paths
 	"manual":       true, // a manual check; cite what was confirmed and how
@@ -44,7 +45,7 @@ var validEvidenceKinds = map[string]bool{
 func (completeStep) Name() string { return "complete_step" }
 
 func (completeStep) Description() string {
-	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
+	return "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a successful built-in review, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`."
 }
 
 func (completeStep) Schema() json.RawMessage {
@@ -61,7 +62,7 @@ func (completeStep) Schema() json.RawMessage {
     "items":{
       "type":"object",
       "properties":{
-        "kind":{"type":"string","enum":["verification","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
+        "kind":{"type":"string","enum":["verification","review","diff","files","manual"],"description":"verification = a command/test was run (command REQUIRED); review = the built-in review task completed successfully; diff = a concrete code change (paths REQUIRED); files = files created/edited/inspected (paths REQUIRED); manual = a manual check."},
         "summary":{"type":"string","description":"The evidence itself: the test result, what the diff does, or what was confirmed."},
         "command":{"type":"string","description":"REQUIRED for verification evidence: the command as it actually ran (e.g. \"go test ./...\") — it is checked against this session's real command history."},
         "paths":{"type":"array","items":{"type":"string"},"description":"REQUIRED for diff/files evidence: the files this evidence refers to, as the paths were passed to the tools that touched them."}
@@ -173,6 +174,11 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 				}
 				hint := allCommandHints(ctx, ledger)
 				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful receipt — cite the command exactly as it ran in the session%s", i+1, command, hint)
+			}
+			hostVerified++
+		case "review":
+			if !ledger.HasSuccessfulReview() {
+				return 0, 0, fmt.Errorf("evidence %d: review evidence requires a successful task(profile=\"review\") receipt in this turn", i+1)
 			}
 			hostVerified++
 		case "diff":

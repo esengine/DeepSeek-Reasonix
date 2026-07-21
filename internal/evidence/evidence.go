@@ -36,6 +36,7 @@ type TodoStepMatch struct {
 type Receipt struct {
 	ToolName  string          `json:"tool_name"`
 	Args      json.RawMessage `json:"args,omitempty"`
+	Profile   string          `json:"profile,omitempty"`
 	Success   bool            `json:"success"`
 	Command   string          `json:"command,omitempty"`
 	Step      string          `json:"step,omitempty"`
@@ -133,6 +134,23 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
 		if r.Success && r.ToolName == "bash" && CommandMatches(command, r.Command) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulReview reports whether the built-in review task completed in
+// this turn. Review is a tool receipt, not a shell command, so it must not be
+// cited as verification evidence with a command string.
+func (l *Ledger) HasSuccessfulReview() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == "task" && r.Profile == "review" {
 			return true
 		}
 	}
@@ -698,6 +716,9 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 	if err := json.Unmarshal(args, &fields); err == nil {
 		if toolName == "bash" {
 			r.Command = stringField(fields, "command")
+		}
+		if toolName == "task" {
+			r.Profile = stringField(fields, "profile")
 		}
 		if toolName == "complete_step" {
 			r.Step = completeStepIdentity(fields)
