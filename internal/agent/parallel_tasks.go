@@ -155,6 +155,23 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		go func() {
 			defer wg.Done()
 			nested := subSinkFor(subID, sink)
+			// Session scheduler bounds total concurrency for parallel_tasks the
+			// same way as fleet (read-only slots; no write claims).
+			releaseSlot, slotErr := p.taskTool.acquireSlot(ctx, AcquireRequest{
+				Writer: false,
+				Nested: SubagentDepth(ctx) > 0,
+				Label:  label,
+			})
+			if slotErr != nil {
+				sink.Emit(event.Event{
+					Kind: event.ToolResult,
+					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: slotErr.Error()},
+				})
+				doneCh <- subResult{index: idx, err: slotErr}
+				return
+			}
+			defer releaseSlot()
+
 			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
 			childDepth, depthErr := p.taskTool.nextSubagentDepth(ctx)
 			if depthErr != nil {
@@ -179,28 +196,19 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				return
 			}
 
+			// Ordinary parallel_tasks (no profile) keep the concise read-only
+			// default system prompt — profile-aware batches use fleet instead.
 			sess := NewSession(DefaultReadOnlyTaskSystemPrompt)
-			// Create an independent context so parent turn cancellation
-			// does not cascade to this sub-agent. The slot was already
-			// acquired using the parent ctx (above), so waiting for a slot
-			// still respects the parent turn lifecycle.
-			subCtx := context.WithoutCancel(ctx)
-			opts := p.taskTool.subagentOptions(subCtx, max, pricing, ctxWin, childDepth)
+			opts := p.taskTool.subagentOptions(ctx, max, pricing, ctxWin, childDepth)
 			// Same contract as runSubSession: capture the pristine task before
 			// host framing is prepended so delivery intent classification judges
 			// the task, not the wrapper.
 			opts.ClassifierTaskText = t.Prompt
-			output, runErr := RunReadOnlySubAgentWithSession(subCtx, prov, subReg, sess, p.taskTool.withWorkspaceContext(t.Prompt),
+			output, runErr := RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, p.taskTool.withWorkspaceContext(t.Prompt),
 				opts, nested)
 
 			if ctx.Err() != nil && runErr == nil {
-				// Parent context was cancelled but sub-agent completed.
-				// Use subCtx for the actual error check - if subCtx is
-				// also cancelled (genuine error, not parent cascade),
-				// surface it; otherwise the sub-agent finished fine.
-				if subCtx.Err() != nil {
-					runErr = subCtx.Err()
-				}
+				runErr = ctx.Err()
 			}
 			if runErr != nil {
 				errText := runErr.Error()
@@ -220,6 +228,22 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			})
 			doneCh <- subResult{index: idx, output: output}
 		}()
+	}
+
+	markCancelled := func(err error) {
+		for i := range params.Tasks {
+			if done[i] {
+				continue
+			}
+			done[i] = true
+			if running[i] {
+				statuses[i] = parallelTaskCancelled
+				taskErrs[i] = err
+				continue
+			}
+			statuses[i] = parallelTaskSkipped
+			taskErrs[i] = err
+		}
 	}
 
 	completed := 0
@@ -248,36 +272,38 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		case r := <-doneCh:
 			processResult(r)
 		case <-ctx.Done():
-			// Parent context cancelled, but sub-agents have independent
-			// contexts (context.WithoutCancel in startTask). Keep receiving
-			// their results instead of marking them all as cancelled.
-			// Tasks that failed slot acquisition (parent ctx in acquireSlot)
-			// have already sent their errors to doneCh.
-			for completed < n {
-				r := <-doneCh
-				processResult(r)
+			err := ctx.Err()
+			// Grace period: sub-agents that are near completion
+			// can finish before being marked as cancelled.
+			// This prevents unnecessary context.Canceled results
+			// for sub-agents that would have completed within a
+			// few hundred milliseconds.
+			drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer drainCancel()
+		drain:
+			for {
+				select {
+				case r := <-doneCh:
+					processResult(r)
+					if completed >= n {
+						break drain
+					}
+				case <-drainCtx.Done():
+					break drain
+				}
 			}
+			markCancelled(err)
+			wg.Wait()
+			return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
 		}
 	}
 	wg.Wait()
-	// Collect any errors from failed tasks (non-cancelled, non-completed).
-	// Cancelled/skipped tasks from the ctx.Done() drain path below are
-	// also reported when they exist, but with the independent sub-agent
-	// context fix, most tasks should complete normally.
-	var firstErr error
-	for i, st := range statuses {
-		if st == parallelTaskFailed && taskErrs[i] != nil && firstErr == nil {
-			firstErr = taskErrs[i]
-		}
-	}
 	if parallelTasksWereCancelled(statuses) {
-		if firstErr == nil {
-			firstErr = context.Canceled
+		err := ctx.Err()
+		if err == nil {
+			err = context.Canceled
 		}
-		return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), firstErr
-	}
-	if firstErr != nil {
-		return formatParallelTasksAggregate(outputs, taskErrs, statuses, false), firstErr
+		return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
 	}
 	return formatParallelTasksAggregate(outputs, taskErrs, statuses, false), nil
 }
