@@ -32,6 +32,7 @@ type httpTransport struct {
 	url     string
 	headers map[string]string
 	client  *http.Client
+	auth    MCPAuthorizer // optional OAuth authorizer; nil disables token injection
 
 	mu      sync.Mutex
 	nextID  int
@@ -50,6 +51,7 @@ func newHTTPTransport(s Spec) (*httpTransport, error) {
 		name:    s.Name,
 		url:     s.URL,
 		headers: headers,
+		auth:    s.Authorizer,
 		client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) == 0 || sameHTTPOrigin(via[0].URL, req.URL) {
 				return nil
@@ -60,6 +62,16 @@ func newHTTPTransport(s Spec) (*httpTransport, error) {
 			return http.ErrUseLastResponse
 		}},
 	}, nil
+}
+
+// currentBearer returns a cached OAuth token for this server, or "" when no
+// authorizer is configured or no token is available. It never blocks on the
+// interactive flow.
+func (t *httpTransport) currentBearer() string {
+	if t.auth == nil {
+		return ""
+	}
+	return t.auth.CurrentToken(t.url)
 }
 
 func sameHTTPOrigin(a, b *url.URL) bool {
@@ -93,9 +105,29 @@ func (t *httpTransport) call(ctx context.Context, method string, params any) (js
 		return nil, err
 	}
 
-	resp, err := t.do(ctx, body)
+	bearer := t.currentBearer()
+	resp, err := t.do(ctx, body, bearer)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, err)
+	}
+
+	// OAuth: a 401 means the server requires (or re-requires) authorization.
+	// Run the authorizer once and retry with the fresh token. The interactive
+	// flow runs under the transport lock; that is acceptable because the lock
+	// already serializes all calls to this one server, OAuth happens at most
+	// once (later calls reuse the cached token), and no part of the flow routes
+	// back through this transport.
+	if resp.StatusCode == http.StatusUnauthorized && t.auth != nil {
+		wwwAuthenticate := resp.Header.Get("WWW-Authenticate")
+		_ = resp.Body.Close()
+		token, authErr := t.auth.Authorize(ctx, t.name, t.url)
+		if authErr != nil || token == "" {
+			return nil, t.unauthorizedError(method, wwwAuthenticate, authErr)
+		}
+		resp, err = t.do(ctx, body, token)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %q: %s: %w", t.name, method, err)
+		}
 	}
 	defer resp.Body.Close()
 	t.captureSession(resp)
@@ -110,6 +142,9 @@ func (t *httpTransport) call(ctx context.Context, method string, params any) (js
 				body:   msg,
 			})
 		}
+		if resp.StatusCode == http.StatusUnauthorized && t.auth != nil {
+			return nil, t.unauthorizedError(method, resp.Header.Get("WWW-Authenticate"), nil)
+		}
 		return nil, fmt.Errorf("plugin %q: %s: http %d: %s", t.name, method, resp.StatusCode, msg)
 	}
 
@@ -117,6 +152,20 @@ func (t *httpTransport) call(ctx context.Context, method string, params any) (js
 		return t.readSSEResponse(resp.Body, id)
 	}
 	return decodeRPCResult(resp.Body, t.name)
+}
+
+// unauthorizedError wraps a 401 with an actionable hint. When an authorizer is
+// configured but failed, the cause explains why; when the retry still 401s, the
+// user is told the token was rejected.
+func (t *httpTransport) unauthorizedError(method, wwwAuthenticate string, cause error) error {
+	hint := "server requires OAuth authorization"
+	if cause != nil {
+		return fmt.Errorf("plugin %q: %s: http 401: %s: %w", t.name, method, hint, cause)
+	}
+	if strings.TrimSpace(wwwAuthenticate) != "" {
+		return fmt.Errorf("plugin %q: %s: http 401: %s (token rejected; WWW-Authenticate: %s)", t.name, method, hint, wwwAuthenticate)
+	}
+	return fmt.Errorf("plugin %q: %s: http 401: %s (token rejected)", t.name, method, hint)
 }
 
 func (t *httpTransport) notify(ctx context.Context, method string, params any) error {
@@ -127,7 +176,7 @@ func (t *httpTransport) notify(ctx context.Context, method string, params any) e
 	if err != nil {
 		return err
 	}
-	resp, err := t.do(ctx, body)
+	resp, err := t.do(ctx, body, t.currentBearer())
 	if err != nil {
 		return fmt.Errorf("plugin %q: %s: %w", t.name, method, err)
 	}
@@ -145,8 +194,10 @@ func (t *httpTransport) close() {
 }
 
 // do POSTs one JSON-RPC body with the standard MCP headers, the configured
-// static headers, and the session id (once known). Caller holds t.mu.
-func (t *httpTransport) do(ctx context.Context, body []byte) (*http.Response, error) {
+// static headers, the session id (once known), and the OAuth bearer token (when
+// one is available). The bearer overrides any static "Authorization" header so
+// OAuth tokens win for OAuth-protected servers. Caller holds t.mu.
+func (t *httpTransport) do(ctx context.Context, body []byte, bearer string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -155,6 +206,9 @@ func (t *httpTransport) do(ctx context.Context, body []byte) (*http.Response, er
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	for k, v := range t.headers {
 		req.Header.Set(k, v)
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", bearer)
 	}
 	if t.session != "" {
 		req.Header.Set("Mcp-Session-Id", t.session)

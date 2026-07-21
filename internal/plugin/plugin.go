@@ -91,6 +91,11 @@ type Spec struct {
 	// LaunchManager owns exact project launch grants and mutable launcher locks.
 	// It never contributes to SpecFingerprint or provider-visible tool schemas.
 	LaunchManager *mcplaunch.Manager
+	// Authorizer obtains and caches OAuth bearer tokens for a remote (http)
+	// server. It is host-injected, never part of SpecFingerprint, and used only
+	// by the HTTP transport: when a request gets a 401 the transport asks the
+	// authorizer for a token and retries once. Nil disables OAuth entirely.
+	Authorizer MCPAuthorizer
 	// ConfigSource disambiguates otherwise identical server names coming from
 	// workspace config, a host transport, or a verified plugin package.
 	ConfigSource           string
@@ -138,6 +143,25 @@ type transport interface {
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
 	notify(ctx context.Context, method string, params any) error
 	close()
+}
+
+// MCPAuthorizer obtains and caches OAuth bearer tokens for a remote MCP server.
+// It is host-injected (not part of SpecFingerprint) and used only by the HTTP
+// transport. When a request to an OAuth-protected server is rejected with 401,
+// the transport calls Authorize, then retries the request once with the token.
+//
+// The concrete implementation lives in internal/mcpauth; the interface keeps the
+// plugin package free of an import dependency on it.
+type MCPAuthorizer interface {
+	// CurrentToken returns a bearer-token Authorization-header value for
+	// serverURL if one is cached and usable (refreshing non-interactively when
+	// possible), or "" when no token can be obtained without user interaction.
+	// It must not run an interactive flow.
+	CurrentToken(serverURL string) string
+	// Authorize returns a bearer-token header value for serverURL, running the
+	// interactive authorization flow when no usable token is cached. The result
+	// is safe to send as an "Authorization" header (e.g. "Bearer xyz").
+	Authorize(ctx context.Context, serverName, serverURL string) (string, error)
 }
 
 // Host owns the running plugin connections and closes them together. It also

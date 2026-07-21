@@ -36,6 +36,7 @@ import (
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/lsp"
+	"reasonix/internal/mcpauth"
 	"reasonix/internal/mcpcatalog"
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/memory"
@@ -342,6 +343,23 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return nil, err
 	}
 
+	// The shared MCP OAuth client. It is host-injected into every remote
+	// (http/sse) server's Spec.Authorizer so the transport can acquire and
+	// refresh bearer tokens. It uses the app's proxy settings and routes
+	// user-facing notices through the event sink.
+	oauthHTTPClient, err := netclient.NewHTTPClient(proxySpec, netclient.TransportOptions{})
+	if err != nil {
+		return nil, err
+	}
+	oauthClient, err := mcpauth.New(mcpauth.Options{
+		StorePath:  filepath.Join(config.ReasonixHomeDir(), "mcp-oauth-credentials.json"),
+		HTTPClient: oauthHTTPClient,
+		Out:        &sinkNoticeWriter{sink: sink},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mcp oauth client: %w", err)
+	}
+
 	execProv, err := NewProviderWithProxy(entry, proxySpec)
 	if err != nil {
 		return nil, err
@@ -482,6 +500,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		DefaultCallTimeout:   time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
 		PlanModeAllowedTools: cfg.Agent.PlanModeAllowedTools,
 		LaunchManager:        mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
+		Authorizer:           oauthClient,
 		ConfigSource:         "workspace_config",
 		StateHome:            config.ReasonixHomeDir(),
 		WriterRoots:          writeRoots,
@@ -506,6 +525,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	for i := range extraSpecs {
 		if extraSpecs[i].LaunchManager == nil {
 			extraSpecs[i].LaunchManager = pluginSpecOptions.LaunchManager
+		}
+		if isRemoteTransport(extraSpecs[i].Type) && pluginSpecOptions.Authorizer != nil {
+			extraSpecs[i].Authorizer = pluginSpecOptions.Authorizer
 		}
 		if strings.TrimSpace(extraSpecs[i].ConfigSource) == "" {
 			extraSpecs[i].ConfigSource = "host_session"
@@ -1591,6 +1613,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				return
 			}
 			spec.LaunchManager = pluginSpecOptions.LaunchManager
+			if isRemoteTransport(spec.Type) && pluginSpecOptions.Authorizer != nil {
+				spec.Authorizer = pluginSpecOptions.Authorizer
+			}
 			if strings.TrimSpace(spec.ConfigSource) == "" {
 				spec.ConfigSource = pluginSpecOptions.ConfigSource
 			}
@@ -2223,13 +2248,16 @@ type PluginSpecOptions struct {
 	DefaultCallTimeout   time.Duration
 	PlanModeAllowedTools []string
 	LaunchManager        *mcplaunch.Manager
-	ConfigSource         string
-	StateHome            string
-	WriterRoots          []string
-	ForbidReadRoots      []string
-	Network              bool
-	OfficialServers      map[string]VerifiedMCPPackage
-	PackageOwners        map[string]string
+	// Authorizer is injected into every remote (http/sse) server so the HTTP
+	// transport can perform OAuth. Nil disables OAuth entirely.
+	Authorizer      *mcpauth.Client
+	ConfigSource    string
+	StateHome       string
+	WriterRoots     []string
+	ForbidReadRoots []string
+	Network         bool
+	OfficialServers map[string]VerifiedMCPPackage
+	PackageOwners   map[string]string
 }
 
 type VerifiedMCPPackage struct {
@@ -2290,9 +2318,92 @@ func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, 
 		ImplicitApproval:         e.Source.UserAuthorized(),
 		RequireLaunchApproval:    e.Source.RequiresLaunchApproval(),
 	}, workspaceRoot)
+	// Remote (http/sse) servers get the OAuth authorizer so the transport can
+	// acquire and refresh bearer tokens. The per-server OAuth config (if any) is
+	// registered on the shared client keyed by server name.
+	if isRemoteTransport(spec.Type) && opts.Authorizer != nil {
+		spec.Authorizer = opts.Authorizer
+		if e.OAuth != nil {
+			opts.Authorizer.SetConfig(spec.Name, toMCPOAuthConfig(*e.OAuth))
+		}
+	}
 	applyMCPIsolation(&spec, workspaceRoot, opts)
 	applyVerifiedMCPPackage(&spec, opts)
 	return spec
+}
+
+// isRemoteTransport reports whether a plugin transport is a remote http(s) one.
+func isRemoteTransport(typ string) bool {
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "http", "streamable-http", "streamable_http", "sse":
+		return true
+	default:
+		return false
+	}
+}
+
+// toMCPOAuthConfig converts the config-layer OAuth type to the runtime one.
+func toMCPOAuthConfig(c config.MCPOAuthConfig) mcpauth.Config {
+	out := mcpauth.Config{
+		ClientID:                  c.ClientID,
+		ClientSecret:              c.ClientSecret,
+		Scopes:                    c.Scopes,
+		RedirectPort:              c.RedirectPort,
+		SkipBrowser:               c.SkipBrowser,
+		SkipDynamicRegistration:   c.SkipDynamicRegistration,
+		TrustedOrigins:            c.TrustedOrigins,
+		TokenEndpointAuthMethod:   c.TokenEndpointAuthMethod,
+		PrivateKeyPEM:             c.PrivateKeyPEM,
+		PrivateKeyPath:            c.PrivateKeyPath,
+		ClientAssertionSigningAlg: c.ClientAssertionSigningAlg,
+	}
+	if c.JWTBearerGrant != nil {
+		out.JWTBearerGrant = &mcpauth.JWTBearerGrant{
+			Issuer:         c.JWTBearerGrant.Issuer,
+			Subject:        c.JWTBearerGrant.Subject,
+			PrivateKeyPEM:  c.JWTBearerGrant.PrivateKeyPEM,
+			PrivateKeyPath: c.JWTBearerGrant.PrivateKeyPath,
+			SigningAlg:     c.JWTBearerGrant.SigningAlg,
+			Scopes:         c.JWTBearerGrant.Scopes,
+		}
+	}
+	return out
+}
+
+// sinkNoticeWriter is an io.Writer that emits each line written to it as a
+// Notice event on the sink, so MCP OAuth status messages ("opening your
+// browser") reach the user through the normal event channel.
+type sinkNoticeWriter struct {
+	sink event.Sink
+	buf  []byte
+	mu   sync.Mutex
+}
+
+func (w *sinkNoticeWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, p...)
+	for {
+		i := indexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimRight(string(w.buf[:i]), "\r")
+		w.buf = w.buf[i+1:]
+		if strings.TrimSpace(line) != "" && w.sink != nil {
+			w.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: line})
+		}
+	}
+	return len(p), nil
+}
+
+func indexByte(b []byte, c byte) int {
+	for i, x := range b {
+		if x == c {
+			return i
+		}
+	}
+	return -1
 }
 
 func pluginPackageOwners(cfg *config.Config) map[string]string {

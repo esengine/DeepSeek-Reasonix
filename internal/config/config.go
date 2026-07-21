@@ -1519,9 +1519,97 @@ type PluginEntry struct {
 	//                  swap happens once the spawn finishes.
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier         string          `toml:"tier"`
+	Tier string `toml:"tier"`
+	// OAuth configures remote-server OAuth 2.0 authorization for http/sse
+	// plugins. It is optional: when nil, Reasonix auto-discovers authorization
+	// metadata on the first 401 and runs the browser flow. Set it to pin a
+	// client id, request specific scopes, or run headless (skip_browser).
+	OAuth        *MCPOAuthConfig `toml:"oauth,omitempty"`
 	Source       MCPConfigSource `toml:"-" json:"-"`
 	expansionEnv map[string]string
+}
+
+// MCPOAuthConfig is the optional OAuth 2.0 configuration for one remote MCP
+// server. It mirrors a subset of the runtime mcpauth.Config; the conversion
+// happens in the boot layer so the config package stays free of that dependency.
+type MCPOAuthConfig struct {
+	// ClientID overrides the public client id used in the authorization flow.
+	// Empty performs dynamic client registration when the server supports it.
+	ClientID string `toml:"client_id" json:"client_id,omitempty"`
+	// ClientSecret pairs with ClientID for confidential clients. Leave empty for
+	// public PKCE clients.
+	ClientSecret string `toml:"client_secret" json:"client_secret,omitempty"`
+	// Scopes requests specific OAuth scopes. Empty lets the server decide.
+	Scopes []string `toml:"scopes" json:"scopes,omitempty"`
+	// RedirectPort pins the loopback callback port. Zero picks a free port.
+	RedirectPort int `toml:"redirect_port" json:"redirect_port,omitempty"`
+	// SkipBrowser prints the authorization URL instead of opening a browser.
+	SkipBrowser bool `toml:"skip_browser" json:"skip_browser,omitempty"`
+	// SkipDynamicRegistration disables RFC 7591 registration even if the server
+	// advertises a registration endpoint.
+	SkipDynamicRegistration bool `toml:"skip_dynamic_registration" json:"skip_dynamic_registration,omitempty"`
+	// TrustedOrigins authorizes metadata/issuer origins outside the server
+	// origin (escape hatch for federated deployments).
+	TrustedOrigins []string `toml:"trusted_origins" json:"trusted_origins,omitempty"`
+	// TokenEndpointAuthMethod selects how the client authenticates at the token
+	// endpoint: none|client_secret_basic|client_secret_post|private_key_jwt|
+	// client_secret_jwt. Empty auto-selects. private_key_jwt/client_secret_jwt
+	// use RFC 7523 JWT assertions.
+	TokenEndpointAuthMethod string `toml:"token_endpoint_auth_method" json:"token_endpoint_auth_method,omitempty"`
+	// PrivateKeyPath points to a PEM-encoded private key (RSA/EC/Ed25519) used
+	// to sign private_key_jwt assertions. Preferred over PrivateKeyPEM so the
+	// key stays out of config files.
+	PrivateKeyPath string `toml:"private_key_path" json:"private_key_path,omitempty"`
+	// PrivateKeyPEM is an inline PEM-encoded private key for private_key_jwt.
+	PrivateKeyPEM string `toml:"private_key_pem" json:"private_key_pem,omitempty"`
+	// ClientAssertionSigningAlg overrides the JWS alg for JWT assertions
+	// (RS256, ES256, PS256, HS256, EdDSA, ...). Empty = key-type default.
+	ClientAssertionSigningAlg string `toml:"client_assertion_signing_alg" json:"client_assertion_signing_alg,omitempty"`
+	// JWTBearerGrant enables the RFC 7523 §1 JWT bearer assertion grant for
+	// non-interactive (service) authorization. When set, no browser opens.
+	JWTBearerGrant *MCPJWTBearerGrant `toml:"jwt_bearer_grant,omitempty" json:"jwt_bearer_grant,omitempty"`
+}
+
+// MCPJWTBearerGrant configures the RFC 7523 §1 JWT bearer assertion grant
+// (service-to-service, no browser).
+type MCPJWTBearerGrant struct {
+	Issuer         string   `toml:"issuer" json:"issuer,omitempty"`
+	Subject        string   `toml:"subject" json:"subject,omitempty"`
+	PrivateKeyPath string   `toml:"private_key_path" json:"private_key_path,omitempty"`
+	PrivateKeyPEM  string   `toml:"private_key_pem" json:"private_key_pem,omitempty"`
+	SigningAlg     string   `toml:"signing_alg" json:"signing_alg,omitempty"`
+	Scopes         []string `toml:"scopes" json:"scopes,omitempty"`
+}
+
+// ClearOAuthSecret returns a copy of cfg with any embedded secrets removed
+// (client_secret and inline private keys), and whether anything changed. The
+// clear-auth path uses it so a shared config never carries confidential
+// material. File-based keys (PrivateKeyPath) are kept since they are a path,
+// not a secret; private_key_pem and jwt_bearer_grant.private_key_pem are stripped.
+func ClearOAuthSecret(cfg *MCPOAuthConfig) (*MCPOAuthConfig, bool) {
+	if cfg == nil {
+		return cfg, false
+	}
+	changed := false
+	out := *cfg
+	if strings.TrimSpace(out.ClientSecret) != "" {
+		out.ClientSecret = ""
+		changed = true
+	}
+	if strings.TrimSpace(out.PrivateKeyPEM) != "" {
+		out.PrivateKeyPEM = ""
+		changed = true
+	}
+	if out.JWTBearerGrant != nil && strings.TrimSpace(out.JWTBearerGrant.PrivateKeyPEM) != "" {
+		g := *out.JWTBearerGrant
+		g.PrivateKeyPEM = ""
+		out.JWTBearerGrant = &g
+		changed = true
+	}
+	if !changed {
+		return cfg, false
+	}
+	return &out, true
 }
 
 func (e PluginEntry) ShouldAutoStart() bool {
