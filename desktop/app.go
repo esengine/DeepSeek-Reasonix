@@ -5879,8 +5879,8 @@ type Meta struct {
 	TokenMode         string                   `json:"tokenMode"`
 	Goal              string                   `json:"goal,omitempty"`
 	GoalStatus        string                   `json:"goalStatus,omitempty"`
-	AutoResearch      *AutoResearchCompactView  `json:"autoResearch,omitempty"`
-	CanonicalTodos    []evidence.TodoItem        `json:"canonicalTodos,omitempty"`
+	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
+	CanonicalTodos    []evidence.TodoItem       `json:"canonicalTodos,omitempty"`
 }
 
 type AutoResearchCompactView struct {
