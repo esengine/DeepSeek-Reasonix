@@ -2,6 +2,329 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.17.17",
+      "date": "2026-07-21",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix Desktop v1.17.17",
+        "zh": "Reasonix 桌面版 v1.17.17"
+      },
+      "summary": {
+        "en": "This release brings ACP mid-turn steering, workspace diffs in Changes, retirement of automatic Plan Mode, and various UI and lifecycle fixes.",
+        "zh": "此版本带来 ACP 回合中引导、改动面板工作区差异、退役自动计划模式以及多项界面和生命周期修复。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "README",
+            "zh": "自述文件"
+          },
+          "body": {
+            "en": "Project overview and quick start.",
+            "zh": "项目概述与快速入门。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/993cee10f24a1277f2c7d5802b2b27cd8bb7ce8e/README.md"
+        },
+        {
+          "title": {
+            "en": "ACP Integration Guide",
+            "zh": "ACP 集成指南"
+          },
+          "body": {
+            "en": "How to integrate with the Agent Client Protocol.",
+            "zh": "如何与代理客户端协议集成。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/993cee10f24a1277f2c7d5802b2b27cd8bb7ce8e/docs/ACP.md"
+        },
+        {
+          "title": {
+            "en": "Collaboration Modes",
+            "zh": "协作模式"
+          },
+          "body": {
+            "en": "Guide to collaboration modes.",
+            "zh": "协作模式指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/993cee10f24a1277f2c7d5802b2b27cd8bb7ce8e/docs/COLLABORATION_MODES.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Configuration Paths",
+            "zh": "配置路径"
+          },
+          "body": {
+            "en": "Details on configuration file locations.",
+            "zh": "配置文件路径详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/993cee10f24a1277f2c7d5802b2b27cd8bb7ce8e/docs/CONFIG_PATHS.md"
+        },
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Comprehensive usage guide.",
+            "zh": "完整使用指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/993cee10f24a1277f2c7d5802b2b27cd8bb7ce8e/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "Technical specification.",
+            "zh": "技术规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/993cee10f24a1277f2c7d5802b2b27cd8bb7ce8e/docs/SPEC.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "ACP mid-turn steering",
+            "zh": "ACP 回合中引导"
+          },
+          "body": {
+            "en": "Clients can now steer active sessions using the `_reasonix.io/session/steer` vendor extension, with full capability negotiation.",
+            "zh": "客户端现在可使用 `_reasonix.io/session/steer` 供应商扩展在活动会话中引导，支持完整的能力协商。"
+          },
+          "refs": [
+            6715
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Workspace diffs in Changes",
+            "zh": "改动面板显示工作区差异"
+          },
+          "body": {
+            "en": "The Changes panel now shows the complete working-tree diff from Git HEAD, with syntax highlighting and line numbers.",
+            "zh": "改动面板现在显示从 Git HEAD 开始的完整工作树差异，支持语法高亮和行号。"
+          },
+          "refs": [
+            6733
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Retire automatic Plan Mode",
+            "zh": "退役自动计划模式"
+          },
+          "body": {
+            "en": "Automatic Plan Mode has been removed to simplify workflow; planning is now always initiated explicitly.",
+            "zh": "已移除自动计划模式以简化工作流程；现在始终显式启动计划。"
+          },
+          "refs": [
+            6734
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Explicit Goal start for AutoResearch",
+            "zh": "要求显式启动目标模式后再启用自动研究"
+          },
+          "body": {
+            "en": "AutoResearch now requires an explicit Goal selection or `/goal` command, preventing accidental research activation.",
+            "zh": "自动研究现在需要显式选择目标或使用 `/goal` 命令，避免意外激活研究模式。"
+          },
+          "refs": [
+            6731
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "ACP mid-turn steering",
+              "zh": "ACP 回合中引导"
+            },
+            "body": {
+              "en": "Support for the `_reasonix.io/session/steer` ACP vendor extension, allowing clients to guide active sessions.",
+              "zh": "支持 `_reasonix.io/session/steer` ACP 供应商扩展，允许客户端在活动会话中引导。"
+            },
+            "refs": [
+              6715
+            ]
+          },
+          {
+            "title": {
+              "en": "Workspace diffs in Changes",
+              "zh": "改动面板显示工作区差异"
+            },
+            "body": {
+              "en": "Added a read-only API to show the complete Git HEAD-to-worktree diff with syntax highlighting and line numbers.",
+              "zh": "新增只读 API，显示完整的 Git HEAD 到工作树的差异，支持语法高亮和行号。"
+            },
+            "refs": [
+              6733
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Retire automatic Plan Mode",
+              "zh": "退役自动计划模式"
+            },
+            "body": {
+              "en": "Automatic Plan Mode has been retired; planning now requires explicit manual activation. Existing configurations are automatically migrated.",
+              "zh": "已退役自动计划模式；现在计划需要显式手动激活。现有配置将自动迁移。"
+            },
+            "refs": [
+              6734
+            ]
+          },
+          {
+            "title": {
+              "en": "Explicit Goal start for AutoResearch",
+              "zh": "要求显式启动目标模式后再启用自动研究"
+            },
+            "body": {
+              "en": "AutoResearch is now only available after an explicit Goal selection or `/goal` command, removing the automatic classifier and preventing unintended activation.",
+              "zh": "自动研究现在仅在显式选择目标或使用 `/goal` 命令后才可用，移除了自动分类器并防止意外激活。"
+            },
+            "refs": [
+              6731
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Controller cancels foreground work on close",
+              "zh": "控制器关闭时取消前台任务"
+            },
+            "body": {
+              "en": "Fixed a lifecycle defect where `Controller.Close()` would not cancel active foreground contexts or pending waiters, potentially leaving orphaned operations and false idle states.",
+              "zh": "修复了生命周期缺陷：`Controller.Close()` 现在会取消活动的前台上下文和待处理等待，避免遗留操作和错误空闲状态。"
+            },
+            "refs": [
+              6679
+            ]
+          },
+          {
+            "title": {
+              "en": "Prevent model list option overlap",
+              "zh": "防止模型列表选项重叠"
+            },
+            "body": {
+              "en": "Fixed CSS grid layout so that model option cards no longer visually overlap when providers have many models or long names.",
+              "zh": "修复了 CSS 网格布局，当供应商有很多模型或长名称时，模型选项卡片不再视觉重叠。"
+            },
+            "refs": [
+              6539
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows opener menu now stays above transcript",
+              "zh": "Windows 打开菜单始终保持在上方"
+            },
+            "body": {
+              "en": "Fixed an issue where the external-opener menu on Windows could be hidden behind conversation content.",
+              "zh": "修复了 Windows 上外部打开菜单可能被对话内容遮挡的问题。"
+            },
+            "refs": [
+              6737
+            ]
+          },
+          {
+            "title": {
+              "en": "CC Switch MCP import respects enabled_reasonix",
+              "zh": "CC Switch MCP 导入遵循 enabled_reasonix"
+            },
+            "body": {
+              "en": "MCP servers from CC Switch are now correctly imported using the `enabled_reasonix` flag, with compatible fallbacks for older schemas.",
+              "zh": "现在使用 `enabled_reasonix` 标志正确导入 CC Switch 的 MCP 服务器，并为旧架构提供兼容回退。"
+            },
+            "refs": [
+              6730
+            ]
+          },
+          {
+            "title": {
+              "en": "WebView2 startup isolated from system proxies",
+              "zh": "WebView2 启动隔离系统代理"
+            },
+            "body": {
+              "en": "WebView2 shell starts without proxy to avoid stalling on unreachable proxies, with a 15-second watchdog and recovery prompt.",
+              "zh": "WebView2 外壳在无代理模式下启动，避免因不可达代理而停滞，并提供 15 秒看门狗和恢复提示。"
+            },
+            "refs": [
+              6727
+            ]
+          },
+          {
+            "title": {
+              "en": "Remote SSH config aligned with OpenSSH",
+              "zh": "远程 SSH 配置与 OpenSSH 对齐"
+            },
+            "body": {
+              "en": "SSH connection resolution now uses the full OpenSSH configuration stack and aligns authentication behavior, including IdentityFile and IdentitiesOnly handling.",
+              "zh": "SSH 连接解析现在使用完整的 OpenSSH 配置堆栈，并对齐了认证行为，包括 IdentityFile 和 IdentitiesOnly 的处理。"
+            },
+            "refs": [
+              6716
+            ]
+          },
+          {
+            "title": {
+              "en": "Workspace tree row overlap fixed",
+              "zh": "工作区文件树行重叠修复"
+            },
+            "body": {
+              "en": "Fixed virtual row overlap in the file tree after directory expansion by using stable file paths as keys.",
+              "zh": "通过使用稳定的文件路径作为键，修复了目录展开后文件树中虚拟行重叠的问题。"
+            },
+            "refs": [
+              6717
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "Automatic Plan Mode retired",
+            "zh": "自动计划模式已退役"
+          },
+          "body": {
+            "en": "Automatic Plan Mode has been removed. Your configuration will be automatically migrated on first launch: `auto_plan` will be set to off and legacy keys removed. Planning must now be started explicitly (e.g., via Shift+Tab).",
+            "zh": "自动计划模式已移除。首次启动时将自动迁移配置：`auto_plan` 将被设为 off 并移除旧键。现在必须显式启动计划（例如通过 Shift+Tab）。"
+          },
+          "refs": [
+            6734
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "erphenheimer",
+        "HaoyueQin",
+        "SivanCola",
+        "par73e",
+        "zhuguang-ZFG",
+        "gcoder1991"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.17",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.16...desktop-v1.17.17",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.16",
       "date": "2026-07-20",
       "channel": "stable",
