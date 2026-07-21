@@ -37,6 +37,7 @@ type mcpServerSpec struct {
 	DefaultToolsApprovalMode string                   `json:"default_tools_approval_mode"`
 	Tools                    map[string]MCPToolPolicy `json:"tools"`
 	ApprovalsReviewer        string                   `json:"approvals_reviewer"`
+	OAuth                    *MCPOAuthConfig          `json:"oauth"`
 }
 
 // loadMCPJSON reads path (Claude Code's .mcp.json) and returns its servers as
@@ -216,6 +217,7 @@ func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 		DefaultToolsApprovalMode: s.DefaultToolsApprovalMode,
 		Tools:                    mcpToolPoliciesWithApprovalMode(s.Tools),
 		ApprovalsReviewer:        s.ApprovalsReviewer,
+		OAuth:                    s.OAuth,
 	}
 	e, _ = NormalizePluginCommandLine(e)
 	return e
@@ -343,6 +345,7 @@ func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry Pl
 		return err
 	}
 	setMCPJSONString(server, "approvals_reviewer", strings.TrimSpace(entry.ApprovalsReviewer))
+	setMCPJSONOAuth(server, "oauth", entry.OAuth)
 	return nil
 }
 
@@ -457,12 +460,14 @@ func clearMCPJSONAuthentication(path, name string) (PluginEntry, bool, error) {
 		return PluginEntry{}, false, fmt.Errorf("mcp config %s: server %q: %w", path, name, err)
 	}
 	cleanHeaders, cleanEnv, cleanURL, changed := mcpdiag.ClearAuthConfig(spec.Headers, spec.Env, spec.URL)
-	if !changed {
+	cleanOAuth, oauthChanged := ClearOAuthSecret(spec.OAuth)
+	if !changed && !oauthChanged {
 		return pluginEntryFromMCPSpec(name, spec), false, nil
 	}
 	spec.Headers = cleanHeaders
 	spec.Env = cleanEnv
 	spec.URL = cleanURL
+	spec.OAuth = cleanOAuth
 
 	var server map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &server); err != nil || server == nil {
@@ -471,6 +476,7 @@ func clearMCPJSONAuthentication(path, name string) (PluginEntry, bool, error) {
 	setMCPJSONStringMap(server, "headers", cleanHeaders)
 	setMCPJSONStringMap(server, "env", cleanEnv)
 	setMCPJSONString(server, "url", cleanURL)
+	setMCPJSONOAuth(server, "oauth", cleanOAuth)
 	updatedRaw, err := json.Marshal(server)
 	if err != nil {
 		return PluginEntry{}, false, fmt.Errorf("mcp config %s: server %q: %w", path, name, err)
@@ -511,6 +517,32 @@ func setMCPJSONString(server map[string]json.RawMessage, key, value string) {
 		return
 	}
 	server[key] = raw
+}
+
+// setMCPJSONOAuth serializes the optional OAuth block. A nil config deletes the
+// key so round-tripping a server that never had OAuth leaves no empty object.
+func setMCPJSONOAuth(server map[string]json.RawMessage, key string, cfg *MCPOAuthConfig) {
+	if cfg == nil || isZeroOAuthConfig(cfg) {
+		delete(server, key)
+		return
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		delete(server, key)
+		return
+	}
+	server[key] = raw
+}
+
+// isZeroOAuthConfig reports whether every OAuth field is unset, so an empty
+// block is not written to disk.
+func isZeroOAuthConfig(cfg *MCPOAuthConfig) bool {
+	if cfg == nil {
+		return true
+	}
+	return cfg.ClientID == "" && cfg.ClientSecret == "" && cfg.RedirectPort == 0 &&
+		!cfg.SkipBrowser && !cfg.SkipDynamicRegistration && len(cfg.Scopes) == 0 &&
+		len(cfg.TrustedOrigins) == 0
 }
 
 func setMCPJSONStringArray(server map[string]json.RawMessage, key string, values []string) {

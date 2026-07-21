@@ -785,10 +785,12 @@ func (c *Config) ClearPluginAuthentication(name string) (PluginEntry, bool, erro
 			continue
 		}
 		headers, env, url, changed := mcpdiag.ClearAuthConfig(c.Plugins[i].Headers, c.Plugins[i].Env, c.Plugins[i].URL)
+		oauth, oauthChanged := ClearOAuthSecret(c.Plugins[i].OAuth)
 		c.Plugins[i].Headers = headers
 		c.Plugins[i].Env = env
 		c.Plugins[i].URL = url
-		return c.Plugins[i], changed, nil
+		c.Plugins[i].OAuth = oauth
+		return c.Plugins[i], changed || oauthChanged, nil
 	}
 	return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
 }

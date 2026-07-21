@@ -148,7 +148,7 @@ func TestHTTPTransportDoesNotRedirectCredentialsAcrossOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := transport.do(context.Background(), []byte(`{}`))
+	resp, err := transport.do(context.Background(), []byte(`{}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}

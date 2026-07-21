@@ -179,6 +179,24 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # # Enabled MCP servers connect automatically in the background after session
 # # start. Use /mcp or the desktop MCP panel to refresh, reconnect, or disable.
 
+# Remote (Streamable HTTP) plugins. OAuth is handled automatically: on the first
+# 401 Reasonix discovers the server's authorization metadata, opens your browser
+# to sign in, and caches the token under ~/.reasonix/mcp-oauth-credentials.json.
+# No extra config is required for servers that support auto-discovery.
+# [[plugins]]
+# name = "remote"
+# type = "http"
+# url  = "https://mcp.example.com/mcp"
+# # Optional OAuth overrides (auto works with none of these):
+# # [plugins.oauth]
+# # client_id = "my-public-client"        # default: dynamic client registration
+# # client_secret = ""                    # only for confidential clients
+# # scopes = ["read", "write"]            # default: server-advertised scopes
+# # redirect_port = 8080                  # default: a free loopback port
+# # skip_browser = false                  # true prints the URL instead (headless/CI)
+# # skip_dynamic_registration = false     # true disables RFC 7591 DCR
+# # trusted_origins = []                  # allow metadata/AS origins beyond the server
+
 # Bot gateway: multi-channel IM bot for QQ, Feishu, and WeChat.
 # Start with `reasonix bot start --channels qq,feishu,weixin`.
 # All secrets are read from environment variables; never put keys here.

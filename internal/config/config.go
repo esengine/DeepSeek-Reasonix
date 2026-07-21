@@ -1519,9 +1519,51 @@ type PluginEntry struct {
 	//                  swap happens once the spawn finishes.
 	// Empty defaults to "background" so enabled MCPs connect automatically
 	// without blocking chat. Unknown non-empty values fall back to "background".
-	Tier         string          `toml:"tier"`
+	Tier string `toml:"tier"`
+	// OAuth configures remote-server OAuth 2.0 authorization for http/sse
+	// plugins. It is optional: when nil, Reasonix auto-discovers authorization
+	// metadata on the first 401 and runs the browser flow. Set it to pin a
+	// client id, request specific scopes, or run headless (skip_browser).
+	OAuth        *MCPOAuthConfig `toml:"oauth,omitempty"`
 	Source       MCPConfigSource `toml:"-" json:"-"`
 	expansionEnv map[string]string
+}
+
+// MCPOAuthConfig is the optional OAuth 2.0 configuration for one remote MCP
+// server. It mirrors a subset of the runtime mcpauth.Config; the conversion
+// happens in the boot layer so the config package stays free of that dependency.
+type MCPOAuthConfig struct {
+	// ClientID overrides the public client id used in the authorization flow.
+	// Empty performs dynamic client registration when the server supports it.
+	ClientID string `toml:"client_id" json:"client_id,omitempty"`
+	// ClientSecret pairs with ClientID for confidential clients. Leave empty for
+	// public PKCE clients.
+	ClientSecret string `toml:"client_secret" json:"client_secret,omitempty"`
+	// Scopes requests specific OAuth scopes. Empty lets the server decide.
+	Scopes []string `toml:"scopes" json:"scopes,omitempty"`
+	// RedirectPort pins the loopback callback port. Zero picks a free port.
+	RedirectPort int `toml:"redirect_port" json:"redirect_port,omitempty"`
+	// SkipBrowser prints the authorization URL instead of opening a browser.
+	SkipBrowser bool `toml:"skip_browser" json:"skip_browser,omitempty"`
+	// SkipDynamicRegistration disables RFC 7591 registration even if the server
+	// advertises a registration endpoint.
+	SkipDynamicRegistration bool `toml:"skip_dynamic_registration" json:"skip_dynamic_registration,omitempty"`
+	// TrustedOrigins authorizes metadata/issuer origins outside the server
+	// origin (escape hatch for federated deployments).
+	TrustedOrigins []string `toml:"trusted_origins" json:"trusted_origins,omitempty"`
+}
+
+// ClearOAuthSecret returns a copy of cfg with any embedded client_secret
+// removed, and whether anything changed. The clear-auth path uses it so a
+// shared config never carries a confidential OAuth client secret. Public PKCE
+// clients (the common case) have no secret, so this is a no-op for them.
+func ClearOAuthSecret(cfg *MCPOAuthConfig) (*MCPOAuthConfig, bool) {
+	if cfg == nil || strings.TrimSpace(cfg.ClientSecret) == "" {
+		return cfg, false
+	}
+	out := *cfg
+	out.ClientSecret = ""
+	return &out, true
 }
 
 func (e PluginEntry) ShouldAutoStart() bool {
