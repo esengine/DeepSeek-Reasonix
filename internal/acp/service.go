@@ -651,7 +651,11 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
-	s.sendAvailableCommands(sess)
+	// Fire in a new goroutine so the session/new response reaches the client
+	// first. Clients like agentic.nvim register their session subscriber in the
+	// response callback and silently drop session/update notifications that arrive
+	// earlier (including available_commands_update).
+	go s.sendAvailableCommands(sess)
 
 	return SessionNewResult{
 		SessionID:     id,
@@ -972,7 +976,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
-	s.sendAvailableCommands(sess)
+	go s.sendAvailableCommands(sess)
 
 	if replay {
 		sink.replay(ctrl.History())
@@ -1557,7 +1561,7 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 	sink.bindAnswer(newCtrl.AnswerQuestion)
 
 	cur.ReleaseResources()
-	s.sendAvailableCommands(sess)
+	go s.sendAvailableCommands(sess)
 	sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
 	return nil
 }
