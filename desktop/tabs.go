@@ -5051,7 +5051,7 @@ const (
 	topicTitleSourcesFile  = "desktop-topic-title-sources.json"
 	topicCreatedAtsFile    = "desktop-topic-created-at.json"
 	topicAutoTitlesFile    = "desktop-topic-auto-title-meta.json"
-	defaultTopicTitle      = "新的会话"
+	defaultTopicTitle      = "New Session"
 	topicTitleSourceAuto   = "auto"
 	topicTitleSourceManual = "manual"
 )
