@@ -15,6 +15,19 @@ location.
 Set `REASONIX_HOME` to override Reasonix home for tests, CI, or portable
 installations. Normal users should not need it.
 
+Pass `--home PATH` to the CLI, Desktop, or `reasonix-guard launch` to select a
+complete isolated profile for that process. Relative paths are resolved from the
+startup working directory; `~` and `${VAR}` are expanded. This option overrides
+inherited `REASONIX_HOME`, `REASONIX_STATE_HOME`, and `REASONIX_CACHE_HOME`, using
+`PATH` for configuration and state and `PATH/cache` for cache. The selected profile
+is inherited by MCP servers, plugins, hooks, and other child processes.
+
+An isolated profile does not import or fall back to the default user profile.
+Workspace-local `reasonix.toml` and `.mcp.json` files still participate in their
+normal configuration merge. Desktop instances using different homes can run at
+the same time; launching the same executable again with the same home keeps the
+normal single-instance behavior.
+
 When `REASONIX_HOME` is set, the runtime is fully self-contained: all
 configuration, state, cache, and data live under that directory tree. Legacy
 migration, OS-home convention directory scanning, and all other fallback paths

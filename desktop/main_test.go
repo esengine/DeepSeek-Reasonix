@@ -9,12 +9,28 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 )
 
-func TestParseDesktopLaunchArgsSafeMode(t *testing.T) {
-	if !parseDesktopLaunchArgs([]string{"--safe-mode"}).SafeMode {
-		t.Fatal("--safe-mode was not recognized")
+func TestParseDesktopLaunchArgs(t *testing.T) {
+	launch, err := parseDesktopLaunchArgs([]string{"--other", "--home", "profile path", "--safe-mode"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if parseDesktopLaunchArgs([]string{"--other"}).SafeMode {
-		t.Fatal("unrelated argument enabled safe mode")
+	if !launch.SafeMode || launch.Home != "profile path" {
+		t.Fatalf("launch options = %+v", launch)
+	}
+	launch, err = parseDesktopLaunchArgs([]string{"--home=other", "--", "--safe-mode"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !launch.SafeMode || launch.Home != "other" {
+		t.Fatalf("launch options after -- = %+v", launch)
+	}
+}
+
+func TestParseDesktopLaunchArgsRejectsMissingHome(t *testing.T) {
+	for _, args := range [][]string{{"--home"}, {"--home="}, {"--home", "--"}} {
+		if _, err := parseDesktopLaunchArgs(args); err == nil {
+			t.Fatalf("parseDesktopLaunchArgs(%#v) unexpectedly succeeded", args)
+		}
 	}
 }
 

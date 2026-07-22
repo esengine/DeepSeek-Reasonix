@@ -201,6 +201,88 @@ func cleanEnvDir(name string) string {
 	return filepath.Clean(dir)
 }
 
+func normalizeHomeDir(raw string) (string, error) {
+	dir := strings.TrimSpace(raw)
+	if dir == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	for _, match := range varRef.FindAllStringSubmatch(dir, -1) {
+		if value, ok := os.LookupEnv(match[1]); (!ok || value == "") && match[2] == "" {
+			return "", fmt.Errorf("environment variable %s is not set", match[1])
+		}
+	}
+	dir = ExpandVars(dir)
+	if strings.TrimSpace(dir) == "" {
+		return "", fmt.Errorf("path is empty after environment expansion")
+	}
+	if dir == "~" || strings.HasPrefix(dir, "~/") || strings.HasPrefix(dir, `~\`) {
+		home, err := osUserHomeDir()
+		if err != nil || strings.TrimSpace(home) == "" {
+			return "", fmt.Errorf("resolve user home")
+		}
+		if dir == "~" {
+			dir = home
+		} else {
+			dir = filepath.Join(home, dir[2:])
+		}
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(abs), nil
+}
+
+// NormalizeHomeOverride validates and resolves a --home value without creating it.
+func NormalizeHomeOverride(raw string) (string, error) {
+	dir, err := normalizeHomeDir(raw)
+	if err != nil {
+		return "", err
+	}
+	if info, err := os.Stat(dir); err == nil {
+		if !info.IsDir() {
+			return "", fmt.Errorf("path exists and is not a directory")
+		}
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	return dir, nil
+}
+
+// ApplyHomeOverride makes a --home value authoritative for this process and its children.
+func ApplyHomeOverride(raw string) (string, error) {
+	dir, err := NormalizeHomeOverride(raw)
+	if err != nil {
+		return "", err
+	}
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"REASONIX_HOME", dir},
+		{"REASONIX_STATE_HOME", dir},
+		{"REASONIX_CACHE_HOME", filepath.Join(dir, "cache")},
+	}
+	previous := make([]struct {
+		value string
+		set   bool
+	}, len(values))
+	for i, item := range values {
+		previous[i].value, previous[i].set = os.LookupEnv(item.name)
+		if err := os.Setenv(item.name, item.value); err != nil {
+			for j := 0; j < i; j++ {
+				if previous[j].set {
+					_ = os.Setenv(values[j].name, previous[j].value)
+				} else {
+					_ = os.Unsetenv(values[j].name)
+				}
+			}
+			return "", fmt.Errorf("set %s: %w", item.name, err)
+		}
+	}
+	return dir, nil
+}
+
 func samePath(a, b string) bool {
 	if a == "" || b == "" {
 		return false

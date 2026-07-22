@@ -66,19 +66,27 @@ const eventChannel = "agent:event"
 const singleInstanceIDPrefix = "com.reasonix.desktop"
 
 // singleInstanceID is used by Wails to route a second desktop launch back to the
-// running instance. It is stable for a given binary path, while allowing a dev
-// build and an installed release at different paths to run side by side.
+// running instance. It is stable for a given binary path and isolated profile.
 func singleInstanceID() string {
-	abs, err := os.Executable()
+	executable, err := os.Executable()
 	if err != nil {
 		return singleInstanceIDPrefix
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		abs = resolved
-	} else if fallback, err := filepath.Abs(abs); err == nil {
-		abs = fallback
+	return singleInstanceIDFor(executable, config.IsolatedHomeDir())
+}
+
+func singleInstanceIDFor(executable, home string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	} else if fallback, err := filepath.Abs(executable); err == nil {
+		executable = fallback
 	}
-	sum := sha256.Sum256([]byte(abs))
+	identity := executable
+	if home != "" {
+		home = filepath.Clean(home)
+		identity += "\x00" + home
+	}
+	sum := sha256.Sum256([]byte(identity))
 	return singleInstanceIDPrefix + "." + hex.EncodeToString(sum[:8])
 }
 

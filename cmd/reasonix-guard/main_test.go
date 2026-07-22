@@ -4,10 +4,53 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"reasonix/internal/repair"
 )
+
+func TestRunLaunchAppliesAndForwardsHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "profile with spaces")
+	output := filepath.Join(dir, "args")
+	app := filepath.Join(dir, "desktop")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$REASONIX_HOME\" \"$REASONIX_STATE_HOME\" \"$REASONIX_CACHE_HOME\" \"$@\" > \"$REASONIX_GUARD_TEST_OUTPUT\"\n"
+	if err := os.WriteFile(app, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REASONIX_GUARD_TEST_OUTPUT", output)
+	t.Setenv("REASONIX_HOME", filepath.Join(dir, "old-home"))
+	t.Setenv("REASONIX_STATE_HOME", filepath.Join(dir, "old-state"))
+	t.Setenv("REASONIX_CACHE_HOME", filepath.Join(dir, "old-cache"))
+
+	if code := runLaunch([]string{"--app", app, "--detach=false", "--home", profile, "--safe-mode", "extra"}); code != 0 {
+		t.Fatalf("runLaunch exit code = %d", code)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSpace(string(data)), "\n")
+	want := []string{profile, profile, filepath.Join(profile, "cache"), "--safe-mode", "--home", profile, "extra"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("child environment and args = %#v, want %#v", got, want)
+	}
+}
+
+func TestRunLaunchRejectsInvalidHomeBeforeStartingChild(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profile-file")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code := runLaunch([]string{"--home", path, "--app", filepath.Join(t.TempDir(), "missing")}); code != 2 {
+		t.Fatalf("runLaunch exit code = %d, want 2", code)
+	}
+}
 
 func TestCheckReportsInvalidProjectConfig(t *testing.T) {
 	root := t.TempDir()

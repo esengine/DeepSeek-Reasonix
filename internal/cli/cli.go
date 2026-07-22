@@ -48,6 +48,19 @@ var (
 
 // Run is the CLI entry point; it returns a process exit code.
 func Run(args []string, version string) int {
+	var home string
+	var err error
+	args, home, err = extractGlobalHome(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	if home != "" {
+		if _, err := config.ApplyHomeOverride(home); err != nil {
+			fmt.Fprintln(os.Stderr, "error: invalid --home:", err)
+			return 2
+		}
+	}
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
@@ -154,6 +167,35 @@ func Run(args []string, version string) int {
 		usage()
 		return 2
 	}
+}
+
+func extractGlobalHome(args []string) ([]string, string, error) {
+	out := make([]string, 0, len(args))
+	home := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			out = append(out, args[i:]...)
+			break
+		}
+		if arg == "--home" {
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return nil, "", fmt.Errorf("--home requires a path")
+			}
+			home = args[i+1]
+			i++
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "--home="); ok {
+			if strings.TrimSpace(value) == "" {
+				return nil, "", fmt.Errorf("--home requires a path")
+			}
+			home = value
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out, home, nil
 }
 
 func isDoctorRepairCommand(args []string) bool {

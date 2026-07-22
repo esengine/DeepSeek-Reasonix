@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -9,6 +10,57 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 )
+
+func TestRunAppliesHomeBeforeCommandRouting(t *testing.T) {
+	base := t.TempDir()
+	home := filepath.Join(base, "profile")
+	t.Setenv("REASONIX_HOME", filepath.Join(base, "old-home"))
+	t.Setenv("REASONIX_STATE_HOME", filepath.Join(base, "old-state"))
+	t.Setenv("REASONIX_CACHE_HOME", filepath.Join(base, "old-cache"))
+
+	if code := Run([]string{"version", "--home", home}, "test"); code != 0 {
+		t.Fatalf("Run exit code = %d", code)
+	}
+	if got := os.Getenv("REASONIX_HOME"); got != home {
+		t.Fatalf("REASONIX_HOME = %q, want %q", got, home)
+	}
+	if got := os.Getenv("REASONIX_STATE_HOME"); got != home {
+		t.Fatalf("REASONIX_STATE_HOME = %q, want %q", got, home)
+	}
+	if got := os.Getenv("REASONIX_CACHE_HOME"); got != filepath.Join(home, "cache") {
+		t.Fatalf("REASONIX_CACHE_HOME = %q", got)
+	}
+}
+
+func TestExtractGlobalHome(t *testing.T) {
+	cases := []struct {
+		args     []string
+		wantArgs []string
+		wantHome string
+	}{
+		{[]string{"--home", "profiles/a", "version"}, []string{"version"}, "profiles/a"},
+		{[]string{"version", "--home", "profiles/a"}, []string{"version"}, "profiles/a"},
+		{[]string{"--home=profile with spaces", "-p", "task"}, []string{"-p", "task"}, "profile with spaces"},
+		{[]string{"run", "--", "--home", "literal"}, []string{"run", "--", "--home", "literal"}, ""},
+	}
+	for _, tc := range cases {
+		gotArgs, gotHome, err := extractGlobalHome(tc.args)
+		if err != nil {
+			t.Fatalf("extractGlobalHome(%#v): %v", tc.args, err)
+		}
+		if !reflect.DeepEqual(gotArgs, tc.wantArgs) || gotHome != tc.wantHome {
+			t.Fatalf("extractGlobalHome(%#v) = (%#v, %q), want (%#v, %q)", tc.args, gotArgs, gotHome, tc.wantArgs, tc.wantHome)
+		}
+	}
+}
+
+func TestExtractGlobalHomeRejectsMissingValue(t *testing.T) {
+	for _, args := range [][]string{{"--home"}, {"--home="}, {"--home", "--"}} {
+		if _, _, err := extractGlobalHome(args); err == nil {
+			t.Fatalf("extractGlobalHome(%#v) unexpectedly succeeded", args)
+		}
+	}
+}
 
 func TestSplitAllowedToolRules(t *testing.T) {
 	got, err := splitAllowedToolRules([]string{

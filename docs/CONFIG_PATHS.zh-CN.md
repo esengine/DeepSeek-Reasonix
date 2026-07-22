@@ -12,6 +12,15 @@
 
 可以设置 `REASONIX_HOME` 覆盖 Reasonix home，主要用于测试、CI 或便携安装。普通用户通常不需要设置。
 
+CLI、Desktop 或 `reasonix-guard launch` 都可以通过 `--home PATH` 选择一个完整的隔离
+profile。相对路径基于启动时工作目录解析，并支持展开 `~` 和 `${VAR}`。该参数优先于继承的
+`REASONIX_HOME`、`REASONIX_STATE_HOME` 和 `REASONIX_CACHE_HOME`：配置与状态使用
+`PATH`，缓存使用 `PATH/cache`。MCP server、plugin、hook 和其他子进程会继承同一 profile。
+
+隔离 profile 不会导入或 fallback 到默认用户 profile。Workspace 本地的 `reasonix.toml`
+和 `.mcp.json` 仍按原有规则参与配置合并。使用不同 home 的 Desktop 实例可以同时运行；
+同一 executable 使用同一 home 重复启动时，仍保持原有单实例行为。
+
 设置 `REASONIX_HOME` 后，运行时会变成完整自包含模式：配置、状态、缓存和数据都会位于该目录树下。
 Legacy 迁移、OS home 约定目录扫描以及其他 fallback 路径都会跳过，避免从系统级正式安装带入或写回数据。
 

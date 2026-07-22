@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/repair"
 )
 
@@ -244,10 +245,20 @@ func failedInstallBlocksLaunch(result repair.UpdateRollbackResult, err error) bo
 func runLaunch(args []string) int {
 	fs := flag.NewFlagSet("reasonix-guard launch", flag.ContinueOnError)
 	app := fs.String("app", "", "desktop executable path")
+	home := fs.String("home", "", "isolated Reasonix profile root")
 	safeMode := fs.Bool("safe-mode", false, "force Safe Mode")
 	detach := fs.Bool("detach", packagedDetachedLauncher(), "start the desktop and exit the launcher")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	normalizedHome := ""
+	if *home != "" {
+		var err error
+		normalizedHome, err = config.ApplyHomeOverride(*home)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error: invalid --home:", err)
+			return 2
+		}
 	}
 	// An update helper that watched the installer fail records a marker (it
 	// cannot roll back itself from outside the install directory). Restore the
@@ -300,6 +311,9 @@ func runLaunch(args []string) int {
 		return 1
 	}
 	childArgs := append([]string(nil), fs.Args()...)
+	if normalizedHome != "" {
+		childArgs = append([]string{"--home", normalizedHome}, childArgs...)
+	}
 	if useSafeMode {
 		childArgs = append([]string{"--safe-mode"}, childArgs...)
 	}

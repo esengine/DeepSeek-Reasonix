@@ -450,6 +450,7 @@ var ChineseTraditional = Messages{
 	UsageBody: `reasonix — 由設定和插件驅動的 coding agent（多模型）
 
 用法：
+  reasonix [--home PATH] <命令或互動選項>                        使用隔離的使用者 profile
   reasonix [--model NAME] [-c|--continue] [-r|--resume [QUERY]] [--permission-mode MODE] [--effort LEVEL] [--add-dir PATH]   互動式會話
   reasonix -p|--print [--model NAME] [--output-format text|json|stream-json] [--allowed-tools RULES] [--add-dir PATH] <task>
   reasonix run [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] [--output-format FORMAT] <task>

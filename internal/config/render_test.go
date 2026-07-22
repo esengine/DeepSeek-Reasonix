@@ -1245,6 +1245,105 @@ func TestLoadForEditIgnoresAndDropsDeprecatedAgentStepLimitsOnSave(t *testing.T)
 	}
 }
 
+func TestApplyHomeOverrideUsesOneProfileRoot(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("REASONIX_HOME", filepath.Join(base, "old-home"))
+	t.Setenv("REASONIX_STATE_HOME", filepath.Join(base, "old-state"))
+	t.Setenv("REASONIX_CACHE_HOME", filepath.Join(base, "old-cache"))
+
+	home := filepath.Join(base, "profile with spaces")
+	got, err := ApplyHomeOverride(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != home {
+		t.Fatalf("ApplyHomeOverride() = %q, want %q", got, home)
+	}
+	paths := map[string]string{
+		"home":        ReasonixHomeDir(),
+		"config":      UserConfigPath(),
+		"credentials": UserCredentialsPath(),
+		"sessions":    SessionDir(),
+		"memory":      MemoryUserDir(),
+		"cache":       CacheDir(),
+	}
+	want := map[string]string{
+		"home":        home,
+		"config":      filepath.Join(home, "config.toml"),
+		"credentials": filepath.Join(home, ".env"),
+		"sessions":    filepath.Join(home, "sessions"),
+		"memory":      home,
+		"cache":       filepath.Join(home, "cache"),
+	}
+	for name, path := range paths {
+		if path != want[name] {
+			t.Errorf("%s path = %q, want %q", name, path, want[name])
+		}
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("ApplyHomeOverride created profile directory: %v", err)
+	}
+}
+
+func TestNormalizeHomeOverrideRejectsInvalidPaths(t *testing.T) {
+	if _, err := NormalizeHomeOverride("   "); err == nil {
+		t.Fatal("empty home unexpectedly succeeded")
+	}
+	if _, err := NormalizeHomeOverride("${REASONIX_MISSING_HOME}/profile"); err == nil {
+		t.Fatal("missing embedded variable unexpectedly succeeded")
+	}
+	path := filepath.Join(t.TempDir(), "profile-file")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NormalizeHomeOverride(path); err == nil {
+		t.Fatal("file home unexpectedly succeeded")
+	}
+}
+
+func TestNormalizeHomeOverrideExpandsRelativeAndTildePaths(t *testing.T) {
+	base := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(base); err == nil {
+		base = resolved
+	}
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(base); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(old) })
+
+	got, err := NormalizeHomeOverride(filepath.Join("profiles", "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(base, "profiles", "test"); !samePath(got, want) {
+		t.Fatalf("relative home = %q, want %q", got, want)
+	}
+
+	t.Setenv("REASONIX_TEST_PROFILE_ROOT", base)
+	got, err = NormalizeHomeOverride("${REASONIX_TEST_PROFILE_ROOT}/expanded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(base, "expanded"); !samePath(got, want) {
+		t.Fatalf("expanded home = %q, want %q", got, want)
+	}
+
+	oldHome := osUserHomeDir
+	osUserHomeDir = func() (string, error) { return base, nil }
+	t.Cleanup(func() { osUserHomeDir = oldHome })
+	got, err = NormalizeHomeOverride("~/profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(base, "profile"); !samePath(got, want) {
+		t.Fatalf("tilde home = %q, want %q", got, want)
+	}
+}
+
 func TestIsolatedHomeDirEmptyByDefault(t *testing.T) {
 	t.Setenv("REASONIX_HOME", "")
 	if got := IsolatedHomeDir(); got != "" {

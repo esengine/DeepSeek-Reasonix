@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -100,7 +101,17 @@ func main() {
 		os.Exit(exitCode)
 	}
 
-	launch := parseDesktopLaunchArgs(os.Args[1:])
+	launch, err := parseDesktopLaunchArgs(os.Args[1:])
+	if err != nil {
+		println("Error:", err.Error())
+		os.Exit(2)
+	}
+	if launch.Home != "" {
+		if _, err := config.ApplyHomeOverride(launch.Home); err != nil {
+			println("Error: invalid --home:", err.Error())
+			os.Exit(2)
+		}
+	}
 	if config.SafeModeRequested() {
 		launch.SafeMode = true
 	}
@@ -157,7 +168,7 @@ func main() {
 	// Other platforms provide a no-op implementation.
 	scheduleWebKitSignalHandlerRepair()
 
-	err := wails.Run(&options.App{
+	err = wails.Run(&options.App{
 		Title:     title,
 		Width:     width,
 		Height:    height,
@@ -232,14 +243,33 @@ func main() {
 
 type desktopLaunchOptions struct {
 	SafeMode bool
+	Home     string
 }
 
-func parseDesktopLaunchArgs(args []string) desktopLaunchOptions {
+func parseDesktopLaunchArgs(args []string) (desktopLaunchOptions, error) {
 	var out desktopLaunchOptions
-	for _, arg := range args {
-		if arg == "--safe-mode" {
+	parseHome := true
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			parseHome = false
+			continue
+		}
+		switch {
+		case arg == "--safe-mode":
 			out.SafeMode = true
+		case parseHome && arg == "--home":
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "-") {
+				return out, fmt.Errorf("--home requires a path")
+			}
+			out.Home = args[i+1]
+			i++
+		case parseHome && strings.HasPrefix(arg, "--home="):
+			out.Home = strings.TrimPrefix(arg, "--home=")
+			if strings.TrimSpace(out.Home) == "" {
+				return out, fmt.Errorf("--home requires a path")
+			}
 		}
 	}
-	return out
+	return out, nil
 }
