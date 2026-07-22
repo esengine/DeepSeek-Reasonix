@@ -51,7 +51,7 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # and Anthropic/token-plan regions, MiniMax CN/Global API and Anthropic routes,
 # GLM/Z.AI CN/Global API and coding-plan routes, OpenCode Go/Zen, Qwen/DashScope
 # CN/Global API and coding-plan routes, StepFun, NovitaAI, GMI, Vercel AI
-# Gateway, HuggingFace, NVIDIA, KiloCode, and Ollama Cloud.
+# Gateway, HuggingFace, NVIDIA, Atlas Cloud, KiloCode, and Ollama Cloud.
 [[providers]]
 name        = "deepseek"
 kind        = "openai"
