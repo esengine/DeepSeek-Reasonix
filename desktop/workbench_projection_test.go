@@ -49,6 +49,29 @@ func TestWorkbenchSnapshotProjectionUsesRemoteWorkspaceAndProfile(t *testing.T) 
 	}
 }
 
+func TestWorkbenchSnapshotProjectionPreservesCanonicalTodos(t *testing.T) {
+	content := "Ship the fix"
+	meta := workbenchMeta(protocol.SessionSnapshot{Todos: []protocol.TodoItem{{
+		Content: &content, Status: protocol.TodoCompleted, ActiveForm: "Shipping the fix", Level: 1,
+	}}}, "/srv/app")
+	if meta.CanonicalTodos == nil {
+		t.Fatal("canonical todos are unavailable, want projected remote snapshot")
+	}
+	if got := *meta.CanonicalTodos; len(got) != 1 || got[0].Content != content || got[0].Status != "completed" || got[0].ActiveForm != "Shipping the fix" || got[0].Level != 1 {
+		t.Fatalf("canonical todos = %+v", got)
+	}
+
+	empty := workbenchMeta(protocol.SessionSnapshot{Todos: []protocol.TodoItem{}}, "/srv/app")
+	if empty.CanonicalTodos == nil || len(*empty.CanonicalTodos) != 0 {
+		t.Fatalf("empty canonical todos = %#v, want authoritative empty list", empty.CanonicalTodos)
+	}
+
+	unavailable := workbenchMeta(protocol.SessionSnapshot{}, "/srv/app")
+	if unavailable.CanonicalTodos != nil {
+		t.Fatalf("unavailable canonical todos = %#v, want omitted field", unavailable.CanonicalTodos)
+	}
+}
+
 func TestWorkbenchContextProjectionPreservesAllSourceTotals(t *testing.T) {
 	context := workbenchContextInfo(protocol.ContextView{
 		UsedTokens: 10, WindowTokens: 100, TotalTokens: 30, SessionCacheHitTokens: 7, SessionCacheMissTokens: 2,

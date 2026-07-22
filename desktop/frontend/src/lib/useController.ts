@@ -1690,26 +1690,6 @@ function settingSwitchNoticeText(
   return t(keys.failed, { err: msg });
 }
 
-async function refreshMetaForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<void> {
-  try {
-    dispatchTo(tabId, { type: "meta", meta: await app.MetaForTab(tabId) });
-    dispatchTo(tabId, { type: "context", context: await app.ContextUsageForTab(tabId) });
-    dispatchTo(tabId, { type: "effort", effort: await app.EffortForTab(tabId) });
-  } catch {
-    /* ignore */
-  }
-}
-
-async function refreshMetaOnlyForTab(tabId: string, dispatchTo: (tabId: string, action: Action) => void): Promise<Meta | undefined> {
-  try {
-    const meta = await app.MetaForTab(tabId);
-    dispatchTo(tabId, { type: "meta", meta });
-    return meta;
-  } catch {
-    return undefined;
-  }
-}
-
 export function replayPendingPromptsForActiveTab(activeTabId: string | undefined, replay: () => Promise<void> = () => app.ReplayPendingPrompts()): void {
   if (!activeTabId) return;
   void replay().catch(() => {});
@@ -1783,16 +1763,52 @@ export function useController() {
   }, []);
 
   const checkpointRefreshSeq = useRef(new Map<string, number>());
+  const metaRefreshSeq = useRef(new Map<string, number>());
   const sessionLoadSeq = useRef(new Map<string, number>());
   const sessionLoadInFlight = useRef(new Map<string, { sessionPath: string; promise: Promise<void> }>());
+  const bumpMetaRefreshSeq = useCallback((tabId: string): number => {
+    const seq = (metaRefreshSeq.current.get(tabId) ?? 0) + 1;
+    metaRefreshSeq.current.set(tabId, seq);
+    return seq;
+  }, []);
+  const metaRefreshCurrent = useCallback((tabId: string, seq: number): boolean => {
+    return metaRefreshSeq.current.get(tabId) === seq;
+  }, []);
   const bumpSessionLoadSeq = useCallback((tabId: string): number => {
+    // A session transition changes the meaning of every tab-scoped Meta field.
+    // Invalidate requests that started against the previous session before
+    // resetting or hydrating the visible state.
+    bumpMetaRefreshSeq(tabId);
     const seq = (sessionLoadSeq.current.get(tabId) ?? 0) + 1;
     sessionLoadSeq.current.set(tabId, seq);
     return seq;
-  }, []);
+  }, [bumpMetaRefreshSeq]);
   const sessionLoadCurrent = useCallback((tabId: string, seq: number): boolean => {
     return sessionLoadSeq.current.get(tabId) === seq;
   }, []);
+  const loadMetaForTab = useCallback(async (tabId: string): Promise<Meta | undefined> => {
+    const seq = bumpMetaRefreshSeq(tabId);
+    const meta = await app.MetaForTab(tabId).catch(() => undefined);
+    if (!metaRefreshCurrent(tabId, seq)) return undefined;
+    return meta;
+  }, [bumpMetaRefreshSeq, metaRefreshCurrent]);
+  const refreshMetaOnlyForTab = useCallback(async (tabId: string): Promise<Meta | undefined> => {
+    const meta = await loadMetaForTab(tabId);
+    if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
+    return meta;
+  }, [dispatchTo, loadMetaForTab]);
+  const refreshMetaForTab = useCallback(async (tabId: string): Promise<void> => {
+    const sessionSeq = sessionLoadSeq.current.get(tabId) ?? 0;
+    const meta = await refreshMetaOnlyForTab(tabId);
+    if (meta === undefined || (sessionLoadSeq.current.get(tabId) ?? 0) !== sessionSeq) return;
+    const [context, effort] = await Promise.all([
+      app.ContextUsageForTab(tabId).catch(() => undefined),
+      app.EffortForTab(tabId).catch(() => undefined),
+    ]);
+    if ((sessionLoadSeq.current.get(tabId) ?? 0) !== sessionSeq) return;
+    if (context !== undefined) dispatchTo(tabId, { type: "context", context });
+    if (effort !== undefined) dispatchTo(tabId, { type: "effort", effort });
+  }, [dispatchTo, refreshMetaOnlyForTab]);
   const bumpCheckpointRefreshSeq = useCallback((tabId: string): number => {
     const seq = (checkpointRefreshSeq.current.get(tabId) ?? 0) + 1;
     checkpointRefreshSeq.current.set(tabId, seq);
@@ -1892,7 +1908,7 @@ export function useController() {
         addBreadcrumb("tab.hydrate", `ancillary skipped inactive ${reason} ${tabId}`);
         return;
       }
-      const meta = await loadTimed("meta", () => app.MetaForTab(tabId));
+      const meta = await loadTimed("meta", () => loadMetaForTab(tabId));
       if (!stillCurrent()) return;
       if (!stillVisible()) {
         addBreadcrumb("tab.hydrate", `meta ignored inactive ${reason} ${tabId}`);
@@ -1946,7 +1962,7 @@ export function useController() {
         sessionLoadInFlight.current.delete(tabId);
       }
     }
-  }, [bumpSessionLoadSeq, dispatchTo, sessionLoadCurrent]);
+  }, [bumpSessionLoadSeq, dispatchTo, loadMetaForTab, sessionLoadCurrent]);
 
   const loadOlderHistory = useCallback(async (tabId?: string): Promise<void> => {
     const targetTabId = tabId || activeTabIdRef.current;
@@ -2160,7 +2176,7 @@ export function useController() {
         app.BalanceForTab(targetTabId).then((balance) => dispatchTo(targetTabId, { type: "balance", balance })).catch(() => {});
         app.EffortForTab(targetTabId).then((effort) => dispatchTo(targetTabId, { type: "effort", effort })).catch(() => {});
         void refreshCheckpoints(targetTabId);
-        void refreshMetaForTab(targetTabId, dispatchTo);
+        void refreshMetaForTab(targetTabId);
       }
       if (e.kind === "turn_done" || e.kind === "notice") {
         app.JobsForTab(targetTabId).then((jobs) => dispatchTo(targetTabId, { type: "jobs", jobs: asArray(jobs) })).catch(() => {});
@@ -2212,7 +2228,7 @@ export function useController() {
       offReady();
       offRebuilt();
     };
-  }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, syncActiveTabFromBackend]);
+  }, [dispatchTo, loadSessionDataForTab, refreshCheckpoints, refreshMetaForTab, syncActiveTabFromBackend]);
 
   // Keep shared all-source telemetry live between turn boundaries. Delivery
   // mode can complete dozens of provider requests inside one UI turn, while
@@ -2270,7 +2286,7 @@ export function useController() {
       if (!stillCurrent()) return;
       const current = statesRef.current.get(tabId);
       if (!current?.meta || current.meta.ready || current.meta.startupErr || current.backendActivationPending) return;
-      const nextMeta = await refreshMetaOnlyForTab(tabId, dispatchTo);
+      const nextMeta = await refreshMetaOnlyForTab(tabId);
       if (!stillCurrent()) return;
       if (nextMeta?.ready || nextMeta?.startupErr || attempt + 1 >= STARTUP_READY_META_RECONCILE_ATTEMPTS) return;
       schedule(attempt + 1);
@@ -2281,7 +2297,7 @@ export function useController() {
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [activeTabId, activeState.meta?.ready, activeState.meta?.startupErr, activeState.backendActivationPending, dispatchTo]);
+  }, [activeTabId, activeState.meta?.ready, activeState.meta?.startupErr, activeState.backendActivationPending, refreshMetaOnlyForTab]);
 
   // Stale-turn watchdog: if the frontend thinks the agent is running but the
   // turn stream has gone quiet, reconcile with the backend. This catches cases
@@ -2491,8 +2507,8 @@ export function useController() {
   const setCollaborationModeForTab = useCallback(async (tabId: string, mode: CollaborationMode): Promise<void> => {
     if (!tabId) return;
     await app.SetCollaborationModeForTab(tabId, mode).catch(() => {});
-    await refreshMetaForTab(tabId, dispatchTo);
-  }, [dispatchTo]);
+    await refreshMetaForTab(tabId);
+  }, [refreshMetaForTab]);
 
   const setCollaborationMode = useCallback(async (mode: CollaborationMode): Promise<void> => {
     if (!activeTabId) return;
@@ -2508,8 +2524,8 @@ export function useController() {
     const drained = await app.SetToolApprovalModeForTab(tabId, mode).catch(() => undefined);
     const ids = Array.isArray(drained) ? drained : [];
     if (ids.length) dispatchTo(tabId, { type: "approval_drained", ids, epoch });
-    await refreshMetaForTab(tabId, dispatchTo);
-  }, [dispatchTo]);
+    await refreshMetaForTab(tabId);
+  }, [dispatchTo, refreshMetaForTab]);
 
   const setToolApprovalMode = useCallback(async (mode: ToolApprovalMode): Promise<void> => {
     if (!activeTabId) return;
@@ -2519,8 +2535,8 @@ export function useController() {
   const setGoalForTab = useCallback(async (tabId: string, goal: string): Promise<void> => {
     if (!tabId) return;
     await app.SetGoalForTab(tabId, goal).catch(() => {});
-    await refreshMetaForTab(tabId, dispatchTo);
-  }, [dispatchTo]);
+    await refreshMetaForTab(tabId);
+  }, [refreshMetaForTab]);
 
   const setGoal = useCallback(async (goal: string): Promise<void> => {
     if (!activeTabId) return;
@@ -2530,8 +2546,8 @@ export function useController() {
   const clearGoalForTab = useCallback(async (tabId: string): Promise<void> => {
     if (!tabId) return;
     await app.ClearGoalForTab(tabId).catch(() => {});
-    await refreshMetaForTab(tabId, dispatchTo);
-  }, [dispatchTo]);
+    await refreshMetaForTab(tabId);
+  }, [refreshMetaForTab]);
 
   const clearGoal = useCallback(async (): Promise<void> => {
     if (!activeTabId) return;
@@ -2542,12 +2558,12 @@ export function useController() {
     if (!tabId) return false;
     try {
       const resumed = await app.ResumeGoalForTab(tabId);
-      await refreshMetaForTab(tabId, dispatchTo);
+      await refreshMetaForTab(tabId);
       return resumed;
     } catch {
       return false;
     }
-  }, [dispatchTo]);
+  }, [refreshMetaForTab]);
 
   const resumeGoal = useCallback(async (): Promise<boolean> => {
     if (!activeTabId) return false;
@@ -2582,11 +2598,11 @@ export function useController() {
     if (tabId) {
       dispatchTo(tabId, { type: "history", messages: [] });
       dispatchTo(tabId, { type: "hydrate_done" });
-      void refreshMetaForTab(tabId, dispatchTo);
+      void refreshMetaForTab(tabId);
       app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
       void refreshCheckpoints(tabId);
     }
-  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, waitForTabReady]);
+  }, [activeTabId, bumpCheckpointRefreshSeq, bumpSessionLoadSeq, dispatchTo, loadSessionDataForTab, refreshCheckpoints, refreshMetaForTab, waitForTabReady]);
 
   const clearSession = useCallback(async () => {
     const tabId = activeTabId;
@@ -2637,12 +2653,11 @@ export function useController() {
     dispatchTo(targetTabId, { type: "reset" });
     dispatchTo(targetTabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(targetTabId, { type: "hydrate_done" });
-    const meta = await app.MetaForTab(targetTabId).catch(() => undefined);
+    await refreshMetaOnlyForTab(targetTabId);
     if (!sessionLoadCurrent(targetTabId, seq)) return;
-    if (meta !== undefined) dispatchTo(targetTabId, { type: "meta", meta });
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
-  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
+  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string) => {
     if (!tabId) return;
@@ -2664,12 +2679,11 @@ export function useController() {
     dispatchTo(tabId, { type: "reset" });
     dispatchTo(tabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(tabId, { type: "hydrate_done" });
-    const meta = await app.MetaForTab(tabId).catch(() => undefined);
+    await refreshMetaOnlyForTab(tabId);
     if (!sessionLoadCurrent(tabId, seq)) return;
-    if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
     app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(tabId);
-  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForTabReady]);
+  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
   const deleteSession = useCallback((path: string) => app.DeleteSession(path).finally(() => invalidateCache()), []);
@@ -2679,12 +2693,8 @@ export function useController() {
 
   const refreshMeta = useCallback(async () => {
     if (!activeTabId) return;
-    try {
-      dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
-    } catch { /* ignore */ }
-  }, [activeTabId, dispatchTo]);
+    await refreshMetaForTab(activeTabId);
+  }, [activeTabId, refreshMetaForTab]);
 
   const refreshWorkspaceState = useCallback(async (path: string): Promise<string> => {
     if (path) await syncActiveTabFromBackend(true);
@@ -2716,12 +2726,8 @@ export function useController() {
       dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: modelSwitchNoticeText(err) });
       return;
     }
-    try {
-      dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
-    } catch { /* ignore */ }
-  }, [activeTabId, dispatchTo]);
+    await refreshMetaForTab(activeTabId);
+  }, [activeTabId, dispatchTo, refreshMetaForTab]);
 
   const setEffort = useCallback(async (level: string) => {
     if (!activeTabId) return;
@@ -2731,12 +2737,8 @@ export function useController() {
       dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: effortSwitchNoticeText(err) });
       return;
     }
-    try {
-      dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
-    } catch { /* ignore */ }
-  }, [activeTabId, dispatchTo]);
+    await refreshMetaForTab(activeTabId);
+  }, [activeTabId, dispatchTo, refreshMetaForTab]);
 
   const setTokenMode = useCallback(async (mode: TokenMode): Promise<boolean> => {
     if (!activeTabId) return false;
@@ -2746,13 +2748,9 @@ export function useController() {
       dispatchTo(activeTabId, { type: "local_notice", level: "warn", text: tokenModeSwitchNoticeText(err) });
       return false;
     }
-    try {
-      dispatchTo(activeTabId, { type: "meta", meta: await app.MetaForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "context", context: await app.ContextUsageForTab(activeTabId) });
-      dispatchTo(activeTabId, { type: "effort", effort: await app.EffortForTab(activeTabId) });
-    } catch { /* ignore */ }
+    await refreshMetaForTab(activeTabId);
     return true;
-  }, [activeTabId, dispatchTo]);
+  }, [activeTabId, dispatchTo, refreshMetaForTab]);
 
   const fetchMemory = useCallback((): Promise<MemoryView> =>
     app.Memory().catch(() => ({ docs: [], facts: [], archives: [], scopes: [], storeDir: "", available: false })), []);
@@ -2814,7 +2812,7 @@ export function useController() {
       const messages = asArray(await app.HistoryForTab(sourceTabId).catch(() => [] as HistoryMessage[]));
       dispatchTo(sourceTabId, { type: "reset" });
       dispatchTo(sourceTabId, { type: "history", messages });
-      await refreshMetaOnlyForTab(sourceTabId, dispatchTo);
+      await refreshMetaOnlyForTab(sourceTabId);
       dispatchTo(sourceTabId, { type: "context", context: await app.ContextUsageForTab(sourceTabId) });
       dispatchTo(sourceTabId, { type: "checkpoints", checkpoints: asArray(await app.CheckpointsForTab(sourceTabId)) });
       return true;
@@ -2824,7 +2822,7 @@ export function useController() {
     } finally {
       dispatchTo(sourceTabId, { type: "message_action_done" });
     }
-  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, syncActiveTabFromBackend, waitForTabReady]);
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime, refreshMetaOnlyForTab, syncActiveTabFromBackend, waitForTabReady]);
 
   const rewind = useCallback(async (turn: number, scope: string): Promise<boolean> => {
     if (!activeTabId) return false;
