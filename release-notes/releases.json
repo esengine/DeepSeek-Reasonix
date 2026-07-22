@@ -2,6 +2,283 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.17.19",
+      "date": "2026-07-22",
+      "channel": "stable",
+      "title": {
+        "en": "Zero-config MCPs, reliable Todos, and a sharper desktop",
+        "zh": "零配置 MCP、可靠待办与更顺手的桌面体验"
+      },
+      "summary": {
+        "en": "This release makes trusted MCP servers connect reliably with less setup, keeps Todo progress authoritative across local and remote sessions, improves workspace navigation and selected-context previews, and hardens Auto decisions, configuration persistence, registry review, and Windows packaging.",
+        "zh": "此版本让可信 MCP 服务器以更少配置可靠连接，让本地与远程会话中的待办进度保持权威一致，并改进工作区导航和选中内容预览，同时强化 Auto 决策、配置持久化、市场审核与 Windows 打包。"
+      },
+      "surfaces": [
+        "mcp",
+        "desktop",
+        "agent",
+        "cli",
+        "registry"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "Review the updated Auto behavior and the decisions that still require explicit user input.",
+            "zh": "了解更新后的 Auto 行为，以及仍需要用户明确选择的决策边界。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/b8f715b546ee1252530005ff1d7c3b157beed644/docs/TOOL_APPROVAL_MODES.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Trusted MCP servers work with less setup",
+            "zh": "可信 MCP 服务器开箱即用"
+          },
+          "body": {
+            "en": "Installed and authorized MCP servers now register cached tools immediately, start on demand, expose clearer runtime state, and shut down without leaving schema-cache writes behind.",
+            "zh": "已安装并授权的 MCP 服务器现在会立即注册缓存工具、按需启动、展示更清晰的运行状态，并在关闭时等待 schema 缓存写入完成。"
+          },
+          "refs": [
+            6819,
+            6829,
+            6840
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Todo progress stays authoritative",
+            "zh": "待办进度保持权威一致"
+          },
+          "body": {
+            "en": "The Desktop Todo panel now follows canonical server state across completion, resume, rewind, session switches, and Remote Workbench snapshots instead of reviving stale transcript data.",
+            "zh": "桌面端待办面板现在会在完成、恢复、回滚、会话切换和远程工作台快照中遵循服务端规范状态，不再复活历史记录里的过期待办。"
+          },
+          "refs": [
+            6774
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "A more capable workspace view",
+            "zh": "更强的工作区浏览体验"
+          },
+          "body": {
+            "en": "The file tree remembers useful expansion state, compacts directory chains, adds Seti file icons and nesting guides, while selected chat or code context remains visible as an expandable message card.",
+            "zh": "文件树现在会记住有用的展开状态、折叠连续目录、显示 Seti 文件图标和层级引导线；选中的聊天或代码上下文也会以可展开卡片保留在消息中。"
+          },
+          "refs": [
+            6807,
+            6813
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Auto asks only at real plan boundaries",
+            "zh": "Auto 只在真正的计划边界介入"
+          },
+          "body": {
+            "en": "Routine allowed work continues automatically, while genuine strategy or scope transitions receive a neutral plan comparison across Desktop, CLI, and bot clients.",
+            "zh": "常规且已获允许的工作会继续自动执行；真正涉及策略或范围变化时，桌面端、CLI 与 Bot 会显示中立的计划对比供用户选择。"
+          },
+          "refs": [
+            6817
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Plugin submissions in the community registry",
+              "zh": "社区市场支持提交插件"
+            },
+            "body": {
+              "en": "Publishers can submit plugin packages alongside skills and MCP servers, with validated metadata and install routing.",
+              "zh": "发布者现在可以像提交 Skill 和 MCP 服务器一样提交插件包，并使用经过校验的元数据和安装路由。"
+            },
+            "refs": [
+              6816
+            ]
+          },
+          {
+            "title": {
+              "en": "Selected-context cards in messages",
+              "zh": "消息中的选中上下文卡片"
+            },
+            "body": {
+              "en": "Selected chat excerpts and code added to a prompt remain visible and expandable after sending without duplicating model-visible context.",
+              "zh": "加入提示词的聊天摘录和代码在发送后仍会以可展开卡片显示，同时不会重复注入模型上下文。"
+            },
+            "refs": [
+              6813
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Reliable MCP installation and lifecycle",
+              "zh": "更可靠的 MCP 安装与生命周期"
+            },
+            "body": {
+              "en": "Quick install, manual setup, and JSON setup now share one flow; enable, disable, retry, child-agent inheritance, startup single-flight, project-relative commands, and cleanup follow consistent host-side rules.",
+              "zh": "快速安装、手动配置与 JSON 配置现在共用一套流程；启用、停用、重试、子 Agent 继承、启动去重、项目相对命令和关闭清理均遵循一致的宿主侧规则。"
+            },
+            "refs": [
+              6819,
+              6829,
+              6840
+            ]
+          },
+          {
+            "title": {
+              "en": "Workspace tree navigation",
+              "zh": "工作区文件树导航"
+            },
+            "body": {
+              "en": "Expansion memory, compact directory chains, nesting guides, and bundled Seti icons make large workspaces easier to scan on macOS and Windows.",
+              "zh": "展开状态记忆、连续目录折叠、层级引导线和内置 Seti 图标，让 macOS 与 Windows 上的大型工作区更易浏览。"
+            },
+            "refs": [
+              6807
+            ]
+          },
+          {
+            "title": {
+              "en": "Theme editor usability",
+              "zh": "主题编辑器可用性"
+            },
+            "body": {
+              "en": "Save actions, keyboard focus, Escape handling, busy state, and narrow-window layout now behave consistently inside Settings.",
+              "zh": "设置中的主题编辑器现在能一致处理保存操作、键盘焦点、Escape、忙碌状态和窄窗口布局。"
+            },
+            "refs": [
+              6821
+            ]
+          },
+          {
+            "title": {
+              "en": "Safer registry moderation",
+              "zh": "更安全的市场审核"
+            },
+            "body": {
+              "en": "Publisher updates return to review, clear stale verification, and require approval against the exact revision so concurrent changes fail closed.",
+              "zh": "发布者更新会重新进入审核、清除旧的认证状态，并要求针对精确修订批准，让并发变更以安全方式失败。"
+            },
+            "refs": [
+              6830
+            ]
+          },
+          {
+            "title": {
+              "en": "Clearer MiniMax content-review errors",
+              "zh": "更清晰的 MiniMax 内容审查错误"
+            },
+            "body": {
+              "en": "MiniMax review failures now preserve upstream diagnostics and explain that the full conversation context may be involved instead of suggesting an ineffective retry.",
+              "zh": "MiniMax 内容审查失败现在会保留上游诊断，并说明完整对话上下文可能相关，不再建议无效重试。"
+            },
+            "refs": [
+              6824
+            ]
+          },
+          {
+            "title": {
+              "en": "ACP command availability after session startup",
+              "zh": "ACP 会话启动后的命令可用性"
+            },
+            "body": {
+              "en": "Command updates are now sent only after new, loaded, or resumed session responses, so clients can register before notifications arrive.",
+              "zh": "新建、加载或恢复会话时，命令更新现在会在会话响应之后发送，让客户端有机会先完成订阅。"
+            },
+            "refs": [
+              6803
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Permission edits preserve the full policy",
+              "zh": "权限更新保留完整策略"
+            },
+            "body": {
+              "en": "Remembering a new allow rule no longer drops mode, ask, deny, comments, or unknown permission fields, and concurrent writers are serialized across processes.",
+              "zh": "记住新的允许规则时不再丢失 mode、ask、deny、注释或未知权限字段，并会跨进程序列化并发写入。"
+            },
+            "refs": [
+              6784
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows portable packages keep the GUI launcher",
+              "zh": "Windows 便携包保留图形启动器"
+            },
+            "body": {
+              "en": "The bundled CLI now uses a distinct internal filename, preventing case-insensitive staging from replacing Reasonix.exe with the console executable.",
+              "zh": "内置 CLI 现在使用独立的内部文件名，避免不区分大小写的打包目录把 Reasonix.exe 图形启动器替换成控制台程序。"
+            },
+            "refs": [
+              6806
+            ]
+          },
+          {
+            "title": {
+              "en": "Todo panels no longer revive completed work",
+              "zh": "待办面板不再复活已完成任务"
+            },
+            "body": {
+              "en": "Canonical Todo snapshots now win over transcript reconstruction, including authoritative empty lists and guarded asynchronous refreshes.",
+              "zh": "规范 Todo 快照现在优先于历史记录重建，并正确处理权威空列表和受保护的异步刷新。"
+            },
+            "refs": [
+              6774
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "No manual migration required",
+            "zh": "无需手动迁移"
+          },
+          "body": {
+            "en": "Existing providers, sessions, projects, and MCP definitions continue to load. MCP enable and disable choices are stored in a new separate activation file when changed; a missing file preserves legacy auto_start behavior.",
+            "zh": "现有 Provider、会话、项目和 MCP 定义会继续正常加载。MCP 启用或停用选择在发生更改后会写入新的独立 activation 文件；文件缺失时仍保留旧版 auto_start 行为。"
+          },
+          "refs": [
+            6829
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "erphenheimer",
+        "JesonChou",
+        "SauronSkywalker",
+        "ffff2004",
+        "par73e"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.19",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.18...desktop-v1.17.19",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.18",
       "date": "2026-07-22",
       "channel": "stable",
