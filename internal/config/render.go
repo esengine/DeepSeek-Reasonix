@@ -235,10 +235,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	} else {
 		b.WriteString("# plan_mode_read_only_commands = [\"gh issue view\"]   # legacy compatibility only; Plan bash uses Permissions\n")
 	}
-	if c.Agent.PlannerModel != "" {
-		fmt.Fprintf(&b, "planner_model = %q   # low-frequency planner (two-model collaboration)\n", c.Agent.PlannerModel)
+	if c.Agent.ContextModel != "" {
+		fmt.Fprintf(&b, "context_model = %q   # pre-turn context research model\n", c.Agent.ContextModel)
 	} else {
-		b.WriteString("# planner_model = \"deepseek-pro\"   # optional: enable two-model collaboration\n")
+		b.WriteString("# context_model = \"deepseek-pro\"   # optional: pre-turn context research\n")
 	}
 	if c.Agent.SubagentModel != "" {
 		fmt.Fprintf(&b, "subagent_model = %q   # default model for runAs=subagent skills\n", c.Agent.SubagentModel)
@@ -890,8 +890,8 @@ func RenderTOMLProjectDelta(c *Config) string {
 		fmt.Fprintf(&agentBuf, "plan_mode_read_only_commands = %s\n", renderStringArray(c.Agent.PlanModeReadOnlyCommands))
 		anyAgent = true
 	}
-	if c.Agent.PlannerModel != "" && c.Agent.PlannerModel != d.Agent.PlannerModel {
-		fmt.Fprintf(&agentBuf, "planner_model = %q\n", c.Agent.PlannerModel)
+	if c.Agent.ContextModel != "" && c.Agent.ContextModel != d.Agent.ContextModel {
+		fmt.Fprintf(&agentBuf, "context_model = %q\n", c.Agent.ContextModel)
 		anyAgent = true
 	}
 	if c.Agent.SubagentModel != "" && c.Agent.SubagentModel != d.Agent.SubagentModel {

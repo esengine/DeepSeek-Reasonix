@@ -123,7 +123,7 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 		Models:  []string{customModel},
 		Default: customModel,
 	})
-	cfg.Agent.PlannerModel = customProvider + "/" + customModel
+	cfg.Agent.ContextModel = customProvider + "/" + customModel
 	cfg.Desktop.ProviderAccess = []string{customProvider}
 	cfg.Bot.Connections = []config.BotConnectionConfig{{
 		Provider: "feishu",
@@ -148,7 +148,7 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 		"settings_status_bar_items_count":  "n_3",
 		"settings_check_updates":           "off",
 		"settings_default_model":           "deepseek_deepseek_v4_flash",
-		"settings_planner_model":           metricBucket("custom_" + customProvider + "_" + customModel),
+		"settings_context_model":           metricBucket("custom_" + customProvider + "_" + customModel),
 		"settings_provider_access":         metricBucket("custom_" + customProvider),
 		"settings_bot_enabled":             "off",
 		"settings_bot_connection_count":    "n_1",
@@ -164,18 +164,18 @@ func TestObserveSettingsSnapshotUsesSafeBuckets(t *testing.T) {
 	}
 }
 
-func TestObserveSettingsSnapshotCountsDisabledPlannerAsOff(t *testing.T) {
+func TestObserveSettingsSnapshotCountsDisabledContextAsOff(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.PlannerModel = ""
+	cfg.Agent.ContextModel = ""
 
 	m := newMetricsAggregator(t.TempDir())
 	m.observeSettingsSnapshot(cfg)
 
-	if got := m.c["settings_planner_model"]["off"]; got != 1 {
-		t.Fatalf("settings_planner_model/off = %d, want 1", got)
+	if got := m.c["settings_context_model"]["off"]; got != 1 {
+		t.Fatalf("settings_context_model/off = %d, want 1", got)
 	}
-	if got := m.c["settings_planner_model"][safeModelBucket(cfg, cfg.DefaultModel)]; got != 0 {
-		t.Fatalf("disabled planner should not count the default model, got %d", got)
+	if got := m.c["settings_context_model"][safeModelBucket(cfg, cfg.DefaultModel)]; got != 0 {
+		t.Fatalf("disabled context model should not count the default model, got %d", got)
 	}
 }
 

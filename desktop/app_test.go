@@ -4219,7 +4219,7 @@ func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
 		{Name: "prov-a", Kind: "openai", BaseURL: "https://a.example.com", Model: "model-a1", Models: []string{"model-a1", "model-a2"}, APIKeyEnv: "REASONIX_TEST_KEY"},
 		{Name: "prov-b", Kind: "openai", BaseURL: "https://b.example.com", Model: "model-b1", APIKeyEnv: "REASONIX_TEST_KEY"},
 	}
-	cfg.Agent.PlannerModel = "prov-a"
+	cfg.Agent.ContextModel = "prov-a"
 	cfg.Desktop.ProviderAccess = []string{"prov-a", "prov-b"}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -4241,8 +4241,8 @@ func TestDeleteProviderMigratesConfigAndOpenTabs(t *testing.T) {
 	if _, ok := got.Provider("prov-a"); ok {
 		t.Fatal("prov-a should be removed")
 	}
-	if got.DefaultModel != "prov-b" || got.Agent.PlannerModel != "prov-b" {
-		t.Fatalf("model refs after delete = default:%q planner:%q, want prov-b", got.DefaultModel, got.Agent.PlannerModel)
+	if got.DefaultModel != "prov-b" || got.Agent.ContextModel != "prov-b" {
+		t.Fatalf("model refs after delete = default:%q context:%q, want prov-b", got.DefaultModel, got.Agent.ContextModel)
 	}
 	if providerAccessSet(got.Desktop.ProviderAccess)["prov-a"] {
 		t.Fatalf("provider access still contains prov-a: %+v", got.Desktop.ProviderAccess)

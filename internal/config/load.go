@@ -134,6 +134,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	normalizeLegacyEffort(cfg)
 	cfg.ignoredLegacyStepLimits = normalizeLegacyAgentStepLimits(cfg)
 	normalizeRetiredAutoPlan(cfg)
+	normalizePlannerToContextModel(cfg)
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyStepFunBaseURLs(cfg)
 	normalizeLegacyLongCatContextWindows(cfg)
@@ -636,6 +637,24 @@ func normalizeRetiredAutoPlan(c *Config) bool {
 	c.Agent.AutoPlan = "off"
 	c.Agent.AutoPlanClassifier = ""
 	return changed
+}
+
+// normalizePlannerToContextModel migrates the deprecated agent.planner_model
+// key into the new agent.context_model.  If context_model is already set it
+// takes precedence and the old planner_model is silently dropped.
+func normalizePlannerToContextModel(c *Config) {
+	if c == nil {
+		return
+	}
+	if c.Agent.ContextModel != "" {
+		// ContextModel already set — it wins over the deprecated key.
+		c.Agent.PlannerModel = ""
+		return
+	}
+	if c.Agent.PlannerModel != "" {
+		c.Agent.ContextModel = c.Agent.PlannerModel
+		c.Agent.PlannerModel = ""
+	}
 }
 
 func loadDotEnvForEditPath(path string) {
@@ -1328,7 +1347,7 @@ func legacyMimoConfigRefs(c *Config) []string {
 	}
 	refs := []string{
 		c.DefaultModel,
-		c.Agent.PlannerModel,
+		c.Agent.ContextModel,
 		c.Agent.SubagentModel,
 		c.Bot.Model,
 	}
@@ -1469,7 +1488,7 @@ func NormalizeLegacyDesktopProviderAccess(c *Config) {
 		}
 	}
 	addRef(c.DefaultModel)
-	addRef(c.Agent.PlannerModel)
+	addRef(c.Agent.ContextModel)
 	addRef(c.Agent.SubagentModel)
 	for _, ref := range c.Agent.SubagentModels {
 		addRef(ref)
@@ -1656,7 +1675,7 @@ func firstKnownModel(current string, models []string, fallback string) string {
 
 func retargetDesktopOfficialRefs(c *Config, access map[string]bool) {
 	c.DefaultModel = retargetDesktopOfficialRef(c.DefaultModel, access)
-	c.Agent.PlannerModel = retargetDesktopOfficialRef(c.Agent.PlannerModel, access)
+	c.Agent.ContextModel = retargetDesktopOfficialRef(c.Agent.ContextModel, access)
 	c.Agent.SubagentModel = retargetDesktopOfficialRef(c.Agent.SubagentModel, access)
 	for skill, ref := range c.Agent.SubagentModels {
 		c.Agent.SubagentModels[skill] = retargetDesktopOfficialRef(ref, access)

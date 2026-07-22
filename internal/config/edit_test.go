@@ -361,16 +361,16 @@ func TestSetUICloseBehavior(t *testing.T) {
 func TestSetPlannerModel(t *testing.T) {
 	c := Default()
 	if err := c.SetPlannerModel("deepseek-pro"); err != nil {
-		t.Fatalf("set planner: %v", err)
+		t.Fatalf("set context model: %v", err)
 	}
-	if c.Agent.PlannerModel != "deepseek-pro" {
-		t.Errorf("planner = %q", c.Agent.PlannerModel)
+	if c.Agent.ContextModel != "deepseek-pro" {
+		t.Errorf("context = %q", c.Agent.ContextModel)
 	}
-	if err := c.SetPlannerModel(""); err != nil || c.Agent.PlannerModel != "" {
-		t.Errorf("clearing planner failed: err=%v planner=%q", err, c.Agent.PlannerModel)
+	if err := c.SetPlannerModel(""); err != nil || c.Agent.ContextModel != "" {
+		t.Errorf("clearing context model failed: err=%v context=%q", err, c.Agent.ContextModel)
 	}
 	if err := c.SetPlannerModel("ghost"); err == nil {
-		t.Error("expected error for unknown planner")
+		t.Error("expected error for unknown context model")
 	}
 }
 
@@ -763,7 +763,7 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 
 func TestRemoveProvider(t *testing.T) {
 	c := Default()
-	c.Agent.PlannerModel = "deepseek-pro"
+	c.Agent.ContextModel = "deepseek-pro"
 
 	// Cannot remove the default model when no configured fallback is available.
 	for i := range c.Providers {
@@ -772,12 +772,12 @@ func TestRemoveProvider(t *testing.T) {
 	if err := c.RemoveProvider(c.DefaultModel); err == nil {
 		t.Error("expected error removing the default model")
 	}
-	// Removing the planner provider clears planner_model.
+	// Removing the context model provider clears context_model.
 	if err := c.RemoveProvider("deepseek-pro"); err != nil {
-		t.Fatalf("remove planner provider: %v", err)
+		t.Fatalf("remove context model provider: %v", err)
 	}
-	if c.Agent.PlannerModel != "" {
-		t.Errorf("planner should be cleared, got %q", c.Agent.PlannerModel)
+	if c.Agent.ContextModel != "" {
+		t.Errorf("context model should be cleared, got %q", c.Agent.ContextModel)
 	}
 	if _, ok := c.Provider("deepseek-pro"); ok {
 		t.Error("provider not actually removed")
@@ -1074,8 +1074,8 @@ func TestSaveToRoundTrips(t *testing.T) {
 	if got.DefaultModel != "deepseek-pro" {
 		t.Errorf("default_model = %q", got.DefaultModel)
 	}
-	if got.Agent.PlannerModel != "deepseek-pro" {
-		t.Errorf("planner_model = %q", got.Agent.PlannerModel)
+	if got.Agent.ContextModel != "deepseek-pro" {
+		t.Errorf("context_model = %q", got.Agent.ContextModel)
 	}
 	if _, ok := got.Provider("local"); !ok {
 		t.Error("added provider 'local' missing after round-trip")

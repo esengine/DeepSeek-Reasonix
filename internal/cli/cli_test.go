@@ -715,7 +715,7 @@ func TestProvidersWithMissingKeysIncludesReferencedSecondaryModels(t *testing.T)
 		config.ProviderEntry{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY"},
 		config.ProviderEntry{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY"},
 	)
-	cfg.Agent.PlannerModel = "mimo-pro"
+	cfg.Agent.ContextModel = "mimo-pro"
 	cfg.Agent.SubagentModel = "mimo-flash"
 	cfg.Agent.SubagentModels = map[string]string{
 		"review": "mimo-pro/mimo-v2.5-pro",
@@ -1564,7 +1564,7 @@ func TestProvidersWithMissingKeysIncludesPlannerModel(t *testing.T) {
 	t.Setenv("MIMO_API_KEY", "")
 	cfg := config.Default()
 	cfg.Providers = append(cfg.Providers, config.ProviderEntry{Name: "mimo-pro", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", APIKeyEnv: "MIMO_API_KEY"})
-	cfg.Agent.PlannerModel = "mimo-pro"
+	cfg.Agent.ContextModel = "mimo-pro"
 
 	got := providersWithMissingKeys(cfg)
 	if len(got) != 1 || got[0].APIKeyEnv != "MIMO_API_KEY" {

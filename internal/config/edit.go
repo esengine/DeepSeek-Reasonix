@@ -58,18 +58,25 @@ func (c *Config) SetDefaultModel(name string) error {
 	return nil
 }
 
-// SetPlannerModel sets (or, with "", clears) agent.planner_model for two-model
-// collaboration. A non-empty name must be a configured provider.
-func (c *Config) SetPlannerModel(name string) error {
+// SetContextModel sets (or, with "", clears) agent.context_model for pre-turn
+// context research (formerly the two-model planner collaboration).
+// A non-empty name must be a configured provider.
+func (c *Config) SetContextModel(name string) error {
 	if name == "" {
-		c.Agent.PlannerModel = ""
+		c.Agent.ContextModel = ""
 		return nil
 	}
 	if _, ok := c.Provider(name); !ok {
-		return fmt.Errorf("set planner: no provider %q (configured: %s)", name, c.providerNames())
+		return fmt.Errorf("set context model: no provider %q (configured: %s)", name, c.providerNames())
 	}
-	c.Agent.PlannerModel = name
+	c.Agent.ContextModel = name
 	return nil
+}
+
+// SetPlannerModel is the deprecated name for SetContextModel. It writes to
+// both the old and new fields for backward compatibility with older desktops.
+func (c *Config) SetPlannerModel(name string) error {
+	return c.SetContextModel(name)
 }
 
 // SetAutoPlan is retained for source compatibility with older desktop clients.
@@ -473,7 +480,8 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 
 	defaultRefsProvider := c.modelRefTargetsProvider(c.DefaultModel, name)
-	plannerRefsProvider := c.modelRefTargetsProvider(c.Agent.PlannerModel, name)
+	plannerRefsProvider := c.modelRefTargetsProvider(c.Agent.ContextModel, name) ||
+		c.modelRefTargetsProvider(c.Agent.PlannerModel, name)
 	subagentRefsProvider := c.modelRefTargetsProvider(c.Agent.SubagentModel, name)
 	subagentModelRefsProvider := map[string]bool{}
 	for skill, ref := range c.Agent.SubagentModels {
@@ -496,6 +504,7 @@ func (c *Config) RemoveProvider(name string) error {
 		c.DefaultModel = fallback
 	}
 	if plannerRefsProvider {
+		c.Agent.ContextModel = fallback
 		c.Agent.PlannerModel = fallback
 	}
 	if subagentRefsProvider {

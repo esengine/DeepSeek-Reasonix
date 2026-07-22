@@ -197,11 +197,11 @@ func safeModelBucket(c *config.Config, ref string) string {
 	return metricBucket(provider + "_" + e.Model)
 }
 
-func plannerModelBucket(c *config.Config) string {
-	if strings.TrimSpace(c.Agent.PlannerModel) == "" {
+func contextModelBucket(c *config.Config) string {
+	if strings.TrimSpace(c.Agent.ContextModel) == "" {
 		return "off"
 	}
-	return safeModelBucket(c, c.Agent.PlannerModel)
+	return safeModelBucket(c, c.Agent.ContextModel)
 }
 
 func safeProviderAccessBucket(c *config.Config, name string) string {
@@ -235,7 +235,7 @@ func (m *metricsAggregator) observeSettingsSnapshot(c *config.Config) {
 	m.inc("settings_status_bar_items_count", statusBarItemsCountBucket(len(c.DesktopStatusBarItems())))
 	m.inc("settings_check_updates", boolBucket(c.DesktopCheckUpdates()))
 	m.inc("settings_default_model", safeModelBucket(c, c.DefaultModel))
-	m.inc("settings_planner_model", plannerModelBucket(c))
+	m.inc("settings_context_model", contextModelBucket(c))
 	m.inc("settings_subagent_model", safeModelBucket(c, c.Agent.SubagentModel))
 	m.inc("settings_subagent_effort", knownBucketDefault(c.Agent.SubagentEffort, "auto", "auto", "low", "medium", "high", "xhigh", "max", "off"))
 	m.inc("settings_reasoning_language", config.NormalizeReasoningLanguage(c.Agent.ReasoningLanguage))

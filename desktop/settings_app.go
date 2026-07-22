@@ -253,7 +253,8 @@ type BotSettingsView struct {
 // SettingsView is the whole Settings panel payload.
 type SettingsView struct {
 	DefaultModel            string               `json:"defaultModel"`
-	PlannerModel            string               `json:"plannerModel"`
+	ContextModel            string               `json:"contextModel"`
+	PlannerModel            string               `json:"plannerModel"` // deprecated; kept for old desktop compat
 	SubagentModel           string               `json:"subagentModel"`
 	SubagentEffort          string               `json:"subagentEffort"`
 	AutoPlan                string               `json:"autoPlan"`
@@ -853,7 +854,8 @@ func (a *App) Settings() SettingsView {
 	effectiveShell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, nil)
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
-		PlannerModel:      cfg.Agent.PlannerModel,
+		ContextModel:      cfg.Agent.ContextModel,
+		PlannerModel:      cfg.Agent.ContextModel,
 		SubagentModel:     cfg.Agent.SubagentModel,
 		SubagentEffort:    cfg.Agent.SubagentEffort,
 		AutoPlan:          "off", // deprecated JSON compatibility for older frontends
@@ -1725,8 +1727,14 @@ func (a *App) SetDefaultModel(ref string) error {
 	return nil
 }
 
-// SetPlannerModel sets (or, with "", clears) the two-model planner.
+// SetPlannerModel is deprecated; use SetContextModel instead.
 func (a *App) SetPlannerModel(ref string) error {
+	return a.SetContextModel(ref)
+}
+
+// SetContextModel sets (or, with "", clears) agent.context_model for pre-turn
+// context research (formerly the two-model planner).
+func (a *App) SetContextModel(ref string) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		if ref != "" {
 			resolved, err := selectableDesktopModelRef(c, ref)
@@ -1735,7 +1743,7 @@ func (a *App) SetPlannerModel(ref string) error {
 			}
 			ref = resolved
 		}
-		c.Agent.PlannerModel = ref
+		c.Agent.ContextModel = ref
 		return nil
 	})
 }
@@ -2359,7 +2367,8 @@ func retargetProviderReferences(c *config.Config, name, fallbackRef string) {
 	if desktopModelRefsProvider(c, c.DefaultModel, name) {
 		c.DefaultModel = fallbackRef
 	}
-	if desktopModelRefsProvider(c, c.Agent.PlannerModel, name) {
+	if desktopModelRefsProvider(c, c.Agent.ContextModel, name) {
+		c.Agent.ContextModel = fallbackRef
 		c.Agent.PlannerModel = fallbackRef
 	}
 	if desktopModelRefsProvider(c, c.Agent.SubagentModel, name) {
