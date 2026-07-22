@@ -9,7 +9,6 @@ import {
   FULL_CONVERSATION_MAX_WIDTH,
   getCachedConversationWidth,
   normalizeConversationWidth,
-  STANDARD_CONVERSATION_MAX_WIDTH,
 } from "../lib/conversationWidth";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -42,6 +41,9 @@ const storage = new Map<string, string>();
       setProperty(name: string, value: string) {
         styleProps.set(name, value);
       },
+      removeProperty(name) {
+        styleProps.delete(name);
+      },
     },
   },
 };
@@ -65,7 +67,7 @@ storage.set(CONVERSATION_WIDTH_STORAGE_KEY, "full");
 ok(getCachedConversationWidth() === "full", "early-paint cache restores full width");
 
 applyConversationWidth("standard");
-ok(styleProps.get("--maxw") === STANDARD_CONVERSATION_MAX_WIDTH, "standard width remains fixed at 960px");
+ok(!styleProps.has("--maxw"), "standard width removes the inline override, relying on CSS default");
 
 applyConversationWidth("full");
 ok(styleProps.get("--maxw") === FULL_CONVERSATION_MAX_WIDTH, "full width never becomes narrower than standard");
