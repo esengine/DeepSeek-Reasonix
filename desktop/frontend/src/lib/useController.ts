@@ -11,6 +11,7 @@ import { invalidateCache } from "./composerHistory";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
 import { createRafBatch } from "./rafBatch";
 import { t, type DictKey } from "./i18n";
+import { sameTodoList } from "./todoVisibility";
 import { fileDiffFromWire, summarize, summarizeFileDiff, type ToolFileDiff } from "./tools";
 import { modeHasAutoApproveTools, normalizeMode, normalizeToolApprovalMode } from "./types";
 import type {
@@ -299,6 +300,7 @@ export function metaFromTab(tab: TabMeta, existing?: Meta): Meta {
     tokenMode: tab.tokenMode ?? existing?.tokenMode ?? "full",
     goal: tab.goal ?? existing?.goal,
     goalStatus: tab.goalStatus ?? existing?.goalStatus,
+    canonicalTodos: existing?.canonicalTodos,
   };
 }
 
@@ -328,8 +330,14 @@ export function sameMeta(a?: Meta, b?: Meta): boolean {
 
     a.tokenMode === b.tokenMode &&
     a.goal === b.goal &&
-    a.goalStatus === b.goalStatus
+    a.goalStatus === b.goalStatus &&
+    sameTodoList(a.canonicalTodos, b.canonicalTodos)
   );
+}
+
+function metaWithoutCanonicalTodos(meta?: Meta): Meta | undefined {
+  if (!meta || meta.canonicalTodos === undefined) return meta;
+  return { ...meta, canonicalTodos: undefined };
 }
 
 const STALE_TURN_RECONCILE_MS = 30_000;
@@ -1335,7 +1343,7 @@ export function reducer(s: State, a: Action): State {
     // as a stale replay of an already-answered prompt and silently ignored.
     case "controller_rebuilt":
       return { ...s, promptEpoch: s.promptEpoch + 1, resolvedPromptId: undefined, promptArrivedId: undefined, promptArrivedAt: undefined };
-    case "reset": return { ...initialState, meta: s.meta, context: { used: 0, window: s.context.window, sessionTokens: 0, compactRatio: s.context.compactRatio }, balance: s.balance, effort: s.effort, jobs: s.jobs, hydrating: s.hydrating, hydrateReason: s.hydrateReason, hydrateError: s.hydrateError, hydrateHistoryLoaded: s.hydrateHistoryLoaded, hydratePlaceholderItems: s.hydratePlaceholderItems, backendActivationPending: s.backendActivationPending, sessionGen: s.sessionGen + 1, promptEpoch: s.promptEpoch + 1 };
+    case "reset": return { ...initialState, meta: metaWithoutCanonicalTodos(s.meta), context: { used: 0, window: s.context.window, sessionTokens: 0, compactRatio: s.context.compactRatio }, balance: s.balance, effort: s.effort, jobs: s.jobs, hydrating: s.hydrating, hydrateReason: s.hydrateReason, hydrateError: s.hydrateError, hydrateHistoryLoaded: s.hydrateHistoryLoaded, hydratePlaceholderItems: s.hydratePlaceholderItems, backendActivationPending: s.backendActivationPending, sessionGen: s.sessionGen + 1, promptEpoch: s.promptEpoch + 1 };
     case "event": return applyEvent(s, a.e);
     default: return s;
   }
@@ -2629,6 +2637,9 @@ export function useController() {
     dispatchTo(targetTabId, { type: "reset" });
     dispatchTo(targetTabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(targetTabId, { type: "hydrate_done" });
+    const meta = await app.MetaForTab(targetTabId).catch(() => undefined);
+    if (!sessionLoadCurrent(targetTabId, seq)) return;
+    if (meta !== undefined) dispatchTo(targetTabId, { type: "meta", meta });
     app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
   }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
@@ -2653,6 +2664,9 @@ export function useController() {
     dispatchTo(tabId, { type: "reset" });
     dispatchTo(tabId, { type: "history_page", page, mode: "replace" });
     dispatchTo(tabId, { type: "hydrate_done" });
+    const meta = await app.MetaForTab(tabId).catch(() => undefined);
+    if (!sessionLoadCurrent(tabId, seq)) return;
+    if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
     app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(tabId);
   }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, refreshCheckpoints, sessionLoadCurrent, waitForTabReady]);
@@ -2800,6 +2814,7 @@ export function useController() {
       const messages = asArray(await app.HistoryForTab(sourceTabId).catch(() => [] as HistoryMessage[]));
       dispatchTo(sourceTabId, { type: "reset" });
       dispatchTo(sourceTabId, { type: "history", messages });
+      await refreshMetaOnlyForTab(sourceTabId, dispatchTo);
       dispatchTo(sourceTabId, { type: "context", context: await app.ContextUsageForTab(sourceTabId) });
       dispatchTo(sourceTabId, { type: "checkpoints", checkpoints: asArray(await app.CheckpointsForTab(sourceTabId)) });
       return true;

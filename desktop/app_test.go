@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/memory"
@@ -38,6 +39,44 @@ import (
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
+
+type todoMetaController struct {
+	control.SessionAPI
+	todos []evidence.TodoItem
+}
+
+func (c *todoMetaController) Todos() []evidence.TodoItem {
+	return append([]evidence.TodoItem(nil), c.todos...)
+}
+
+func TestCanonicalTodosMetaWireContract(t *testing.T) {
+	if got := ctrlTodos(nil); got != nil {
+		t.Fatalf("nil controller todos = %+v, want unavailable", *got)
+	}
+
+	empty := Meta{CanonicalTodos: ctrlTodos(&todoMetaController{})}
+	raw, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty canonical todos: %v", err)
+	}
+	if !strings.Contains(string(raw), `"canonicalTodos":[]`) {
+		t.Fatalf("empty canonical todos must encode as an authoritative empty array: %s", raw)
+	}
+
+	ctrl := &todoMetaController{todos: []evidence.TodoItem{{Content: "Ship", Status: "completed"}}}
+	got := ctrlTodos(ctrl)
+	if got == nil || len(*got) != 1 || (*got)[0].Status != "completed" {
+		t.Fatalf("canonical todos = %+v, want completed task", got)
+	}
+
+	unavailable, err := json.Marshal(Meta{CanonicalTodos: ctrlTodos(nil)})
+	if err != nil {
+		t.Fatalf("marshal unavailable canonical todos: %v", err)
+	}
+	if strings.Contains(string(unavailable), "canonicalTodos") {
+		t.Fatalf("unavailable canonical todos should preserve the legacy fallback contract: %s", unavailable)
+	}
+}
 
 func TestPluginToolsToViewPreservesSchemaError(t *testing.T) {
 	got := pluginToolsToView([]plugin.ToolInfo{{

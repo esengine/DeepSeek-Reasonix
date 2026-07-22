@@ -342,12 +342,41 @@ console.log("\nuse controller meta");
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
   eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
   eq(sameMeta(meta({ imageInputEnabled: true }), meta({ imageInputEnabled: false })), false, "image input capability changes invalidate meta equality");
+  eq(
+    sameMeta(
+      meta({ canonicalTodos: [{ content: "Ship", status: "in_progress" }] }),
+      meta({ canonicalTodos: [{ content: "Ship", status: "completed" }] }),
+    ),
+    false,
+    "canonical todo progress invalidates meta equality",
+  );
+  eq(
+    sameMeta(meta({ canonicalTodos: [] }), meta({ canonicalTodos: [] })),
+    true,
+    "equivalent empty canonical todo lists keep meta stable",
+  );
 }
 
 {
   const preserved = metaFromTab(tab({ toolApprovalMode: "" }), meta({ toolApprovalMode: "auto", autoApproveTools: false }));
   eq(preserved.toolApprovalMode, "auto", "blank tab snapshot preserves explicit auto approval mode");
   eq(preserved.autoApproveTools, false, "blank tab snapshot does not silently resurrect yolo approval");
+  const todos = [{ content: "Keep task state", status: "in_progress" }];
+  const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
+  eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");
+}
+
+{
+  const before = meta({ canonicalTodos: [{ content: "Ship", status: "in_progress" }] });
+  const completed = meta({ canonicalTodos: [{ content: "Ship", status: "completed" }] });
+  const updated = reducer({ ...initialState, meta: before }, { type: "meta", meta: completed });
+  eq(updated.meta?.canonicalTodos?.[0]?.status, "completed", "meta refresh applies canonical todo progress");
+
+  const reset = reducer(updated, { type: "reset" });
+  eq(reset.meta?.canonicalTodos, undefined, "session reset clears canonical todos from the previous session");
+
+  const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
+  eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
 }
 
 {

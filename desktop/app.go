@@ -5880,7 +5880,9 @@ type Meta struct {
 	Goal              string                   `json:"goal,omitempty"`
 	GoalStatus        string                   `json:"goalStatus,omitempty"`
 	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
-	CanonicalTodos    []evidence.TodoItem      `json:"canonicalTodos,omitempty"`
+	// A nil pointer means the controller cannot provide an authoritative snapshot;
+	// a non-nil pointer preserves an empty list as an explicit panel clear.
+	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
 }
 
 type AutoResearchCompactView struct {
@@ -6033,11 +6035,15 @@ func compactAutoResearchFromController(ctrl control.SessionAPI) *AutoResearchCom
 // ctrlTodos returns the canonical task list from a session controller, or nil
 // if the controller is not yet bound. Used by MetaForTab so the frontend
 // task panel has access to the authoritative server-side todo state.
-func ctrlTodos(ctrl control.SessionAPI) []evidence.TodoItem {
+func ctrlTodos(ctrl control.SessionAPI) *[]evidence.TodoItem {
 	if ctrl == nil {
 		return nil
 	}
-	return ctrl.Todos()
+	todos := ctrl.Todos()
+	if todos == nil {
+		todos = []evidence.TodoItem{}
+	}
+	return &todos
 }
 
 func compactAutoResearch(tab *WorkspaceTab) *AutoResearchCompactView {

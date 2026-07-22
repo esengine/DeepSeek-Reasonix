@@ -140,6 +140,7 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 
 const staleHistory = deferred<HistoryMessage[]>();
 let newSessionCalls = 0;
+let backendCanonicalTodos = [{ content: "Old task", status: "in_progress" }];
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
@@ -154,7 +155,7 @@ window.go = {
   main: {
     App: {
       ListTabs: async () => [tabMeta()],
-      MetaForTab: async () => meta(),
+      MetaForTab: async () => meta({ canonicalTodos: backendCanonicalTodos }),
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
       BalanceForTab: async () => balance,
@@ -169,10 +170,22 @@ window.go = {
       ReplayPendingPrompts: async () => {},
       NewSession: async () => {
         newSessionCalls += 1;
+        backendCanonicalTodos = [];
       },
       NewSessionForTab: async (tabID: string) => {
         if (tabID !== "tab-a") throw new Error(`unexpected new-session target ${tabID}`);
         newSessionCalls += 1;
+        backendCanonicalTodos = [];
+      },
+      ResumeSessionPageForTab: async () => {
+        backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
+        return {
+          messages: [{ role: "user", content: "restore" }, { role: "assistant", content: "done" }],
+          startTurn: 0,
+          endTurn: 1,
+          totalTurns: 1,
+          hasOlder: false,
+        };
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -197,11 +210,18 @@ await act(async () => {
 await waitFor("active tab", () => controller?.activeTabId === "tab-a");
 
 await act(async () => {
+  await controller?.refreshMeta();
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.[0]?.content, "Old task", "pre-reset metadata exposes the current session todo");
+
+await act(async () => {
   await controller?.newSession();
   await flushPromises();
 });
 eq(newSessionCalls, 1, "tab-scoped NewSession is called once");
 eq(controller?.state.items.length, 0, "new session clears the visible transcript");
+eq(controller?.state.meta?.canonicalTodos?.length, 0, "new session refresh replaces the previous session todo with an authoritative empty list");
 
 await act(async () => {
   staleHistory.resolve([{ role: "user", content: "old prompt" }]);
@@ -210,6 +230,12 @@ await act(async () => {
 });
 
 eq(controller?.state.items.length, 0, "stale history load cannot repopulate a new blank session");
+
+await act(async () => {
+  await controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.[0]?.status, "completed", "resuming a session refreshes its authoritative canonical todo state");
 
 await act(async () => {
   root.unmount();
