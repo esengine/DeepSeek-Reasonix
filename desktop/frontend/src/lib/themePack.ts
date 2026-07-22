@@ -457,6 +457,9 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
     // Clamp to 100% to prevent color-mix from receiving values > 100%.
     root.style.setProperty("--theme-pane-shell-pct", `${Math.min((homePane + 0.08) * 100, 100)}%`);
     root.style.setProperty("--theme-pane-card-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-session-hover-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-child-pct", `${Math.min((homePane + 0.30) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-interact-pct", `${Math.min((homePane + 0.40) * 100, 100)}%`);
     // Legacy aliases keep V1 tests and third-party diagnostics stable.
     root.style.setProperty("--theme-bg-image", `url("${cssUrlEscape(homeUrl)}")`);
     root.style.setProperty("--theme-bg-focus-x", `${clamp01(home.focusX) * 100}%`);
@@ -484,6 +487,9 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
   root.style.setProperty("--theme-pane-task-alpha", String(taskPane));
   root.style.setProperty("--theme-pane-task-shell-pct", `${Math.min((taskPane + 0.08) * 100, 100)}%`);
   root.style.setProperty("--theme-pane-task-card-pct", `${Math.min((taskPane + 0.14) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-session-hover-pct", `${Math.min((taskPane + 0.26) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-child-pct", `${Math.min((taskPane + 0.30) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-interact-pct", `${Math.min((taskPane + 0.40) * 100, 100)}%`);
   const safe = taskSource?.safeArea === "left" || taskSource?.safeArea === "right" ? taskSource.safeArea : "center";
   root.setAttribute("data-theme-safe-area", safe);
   root.setAttribute("data-theme-has-bg", "true");

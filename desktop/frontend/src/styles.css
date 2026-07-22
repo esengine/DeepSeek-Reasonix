@@ -27694,7 +27694,7 @@ body > .mermaid-diagram--fullscreen {
   position: absolute;
   left: 10px;
   right: 10px;
-  bottom: -1px;
+  bottom: 1px;
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
@@ -33674,7 +33674,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock__tools,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .statusbar {
-  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-shell-pct, 80%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-shell-pct, 60%), transparent) !important;
 }
 
 /* Home: chat area — controlled by paneOpacity (面板透明度) */
@@ -33684,15 +33684,111 @@ body > .mermaid-diagram--fullscreen {
 
 /* Home: card elements — controlled by the paneOpacity card tier */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__usage,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__action-btn,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__icon-btn {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__icon-btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .external-opener {
   background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-card-pct, 88%), transparent) !important;
 }
 
+/* Home: session/folder hover — session-hover tier */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .hist-item:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__topic:hover {
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-session-hover-pct, 76%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__folder:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__folder--active:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__folder--menu-open:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-session-hover-pct, 76%), transparent) !important;
+}
+
+/* Home: child elements — neutral backgrounds */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__capacity-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__source-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__source-row,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__type-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__view-switch,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .mermaid-diagram,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .diff,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .code,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md-code,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .copybtn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .turn-actions__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .rewind__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-shelf__card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-action,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-shelf__header-button,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .approval-subject,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .ask-shelf__detail,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .welcome__ex,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .banner--update {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: child elements — surface-2 base (composer chrome) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-modebar,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-task-mode-trigger,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .modelsw__trigger {
+  background: color-mix(in srgb, var(--surface-2) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: child elements — sidebar nav/utility hover (sidebar-hover base) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .sidebar__navitem:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .sidebar__utility-button:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: child elements — preserve original colors */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send {
+  background: color-mix(in srgb, var(--control-primary-bg) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--stop {
+  background: color-mix(in srgb, color-mix(in srgb, var(--err) 14%, var(--bg-elev-2)) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
+  background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg--user .msg__body {
+  background: color-mix(in srgb, var(--chat-user-bg) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .approval-reason {
+  background: color-mix(in srgb, color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-soft)) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: interact elements — hover/active states */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .turn-actions__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .rewind__btn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .modelsw__trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-action:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-shelf__header-button:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .welcome__ex:hover {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-interact-pct, 90%), transparent) !important;
+}
+/* Home: interact — colored button hover (use original darker formula, no transparency) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 88%, #000) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--stop:hover {
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2)) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 24%, var(--bg-elev-2)) !important;
+}
+/* Home: active modebar item hover — mirror send-btn darken pattern */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-modebar__item--active:hover {
+  background: color-mix(in srgb, var(--composer-modebar-active-bg) 88%, #000) !important;
+}
+
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-change-scope__head {
-  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-shell-pct, 80%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-shell-pct, 60%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .transcript,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .transcript-shell {
@@ -33706,7 +33802,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock__tools,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .statusbar {
-  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-shell-pct, 88%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-shell-pct, 78%), transparent) !important;
 }
 
 /* Task: chat area — controlled by paneOpacity (面板透明度) */
@@ -33716,15 +33812,109 @@ body > .mermaid-diagram--fullscreen {
 
 /* Task: card elements — controlled by the paneOpacity card tier */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__usage,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__action-btn,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__icon-btn {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__icon-btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .external-opener {
   background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-card-pct, 88%), transparent) !important;
 }
 
+/* Task: session/folder hover — session-hover tier */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .hist-item:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__topic:hover {
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-session-hover-pct, 94%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__folder:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__folder--active:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__folder--menu-open:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-task-session-hover-pct, 94%), transparent) !important;
+}
+
+/* Task: child elements — neutral backgrounds */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__capacity-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__source-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__source-row,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__type-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__view-switch,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .mermaid-diagram,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .diff,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .code,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md-code,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .copybtn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .turn-actions__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .rewind__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-shelf__card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-action,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-shelf__header-button,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .approval-subject,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .ask-shelf__detail,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .banner--update {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: child elements — surface-2 base (composer chrome) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-modebar,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-task-mode-trigger,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .modelsw__trigger {
+  background: color-mix(in srgb, var(--surface-2) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: child elements — sidebar nav/utility hover (sidebar-hover base) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .sidebar__navitem:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .sidebar__utility-button:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: child elements — preserve original colors */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send {
+  background: color-mix(in srgb, var(--control-primary-bg) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--stop {
+  background: color-mix(in srgb, color-mix(in srgb, var(--err) 14%, var(--bg-elev-2)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
+  background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg--user .msg__body {
+  background: color-mix(in srgb, var(--chat-user-bg) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .approval-reason {
+  background: color-mix(in srgb, color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-soft)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: interact elements — hover/active states */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .turn-actions__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .rewind__btn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .modelsw__trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-action:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-shelf__header-button:hover {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-interact-pct, 100%), transparent) !important;
+}
+/* Task: interact — colored button hover (use original darker formula, no transparency) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 88%, #000) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--stop:hover {
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2)) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 24%, var(--bg-elev-2)) !important;
+}
+/* Task: active modebar item hover — mirror send-btn darken pattern */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-modebar__item--active:hover {
+  background: color-mix(in srgb, var(--composer-modebar-active-bg) 88%, #000) !important;
+}
+
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-change-scope__head {
-  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-shell-pct, 88%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-shell-pct, 78%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .transcript,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .transcript-shell {
@@ -33747,11 +33937,107 @@ body > .mermaid-diagram--fullscreen {
   background: transparent !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__usage,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__action-btn,
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__icon-btn {
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__icon-btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .external-opener {
   background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+}
+
+/* Fallback: session/folder hover */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .hist-item:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__topic:hover {
+  background: color-mix(in srgb, var(--bg-soft) 76%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__folder:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__folder--active:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__folder--menu-open:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) 76%, transparent) !important;
+}
+
+/* Fallback: child elements — neutral backgrounds */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__capacity-card,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__source-overview,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__source-row,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__type-overview,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__view-switch,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .mermaid-diagram,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .diff,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .code,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md-code,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .copybtn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta__btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .turn-actions__btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .rewind__btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-shelf__card,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-action,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-shelf__header-button,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .approval-subject,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .ask-shelf__detail,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .welcome__ex,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .banner--update {
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent) !important;
+}
+
+/* Fallback: child elements — surface-2 base (composer chrome) */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-modebar,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-task-mode-trigger,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .modelsw__trigger {
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent) !important;
+}
+
+/* Fallback: child elements — sidebar nav/utility hover (sidebar-hover base) */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .sidebar__navitem:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .sidebar__utility-button:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) 80%, transparent) !important;
+}
+
+/* Fallback: child elements — preserve original colors */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send {
+  background: color-mix(in srgb, var(--control-primary-bg) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--stop {
+  background: color-mix(in srgb, color-mix(in srgb, var(--err) 14%, var(--bg-elev-2)) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
+  background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg--user .msg__body {
+  background: color-mix(in srgb, var(--chat-user-bg) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .approval-reason {
+  background: color-mix(in srgb, color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-soft)) 80%, transparent) !important;
+}
+
+/* Fallback: interact elements — hover/active states */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .turn-actions__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .rewind__btn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .modelsw__trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-action:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-shelf__header-button:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .welcome__ex:hover {
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent) !important;
+}
+/* Fallback: interact — colored button hover (use original darker formula, no transparency) */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 88%, #000) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--stop:hover {
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2)) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 24%, var(--bg-elev-2)) !important;
+}
+/* Fallback: active modebar item hover — mirror send-btn darken pattern */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-modebar__item--active:hover {
+  background: color-mix(in srgb, var(--composer-modebar-active-bg) 88%, #000) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workspace-change-scope__head {
   background: color-mix(in srgb, var(--bg-soft) 80%, transparent) !important;
@@ -36137,4 +36423,31 @@ body > .mermaid-diagram--fullscreen {
    padding that would otherwise waste space between the status bar and terminal. */
 .footer.footer--compact {
   padding-bottom: 4px !important;
+}
+
+/* ── Windows frameless workbench: dock tab compression ─────────── */
+/* Only compress spacing; never shrink tabs or truncate labels.
+   Classic layout (.app--classic) is untouched. */
+@container (max-width: 420px) {
+  .app--windows-frameless.app--workbench .workbench-dock__tools,
+  :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tools {
+    /* 420 px dock → 12 px left pad     300 px dock →  4 px          */
+    padding-left: clamp(4px, calc(6.667 * 1cqi - 16px), 12px);
+  }
+  .app--windows-frameless.app--workbench .workbench-dock__tabs,
+  :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tabs {
+    /* 420 px dock →  2 px gap          300 px dock →  0 px          */
+    gap: clamp(0px, calc(1.667 * 1cqi - 5px), 2px);
+  }
+  .app--windows-frameless.app--workbench .workbench-dock__tab,
+  :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tab {
+    flex: 0 0 auto;
+    min-width: auto;
+    max-width: none;
+    /* 420 px dock → 12 px padding      300 px dock →  4 px          */
+    padding-left:  clamp(4px, calc(6.667 * 1cqi - 16px), 12px);
+    padding-right: clamp(4px, calc(6.667 * 1cqi - 16px), 12px);
+    /* icon↔label gap: 420→6px          300→2px                     */
+    gap:           clamp(2px, calc(3.333 * 1cqi - 8px), 6px);
+  }
 }
