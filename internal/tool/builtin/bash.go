@@ -137,7 +137,7 @@ func (b bash) resolved() sandbox.Shell {
 }
 
 func (bash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group."},"sandbox_capabilities":{"type":"object","description":"Optional request for one atomic OS-sandbox capability delta. The host may run the command in the original sandbox instead.","additionalProperties":false,"properties":{"network":{"type":"boolean","description":"Request unrestricted network access."},"read_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"write_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"argv_prefix":{"type":"array","maxItems":8,"items":{"type":"string"},"description":"Optional proposed reusable argv prefix; it does not itself grant authority."},"justification":{"type":"string","maxLength":100,"description":"Model-authored reason, at most 100 Unicode characters; authoritative normalized capabilities are reviewed separately."}}}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group."},"sandbox_capabilities":{"type":"object","description":"Optional request for one atomic OS-sandbox capability delta. The host may run the command in the original sandbox instead.","additionalProperties":false,"properties":{"network":{"type":"boolean","description":"Request unrestricted network access."},"read_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"write_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"devices":{"type":"array","maxItems":4,"description":"Exact existing canonical-absolute character or block devices. Linux may materialize these with path-string --dev-bind, which has an accepted host-device TOCTOU window.","items":{"type":"object","additionalProperties":false,"properties":{"path":{"type":"string","maxLength":4096}},"required":["path"]}},"argv_prefix":{"type":"array","maxItems":8,"items":{"type":"string"},"description":"Optional proposed reusable argv prefix; it does not itself grant authority."},"justification":{"type":"string","maxLength":100,"description":"Model-authored reason, at most 100 Unicode characters; authoritative normalized capabilities are reviewed separately."}}}},"required":["command"]}`)
 }
 
 // ReadOnly is false: bash's effect cannot be inferred from args (rm, curl,
@@ -283,7 +283,12 @@ func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMe
 			if shouldReapAfterRun(jobCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
 				reapShellProcess(cmd, tracked) // reap process-group stragglers the job left running (#3702)
 			}
-			return "", normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses)
+			runErr = normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses)
+			if launch.UsesDelta {
+				outcome := bashCapabilityExecutionOutcome(jobCtx, cmd)
+				_, _ = fmt.Fprintln(out, sandbox.CapabilityExecutionDiagnostic(launch, outcome))
+			}
+			return "", runErr
 		})
 		msg := fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID)
 		msg = appendCapabilityDiagnostic(msg, diagnostic)
@@ -291,7 +296,10 @@ func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMe
 	}
 
 	defer launch.Close()
-	out, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv, launch.ExtraFiles)
+	out, err, outcome := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv, launch.ExtraFiles)
+	if use == sandbox.AuthorizedDelta && launch.UsesDelta {
+		diagnostic = sandbox.CapabilityExecutionDiagnostic(launch, outcome)
+	}
 	out = appendCapabilityDiagnostic(out, diagnostic)
 	return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
 }
@@ -357,7 +365,7 @@ func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args j
 	})
 }
 
-func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, extraFiles []*os.File) (string, error) {
+func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, extraFiles []*os.File) (string, error, sandbox.CapabilityExecutionOutcome) {
 	runCtx := ctx
 	timeout := b.foregroundTimeout()
 	if timeout > 0 {
@@ -388,15 +396,33 @@ func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell,
 	}
 	err = normalizeBashRunError(runCtx, err, p.PreserveBackgroundProcesses)
 	out := buf.String()
+	outcome := bashCapabilityExecutionOutcome(runCtx, cmd)
 
 	if errors.Is(context.Cause(runCtx), errBashTimeout) {
-		return out, fmt.Errorf("command timed out (> %s)", timeout)
+		return out, fmt.Errorf("command timed out (> %s)", timeout), outcome
 	}
 	if err != nil {
 		// Non-zero exit: feed output and error back so the model can self-correct.
-		return out, fmt.Errorf("command exited: %w", err)
+		return out, fmt.Errorf("command exited: %w", err), outcome
 	}
-	return out, nil
+	return out, nil, outcome
+}
+
+func bashCapabilityExecutionOutcome(ctx context.Context, cmd *exec.Cmd) sandbox.CapabilityExecutionOutcome {
+	if cmd != nil && cmd.ProcessState != nil {
+		// On Unix, an externally signaled wrapper has ExitCode -1. Ordinary user
+		// exits such as 7 remain completed; Bubblewrap reports child exits as
+		// codes. A terminal ProcessState is stronger evidence than a context
+		// cancellation that may have raced with normal process completion.
+		if cmd.ProcessState.ExitCode() == -1 {
+			return sandbox.CapabilityExecutionInterrupted
+		}
+		return sandbox.CapabilityExecutionCompleted
+	}
+	if ctx.Err() != nil {
+		return sandbox.CapabilityExecutionInterrupted
+	}
+	return sandbox.CapabilityExecutionCompleted
 }
 
 func normalizeBashRunError(ctx context.Context, err error, preserveBackgroundProcesses bool) error {

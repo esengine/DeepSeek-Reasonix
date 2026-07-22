@@ -16,6 +16,7 @@ import (
 var (
 	bwrapCapabilityUsability sync.Map // resolved executable path -> bool
 	bwrapNetworkUsability    sync.Map // resolved executable path -> bool
+	bwrapDeviceUsability     sync.Map // resolved executable path -> bool
 )
 
 func capabilityPlatformNoDelta() bool { return runtime.GOOS != "linux" }
@@ -61,13 +62,18 @@ func capabilityPlatformSupports(_ context.Context, base Spec, delta CapabilitySe
 		return false, "bubblewrap is unavailable"
 	}
 	if len(delta.Reads)+len(delta.Writes) == 0 {
-		return true, ""
+		if len(delta.Devices) == 0 {
+			return true, ""
+		}
 	}
 	if !base.Network && !delta.Network && !usableBwrapNetworkIsolation(bwrap) {
 		return false, "bubblewrap cannot create the network namespace required by the base sandbox"
 	}
-	if !usableBwrapCapabilityPaths(bwrap) {
+	if len(delta.Reads)+len(delta.Writes) > 0 && !usableBwrapCapabilityPaths(bwrap) {
 		return false, "bubblewrap does not pass the descriptor-bound mount probe"
+	}
+	if len(delta.Devices) > 0 && !usableBwrapDevices(bwrap) {
+		return false, "bubblewrap does not pass the exact-device --dev-bind behavioral probe"
 	}
 	return true, ""
 }
@@ -189,6 +195,29 @@ func usableBwrapCapabilityPaths(bwrap string) bool {
 	return actual.(bool)
 }
 
+func usableBwrapDevices(bwrap string) bool {
+	if cached, ok := bwrapDeviceUsability.Load(bwrap); ok {
+		return cached.(bool)
+	}
+	device, err := inspectCapabilityDevice("/dev/null")
+	if err != nil || device.Kind != CapabilityCharacterDevice {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	const probeDestination = "/dev/reasonix-device-capability-probe"
+	usable := exec.CommandContext(ctx, bwrap,
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--dev-bind", device.Canonical, probeDestination,
+		"--", "/bin/sh", "-c",
+		`test -c "$0" && dd if="$0" of=/dev/null count=1 status=none`, probeDestination,
+	).Run() == nil
+	actual, _ := bwrapDeviceUsability.LoadOrStore(bwrap, usable)
+	return actual.(bool)
+}
+
 func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string) (CapabilityLaunch, error) {
 	if runtime.GOOS != "linux" {
 		return CapabilityLaunch{}, fmt.Errorf("capability relaxation is unsupported on %s", runtime.GOOS)
@@ -199,6 +228,9 @@ func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta Capabil
 	}
 	if len(delta.Reads)+len(delta.Writes) > 0 && !usableBwrapCapabilityPaths(bwrap) {
 		return CapabilityLaunch{}, fmt.Errorf("descriptor-bound Bubblewrap mounts are unavailable")
+	}
+	if len(delta.Devices) > 0 && !usableBwrapDevices(bwrap) {
+		return CapabilityLaunch{}, fmt.Errorf("exact-device Bubblewrap --dev-bind is unavailable")
 	}
 
 	files := make([]*os.File, 0, len(delta.Reads)+len(delta.Writes))
@@ -215,6 +247,13 @@ func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta Capabil
 		}
 		files = append(files, file)
 	}
+	activation, statusWriter, err := newCapabilityActivationWitness()
+	if err != nil {
+		closeFiles()
+		return CapabilityLaunch{}, fmt.Errorf("create Bubblewrap activation witness: %w", err)
+	}
+	statusFD := 3 + len(files)
+	files = append(files, statusWriter)
 
 	spec := cloneSpec(base)
 	if delta.Network {
@@ -248,6 +287,14 @@ func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta Capabil
 		args = append(args, "--bind-fd", strconv.Itoa(fd), path.Canonical)
 		fd++
 	}
+	for _, device := range delta.Devices {
+		args = append(args, "--dev-bind", device.Canonical, device.Canonical)
+	}
+	args = append(args, "--json-status-fd", strconv.Itoa(statusFD))
 	args = append(args, sh.argv(command)...)
-	return CapabilityLaunch{Argv: append([]string{bwrap}, args...), ExtraFiles: files, Wrapped: true}, nil
+	launch := CapabilityLaunch{Argv: append([]string{bwrap}, args...), ExtraFiles: files, Wrapped: true, activation: activation}
+	if len(delta.Devices) > 0 {
+		launch.Materialization = CapabilityMaterializationPathStringDevBind
+	}
+	return launch, nil
 }

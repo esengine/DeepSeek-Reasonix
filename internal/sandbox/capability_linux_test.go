@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -11,9 +12,141 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestEvaluateDeviceCapabilityStrictlyNormalizesExactCharacterDevice(t *testing.T) {
+	device, err := inspectCapabilityDevice("/dev/null")
+	if err != nil {
+		t.Skipf("/dev/null is unavailable: %v", err)
+	}
+	review := EvaluateCapability(context.Background(), CapabilityInput{
+		Base:      Spec{Mode: "off"},
+		Workspace: t.TempDir(),
+		Raw: capabilityJSON(t, map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		}),
+	}).Review()
+	if review.State != CapabilityNoEffectiveDelta || len(review.Request.Devices) != 1 {
+		t.Fatalf("review = %#v", review)
+	}
+	got := review.Request.Devices[0]
+	if got != device || got.Kind != CapabilityCharacterDevice {
+		t.Fatalf("device = %#v, want %#v", got, device)
+	}
+	if review.Risk.Level != CapabilityRiskCritical || len(review.Risk.Findings) != 1 || review.Risk.Findings[0].Code != "device_access" {
+		t.Fatalf("risk = %#v, want critical device_access", review.Risk)
+	}
+	if !review.Authority.Requested || review.Authority.Supported || review.Authority.Prepared || review.Authority.Applied != CapabilityNotApplied {
+		t.Fatalf("authority = %#v", review.Authority)
+	}
+	diagnostic := CapabilityFallbackDiagnostic(review, BaseOnly)
+	for _, want := range []string{"requested=true", "supported=false", "prepared=false", "applied=false"} {
+		if !strings.Contains(diagnostic, want) {
+			t.Fatalf("diagnostic %q missing %q", diagnostic, want)
+		}
+	}
+}
+
+func TestEvaluateDeviceCapabilityRejectsMalformedAndNonDevices(t *testing.T) {
+	workspace := t.TempDir()
+	regular := filepath.Join(workspace, "regular")
+	if err := os.WriteFile(regular, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(workspace, "directory")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(workspace, "fifo")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(workspace, "socket")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	symlink := filepath.Join(workspace, "null-link")
+	if err := os.Symlink("/dev/null", symlink); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := map[string]json.RawMessage{
+		"null devices":     json.RawMessage(`{"devices":null}`),
+		"relative":         capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": "dev/null"}}}),
+		"unclean":          capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": "/dev/../dev/null"}}}),
+		"missing":          capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": filepath.Join(workspace, "missing")}}}),
+		"regular":          capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": regular}}}),
+		"directory":        capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": directory}}}),
+		"fifo":             capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": fifo}}}),
+		"socket":           capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": socket}}}),
+		"symlink":          capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": symlink}}}),
+		"unknown field":    json.RawMessage(`{"devices":[{"path":"/dev/null","kind":"character"}]}`),
+		"duplicate field":  json.RawMessage(`{"devices":[{"path":"/dev/null","path":"/dev/zero"}]}`),
+		"malformed nested": json.RawMessage(`{"devices":[{"path":7}]}`),
+	}
+	for name, raw := range tests {
+		t.Run(name, func(t *testing.T) {
+			review := EvaluateCapability(context.Background(), CapabilityInput{
+				Base: Spec{Mode: "enforce"}, Workspace: workspace, Raw: raw,
+			}).Review()
+			if review.State != CapabilitySoftDenied || review.Diagnostic == "" || !capabilitySetEmpty(review.EffectiveDelta) {
+				t.Fatalf("review = %#v, want atomic diagnosed soft denial", review)
+			}
+		})
+	}
+}
+
+func TestEvaluateDeviceCapabilityRecordsBlockIdentityWhenAvailable(t *testing.T) {
+	var block string
+	_ = filepath.WalkDir("/dev", func(path string, entry os.DirEntry, err error) error {
+		if err != nil || block != "" {
+			return nil
+		}
+		info, err := entry.Info()
+		if err == nil && info.Mode()&os.ModeDevice != 0 && info.Mode()&os.ModeCharDevice == 0 {
+			block = path
+		}
+		return nil
+	})
+	if block == "" {
+		t.Skip("host exposes no block device under /dev")
+	}
+	review := EvaluateCapability(context.Background(), CapabilityInput{
+		Base: Spec{Mode: "off"}, Workspace: t.TempDir(),
+		Raw: capabilityJSON(t, map[string]any{"devices": []any{map[string]string{"path": block}}}),
+	}).Review()
+	if len(review.Request.Devices) != 1 || review.Request.Devices[0].Kind != CapabilityBlockDevice {
+		t.Fatalf("review = %#v, want normalized block device", review)
+	}
+}
+
+func TestCapabilityDeviceFromStatDeterministicallyRecordsBlockIdentity(t *testing.T) {
+	device, err := capabilityDeviceFromStat("/dev/fabricated-block", unix.S_IFBLK|0o600, unix.Mkdev(259, 17))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if device.Kind != CapabilityBlockDevice || device.Major != 259 || device.Minor != 17 {
+		t.Fatalf("device = %#v, want block 259:17", device)
+	}
+}
+
+func TestDeviceCapabilityRevalidationDetectsMajorMinorReplacement(t *testing.T) {
+	device, err := inspectCapabilityDevice("/dev/null")
+	if err != nil {
+		t.Skipf("/dev/null is unavailable: %v", err)
+	}
+	device.Minor++
+	if err := revalidateCapabilityDevice(device); err == nil || !strings.Contains(err.Error(), "changed identity") {
+		t.Fatalf("revalidation error = %v, want changed identity", err)
+	}
+}
 
 func TestLinuxEffectiveReadDeltaModelsTmpfsMaskAndReboundWriteRoot(t *testing.T) {
 	workspace, err := os.MkdirTemp("/tmp", "reasonix-capability-workspace-*")
@@ -310,6 +443,203 @@ func TestLinuxCapabilityLaunchAtomicallyFallsBackAfterSymlinkReplacement(t *test
 	defer launch.Close()
 	if launch.UsesDelta || launch.Diagnostic == "" || containsArg(launch.Argv, "--bind-fd") {
 		t.Fatalf("symlink replacement launch = %#v, want atomic base fallback", launch)
+	}
+}
+
+func TestLinuxDeviceCapabilityLaunchUsesPathStringDevBind(t *testing.T) {
+	if !Available() {
+		t.Skip("Bubblewrap unavailable")
+	}
+	assessment := EvaluateCapability(context.Background(), CapabilityInput{
+		Base:      Spec{Mode: "enforce", Network: true, MinimalWrites: true},
+		Workspace: t.TempDir(),
+		Raw: capabilityJSON(t, map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		}),
+	})
+	if review := assessment.Review(); review.State != CapabilityReady {
+		t.Skipf("device capability unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	launch := PrepareCapabilityCommand(context.Background(), assessment, AuthorizedDelta, ResolveShell("bash", "", nil),
+		"dd if=/dev/null of=/dev/null count=1 status=none")
+	defer launch.Close()
+	if !launch.UsesDelta || !containsArg(launch.Argv, "--dev-bind") {
+		t.Fatalf("launch = %#v, want exact device delta", launch)
+	}
+	if launch.Materialization != CapabilityMaterializationPathStringDevBind {
+		t.Fatalf("materialization = %v, want path-string device bind domain value", launch.Materialization)
+	}
+	disclosure := launch.Materialization.Disclosure()
+	for _, required := range []string{"path-string --dev-bind", "accepted TOCTOU", "not descriptor-bound or race-free"} {
+		if !strings.Contains(disclosure, required) {
+			t.Fatalf("domain disclosure %q missing spec contract %q", disclosure, required)
+		}
+	}
+	if !strings.Contains(launch.Diagnostic, disclosure) {
+		t.Fatalf("prepared launch diagnostic %q missing domain disclosure %q", launch.Diagnostic, disclosure)
+	}
+	for _, arg := range launch.Argv {
+		if strings.HasPrefix(arg, "/proc/self/fd/") {
+			t.Fatalf("device launch falsely used proc fd source: %v", launch.Argv)
+		}
+	}
+	if launch.Authority.Applied != CapabilityApplicationUnknown || !strings.Contains(launch.Diagnostic, "applied=unknown") {
+		t.Fatalf("prepared launch claimed application: %#v diagnostic=%q", launch.Authority, launch.Diagnostic)
+	}
+	cmd := exec.Command(launch.Argv[0], launch.Argv[1:]...)
+	cmd.ExtraFiles = launch.ExtraFiles
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("device capability failed: %v\n%s", err, out)
+	}
+	diagnostic := CapabilityExecutionDiagnostic(launch, CapabilityExecutionCompleted)
+	if !strings.Contains(diagnostic, "applied=true") || launch.Materialization.Disclosure() == "" {
+		t.Fatalf("execution diagnostic = %q", diagnostic)
+	}
+}
+
+func TestLinuxActivationWitnessKeepsInterruptedMissingEventUnknown(t *testing.T) {
+	makeLaunch := func(t *testing.T) CapabilityLaunch {
+		t.Helper()
+		activation, writer, err := newCapabilityActivationWitness()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return CapabilityLaunch{
+			ExtraFiles: []*os.File{writer}, UsesDelta: true, activation: activation,
+			Authority: CapabilityAuthorityStatus{
+				Requested: true, Supported: true, Prepared: true, Applied: CapabilityApplicationUnknown,
+			},
+		}
+	}
+	interrupted := makeLaunch(t)
+	defer interrupted.Close()
+	if diagnostic := CapabilityExecutionDiagnostic(interrupted, CapabilityExecutionInterrupted); !strings.Contains(diagnostic, "applied=unknown") {
+		t.Fatalf("interrupted diagnostic = %q, missing witness must remain unknown", diagnostic)
+	}
+
+	completed := makeLaunch(t)
+	defer completed.Close()
+	if diagnostic := CapabilityExecutionDiagnostic(completed, CapabilityExecutionCompleted); !strings.Contains(diagnostic, "applied=false") {
+		t.Fatalf("completed diagnostic = %q, missing witness without interruption must be false", diagnostic)
+	}
+}
+
+func TestLinuxCompletedActivationWaitHasNoDeadline(t *testing.T) {
+	if wait, bounded := capabilityActivationWait(CapabilityExecutionCompleted); bounded || wait != 0 {
+		t.Fatalf("completed activation wait = (%s, %t), want deterministic unbounded drain", wait, bounded)
+	}
+	if wait, bounded := capabilityActivationWait(CapabilityExecutionInterrupted); !bounded || wait <= 0 {
+		t.Fatalf("interrupted activation wait = (%s, %t), want positive bounded grace period", wait, bounded)
+	}
+}
+
+func TestLinuxActivationWitnessBoundsStubbornOpenWriter(t *testing.T) {
+	activation, writer, err := newCapabilityActivationWitness()
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateFD, err := unix.Dup(int(writer.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubbornWriter := os.NewFile(uintptr(duplicateFD), "stubborn-status-writer")
+	launch := CapabilityLaunch{
+		ExtraFiles: []*os.File{writer}, UsesDelta: true, activation: activation,
+		Authority: CapabilityAuthorityStatus{
+			Requested: true, Supported: true, Prepared: true, Applied: CapabilityApplicationUnknown,
+		},
+	}
+	started := time.Now()
+	if diagnostic := CapabilityExecutionDiagnostic(launch, CapabilityExecutionInterrupted); !strings.Contains(diagnostic, "applied=unknown") {
+		t.Fatalf("interrupted diagnostic = %q", diagnostic)
+	}
+	launch.Close()
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("activation witness took %s with inherited writer still open", elapsed)
+	}
+	select {
+	case <-activation.done:
+	default:
+		t.Fatal("activation drain goroutine did not stop after Close")
+	}
+	_ = stubbornWriter.Close()
+}
+
+func TestLinuxActivationWitnessProvesAppliedForNonzeroUserExit(t *testing.T) {
+	if !Available() {
+		t.Skip("Bubblewrap unavailable")
+	}
+	assessment := EvaluateCapability(context.Background(), CapabilityInput{
+		Base: Spec{Mode: "enforce", Network: true, MinimalWrites: true}, Workspace: t.TempDir(),
+		Raw: capabilityJSON(t, map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		}),
+	})
+	if review := assessment.Review(); review.State != CapabilityReady {
+		t.Skipf("device capability unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	launch := PrepareCapabilityCommand(context.Background(), assessment, AuthorizedDelta, ResolveShell("bash", "", nil), "exit 7")
+	defer launch.Close()
+	cmd := exec.Command(launch.Argv[0], launch.Argv[1:]...)
+	cmd.ExtraFiles = launch.ExtraFiles
+	if err := cmd.Run(); err == nil {
+		t.Fatal("user command unexpectedly exited zero")
+	}
+	if diagnostic := CapabilityExecutionDiagnostic(launch, CapabilityExecutionCompleted); !strings.Contains(diagnostic, "applied=true") {
+		t.Fatalf("diagnostic = %q, nonzero user exit must retain witnessed application", diagnostic)
+	}
+}
+
+func TestLinuxActivationWitnessDoesNotTreatSetupFailureAsApplied(t *testing.T) {
+	if !Available() {
+		t.Skip("Bubblewrap unavailable")
+	}
+	assessment := EvaluateCapability(context.Background(), CapabilityInput{
+		Base: Spec{Mode: "enforce", Network: true, MinimalWrites: true}, Workspace: t.TempDir(),
+		Raw: capabilityJSON(t, map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		}),
+	})
+	if review := assessment.Review(); review.State != CapabilityReady {
+		t.Skipf("device capability unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	launch := PrepareCapabilityCommand(context.Background(), assessment, AuthorizedDelta, ResolveShell("bash", "", nil), "true")
+	defer launch.Close()
+	launch.Argv = append([]string{launch.Argv[0], "--reasonix-invalid-setup-option"}, launch.Argv[1:]...)
+	cmd := exec.Command(launch.Argv[0], launch.Argv[1:]...)
+	cmd.ExtraFiles = launch.ExtraFiles
+	if err := cmd.Run(); err == nil {
+		t.Fatal("invalid Bubblewrap setup unexpectedly succeeded")
+	}
+	diagnostic := CapabilityExecutionDiagnostic(launch, CapabilityExecutionCompleted)
+	if !strings.Contains(diagnostic, "prepared=true") || !strings.Contains(diagnostic, "applied=false") {
+		t.Fatalf("diagnostic = %q, setup failure must not claim application", diagnostic)
+	}
+}
+
+func TestLinuxDeviceCapabilityIdentityChangeAtomicallyFallsBackMixedBundle(t *testing.T) {
+	if !Available() {
+		t.Skip("Bubblewrap unavailable")
+	}
+	assessment := EvaluateCapability(context.Background(), CapabilityInput{
+		Base:      Spec{Mode: "enforce", MinimalWrites: true},
+		Workspace: t.TempDir(),
+		Raw: capabilityJSON(t, map[string]any{
+			"network": true,
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		}),
+	})
+	if review := assessment.Review(); review.State != CapabilityReady {
+		t.Skipf("mixed device capability unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	assessment.review.EffectiveDelta.Devices[0].Major++
+	launch := PrepareCapabilityCommand(context.Background(), assessment, AuthorizedDelta, ResolveShell("bash", "", nil), "true")
+	defer launch.Close()
+	if launch.UsesDelta || containsArg(launch.Argv, "--dev-bind") || !containsArg(launch.Argv, "--unshare-net") {
+		t.Fatalf("launch = %#v, want unchanged base sandbox with no partial network/device delta", launch)
+	}
+	if !strings.Contains(launch.Diagnostic, "changed identity") || !strings.Contains(launch.Diagnostic, "prepared=false") {
+		t.Fatalf("diagnostic = %q", launch.Diagnostic)
 	}
 }
 

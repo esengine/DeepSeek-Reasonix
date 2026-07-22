@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
@@ -29,12 +32,12 @@ func TestBashSchemaAdvertisesBoundedSandboxCapabilities(t *testing.T) {
 	if !ok || capability.Type != "object" || capability.AdditionalProperties == nil || *capability.AdditionalProperties {
 		t.Fatalf("sandbox_capabilities schema = %#v", capability)
 	}
-	for _, name := range []string{"network", "read_paths", "write_paths", "argv_prefix", "justification"} {
+	for _, name := range []string{"network", "read_paths", "write_paths", "devices", "argv_prefix", "justification"} {
 		if _, ok := capability.Properties[name]; !ok {
 			t.Fatalf("sandbox_capabilities schema missing %q", name)
 		}
 	}
-	for name, want := range map[string]int{"read_paths": 4, "write_paths": 4, "argv_prefix": 8} {
+	for name, want := range map[string]int{"read_paths": 4, "write_paths": 4, "devices": 4, "argv_prefix": 8} {
 		var property struct {
 			MaxItems int `json:"maxItems"`
 		}
@@ -143,6 +146,191 @@ func TestPreparedBashInvocationAppliesAuthorizedAtomicWriteDelta(t *testing.T) {
 	}
 	if string(got) != "granted" {
 		t.Fatalf("output file = %q", got)
+	}
+}
+
+func TestPreparedBashInvocationReportsAppliedPathStringDeviceDelta(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("OS sandbox unavailable")
+	}
+	b := bash{
+		workDir: t.TempDir(),
+		sb: sandbox.Spec{
+			Mode:          "enforce",
+			Network:       true,
+			MinimalWrites: true,
+		},
+	}
+	invocation, err := b.PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": "dd if=/dev/null of=/dev/null count=1 status=none",
+		"sandbox_capabilities": map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review := invocation.Review(); review.State != sandbox.CapabilityReady {
+		t.Skipf("device capabilities unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	out, err := invocation.Execute(context.Background(), sandbox.AuthorizedDelta)
+	if err != nil {
+		t.Fatalf("authorized device command failed: %v (out=%q)", err, out)
+	}
+	for _, want := range []string{
+		"requested=true", "supported=true", "prepared=true", "applied=true",
+		sandbox.CapabilityMaterializationPathStringDevBind.Disclosure(),
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output %q missing authoritative device diagnostic %q", out, want)
+		}
+	}
+}
+
+func TestPreparedForegroundBashCancellationKeepsMissingWitnessUnknown(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("OS sandbox unavailable")
+	}
+	b := bash{
+		workDir: t.TempDir(),
+		sb:      sandbox.Spec{Mode: "enforce", Network: true, MinimalWrites: true},
+	}
+	invocation, err := b.PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": "sleep 30",
+		"sandbox_capabilities": map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review := invocation.Review(); review.State != sandbox.CapabilityReady {
+		t.Skipf("device capabilities unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	out, err := invocation.Execute(canceled, sandbox.AuthorizedDelta)
+	if err == nil {
+		t.Fatalf("pre-canceled foreground execution unexpectedly succeeded: output=%q", out)
+	}
+	if !strings.Contains(out, "prepared=true") || !strings.Contains(out, "applied=unknown") {
+		t.Fatalf("canceled foreground output = %q, missing final witness must remain unknown", out)
+	}
+}
+
+func TestPreparedForegroundBashExternallySignaledWrapperIsInterrupted(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("OS sandbox unavailable")
+	}
+	b := bash{workDir: t.TempDir(), sb: sandbox.Spec{Mode: "enforce", Network: true, MinimalWrites: true}}
+	invocation, err := b.PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": `kill -TERM "$PPID"; exit 0`,
+		"sandbox_capabilities": map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review := invocation.Review(); review.State != sandbox.CapabilityReady {
+		t.Skipf("device capabilities unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	out, err := invocation.Execute(context.Background(), sandbox.AuthorizedDelta)
+	if err == nil {
+		t.Fatalf("externally signaled Bubblewrap wrapper unexpectedly succeeded: output=%q", out)
+	}
+	if !strings.Contains(out, "prepared=true") || !strings.Contains(out, "applied=unknown") {
+		t.Fatalf("signaled wrapper output = %q, missing final witness must remain unknown", out)
+	}
+}
+
+func TestBashCapabilityExecutionOutcomeKeepsOrdinaryNonzeroCompleted(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "exit 7")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("test command unexpectedly exited zero")
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if outcome := bashCapabilityExecutionOutcome(canceled, cmd); outcome != sandbox.CapabilityExecutionCompleted {
+		t.Fatalf("exit 7 outcome = %v, want completed", outcome)
+	}
+}
+
+func TestPreparedBackgroundBashReportsWitnessedApplicationAfterNonzeroExit(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("OS sandbox unavailable")
+	}
+	manager := jobs.NewManager(event.Discard)
+	defer manager.Close()
+	ctx := jobs.WithSession(jobs.WithManager(context.Background(), manager), "capability-session")
+	b := bash{
+		workDir: t.TempDir(),
+		sb:      sandbox.Spec{Mode: "enforce", Network: true, MinimalWrites: true},
+	}
+	invocation, err := b.PrepareSandboxInvocation(ctx, argsJSON(t, map[string]any{
+		"command":           "exit 7",
+		"run_in_background": true,
+		"sandbox_capabilities": map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review := invocation.Review(); review.State != sandbox.CapabilityReady {
+		t.Skipf("device capabilities unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	out, err := invocation.Execute(ctx, sandbox.AuthorizedDelta)
+	if err != nil {
+		t.Fatalf("background start failed: %v (out=%q)", err, out)
+	}
+	jobID := backgroundJobIDFromStartOutput(t, out)
+	results := manager.WaitForSession(context.Background(), "capability-session", []string{jobID}, 5)
+	if len(results) != 1 || results[0].Status != jobs.Failed {
+		t.Fatalf("results = %#v, want one failed user command", results)
+	}
+	if !strings.Contains(results[0].Output, "prepared=true") || !strings.Contains(results[0].Output, "applied=true") {
+		t.Fatalf("background output = %q, want witnessed applied authority despite exit 7", results[0].Output)
+	}
+}
+
+func TestPreparedBackgroundBashCancellationNeverClaimsNotAppliedWithoutProof(t *testing.T) {
+	if !sandbox.Available() {
+		t.Skip("OS sandbox unavailable")
+	}
+	manager := jobs.NewManager(event.Discard)
+	defer manager.Close()
+	ctx := jobs.WithSession(jobs.WithManager(context.Background(), manager), "canceled-capability-session")
+	b := bash{workDir: t.TempDir(), sb: sandbox.Spec{Mode: "enforce", Network: true, MinimalWrites: true}}
+	invocation, err := b.PrepareSandboxInvocation(ctx, argsJSON(t, map[string]any{
+		"command": "sleep 30", "run_in_background": true,
+		"sandbox_capabilities": map[string]any{
+			"devices": []any{map[string]string{"path": "/dev/null"}},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review := invocation.Review(); review.State != sandbox.CapabilityReady {
+		t.Skipf("device capabilities unavailable: state=%v diagnostic=%q", review.State, review.Diagnostic)
+	}
+	out, err := invocation.Execute(ctx, sandbox.AuthorizedDelta)
+	if err != nil {
+		t.Fatalf("background start failed: %v (out=%q)", err, out)
+	}
+	jobID := backgroundJobIDFromStartOutput(t, out)
+	if !manager.KillForSession("canceled-capability-session", jobID) {
+		t.Fatalf("failed to cancel background job %q", jobID)
+	}
+	results := manager.WaitForSession(context.Background(), "canceled-capability-session", []string{jobID}, 5)
+	if len(results) != 1 || results[0].Status != jobs.Killed {
+		t.Fatalf("results = %#v, want one killed job", results)
+	}
+	if strings.Contains(results[0].Output, "applied=false") {
+		t.Fatalf("canceled background output = %q, cancellation cannot prove authority was never active", results[0].Output)
+	}
+	if !strings.Contains(results[0].Output, "applied=unknown") && !strings.Contains(results[0].Output, "applied=true") {
+		t.Fatalf("canceled background output = %q, want conservative unknown or witnessed true", results[0].Output)
 	}
 }
 

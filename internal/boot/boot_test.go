@@ -671,6 +671,9 @@ model = "x"
 	if !requestToolSchemaContains(parentReq, "bash", "sandbox_capabilities") {
 		t.Fatalf("parent bash schema should include sandbox_capabilities")
 	}
+	if !requestToolSchemaContains(parentReq, "bash", "devices") {
+		t.Fatalf("parent bash capability schema should include devices")
+	}
 	for _, hidden := range []string{"task", "run_skill", "read_only_skill", "read_skill", "install_skill", "install_source", "explore", "research", "review", "security_review", "wait", "bash_output", "kill_shell"} {
 		if requestHasTool(subReq, hidden) {
 			t.Fatalf("skill subagent request should hide %q; tools=%v", hidden, toolSchemaNames(subReq.Tools))
@@ -684,6 +687,9 @@ model = "x"
 	}
 	if !requestToolSchemaContains(subReq, "bash", "sandbox_capabilities") {
 		t.Fatalf("skill subagent bash schema should include sandbox_capabilities")
+	}
+	if !requestToolSchemaContains(subReq, "bash", "devices") {
+		t.Fatalf("skill subagent bash capability schema should include devices")
 	}
 	if !requestToolDescriptionContains(subReq, "bash", "Only permission-classified read-only commands are allowed") {
 		t.Fatalf("review subagent bash must advertise its permission-layer read-only policy; got %q", requestToolDescription(subReq, "bash"))

@@ -16,6 +16,9 @@ func capabilityBaseWriteRoots(spec Spec) []string {
 func capabilityBaseReadCovers(_ Spec, _ CapabilityPath) bool { return true }
 
 func capabilityPlatformSupports(_ context.Context, _ Spec, delta CapabilitySet) (bool, string) {
+	if len(delta.Devices) > 0 {
+		return false, "device capabilities are supported only by the proven Linux Bubblewrap backend"
+	}
 	if len(delta.Reads)+len(delta.Writes) > 0 {
 		return false, "Seatbelt path exceptions have not passed the required real-platform safety probe"
 	}
@@ -23,6 +26,9 @@ func capabilityPlatformSupports(_ context.Context, _ Spec, delta CapabilitySet) 
 }
 
 func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string) (CapabilityLaunch, error) {
+	if len(delta.Devices) > 0 {
+		return CapabilityLaunch{}, fmt.Errorf("device capabilities are unsupported on macOS")
+	}
 	if len(delta.Reads)+len(delta.Writes) > 0 {
 		return CapabilityLaunch{}, fmt.Errorf("Seatbelt path exceptions are unsupported")
 	}

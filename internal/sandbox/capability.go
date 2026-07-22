@@ -14,6 +14,7 @@ import (
 
 const (
 	maxCapabilityPaths         = 4
+	maxCapabilityDevices       = 4
 	maxCapabilityPrefixTokens  = 8
 	maxCapabilityPathBytes     = 4096
 	maxCapabilityJustification = 100
@@ -102,24 +103,80 @@ type CapabilityPath struct {
 	Kind      CapabilityPathKind     `json:"kind"`
 }
 
+// CapabilityDeviceKind records the kernel device class independently from
+// ordinary file read/write authority.
+type CapabilityDeviceKind string
+
+const (
+	// CapabilityCharacterDevice identifies a character device.
+	CapabilityCharacterDevice CapabilityDeviceKind = "character"
+	// CapabilityBlockDevice identifies a block device.
+	CapabilityBlockDevice CapabilityDeviceKind = "block"
+)
+
+// CapabilityDevice is one normalized exact Linux device identity. Device
+// requests never represent directory scopes or ordinary filesystem access.
+type CapabilityDevice struct {
+	Path      string               `json:"path"`
+	Canonical string               `json:"canonical"`
+	Kind      CapabilityDeviceKind `json:"kind"`
+	Major     uint32               `json:"major"`
+	Minor     uint32               `json:"minor"`
+}
+
 // CapabilitySet is an atomic network/read/write authority bundle.
 type CapabilitySet struct {
-	Network bool             `json:"network"`
-	Reads   []CapabilityPath `json:"read_paths,omitempty"`
-	Writes  []CapabilityPath `json:"write_paths,omitempty"`
+	Network bool               `json:"network"`
+	Reads   []CapabilityPath   `json:"read_paths,omitempty"`
+	Writes  []CapabilityPath   `json:"write_paths,omitempty"`
+	Devices []CapabilityDevice `json:"devices,omitempty"`
+}
+
+// CapabilityAppliedState truthfully separates launch preparation from known
+// device/path authority application by the child sandbox.
+type CapabilityAppliedState string
+
+const (
+	// CapabilityNotApplied means no additional authority was prepared.
+	CapabilityNotApplied CapabilityAppliedState = "false"
+	// CapabilityApplicationUnknown means a delta was prepared but process setup
+	// has not been proven successful, for example for a background command.
+	CapabilityApplicationUnknown CapabilityAppliedState = "unknown"
+	// CapabilityApplied means the prepared sandboxed command completed, proving
+	// Bubblewrap reached and applied its mount setup.
+	CapabilityApplied CapabilityAppliedState = "true"
+)
+
+// CapabilityAuthorityStatus is the authoritative monotonic status of a
+// requested capability bundle at the point represented by its enclosing value.
+type CapabilityAuthorityStatus struct {
+	Requested bool                   `json:"requested"`
+	Supported bool                   `json:"supported"`
+	Prepared  bool                   `json:"prepared"`
+	Applied   CapabilityAppliedState `json:"applied"`
 }
 
 // CapabilityReview is the immutable view consumed by the future authorization
 // gate. Slices returned by CapabilityAssessment.Review are defensive copies.
 type CapabilityReview struct {
-	Requested      bool            `json:"requested"`
-	State          CapabilityState `json:"state"`
-	Request        CapabilitySet   `json:"request"`
-	EffectiveDelta CapabilitySet   `json:"effective_delta"`
-	ArgvPrefix     []string        `json:"argv_prefix,omitempty"`
-	Justification  string          `json:"justification,omitempty"`
-	Risk           CapabilityRisk  `json:"risk"`
-	Diagnostic     string          `json:"diagnostic,omitempty"`
+	State          CapabilityState           `json:"state"`
+	Request        CapabilitySet             `json:"request"`
+	EffectiveDelta CapabilitySet             `json:"effective_delta"`
+	ArgvPrefix     []string                  `json:"argv_prefix,omitempty"`
+	Justification  string                    `json:"justification,omitempty"`
+	Risk           CapabilityRisk            `json:"risk"`
+	Diagnostic     string                    `json:"diagnostic,omitempty"`
+	Authority      CapabilityAuthorityStatus `json:"authority"`
+}
+
+// MarshalJSON preserves the established top-level requested projection while
+// CapabilityAuthorityStatus remains its single authoritative storage location.
+func (r CapabilityReview) MarshalJSON() ([]byte, error) {
+	type reviewAlias CapabilityReview
+	return json.Marshal(struct {
+		Requested bool `json:"requested"`
+		reviewAlias
+	}{Requested: r.Authority.Requested, reviewAlias: reviewAlias(r)})
 }
 
 // CapabilityInput contains the complete immutable basis for one evaluation.
@@ -154,11 +211,16 @@ type capabilityPathRequest struct {
 }
 
 type capabilityRequest struct {
-	Network       bool                    `json:"network"`
-	ReadPaths     []capabilityPathRequest `json:"read_paths"`
-	WritePaths    []capabilityPathRequest `json:"write_paths"`
-	ArgvPrefix    []string                `json:"argv_prefix"`
-	Justification string                  `json:"justification"`
+	Network       bool                      `json:"network"`
+	ReadPaths     []capabilityPathRequest   `json:"read_paths"`
+	WritePaths    []capabilityPathRequest   `json:"write_paths"`
+	Devices       []capabilityDeviceRequest `json:"devices"`
+	ArgvPrefix    []string                  `json:"argv_prefix"`
+	Justification string                    `json:"justification"`
+}
+
+type capabilityDeviceRequest struct {
+	Path string `json:"path"`
 }
 
 // EvaluateCapability strictly validates and normalizes one complete request,
@@ -168,11 +230,12 @@ type capabilityRequest struct {
 func EvaluateCapability(ctx context.Context, in CapabilityInput) CapabilityAssessment {
 	a := CapabilityAssessment{base: cloneSpec(in.Base)}
 	a.review.Risk.Level = CapabilityRiskNormal
+	a.review.Authority.Applied = CapabilityNotApplied
 	if in.Raw == nil {
 		a.review.State = CapabilityOmitted
 		return a
 	}
-	a.review.Requested = true
+	a.review.Authority.Requested = true
 
 	req, err := decodeCapabilityRequest(in.Raw)
 	if err != nil {
@@ -192,7 +255,11 @@ func EvaluateCapability(ctx context.Context, in CapabilityInput) CapabilityAsses
 	if err != nil {
 		return a.softDeny(fmt.Errorf("write paths: %w", err))
 	}
-	a.review.Request = CapabilitySet{Network: req.Network, Reads: reads, Writes: writes}
+	devices, err := normalizeCapabilityDevices(req.Devices)
+	if err != nil {
+		return a.softDeny(fmt.Errorf("devices: %w", err))
+	}
+	a.review.Request = CapabilitySet{Network: req.Network, Reads: reads, Writes: writes, Devices: devices}
 	a.review.ArgvPrefix = append([]string(nil), req.ArgvPrefix...)
 	a.review.Justification = req.Justification
 	a.review.Risk = classifyCapabilityRisk(a.base, a.review.Request)
@@ -219,6 +286,7 @@ func EvaluateCapability(ctx context.Context, in CapabilityInput) CapabilityAsses
 		return a.softDeny(fmt.Errorf("sandbox capability bundle is unsupported: %s", reason))
 	}
 	a.review.State = CapabilityReady
+	a.review.Authority.Supported = true
 	return a
 }
 
@@ -240,6 +308,12 @@ func decodeCapabilityRequest(raw json.RawMessage) (capabilityRequest, error) {
 	if err := rejectDuplicateCapabilityFields(raw); err != nil {
 		return req, fmt.Errorf("invalid sandbox_capabilities: %w", err)
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err == nil {
+		if devices, ok := fields["devices"]; ok && bytes.Equal(bytes.TrimSpace(devices), []byte("null")) {
+			return req, fmt.Errorf("invalid sandbox_capabilities: devices must be an array")
+		}
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
@@ -257,6 +331,9 @@ func decodeCapabilityRequest(raw json.RawMessage) (capabilityRequest, error) {
 	}
 	if len(req.WritePaths) > maxCapabilityPaths {
 		return req, fmt.Errorf("write_paths exceeds %d entries", maxCapabilityPaths)
+	}
+	if len(req.Devices) > maxCapabilityDevices {
+		return req, fmt.Errorf("devices exceeds %d entries", maxCapabilityDevices)
 	}
 	if len(req.ArgvPrefix) > maxCapabilityPrefixTokens {
 		return req, fmt.Errorf("argv_prefix exceeds %d tokens", maxCapabilityPrefixTokens)
@@ -277,7 +354,42 @@ func decodeCapabilityRequest(raw json.RawMessage) (capabilityRequest, error) {
 			return req, fmt.Errorf("paths must be non-empty UTF-8 without NUL")
 		}
 	}
+	for _, device := range req.Devices {
+		if len(device.Path) > maxCapabilityPathBytes {
+			return req, fmt.Errorf("device path exceeds %d bytes", maxCapabilityPathBytes)
+		}
+		if device.Path == "" || !utf8.ValidString(device.Path) || strings.ContainsRune(device.Path, '\x00') {
+			return req, fmt.Errorf("device paths must be non-empty UTF-8 without NUL")
+		}
+	}
 	return req, nil
+}
+
+func normalizeCapabilityDevices(requests []capabilityDeviceRequest) ([]CapabilityDevice, error) {
+	out := make([]CapabilityDevice, 0, len(requests))
+	seen := make(map[string]bool, len(requests))
+	for _, req := range requests {
+		if !filepath.IsAbs(req.Path) || filepath.Clean(req.Path) != req.Path {
+			return nil, fmt.Errorf("device path %q must be clean and absolute", req.Path)
+		}
+		real, err := filepath.EvalSymlinks(req.Path)
+		if err != nil {
+			return nil, fmt.Errorf("device path %q must already exist: %w", req.Path, err)
+		}
+		if filepath.Clean(real) != req.Path {
+			return nil, fmt.Errorf("device path %q must not contain symlinks", req.Path)
+		}
+		device, err := inspectCapabilityDevice(req.Path)
+		if err != nil {
+			return nil, fmt.Errorf("device path %q: %w", req.Path, err)
+		}
+		if seen[device.Canonical] {
+			continue
+		}
+		seen[device.Canonical] = true
+		out = append(out, device)
+	}
+	return out, nil
 }
 
 func rejectDuplicateCapabilityFields(raw json.RawMessage) error {
@@ -416,7 +528,7 @@ func normalizeCapabilityPaths(workspace string, requests []capabilityPathRequest
 }
 
 func effectiveCapabilityDelta(base Spec, request CapabilitySet) CapabilitySet {
-	delta := CapabilitySet{Network: request.Network && !base.Network}
+	delta := CapabilitySet{Network: request.Network && !base.Network, Devices: append([]CapabilityDevice(nil), request.Devices...)}
 	for _, p := range request.Reads {
 		if capabilityReadCoveredByBase(base, p) {
 			continue
@@ -565,6 +677,13 @@ func classifyCapabilityRisk(base Spec, set CapabilitySet) CapabilityRisk {
 			risk.Findings = append(risk.Findings, CapabilityRiskFinding{Code: code, Message: message})
 		}
 	}
+	for _, device := range set.Devices {
+		risk.Level = CapabilityRiskCritical
+		risk.Findings = append(risk.Findings, CapabilityRiskFinding{
+			Code:    "device_access",
+			Message: fmt.Sprintf("scope permits direct %s device access to %s", device.Kind, device.Canonical),
+		})
+	}
 	return risk
 }
 
@@ -610,7 +729,7 @@ func broadCapabilityPath(path string) bool {
 }
 
 func capabilitySetEmpty(set CapabilitySet) bool {
-	return !set.Network && len(set.Reads) == 0 && len(set.Writes) == 0
+	return !set.Network && len(set.Reads) == 0 && len(set.Writes) == 0 && len(set.Devices) == 0
 }
 
 func cloneCapabilitySet(in CapabilitySet) CapabilitySet {
@@ -618,6 +737,7 @@ func cloneCapabilitySet(in CapabilitySet) CapabilitySet {
 		Network: in.Network,
 		Reads:   append([]CapabilityPath(nil), in.Reads...),
 		Writes:  append([]CapabilityPath(nil), in.Writes...),
+		Devices: append([]CapabilityDevice(nil), in.Devices...),
 	}
 }
 

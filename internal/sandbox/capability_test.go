@@ -15,7 +15,7 @@ func TestEvaluateCapabilityOmittedDoesNoWorkspaceResolution(t *testing.T) {
 		Workspace: filepath.Join(t.TempDir(), "missing"),
 	})
 	review := assessment.Review()
-	if review.State != CapabilityOmitted || review.Requested {
+	if review.State != CapabilityOmitted || review.Authority.Requested {
 		t.Fatalf("review = %#v, want omitted request", review)
 	}
 }
@@ -24,6 +24,7 @@ func TestEvaluateCapabilityStrictlySoftDeniesInvalidObjects(t *testing.T) {
 	workspace := t.TempDir()
 	tests := map[string]string{
 		"null":               `null`,
+		"null devices":       `{"devices":null}`,
 		"unknown field":      `{"network":true,"surprise":true}`,
 		"duplicate field":    `{"network":true,"network":false}`,
 		"unknown identity":   `{"read_paths":[{"identity":"host","path":"x"}]}`,
@@ -46,6 +47,24 @@ func TestEvaluateCapabilityStrictlySoftDeniesInvalidObjects(t *testing.T) {
 	}
 }
 
+func TestCapabilityReviewJSONProjectsRequestedFromAuthority(t *testing.T) {
+	review := CapabilityReview{Authority: CapabilityAuthorityStatus{Requested: true, Applied: CapabilityNotApplied}}
+	raw, err := json.Marshal(review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected struct {
+		Requested bool                      `json:"requested"`
+		Authority CapabilityAuthorityStatus `json:"authority"`
+	}
+	if err := json.Unmarshal(raw, &projected); err != nil {
+		t.Fatal(err)
+	}
+	if !projected.Requested || !projected.Authority.Requested {
+		t.Fatalf("projected review = %s, want one authority value exposed in both JSON locations", raw)
+	}
+}
+
 func TestEvaluateCapabilityEnforcesPreNormalizationLimits(t *testing.T) {
 	workspace := t.TempDir()
 	path := func(name string) map[string]string {
@@ -57,6 +76,15 @@ func TestEvaluateCapabilityEnforcesPreNormalizationLimits(t *testing.T) {
 		},
 		"write count": {
 			"write_paths": []any{path("a"), path("b"), path("c"), path("d"), path("e")},
+		},
+		"device count": {
+			"devices": []any{
+				map[string]string{"path": "/dev/null"},
+				map[string]string{"path": "/dev/zero"},
+				map[string]string{"path": "/dev/full"},
+				map[string]string{"path": "/dev/random"},
+				map[string]string{"path": "/dev/urandom"},
+			},
 		},
 		"prefix count": {
 			"argv_prefix": []string{"1", "2", "3", "4", "5", "6", "7", "8", "9"},
