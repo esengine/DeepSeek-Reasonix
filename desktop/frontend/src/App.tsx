@@ -106,6 +106,7 @@ import {
 } from "./lib/types";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
+import { workspaceTreeVisitId } from "./lib/workspaceTreeMemory";
 import {
   composerProfileFromMeta,
   composerProfileFromTab,
@@ -1565,6 +1566,14 @@ export default function App() {
     state.sessionGen,
     workspaceControllerEpoch,
   ].join("\u0000");
+  // A topic may contain multiple saved sessions; the concrete session path is
+  // the runtime conversation identity, with topic/tab ids only as fallbacks.
+  const workspaceTreeMemoryKey = [
+    activeTab?.scope ?? "",
+    activeTab?.workspaceRoot ?? state.meta?.cwd ?? "",
+    activeTab?.sessionPath || state.meta?.sessionPath || activeTab?.topicId || activeTabId || "",
+  ].join("\u0000");
+  const workspaceTreeMemoryVisitId = workspaceTreeVisitId(workspaceTreeMemoryKey);
   const sidebarImDetailConnection = useMemo(
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
@@ -4441,6 +4450,8 @@ export default function App() {
                   tabId={activeTabId}
                   cwd={state.meta?.cwd}
                   workspaceScopeKey={workspaceScopeKey}
+                  workspaceMemoryKey={workspaceTreeMemoryKey}
+                  workspaceMemoryVisitId={workspaceTreeMemoryVisitId}
                   maximized={workspacePanelMaximized}
                   panelWidth={workspacePanelRenderWidth}
                   onClose={() => setWorkspacePanel(false)}

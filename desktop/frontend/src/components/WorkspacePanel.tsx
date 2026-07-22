@@ -40,6 +40,12 @@ import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { closeWorkspacePreviewTab } from "../lib/workspacePreviewTabs";
 import { shouldScrollWorkspaceTreeSelection } from "../lib/workspaceTreeReveal";
 import { mergeWorkspaceSearchResults } from "../lib/workspaceTreeSearch";
+import {
+  readWorkspaceTreeMemory,
+  rememberWorkspaceTreeOpenDirs,
+  touchWorkspaceTreeVisit,
+  workspaceTreeVisitId,
+} from "../lib/workspaceTreeMemory";
 import type {
   DirEntry,
   FilePreview,
@@ -58,6 +64,7 @@ import { FloatingMenu, FloatingMenuItems } from "./FloatingMenu";
 import { Markdown } from "./Markdown";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
+import { WorkspaceFileIcon } from "./WorkspaceFileIcon";
 
 const WORKSPACE_TREE_MIN_WIDTH = 140;
 const WORKSPACE_TREE_DEFAULT_WIDTH = 300;
@@ -110,6 +117,11 @@ function parentDirs(path: string): string[] {
     dirs.push(acc);
   }
   return dirs;
+}
+
+function topLevelDirPath(path: string): string {
+  const first = path.split("/").find(Boolean);
+  return first ? `${first}/` : "";
 }
 
 function renderMediaPreview(preview: FilePreview): ReactElement | null {
@@ -165,6 +177,8 @@ interface TreeRow {
   active: boolean;
   isOpen?: boolean;
   isSearch?: boolean;
+  compactPaths?: string[];
+  displayName?: string;
 }
 
 export function WorkspacePanel({
@@ -188,6 +202,8 @@ export function WorkspacePanel({
   changeListRequest,
   showViewTabs = true,
   workspaceScopeKey: workspaceScopeKeyProp,
+  workspaceMemoryKey: workspaceMemoryKeyProp,
+  workspaceMemoryVisitId: workspaceMemoryVisitIdProp,
   creationMode = false,
 }: {
   open: boolean;
@@ -210,17 +226,27 @@ export function WorkspacePanel({
   changeListRequest?: WorkspaceChangeListRequest | null;
   showViewTabs?: boolean;
   workspaceScopeKey?: string;
+  workspaceMemoryKey?: string;
+  workspaceMemoryVisitId?: number;
   creationMode?: boolean;
 }) {
   const t = useT();
   const workspaceTabId = tabId ?? "";
   const workspaceScopeKey = workspaceScopeKeyProp ?? `${workspaceTabId}\u0000${cwd ?? ""}`;
+  const workspaceMemoryKey = workspaceMemoryKeyProp ?? workspaceScopeKey;
+  const workspaceMemoryVisitId = workspaceMemoryVisitIdProp ?? workspaceTreeVisitId(workspaceMemoryKey);
+  const initialWorkspaceMemory = readWorkspaceTreeMemory(workspaceMemoryKey);
   const panelRef = useRef<HTMLElement>(null);
   const treeRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLInputElement>(null);
   const previewBodyRef = useRef<HTMLDivElement>(null);
   const [entriesByDir, setEntriesByDir] = useState<Record<string, DirEntry[]>>({});
-  const [openDirs, setOpenDirs] = useState<Set<string>>(() => new Set([""]));
+  const [openDirs, setOpenDirs] = useState<Set<string>>(
+    () => new Set(initialWorkspaceMemory?.openDirs ?? [""]),
+  );
+  const [revealedRootPaths, setRevealedRootPaths] = useState<Set<string> | null>(
+    () => initialWorkspaceMemory && initialWorkspaceMemory.visitId !== workspaceMemoryVisitId ? new Set() : null,
+  );
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
   const [preview, setPreview] = useState<FilePreview | null>(null);
@@ -266,6 +292,7 @@ export function WorkspacePanel({
   const commitDetailRequestIdRef = useRef(0);
   const dirLoadGenerationRef = useRef(0);
   const dirLoadRequestIdsRef = useRef<Record<string, number>>({});
+  const compactProbeInFlightRef = useRef(new Set<string>());
   const recentAnchorRef = useRef<HTMLButtonElement>(null);
   const openDirsRef = useRef(openDirs);
   const pendingTreeRevealPathRef = useRef<string | null>(null);
@@ -275,19 +302,41 @@ export function WorkspacePanel({
     openDirsRef.current = openDirs;
   }, [openDirs]);
 
+  const updateOpenDirs = useCallback(
+    (update: (previous: ReadonlySet<string>) => Set<string>) => {
+      setOpenDirs((previous) => {
+        const next = update(previous);
+        rememberWorkspaceTreeOpenDirs(workspaceMemoryKey, next, workspaceMemoryVisitId);
+        return next;
+      });
+    },
+    [workspaceMemoryKey, workspaceMemoryVisitId],
+  );
+
+  useEffect(() => {
+    const remembered = readWorkspaceTreeMemory(workspaceMemoryKey);
+    const nextOpenDirs = new Set(remembered?.openDirs ?? [""]);
+    setOpenDirs(nextOpenDirs);
+    openDirsRef.current = nextOpenDirs;
+    setRevealedRootPaths(remembered && remembered.visitId !== workspaceMemoryVisitId ? new Set() : null);
+    if (remembered) touchWorkspaceTreeVisit(workspaceMemoryKey, workspaceMemoryVisitId);
+    else rememberWorkspaceTreeOpenDirs(workspaceMemoryKey, nextOpenDirs, workspaceMemoryVisitId);
+  }, [workspaceMemoryKey, workspaceMemoryVisitId]);
+
   const loadDir = useCallback(async (dir: string) => {
     const requestTabId = workspaceTabId;
     const requestScopeKey = workspaceScopeKey;
     const generation = dirLoadGenerationRef.current;
     const requestId = (dirLoadRequestIdsRef.current[dir] ?? 0) + 1;
     dirLoadRequestIdsRef.current[dir] = requestId;
-    const entries = await app.ListDirForTab(requestTabId, dir).catch((): DirEntry[] => []);
+    const entries = asArray(await app.ListDirForTab(requestTabId, dir).catch((): DirEntry[] => []));
     if (
       currentWorkspaceScopeKeyRef.current !== requestScopeKey ||
       dirLoadGenerationRef.current !== generation ||
       dirLoadRequestIdsRef.current[dir] !== requestId
-    ) return;
-    setEntriesByDir((prev) => ({ ...prev, [dir]: asArray(entries) }));
+    ) return null;
+    setEntriesByDir((prev) => ({ ...prev, [dir]: entries }));
+    return entries;
   }, [workspaceScopeKey, workspaceTabId]);
 
   const loadGitHistory = useCallback(async () => {
@@ -433,18 +482,18 @@ export function WorkspacePanel({
       setFilter("");
       setOpenTabs((tabs) => [...tabs.filter((tab) => tab !== path), path].slice(-WORKSPACE_MAX_PREVIEW_TABS));
       const dirs = parentDirs(path);
-      setOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
+      updateOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
       dirs.forEach((dir) => void loadDir(dir));
     },
-    [loadDir, openTabs.length, panelWidth, selectedPath, treeVisible],
+    [loadDir, openTabs.length, panelWidth, selectedPath, treeVisible, updateOpenDirs],
   );
 
   useEffect(() => {
     if (!open) return;
     dirLoadGenerationRef.current += 1;
     dirLoadRequestIdsRef.current = {};
+    compactProbeInFlightRef.current.clear();
     setEntriesByDir({});
-    setOpenDirs(new Set([""]));
     setSelectedPath(null);
     setOpenTabs([]);
     setPreview(null);
@@ -560,9 +609,9 @@ export function WorkspacePanel({
     setSelectionMenu(null);
     setTreeMenu(null);
     const dirs = Array.from(new Set(paths.flatMap(parentDirs)));
-    setOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
+    updateOpenDirs((prev) => new Set([...Array.from(prev), ...dirs]));
     dirs.forEach((dir) => void loadDir(dir));
-  }, [fileListRequest, loadDir, open, scopedFilePaths, viewMode]);
+  }, [fileListRequest, loadDir, open, scopedFilePaths, updateOpenDirs, viewMode]);
 
   useEffect(() => {
     if (!open || changeListRequest) return;
@@ -761,19 +810,35 @@ export function WorkspacePanel({
   }, [open, refreshSelected, selectedPath]);
 
   const toggleDir = useCallback(
-    (dir: string) => {
-      setOpenDirs((prev) => {
-        const next = new Set(prev);
-        if (next.has(dir)) {
-          next.delete(dir);
-        } else {
-          next.add(dir);
-          void loadDir(dir);
+    (dir: string, compactPaths: string[] = [dir]) => {
+      const firstPath = compactPaths[0] ?? dir;
+      const rootPath = topLevelDirPath(firstPath);
+      if (revealedRootPaths !== null && !revealedRootPaths.has(rootPath)) {
+        setRevealedRootPaths((current) => new Set([...(current ?? []), rootPath]));
+        const remembered = openDirsRef.current;
+        if (!remembered.has(firstPath)) {
+          updateOpenDirs((previous) => new Set([...previous, ...compactPaths]));
+          compactPaths.forEach((path) => void loadDir(path));
+          return;
         }
+        remembered.forEach((path) => {
+          if (path === rootPath || path.startsWith(rootPath)) void loadDir(path);
+        });
+        return;
+      }
+
+      const isOpen = openDirsRef.current.has(firstPath);
+      updateOpenDirs((previous) => {
+        const next = new Set(previous);
+        compactPaths.forEach((path) => {
+          if (isOpen) next.delete(path);
+          else next.add(path);
+        });
         return next;
       });
+      if (!isOpen) compactPaths.forEach((path) => void loadDir(path));
     },
-    [loadDir],
+    [loadDir, revealedRootPaths, updateOpenDirs],
   );
 
   const breadcrumbDirs = selectedPath ? parentDirs(selectedPath) : [""];
@@ -888,25 +953,52 @@ export function WorkspacePanel({
     const build = (dir: string, depth: number) => {
       const entries = entriesByDir[dir] ?? [];
       for (const entry of entries) {
-        const path = entryPath(dir, entry);
-        const isOpen = openDirs.has(path);
-        const active = selectedPath === path;
+        const firstPath = entryPath(dir, entry);
+        if (!entry.isDir) {
+          acc.push({
+            key: firstPath,
+            path: firstPath,
+            depth,
+            entry,
+            active: selectedPath === firstPath,
+            isOpen: false,
+          });
+          continue;
+        }
+
+        const compactPaths = [firstPath];
+        const compactNames = [entry.name];
+        let lastPath = firstPath;
+        let lastEntry = entry;
+        while (true) {
+          const children = entriesByDir[lastPath];
+          if (!children || children.length !== 1 || !children[0]?.isDir) break;
+          lastEntry = children[0];
+          lastPath = entryPath(lastPath, lastEntry);
+          compactPaths.push(lastPath);
+          compactNames.push(lastEntry.name);
+        }
+        const rootPath = topLevelDirPath(firstPath);
+        const isRevealed = revealedRootPaths === null || revealedRootPaths.has(rootPath);
+        const isOpen = isRevealed && openDirs.has(firstPath);
         acc.push({
-          key: path,
-          path,
+          key: lastPath,
+          path: lastPath,
           depth,
-          entry,
-          active,
+          entry: lastEntry,
+          active: selectedPath === lastPath,
           isOpen,
+          compactPaths,
+          displayName: compactNames.join(" / "),
         });
-        if (entry.isDir && isOpen) {
-          build(path, depth + 1);
+        if (isOpen) {
+          build(lastPath, depth + 1);
         }
       }
     };
     build("", 0);
     return acc;
-  }, [flattened, entriesByDir, openDirs, selectedPath]);
+  }, [flattened, entriesByDir, openDirs, revealedRootPaths, selectedPath]);
   const getTreeRowKey = useCallback((index: number) => treeRows[index]?.key ?? index, [treeRows]);
 
   const virtualizer = useVirtualizer({
@@ -917,6 +1009,21 @@ export function WorkspacePanel({
     overscan: 10,
     directDomUpdates: true,
   });
+  const virtualTreeItems = virtualizer.getVirtualItems();
+  const compactProbePaths = virtualTreeItems
+    .map((item) => treeRows[item.index])
+    .filter((row): row is TreeRow => Boolean(row?.entry.isDir && entriesByDir[row.path] === undefined))
+    .map((row) => row.path);
+  const compactProbeKey = compactProbePaths.join("\u0000");
+
+  useEffect(() => {
+    if (!open || !compactProbeKey) return;
+    compactProbePaths.forEach((path) => {
+      if (compactProbeInFlightRef.current.has(path)) return;
+      compactProbeInFlightRef.current.add(path);
+      void loadDir(path).finally(() => compactProbeInFlightRef.current.delete(path));
+    });
+  }, [compactProbeKey, loadDir, open]);
 
   const searchPlaceholder = t(scopedFilePaths ? "workspace.filterReferencedFiles" : changedMode ? "workspace.filterChanges" : "workspace.filter");
 
@@ -1206,7 +1313,7 @@ export function WorkspacePanel({
   };
 
   const renderNormalRow = (row: TreeRow) => {
-    const { path, depth, entry, isOpen, active } = row;
+    const { path, depth, entry, isOpen, active, compactPaths = [path], displayName = entry.name } = row;
     return (
       <button
         key={path}
@@ -1216,7 +1323,7 @@ export function WorkspacePanel({
         onDragStart={(event) => startTreeDrag(event, path, entry.isDir)}
         onClick={() => {
           if (entry.isDir) {
-            toggleDir(path);
+            toggleDir(path, compactPaths);
           } else {
             if (selectedPath === path) {
               setSelectedPath(null);
@@ -1228,6 +1335,17 @@ export function WorkspacePanel({
         onContextMenu={(event) => openTreeMenu(event, path, entry.isDir)}
         style={{ paddingLeft: 8 + depth * 14 }}
       >
+        {depth > 0 && (
+          <span className="workspace-tree__guides" aria-hidden="true">
+            {Array.from({ length: depth }, (_, index) => (
+              <span
+                className="workspace-tree__guide"
+                key={index}
+                style={{ left: 14 + index * 14 }}
+              />
+            ))}
+          </span>
+        )}
         {entry.isDir ? (
           <ChevronRight
             size={13}
@@ -1243,9 +1361,9 @@ export function WorkspacePanel({
         {entry.isDir ? (
           <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
         ) : (
-          <FileText size={14} className="workspace-tree__icon" />
+          <WorkspaceFileIcon fileName={entry.name} />
         )}
-        <span className="workspace-tree__name">{entry.name}</span>
+        <span className="workspace-tree__name">{displayName}</span>
       </button>
     );
   };
@@ -1276,7 +1394,7 @@ export function WorkspacePanel({
         {entry.isDir ? (
           <Folder size={14} className="workspace-tree__icon workspace-tree__icon--dir" />
         ) : (
-          <FileText size={14} className="workspace-tree__icon" />
+          <WorkspaceFileIcon fileName={entry.name} />
         )}
         <span className="workspace-tree__result">
           <span className="workspace-tree__result-name">{basename(path)}</span>
@@ -1394,7 +1512,7 @@ export function WorkspacePanel({
               onClick={() => {
                 setFilter("");
                 showTreeEvenSplit();
-                setOpenDirs((prev) => new Set([...Array.from(prev), ""]));
+                updateOpenDirs((prev) => new Set([...Array.from(prev), ""]));
                 void loadDir("");
               }}
             >
@@ -1414,7 +1532,7 @@ export function WorkspacePanel({
                       if (isLast) return;
                       showTreeEvenSplit();
                       setFilter("");
-                      setOpenDirs((prev) => new Set([...Array.from(prev), ...breadcrumbDirs, dir]));
+                      updateOpenDirs((prev) => new Set([...Array.from(prev), ...breadcrumbDirs, dir]));
                       void loadDir(dir);
                     }}
                   >
@@ -1871,7 +1989,7 @@ export function WorkspacePanel({
                 position: "relative",
               }}
             >
-              {virtualizer.getVirtualItems().map((row) => {
+              {virtualTreeItems.map((row) => {
                 const item = treeRows[row.index];
                 if (!item) return null;
                 return (

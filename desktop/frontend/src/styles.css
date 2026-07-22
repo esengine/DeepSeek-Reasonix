@@ -2,12 +2,20 @@
  * Reasonix desktop — single-column, developer-dense, terminal-flavored chat UI.
  *
  * Multi-platform notes:
- *  - System font stack only; no web-font fetches (offline-first, consistent).
+ *  - System font stack for text; bundled icon fonts only (no web-font fetches).
  *  - No backdrop-filter / blur (slow & inconsistent on Linux WebKitGTK).
  *  - Colors via CSS variables + prefers-color-scheme so the webview follows the OS.
  *  - --wails-draggable marks the title region as an OS drag handle (macOS inset
  *    title bar); interactive children opt out with --wails-draggable: no-drag.
  */
+
+@font-face {
+  font-family: "Reasonix Seti";
+  src: url("./assets/file-icons/seti/seti.woff") format("woff");
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
 
 :root {
   color-scheme: dark;
@@ -9491,6 +9499,18 @@ body > .mermaid-diagram--fullscreen {
   font-size: 12.5px;
   text-align: left;
 }
+.workspace-tree__guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.workspace-tree__guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--fg-faint) 28%, transparent);
+}
 .workspace-tree__row:hover {
   background: var(--tree-row-hover-bg);
   color: var(--fg);
@@ -9849,6 +9869,28 @@ body > .mermaid-diagram--fullscreen {
 }
 .workspace-tree__icon--dir {
   color: var(--fg-dim);
+}
+.workspace-file-icon {
+  width: 14px;
+  height: 16px;
+  flex: 0 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--workspace-file-icon-dark, var(--fg-faint));
+  font-family: "Reasonix Seti";
+  font-size: 16px;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+}
+:root[data-theme="light"] .workspace-file-icon {
+  color: var(--workspace-file-icon-light, var(--fg-faint));
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .workspace-file-icon {
+    color: var(--workspace-file-icon-light, var(--fg-faint));
+  }
 }
 .workspace-tree__row--active .workspace-tree__icon,
 .workspace-tree__row--active .workspace-tree__icon--dir {
