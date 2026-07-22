@@ -20,6 +20,8 @@ import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../li
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta, MemoryCitation } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
+import { CodeViewer } from "./CodeViewer";
+import { languageFor, parseSelectedTextContext, SELECTION_LABEL_RE } from "../lib/selectedTextContext";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
@@ -90,7 +92,7 @@ type PastedBlockInfo = {
   content: string;
 };
 
-const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]|\[(Chat|Code):[^\]]*\]/g;
+const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]/g;
 
 export function parsePastedBlocks(text: string, submitText?: string): PastedBlockInfo[] {
   const labels = text.match(PASTE_LABEL_RE);
@@ -108,6 +110,40 @@ export function parsePastedBlocks(text: string, submitText?: string): PastedBloc
     blocks.push({ label, content });
   }
   return blocks;
+}
+
+export type SelectedTextBlockInfo = {
+  label: string;
+  content: string;
+  path?: string;
+  start: number;
+  end: number;
+  kind: "chat" | "code";
+};
+
+export function parseSelectedTextBlocks(text: string, submitText?: string): SelectedTextBlockInfo[] {
+  const entries = parseSelectedTextContext(submitText);
+  if (entries.length === 0) return [];
+  const matches = Array.from(text.matchAll(SELECTION_LABEL_RE));
+  if (matches.length < entries.length) return [];
+
+  // Composer appends one label per selection after the authored text. Taking
+  // the trailing matches avoids treating label-shaped prose as an attachment.
+  return matches.slice(-entries.length).flatMap((match, index) => {
+    const label = match[0];
+    const start = match.index ?? -1;
+    const entry = entries[index];
+    const kind = entry.path ? "code" : "chat";
+    if (start < 0 || match[1]?.toLowerCase() !== kind) return [];
+    return [{
+      label,
+      content: entry.text,
+      path: entry.path,
+      start,
+      end: start + label.length,
+      kind,
+    }];
+  });
 }
 
 function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
@@ -231,45 +267,56 @@ export function UserMessage({
     setImageViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
   }, []);
 
-  const pasteBlocks = useMemo(() => parsePastedBlocks(actionText, submitText), [actionText, submitText]);
-  const [expandedPasteLabels, setExpandedPasteLabels] = useState<Record<string, boolean>>({});
+  const pasteBlocks = useMemo(() => parsePastedBlocks(displayText, submitText), [displayText, submitText]);
+  const selectedTextBlocks = useMemo(() => parseSelectedTextBlocks(displayText, submitText), [displayText, submitText]);
+  const [expandedBlockKeys, setExpandedBlockKeys] = useState<Record<string, boolean>>({});
 
   type DisplaySegment =
     | { type: "text"; content: string }
-    | { type: "paste"; block: PastedBlockInfo };
+    | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
+    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
 
   const displaySegments = useMemo((): DisplaySegment[] => {
-    if (pasteBlocks.length === 0) return [{ type: "text", content: displayText }];
+    if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
     const segments: DisplaySegment[] = [];
-    // Order blocks by their position in the text so cards appear inline.
-    const ordered = pasteBlocks
-      .map((b) => ({ block: b, pos: displayText.indexOf(b.label) }))
-      .filter((x) => x.pos >= 0)
-      .sort((a, b) => a.pos - b.pos);
-    let remaining = displayText;
-    for (const { block } of ordered) {
-      const idx = remaining.indexOf(block.label);
-      if (idx < 0) continue;
+    const ordered: Array<
+      | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
+      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
+    > = [
+      ...pasteBlocks.map((block) => {
+        const start = displayText.indexOf(block.label);
+        return { block, start, end: start + block.label.length, kind: "paste" as const };
+      }),
+      ...selectedTextBlocks.map((block) => ({ block, start: block.start, end: block.end, kind: block.kind })),
+    ].filter((block) => block.start >= 0).sort((a, b) => a.start - b.start);
+    let cursor = 0;
+    for (const item of ordered) {
+      if (item.start < cursor) continue;
       // Text before the label: strip the trailing newline that separated the
       // label from the preceding line so the card sits tight against the text.
-      if (idx > 0) {
-        let before = remaining.slice(0, idx);
+      if (item.start > cursor) {
+        let before = displayText.slice(cursor, item.start);
         before = before.replace(/\n$/, "");
         if (before) segments.push({ type: "text", content: before });
       }
-      segments.push({ type: "paste", block });
-      remaining = remaining.slice(idx + block.label.length);
+      const key = `${item.kind}:${item.start}:${item.block.label}`;
+      if (item.kind === "paste") {
+        segments.push({ type: "block", key, block: item.block, kind: item.kind });
+      } else {
+        segments.push({ type: "block", key, block: item.block, kind: item.kind });
+      }
+      cursor = item.end;
     }
     // Strip the leading newline that followed the label.
-    remaining = remaining.replace(/^\n/, "");
+    const remaining = displayText.slice(cursor).replace(/^\n/, "");
     if (remaining.trim()) segments.push({ type: "text", content: remaining });
     return segments.length > 0 ? segments : [{ type: "text", content: displayText }];
-  }, [displayText, pasteBlocks]);
+  }, [displayText, pasteBlocks, selectedTextBlocks]);
 
-  const togglePasteExpand = (label: string) => {
-    setExpandedPasteLabels((prev) => ({
+  const toggleBlockExpand = (key: string) => {
+    setExpandedBlockKeys((prev) => ({
       ...prev,
-      [label]: !prev[label],
+      [key]: !prev[key],
     }));
   };
   const orderedDraftAttachments = sortDisplayAttachments(draftAttachments);
@@ -448,7 +495,7 @@ export function UserMessage({
           </div>
         ) : (
           <>
-            {hasInvocationSegments && pasteBlocks.length === 0 ? (
+            {hasInvocationSegments && pasteBlocks.length === 0 && selectedTextBlocks.length === 0 ? (
               <div className="msg__text msg__rich-text">
                 {invocationSegments.map((segment, index) => segment.type === "text"
                   ? <span key={`text:${segment.start}:${index}`}>{segment.content}</span>
@@ -465,23 +512,29 @@ export function UserMessage({
               if (seg.type === "text") {
                 return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
               }
-              const expanded = Boolean(expandedPasteLabels[seg.block.label]);
+              const expanded = Boolean(expandedBlockKeys[seg.key]);
               return (
-                <div className="msg-pasted" key={seg.block.label}>
+                <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
                     <div className="msg-pasted-head">
-                      <FileText size={15} />
+                      {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
                         <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
-                          <button type="button" onClick={() => togglePasteExpand(seg.block.label)}>
+                          <button type="button" onClick={() => toggleBlockExpand(seg.key)}>
                             {expanded ? t("common.collapse") : t("composer.pastedExpand")}
                           </button>
                         </Tooltip>
                       </div>
                     </div>
                     {expanded && (
-                      <div className="msg-pasted-expanded"><Markdown text={seg.block.content} /></div>
+                      <div className="msg-pasted-expanded">
+                        {seg.kind === "chat"
+                          ? <Markdown text={seg.block.content} />
+                          : seg.kind === "code"
+                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
+                            : seg.block.content}
+                      </div>
                     )}
                   </div>
                 </div>
