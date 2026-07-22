@@ -19,6 +19,6 @@ func capabilityPlatformSupports(_ context.Context, _ Spec, _ CapabilitySet) (boo
 	return false, "Windows Bash sandbox capabilities have no effective OS delta"
 }
 
-func prepareCapabilityPlatformLaunch(_ context.Context, _ Spec, _ CapabilitySet, _ Shell, _ string) (CapabilityLaunch, error) {
+func prepareCapabilityPlatformLaunch(_ context.Context, _ Spec, _ CapabilitySet, _ Shell, _ string, _ []string) (CapabilityLaunch, error) {
 	return CapabilityLaunch{}, fmt.Errorf("Windows Bash sandbox capabilities have no effective OS delta")
 }

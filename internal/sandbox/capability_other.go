@@ -218,7 +218,7 @@ func usableBwrapDevices(bwrap string) bool {
 	return actual.(bool)
 }
 
-func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string) (CapabilityLaunch, error) {
+func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string, directArgv []string) (CapabilityLaunch, error) {
 	if runtime.GOOS != "linux" {
 		return CapabilityLaunch{}, fmt.Errorf("capability relaxation is unsupported on %s", runtime.GOOS)
 	}
@@ -291,7 +291,12 @@ func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta Capabil
 		args = append(args, "--dev-bind", device.Canonical, device.Canonical)
 	}
 	args = append(args, "--json-status-fd", strconv.Itoa(statusFD))
-	args = append(args, sh.argv(command)...)
+	if len(directArgv) > 0 {
+		args = append(args, "--")
+		args = append(args, directArgv...)
+	} else {
+		args = append(args, sh.argv(command)...)
+	}
 	launch := CapabilityLaunch{Argv: append([]string{bwrap}, args...), ExtraFiles: files, Wrapped: true, activation: activation}
 	if len(delta.Devices) > 0 {
 		launch.Materialization = CapabilityMaterializationPathStringDevBind

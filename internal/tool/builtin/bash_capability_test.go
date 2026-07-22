@@ -16,6 +16,97 @@ import (
 )
 
 var _ tool.SandboxCapabilityTool = bash{}
+var _ tool.DirectSandboxCapabilityInvocation = (*preparedBashInvocation)(nil)
+
+func TestPreparedBashGrantReuseExecutesCanonicalWitnessDirectly(t *testing.T) {
+	original := bashPrepareCapabilityDirect
+	defer func() { bashPrepareCapabilityDirect = original }()
+	canonical, err := exec.LookPath("printf")
+	if err != nil {
+		t.Skip("printf unavailable")
+	}
+	canonical, err = filepath.Abs(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(canonical); resolveErr == nil {
+		canonical = resolved
+	}
+	var captured []string
+	bashPrepareCapabilityDirect = func(_ context.Context, _ sandbox.CapabilityAssessment, _ sandbox.CapabilityUse, _ sandbox.Shell, _ string, direct []string) sandbox.CapabilityLaunch {
+		captured = append([]string(nil), direct...)
+		return sandbox.CapabilityLaunch{Argv: append([]string(nil), direct...), Wrapped: true, UsesDelta: true}
+	}
+	invocation, err := (bash{workDir: t.TempDir()}).PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command":              "printf shadowed",
+		"sandbox_capabilities": map[string]any{"network": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	direct := invocation.(tool.DirectSandboxCapabilityInvocation)
+	out, err := direct.ExecuteDirect(context.Background(), sandbox.AuthorizedDelta, canonical, []string{canonical, "shadow-safe"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(captured) != 2 || captured[0] != canonical || !strings.Contains(out, "shadow-safe") || strings.Contains(out, "shadowed") {
+		t.Fatalf("captured=%v out=%q", captured, out)
+	}
+}
+
+func TestPreparedBashGrantReuseNeverRoutesCanonicalWitnessThroughShellTerminal(t *testing.T) {
+	original := bashPrepareCapabilityDirect
+	defer func() { bashPrepareCapabilityDirect = original }()
+	canonical, err := exec.LookPath("printf")
+	if err != nil {
+		t.Skip("printf unavailable")
+	}
+	canonical, _ = filepath.Abs(canonical)
+	term := &fakeTerminal{out: "terminal-ran", ok: true}
+	bashPrepareCapabilityDirect = func(_ context.Context, _ sandbox.CapabilityAssessment, _ sandbox.CapabilityUse, _ sandbox.Shell, _ string, direct []string) sandbox.CapabilityLaunch {
+		return sandbox.CapabilityLaunch{Argv: append([]string(nil), direct...), Wrapped: true, UsesDelta: true}
+	}
+	invocation, err := (bash{workDir: t.TempDir(), terminal: term}).PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": "printf shadowed", "sandbox_capabilities": map[string]any{"network": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := invocation.(tool.DirectSandboxCapabilityInvocation).ExecuteDirect(
+		context.Background(), sandbox.AuthorizedDelta, canonical, []string{canonical, "canonical-ran"},
+	)
+	if err != nil || !strings.Contains(out, "canonical-ran") || strings.Contains(out, "terminal-ran") {
+		t.Fatalf("output=%q err=%v", out, err)
+	}
+	if len(term.called) != 0 {
+		t.Fatalf("authorized delta was routed through shell terminal: %v", term.called)
+	}
+}
+
+func TestPreparedBashGrantReuseFailureUsesTruthfulBaseTerminalFallback(t *testing.T) {
+	original := bashPrepareCapabilityDirect
+	defer func() { bashPrepareCapabilityDirect = original }()
+	term := &fakeTerminal{out: "base-terminal-ran", ok: true}
+	bashPrepareCapabilityDirect = func(_ context.Context, _ sandbox.CapabilityAssessment, _ sandbox.CapabilityUse, sh sandbox.Shell, command string, _ []string) sandbox.CapabilityLaunch {
+		argv, wrapped := sandbox.Command(sandbox.Spec{}, sh, command)
+		return sandbox.CapabilityLaunch{Argv: argv, Wrapped: wrapped, Diagnostic: "canonical delta unavailable; using base sandbox"}
+	}
+	invocation, err := (bash{workDir: t.TempDir(), terminal: term}).PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": "printf original", "sandbox_capabilities": map[string]any{"network": true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := invocation.(tool.DirectSandboxCapabilityInvocation).ExecuteDirect(
+		context.Background(), sandbox.AuthorizedDelta, "/canonical/printf", []string{"/canonical/printf", "canonical"},
+	)
+	if err != nil || !strings.Contains(out, "base-terminal-ran") || !strings.Contains(out, "using base sandbox") {
+		t.Fatalf("output=%q err=%v", out, err)
+	}
+	if len(term.called) != 1 || term.called[0] != "printf original" {
+		t.Fatalf("base fallback terminal calls=%v", term.called)
+	}
+}
 
 func TestBashSchemaAdvertisesBoundedSandboxCapabilities(t *testing.T) {
 	var schema struct {

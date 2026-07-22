@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
+	"reasonix/internal/sandboxauth"
 )
 
 // approvalManager owns the approval/ask prompt bookkeeping and the runtime
@@ -223,6 +224,39 @@ func (a *approvalManager) registerDecisionKind(tool, subject, reason string, fre
 	return id, reply
 }
 
+// registerSandboxCapability allocates from the shared approval ID namespace and
+// records the typed binding before its event can be delivered.
+func (a *approvalManager) registerSandboxCapability(prompt sandboxauth.Prompt) (string, chan sandboxauth.Action) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextID++
+	id := strconv.Itoa(a.nextID)
+	reply := make(chan sandboxauth.Action, 1)
+	promptCopy := prompt
+	a.approvals[id] = pendingApproval{
+		tool: "bash", subject: strings.Join(prompt.Argv, " "), reason: prompt.Review.Justification,
+		fresh: true, kind: sandboxauth.ApprovalKind, capabilityReply: reply,
+		sandboxCapability: &promptCopy,
+	}
+	return id, reply
+}
+
+// resolveSandboxCapability validates before deletion so unknown actions leave
+// the waiter pending and retryable.
+func (a *approvalManager) resolveSandboxCapability(id string, action sandboxauth.Action) (chan sandboxauth.Action, bool) {
+	if !action.Valid() {
+		return nil, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.approvals[id]
+	if !ok || p.kind != sandboxauth.ApprovalKind || p.capabilityReply == nil {
+		return nil, false
+	}
+	delete(a.approvals, id)
+	return p.capabilityReply, true
+}
+
 // grantSession records a session-scoped grant so future calls in the same scope
 // short-circuit.
 func (a *approvalManager) grantSession(tool, subject string) {
@@ -257,6 +291,7 @@ func (a *approvalManager) grantPlanModeReadOnlyCommand(prefix string) {
 type SessionAuthorizations struct {
 	Grants                   []string
 	PlanModeReadOnlyCommands []string
+	SandboxCapabilityGrants  []sandboxauth.Grant
 }
 
 func (a *approvalManager) snapshotSessionAuthorizations() SessionAuthorizations {
@@ -406,7 +441,7 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	for id, p := range a.approvals {
 		approvals = append(approvals, event.Approval{
 			ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason, Fresh: p.fresh,
-			Kind: p.kind, Recovery: p.recovery,
+			Kind: p.kind, Recovery: p.recovery, SandboxCapability: p.sandboxCapability,
 		})
 	}
 	asks := make([]event.Ask, 0, len(a.asks))

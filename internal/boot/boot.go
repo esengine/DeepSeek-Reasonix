@@ -10,6 +10,7 @@ package boot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/secrets"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
@@ -156,6 +158,53 @@ type Options struct {
 	// catalog. Remote Workbench injects a Broker resolver so no credential or
 	// provider endpoint has to exist on the Host. Nil preserves local behavior.
 	ProviderResolver provider.Resolver
+	// Sandbox capability adapters are runtime-only seams. Project config parsing,
+	// validation, locking, and mutation belong to Issue #6; callers may supply
+	// already-validated grants and persistence behavior here.
+	SandboxCapabilityGrantSource sandboxauth.GrantSource
+	SandboxCapabilityPersister   sandboxauth.Persister
+	SandboxCapabilityPolicyHook  sandboxauth.PolicyHook
+	SandboxCapabilityAutoOnce    sandboxauth.AutoOncePolicy
+	SandboxCapabilityAudit       sandboxauth.AuditSink
+}
+
+func sandboxCapabilityEngineForOptions(opts Options) *sandboxauth.Engine {
+	return &sandboxauth.Engine{
+		Source: opts.SandboxCapabilityGrantSource, Persister: opts.SandboxCapabilityPersister,
+		Hook: opts.SandboxCapabilityPolicyHook, AutoOnce: opts.SandboxCapabilityAutoOnce,
+		Audit: opts.SandboxCapabilityAudit,
+	}
+}
+
+type sandboxCapabilityPolicyHooks struct {
+	configured *hook.Runner
+	upstream   sandboxauth.PolicyHook
+}
+
+func (h sandboxCapabilityPolicyHooks) AllowSandboxCapability(ctx context.Context, req sandboxauth.Request) (bool, string) {
+	if h.upstream != nil {
+		allow, message := h.upstream.AllowSandboxCapability(ctx, req)
+		if !allow {
+			return false, message
+		}
+	}
+	if !h.configured.Enabled() {
+		return true, ""
+	}
+	args, err := json.Marshal(struct {
+		Command             string                `json:"command"`
+		SandboxCapabilities sandbox.CapabilitySet `json:"sandbox_capabilities"`
+	}{Command: req.Command, SandboxCapabilities: req.Review.EffectiveDelta})
+	if err != nil {
+		return false, fmt.Sprintf("encode sandbox capability hook payload: %v", err)
+	}
+	decision, message := h.configured.PermissionRequest(ctx, "bash", req.Command, args)
+	if decision != nil && !*decision {
+		return false, message
+	}
+	// A hook allow is only an absence of further restriction. Engine.Authorize
+	// still requires one grant, auto-once authority, or a typed human action.
+	return true, ""
 }
 
 func recoveryHeadlessMode(opts Options) bool {
@@ -796,6 +845,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		cfg.Agent.MaxSubagentConcurrency, cfg.Agent.MaxParallelWriters,
 	)
 	subagentScheduler := agent.NewSubagentScheduler(maxSubagentConcurrency, maxParallelWriters)
+	sandboxCapabilityEngine := sandboxCapabilityEngineForOptions(opts)
+	sandboxCapabilityEngine.Hook = sandboxCapabilityPolicyHooks{
+		configured: hookRunner,
+		upstream:   sandboxCapabilityEngine.Hook,
+	}
 	profileLookup := func(name string) (agent.ProfileDefinition, bool) {
 		sk, ok := skillStore.Read(name)
 		if !ok || sk.RunAs != skill.RunSubagent {
@@ -849,6 +903,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			WithMaxSubagentDepth(maxSubagentDepth).
 			WithDeliveryProfile(tokenDelivery).
 			WithWorkspaceLease(workspaceLease).
+			WithSandboxCapabilityGate(sandboxCapabilityEngine).
 			WithScheduler(subagentScheduler).
 			WithProfileLookup(profileLookup).
 			WithProfileConfigResolvers(profileConfigModel, profileConfigEffort).
@@ -932,27 +987,35 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// subagentSkillOptions is the single construction point for skill sub-agent
 	// run options, so the read-only and writer-capable runners cannot drift on
 	// compaction or language settings — add new fields here, not per runner.
-	subagentSkillOptions := func(sctx context.Context, steps int, price *provider.Pricing, ctxWin, childDepth int) agent.Options {
+	subagentSkillOptions := func(sctx context.Context, steps int, price *provider.Pricing, ctxWin, childDepth int, readOnly bool) agent.Options {
+		var writeRoots []string
+		if !readOnly {
+			writeRoots = []string{root}
+		}
+		delegation := agent.SandboxDelegationForChild(sctx, root, writeRoots)
 		return agent.Options{
-			MaxSteps:            steps,
-			Temperature:         cfg.Agent.Temperature,
-			Pricing:             price,
-			UsageSource:         event.UsageSourceSubagent,
-			Gate:                headlessGate,
-			ContextWindow:       ctxWin,
-			RecentKeep:          cfg.Agent.RecentKeep,
-			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
-			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
-			CompactRatio:        cfg.Agent.CompactRatio,
-			CompactForceRatio:   cfg.Agent.CompactForceRatio,
-			ArchiveDir:          config.ArchiveDir(),
-			KeepPolicy:          keepPolicy,
-			ResponseLanguage:    agent.ResponseLanguageFromContext(sctx),
-			ReasoningLanguage:   agent.ReasoningLanguageFromContext(sctx),
-			SubagentDepth:       childDepth,
-			MaxSubagentDepth:    maxSubagentDepth,
-			DeliveryProfile:     tokenDelivery,
-			WorkspaceLease:      workspaceLease,
+			MaxSteps:              steps,
+			Temperature:           cfg.Agent.Temperature,
+			Pricing:               price,
+			UsageSource:           event.UsageSourceSubagent,
+			Gate:                  headlessGate,
+			SandboxCapabilityGate: sandboxCapabilityEngine,
+			SandboxWorkspace:      root,
+			SandboxDelegation:     delegation,
+			ContextWindow:         ctxWin,
+			RecentKeep:            cfg.Agent.RecentKeep,
+			SoftCompactRatio:      cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio:   cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:          cfg.Agent.CompactRatio,
+			CompactForceRatio:     cfg.Agent.CompactForceRatio,
+			ArchiveDir:            config.ArchiveDir(),
+			KeepPolicy:            keepPolicy,
+			ResponseLanguage:      agent.ResponseLanguageFromContext(sctx),
+			ReasoningLanguage:     agent.ReasoningLanguageFromContext(sctx),
+			SubagentDepth:         childDepth,
+			MaxSubagentDepth:      maxSubagentDepth,
+			DeliveryProfile:       tokenDelivery,
+			WorkspaceLease:        workspaceLease,
 		}
 	}
 	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
@@ -1003,7 +1066,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if sysPrompt == "" {
 			sysPrompt = agent.DefaultReadOnlyTaskSystemPrompt
 		}
-		runOptions := subagentSkillOptions(sctx, steps, price, ctxWin, childDepth)
+		runOptions := subagentSkillOptions(sctx, steps, price, ctxWin, childDepth, true)
 		// Delivery risk gates consume typed reports; outside Delivery a casual
 		// /review run may finish with prose only.
 		if runOptions.DeliveryProfile {
@@ -1122,7 +1185,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				steps = 5
 			}
 		}
-		runOptions := subagentSkillOptions(sctx, steps, price, ctxWin, childDepth)
+		runOptions := subagentSkillOptions(sctx, steps, price, ctxWin, childDepth, sk.ReadOnly)
 		// Delivery risk gates consume typed reports; outside Delivery a casual
 		// /review run may finish with prose only.
 		if runOptions.DeliveryProfile {
@@ -1529,13 +1592,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	execSess := agent.NewSession(sysPrompt)
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:    maxSteps,
-		MaxStepsKey: opts.MaxStepsKey,
-		Temperature: cfg.Agent.Temperature,
-		Pricing:     entry.Price,
-		Gate:        headlessGate,
-		Hooks:       hookRunner,
-		Jobs:        jm,
+		MaxSteps:              maxSteps,
+		MaxStepsKey:           opts.MaxStepsKey,
+		Temperature:           cfg.Agent.Temperature,
+		Pricing:               entry.Price,
+		Gate:                  headlessGate,
+		SandboxCapabilityGate: sandboxCapabilityEngine,
+		SandboxWorkspace:      root,
+		Hooks:                 hookRunner,
+		Jobs:                  jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:           subagentScheduler,
@@ -1611,34 +1676,35 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	ctrlOpts := control.Options{
-		Runner:                runner,
-		Executor:              executor,
-		Sink:                  sink,
-		Policy:                policy,
-		SubagentGate:          headlessGate,
-		Label:                 label,
-		ModelRef:              modelRef,
-		SystemPrompt:          sysPrompt,
-		SessionDir:            sessionDir,
-		Host:                  pluginHost,
-		Commands:              cmds,
-		Skills:                skills,
-		AllSkills:             allSkills,
-		SkillStore:            skillStore,
-		AllSkillStore:         allSkillStore,
-		SkillRunner:           skillRunner,
-		ReadOnlySkillRunner:   readOnlySkillRunner,
-		SkillProfile:          skillProfile,
-		Hooks:                 hookRunner,
-		Memory:                mem,
-		Cleanup:               cleanup,
-		BalanceURL:            entry.BalanceURL,
-		BalanceKey:            entry.APIKey(),
-		BalanceClient:         balanceClient,
-		Jobs:                  jm,
-		Registry:              reg,
-		PluginCtx:             ctx,
-		MCPDefaultCallTimeout: pluginSpecOptions.DefaultCallTimeout,
+		SandboxCapabilityEngine: sandboxCapabilityEngine,
+		Runner:                  runner,
+		Executor:                executor,
+		Sink:                    sink,
+		Policy:                  policy,
+		SubagentGate:            headlessGate,
+		Label:                   label,
+		ModelRef:                modelRef,
+		SystemPrompt:            sysPrompt,
+		SessionDir:              sessionDir,
+		Host:                    pluginHost,
+		Commands:                cmds,
+		Skills:                  skills,
+		AllSkills:               allSkills,
+		SkillStore:              skillStore,
+		AllSkillStore:           allSkillStore,
+		SkillRunner:             skillRunner,
+		ReadOnlySkillRunner:     readOnlySkillRunner,
+		SkillProfile:            skillProfile,
+		Hooks:                   hookRunner,
+		Memory:                  mem,
+		Cleanup:                 cleanup,
+		BalanceURL:              entry.BalanceURL,
+		BalanceKey:              entry.APIKey(),
+		BalanceClient:           balanceClient,
+		Jobs:                    jm,
+		Registry:                reg,
+		PluginCtx:               ctx,
+		MCPDefaultCallTimeout:   pluginSpecOptions.DefaultCallTimeout,
 		MCPConfigureSpec: func(spec *plugin.Spec) {
 			if spec == nil {
 				return

@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
@@ -83,6 +84,7 @@ type Asker interface {
 type callContextKey struct{}
 type parentSessionContextKey struct{}
 type subagentDepthContextKey struct{}
+type sandboxDelegationContextKey struct{}
 type userImagesContextKey struct{}
 
 // callContext is the per-call context a tool can read. parentID is the call being
@@ -162,6 +164,15 @@ func SubagentDepth(ctx context.Context) int {
 		return 0
 	}
 	return depth
+}
+
+func withSandboxDelegation(ctx context.Context, delegation sandboxauth.Delegation) context.Context {
+	return context.WithValue(ctx, sandboxDelegationContextKey{}, delegation)
+}
+
+func sandboxDelegationFromContext(ctx context.Context) sandboxauth.Delegation {
+	delegation, _ := ctx.Value(sandboxDelegationContextKey{}).(sandboxauth.Delegation)
+	return delegation
 }
 
 // WithUserImages carries the data URLs of images the user attached to this turn,
@@ -319,6 +330,10 @@ type Agent struct {
 	// gate, when non-nil, is the per-call permission gate for both standard and
 	// Plan workflows. nil disables gating entirely.
 	gate Gate
+	// sandboxCapabilityGate independently authorizes sealed sandbox deltas.
+	sandboxCapabilityGate sandboxauth.Gate
+	sandboxWorkspace      string
+	sandboxDelegation     sandboxauth.Delegation
 
 	// recoveryGate, when non-nil, is the Auto Guard boundary for Auto mode.
 	// Shared by root and sub-agents for the same controller task. nil disables
@@ -588,6 +603,20 @@ func (a *Agent) SetGate(g Gate) {
 		g = nil
 	}
 	a.gate = g
+}
+
+// SetSandboxCapabilityGate installs the capability boundary independently of
+// ordinary permission and Auto Guard.
+func (a *Agent) SetSandboxCapabilityGate(g sandboxauth.Gate, workspace string, delegation sandboxauth.Delegation) {
+	if a == nil {
+		return
+	}
+	if nilutil.IsNil(g) {
+		g = nil
+	}
+	a.sandboxCapabilityGate = g
+	a.sandboxWorkspace = strings.TrimSpace(workspace)
+	a.sandboxDelegation = delegation
 }
 
 // SetRecoveryGate installs Auto Guard. Safe to call before the run loop starts;
@@ -872,6 +901,11 @@ type Options struct {
 	// Gate is the per-call permission gate. nil disables gating.
 	Gate Gate
 
+	// SandboxCapabilityGate runs after ordinary permission and before leases.
+	SandboxCapabilityGate sandboxauth.Gate
+	SandboxWorkspace      string
+	SandboxDelegation     sandboxauth.Delegation
+
 	// ReadOnlyExecution enables a permanent host-side read-only boundary for
 	// planner and research agents. It is intentionally independent of Plan mode
 	// so a stale collaboration flag cannot authorize a dynamic writer target.
@@ -1049,6 +1083,9 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		usageSource:           usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
 		sink:                  sink,
 		gate:                  gate,
+		sandboxCapabilityGate: opts.SandboxCapabilityGate,
+		sandboxWorkspace:      strings.TrimSpace(opts.SandboxWorkspace),
+		sandboxDelegation:     opts.SandboxDelegation,
 		recoveryGate:          opts.RecoveryGate,
 		recoveryAgentID:       strings.TrimSpace(opts.RecoveryAgentID),
 		recoveryTaskID:        strings.TrimSpace(opts.RecoveryTaskID),
@@ -3497,6 +3534,45 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 			}
 		}
 	}
+	// Resolve the concrete execution target before capability preparation. This
+	// is intentionally after ordinary permission: a denied command must not
+	// normalize host paths, resolve executables, or emit a capability prompt.
+	runTool := execTool
+	runArgs := execArgs
+	if resolved.Target != nil {
+		runTool = resolved.Target
+		runArgs = resolved.Args
+		if len(runArgs) == 0 {
+			runArgs = json.RawMessage(`{}`)
+		}
+	}
+	var sandboxInvocation tool.SandboxCapabilityInvocation
+	sandboxDecision := sandboxauth.Decision{Use: sandbox.BaseOnly}
+	if capable, ok := runTool.(tool.SandboxCapabilityTool); ok {
+		invocation, prepareErr := capable.PrepareSandboxInvocation(ctx, runArgs)
+		if prepareErr != nil {
+			return toolOutcome{output: fmt.Sprintf("error: %v", prepareErr), errMsg: firstLine(prepareErr.Error())}
+		}
+		sandboxInvocation = invocation
+		if a.sandboxCapabilityGate != nil && invocation.Review().Authority.Requested {
+			info := invocation.SandboxCapabilityRequest()
+			decision, authErr := a.sandboxCapabilityGate.Authorize(ctx, sandboxauth.Request{
+				Review: invocation.Review(), Workspace: a.sandboxWorkspace, Command: info.Command,
+				Background: info.RunInBackground, PreserveBackgroundProcesses: info.PreserveBackgroundProcesses,
+				Subagent: a.subagentDepth > 0, Delegation: a.sandboxDelegation,
+			})
+			if authErr != nil {
+				decision = sandboxauth.Decision{
+					Use:        sandbox.BaseOnly,
+					Diagnostic: fmt.Sprintf("sandbox capability authorization failed: %v; using the base sandbox", authErr),
+				}
+			}
+			sandboxDecision = decision
+			if decision.Cancel {
+				return toolOutcome{output: "blocked: " + firstNonEmpty(decision.Diagnostic, "sandbox capability request canceled the command"), blocked: true, errMsg: "blocked: sandbox capability request canceled"}
+			}
+		}
+	}
 	// Acquire after permission is granted but before PreToolUse: hooks are user
 	// shell code and can themselves change the workspace. This keeps readers
 	// concurrent and avoids holding the workspace during an approval prompt while
@@ -3508,17 +3584,6 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 				blocked: true,
 				errMsg:  "blocked: workspace write lease unavailable",
 			}
-		}
-	}
-	// Resolve the concrete execution target before hooks. A proxy may carry a
-	// different target/name/argument set than the provider-visible call.
-	runTool := execTool
-	runArgs := execArgs
-	if resolved.Target != nil {
-		runTool = resolved.Target
-		runArgs = resolved.Args
-		if len(runArgs) == 0 {
-			runArgs = json.RawMessage(`{}`)
 		}
 	}
 	// Hold the parent claim before PreToolUse: hooks are user shell code and may
@@ -3563,6 +3628,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	}
 	cctx := withCallContext(ctx, call.ID, a.sink, a.asker, a.planMode.Load())
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
+	cctx = withSandboxDelegation(cctx, a.sandboxDelegation)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
 		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())
@@ -3620,7 +3686,22 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	if a.plannerMCPExecution && isMCPExecutionTarget(runTool, permName) && mcpServerAuthorized(runTool) && !mcpDestructiveHint(runTool) {
 		cctx = tool.WithNonDestructiveMCPExecutionIntent(cctx)
 	}
-	if it, ok := runTool.(tool.ImageTool); ok {
+	if sandboxInvocation != nil {
+		if sandboxDecision.CanonicalExecutable != "" {
+			if direct, ok := sandboxInvocation.(tool.DirectSandboxCapabilityInvocation); ok {
+				result, err = direct.ExecuteDirect(cctx, sandboxDecision.Use, sandboxDecision.CanonicalExecutable, sandboxDecision.Argv)
+			} else {
+				sandboxDecision.Use = sandbox.BaseOnly
+				sandboxDecision.Diagnostic = firstNonEmpty(sandboxDecision.Diagnostic, "reusable capability grant matched, but canonical direct execution is unavailable; using the base sandbox")
+				result, err = sandboxInvocation.Execute(cctx, sandboxDecision.Use)
+			}
+		} else {
+			result, err = sandboxInvocation.Execute(cctx, sandboxDecision.Use)
+		}
+		if strings.TrimSpace(sandboxDecision.Diagnostic) != "" {
+			result = strings.TrimRight(result, "\n") + "\n[sandbox authorization] " + sandboxDecision.Diagnostic
+		}
+	} else if it, ok := runTool.(tool.ImageTool); ok {
 		result, images, err = it.ExecuteWithImages(cctx, runArgs)
 	} else {
 		result, err = runTool.Execute(cctx, runArgs)

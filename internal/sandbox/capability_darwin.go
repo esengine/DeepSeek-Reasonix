@@ -25,7 +25,7 @@ func capabilityPlatformSupports(_ context.Context, _ Spec, delta CapabilitySet) 
 	return true, ""
 }
 
-func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string) (CapabilityLaunch, error) {
+func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string, directArgv []string) (CapabilityLaunch, error) {
 	if len(delta.Devices) > 0 {
 		return CapabilityLaunch{}, fmt.Errorf("device capabilities are unsupported on macOS")
 	}
@@ -37,6 +37,9 @@ func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta Capabil
 		spec.Network = true
 	}
 	argv, wrapped := Command(spec, sh, command)
+	if len(directArgv) > 0 {
+		argv, wrapped = CommandArgs(spec, directArgv)
+	}
 	if !wrapped {
 		return CapabilityLaunch{}, fmt.Errorf("sandbox-exec is unavailable")
 	}

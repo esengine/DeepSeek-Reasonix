@@ -38,6 +38,8 @@ var bashShellPATH = cachedBashShellPATH
 
 var (
 	bashSandboxCommand             = sandbox.Command
+	bashPrepareCapabilityCommand   = sandbox.PrepareCapabilityCommand
+	bashPrepareCapabilityDirect    = sandbox.PrepareCapabilityDirectCommand
 	bashSandboxEscapePromptEnabled = func() bool { return runtime.GOOS == "windows" }
 )
 
@@ -204,7 +206,26 @@ func (i *preparedBashInvocation) Review() sandbox.CapabilityReview {
 	return i.assessment.Review()
 }
 
+func (i *preparedBashInvocation) SandboxCapabilityRequest() tool.SandboxCapabilityRequest {
+	return tool.SandboxCapabilityRequest{
+		Command:                     i.p.Command,
+		RunInBackground:             i.p.RunInBackground,
+		PreserveBackgroundProcesses: i.p.PreserveBackgroundProcesses,
+	}
+}
+
 func (i *preparedBashInvocation) Execute(ctx context.Context, use sandbox.CapabilityUse) (string, error) {
+	return i.execute(ctx, use, nil)
+}
+
+func (i *preparedBashInvocation) ExecuteDirect(ctx context.Context, use sandbox.CapabilityUse, canonicalExecutable string, argv []string) (string, error) {
+	if canonicalExecutable == "" || len(argv) == 0 || argv[0] != canonicalExecutable {
+		return "", fmt.Errorf("invalid canonical direct-execution witness")
+	}
+	return i.execute(ctx, use, append([]string(nil), argv...))
+}
+
+func (i *preparedBashInvocation) execute(ctx context.Context, use sandbox.CapabilityUse, directArgv []string) (string, error) {
 	i.mu.Lock()
 	if i.used {
 		i.mu.Unlock()
@@ -212,12 +233,30 @@ func (i *preparedBashInvocation) Execute(ctx context.Context, use sandbox.Capabi
 	}
 	i.used = true
 	i.mu.Unlock()
-	return i.b.executePrepared(ctx, i.p, i.args, i.assessment, use)
+	return i.b.executePrepared(ctx, i.p, i.args, i.assessment, use, directArgv)
 }
 
-func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMessage, assessment sandbox.CapabilityAssessment, use sandbox.CapabilityUse) (string, error) {
+func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMessage, assessment sandbox.CapabilityAssessment, use sandbox.CapabilityUse, directArgv []string) (string, error) {
 	sh := b.resolved()
 	diagnostic := sandbox.CapabilityFallbackDiagnostic(assessment.Review(), use)
+
+	// Materialize authority before considering a host terminal. A terminal cannot
+	// honor local capability confinement, so a successfully prepared delta must
+	// always execute through the local launcher (and reusable grants therefore
+	// consume their canonical argv). If preparation falls back atomically to the
+	// base command, the terminal remains an eligible base executor and receives
+	// the truthful fallback diagnostic.
+	launch := sandbox.CapabilityLaunch{}
+	if use == sandbox.AuthorizedDelta {
+		if len(directArgv) > 0 {
+			launch = bashPrepareCapabilityDirect(ctx, assessment, use, sh, p.Command, directArgv)
+		} else {
+			launch = bashPrepareCapabilityCommand(ctx, assessment, use, sh, p.Command)
+		}
+		diagnostic = launch.Diagnostic
+	} else {
+		launch.Argv, launch.Wrapped = bashSandboxCommand(b.sb, sh, p.Command)
+	}
 
 	// A host-owned terminal runs the command where the user watches it live.
 	// Never when the OS sandbox is enforcing (the host cannot honor the local
@@ -225,7 +264,7 @@ func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMe
 	// (the host terminal spawns with its own unfiltered environment, which
 	// would leak the credentials the user asked to strip), and never for
 	// background jobs. ok=false falls back to local execution unchanged.
-	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
+	if b.terminal != nil && !launch.UsesDelta && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
 		if out, ok, err := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.timeout); ok {
 			out = appendCapabilityDiagnostic(out, diagnostic)
 			return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
@@ -233,13 +272,6 @@ func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMe
 	}
 
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	launch := sandbox.CapabilityLaunch{}
-	if use == sandbox.AuthorizedDelta {
-		launch = sandbox.PrepareCapabilityCommand(ctx, assessment, use, sh, p.Command)
-		diagnostic = launch.Diagnostic
-	} else {
-		launch.Argv, launch.Wrapped = bashSandboxCommand(b.sb, sh, p.Command)
-	}
 	argv, wrapped := launch.Argv, launch.Wrapped
 	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, p.Command, args) {
 		launch.Close()

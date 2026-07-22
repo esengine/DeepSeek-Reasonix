@@ -46,7 +46,25 @@ type SandboxCapabilityTool interface {
 // execute another. Implementations must treat AuthorizedDelta atomically.
 type SandboxCapabilityInvocation interface {
 	Review() sandbox.CapabilityReview
+	SandboxCapabilityRequest() SandboxCapabilityRequest
 	Execute(ctx context.Context, use sandbox.CapabilityUse) (string, error)
+}
+
+// DirectSandboxCapabilityInvocation consumes a canonical executable witness on
+// reusable-grant hits. The first argv element must be the same canonical path;
+// implementations must not route it back through a shell or PATH lookup.
+type DirectSandboxCapabilityInvocation interface {
+	SandboxCapabilityInvocation
+	ExecuteDirect(ctx context.Context, use sandbox.CapabilityUse, canonicalExecutable string, argv []string) (string, error)
+}
+
+// SandboxCapabilityRequest carries execution identity that is not part of the
+// capability value object. Authorization uses it to bind grants to the actual
+// command and process-lifetime dimensions reviewed by the host.
+type SandboxCapabilityRequest struct {
+	Command                     string
+	RunInBackground             bool
+	PreserveBackgroundProcesses bool
 }
 
 // Previewer is an optional capability a writer Tool may implement: given the

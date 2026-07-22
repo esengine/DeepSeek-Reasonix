@@ -77,6 +77,19 @@ func (l *CapabilityLaunch) Close() {
 // the complete authorized effective delta. Any validation or platform failure
 // atomically falls back to the base command and returns a truthful diagnostic.
 func PrepareCapabilityCommand(ctx context.Context, assessment CapabilityAssessment, use CapabilityUse, sh Shell, command string) CapabilityLaunch {
+	return prepareCapabilityCommand(ctx, assessment, use, sh, command, nil)
+}
+
+// PrepareCapabilityDirectCommand is PrepareCapabilityCommand with a canonical
+// direct-execution witness used only for reusable grant hits. Successful delta
+// materialization executes directArgv without consulting shell aliases or PATH;
+// any validation/materialization failure still runs the original command in
+// the unchanged base sandbox.
+func PrepareCapabilityDirectCommand(ctx context.Context, assessment CapabilityAssessment, use CapabilityUse, sh Shell, command string, directArgv []string) CapabilityLaunch {
+	return prepareCapabilityCommand(ctx, assessment, use, sh, command, append([]string(nil), directArgv...))
+}
+
+func prepareCapabilityCommand(ctx context.Context, assessment CapabilityAssessment, use CapabilityUse, sh Shell, command string, directArgv []string) CapabilityLaunch {
 	baseArgv, baseWrapped := Command(assessment.base, sh, command)
 	base := CapabilityLaunch{Argv: baseArgv, Wrapped: baseWrapped, Authority: assessment.review.Authority}
 	if use != AuthorizedDelta || assessment.review.State != CapabilityReady {
@@ -97,7 +110,7 @@ func PrepareCapabilityCommand(ctx context.Context, assessment CapabilityAssessme
 			return base
 		}
 	}
-	launch, err := prepareCapabilityPlatformLaunch(ctx, assessment.base, assessment.review.EffectiveDelta, sh, command)
+	launch, err := prepareCapabilityPlatformLaunch(ctx, assessment.base, assessment.review.EffectiveDelta, sh, command, directArgv)
 	if err != nil {
 		base.Diagnostic = fmt.Sprintf("sandbox capability request was not applied: %v; %s", err, formatCapabilityAuthority(base.Authority))
 		return base

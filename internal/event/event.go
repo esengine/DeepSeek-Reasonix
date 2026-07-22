@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 )
 
 // Kind tags an Event. Read the field(s) documented for that kind.
@@ -180,6 +181,8 @@ type Approval struct {
 	// Recovery carries Auto Guard card fields when Kind is "recovery".
 	// Old frontends ignore it and still render a one-shot fresh approval.
 	Recovery *RecoveryApproval
+	// SandboxCapability is authoritative when Kind is sandbox_capability.
+	SandboxCapability *sandboxauth.Prompt
 }
 
 // RecoveryApproval is the backward-compatible structured payload for Auto
