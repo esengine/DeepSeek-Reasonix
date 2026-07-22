@@ -51,6 +51,24 @@ export function formatSelectedTextContext(references: readonly SelectedTextRefer
   ].join("\n");
 }
 
+// Regex for matching selection labels embedded in display text by
+// formatSelectionLabel. Used by Message.tsx to identify selection cards.
+// Formats: [Chat: "snippet..."], [Code: filename → "snippet..."]
+export const SELECTION_LABEL_RE = /\[(Chat|Code):[^\]]*\]/g;
+
+// Generates a short inline label for displayText so the user's message
+// bubble shows what selected content was attached. The label shows a
+// truncated snippet of the selected text; any ] in the snippet is
+// replaced with fullwidth ］ (U+FF3D) to avoid breaking SELECTION_LABEL_RE.
+export function formatSelectionLabel(ref: SelectedTextReference): string {
+  const snippet = selectedTextSnippet(ref.text, 40).replace(/\]/g, "\uFF3D");
+  if (ref.path) {
+    const name = ref.path.split("/").filter(Boolean).pop() ?? ref.path;
+    return `[Code: ${name} → ${snippet}]`;
+  }
+  return `[Chat: ${snippet}]`;
+}
+
 export function selectedTextSnippet(value: string, maxChars = 72): string {
   const text = value.replace(/\s+/g, " ").trim();
   if (text.length <= maxChars) return text;

@@ -21,7 +21,7 @@ export function ComposerContextCard({
   icon,
 }: {
   variant: ComposerContextCardVariant;
-  tooltipLabel: string;
+  tooltipLabel: ReactNode;
   removeLabel: string;
   onRemove: () => void;
   removeDisabled?: boolean;

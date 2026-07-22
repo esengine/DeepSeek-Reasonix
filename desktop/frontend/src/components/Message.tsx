@@ -90,7 +90,7 @@ type PastedBlockInfo = {
   content: string;
 };
 
-const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]/g;
+const PASTE_LABEL_RE = /\[(?:已粘贴文本|已貼上文字|Pasted text) #\d+ · \d+ (?:行|lines)\]|\[(Chat|Code):[^\]]*\]/g;
 
 export function parsePastedBlocks(text: string, submitText?: string): PastedBlockInfo[] {
   const labels = text.match(PASTE_LABEL_RE);
@@ -481,7 +481,7 @@ export function UserMessage({
                       </div>
                     </div>
                     {expanded && (
-                      <div className="msg-pasted-expanded">{seg.block.content}</div>
+                      <div className="msg-pasted-expanded"><Markdown text={seg.block.content} /></div>
                     )}
                   </div>
                 </div>

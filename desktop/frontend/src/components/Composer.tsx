@@ -36,6 +36,7 @@ import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { Markdown } from "./Markdown";
 import { ContextWindowRing } from "./ContextWindowRing";
 import { ImageViewer } from "./ImageViewer";
 import {
@@ -50,6 +51,7 @@ import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToke
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import {
   formatSelectedTextContext,
+  formatSelectionLabel,
   normalizeSelectedText,
   selectedTextSnippet,
   type SelectedTextInsertRequest,
@@ -1677,6 +1679,7 @@ export function Composer({
       const displayRefs = [
         ...currentWorkspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
         ...orderedAttachments.map(formatAttachmentDisplayReference),
+        ...selectedTextRefsRef.current.map(formatSelectionLabel),
       ].join(" ");
       const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
       // PR-B: when past:chats refs are attached, prepend their formatted transcript
@@ -1688,8 +1691,14 @@ export function Composer({
       const currentPastedBlocks = [...pastedBlocksRef.current];
       const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs);
       const selectedTextContext = formatSelectedTextContext(currentSelectedTextRefs);
+      // Build begin/end markers so Message.tsx's parsePastedBlocks can
+      // extract the full selection content for card rendering.
+      const selectionBlocks = currentSelectedTextRefs.length === 0 ? "" : "\n\n" + currentSelectedTextRefs.map((ref) => {
+        const label = formatSelectionLabel(ref);
+        return `--- Begin ${label} ---\n${ref.text}\n--- End ${label} ---`;
+      }).join("\n\n");
       const invocationText = serializeInvocationSubmit(trimmedText, trimmedDraft.invocations);
-      const baseSubmitText = [expandPastedBlocks(invocationText, currentPastedBlocks), refs].filter(Boolean).join(" ");
+      const baseSubmitText = [expandPastedBlocks(invocationText, currentPastedBlocks), refs, selectionBlocks].filter(Boolean).join(" ");
       const submitBase = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
       const submitText = [submitBase, selectedTextContext].filter(Boolean).join("\n\n");
       const structuredInput = [expandPastedBlocks(trimmedText, currentPastedBlocks), refs].filter(Boolean).join(" ");
@@ -3480,7 +3489,7 @@ export function Composer({
             <ComposerContextCard
               key={reference.id}
               variant="selection"
-              tooltipLabel={reference.text}
+              tooltipLabel={<Markdown text={reference.text} />}
               removeLabel={t("composer.removeSelectedText")}
               onRemove={() => {
                 const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);

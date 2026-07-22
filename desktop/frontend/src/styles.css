@@ -4251,6 +4251,9 @@ a[href] {
   font-size: 13px;
   line-height: 1.5;
 }
+.msg-pasted-expanded .md {
+  white-space: normal;
+}
 
 .msg--assistant {
   color: var(--fg);
@@ -9277,6 +9280,16 @@ body > .mermaid-diagram--fullscreen {
   top: calc(var(--tooltip-arrow-y) - 4px);
   border-right: 0;
   border-top: 0;
+}
+.tooltip .md {
+  white-space: normal;
+  font-size: inherit;
+  line-height: inherit;
+}
+.tooltip .md pre {
+  max-height: 240px;
+  overflow: auto;
+  font-size: 11px;
 }
 /* past:chats hover preview (PR-C2). Inherits colors from the .tooltip container
    (--fg / --fg-dim / --fg-faint / --border / --bg-elev) and only adjusts layout. */

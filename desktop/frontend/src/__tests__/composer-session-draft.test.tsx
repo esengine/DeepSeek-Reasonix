@@ -774,7 +774,8 @@ console.log("\ncomposer session draft");
     sendButton().click();
     await flushTimers();
   });
-  eq(sent[0]?.display, "Explain the selected behavior", "the visible user message stays as the user's draft");
+  // Selection labels show a snippet of the selected text
+  ok(sent[0]?.display.includes("[Chat:") && sent[0]?.display.includes("[Code: util.ts →"), "display includes selection labels with text snippet");
   ok(sent[0]?.submit.includes("<reasonix-selected-chat-context>") === true, "submit appends the selected text context block");
   ok(
     sent[0]?.submit.includes('[{"text":"selected assistant response"},{"path":"src/lib/util.ts","text":"const value = 1;"}]') === true,
