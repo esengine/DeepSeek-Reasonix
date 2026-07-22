@@ -2,6 +2,261 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.17.18",
+      "date": "2026-07-22",
+      "channel": "stable",
+      "title": {
+        "en": "Remote Workbench, Auto Guard, and a smoother desktop",
+        "zh": "远程工作台、Auto Guard 与更顺畅的桌面体验"
+      },
+      "summary": {
+        "en": "This release adds a Windows-to-Linux Remote Workbench powered by local providers, strengthens Auto mode with Auto Guard, simplifies installed MCP authorization, and improves file previews, onboarding, updates, and session safety.",
+        "zh": "此版本新增由本机 Provider 驱动的 Windows 到 Linux 远程工作台，以 Auto Guard 强化自动模式，简化已安装 MCP 的授权，并改进文件预览、首次引导、更新流程与会话安全。"
+      },
+      "surfaces": [
+        "desktop",
+        "agent",
+        "remote",
+        "mcp",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Remote Workbench Guide",
+            "zh": "远程工作台指南"
+          },
+          "body": {
+            "en": "Connect the desktop client to a Linux SSH host while keeping model access on the local machine.",
+            "zh": "将桌面客户端连接到 Linux SSH 主机，同时让模型访问继续留在本机。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/03cc7749735116d5e3a56ff61a97cf84bbec6a5c/docs/REMOTE_WORKBENCH.md"
+        },
+        {
+          "title": {
+            "en": "Tool Approval Modes",
+            "zh": "工具审批模式"
+          },
+          "body": {
+            "en": "Understand the approval choices used by local and remote workflows.",
+            "zh": "了解本地与远程工作流使用的工具审批选项。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/03cc7749735116d5e3a56ff61a97cf84bbec6a5c/docs/TOOL_APPROVAL_MODES.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Remote Workbench over SSH",
+            "zh": "基于 SSH 的远程工作台"
+          },
+          "body": {
+            "en": "Use the Windows desktop client against a Linux workspace while the local provider broker keeps model credentials and inference on the client machine.",
+            "zh": "可用 Windows 桌面客户端操作 Linux 工作区，同时由本机 Provider Broker 将模型凭据与推理保留在客户端。"
+          },
+          "refs": [
+            6728,
+            6790
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Auto Guard for Auto mode",
+            "zh": "自动模式新增 Auto Guard"
+          },
+          "body": {
+            "en": "Auto mode now evaluates recovery decisions more deliberately and records enough context to keep interrupted work moving safely.",
+            "zh": "自动模式现在会更审慎地评估恢复决策，并保留足够上下文，让被打断的工作可以安全继续。"
+          },
+          "refs": [
+            6732
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Simpler installed MCP authorization",
+            "zh": "更简单的已安装 MCP 授权"
+          },
+          "body": {
+            "en": "Installed MCP servers now follow a clearer trust and authorization path without the retired catalog workflow.",
+            "zh": "已安装 MCP 服务器现在采用更清晰的信任与授权路径，不再依赖已退役的目录工作流。"
+          },
+          "refs": [
+            6767
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Searchable file previews",
+            "zh": "可搜索的文件预览"
+          },
+          "body": {
+            "en": "Desktop file previews now include line numbers and in-file search for faster navigation through source and text files.",
+            "zh": "桌面端文件预览新增行号与文件内搜索，更便于浏览源码和文本文件。"
+          },
+          "refs": [
+            6574
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Remote workspace runtime",
+              "zh": "远程工作区运行时"
+            },
+            "body": {
+              "en": "Added SSH host discovery, trust prompts, remote runtime attachment, file and Git projections, reconnect handling, and local-provider brokering for Remote Workbench.",
+              "zh": "远程工作台新增 SSH 主机发现、信任提示、远程运行时挂载、文件与 Git 投影、重连处理以及本机 Provider 转发。"
+            },
+            "refs": [
+              6728,
+              6790
+            ]
+          },
+          {
+            "title": {
+              "en": "Auto Guard recovery decisions",
+              "zh": "Auto Guard 恢复决策"
+            },
+            "body": {
+              "en": "Added deterministic recovery rules, review records, and guarded continuation for Auto mode.",
+              "zh": "自动模式新增确定性恢复规则、审查记录与受保护的继续执行流程。"
+            },
+            "refs": [
+              6732
+            ]
+          },
+          {
+            "title": {
+              "en": "Line-numbered file preview and search",
+              "zh": "带行号和搜索的文件预览"
+            },
+            "body": {
+              "en": "Added a dedicated large-file preview component with line numbers, text search, and keyboard navigation.",
+              "zh": "新增面向大文件的预览组件，支持行号、文本搜索与键盘导航。"
+            },
+            "refs": [
+              6574
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "First-run provider onboarding",
+              "zh": "首次 Provider 接入引导"
+            },
+            "body": {
+              "en": "The first-run experience now leads users into provider setup with clearer choices and status feedback.",
+              "zh": "首次启动体验现在会以更清晰的选项和状态反馈引导用户完成 Provider 配置。"
+            },
+            "refs": [
+              6757
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows update progress and recovery",
+              "zh": "Windows 更新进度与恢复"
+            },
+            "body": {
+              "en": "Windows updates now show progress and use a hardened handoff and startup-recovery path when an update is interrupted.",
+              "zh": "Windows 更新现在会显示进度，并在更新中断时使用更稳健的交接与启动恢复流程。"
+            },
+            "refs": [
+              6751,
+              6764
+            ]
+          },
+          {
+            "title": {
+              "en": "Installed MCP trust flow",
+              "zh": "已安装 MCP 信任流程"
+            },
+            "body": {
+              "en": "MCP packages and servers now use the installed registry and an explicit trust dialog instead of the former signed catalog path.",
+              "zh": "MCP 包与服务器现在使用已安装注册表和显式信任对话框，不再经过旧的签名目录路径。"
+            },
+            "refs": [
+              6767
+            ]
+          },
+          {
+            "title": {
+              "en": "VS Code extension install links",
+              "zh": "VS Code 扩展安装入口"
+            },
+            "body": {
+              "en": "Project documentation and the website now expose direct installation paths for the Reasonix VS Code extension.",
+              "zh": "项目文档和官网现在提供 Reasonix VS Code 扩展的直接安装入口。"
+            },
+            "refs": [
+              6735
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Active sessions cannot be archived",
+              "zh": "活动会话不会被归档"
+            },
+            "body": {
+              "en": "Archive actions now reject the active session and active topic, preventing a live conversation from disappearing underneath its runtime.",
+              "zh": "归档操作现在会拒绝活动会话和活动主题，避免正在运行的对话从运行时下方消失。"
+            },
+            "refs": [
+              6761,
+              6776
+            ]
+          },
+          {
+            "title": {
+              "en": "Remote Workbench reconnect and cleanup",
+              "zh": "远程工作台重连与清理"
+            },
+            "body": {
+              "en": "Release-blocking SSH lifecycle, reconnect, provider-catalog, and shutdown cleanup defects found during physical Windows-to-Linux acceptance have been fixed.",
+              "zh": "真实 Windows 到 Linux 验收中发现的 SSH 生命周期、重连、Provider 目录和关闭清理等发版阻断问题已修复。"
+            },
+            "refs": [
+              6790
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "No manual migration required",
+            "zh": "无需手动迁移"
+          },
+          "body": {
+            "en": "Existing local workspaces, providers, and desktop preferences continue to load normally. Remote Workbench is opt-in and requires a reachable OpenSSH-compatible Linux host.",
+            "zh": "现有本地工作区、Provider 和桌面偏好会正常继续加载。远程工作台为可选功能，需要一台可访问且兼容 OpenSSH 的 Linux 主机。"
+          }
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "par73e",
+        "JesonChou"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.18",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.17...desktop-v1.17.18",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.17",
       "date": "2026-07-21",
       "channel": "stable",
