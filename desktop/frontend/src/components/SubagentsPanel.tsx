@@ -50,6 +50,21 @@ function builtinDescription(name: string, fallback: string, t: ReturnType<typeof
   }
 }
 
+function builtinModelHint(name: string, t: ReturnType<typeof useT>): string | null {
+  switch (name) {
+    case "explore":
+      return t("subagents.builtinExploreModelHint");
+    case "research":
+      return t("subagents.builtinResearchModelHint");
+    case "review":
+      return t("subagents.builtinReviewModelHint");
+    case "security-review":
+      return t("subagents.builtinSecurityReviewModelHint");
+    default:
+      return null;
+  }
+}
+
 function shortModelRef(ref: string): string {
   const parts = ref.split("/");
   return parts[parts.length - 1] || ref;
@@ -367,6 +382,7 @@ function BuiltinSubagentRow({
   const inheritedModel = shortModelRef(toRef(s.subagentModel || s.defaultModel, s)) || t("common.auto");
   const inheritedEffort = s.subagentEffort || t("common.auto");
   const overridden = Boolean(skill.configuredModel || skill.configuredEffort);
+  const modelHint = builtinModelHint(skill.name, t);
   return (
     <div className="cap-skill-card subagents-builtin-card">
       <div className="cap-skill-card__top">
@@ -398,6 +414,9 @@ function BuiltinSubagentRow({
             emptyOptionHint={t("subagents.effectiveValue", { value: inheritedModel })}
             onPick={onSetModel}
           />
+          {modelHint && (
+            <span className="subagents-builtin-model-hint">{modelHint}</span>
+          )}
         </div>
         <div className="subagents-builtin-overrides__field">
           <span className="subagents-builtin-overrides__field-label">{t("subagents.effort")}</span>
