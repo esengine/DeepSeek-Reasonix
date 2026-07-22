@@ -58,6 +58,18 @@ eq(
   "selection cards recover duplicate snippets and bracketed file names from the existing JSON context",
 );
 eq(selectedBlocks[0]?.start, display.indexOf(labels[0], display.indexOf("\n") + 1), "label-shaped authored prose is not consumed as a selection card");
+const unterminatedDisplay = `explain literal [Chat: ${labels.join(" ")}`;
+let expectedLabelStart = unterminatedDisplay.length - labels.join(" ").length;
+const expectedTrailingLabels = labels.map((label) => {
+  const expected = { label, start: expectedLabelStart };
+  expectedLabelStart += label.length + 1;
+  return expected;
+});
+eq(
+  parseSelectedTextBlocks(unterminatedDisplay, formatSelectedTextContext(selections)).map(({ label, start }) => ({ label, start })),
+  expectedTrailingLabels,
+  "unterminated label-shaped prose cannot consume the exact trailing selection labels",
+);
 eq(parsePastedBlocks(labels.join(" "), formatSelectedTextContext(selections)), [], "selection labels no longer use pasted-text marker parsing");
 
 console.log(`\n${passed} passed, ${failed} failed`);

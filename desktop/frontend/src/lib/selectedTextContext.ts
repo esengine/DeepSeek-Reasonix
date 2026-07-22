@@ -17,6 +17,12 @@ export interface SelectedTextContextEntry {
   path?: string;
 }
 
+export interface SelectedTextContextParts {
+  submitText: string;
+  contextBlock: string;
+  entries: SelectedTextContextEntry[];
+}
+
 export const SELECTED_TEXT_MAX_CHARS = 12_000;
 const SELECTED_TEXT_TRUNCATION_MARKER = "\n\n[Selection truncated]";
 const SELECTED_TEXT_CONTEXT_OPEN = "<reasonix-selected-chat-context>";
@@ -61,48 +67,77 @@ export function formatSelectedTextContext(references: readonly SelectedTextRefer
 // Recover the already-persisted selection payload for local transcript UI.
 // The provider-visible submit bytes remain the single source of truth, so the
 // composer does not need to duplicate selected content in a second marker block.
-export function parseSelectedTextContext(value: string | undefined): SelectedTextContextEntry[] {
-  if (!value) return [];
+function selectedTextContextParts(value: string | undefined): SelectedTextContextParts | null {
+  if (!value) return null;
   const openIndex = value.lastIndexOf(SELECTED_TEXT_CONTEXT_OPEN);
-  if (openIndex < 0) return [];
+  if (openIndex < 0) return null;
   const bodyStart = openIndex + SELECTED_TEXT_CONTEXT_OPEN.length;
   const closeIndex = value.indexOf(SELECTED_TEXT_CONTEXT_CLOSE, bodyStart);
-  if (closeIndex < 0) return [];
+  if (closeIndex < 0) return null;
+  const closeEnd = closeIndex + SELECTED_TEXT_CONTEXT_CLOSE.length;
+  // Composer owns this block as the final submit suffix. Requiring an empty
+  // tail prevents selected-context markup inside quoted session text from
+  // being mistaken for the current message's local card metadata.
+  if (value.slice(closeEnd).trim() !== "") return null;
   const body = value.slice(bodyStart, closeIndex);
   const payloadStart = body.indexOf("[");
-  if (payloadStart < 0) return [];
+  if (payloadStart < 0) return null;
 
   try {
     const parsed: unknown = JSON.parse(body.slice(payloadStart).trim());
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) return null;
     const entries: SelectedTextContextEntry[] = [];
     for (const item of parsed) {
-      if (!item || typeof item !== "object") return [];
+      if (!item || typeof item !== "object") return null;
       const record = item as Record<string, unknown>;
-      if (typeof record.text !== "string" || (record.path !== undefined && typeof record.path !== "string")) return [];
+      if (typeof record.text !== "string" || (record.path !== undefined && typeof record.path !== "string")) return null;
       entries.push(record.path ? { path: record.path, text: record.text } : { text: record.text });
     }
-    return entries;
+    return {
+      submitText: value.slice(0, openIndex).trimEnd(),
+      contextBlock: value.slice(openIndex, closeEnd),
+      entries,
+    };
   } catch {
-    return [];
+    return null;
   }
 }
 
-// Regex for matching selection labels embedded in display text by
-// formatSelectionLabel. Used by Message.tsx to identify selection cards.
-// Formats: [Chat: snippet...], [Code: filename → snippet...]
-export const SELECTION_LABEL_RE = /\[(Chat|Code):[^\]]*\]/g;
+export function parseSelectedTextContext(value: string | undefined): SelectedTextContextEntry[] {
+  return selectedTextContextParts(value)?.entries ?? [];
+}
+
+export function splitSelectedTextContext(value: string | undefined): SelectedTextContextParts {
+  return selectedTextContextParts(value) ?? {
+    submitText: value ?? "",
+    contextBlock: "",
+    entries: [],
+  };
+}
 
 // Generates a short inline label for displayText so the user's message
 // bubble shows what selected content was attached. Brackets are sanitized in
-// every dynamic field so legal file names cannot break SELECTION_LABEL_RE.
-export function formatSelectionLabel(ref: SelectedTextReference): string {
+// every dynamic field so labels remain an unambiguous trailing suffix.
+export function formatSelectionLabel(ref: Pick<SelectedTextReference, "text" | "path">): string {
   const snippet = selectionLabelPart(ref.text);
   if (ref.path) {
     const name = selectionLabelPart(ref.path.split(/[\\/]/).filter(Boolean).pop() ?? ref.path);
     return `[Code: ${name} → ${snippet}]`;
   }
   return `[Chat: ${snippet}]`;
+}
+
+export function formatSelectionLabels(references: readonly Pick<SelectedTextReference, "text" | "path">[]): string {
+  return references.map(formatSelectionLabel).join(" ");
+}
+
+export function stripSelectionLabels(
+  value: string,
+  references: readonly Pick<SelectedTextReference, "text" | "path">[],
+): string {
+  const labels = formatSelectionLabels(references);
+  if (!labels || !value.endsWith(labels)) return value;
+  return value.slice(0, value.length - labels.length).trimEnd();
 }
 
 function selectionLabelPart(value: string): string {

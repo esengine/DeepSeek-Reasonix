@@ -8,7 +8,7 @@ import { ComposerContextCard } from "./ComposerContextCard";
 import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import type { DisplayAttachment } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
-import { replaySubmitText } from "../lib/editReplay";
+import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
@@ -21,7 +21,7 @@ import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta, MemoryCitation } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 import { CodeViewer } from "./CodeViewer";
-import { languageFor, parseSelectedTextContext, SELECTION_LABEL_RE } from "../lib/selectedTextContext";
+import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
@@ -124,25 +124,25 @@ export type SelectedTextBlockInfo = {
 export function parseSelectedTextBlocks(text: string, submitText?: string): SelectedTextBlockInfo[] {
   const entries = parseSelectedTextContext(submitText);
   if (entries.length === 0) return [];
-  const matches = Array.from(text.matchAll(SELECTION_LABEL_RE));
-  if (matches.length < entries.length) return [];
+  const suffix = formatSelectionLabels(entries);
+  if (!suffix || !text.endsWith(suffix)) return [];
 
-  // Composer appends one label per selection after the authored text. Taking
-  // the trailing matches avoids treating label-shaped prose as an attachment.
-  return matches.slice(-entries.length).flatMap((match, index) => {
-    const label = match[0];
-    const start = match.index ?? -1;
-    const entry = entries[index];
+  // Composer owns the exact trailing label suffix. Deriving it from the JSON
+  // entries avoids consuming label-shaped or unterminated authored prose.
+  let start = text.length - suffix.length;
+  return entries.map((entry) => {
+    const label = formatSelectionLabels([entry]);
     const kind = entry.path ? "code" : "chat";
-    if (start < 0 || match[1]?.toLowerCase() !== kind) return [];
-    return [{
+    const block = {
       label,
       content: entry.text,
       path: entry.path,
       start,
       end: start + label.length,
       kind,
-    }];
+    } satisfies SelectedTextBlockInfo;
+    start = block.end + 1;
+    return block;
   });
 }
 
@@ -236,7 +236,11 @@ export function UserMessage({
   const imSource = parseImSourceMessage(text);
   const actionText = stripMemoryCompilerExecution(imSource?.text ?? text);
   const hasMemoryCompiler = Boolean(submitText?.includes("<memory-compiler-execution>"));
-  const { text: displayText, attachments } = parseAttachmentRefsForDisplay(actionText);
+  const selectedTextEntries = useMemo(() => parseSelectedTextContext(submitText), [submitText]);
+  const editableActionText = stripSelectionLabels(actionText, selectedTextEntries);
+  const { text: editableDisplayText, attachments } = parseAttachmentRefsForDisplay(editableActionText);
+  const selectionLabels = formatSelectionLabels(selectedTextEntries);
+  const displayText = [editableDisplayText, selectionLabels].filter(Boolean).join(editableDisplayText && selectionLabels ? " " : "");
   const invocationSegments = imSource ? [] : invocationSegmentsFromMessage(displayText, submitText, invocationMetadata);
   const hasInvocationSegments = invocationSegments.some((segment) => segment.type === "invocation");
   const orderedAttachments = sortDisplayAttachments(attachments);
@@ -244,7 +248,7 @@ export function UserMessage({
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
   const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
   const [editing, setEditing] = useState(false);
-  const [draftText, setDraftText] = useState(displayText);
+  const [draftText, setDraftText] = useState(editableDisplayText);
   const [draftAttachments, setDraftAttachments] = useState<DisplayAttachment[]>(attachments);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -328,10 +332,10 @@ export function UserMessage({
 
   useEffect(() => {
     if (editing) return;
-    const parsed = parseAttachmentRefsForDisplay(actionText);
+    const parsed = parseAttachmentRefsForDisplay(editableActionText);
     setDraftText(parsed.text);
     setDraftAttachments(parsed.attachments);
-  }, [actionText, editing]);
+  }, [editableActionText, editing]);
 
   useEffect(() => {
     if (!editing) return;
@@ -345,14 +349,14 @@ export function UserMessage({
 
   const startEdit = () => {
     if (!canEdit) return;
-    const parsed = parseAttachmentRefsForDisplay(actionText);
+    const parsed = parseAttachmentRefsForDisplay(editableActionText);
     setDraftText(parsed.text);
     setDraftAttachments(parsed.attachments);
     setEditing(true);
   };
 
   const cancelEdit = () => {
-    const parsed = parseAttachmentRefsForDisplay(actionText);
+    const parsed = parseAttachmentRefsForDisplay(editableActionText);
     setDraftText(parsed.text);
     setDraftAttachments(parsed.attachments);
     setEditing(false);
@@ -380,9 +384,10 @@ export function UserMessage({
     const bodyText = parsedDraft.text.trim();
     const displayRefs = nextAttachments.map(formatAttachmentRefForDisplay).join(" ");
     const submitRefs = nextAttachments.map(formatAttachmentRefForSubmit).join(" ");
-    const next = [bodyText, displayRefs].filter(Boolean).join(bodyText && displayRefs ? " " : "");
+    const nextEditable = [bodyText, displayRefs].filter(Boolean).join(bodyText && displayRefs ? " " : "");
+    const next = [nextEditable, selectionLabels].filter(Boolean).join(nextEditable && selectionLabels ? " " : "");
     const fallbackSubmit = [bodyText, submitRefs].filter(Boolean).join(bodyText && submitRefs ? " " : "");
-    const submit = replaySubmitText(submitText, actionText, next, fallbackSubmit);
+    const submit = replaySubmitTextPreservingSelectedContext(submitText, editableActionText, nextEditable, fallbackSubmit);
     if (!next) return;
     setEditSubmitting(true);
     try {
@@ -474,7 +479,7 @@ export function UserMessage({
               <button className="msg-edit__btn" type="button" disabled={editSubmitting} onClick={cancelEdit}>
                 {t("common.cancel")}
               </button>
-              <button className="msg-edit__btn msg-edit__btn--primary" type="submit" disabled={editSubmitting || (draftText.trim() === "" && draftAttachments.length === 0)}>
+              <button className="msg-edit__btn msg-edit__btn--primary" type="submit" disabled={editSubmitting || (draftText.trim() === "" && draftAttachments.length === 0 && selectedTextEntries.length === 0)}>
                 {t("msg.editSend")}
               </button>
             </div>

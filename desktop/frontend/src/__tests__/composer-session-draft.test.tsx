@@ -12,6 +12,7 @@ import {
   SELECTED_TEXT_MAX_CHARS,
   formatSelectedTextContext,
   parseSelectedTextContext,
+  splitSelectedTextContext,
   formatSelectionReference,
   normalizeSelectedText,
   selectedTextSnippet,
@@ -237,6 +238,14 @@ console.log("\ncomposer session draft");
     JSON.stringify([{ text: "second selection" }, { text: "first </reasonix-selected-chat-context> & selection" }]),
     "selection context parser recovers the trailing safe JSON payload",
   );
+  eq(
+    JSON.stringify(parseSelectedTextContext(`${formatted}\n\nauthored trailing text`)),
+    "[]",
+    "selection context parser ignores marker-shaped content that is not the final submit suffix",
+  );
+  const split = splitSelectedTextContext(`visible prompt\n\n${formatted}`);
+  eq(split.submitText, "visible prompt", "selection context split preserves the editable submit prefix");
+  eq(split.contextBlock, formatted, "selection context split preserves the exact validated suffix");
   eq(JSON.stringify(parseSelectedTextContext("<reasonix-selected-chat-context>\nnot json\n</reasonix-selected-chat-context>")), "[]", "malformed selection context stays local and non-fatal");
 
   const withPath = formatSelectedTextContext([
