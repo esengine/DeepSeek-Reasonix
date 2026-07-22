@@ -1486,7 +1486,9 @@ export const en = {
   "settings.modelsRequireKey": "Set a key before selecting these models.",
   "settings.defaultModel": "Default model",
   "settings.defaultModelHint": "Used for new sessions; existing sessions keep their saved model.",
-  "settings.plannerModel": "Dedicated planner model",
+  "settings.plannerModel": "Dedicated planner model", // deprecated
+  "settings.contextModel": "Context model",
+  "settings.contextModelHint": "Pre-turn context research model (read-only); runs before every turn to collect relevant workspace context. Leave blank to use a single model.",
   "settings.plannerNone": "Use current model (single model)",
   "settings.subagentDefaults": "Subagent defaults",
   "settings.subagentModel": "Subagent model",

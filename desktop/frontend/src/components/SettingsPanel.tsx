@@ -3996,7 +3996,7 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const autoRefreshKeyRef = useRef("");
   const refs = useMemo(() => allRefs(s), [s.providers]);
   const defaultRef = toRef(s.defaultModel, s);
-  const plannerRef = toRef(s.plannerModel, s);
+  const plannerRef = toRef(s.contextModel || s.plannerModel, s);
   const subagentRef = toRef(s.subagentModel, s);
   const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
   const [defaultProvider] = defaultRef.split("/");
@@ -4083,14 +4083,14 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
               />
             </SettingsField>
 
-            <SettingsField label={t("settings.plannerModel")}>
+            <SettingsField label={t("settings.contextModel")}>
               <ModelPicker
                 s={s}
                 refs={refs}
                 value={plannerSelectRef}
                 disabled={busy}
                 includeSameDefault
-                onPick={(ref) => void apply(() => app.SetPlannerModel(ref))}
+                onPick={(ref) => void apply(() => app.SetContextModel(ref))}
               />
             </SettingsField>
 
