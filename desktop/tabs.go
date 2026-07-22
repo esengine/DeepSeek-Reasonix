@@ -5766,7 +5766,7 @@ type ProjectNode struct {
 	RecoveryParentID string        `json:"recoveryParentId,omitempty"`
 	IsolatedWorktree bool          `json:"isolatedWorktree,omitempty"`
 	Children         []ProjectNode `json:"children,omitempty"`
-	TitleKind string        `json:"titleKind,omitempty"`
+	TitleKind        string        `json:"titleKind,omitempty"`
 }
 
 func normalizeTopicStatus(status string) string {
