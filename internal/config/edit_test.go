@@ -1871,6 +1871,117 @@ legacy_preference = "keep"
 	}
 }
 
+func TestWritePermissionsAllowIgnoresSectionExamplesInMultilineStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "multiline basic string with five-quote close before existing section",
+			body: `[agent]
+system_prompt = """
+Example only:
+A "quoted" explanation and an escaped \" marker.
+[permissions]
+allow = ["Bash(example)"]
+Ends with two quotes."""""
+
+[permissions]
+mode = "ask"
+allow = ["Bash(existing)"]
+deny = ["Bash(rm:*)"]
+`,
+		},
+		{
+			name: "multiline literal string with four-quote close without existing section",
+			body: `[agent]
+system_prompt = '''
+Example only:
+A 'quoted' explanation.
+[permissions]
+allow = ["Bash(example)"]
+Ends with one quote.''''
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "reasonix.toml")
+			if err := os.WriteFile(path, []byte(tt.body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			wantAllow := []string{"Bash(existing)", "Edit(src/app.go)"}
+			if !strings.Contains(tt.body, `Bash(existing)`) {
+				wantAllow = []string{"Edit(src/app.go)"}
+			}
+			if err := WritePermissionsAllow(path, wantAllow); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := LoadForEditReadOnlyStrict(path)
+			if err != nil {
+				t.Fatalf("updated config does not parse: %v", err)
+			}
+			if !reflect.DeepEqual(got.Permissions.Allow, wantAllow) {
+				t.Fatalf("permissions.allow = %v, want %v", got.Permissions.Allow, wantAllow)
+			}
+			if !strings.Contains(got.Agent.SystemPrompt, "[permissions]\nallow = [\"Bash(example)\"]") {
+				t.Fatalf("system prompt example changed: %q", got.Agent.SystemPrompt)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(raw), "[permissions]\nallow = [\"Bash(example)\"]") {
+				t.Fatalf("multiline string content changed:\n%s", raw)
+			}
+		})
+	}
+}
+
+func TestWritePermissionsAllowReplacesArrayContainingMultilineString(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	original := `[permissions]
+allow = [
+  """Bash(example]
+[desktop]
+)""",
+  "Bash(existing)",
+]
+deny = ["Bash(rm:*)"]
+
+[desktop]
+legacy_preference = "keep"
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wantAllow := []string{"Bash(existing)", "Edit(src/app.go)"}
+	if err := WritePermissionsAllow(path, wantAllow); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatalf("updated config does not parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.Permissions.Allow, wantAllow) {
+		t.Fatalf("permissions.allow = %v, want %v", got.Permissions.Allow, wantAllow)
+	}
+	if !reflect.DeepEqual(got.Permissions.Deny, []string{"Bash(rm:*)"}) {
+		t.Fatalf("permissions.deny = %v", got.Permissions.Deny)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "[desktop]\nlegacy_preference = \"keep\"") {
+		t.Fatalf("unrelated section changed:\n%s", raw)
+	}
+}
+
 func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) {
 	a := ProviderEntry{Name: "relay", Kind: "openai", BaseURL: "https://relay.example/v1", Model: "m", APIKeyEnv: "RELAY_API_KEY"}
 	b := a

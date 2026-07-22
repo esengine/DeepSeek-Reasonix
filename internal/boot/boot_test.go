@@ -3322,6 +3322,40 @@ legacy_preference = "keep"
 	}
 }
 
+func TestRememberPermissionRuleIgnoresTOMLExampleInMultilineSystemPrompt(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `[agent]
+system_prompt = """
+Example only:
+[permissions]
+allow = ["Bash(example)"]
+"""
+
+[permissions]
+mode = "ask"
+allow = ["Bash(existing)"]
+deny = ["Bash(rm:*)"]
+`)
+
+	const rule = "Edit(src/app.go)"
+	result := rememberPermissionRule(workspace, rule)
+	if result.Err != nil || !result.Saved {
+		t.Fatalf("remember result = %+v, want saved without error", result)
+	}
+
+	path := filepath.Join(workspace, "reasonix.toml")
+	got, err := config.LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatalf("updated config does not parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.Permissions.Allow, []string{"Bash(existing)", rule}) {
+		t.Fatalf("permissions.allow = %v", got.Permissions.Allow)
+	}
+	if !strings.Contains(got.Agent.SystemPrompt, "[permissions]\nallow = [\"Bash(example)\"]") {
+		t.Fatalf("system prompt example changed: %q", got.Agent.SystemPrompt)
+	}
+}
+
 func TestRememberPermissionRuleRejectsMalformedConfigWithoutWriting(t *testing.T) {
 	workspace := robustTempDir(t)
 	path := filepath.Join(workspace, "reasonix.toml")

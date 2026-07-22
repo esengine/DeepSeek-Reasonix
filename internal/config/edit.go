@@ -9,7 +9,10 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
+
+	"github.com/BurntSushi/toml"
 
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -1333,10 +1336,17 @@ func WritePermissionsAllow(path string, allow []string) error {
 	body := string(raw)
 	if body == "" {
 		body = fmt.Sprintf("[permissions]\nallow = %s\n", renderStringArray(allow))
-		return writeConfigFile(path, body)
+	} else {
+		body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderStringArray(allow))
 	}
 
-	body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderStringArray(allow))
+	var candidate Config
+	if _, err := toml.Decode(body, &candidate); err != nil {
+		return fmt.Errorf("write permissions: validate updated config: %w", err)
+	}
+	if !slices.Equal(candidate.Permissions.Allow, allow) {
+		return fmt.Errorf("write permissions: validate updated allow: got %v, want %v", candidate.Permissions.Allow, allow)
+	}
 	return writeConfigFile(path, body)
 }
 
@@ -1346,8 +1356,12 @@ func WritePermissionsAllow(path string, allow []string) error {
 // at the end.
 func replaceTOMLSection(body, sectionName, newContent string) string {
 	spans := tomlLineSpans(body)
+	structural := tomlStructuralLineMask(spans)
 	arrayIdx := -1
 	for i, span := range spans {
+		if !structural[i] {
+			continue
+		}
 		name, isArray, ok := tomlEditSectionHeader(span.text)
 		if ok && isArray && name == sectionName {
 			arrayIdx = i
@@ -1358,6 +1372,9 @@ func replaceTOMLSection(body, sectionName, newContent string) string {
 		start := spans[arrayIdx].start
 		end := len(body)
 		for i := arrayIdx + 1; i < len(spans); i++ {
+			if !structural[i] {
+				continue
+			}
 			name, isArray, ok := tomlEditSectionHeader(spans[i].text)
 			if !ok {
 				continue
@@ -1371,13 +1388,19 @@ func replaceTOMLSection(body, sectionName, newContent string) string {
 		return body[:start] + strings.TrimRight(newContent, "\n") + "\n" + body[end:]
 	}
 
-	for _, span := range spans {
+	for i, span := range spans {
+		if !structural[i] {
+			continue
+		}
 		name, isArray, ok := tomlEditSectionHeader(span.text)
 		if !ok || isArray || name != sectionName {
 			continue
 		}
 		end := len(body)
-		for _, next := range spans {
+		for nextIdx, next := range spans {
+			if !structural[nextIdx] {
+				continue
+			}
 			if next.start <= span.start {
 				continue
 			}
@@ -1394,9 +1417,13 @@ func replaceTOMLSection(body, sectionName, newContent string) string {
 func upsertTOMLSectionKey(body, sectionName, key, line string) string {
 	line = strings.TrimRight(line, "\r\n") + "\n"
 	spans := tomlLineSpans(body)
+	structural := tomlStructuralLineMask(spans)
 	sectionIdx := -1
 	sectionEnd := len(body)
 	for i, span := range spans {
+		if !structural[i] {
+			continue
+		}
 		name, isArray, ok := tomlEditSectionHeader(span.text)
 		if ok {
 			if sectionIdx >= 0 {
@@ -1435,47 +1462,131 @@ func upsertTOMLSectionKey(body, sectionName, key, line string) string {
 }
 
 type tomlLexState struct {
-	inBasic   bool
-	inLiteral bool
-	escaped   bool
+	stringKind tomlStringKind
+	escaped    bool
+}
+
+type tomlStringKind uint8
+
+const (
+	tomlStringNone tomlStringKind = iota
+	tomlStringBasic
+	tomlStringLiteral
+	tomlStringMultilineBasic
+	tomlStringMultilineLiteral
+)
+
+func (s tomlLexState) inMultilineString() bool {
+	return s.stringKind == tomlStringMultilineBasic || s.stringKind == tomlStringMultilineLiteral
 }
 
 func scanTOMLLine(line string, state *tomlLexState, outsideString func(byte)) int {
-	for i := 0; i < len(line); i++ {
+	for i := 0; i < len(line); {
 		ch := line[i]
-		if state.escaped {
-			state.escaped = false
-			continue
-		}
-		if state.inBasic {
+		switch state.stringKind {
+		case tomlStringBasic:
+			if state.escaped {
+				state.escaped = false
+				i++
+				continue
+			}
 			switch ch {
 			case '\\':
 				state.escaped = true
 			case '"':
-				state.inBasic = false
+				state.stringKind = tomlStringNone
 			}
+			i++
 			continue
-		}
-		if state.inLiteral {
+		case tomlStringLiteral:
 			if ch == '\'' {
-				state.inLiteral = false
+				state.stringKind = tomlStringNone
 			}
+			i++
+			continue
+		case tomlStringMultilineBasic:
+			if state.escaped {
+				state.escaped = false
+				i++
+				continue
+			}
+			if ch == '\\' {
+				state.escaped = true
+				i++
+				continue
+			}
+			if ch == '"' {
+				run := tomlQuoteRun(line, i, '"')
+				if run >= 3 {
+					state.stringKind = tomlStringNone
+				}
+				i += run
+				continue
+			}
+			i++
+			continue
+		case tomlStringMultilineLiteral:
+			if ch == '\'' {
+				run := tomlQuoteRun(line, i, '\'')
+				if run >= 3 {
+					state.stringKind = tomlStringNone
+				}
+				i += run
+				continue
+			}
+			i++
 			continue
 		}
+
 		switch ch {
 		case '#':
 			return i
 		case '"':
-			state.inBasic = true
+			run := tomlQuoteRun(line, i, '"')
+			switch {
+			case run == 1:
+				state.stringKind = tomlStringBasic
+			case run >= 3 && run < 6:
+				state.stringKind = tomlStringMultilineBasic
+			}
+			i += run
+			continue
 		case '\'':
-			state.inLiteral = true
+			run := tomlQuoteRun(line, i, '\'')
+			switch {
+			case run == 1:
+				state.stringKind = tomlStringLiteral
+			case run >= 3 && run < 6:
+				state.stringKind = tomlStringMultilineLiteral
+			}
+			i += run
+			continue
 		default:
 			if outsideString != nil {
 				outsideString(ch)
 			}
 		}
+		i++
 	}
 	return -1
+}
+
+func tomlQuoteRun(line string, start int, quote byte) int {
+	end := start
+	for end < len(line) && line[end] == quote {
+		end++
+	}
+	return end - start
+}
+
+func tomlStructuralLineMask(spans []tomlLineSpan) []bool {
+	structural := make([]bool, len(spans))
+	state := tomlLexState{}
+	for i, span := range spans {
+		structural[i] = !state.inMultilineString()
+		scanTOMLLine(span.text, &state, nil)
+	}
+	return structural
 }
 
 func tomlValueEndSpan(spans []tomlLineSpan, start int) int {
