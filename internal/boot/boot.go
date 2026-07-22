@@ -722,6 +722,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// per-skill model, and resumable transcripts when the parent session supports
 	// them. Its tool activity nests under the invoking call, like `task`.
 	skillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
+		// A skill may declare the same read-only contract used by OMR and other
+		// profile distributors. Honor it even when the generic run_skill tool is
+		// used, so the declaration cannot be bypassed by choosing a different
+		// entry point.
+		if sk.ReadOnly {
+			return readOnlySkillRunner(sctx, sk, task, runOpts)
+		}
 		sk = skill.WithCodeGraphTools(sk, skill.CodeGraphReadTools(reg))
 		prov, price, ctxWin := execProv, entry.Price, entry.ContextWindow
 		modelRef := subagentModelRef(cfg, sk)

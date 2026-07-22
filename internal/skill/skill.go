@@ -65,6 +65,7 @@ type Skill struct {
 	RunAs        RunAs  // inline | subagent
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
+	ReadOnly     bool   // whether a subagent skill must use the read-only tool boundary (`read-only: true`)
 	// Routing metadata is intentionally kept out of the cache-stable Skills
 	// index; it feeds per-turn capability hints only.
 	Triggers         []string
@@ -493,6 +494,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
 		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
 		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
+		ReadOnly:     parseBoolFrontmatter(firstFrontmatter(fm, skillFrontmatterReadOnly, skillFrontmatterReadOnlyLegacy)),
 		Triggers:     parseCSVFrontmatter(fm[skillFrontmatterTriggers]),
 		NegativeTriggers: parseCSVFrontmatter(
 			fm[skillFrontmatterNegativeTriggers],
@@ -512,6 +514,8 @@ const (
 	skillFrontmatterAllowedTools     = "allowed-tools"
 	skillFrontmatterModel            = "model"
 	skillFrontmatterEffort           = "effort"
+	skillFrontmatterReadOnly         = "read-only"
+	skillFrontmatterReadOnlyLegacy   = "read_only"
 	skillFrontmatterTriggers         = "triggers"
 	skillFrontmatterNegativeTriggers = "negative-triggers"
 	skillFrontmatterAutoUse          = "auto-use"
@@ -528,6 +532,8 @@ var skillMarkerFrontmatterKeys = []string{
 	skillFrontmatterAllowedTools,
 	skillFrontmatterModel,
 	skillFrontmatterEffort,
+	skillFrontmatterReadOnly,
+	skillFrontmatterReadOnlyLegacy,
 	skillFrontmatterTriggers,
 	skillFrontmatterNegativeTriggers,
 	skillFrontmatterAutoUse,
@@ -542,6 +548,15 @@ func hasSkillMarker(content string, fm map[string]string) bool {
 		}
 	}
 	return frontmatterHasSkillMarkerKey(content)
+}
+
+func firstFrontmatter(fm map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(fm[key]); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func frontmatterHasSkillMarkerKey(content string) bool {

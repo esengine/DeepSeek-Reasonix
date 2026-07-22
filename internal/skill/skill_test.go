@@ -323,7 +323,7 @@ func TestExcludedPathsHideConventionRoots(t *testing.T) {
 func TestFrontmatterFields(t *testing.T) {
 	home := t.TempDir()
 	writeSkill(t, home, ".reasonix/skills/sub.md",
-		"---\ndescription: a sub\nrunAs: subagent\nallowed-tools: read_file, grep\nmodel: deepseek-pro\n---\nbody")
+		"---\ndescription: a sub\nrunAs: subagent\nread-only: true\nallowed-tools: read_file, grep\nmodel: deepseek-pro\n---\nbody")
 	writeSkill(t, home, ".reasonix/skills/fork.md", "---\ndescription: f\ncontext: fork\n---\nbody")
 	writeSkill(t, home, ".reasonix/skills/plain.md", "---\ndescription: p\n---\nbody")
 
@@ -337,6 +337,9 @@ func TestFrontmatterFields(t *testing.T) {
 	}
 	if sub.Model != "deepseek-pro" {
 		t.Errorf("model mis-parsed: %q", sub.Model)
+	}
+	if !sub.ReadOnly {
+		t.Error("read-only: true not parsed")
 	}
 	if fork, _ := st.Read("fork"); fork.RunAs != RunSubagent {
 		t.Error("context: fork should imply subagent")
