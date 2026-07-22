@@ -141,10 +141,11 @@ func (s *lazySpawn) run() {
 	s.trySwap()
 	cacheTools = real
 	s.broadcastReady()
-	// Save cache outside the critical path of tool dispatch, but still under
-	// the deferred end of run after unlock would also work; keep schema write
-	// after unlock by scheduling it here via a copy.
-	go saveLazyCachedSchema(s.spec, cacheTools)
+	// Save cache outside the critical path of tool dispatch. Register the write
+	// before this deferred spawn ends so Host.Close observes and drains it.
+	s.host.queueBackgroundWrite(func() {
+		saveLazyCachedSchema(s.spec, cacheTools)
+	})
 }
 
 func saveLazyCachedSchema(spec Spec, real []tool.Tool) {
@@ -375,8 +376,10 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			safetyErr := lt.reconcileLiveSafety(r)
 			sp.broadcastReady()
 			sp.mu.Unlock()
+			sp.host.queueBackgroundWrite(func() {
+				saveLazyCachedSchema(sp.spec, real)
+			})
 			sp.host.endDeferredSpawn()
-			saveLazyCachedSchema(sp.spec, real)
 			if safetyErr != nil {
 				return "", safetyErr
 			}

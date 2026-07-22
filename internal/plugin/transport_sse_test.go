@@ -224,7 +224,6 @@ func TestLegacySSEBoundsConcurrentServerRequestReplies(t *testing.T) {
 		}
 	})
 	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
-		firstPost.Do(func() { close(postStarted) })
 		active := activePosts.Add(1)
 		defer activePosts.Add(-1)
 		for {
@@ -233,6 +232,7 @@ func TestLegacySSEBoundsConcurrentServerRequestReplies(t *testing.T) {
 				break
 			}
 		}
+		firstPost.Do(func() { close(postStarted) })
 		select {
 		case <-releasePosts:
 			w.WriteHeader(http.StatusAccepted)

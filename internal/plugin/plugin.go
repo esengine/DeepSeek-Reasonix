@@ -493,6 +493,17 @@ func (h *Host) Close() {
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
 }
 
+// queueBackgroundWrite keeps detached persistence inside the Host lifecycle.
+// Callers must enqueue before their Close-drained startup owner completes, so
+// Close cannot begin waiting before the WaitGroup increment is visible.
+func (h *Host) queueBackgroundWrite(write func()) {
+	h.bgWrites.Add(1)
+	go func() {
+		defer h.bgWrites.Done()
+		write()
+	}()
+}
+
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
 // resources) for every connected client. Boot calls it right after Start
 // returns, on a session-scoped ctx, so the agent becomes responsive as soon as
