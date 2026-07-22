@@ -236,6 +236,7 @@ export interface ProjectNode {
   key: string;
   kind: "project" | "topic" | "session" | "global_folder" | "global_topic" | "global_session";
   label: string;
+  titleKind?: string;
   root?: string;
   topicId?: string;
   sessionPath?: string;
