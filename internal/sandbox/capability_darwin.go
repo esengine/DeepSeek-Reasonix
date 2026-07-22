@@ -1,0 +1,38 @@
+//go:build darwin
+
+package sandbox
+
+import (
+	"context"
+	"fmt"
+)
+
+func capabilityPlatformNoDelta() bool { return false }
+
+func capabilityBaseWriteRoots(spec Spec) []string {
+	return writeAllowDirsForSpec(spec)
+}
+
+func capabilityBaseReadCovers(_ Spec, _ CapabilityPath) bool { return true }
+
+func capabilityPlatformSupports(_ context.Context, _ Spec, delta CapabilitySet) (bool, string) {
+	if len(delta.Reads)+len(delta.Writes) > 0 {
+		return false, "Seatbelt path exceptions have not passed the required real-platform safety probe"
+	}
+	return true, ""
+}
+
+func prepareCapabilityPlatformLaunch(_ context.Context, base Spec, delta CapabilitySet, sh Shell, command string) (CapabilityLaunch, error) {
+	if len(delta.Reads)+len(delta.Writes) > 0 {
+		return CapabilityLaunch{}, fmt.Errorf("Seatbelt path exceptions are unsupported")
+	}
+	spec := cloneSpec(base)
+	if delta.Network {
+		spec.Network = true
+	}
+	argv, wrapped := Command(spec, sh, command)
+	if !wrapped {
+		return CapabilityLaunch{}, fmt.Errorf("sandbox-exec is unavailable")
+	}
+	return CapabilityLaunch{Argv: argv, Wrapped: true}, nil
+}

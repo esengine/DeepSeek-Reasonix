@@ -170,21 +170,26 @@ func (b foregroundOnlyBash) Description() string {
 	return desc + " Background execution is unavailable inside subagents."
 }
 
-func (foregroundOnlyBash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute in the foreground"}},"required":["command"]}`)
+func (b foregroundOnlyBash) Schema() json.RawMessage {
+	return foregroundBashSchema(b.inner, "Shell command to execute in the foreground")
 }
 
 func (b foregroundOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		RunInBackground bool `json:"run_in_background"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if p.RunInBackground {
-		return "", fmt.Errorf("background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
+	if err := validateForegroundBashArgs(args); err != nil {
+		return "", err
 	}
 	return b.inner.Execute(ctx, args)
+}
+
+func (b foregroundOnlyBash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (tool.SandboxCapabilityInvocation, error) {
+	if err := validateForegroundBashArgs(args); err != nil {
+		return nil, err
+	}
+	capable, ok := b.inner.(tool.SandboxCapabilityTool)
+	if !ok {
+		return nil, fmt.Errorf("bash sandbox capability preparation is unavailable")
+	}
+	return capable.PrepareSandboxInvocation(ctx, args)
 }
 
 func (b foregroundOnlyBash) ReadOnly() bool { return b.inner.ReadOnly() }
@@ -204,8 +209,8 @@ func (b readOnlyBash) Description() string {
 	return desc + " Only permission-classified read-only commands are allowed; shell operators, background execution, process preservation, and write-capable arguments are blocked."
 }
 
-func (readOnlyBash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Read-only shell command to execute in the foreground. Must match the permission-layer read-only command policy."}},"required":["command"]}`)
+func (b readOnlyBash) Schema() json.RawMessage {
+	return foregroundBashSchema(b.inner, "Read-only shell command to execute in the foreground. Must match the permission-layer read-only command policy.")
 }
 
 func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -215,7 +220,52 @@ func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string
 	return b.inner.Execute(ctx, args)
 }
 
+func (b readOnlyBash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (tool.SandboxCapabilityInvocation, error) {
+	if !permission.BashCommandIsReadOnly(args) {
+		return nil, fmt.Errorf("read-only subagents can prepare only permission-classified foreground read-only commands")
+	}
+	capable, ok := b.inner.(tool.SandboxCapabilityTool)
+	if !ok {
+		return nil, fmt.Errorf("bash sandbox capability preparation is unavailable")
+	}
+	return capable.PrepareSandboxInvocation(ctx, args)
+}
+
 func (readOnlyBash) ReadOnly() bool { return true }
+
+func validateForegroundBashArgs(args json.RawMessage) error {
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return fmt.Errorf("invalid args: %w", err)
+	}
+	if p.RunInBackground {
+		return fmt.Errorf("background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
+	}
+	return nil
+}
+
+func foregroundBashSchema(inner tool.Tool, commandDescription string) json.RawMessage {
+	var schema map[string]any
+	if inner == nil || json.Unmarshal(inner.Schema(), &schema) != nil {
+		return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return inner.Schema()
+	}
+	delete(properties, "run_in_background")
+	delete(properties, "preserve_background_processes")
+	if command, ok := properties["command"].(map[string]any); ok {
+		command["description"] = commandDescription
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		return inner.Schema()
+	}
+	return raw
+}
 
 // TaskTool spawns a sub-agent in its own session for a focused sub-task. The
 // sub-agent runs with a filtered tool whitelist and the same step budget shape

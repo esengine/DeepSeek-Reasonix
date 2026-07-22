@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/diff"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 )
 
 // Tool is a capability the model can invoke.
@@ -30,6 +31,22 @@ type Tool interface {
 	// ordering is preserved. bash and plugin tools must return false because
 	// their effects can't be inferred statically from args.
 	ReadOnly() bool
+}
+
+// SandboxCapabilityTool is the optional seam implemented by Bash for a call
+// that may request an atomic OS-sandbox capability delta. The ordinary Tool
+// interface remains unchanged; execution policy type-asserts this interface
+// only when it needs to review capabilities before Execute.
+type SandboxCapabilityTool interface {
+	PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (SandboxCapabilityInvocation, error)
+}
+
+// SandboxCapabilityInvocation binds validation, review, and execution to one
+// immutable Bash call so policy cannot accidentally authorize one request and
+// execute another. Implementations must treat AuthorizedDelta atomically.
+type SandboxCapabilityInvocation interface {
+	Review() sandbox.CapabilityReview
+	Execute(ctx context.Context, use sandbox.CapabilityUse) (string, error)
 }
 
 // Previewer is an optional capability a writer Tool may implement: given the

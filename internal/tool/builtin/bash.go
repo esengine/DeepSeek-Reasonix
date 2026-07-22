@@ -90,9 +90,10 @@ type bash struct {
 }
 
 type bashParams struct {
-	Command                     string `json:"command"`
-	RunInBackground             bool   `json:"run_in_background"`
-	PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
+	Command                     string          `json:"command"`
+	RunInBackground             bool            `json:"run_in_background"`
+	PreserveBackgroundProcesses bool            `json:"preserve_background_processes"`
+	SandboxCapabilities         json.RawMessage `json:"sandbox_capabilities"`
 }
 
 func (bash) Name() string { return "bash" }
@@ -136,7 +137,7 @@ func (b bash) resolved() sandbox.Shell {
 }
 
 func (bash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group."}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group."},"sandbox_capabilities":{"type":"object","description":"Optional request for one atomic OS-sandbox capability delta. The host may run the command in the original sandbox instead.","additionalProperties":false,"properties":{"network":{"type":"boolean","description":"Request unrestricted network access."},"read_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"write_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"argv_prefix":{"type":"array","maxItems":8,"items":{"type":"string"},"description":"Optional proposed reusable argv prefix; it does not itself grant authority."},"justification":{"type":"string","maxLength":100,"description":"Model-authored reason, at most 100 Unicode characters; authoritative normalized capabilities are reviewed separately."}}}},"required":["command"]}`)
 }
 
 // ReadOnly is false: bash's effect cannot be inferred from args (rm, curl,
@@ -152,20 +153,71 @@ func (bash) SnipHint() tool.SnipHint {
 }
 
 func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	invocation, err := b.PrepareSandboxInvocation(ctx, args)
+	if err != nil {
+		return "", err
+	}
+	return invocation.Execute(ctx, sandbox.BaseOnly)
+}
+
+type preparedBashInvocation struct {
+	b          bash
+	p          bashParams
+	args       json.RawMessage
+	assessment sandbox.CapabilityAssessment
+	mu         sync.Mutex
+	used       bool
+}
+
+// PrepareSandboxInvocation parses one immutable Bash call and evaluates its
+// optional capability request without granting authority. The future policy
+// gate reviews this same invocation before selecting AuthorizedDelta.
+func (b bash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (tool.SandboxCapabilityInvocation, error) {
 	var p bashParams
 	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return nil, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Command == "" {
-		return "", fmt.Errorf("command is required")
+		return nil, fmt.Errorf("command is required")
 	}
 
 	sh := b.resolved()
 	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
-		return "", fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. " +
+		return nil, fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. " +
 			"Sequence with ';' (both run regardless of the first's result), use 'if ($?) { ... }' for " +
 			"conditional chaining, or issue the commands as separate calls")
 	}
+	assessment := sandbox.EvaluateCapability(ctx, sandbox.CapabilityInput{
+		Base:      b.sb,
+		Workspace: b.workDir,
+		Raw:       p.SandboxCapabilities,
+	})
+	return &preparedBashInvocation{
+		b:          b,
+		p:          p,
+		args:       append(json.RawMessage(nil), args...),
+		assessment: assessment,
+	}, nil
+}
+
+func (i *preparedBashInvocation) Review() sandbox.CapabilityReview {
+	return i.assessment.Review()
+}
+
+func (i *preparedBashInvocation) Execute(ctx context.Context, use sandbox.CapabilityUse) (string, error) {
+	i.mu.Lock()
+	if i.used {
+		i.mu.Unlock()
+		return "", fmt.Errorf("prepared bash invocation has already been executed")
+	}
+	i.used = true
+	i.mu.Unlock()
+	return i.b.executePrepared(ctx, i.p, i.args, i.assessment, use)
+}
+
+func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMessage, assessment sandbox.CapabilityAssessment, use sandbox.CapabilityUse) (string, error) {
+	sh := b.resolved()
+	diagnostic := sandbox.CapabilityFallbackDiagnostic(assessment.Review(), use)
 
 	// A host-owned terminal runs the command where the user watches it live.
 	// Never when the OS sandbox is enforcing (the host cannot honor the local
@@ -175,13 +227,22 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	// background jobs. ok=false falls back to local execution unchanged.
 	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
 		if out, ok, err := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.timeout); ok {
+			out = appendCapabilityDiagnostic(out, diagnostic)
 			return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
 		}
 	}
 
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	argv, wrapped := bashSandboxCommand(b.sb, sh, p.Command)
+	launch := sandbox.CapabilityLaunch{}
+	if use == sandbox.AuthorizedDelta {
+		launch = sandbox.PrepareCapabilityCommand(ctx, assessment, use, sh, p.Command)
+		diagnostic = launch.Diagnostic
+	} else {
+		launch.Argv, launch.Wrapped = bashSandboxCommand(b.sb, sh, p.Command)
+	}
+	argv, wrapped := launch.Argv, launch.Wrapped
 	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, p.Command, args) {
+		launch.Close()
 		argv = unconfinedShellArgv(sh, p.Command)
 		wrapped = false
 	} else if b.sb.Enforce() && !wrapped {
@@ -195,6 +256,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			}
 			return "", fmt.Errorf("%s", sandbox.UnavailableMessage())
 		}
+		launch.Close()
 		argv = unconfinedShellArgv(sh, p.Command)
 	}
 	cmdEnv := bashCommandEnv(ctx)
@@ -202,15 +264,18 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
+			launch.Close()
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
 		workDir := b.workDir
 		// The job runs under the manager's session context (no foreground timeout), so it
 		// survives this turn; its combined output streams to the job buffer.
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "bash", commandPreview(p.Command), func(jobCtx context.Context, out io.Writer) (string, error) {
+			defer launch.Close()
 			cmd := exec.CommandContext(jobCtx, argv[0], argv[1:]...)
 			cmd.Dir = workDir
 			cmd.Env = cmdEnv
+			cmd.ExtraFiles = launch.ExtraFiles
 			cmd.WaitDelay = bashWaitDelay
 			cmd.Stdout = out
 			cmd.Stderr = out
@@ -221,11 +286,24 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			return "", normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses)
 		})
 		msg := fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID)
+		msg = appendCapabilityDiagnostic(msg, diagnostic)
 		return appendSessionDataHint(msg, b.guard.CommandHint(b.workDir, p.Command)), nil
 	}
 
-	out, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv)
+	defer launch.Close()
+	out, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv, launch.ExtraFiles)
+	out = appendCapabilityDiagnostic(out, diagnostic)
 	return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
+}
+
+func appendCapabilityDiagnostic(out, diagnostic string) string {
+	if diagnostic == "" {
+		return out
+	}
+	if strings.TrimSpace(out) == "" {
+		return diagnostic
+	}
+	return out + "\n\n" + diagnostic
 }
 
 // appendSessionDataHint appends the session-data guard warning to command
@@ -279,7 +357,7 @@ func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args j
 	})
 }
 
-func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string) (string, error) {
+func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, extraFiles []*os.File) (string, error) {
 	runCtx := ctx
 	timeout := b.foregroundTimeout()
 	if timeout > 0 {
@@ -291,6 +369,7 @@ func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell,
 	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	cmd.Dir = b.workDir // "" lets exec use the process working directory
 	cmd.Env = cmdEnv
+	cmd.ExtraFiles = extraFiles
 	cmd.WaitDelay = bashWaitDelay
 	var buf bytes.Buffer
 	w := io.Writer(&buf)
