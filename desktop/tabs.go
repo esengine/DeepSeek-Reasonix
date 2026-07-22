@@ -5766,7 +5766,7 @@ type ProjectNode struct {
 	RecoveryParentID string        `json:"recoveryParentId,omitempty"`
 	IsolatedWorktree bool          `json:"isolatedWorktree,omitempty"`
 	Children         []ProjectNode `json:"children,omitempty"`
-	TitleKind string `json:"titleKind,omitempty"`
+	TitleKind string        `json:"titleKind,omitempty"`
 }
 
 func normalizeTopicStatus(status string) string {
@@ -7191,11 +7191,11 @@ func (a *App) ListProjectTree() []ProjectNode {
 		titleKind := ""
 		switch {
 		case label == defaultTopicTitle || label == "New Session":
-		titleKind = "new_session"
+			titleKind = "new_session"
 		case strings.HasPrefix(label, "分叉会话") || strings.HasPrefix(label, "Forked Session") || strings.HasSuffix(label, " · 分叉"):
-		titleKind = "forked"
+			titleKind = "forked"
 		case strings.HasPrefix(label, "历史会话") || strings.HasPrefix(label, "History Session"):
-		titleKind = "history"
+			titleKind = "history"
 		}
 		status := activityStatusForTab(tab)
 		runtimeStatus := control.RuntimeStatus{}
@@ -7206,7 +7206,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)] = append(runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)], runtimeSessionStatus{
 			sessionPath:      sessionPath,
 			label:            label,
-			titleKind: titleKind,
+			titleKind:        titleKind,
 			turns:            info.Turns,
 			createdAt:        unixMilliOrZero(info.CreatedAt),
 			lastActivityAt:   unixMilliOrZero(info.LastActivityAt),
