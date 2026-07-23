@@ -36,6 +36,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
@@ -247,6 +248,8 @@ type chatTUI struct {
 	// awaiting ctrl.Approve and key input is captured to answer it.
 	pendingApproval   *event.Approval
 	approvalSelection int
+	capabilityMode    bool // true when pendingApproval.Kind == "sandbox_capability"
+	yoloAckMode       bool // true when YOLO acknowledgement banner is shown
 
 	// chooser holds the `ask` tool's question card (nil when none). While set, the
 	// run goroutine is blocked awaiting ctrl.AnswerQuestion and keys drive the card.
@@ -1925,7 +1928,7 @@ func (m chatTUI) bottomRows() int {
 // reserve rows for a composer that cannot receive input, leaving a confusing
 // blank/bordered area at the bottom of the TUI.
 func (m chatTUI) hideComposer() bool {
-	if m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.quickPick != nil || m.copyPick != nil || m.rewind != nil || m.pendingApproval != nil {
+	if m.mcp != nil || m.clearConfirm != nil || m.mcpImport != nil || m.skillPick != nil || m.resumePick != nil || m.quickPick != nil || m.copyPick != nil || m.rewind != nil || m.pendingApproval != nil || m.yoloAckMode {
 		return true
 	}
 	return m.chooser != nil && !m.chooser.typing
@@ -2649,6 +2652,12 @@ func approvalChoiceLabels(a *event.Approval) []string {
 // (planApprovalTool), starting execution or explicitly exiting without execution
 // drops the local [plan] tag and turns plan mode off on the controller.
 func (m chatTUI) handleApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.yoloAckMode {
+		return m.handleYOLOAckKey(msg)
+	}
+	if m.capabilityMode {
+		return m.handleCapabilityApprovalKey(msg)
+	}
 	choices := approvalChoices(m.pendingApproval)
 	answer := func(choice approvalChoice) (tea.Model, tea.Cmd) {
 		allow, session, persist := choice.allow, choice.allowForSession, choice.persistToConfig
@@ -2747,6 +2756,165 @@ func isRecoveryPlanChangeApproval(a *event.Approval) bool {
 	default:
 		return false
 	}
+}
+
+// handleCapabilityApprovalKey handles key input for sandbox capability approval
+// cards. It maps keys to sandboxauth.Action values and calls
+// ResolveSandboxCapability instead of the legacy Approve path.
+func (m chatTUI) handleCapabilityApprovalKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.pendingApproval == nil {
+		return m, nil
+	}
+	p := m.pendingApproval.SandboxCapability
+	choices := capabilityApprovalChoices(p)
+	choose := func(action sandboxauth.Action) (tea.Model, tea.Cmd) {
+		id := m.pendingApproval.ID
+		m.pendingApproval = nil
+		m.capabilityMode = false
+		_ = m.ctrl.ResolveSandboxCapability(id, action)
+		return m, nil
+	}
+	switch msg.String() {
+	case "ctrl+c":
+		m.ctrl.Cancel()
+		return choose(sandboxauth.CancelCommand)
+	case "up", "k", "ctrl+p":
+		if m.approvalSelection < 0 && len(choices) > 0 {
+			m.approvalSelection = 0
+		} else if m.approvalSelection > 0 {
+			m.approvalSelection--
+		}
+		return m, nil
+	case "down", "j", "ctrl+n":
+		if m.approvalSelection < len(choices)-1 {
+			m.approvalSelection++
+		}
+		return m, nil
+	case "enter":
+		if m.approvalSelection >= 0 && m.approvalSelection < len(choices) {
+			return choose(capabilityActionForIndex(m.approvalSelection, p))
+		}
+		return m, nil
+	case "esc":
+		return choose(sandboxauth.CancelCommand)
+	}
+	lower := strings.ToLower(msg.String())
+	if len(lower) == 1 && lower[0] >= '1' && lower[0] <= '5' {
+		idx := int(lower[0] - '1')
+		if idx < len(choices) {
+			return choose(capabilityActionForIndex(idx, p))
+		}
+		// Legacy 4 = deny maps to RunSandboxed for capability approvals.
+		if lower == "4" {
+			return choose(sandboxauth.RunSandboxed)
+		}
+		return m, nil
+	}
+	switch lower {
+	case "y":
+		if len(choices) > 0 {
+			return choose(capabilityActionForIndex(0, p))
+		}
+	case "a":
+		if p.Reusable {
+			// Find the session choice index
+			for i, c := range choices {
+				if c == i18n.M.CapabilityAllowSession {
+					return choose(capabilityActionForIndex(i, p))
+				}
+			}
+		}
+	case "p":
+		if p.Reusable && !p.SuspectedSecret {
+			for i, c := range choices {
+				if c == i18n.M.CapabilityAllowPersistent {
+					return choose(capabilityActionForIndex(i, p))
+				}
+			}
+		}
+	case "n":
+		return choose(sandboxauth.RunSandboxed)
+	}
+	return m, nil
+}
+
+// capabilityActionForIndex maps a 0-based choice index to the corresponding
+// capabilityActionDefs returns the ordered list of (action, label, show)
+// tuples for a sandbox capability prompt. Both capabilityActionForIndex and
+// capabilityApprovalChoices use it as the single source of truth so that
+// action visibility logic is never duplicated.
+func capabilityActionDefs(p *sandboxauth.Prompt) []struct {
+	action sandboxauth.Action
+	label  string
+	show   bool
+} {
+	return []struct {
+		action sandboxauth.Action
+		label  string
+		show   bool
+	}{
+		{action: sandboxauth.AllowOnce, label: i18n.M.CapabilityAllowOnce, show: true},
+		{action: sandboxauth.AllowSession, label: i18n.M.CapabilityAllowSession, show: p.Reusable},
+		{action: sandboxauth.AllowPersistent, label: i18n.M.CapabilityAllowPersistent, show: p.Reusable && !p.SuspectedSecret},
+		{action: sandboxauth.RunSandboxed, label: i18n.M.CapabilityRunSandboxed, show: true},
+		{action: sandboxauth.CancelCommand, label: i18n.M.CapabilityCancelCommand, show: true},
+	}
+}
+
+// capabilityActionForIndex maps a 0-based choice index to the corresponding
+// sandboxauth.Action, accounting for filtered choices.
+func capabilityActionForIndex(idx int, p *sandboxauth.Prompt) sandboxauth.Action {
+	shown := 0
+	for _, d := range capabilityActionDefs(p) {
+		if d.show {
+			if shown == idx {
+				return d.action
+			}
+			shown++
+		}
+	}
+	return sandboxauth.RunSandboxed // fallback
+}
+
+// handleYOLOAckKey handles key input for the YOLO project-expansion
+// acknowledgement banner. Accept routes to AcknowledgeSandboxCapabilityYOLO;
+// refuse pauses auto-approval.
+func (m chatTUI) handleYOLOAckKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	answer := func(accept bool) (tea.Model, tea.Cmd) {
+		m.ctrl.AcknowledgeSandboxCapabilityYOLO(accept)
+		if accept {
+			m.ctrl.ReloadSandboxCapabilityYOLO()
+		}
+		m.yoloAckMode = false
+		return m, nil
+	}
+	switch msg.String() {
+	case "up", "k", "ctrl+p":
+		if m.approvalSelection > 0 {
+			m.approvalSelection--
+		}
+		return m, nil
+	case "down", "j", "ctrl+n":
+		if m.approvalSelection < 1 {
+			m.approvalSelection++
+		}
+		return m, nil
+	case "enter":
+		if m.approvalSelection == 0 {
+			return answer(true)
+		}
+		return answer(false)
+	case "esc":
+		return answer(false)
+	}
+	lower := strings.ToLower(msg.String())
+	switch lower {
+	case "1", "y":
+		return answer(true)
+	case "2", "n":
+		return answer(false)
+	}
+	return m, nil
 }
 
 func freshApprovalAllowsSession(toolName string) bool {
@@ -3129,8 +3297,15 @@ func shortTokens(n int) string {
 }
 
 // renderApprovalBanner is the slim notice shown above the input while a tool
-// call (or a plan) awaits the user's decision.
+// call (or a plan) awaits the user's decision. It delegates to dedicated
+// renderers for sandbox capability approvals and YOLO acknowledgement.
 func (m chatTUI) renderApprovalBanner() string {
+	if m.yoloAckMode {
+		return m.renderYOLOAcknowledgementBanner()
+	}
+	if m.capabilityMode {
+		return m.renderCapabilityApprovalCard()
+	}
 	w := m.width
 	if w < 10 {
 		w = 10
@@ -3226,6 +3401,151 @@ func approvalToolLabel(toolName string) string {
 	default:
 		return toolName
 	}
+}
+
+// renderCapabilityApprovalCard renders the dedicated sandbox capability approval
+// card with structured fields, risk warnings, justification, and available
+// actions. It is called from renderApprovalBanner when capabilityMode is true.
+func (m chatTUI) renderCapabilityApprovalCard() string {
+	w := m.width
+	if w < 10 {
+		w = 10
+	}
+	if m.pendingApproval == nil || m.pendingApproval.SandboxCapability == nil {
+		return ""
+	}
+	p := m.pendingApproval.SandboxCapability
+	var b strings.Builder
+
+	// Title
+	b.WriteString(i18n.M.CapabilityApprovalTitle + "\n")
+
+	// Command and executable
+	b.WriteString("  " + i18n.M.CapabilityCmdLabel + " " + strings.Join(p.Argv, " ") + "\n")
+	b.WriteString("  " + i18n.M.CapabilityExecLabel + " " + p.CanonicalExecutable + "\n")
+
+	// Network
+	netVal := i18n.M.CapabilityNo
+	if p.Review.EffectiveDelta.Network {
+		netVal = i18n.M.CapabilityFullAccess
+	}
+	b.WriteString("  " + i18n.M.CapabilityNetworkLabel + " " + netVal + "\n")
+
+	// Read paths
+	if len(p.Review.EffectiveDelta.Reads) > 0 {
+		b.WriteString("  " + i18n.M.CapabilityReadPathsLabel + "\n")
+		for _, rp := range p.Review.EffectiveDelta.Reads {
+			kind := i18n.M.CapabilityFileLabel
+			if rp.Kind == "directory" {
+				kind = i18n.M.CapabilityDirLabel
+			}
+			b.WriteString("    " + rp.Canonical + " (" + kind + ")\n")
+		}
+	}
+
+	// Write paths
+	if len(p.Review.EffectiveDelta.Writes) > 0 {
+		b.WriteString("  " + i18n.M.CapabilityWritePathsLabel + "\n")
+		for _, wp := range p.Review.EffectiveDelta.Writes {
+			kind := i18n.M.CapabilityFileLabel
+			if wp.Kind == "directory" {
+				kind = i18n.M.CapabilityDirLabel
+			}
+			b.WriteString("    " + wp.Canonical + " (" + kind + ")\n")
+		}
+	}
+
+	// Devices
+	if len(p.Review.EffectiveDelta.Devices) > 0 {
+		b.WriteString("  " + i18n.M.CapabilityDevicesLabel + "\n")
+		for _, d := range p.Review.EffectiveDelta.Devices {
+			b.WriteString("    " + d.Canonical + "\n")
+		}
+	}
+
+	// Background
+	bgVal := i18n.M.CapabilityNo
+	if p.Background {
+		bgVal = i18n.M.CapabilityYes
+	}
+	b.WriteString("  " + i18n.M.CapabilityBackgroundLabel + " " + bgVal + "\n")
+
+	// Reusable
+	reusableVal := i18n.M.CapabilityNo
+	if p.Reusable {
+		reusableVal = i18n.M.CapabilityYes
+	}
+	b.WriteString("  " + i18n.M.CapabilityReusableLabel + " " + reusableVal + "\n")
+
+	// Preserve processes
+	ppVal := i18n.M.CapabilityNo
+	if p.PreserveBackgroundProcesses {
+		ppVal = i18n.M.CapabilityYes
+	}
+	b.WriteString("  " + i18n.M.CapabilityPreserveProcessesLabel + " " + ppVal + "\n")
+
+	// Background warning for reusable grants with process preservation
+	if p.Reusable && p.PreserveBackgroundProcesses {
+		b.WriteString("  " + i18n.M.CapabilityBgWarningFmt + "\n")
+	}
+
+	// Model justification
+	if just := strings.TrimSpace(p.Review.Justification); just != "" {
+		b.WriteString("\n  " + i18n.M.CapabilityModelJustification + "\n")
+		b.WriteString("    " + strings.ReplaceAll(just, "\n", "\n    ") + "\n")
+	}
+
+	// Prominent warnings from the prompt
+	for _, warn := range p.Warnings {
+		b.WriteString("  " + i18n.M.CapabilityWarningPrefix + " " + warn + "\n")
+	}
+
+	// Risk level
+	if p.Review.Risk.Level == "critical" {
+		b.WriteString("  " + i18n.M.CapabilityRiskCriticalPrefix + "\n")
+	}
+	for _, finding := range p.Review.Risk.Findings {
+		b.WriteString("    " + finding.Message + "\n")
+	}
+
+	// Choices
+	b.WriteString("\n")
+	choices := capabilityApprovalChoices(p)
+	for i, choice := range choices {
+		b.WriteString(rowLine(i == m.approvalSelection, i+1, "", choice, false) + "\n")
+	}
+	b.WriteString(dim(i18n.M.CapabilityNavHint))
+	return choicePanelStyle.Width(w).Render(b.String())
+}
+
+// capabilityApprovalChoices returns the available action labels for a sandbox
+// capability prompt, accounting for Reusable and SuspectedSecret constraints.
+func capabilityApprovalChoices(p *sandboxauth.Prompt) []string {
+	var out []string
+	for _, d := range capabilityActionDefs(p) {
+		if d.show {
+			out = append(out, d.label)
+		}
+	}
+	return out
+}
+
+// renderYOLOAcknowledgementBanner renders a blocking banner that requires the
+// user to accept or refuse project-local YOLO expansion.
+func (m chatTUI) renderYOLOAcknowledgementBanner() string {
+	w := m.width
+	if w < 10 {
+		w = 10
+	}
+	var b strings.Builder
+	b.WriteString(i18n.M.YOLOAckTitle + "\n")
+	b.WriteString("\n")
+	b.WriteString("  " + i18n.M.YOLOAckBlockingNotice + "\n")
+	b.WriteString("\n")
+	b.WriteString(rowLine(m.approvalSelection == 0, 1, "", i18n.M.YOLOAckAccept, false) + "\n")
+	b.WriteString(rowLine(m.approvalSelection == 1, 2, "", i18n.M.YOLOAckRefuse, false) + "\n")
+	b.WriteString(dim(i18n.M.YOLOAckNavHint))
+	return choicePanelStyle.Width(w).Render(b.String())
 }
 
 // todoPanelMaxRows caps how many task lines the pinned panel shows; a long list
@@ -3784,6 +4104,12 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		}
 		m.finalizeStreamed()
 		m.commitLine(fmt.Sprintf("  %s %s", glyph, e.Text))
+		// Sandbox capability YOLO expansion warning blocks further auto-approval
+		// until the user acknowledges it via the dedicated banner.
+		if e.Code == event.NoticeCodeSandboxCapabilityWarning {
+			m.yoloAckMode = true
+			m.approvalSelection = 0
+		}
 
 	case event.GuardianAssessment:
 		m.finalizeStreamed()
@@ -3829,11 +4155,13 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	case event.ApprovalRequest:
 		// The controller's run goroutine is now blocked inside the gate awaiting
 		// this decision; the banner shows it in View and key input answers it via
-		// ctrl.Approve. At most one prompt is outstanding (the controller
-		// serialises them), so a plain field holds the current one.
+		// ctrl.Approve or ctrl.ResolveSandboxCapability. At most one prompt is
+		// outstanding (the controller serialises them), so a plain field holds
+		// the current one.
 		a := e.Approval
 		m.pendingApproval = &a
 		m.approvalSelection = 0
+		m.capabilityMode = a.Kind == sandboxauth.ApprovalKind
 		if isRecoveryPlanChangeApproval(&a) {
 			// A plan decision must start neutral: Enter alone cannot make Auto's
 			// strategy/scope choice for the user.

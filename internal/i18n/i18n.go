@@ -149,6 +149,41 @@ type Messages struct {
 	DiffFoldEnabledFmt                     string // notice when /diff-fold enables folding, %d = line limit
 	DiffFoldDisabled                       string // notice when /diff-fold disables folding (shows all lines)
 
+	// sandbox capability approval card
+	CapabilityApprovalTitle          string // "⛓ Sandbox capability request" / "⛓ 沙箱能力扩展请求"
+	CapabilityCmdLabel               string // "Command:" / "命令:"
+	CapabilityExecLabel              string // "Executable:" / "可执行:"
+	CapabilityNetworkLabel           string // "Network:" / "网络:"
+	CapabilityReadPathsLabel         string // "Read paths:" / "读取路径:"
+	CapabilityWritePathsLabel        string // "Write paths:" / "写入路径:"
+	CapabilityDevicesLabel           string // "Devices:" / "设备:"
+	CapabilityBackgroundLabel        string // "Background:" / "后台:"
+	CapabilityReusableLabel          string // "Reusable:" / "可复用:"
+	CapabilityPreserveProcessesLabel string // "Preserve processes:" / "进程保留:"
+	CapabilityYes                    string // "Yes" / "是"
+	CapabilityNo                     string // "No" / "否"
+	CapabilityFullAccess             string // "Full access" / "完整访问"
+	CapabilityModelJustification     string // "Model justification (untrusted):" / "模型理由 (不可信):"
+	CapabilityWarningPrefix          string // "⚠" — warning prefix emoji
+	CapabilityRiskCriticalPrefix     string // "⚠ Critical risk" / "⚠ 严重风险"
+	CapabilityAllowOnce              string // "1. Allow once" / "1. 允许一次"
+	CapabilityAllowSession           string // "2. Allow for this session" / "2. 允许本次会话"
+	CapabilityAllowPersistent        string // "3. Allow for this project" / "3. 允许此项目"
+	CapabilityRunSandboxed           string // "4. Run in original sandbox" / "4. 在原始沙箱中运行"
+	CapabilityCancelCommand          string // "5. Cancel command" / "5. 取消命令"
+	CapabilityNavHint                string // "↑/↓ navigate · Enter select" / "↑/↓ 选择 · Enter 确认"
+	CapabilityBgWarningFmt           string // "⚠ This grant permits preserved background processes that may outlive the session." / "⚠ 此授权允许保留后台进程，它们可能会在会话结束后继续运行。"
+	CapabilityFileLabel              string // "file" / "文件"
+	CapabilityDirLabel               string // "directory" / "目录"
+
+	// YOLO project expansion acknowledgement
+	YOLOAckTitle          string // "⚠ Sandbox capability auto-approval" / "⚠ 沙箱能力自动审批"
+	YOLOAckPromptFmt      string // "Project configuration enables automatic sandbox capability approval in workspace %s. Acknowledge?" / "项目配置在工作区 %s 启用了自动沙箱能力审批。是否确认？"
+	YOLOAckAccept         string // "Accept" / "接受"
+	YOLOAckRefuse         string // "Refuse" / "拒绝"
+	YOLOAckNavHint        string // "↑/↓ navigate · Enter select" / "↑/↓ 选择 · Enter 确认"
+	YOLOAckBlockingNotice string // "Action required: acknowledge sandbox capability expansion to continue." / "需要操作：确认沙箱能力扩展以继续。"
+
 	// `ask` tool question card.
 	AskTypeSomething   string // the "type your own answer" option label
 	AskTypingHint      string // shown on that row while entering free text
