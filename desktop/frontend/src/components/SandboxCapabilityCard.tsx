@@ -23,6 +23,11 @@ export function SandboxCapabilityCard({ sandboxCapability: sc }: Props) {
   const hasWarnings = sc.warnings && sc.warnings.length > 0;
   const hasGrantPrefix = sc.grant_prefix && sc.grant_prefix.length > 0;
   const showBackgroundWarning = sc.preserve_background_processes;
+  const findingMessage = (finding: WireCapabilityRiskFinding): string => {
+    const key = `approval.sandboxCapabilityFinding.${finding.code}` as const;
+    const localized = t(key as any);
+    return localized === key ? finding.message : localized;
+  };
 
   return (
     <div className="sandbox-capability-card">
@@ -212,7 +217,7 @@ export function SandboxCapabilityCard({ sandboxCapability: sc }: Props) {
                     [{f.code}]
                   </span>
                   <span className="sandbox-capability-card__finding-message">
-                    {f.message}
+                    {findingMessage(f)}
                   </span>
                 </li>
               ),
