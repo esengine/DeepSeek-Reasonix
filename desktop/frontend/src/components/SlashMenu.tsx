@@ -35,9 +35,13 @@ export function sortSlashCommandsForMenu(commands: CommandInfo[]): CommandInfo[]
   return commands
     .map((command, index) => ({ command, index }))
     .sort((a, b) => {
-      const groupDelta = (slashCommandGroupOrder.get(slashCommandGroup(a.command)) ?? 0)
-        - (slashCommandGroupOrder.get(slashCommandGroup(b.command)) ?? 0);
-      return groupDelta || a.index - b.index;
+      const groupDelta =
+        (slashCommandGroupOrder.get(slashCommandGroup(a.command)) ?? 0) -
+        (slashCommandGroupOrder.get(slashCommandGroup(b.command)) ?? 0);
+      if (groupDelta !== 0) return groupDelta;
+      const nameDelta = a.command.name.localeCompare(b.command.name);
+      if (nameDelta !== 0) return nameDelta;
+      return a.index - b.index;
     })
     .map(({ command }) => command);
 }
