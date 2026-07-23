@@ -94,6 +94,8 @@ func ToWire(e event.Event) Event {
 				ChangeKind:      r.ChangeKind,
 				ChangeRationale: r.ChangeRationale,
 				ReviewRationale: r.ReviewRationale,
+				PlanBefore:      r.PlanBefore,
+				PlanAfter:       r.PlanAfter,
 				CanGrantTask:    r.CanGrantTask,
 				TaskGrantScope:  r.TaskGrantScope,
 			}
@@ -265,6 +267,8 @@ type RecoveryApproval struct {
 	ChangeKind      string `json:"change_kind,omitempty"`
 	ChangeRationale string `json:"change_rationale,omitempty"`
 	ReviewRationale string `json:"review_rationale,omitempty"`
+	PlanBefore      string `json:"plan_before,omitempty"`
+	PlanAfter       string `json:"plan_after,omitempty"`
 	CanGrantTask    bool   `json:"can_grant_task,omitempty"`
 	TaskGrantScope  string `json:"task_grant_scope,omitempty"`
 }

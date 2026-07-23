@@ -1515,6 +1515,9 @@ func (e PluginEntry) ShouldAutoStart() bool {
 // ResolvedTier returns the normalized tier ("eager"|"background") with the
 // project default applied. Legacy lazy and unknown values fall back to
 // background so enabled MCPs are available without manual connection.
+//
+// Tier no longer changes runtime process start timing; it remains for config
+// compatibility and diagnostics only.
 func (e PluginEntry) ResolvedTier() string {
 	return resolvedMCPTier(e.Tier)
 }
@@ -1532,10 +1535,31 @@ func resolvedMCPTier(tier string) string {
 	}
 }
 
+// AutoStartPlugins returns enabled MCP entries for the catalog. Durable
+// enable/disable overrides in mcp-activation.json take precedence over the
+// legacy auto_start field. auto_start=false without an override still maps to
+// disabled; true/nil map to enabled. "Auto start" no longer means "spawn the
+// process at session boot" — enabled servers register cached tools and start
+// on first real tool call.
 func (c *Config) AutoStartPlugins() []PluginEntry {
+	return c.EnabledPlugins("", DefaultMCPActivationStore())
+}
+
+// EnabledPlugins returns catalog-enabled MCP entries for workspace, consulting
+// the activation store when provided.
+func (c *Config) EnabledPlugins(workspace string, activation *MCPActivationStore) []PluginEntry {
+	if c == nil {
+		return nil
+	}
 	out := make([]PluginEntry, 0, len(c.Plugins))
 	for _, p := range c.Plugins {
-		if p.ShouldAutoStart() {
+		enabled := p.ShouldAutoStart()
+		if activation != nil {
+			if resolved, err := activation.IsEnabled(p, workspace); err == nil {
+				enabled = resolved
+			}
+		}
+		if enabled {
 			out = append(out, p)
 		}
 	}

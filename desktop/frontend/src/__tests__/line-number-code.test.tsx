@@ -6,13 +6,16 @@ import { CodeViewer } from "../components/CodeViewer";
 import LineNumberCode, {
   findCodeMatches,
   highlightLineMatches,
-  MAX_HIGHLIGHT_BYTES,
-  MAX_HIGHLIGHT_LINES,
   MAX_SEARCH_MATCHES,
-  shouldHighlightCode,
   splitHighlightedCodeLines,
 } from "../components/editors/LineNumberCode";
-import { highlightToHtml } from "../lib/highlight";
+import {
+  highlightToHtml,
+  MAX_HIGHLIGHT_BYTES,
+  MAX_HIGHLIGHT_LINES,
+  shouldHighlightCode,
+  shouldHighlightSource,
+} from "../lib/highlight";
 import { LocaleProvider } from "../lib/i18n";
 
 let passed = 0;
@@ -36,6 +39,16 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForSelector(container: ParentNode, selector: string, timeoutMs = 1_000): Promise<Element> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const element = container.querySelector(selector);
+    if (element) return element;
+    await act(async () => wait(10));
+  }
+  throw new Error(`Timed out waiting for ${selector}`);
+}
+
 console.log("\nline-number code viewer");
 
 const repeatedMatches = findCodeMatches("x\nx\nx", "x").matches;
@@ -56,6 +69,15 @@ ok(cappedMatches.truncated, "reports capped result sets to the viewer");
 ok(shouldHighlightCode(MAX_HIGHLIGHT_BYTES, MAX_HIGHLIGHT_LINES), "keeps syntax highlighting within its budget");
 ok(!shouldHighlightCode(MAX_HIGHLIGHT_BYTES + 1, 1), "falls back to plain text above the byte budget");
 ok(!shouldHighlightCode(1, MAX_HIGHLIGHT_LINES + 1), "falls back to plain text above the line budget");
+ok(shouldHighlightSource("const value = 1;"), "keeps ordinary chat code within the shared budget");
+ok(
+  !shouldHighlightSource("é".repeat(Math.floor(MAX_HIGHLIGHT_BYTES / 2) + 1)),
+  "measures the shared byte budget as UTF-8 rather than UTF-16 code units",
+);
+ok(
+  !shouldHighlightSource("const value = 1;\n".repeat(MAX_HIGHLIGHT_LINES)),
+  "applies the shared line budget without requiring a workspace preview",
+);
 
 const entitySource = "const x = \"<&\";";
 for (const query of ["<", "&"]) {
@@ -224,12 +246,40 @@ await act(async () => {
       <CodeViewer value="const unchanged = true;" language="typescript" />
     </LocaleProvider>,
   );
-  await flush();
 });
+// React.lazy may resolve after more than one task under React 19. Wait for the
+// real viewer instead of asserting against the transient Suspense fallback.
+await waitForSelector(defaultContainer, "pre.code.hljs");
 ok(defaultContainer.querySelector("pre.code.hljs") != null, "keeps the established viewer as the default seam");
 ok(defaultContainer.querySelector(".code--lines") == null, "requires an explicit line-number opt-in");
 ok(defaultContainer.querySelector(".code-block__copy") != null, "keeps copy available on default code blocks");
 await act(async () => defaultRoot.unmount());
+
+const largeChatContainer = document.createElement("div");
+document.body.appendChild(largeChatContainer);
+const largeChatRoot = createRoot(largeChatContainer);
+const largeChatValue = "const value = 1;\n".repeat(MAX_HIGHLIGHT_LINES);
+await act(async () => {
+  largeChatRoot.render(
+    <LocaleProvider>
+      <CodeViewer value={largeChatValue} language="typescript" />
+    </LocaleProvider>,
+  );
+});
+await waitForSelector(largeChatContainer, 'pre[data-highlight-mode="plain"]');
+ok(
+  largeChatContainer.querySelector('pre[data-highlight-mode="plain"]') != null,
+  "ordinary chat blocks reuse the shared syntax budget",
+);
+ok(
+  largeChatContainer.querySelector(".hljs-keyword") == null,
+  "oversized chat blocks skip syntax token generation",
+);
+ok(
+  largeChatContainer.querySelector("code")?.textContent === largeChatValue,
+  "oversized chat blocks preserve their plain-text content",
+);
+await act(async () => largeChatRoot.unmount());
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

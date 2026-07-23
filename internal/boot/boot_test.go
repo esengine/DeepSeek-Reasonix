@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -3266,6 +3267,255 @@ allow = ["Bash(workspace*)"]
 	}
 }
 
+func TestRememberPermissionRulePreservesPermissionPolicyAndComments(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+# Keep this rationale with the policy.
+mode = "deny"
+allow = ["Bash(existing)"] # Keep this allow rationale.
+ask = ["Edit(*.env)"]
+deny = ["Bash(rm:*)"]
+future_policy = "keep"
+
+[desktop]
+legacy_preference = "keep"
+`)
+
+	const rule = "Edit(src/app.go)"
+	result := rememberPermissionRule(workspace, rule)
+	if result.Err != nil || !result.Saved {
+		t.Fatalf("remember result = %+v, want saved without error", result)
+	}
+
+	path := filepath.Join(workspace, "reasonix.toml")
+	got := config.LoadForEdit(path)
+	if got.Permissions.Mode != "deny" {
+		t.Errorf("permissions.mode = %q, want deny", got.Permissions.Mode)
+	}
+	if !reflect.DeepEqual(got.Permissions.Ask, []string{"Edit(*.env)"}) {
+		t.Errorf("permissions.ask = %v, want existing ask policy", got.Permissions.Ask)
+	}
+	if !reflect.DeepEqual(got.Permissions.Deny, []string{"Bash(rm:*)"}) {
+		t.Errorf("permissions.deny = %v, want existing deny policy", got.Permissions.Deny)
+	}
+	if !hasPermissionRule(got.Permissions.Allow, "Bash(existing)") || !hasPermissionRule(got.Permissions.Allow, rule) {
+		t.Errorf("permissions.allow = %v, want existing and remembered rules", got.Permissions.Allow)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{
+		"# Keep this rationale with the policy.",
+		"# Keep this allow rationale.",
+		`future_policy = "keep"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("permissions content %q was not preserved:\n%s", want, body)
+		}
+	}
+	if !strings.Contains(body, "[desktop]\nlegacy_preference = \"keep\"") {
+		t.Errorf("unrelated section was not preserved:\n%s", body)
+	}
+}
+
+func TestRememberPermissionRuleIgnoresTOMLExampleInMultilineSystemPrompt(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `[agent]
+system_prompt = """
+Example only:
+[permissions]
+allow = ["Bash(example)"]
+"""
+
+[permissions]
+mode = "ask"
+allow = ["Bash(existing)"]
+deny = ["Bash(rm:*)"]
+`)
+
+	const rule = "Edit(src/app.go)"
+	result := rememberPermissionRule(workspace, rule)
+	if result.Err != nil || !result.Saved {
+		t.Fatalf("remember result = %+v, want saved without error", result)
+	}
+
+	path := filepath.Join(workspace, "reasonix.toml")
+	got, err := config.LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatalf("updated config does not parse: %v", err)
+	}
+	if !reflect.DeepEqual(got.Permissions.Allow, []string{"Bash(existing)", rule}) {
+		t.Fatalf("permissions.allow = %v", got.Permissions.Allow)
+	}
+	if !strings.Contains(got.Agent.SystemPrompt, "[permissions]\nallow = [\"Bash(example)\"]") {
+		t.Fatalf("system prompt example changed: %q", got.Agent.SystemPrompt)
+	}
+}
+
+func TestRememberPermissionRuleRejectsMalformedConfigWithoutWriting(t *testing.T) {
+	workspace := robustTempDir(t)
+	path := filepath.Join(workspace, "reasonix.toml")
+	original := []byte("[permissions]\nmode = \"deny\"\nallow = [\n")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := rememberPermissionRule(workspace, "Edit(src/app.go)")
+	if result.Err == nil || result.Saved {
+		t.Fatalf("remember result = %+v, want parse error without save", result)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, original) {
+		t.Fatalf("malformed config changed:\ngot:\n%s\nwant:\n%s", got, original)
+	}
+}
+
+func TestRememberPermissionRuleSerializesConcurrentWriters(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = []\n")
+
+	const writers = 32
+	start := make(chan struct{})
+	results := make(chan control.RememberResult, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start
+			results <- rememberPermissionRule(workspace, fmt.Sprintf("Edit(file-%02d)", n))
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for result := range results {
+		if result.Err != nil || !result.Saved {
+			t.Errorf("remember result = %+v, want saved without error", result)
+		}
+	}
+
+	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	for i := 0; i < writers; i++ {
+		rule := fmt.Sprintf("Edit(file-%02d)", i)
+		if !hasPermissionRule(got.Permissions.Allow, rule) {
+			t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
+		}
+	}
+}
+
+func TestRememberPermissionRuleSerializesCrossProcessWriters(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", "[permissions]\nallow = []\n")
+	readyDir := robustTempDir(t)
+	startPath := filepath.Join(readyDir, "start")
+
+	const workers = 4
+	const rulesPerWorker = 8
+	commands := make([]*exec.Cmd, 0, workers)
+	outputs := make([]bytes.Buffer, workers)
+	for worker := 0; worker < workers; worker++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRememberPermissionRuleProcessHelper$")
+		cmd.Stdout = &outputs[worker]
+		cmd.Stderr = &outputs[worker]
+		cmd.Env = append(os.Environ(),
+			"REASONIX_PERMISSION_HELPER=1",
+			"REASONIX_PERMISSION_WORKSPACE="+workspace,
+			"REASONIX_PERMISSION_READY_DIR="+readyDir,
+			"REASONIX_PERMISSION_START="+startPath,
+			fmt.Sprintf("REASONIX_PERMISSION_WORKER=%d", worker),
+			fmt.Sprintf("REASONIX_PERMISSION_RULES=%d", rulesPerWorker),
+		)
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		commands = append(commands, cmd)
+	}
+	t.Cleanup(func() {
+		for _, cmd := range commands {
+			if cmd.ProcessState == nil {
+				_ = cmd.Process.Kill()
+				_, _ = cmd.Process.Wait()
+			}
+		}
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for worker := 0; worker < workers; {
+		if _, err := os.Stat(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker))); err == nil {
+			worker++
+			continue
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("permission helper processes did not become ready")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := os.WriteFile(startPath, []byte("start"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i, cmd := range commands {
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("permission helper failed: %v\n%s", err, outputs[i].String())
+		}
+	}
+
+	got := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	for worker := 0; worker < workers; worker++ {
+		for n := 0; n < rulesPerWorker; n++ {
+			rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
+			if !hasPermissionRule(got.Permissions.Allow, rule) {
+				t.Errorf("permissions.allow missing %q: %v", rule, got.Permissions.Allow)
+			}
+		}
+	}
+}
+
+func TestRememberPermissionRuleProcessHelper(t *testing.T) {
+	if os.Getenv("REASONIX_PERMISSION_HELPER") != "1" {
+		return
+	}
+	workspace := os.Getenv("REASONIX_PERMISSION_WORKSPACE")
+	readyDir := os.Getenv("REASONIX_PERMISSION_READY_DIR")
+	startPath := os.Getenv("REASONIX_PERMISSION_START")
+	t.Setenv("REASONIX_CACHE_HOME", readyDir)
+	worker, err := strconv.Atoi(os.Getenv("REASONIX_PERMISSION_WORKER"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := strconv.Atoi(os.Getenv("REASONIX_PERMISSION_RULES"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(readyDir, fmt.Sprintf("ready-%d", worker)), []byte("ready"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for permission helper start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for n := 0; n < rules; n++ {
+		rule := fmt.Sprintf("Edit(process-%d-file-%02d)", worker, n)
+		result := rememberPermissionRule(workspace, rule)
+		if result.Err != nil || !result.Saved {
+			t.Fatalf("remember result = %+v, want saved without error", result)
+		}
+	}
+}
+
 func TestRememberPermissionRuleCreatesWorkspaceConfigOverUserConfig(t *testing.T) {
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
@@ -4364,6 +4614,57 @@ func waitForMCPFailure(t *testing.T, h *plugin.Host, name string, timeout time.D
 	}
 }
 
+// TestBuildExtraPluginProbeKeepsSessionProcessAlive pins the lifecycle split
+// used by host-supplied ACP/session MCP servers. The five-second readiness
+// context is cancelled before Build returns; a successful stdio child must
+// still live on the session context and accept its first real tool call.
+func TestBuildExtraPluginProbeKeepsSessionProcessAlive(t *testing.T) {
+	isolateConfigHome(t)
+	workspace := robustTempDir(t)
+	t.Chdir(workspace)
+
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	defer cancelSession()
+	ctrl, err := Build(sessionCtx, Options{
+		SessionDir: filepath.Join(t.TempDir(), "sessions"),
+		Sink:       event.Discard,
+		ExtraPlugins: []plugin.Spec{{
+			Name:    "acp-extra",
+			Command: os.Args[0],
+			Args:    []string{"-test.run=TestHelperProcess", "--"},
+			Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+
+	tools, err := ctrl.Host().ToolsFor(sessionCtx, "acp-extra")
+	if err != nil {
+		t.Fatalf("ToolsFor: %v", err)
+	}
+	var echo tool.Tool
+	for _, candidate := range tools {
+		if candidate.Name() == "mcp__acp-extra__echo" {
+			echo = candidate
+			break
+		}
+	}
+	if echo == nil {
+		t.Fatalf("extra plugin echo tool missing from %d tools", len(tools))
+	}
+	callCtx, cancelCall := context.WithTimeout(sessionCtx, 5*time.Second)
+	defer cancelCall()
+	out, err := echo.Execute(callCtx, json.RawMessage(`{"msg":"after-probe"}`))
+	if err != nil {
+		t.Fatalf("Execute after readiness context cancellation: %v", err)
+	}
+	if out != "echo: after-probe" {
+		t.Fatalf("Execute result = %q, want %q", out, "echo: after-probe")
+	}
+}
+
 // TestHelperProcess is invoked as a subprocess by TestBuildEagerStartsAtBoot
 // and TestBuildLazyDoesNotConnectAtBoot. It mirrors the minimal MCP stdio
 // server in internal/plugin/plugin_test.go so the boot package can drive an
@@ -4422,6 +4723,16 @@ func TestHelperProcess(t *testing.T) {
 				echo["annotations"] = map[string]any{"readOnlyHint": true}
 			}
 			result = map[string]any{"tools": []map[string]any{echo}}
+		case "tools/call":
+			var p struct {
+				Arguments struct {
+					Msg string `json:"msg"`
+				} `json:"arguments"`
+			}
+			_ = json.Unmarshal(req.Params, &p)
+			result = map[string]any{"content": []map[string]any{
+				{"type": "text", "text": "echo: " + p.Arguments.Msg},
+			}}
 		}
 
 		resp := map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result}

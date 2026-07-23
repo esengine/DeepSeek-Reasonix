@@ -346,11 +346,24 @@ jobs:
         working-directory: desktop
         run: go run ./cmd/sign manifest ../dist "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.tag }}"
 
+      - name: Download orchestrator-reviewed release notes
+        if: ${{ inputs.orchestrated && steps.ver.outputs.channel != 'canary' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: stable-reviewed-release-notes
+          path: /tmp/stable-reviewed-release-notes
+
+      - name: Use orchestrator-reviewed release notes
+        if: ${{ inputs.orchestrated && steps.ver.outputs.channel != 'canary' }}
+        run: |
+          test -s /tmp/stable-reviewed-release-notes/release-notes.md
+          cp /tmp/stable-reviewed-release-notes/release-notes.md /tmp/release-notes.md
+
       # Canary never appears on the GitHub releases page; the mirror job picks up
       # the signed dist via the canary-dist artifact below. Stable publishes a
       # GitHub release as usual.
       - name: Render reviewed release notes
-        if: steps.ver.outputs.channel != 'canary'
+        if: ${{ !inputs.orchestrated && steps.ver.outputs.channel != 'canary' }}
         run: node scripts/release-notes.mjs render --version "${{ steps.ver.outputs.version }}" --output /tmp/release-notes.md
 
       - name: Revalidate approved release ref

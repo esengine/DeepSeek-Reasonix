@@ -250,7 +250,8 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
 	start := time.Now()
-	results, _ := a.executeBatch(context.Background(), []provider.ToolCall{{Name: "a"}, {Name: "b"}, {Name: "c"}})
+	batch := a.executeBatch(context.Background(), []provider.ToolCall{{Name: "a"}, {Name: "b"}, {Name: "c"}})
+	results := batch.results
 	elapsed := time.Since(start)
 
 	if calls != 3 {
@@ -283,13 +284,14 @@ func TestExecuteBatchSegmentsAroundWrites(t *testing.T) {
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
 	start := time.Now()
-	results, _ := a.executeBatch(context.Background(), []provider.ToolCall{
+	batch := a.executeBatch(context.Background(), []provider.ToolCall{
 		{Name: "ro1"},
 		{Name: "ro2"},
 		{Name: "rw"},
 		{Name: "ro3"},
 		{Name: "ro4"},
 	})
+	results := batch.results
 	elapsed := time.Since(start)
 
 	want := []string{"ro1 done", "ro2 done", "rw done", "ro3 done", "ro4 done"}
@@ -321,7 +323,7 @@ func TestExecuteBatchFeedsReceiptsToCompleteStep(t *testing.T) {
 	reg.Add(completeStep)
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
 
-	results, _ := a.executeBatch(context.Background(), []provider.ToolCall{
+	batch := a.executeBatch(context.Background(), []provider.ToolCall{
 		{Name: "bash", Arguments: `{"command":"go test ./internal/..."}`},
 		{Name: "complete_step", Arguments: `{
 			"step":"Run checks",
@@ -329,6 +331,7 @@ func TestExecuteBatchFeedsReceiptsToCompleteStep(t *testing.T) {
 			"evidence":[{"kind":"verification","summary":"tests passed","command":"go test ./internal/..."}]
 		}`},
 	})
+	results := batch.results
 
 	if len(results) != 2 {
 		t.Fatalf("got %d results, want 2", len(results))

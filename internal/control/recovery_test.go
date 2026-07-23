@@ -47,7 +47,13 @@ func (recoveryTestFailError) Error() string { return "exit status 1" }
 
 var errRecoveryTestFail = recoveryTestFailError{}
 
-func TestRecoveryHardBoundaryBlocksUntilContinue(t *testing.T) {
+type controlRecoveryReviewerFunc func(context.Context, *recovery.FailureEvent, []string, recovery.Proposal, string) (recovery.ReviewVerdict, error)
+
+func (f controlRecoveryReviewerFunc) Review(ctx context.Context, failure *recovery.FailureEvent, diagnosis []string, proposal recovery.Proposal, taskSummary string) (recovery.ReviewVerdict, error) {
+	return f(ctx, failure, diagnosis, proposal, taskSummary)
+}
+
+func TestRecoveryExecutionRiskDoesNotPrompt(t *testing.T) {
 	bash := &recoveryWriteTool{name: "bash", failOnce: true}
 	reg := tool.NewRegistry()
 	reg.Add(bash)
@@ -68,89 +74,43 @@ func TestRecoveryHardBoundaryBlocksUntilContinue(t *testing.T) {
 	c.SetToolApprovalMode(ToolApprovalAuto)
 	c.EnableInteractiveApproval()
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			c.mu.Lock()
-			gate := c.recoveryGate
-			c.mu.Unlock()
-			if gate != nil {
-				snap := gate.Snapshot()
-				for _, st := range snap.Tasks {
-					if st != nil && st.ApprovalID != "" {
-						_ = c.ResolveRecovery(st.ApprovalID, agent.RecoveryActionContinue, "")
-						return
-					}
-				}
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-
 	if err := c.Run(context.Background(), "test then fix"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	<-done
 
 	if bash.runs != 2 {
-		t.Fatalf("bash runs = %d, want failed verification plus confirmed push", bash.runs)
+		t.Fatalf("bash runs = %d, want failed verification plus automatic push", bash.runs)
+	}
+	if got := c.RecoveryMetrics().HumanPrompts; got != 0 {
+		t.Fatalf("execution risk prompts = %d, want 0", got)
 	}
 }
 
-func TestRecoveryReviseBlocksBoundaryAction(t *testing.T) {
-	bash := &recoveryWriteTool{name: "bash", failOnce: true}
-	reg := tool.NewRegistry()
-	reg.Add(bash)
-
-	prov := &recordingProvider{streams: [][]provider.Chunk{
-		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "1", Name: "bash", Arguments: `{"command":"go test ./pkg"}`}}},
-		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "2", Name: "bash", Arguments: `{"command":"git push origin feature"}`}}},
-		{{Type: provider.ChunkText, Text: "done"}},
-	}}
-
-	sess := agent.NewSession("sys")
-	ag := agent.New(prov, reg, sess, agent.Options{MaxSteps: 6}, event.Discard)
-	c := New(Options{
-		Runner:   ag,
-		Executor: ag,
-		Policy:   permission.Policy{Mode: permission.Allow},
+func TestRecoveryReviseBlocksPlanTransition(t *testing.T) {
+	ag := agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)
+	var c *Controller
+	c = New(Options{
+		Runner: ag, Executor: ag, Policy: permission.Policy{Mode: permission.Allow},
+		RecoveryReviewer: controlRecoveryReviewerFunc(func(context.Context, *recovery.FailureEvent, []string, recovery.Proposal, string) (recovery.ReviewVerdict, error) {
+			return recovery.ReviewVerdict{Outcome: recovery.ReviewConfirm, ChangeKind: recovery.ChangeStrategy, Rationale: "choose API direction"}, nil
+		}),
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest && e.Approval.Kind == recovery.ApprovalKindRecovery {
+				_ = c.ResolveRecovery(e.Approval.ID, agent.RecoveryActionRevise, "keep the current API")
+			}
+		}),
 	})
 	c.SetToolApprovalMode(ToolApprovalAuto)
 	c.EnableInteractiveApproval()
-
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			c.mu.Lock()
-			gate := c.recoveryGate
-			c.mu.Unlock()
-			if gate != nil {
-				snap := gate.Snapshot()
-				for _, st := range snap.Tasks {
-					if st != nil && st.ApprovalID != "" {
-						_ = c.ResolveRecovery(st.ApprovalID, agent.RecoveryActionRevise, "only edit tests")
-						return
-					}
-				}
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-
-	if err := c.Run(context.Background(), "test then fix"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if bash.runs != 1 {
-		t.Fatalf("push must not run after revise, bash runs=%d", bash.runs)
-	}
-	if len(prov.requests) == 0 {
-		t.Fatal("expected provider requests")
-	}
-	last := requestMessagesText(prov.requests[len(prov.requests)-1].Messages)
-	if got := strings.Count(last, "only edit tests"); got != 1 {
-		t.Fatalf("revision feedback occurrences = %d, want exactly one\n%s", got, last)
+	c.mu.Lock()
+	gate := c.recoveryGate
+	c.mu.Unlock()
+	dec, err := gate.BeforeMutation(context.Background(), recovery.Proposal{
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Replace API [in_progress]",
+	})
+	if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, "keep the current API") {
+		t.Fatalf("plan revise = %+v, %v", dec, err)
 	}
 }
 
@@ -191,7 +151,7 @@ func TestRecoveryInactiveUnderYolo(t *testing.T) {
 	}
 }
 
-func TestRecoveryHeadlessBlocksInsteadOfWaiting(t *testing.T) {
+func TestRecoveryHeadlessDoesNotBlockExecutionRisk(t *testing.T) {
 	bash := &recoveryWriteTool{name: "bash", failOnce: true}
 	reg := tool.NewRegistry()
 	reg.Add(bash)
@@ -215,16 +175,16 @@ func TestRecoveryHeadlessBlocksInsteadOfWaiting(t *testing.T) {
 	if err := c.Run(ctx, "test then fix"); err != nil {
 		t.Fatalf("headless Run: %v", err)
 	}
-	if bash.runs != 1 {
-		t.Fatalf("headless recovery must block the push, bash runs=%d", bash.runs)
+	if bash.runs != 2 {
+		t.Fatalf("headless Auto should leave push to permission policy, bash runs=%d", bash.runs)
 	}
-	if got := requestMessagesText(prov.requests[len(prov.requests)-1].Messages); !strings.Contains(got, "no decision channel") {
-		t.Fatalf("final provider request lacks structured blocker:\n%s", got)
+	if got := requestMessagesText(prov.requests[len(prov.requests)-1].Messages); strings.Contains(got, "no decision channel") {
+		t.Fatalf("execution risk unexpectedly produced headless plan blocker:\n%s", got)
 	}
 }
 
-func TestLegacyApproveResolvesWaiterOnlyHighRisk(t *testing.T) {
-	// Old clients only call Approve. Pre-action high-risk recovery cards have a
+func TestLegacyApproveResolvesWaiterOnlyPlanTransition(t *testing.T) {
+	// Old clients only call Approve. Normal-execution plan cards have a
 	// live waiter but no taskRuntime, so Snapshot cannot discover them.
 	ag := agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)
 	var c *Controller
@@ -232,6 +192,9 @@ func TestLegacyApproveResolvesWaiterOnlyHighRisk(t *testing.T) {
 	c = New(Options{
 		Runner: ag, Executor: ag,
 		Policy: permission.Policy{Mode: permission.Allow},
+		RecoveryReviewer: controlRecoveryReviewerFunc(func(context.Context, *recovery.FailureEvent, []string, recovery.Proposal, string) (recovery.ReviewVerdict, error) {
+			return recovery.ReviewVerdict{Outcome: recovery.ReviewConfirm, ChangeKind: recovery.ChangeStrategy, Rationale: "choose API direction"}, nil
+		}),
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.ApprovalRequest && e.Approval.Kind == recovery.ApprovalKindRecovery {
 				approvalID = e.Approval.ID
@@ -249,11 +212,11 @@ func TestLegacyApproveResolvesWaiterOnlyHighRisk(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	dec, err := gate.BeforeMutation(ctx, recovery.Proposal{
-		Tool: "bash", Subject: "git push origin feature", Mutates: true,
-		Args: json.RawMessage(`{"command":"git push origin feature"}`),
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Replace API [in_progress]",
 	})
 	if err != nil || !dec.Allow {
-		t.Fatalf("legacy Approve did not unblock high-risk card: %+v %v", dec, err)
+		t.Fatalf("legacy Approve did not unblock plan card: %+v %v", dec, err)
 	}
 	if approvalID == "" {
 		t.Fatal("expected a recovery approval id to be emitted")
@@ -270,6 +233,9 @@ func TestRecoveryPromptCanResolveSynchronouslyFromSink(t *testing.T) {
 	c = New(Options{
 		Runner: ag, Executor: ag,
 		Policy: permission.Policy{Mode: permission.Allow},
+		RecoveryReviewer: controlRecoveryReviewerFunc(func(context.Context, *recovery.FailureEvent, []string, recovery.Proposal, string) (recovery.ReviewVerdict, error) {
+			return recovery.ReviewVerdict{Outcome: recovery.ReviewConfirm, ChangeKind: recovery.ChangeScope, Rationale: "choose product scope"}, nil
+		}),
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.ApprovalRequest && e.Approval.Kind == recovery.ApprovalKindRecovery {
 				resolveErr = c.ResolveRecovery(e.Approval.ID, agent.RecoveryActionContinue, "")
@@ -285,8 +251,8 @@ func TestRecoveryPromptCanResolveSynchronouslyFromSink(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	dec, err := gate.BeforeMutation(ctx, recovery.Proposal{
-		Tool: "bash", Subject: "git push origin feature", Mutates: true,
-		Args: json.RawMessage(`{"command":"git push origin feature"}`),
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Current scope [in_progress]", PlanAfter: "1. Expanded scope [in_progress]",
 	})
 	if resolveErr != nil {
 		t.Fatalf("synchronous ResolveRecovery: %v", resolveErr)

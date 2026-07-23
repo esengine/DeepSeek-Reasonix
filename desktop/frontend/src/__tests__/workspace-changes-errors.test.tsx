@@ -4,8 +4,10 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { workspaceFileIcon } from "../components/WorkspaceFileIcon";
 import { WorkspacePanel } from "../components/WorkspacePanel";
 import { LocaleProvider } from "../lib/i18n";
+import { resetWorkspaceTreeMemoryForTests } from "../lib/workspaceTreeMemory";
 import type { AppBindings } from "../lib/bridge";
 import type { DirEntry, GitCommitView, WorkspaceChangeDetailView, WorkspaceChangesView } from "../lib/types";
 
@@ -101,6 +103,7 @@ async function renderWorkspace(
   changes: WorkspaceChangesView,
   options: { creationMode?: boolean; history?: GitCommitView[]; detail?: WorkspaceChangeDetailView } = {},
 ) {
+  resetWorkspaceTreeMemoryForTests();
   const dom = installDom();
   window.go = {
     main: {
@@ -138,6 +141,7 @@ async function renderWorkspace(
 }
 
 async function renderFilesWorkspace(methods: Partial<AppBindings>, props: Partial<Parameters<typeof WorkspacePanel>[0]> = {}) {
+  resetWorkspaceTreeMemoryForTests();
   const dom = installDom();
   window.go = {
     main: {
@@ -637,6 +641,141 @@ console.log("\nworkspace changes git errors");
     root.unmount();
   });
   dom.window.close();
+}
+
+{
+  const { dom, root, rerender } = await renderFilesWorkspace(
+    {
+      ListDirForTab: async (_tabId, dir) => {
+        if (dir === "") {
+          return [
+            { name: "alpha", isDir: true },
+            { name: "beta", isDir: true },
+          ];
+        }
+        if (dir === "alpha/") {
+          return [
+            { name: "nested", isDir: true },
+            { name: "alpha.txt", isDir: false },
+          ];
+        }
+        if (dir === "alpha/nested/") return [{ name: "deep.ts", isDir: false }];
+        if (dir === "beta/") return [{ name: "beta.txt", isDir: false }];
+        return [];
+      },
+    },
+    {
+      workspaceScopeKey: "scope-a",
+      workspaceMemoryKey: "session-a",
+      workspaceMemoryVisitId: 1,
+    },
+  );
+
+  const clickPath = async (path: string) => {
+    const row = document.querySelector<HTMLButtonElement>(`[data-workspace-path="${path}"]`);
+    if (!row) throw new Error(`missing workspace row ${path}`);
+    await act(async () => {
+      row.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+      await flushPromises();
+    });
+  };
+
+  await waitFor("session A roots", () => document.querySelector('[data-workspace-path="alpha/"]') != null);
+  await clickPath("alpha/");
+  await waitFor("session A nested directory", () => document.querySelector('[data-workspace-path="alpha/nested/"]') != null);
+  await clickPath("alpha/nested/");
+  await waitFor("session A deep file", () => document.querySelector('[data-workspace-path="alpha/nested/deep.ts"]') != null);
+  await clickPath("beta/");
+  await waitFor("session A beta file", () => document.querySelector('[data-workspace-path="beta/beta.txt"]') != null);
+
+  await rerender({ initialViewMode: "changed" });
+  await rerender({ initialViewMode: "files" });
+  await waitFor("same-session restored tree", () => document.querySelector('[data-workspace-path="alpha/nested/deep.ts"]') != null);
+  ok(
+    document.querySelector('[data-workspace-path="beta/beta.txt"]') != null,
+    "Files → Changes → Files preserves the exact expanded tree in one session",
+  );
+
+  await rerender({
+    workspaceScopeKey: "scope-b",
+    workspaceMemoryKey: "session-b",
+    workspaceMemoryVisitId: 2,
+  });
+  await waitFor("session B roots", () => document.querySelector('[data-workspace-path="alpha/"]') != null);
+  await rerender({
+    workspaceScopeKey: "scope-a-returned",
+    workspaceMemoryKey: "session-a",
+    workspaceMemoryVisitId: 3,
+  });
+  await waitFor("returned session A roots", () => document.querySelector('[data-workspace-path="alpha/"]') != null);
+  ok(
+    document.querySelector('[data-workspace-path="alpha/nested/"]') == null &&
+      document.querySelector('[data-workspace-path="beta/beta.txt"]') == null,
+    "returning to a session presents every remembered root collapsed",
+  );
+
+  await clickPath("alpha/");
+  await waitFor("restored alpha subtree", () => document.querySelector('[data-workspace-path="alpha/nested/deep.ts"]') != null);
+  ok(
+    document.querySelector('[data-workspace-path="beta/beta.txt"]') == null,
+    "opening one returned root restores only that root's remembered subtree",
+  );
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const { dom, root } = await renderFilesWorkspace({
+    ListDirForTab: async (_tabId, dir) => {
+      if (dir === "") return [{ name: "src", isDir: true }];
+      if (dir === "src/") return [{ name: "main", isDir: true }];
+      if (dir === "src/main/") return [{ name: "java", isDir: true }];
+      if (dir === "src/main/java/") return [{ name: "App.java", isDir: false }];
+      return [];
+    },
+  });
+
+  await waitFor("compacted directory chain", () =>
+    document.querySelector('[data-workspace-path="src/main/java/"]')?.textContent?.includes("src / main / java") === true,
+  );
+  ok(
+    document.querySelectorAll('[data-workspace-path="src/main/java/"]').length === 1 &&
+      document.querySelector('[data-workspace-path="src/"]') == null,
+    "single-child directory chains render as one compact folder row",
+  );
+
+  await act(async () => {
+    document
+      .querySelector<HTMLButtonElement>('[data-workspace-path="src/main/java/"]')
+      ?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("compact directory child", () => document.querySelector('[data-workspace-path="src/main/java/App.java"]') != null);
+  ok(
+    document.querySelectorAll('[data-workspace-path="src/main/java/App.java"] .workspace-tree__guide').length === 1,
+    "nested file rows render one guide for each visible ancestor level",
+  );
+  ok(
+    document.querySelector('[data-workspace-path="src/main/java/App.java"] .workspace-file-icon')?.textContent !== "",
+    "workspace files render a Seti file-type icon",
+  );
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const javaIcon = workspaceFileIcon("App.java");
+  const markdownIcon = workspaceFileIcon("README.md");
+  const mavenIcon = workspaceFileIcon("pom.xml");
+  const xmlIcon = workspaceFileIcon("layout.xml");
+  ok(javaIcon.glyph !== "" && javaIcon.glyph !== markdownIcon.glyph, "Seti icons distinguish common file extensions");
+  ok(mavenIcon.glyph !== xmlIcon.glyph, "Seti exact-name mappings take precedence over generic extensions");
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

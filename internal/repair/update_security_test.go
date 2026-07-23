@@ -114,6 +114,50 @@ func TestPendingUpdateAcceptsMissingReleaseSibling(t *testing.T) {
 	}
 }
 
+func TestPendingUpdateAcceptsWindowsReleaseUnit(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(dir, "reasonix-launcher.exe"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+
+	names := []string{
+		"reasonix-desktop.exe",
+		"reasonix-guard.exe",
+		"reasonix-launcher.exe",
+		"reasonix-update-helper.exe",
+		"reasonix-cli.exe",
+		"Reasonix.exe",
+	}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, path)
+	}
+	if _, err := PrepareFileUpdate("v1", "v2", paths[0], paths[1:]...); err != nil {
+		t.Fatalf("prepare Windows release unit: %v", err)
+	}
+	tx, err := ReadPendingUpdate()
+	if err != nil {
+		t.Fatalf("read Windows release unit: %v", err)
+	}
+	if len(tx.Files) != len(names) {
+		t.Fatalf("release unit files = %d, want %d: %+v", len(tx.Files), len(names), tx.Files)
+	}
+	for i, file := range tx.Files {
+		if got := filepath.Base(file.TargetPath); got != names[i] {
+			t.Fatalf("release unit file %d = %q, want %q", i, got, names[i])
+		}
+	}
+}
+
 func TestPendingUpdateRejectsHashlessOrPrimaryLessTransactions(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)

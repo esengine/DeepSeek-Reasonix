@@ -5,7 +5,7 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { initialState, reducer, useController, type Item } from "../lib/useController";
 import type { AppBindings } from "../lib/bridge";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta, WireEvent } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -139,7 +139,12 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
 const staleHistory = deferred<HistoryMessage[]>();
+const staleSessionMeta = deferred<Meta>();
 let newSessionCalls = 0;
+let backendCanonicalTodos = [{ content: "Old task", status: "in_progress" }];
+let holdNextMeta = false;
+let staleMetaStarted = false;
+const eventHandlers: Array<(event: WireEvent) => void> = [];
 const context: ContextInfo = { used: 12, window: 100, sessionTokens: 12 };
 const effort: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const balance: BalanceInfo = { available: false, display: "" };
@@ -147,14 +152,24 @@ const jobs: JobView[] = [];
 const checkpoints: CheckpointMeta[] = [];
 
 window.runtime = {
-  EventsOn: () => () => {},
+  EventsOn: (name: string, cb: (...data: unknown[]) => void) => {
+    if (name === "agent:event") eventHandlers.push(cb as (event: WireEvent) => void);
+    return () => {};
+  },
   BrowserOpenURL: () => {},
 };
 window.go = {
   main: {
     App: {
       ListTabs: async () => [tabMeta()],
-      MetaForTab: async () => meta(),
+      MetaForTab: async () => {
+        if (holdNextMeta) {
+          holdNextMeta = false;
+          staleMetaStarted = true;
+          return staleSessionMeta.promise;
+        }
+        return meta({ canonicalTodos: backendCanonicalTodos });
+      },
       ContextUsageForTab: async () => context,
       EffortForTab: async () => effort,
       BalanceForTab: async () => balance,
@@ -169,10 +184,22 @@ window.go = {
       ReplayPendingPrompts: async () => {},
       NewSession: async () => {
         newSessionCalls += 1;
+        backendCanonicalTodos = [];
       },
       NewSessionForTab: async (tabID: string) => {
         if (tabID !== "tab-a") throw new Error(`unexpected new-session target ${tabID}`);
         newSessionCalls += 1;
+        backendCanonicalTodos = [];
+      },
+      ResumeSessionPageForTab: async () => {
+        backendCanonicalTodos = [{ content: "Restored task", status: "completed" }];
+        return {
+          messages: [{ role: "user", content: "restore" }, { role: "assistant", content: "done" }],
+          startTurn: 0,
+          endTurn: 1,
+          totalTurns: 1,
+          hasOlder: false,
+        };
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -197,11 +224,32 @@ await act(async () => {
 await waitFor("active tab", () => controller?.activeTabId === "tab-a");
 
 await act(async () => {
+  await controller?.refreshMeta();
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.[0]?.content, "Old task", "pre-reset metadata exposes the current session todo");
+
+holdNextMeta = true;
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a" });
+  await flushPromises();
+});
+await waitFor("stale metadata request", () => staleMetaStarted);
+
+await act(async () => {
   await controller?.newSession();
   await flushPromises();
 });
 eq(newSessionCalls, 1, "tab-scoped NewSession is called once");
 eq(controller?.state.items.length, 0, "new session clears the visible transcript");
+eq(controller?.state.meta?.canonicalTodos?.length, 0, "new session refresh replaces the previous session todo with an authoritative empty list");
+
+await act(async () => {
+  staleSessionMeta.resolve(meta({ canonicalTodos: [{ content: "Old task", status: "in_progress" }] }));
+  await staleSessionMeta.promise;
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.length, 0, "metadata started before a session transition cannot restore the previous todo");
 
 await act(async () => {
   staleHistory.resolve([{ role: "user", content: "old prompt" }]);
@@ -210,6 +258,12 @@ await act(async () => {
 });
 
 eq(controller?.state.items.length, 0, "stale history load cannot repopulate a new blank session");
+
+await act(async () => {
+  await controller?.resumeSession("/sessions/restored.jsonl", "tab-a");
+  await flushPromises();
+});
+eq(controller?.state.meta?.canonicalTodos?.[0]?.status, "completed", "resuming a session refreshes its authoritative canonical todo state");
 
 await act(async () => {
   root.unmount();

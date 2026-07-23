@@ -513,6 +513,12 @@ func approvalKeyboard(id string) *InlineKeyboard {
 }
 
 func recoveryKeyboard(a event.Approval) *InlineKeyboard {
+	if isRecoveryPlanChange(a) {
+		return &InlineKeyboard{Rows: []InlineKeyboardRow{{Buttons: []InlineKeyboardButton{
+			{ID: "recovery_continue", Label: "1 采用并继续", Style: 0, CallbackID: "/recovery-continue " + a.ID},
+			{ID: "recovery_revise", Label: "2 不采用并调整", Style: 0, CallbackID: "/recovery-revise " + a.ID},
+		}}}}
+	}
 	buttons := []InlineKeyboardButton{{ID: "recovery_continue", Label: "1 继续一次", Style: 1, CallbackID: "/recovery-continue " + a.ID}}
 	if a.Recovery != nil && a.Recovery.CanGrantTask {
 		buttons = append(buttons, InlineKeyboardButton{ID: "recovery_continue_task", Label: "2 本任务允许同类", Style: 0, CallbackID: "/recovery-continue-task " + a.ID})
@@ -526,6 +532,18 @@ func isRecoveryApproval(a event.Approval) bool {
 	return strings.EqualFold(strings.TrimSpace(a.Kind), "recovery") || a.Recovery != nil
 }
 
+func isRecoveryPlanChange(a event.Approval) bool {
+	if !isRecoveryApproval(a) || a.Recovery == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(a.Recovery.ChangeKind)) {
+	case "strategy", "scope":
+		return true
+	default:
+		return false
+	}
+}
+
 func renderApprovalText(a event.Approval) string {
 	if isRecoveryApproval(a) {
 		return renderRecoveryText(a)
@@ -536,11 +554,21 @@ func renderApprovalText(a event.Approval) string {
 
 func renderRecoveryText(a event.Approval) string {
 	var b strings.Builder
-	b.WriteString("⚠️ 执行前确认\n")
+	if isRecoveryPlanChange(a) {
+		b.WriteString("⚠️ 执行计划需要你的决定\n")
+	} else {
+		b.WriteString("⚠️ 执行前确认\n")
+	}
 	rec := a.Recovery
 	if rec != nil {
-		next := firstNonEmptyBot(rec.NextAction, a.Subject, a.Tool)
-		if next != "" {
+		if isRecoveryPlanChange(a) && (strings.TrimSpace(rec.PlanBefore) != "" || strings.TrimSpace(rec.PlanAfter) != "") {
+			if before := clipBotPlan(rec.PlanBefore); before != "" {
+				fmt.Fprintf(&b, "原计划:\n%s\n", before)
+			}
+			if after := clipBotPlan(rec.PlanAfter); after != "" {
+				fmt.Fprintf(&b, "新计划:\n%s\n", after)
+			}
+		} else if next := firstNonEmptyBot(rec.NextAction, a.Subject, a.Tool); next != "" {
 			fmt.Fprintf(&b, "即将执行: %s\n", next)
 		}
 		why := firstNonEmptyBot(rec.ChangeRationale, rec.ReviewRationale, a.Reason)
@@ -550,7 +578,9 @@ func renderRecoveryText(a event.Approval) string {
 	} else {
 		fmt.Fprintf(&b, "即将执行: %s\n", firstNonEmptyBot(a.Subject, a.Tool))
 	}
-	if rec != nil && rec.CanGrantTask {
+	if isRecoveryPlanChange(a) {
+		fmt.Fprintf(&b, "\nID: `%s`\n回复 1 采用新计划并继续，2 不采用并让 Auto 调整。需要给出具体意见时，可使用 `/recovery-revise %s <调整意见>`。", a.ID, a.ID)
+	} else if rec != nil && rec.CanGrantTask {
 		if scope := strings.TrimSpace(rec.TaskGrantScope); scope != "" {
 			fmt.Fprintf(&b, "授权范围: %s\n", scope)
 		}
@@ -577,6 +607,20 @@ func approvalCard(a event.Approval, chatType ChatType, userID string) *Interacti
 }
 
 func recoveryCard(a event.Approval, chatType ChatType, userID string) *InteractiveCard {
+	if isRecoveryPlanChange(a) {
+		return &InteractiveCard{
+			Header: "执行计划需要你的决定",
+			Elements: []InteractiveCardElement{
+				{Tag: "markdown", Content: renderRecoveryText(a)},
+				{Tag: "action", Extra: map[string]any{
+					"actions": []map[string]any{
+						{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "采用并继续"}, "type": "default", "value": cardActionValue("/recovery-continue "+a.ID, chatType, userID)},
+						{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "不采用并调整"}, "type": "default", "value": cardActionValue("/recovery-revise "+a.ID, chatType, userID)},
+					},
+				}},
+			},
+		}
+	}
 	actions := []map[string]any{
 		{"tag": "button", "text": map[string]string{"tag": "plain_text", "content": "继续一次"}, "type": "primary", "value": cardActionValue("/recovery-continue "+a.ID, chatType, userID)},
 	}
@@ -593,6 +637,16 @@ func recoveryCard(a event.Approval, chatType ChatType, userID string) *Interacti
 			}},
 		},
 	}
+}
+
+func clipBotPlan(plan string) string {
+	plan = strings.TrimSpace(plan)
+	const maxRunes = 800
+	runes := []rune(plan)
+	if len(runes) <= maxRunes {
+		return plan
+	}
+	return strings.TrimSpace(string(runes[:maxRunes])) + "…"
 }
 
 func firstNonEmptyBot(vals ...string) string {

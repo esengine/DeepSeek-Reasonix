@@ -136,6 +136,22 @@ func TestReviewerEvidenceInjectionStaysInUserJSON(t *testing.T) {
 	}
 }
 
+func TestReviewerEvidenceCarriesStructuredPlanTransition(t *testing.T) {
+	user, err := buildReviewEvidence(nil, nil, Proposal{
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Keep API [in_progress]",
+		PlanAfter:  "1. Replace API [in_progress]",
+	}, "modernize the API")
+	if err != nil {
+		t.Fatalf("buildReviewEvidence: %v", err)
+	}
+	for _, want := range []string{`"plan_transition":true`, `"plan_before":"1. Keep API`, `"plan_after":"1. Replace API`} {
+		if !strings.Contains(user, want) {
+			t.Fatalf("plan evidence missing %q: %s", want, user)
+		}
+	}
+}
+
 func TestReviewerPreviewHeadTailSampling(t *testing.T) {
 	prov := &captureProvider{
 		response: `{"outcome":"confirm","change_kind":"scope","rationale":"big"}`,
@@ -320,12 +336,11 @@ func TestPolicyPromptBudget(t *testing.T) {
 		t.Fatal("empty policy")
 	}
 	for _, required := range []string{
-		"change_kind=same_strategy, strategy, or scope",
-		"Project-local dependency changes",
-		"different tool, implementation method, or file scope is not by itself",
-		"external or network mutations",
-		"system/global installs or config",
-		"writes outside the workspace",
+		"structured plan transition or failure recovery",
+		"genuine user-owned choice",
+		"Execution safety is not your decision",
+		"permission, sandbox, and tool-specific policy",
+		"it does not ask the user to approve execution risk",
 	} {
 		if !strings.Contains(PolicyPrompt, required) {
 			t.Fatalf("PolicyPrompt missing product boundary %q", required)
@@ -334,6 +349,7 @@ func TestPolicyPromptBudget(t *testing.T) {
 	for _, stale := range []string{
 		"outcome=continue ONLY with change_kind=same_strategy",
 		"installing dependencies, editing config, or external/network writes must be confirm",
+		"whether the next mutation after a failure is bounded",
 	} {
 		if strings.Contains(PolicyPrompt, stale) {
 			t.Fatalf("PolicyPrompt retained stale interruption rule %q", stale)

@@ -116,6 +116,35 @@ func waitForCachedSchema(t *testing.T, spec Spec, timeout time.Duration) *Cached
 	return nil
 }
 
+func TestHostCloseWaitsForLazyBackgroundWrite(t *testing.T) {
+	host := NewHost()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	host.queueBackgroundWrite(func() {
+		close(started)
+		<-release
+	})
+	<-started
+
+	closed := make(chan struct{})
+	go func() {
+		host.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Fatal("Host.Close returned before the lazy background write finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Host.Close did not return after the lazy background write finished")
+	}
+}
+
 // TestLazyCacheHitSyncSpawn drives the cache-hit branch end-to-end: cache is
 // pre-populated, the model can see real schemas before any spawn, and the
 // first Execute synchronously handshakes, swaps the placeholder for the real

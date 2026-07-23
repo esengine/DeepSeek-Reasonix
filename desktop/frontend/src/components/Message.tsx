@@ -8,7 +8,7 @@ import { ComposerContextCard } from "./ComposerContextCard";
 import { formatAttachmentRefForDisplay, formatAttachmentRefForSubmit, parseAttachmentRefsForDisplay, sortDisplayAttachments } from "../lib/attachmentDisplay";
 import type { DisplayAttachment } from "../lib/attachmentDisplay";
 import { app } from "../lib/bridge";
-import { replaySubmitText } from "../lib/editReplay";
+import { replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
@@ -20,6 +20,8 @@ import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../li
 import type { Item, MessageActionScope } from "../lib/useController";
 import type { CheckpointMeta, MemoryCitation } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
+import { CodeViewer } from "./CodeViewer";
+import { formatSelectionLabels, languageFor, parseSelectedTextContext, stripSelectionLabels } from "../lib/selectedTextContext";
 
 type AssistantItem = Extract<Item, { kind: "assistant" }>;
 export type TurnActionMenu = "summary" | "rewind";
@@ -108,6 +110,40 @@ export function parsePastedBlocks(text: string, submitText?: string): PastedBloc
     blocks.push({ label, content });
   }
   return blocks;
+}
+
+export type SelectedTextBlockInfo = {
+  label: string;
+  content: string;
+  path?: string;
+  start: number;
+  end: number;
+  kind: "chat" | "code";
+};
+
+export function parseSelectedTextBlocks(text: string, submitText?: string): SelectedTextBlockInfo[] {
+  const entries = parseSelectedTextContext(submitText);
+  if (entries.length === 0) return [];
+  const suffix = formatSelectionLabels(entries);
+  if (!suffix || !text.endsWith(suffix)) return [];
+
+  // Composer owns the exact trailing label suffix. Deriving it from the JSON
+  // entries avoids consuming label-shaped or unterminated authored prose.
+  let start = text.length - suffix.length;
+  return entries.map((entry) => {
+    const label = formatSelectionLabels([entry]);
+    const kind = entry.path ? "code" : "chat";
+    const block = {
+      label,
+      content: entry.text,
+      path: entry.path,
+      start,
+      end: start + label.length,
+      kind,
+    } satisfies SelectedTextBlockInfo;
+    start = block.end + 1;
+    return block;
+  });
 }
 
 function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
@@ -200,7 +236,11 @@ export function UserMessage({
   const imSource = parseImSourceMessage(text);
   const actionText = stripMemoryCompilerExecution(imSource?.text ?? text);
   const hasMemoryCompiler = Boolean(submitText?.includes("<memory-compiler-execution>"));
-  const { text: displayText, attachments } = parseAttachmentRefsForDisplay(actionText);
+  const selectedTextEntries = useMemo(() => parseSelectedTextContext(submitText), [submitText]);
+  const editableActionText = stripSelectionLabels(actionText, selectedTextEntries);
+  const { text: editableDisplayText, attachments } = parseAttachmentRefsForDisplay(editableActionText);
+  const selectionLabels = formatSelectionLabels(selectedTextEntries);
+  const displayText = [editableDisplayText, selectionLabels].filter(Boolean).join(editableDisplayText && selectionLabels ? " " : "");
   const invocationSegments = imSource ? [] : invocationSegmentsFromMessage(displayText, submitText, invocationMetadata);
   const hasInvocationSegments = invocationSegments.some((segment) => segment.type === "invocation");
   const orderedAttachments = sortDisplayAttachments(attachments);
@@ -208,7 +248,7 @@ export function UserMessage({
   const sentAt = createdAt === undefined ? null : messageDate(createdAt);
   const canEdit = turn !== undefined && onEdit !== undefined && !editDisabled;
   const [editing, setEditing] = useState(false);
-  const [draftText, setDraftText] = useState(displayText);
+  const [draftText, setDraftText] = useState(editableDisplayText);
   const [draftAttachments, setDraftAttachments] = useState<DisplayAttachment[]>(attachments);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -231,45 +271,56 @@ export function UserMessage({
     setImageViewer((prev) => (prev.open ? { ...prev, open: false } : prev));
   }, []);
 
-  const pasteBlocks = useMemo(() => parsePastedBlocks(actionText, submitText), [actionText, submitText]);
-  const [expandedPasteLabels, setExpandedPasteLabels] = useState<Record<string, boolean>>({});
+  const pasteBlocks = useMemo(() => parsePastedBlocks(displayText, submitText), [displayText, submitText]);
+  const selectedTextBlocks = useMemo(() => parseSelectedTextBlocks(displayText, submitText), [displayText, submitText]);
+  const [expandedBlockKeys, setExpandedBlockKeys] = useState<Record<string, boolean>>({});
 
   type DisplaySegment =
     | { type: "text"; content: string }
-    | { type: "paste"; block: PastedBlockInfo };
+    | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
+    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
 
   const displaySegments = useMemo((): DisplaySegment[] => {
-    if (pasteBlocks.length === 0) return [{ type: "text", content: displayText }];
+    if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
     const segments: DisplaySegment[] = [];
-    // Order blocks by their position in the text so cards appear inline.
-    const ordered = pasteBlocks
-      .map((b) => ({ block: b, pos: displayText.indexOf(b.label) }))
-      .filter((x) => x.pos >= 0)
-      .sort((a, b) => a.pos - b.pos);
-    let remaining = displayText;
-    for (const { block } of ordered) {
-      const idx = remaining.indexOf(block.label);
-      if (idx < 0) continue;
+    const ordered: Array<
+      | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
+      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
+    > = [
+      ...pasteBlocks.map((block) => {
+        const start = displayText.indexOf(block.label);
+        return { block, start, end: start + block.label.length, kind: "paste" as const };
+      }),
+      ...selectedTextBlocks.map((block) => ({ block, start: block.start, end: block.end, kind: block.kind })),
+    ].filter((block) => block.start >= 0).sort((a, b) => a.start - b.start);
+    let cursor = 0;
+    for (const item of ordered) {
+      if (item.start < cursor) continue;
       // Text before the label: strip the trailing newline that separated the
       // label from the preceding line so the card sits tight against the text.
-      if (idx > 0) {
-        let before = remaining.slice(0, idx);
+      if (item.start > cursor) {
+        let before = displayText.slice(cursor, item.start);
         before = before.replace(/\n$/, "");
         if (before) segments.push({ type: "text", content: before });
       }
-      segments.push({ type: "paste", block });
-      remaining = remaining.slice(idx + block.label.length);
+      const key = `${item.kind}:${item.start}:${item.block.label}`;
+      if (item.kind === "paste") {
+        segments.push({ type: "block", key, block: item.block, kind: item.kind });
+      } else {
+        segments.push({ type: "block", key, block: item.block, kind: item.kind });
+      }
+      cursor = item.end;
     }
     // Strip the leading newline that followed the label.
-    remaining = remaining.replace(/^\n/, "");
+    const remaining = displayText.slice(cursor).replace(/^\n/, "");
     if (remaining.trim()) segments.push({ type: "text", content: remaining });
     return segments.length > 0 ? segments : [{ type: "text", content: displayText }];
-  }, [displayText, pasteBlocks]);
+  }, [displayText, pasteBlocks, selectedTextBlocks]);
 
-  const togglePasteExpand = (label: string) => {
-    setExpandedPasteLabels((prev) => ({
+  const toggleBlockExpand = (key: string) => {
+    setExpandedBlockKeys((prev) => ({
       ...prev,
-      [label]: !prev[label],
+      [key]: !prev[key],
     }));
   };
   const orderedDraftAttachments = sortDisplayAttachments(draftAttachments);
@@ -281,10 +332,10 @@ export function UserMessage({
 
   useEffect(() => {
     if (editing) return;
-    const parsed = parseAttachmentRefsForDisplay(actionText);
+    const parsed = parseAttachmentRefsForDisplay(editableActionText);
     setDraftText(parsed.text);
     setDraftAttachments(parsed.attachments);
-  }, [actionText, editing]);
+  }, [editableActionText, editing]);
 
   useEffect(() => {
     if (!editing) return;
@@ -298,14 +349,14 @@ export function UserMessage({
 
   const startEdit = () => {
     if (!canEdit) return;
-    const parsed = parseAttachmentRefsForDisplay(actionText);
+    const parsed = parseAttachmentRefsForDisplay(editableActionText);
     setDraftText(parsed.text);
     setDraftAttachments(parsed.attachments);
     setEditing(true);
   };
 
   const cancelEdit = () => {
-    const parsed = parseAttachmentRefsForDisplay(actionText);
+    const parsed = parseAttachmentRefsForDisplay(editableActionText);
     setDraftText(parsed.text);
     setDraftAttachments(parsed.attachments);
     setEditing(false);
@@ -333,9 +384,10 @@ export function UserMessage({
     const bodyText = parsedDraft.text.trim();
     const displayRefs = nextAttachments.map(formatAttachmentRefForDisplay).join(" ");
     const submitRefs = nextAttachments.map(formatAttachmentRefForSubmit).join(" ");
-    const next = [bodyText, displayRefs].filter(Boolean).join(bodyText && displayRefs ? " " : "");
+    const nextEditable = [bodyText, displayRefs].filter(Boolean).join(bodyText && displayRefs ? " " : "");
+    const next = [nextEditable, selectionLabels].filter(Boolean).join(nextEditable && selectionLabels ? " " : "");
     const fallbackSubmit = [bodyText, submitRefs].filter(Boolean).join(bodyText && submitRefs ? " " : "");
-    const submit = replaySubmitText(submitText, actionText, next, fallbackSubmit);
+    const submit = replaySubmitTextPreservingSelectedContext(submitText, editableActionText, nextEditable, fallbackSubmit);
     if (!next) return;
     setEditSubmitting(true);
     try {
@@ -427,7 +479,7 @@ export function UserMessage({
               <button className="msg-edit__btn" type="button" disabled={editSubmitting} onClick={cancelEdit}>
                 {t("common.cancel")}
               </button>
-              <button className="msg-edit__btn msg-edit__btn--primary" type="submit" disabled={editSubmitting || (draftText.trim() === "" && draftAttachments.length === 0)}>
+              <button className="msg-edit__btn msg-edit__btn--primary" type="submit" disabled={editSubmitting || (draftText.trim() === "" && draftAttachments.length === 0 && selectedTextEntries.length === 0)}>
                 {t("msg.editSend")}
               </button>
             </div>
@@ -448,7 +500,7 @@ export function UserMessage({
           </div>
         ) : (
           <>
-            {hasInvocationSegments && pasteBlocks.length === 0 ? (
+            {hasInvocationSegments && pasteBlocks.length === 0 && selectedTextBlocks.length === 0 ? (
               <div className="msg__text msg__rich-text">
                 {invocationSegments.map((segment, index) => segment.type === "text"
                   ? <span key={`text:${segment.start}:${index}`}>{segment.content}</span>
@@ -465,23 +517,29 @@ export function UserMessage({
               if (seg.type === "text") {
                 return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
               }
-              const expanded = Boolean(expandedPasteLabels[seg.block.label]);
+              const expanded = Boolean(expandedBlockKeys[seg.key]);
               return (
-                <div className="msg-pasted" key={seg.block.label}>
+                <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
                     <div className="msg-pasted-head">
-                      <FileText size={15} />
+                      {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
                         <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
-                          <button type="button" onClick={() => togglePasteExpand(seg.block.label)}>
+                          <button type="button" onClick={() => toggleBlockExpand(seg.key)}>
                             {expanded ? t("common.collapse") : t("composer.pastedExpand")}
                           </button>
                         </Tooltip>
                       </div>
                     </div>
                     {expanded && (
-                      <div className="msg-pasted-expanded">{seg.block.content}</div>
+                      <div className="msg-pasted-expanded">
+                        {seg.kind === "chat"
+                          ? <Markdown text={seg.block.content} />
+                          : seg.kind === "code"
+                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
+                            : seg.block.content}
+                      </div>
                     )}
                   </div>
                 </div>

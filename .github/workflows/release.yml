@@ -111,7 +111,19 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - name: Download orchestrator-reviewed release notes
+        if: ${{ inputs.orchestrated }}
+        uses: actions/download-artifact@v8
+        with:
+          name: stable-reviewed-release-notes
+          path: /tmp/stable-reviewed-release-notes
+      - name: Use orchestrator-reviewed release notes
+        if: ${{ inputs.orchestrated }}
+        run: |
+          test -s /tmp/stable-reviewed-release-notes/release-notes.md
+          cp /tmp/stable-reviewed-release-notes/release-notes.md /tmp/release-notes.md
       - name: Render reviewed release notes
+        if: ${{ !inputs.orchestrated }}
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: node scripts/release-notes.mjs render --version "$RELEASE_TAG" --output /tmp/release-notes.md

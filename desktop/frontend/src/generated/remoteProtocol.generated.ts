@@ -2,7 +2,7 @@
 
 export const REMOTE_SCHEMA_FORMAT = "reasonix.remote.schema.v1" as const;
 export const REMOTE_PROTOCOL_VERSION = "1" as const;
-export const REMOTE_SCHEMA_HASH = "sha256:be9ffd48078508809ff65c25890ebbae17ca0703a3bf19d9e46b0afc0987b16f" as const;
+export const REMOTE_SCHEMA_HASH = "sha256:2dd0c22f90d9e7af26b63c93df8ec548f6b5aa927239b7435093195c2bd53808" as const;
 
 export const REMOTE_FIXED_RESOURCES = {
   "protocol": {
@@ -151,6 +151,8 @@ export type RemoteEventRaw = {
       "failed_tool"?: string;
       "next_action"?: string;
       "next_tool"?: string;
+      "plan_after"?: string;
+      "plan_before"?: string;
       "review_rationale"?: string;
       "source_agent"?: string;
       "task_grant_scope"?: string;
@@ -296,6 +298,8 @@ export type RemoteEventHydrated = {
       "failed_tool"?: string;
       "next_action"?: string;
       "next_tool"?: string;
+      "plan_after"?: string;
+      "plan_before"?: string;
       "review_rationale"?: string;
       "source_agent"?: string;
       "task_grant_scope"?: string;
@@ -3028,6 +3032,8 @@ export type SessionEventRaw = {
         "failed_tool"?: string;
         "next_action"?: string;
         "next_tool"?: string;
+        "plan_after"?: string;
+        "plan_before"?: string;
         "review_rationale"?: string;
         "source_agent"?: string;
         "task_grant_scope"?: string;
@@ -3194,6 +3200,8 @@ export type SessionEventHydrated = {
         "failed_tool"?: string;
         "next_action"?: string;
         "next_tool"?: string;
+        "plan_after"?: string;
+        "plan_before"?: string;
         "review_rationale"?: string;
         "source_agent"?: string;
         "task_grant_scope"?: string;
@@ -4261,6 +4269,8 @@ export type SessionSubscribeResultRaw = {
             "failed_tool"?: string;
             "next_action"?: string;
             "next_tool"?: string;
+            "plan_after"?: string;
+            "plan_before"?: string;
             "review_rationale"?: string;
             "source_agent"?: string;
             "task_grant_scope"?: string;
@@ -4673,6 +4683,8 @@ export type SessionSubscribeResultHydrated = {
             "failed_tool"?: string;
             "next_action"?: string;
             "next_tool"?: string;
+            "plan_after"?: string;
+            "plan_before"?: string;
             "review_rationale"?: string;
             "source_agent"?: string;
             "task_grant_scope"?: string;

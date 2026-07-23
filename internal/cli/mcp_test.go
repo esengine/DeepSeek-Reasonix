@@ -18,6 +18,15 @@ import (
 	"reasonix/internal/plugin"
 )
 
+func stubMCPReadinessProbe(t *testing.T) {
+	t.Helper()
+	previous := mcpProbeForInstall
+	mcpProbeForInstall = func(entry config.PluginEntry) (plugin.MCPInstallResult, error) {
+		return plugin.ReadyInstallResult(entry.Name, 3), nil
+	}
+	t.Cleanup(func() { mcpProbeForInstall = previous })
+}
+
 func TestParseMCPAddStdio(t *testing.T) {
 	e, err := parseMCPAdd([]string{"fs", "npx", "-y", "@modelcontextprotocol/server-filesystem", "."})
 	if err != nil {
@@ -84,11 +93,64 @@ func TestParseMCPAddErrors(t *testing.T) {
 		"command and url":   {"x", "--http", "https://x", "node"},
 		"unknown flag":      {"x", "--bogus", "y", "cmd"},
 		"env without value": {"x", "--env"},
+		"bare dash dash":    {"--"},
 	}
 	for name, args := range cases {
 		if _, err := parseMCPAdd(args); err == nil {
 			t.Errorf("%s: expected an error for %v", name, args)
 		}
+	}
+}
+
+func TestParseMCPAddDashDashArgv(t *testing.T) {
+	e, err := parseMCPAdd([]string{"--", "npx", "-y", "chrome-devtools-mcp@latest"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.Name != "chrome-devtools-mcp" {
+		t.Fatalf("name = %q, want chrome-devtools-mcp", e.Name)
+	}
+	if e.Command != "npx" || !reflect.DeepEqual(e.Args, []string{"-y", "chrome-devtools-mcp@latest"}) {
+		t.Fatalf("command/args = %q/%v", e.Command, e.Args)
+	}
+
+	named, err := parseMCPAdd([]string{"chrome", "--", "npx", "-y", "chrome-devtools-mcp@latest"})
+	if err != nil {
+		t.Fatalf("named -- form: %v", err)
+	}
+	if named.Name != "chrome" || named.Command != "npx" {
+		t.Fatalf("named entry = %+v", named)
+	}
+}
+
+func TestParseMCPAddDashDashNamesLauncherPackageNotTrailingArgument(t *testing.T) {
+	e, err := parseMCPAdd([]string{"--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "/srv/shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Name != "server-filesystem" {
+		t.Fatalf("name = %q, want server-filesystem", e.Name)
+	}
+
+	python, err := parseMCPAdd([]string{"--", "python", "-m", "mcp_server_time", "--local-timezone=UTC"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if python.Name != "mcp-server-time" {
+		t.Fatalf("python module name = %q, want mcp-server-time", python.Name)
+	}
+}
+
+func TestParseMCPAddBareURL(t *testing.T) {
+	e, err := parseMCPAdd([]string{"https://mcp.example.com/path"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if e.Type != "http" || e.URL != "https://mcp.example.com/path" {
+		t.Fatalf("type/url = %q/%q", e.Type, e.URL)
+	}
+	if e.Name != "mcp" {
+		t.Fatalf("name = %q, want mcp", e.Name)
 	}
 }
 
@@ -106,6 +168,7 @@ func TestTokenizeArgs(t *testing.T) {
 
 func TestMCPGetOpenDesignStyleInstall(t *testing.T) {
 	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
 
 	addOut := captureStdout(t, func() {
 		if rc := Run([]string{
@@ -157,8 +220,41 @@ func TestMCPGetMissingServerFails(t *testing.T) {
 	}
 }
 
+func TestMCPUpdateProbesCandidateWithoutRewritingConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := config.PluginEntry{Name: "chrome", Command: "npx", Args: []string{"-y", "chrome-devtools-mcp@latest"}}
+	if err := cfg.UpsertPlugin(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := mcpUpdateCLI([]string{"chrome"}); rc != 0 {
+			t.Fatalf("mcp update rc = %d", rc)
+		}
+	})
+	if !strings.Contains(out, "candidate handshake passed with 3 tools") {
+		t.Fatalf("mcp update output = %q", out)
+	}
+	after, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Plugins) != 1 || !reflect.DeepEqual(after.Plugins[0].Args, entry.Args) {
+		t.Fatalf("candidate verification unexpectedly rewrote config: %+v", after.Plugins)
+	}
+}
+
 func TestMCPBrowseAndInstallOfficialRegistryEntry(t *testing.T) {
 	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
 	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"servers": []any{map[string]any{"server": map[string]any{
 			"name": "io.example/demo", "title": "Demo MCP", "version": "1.0.0",
@@ -199,6 +295,7 @@ func TestMCPBrowseAndInstallOfficialRegistryEntry(t *testing.T) {
 
 func TestMCPGetRedactsRemoteAuthMaterial(t *testing.T) {
 	isolateCLIConfigHome(t)
+	stubMCPReadinessProbe(t)
 
 	_ = captureStdout(t, func() {
 		if rc := Run([]string{

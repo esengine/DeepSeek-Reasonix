@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -10,9 +11,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"reasonix/internal/boot"
 	"reasonix/internal/config"
 	"reasonix/internal/mcpregistry"
+	"reasonix/internal/plugin"
 )
 
 // mcp.go holds the MCP server-management surface shared by the `reasonix mcp`
@@ -31,13 +35,53 @@ import (
 func parseMCPAdd(args []string) (config.PluginEntry, error) {
 	var e config.PluginEntry
 	if len(args) == 0 {
-		return e, fmt.Errorf("mcp add: missing server name")
+		return e, fmt.Errorf("mcp add: missing server name, command, or URL")
 	}
+
+	// Simplified forms:
+	//   reasonix mcp add -- npx -y chrome-devtools-mcp@latest
+	//   reasonix mcp add https://example.com/mcp
+	// keep the historical "name command..." form as well.
+	if args[0] == "--" {
+		if len(args) < 2 {
+			return e, fmt.Errorf("mcp add: -- requires a command argv")
+		}
+		e.Command = args[1]
+		e.Args = append([]string(nil), args[2:]...)
+		e.Name = defaultMCPNameFromArgv(e.Command, e.Args)
+		if e.Name == "" {
+			return e, fmt.Errorf("mcp add: could not derive a server name from the command; pass an explicit name")
+		}
+		return e, nil
+	}
+	if looksLikeRemoteMCPURL(args[0]) && (len(args) == 1 || strings.HasPrefix(args[1], "-")) {
+		e.Name = defaultMCPNameFromURL(args[0])
+		e.Type, e.URL = "http", args[0]
+		// Allow trailing --header/--env after a bare URL.
+		if len(args) > 1 {
+			restEntry, err := parseMCPAdd(append([]string{e.Name, "--http", args[0]}, args[1:]...))
+			if err != nil {
+				return e, err
+			}
+			return restEntry, nil
+		}
+		return e, nil
+	}
+
 	e.Name = strings.TrimSpace(args[0])
 	if e.Name == "" || strings.HasPrefix(e.Name, "-") {
 		return e, fmt.Errorf("mcp add: first argument must be the server name, got %q", args[0])
 	}
 	rest := args[1:]
+	if len(rest) > 0 && rest[0] == "--" {
+		// reasonix mcp add <name> -- <argv...>
+		if len(rest) < 2 {
+			return e, fmt.Errorf("mcp add: -- requires a command argv")
+		}
+		e.Command = rest[1]
+		e.Args = append([]string(nil), rest[2:]...)
+		return e, nil
+	}
 
 	i := 0
 	// next consumes the following token as a flag's value (for the "--flag value"
@@ -117,6 +161,120 @@ func parseMCPAdd(args []string) (config.PluginEntry, error) {
 	return e, nil
 }
 
+func looksLikeRemoteMCPURL(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")
+}
+
+func defaultMCPNameFromURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return "remote-mcp"
+	}
+	host := strings.ToLower(u.Hostname())
+	host = strings.TrimPrefix(host, "www.")
+	host = strings.Split(host, ".")[0]
+	host = sanitizeMCPName(host)
+	if host == "" {
+		return "remote-mcp"
+	}
+	return host
+}
+
+func defaultMCPNameFromArgv(command string, args []string) string {
+	runner := strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(filepath.Base(command), ".exe"), ".cmd"), ".bat"))
+	candidate := command
+	switch runner {
+	case "npx", "bunx", "uvx":
+		if operand := firstMCPCommandOperand(args); operand != "" {
+			candidate = operand
+		}
+	case "python", "python3", "py":
+		for i, arg := range args {
+			if arg == "-m" && i+1 < len(args) {
+				candidate = args[i+1]
+				break
+			}
+		}
+		if candidate == command {
+			if operand := firstMCPCommandOperand(args); operand != "" {
+				candidate = operand
+			}
+		}
+	case "node":
+		if operand := firstMCPCommandOperand(args); operand != "" {
+			candidate = operand
+		}
+	case "uv":
+		if len(args) > 0 && args[0] == "run" {
+			if operand := firstMCPCommandOperand(args[1:]); operand != "" {
+				candidate = operand
+			}
+		}
+	}
+	base := filepath.Base(candidate)
+	if at := strings.Index(base, "@"); at > 0 {
+		base = base[:at]
+	}
+	for _, ext := range []string{".js", ".exe", ".cmd", ".bat"} {
+		base = strings.TrimSuffix(base, ext)
+	}
+	name := sanitizeMCPName(base)
+	if name == "" {
+		return "mcp-server"
+	}
+	if candidate == command {
+		switch runner {
+		case "npx", "bunx", "uvx", "uv", "node", "python", "python3", "py":
+			return "mcp-server"
+		}
+	}
+	return name
+}
+
+func firstMCPCommandOperand(args []string) string {
+	valueFlags := map[string]bool{
+		"-p": true, "--package": true, "-c": true, "--call": true,
+		"--node-options": true, "--python": true,
+	}
+	options := true
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if options && arg == "--" {
+			options = false
+			continue
+		}
+		if options && strings.HasPrefix(arg, "-") {
+			if valueFlags[arg] {
+				i++
+			}
+			continue
+		}
+		if arg != "" {
+			return arg
+		}
+	}
+	return ""
+}
+
+func sanitizeMCPName(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	var b strings.Builder
+	for _, r := range raw {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	for strings.Contains(name, "--") {
+		name = strings.ReplaceAll(name, "--", "-")
+	}
+	return name
+}
+
 // tokenizeArgs splits a slash-command line into arguments, honouring "double" and
 // 'single' quotes so values with spaces (e.g. --header "Authorization=Bearer x")
 // survive. An unterminated quote takes the rest of the line as one token.
@@ -171,6 +329,15 @@ func mcpCommand(args []string) int {
 		return mcpGetCLI(args[1:])
 	case "remove", "rm":
 		return mcpRemoveCLI(args[1:])
+	case "enable":
+		return mcpEnableCLI(args[1:], true)
+	case "disable":
+		return mcpEnableCLI(args[1:], false)
+	case "retry", "connect":
+		// connect remains a compatibility alias for enable/retry.
+		return mcpRetryCLI(args[1:])
+	case "update":
+		return mcpUpdateCLI(args[1:])
 	case "import":
 		return mcpImportCLI()
 	case "browse", "search":
@@ -319,15 +486,103 @@ func mcpInstallWithClient(args []string, client *mcpregistry.Client) int {
 			return 1
 		}
 	}
-	if err := cfg.UpsertPlugin(pluginEntry); err != nil {
+	installResult, probeErr := mcpProbeForInstall(pluginEntry)
+	if probeErr != nil && installResult.State != "action_required" {
+		fmt.Fprintf(os.Stderr, "MCP server %q was not installed: %s\n", pluginEntry.Name, installResult.Message)
+		return 1
+	}
+	if err := persistCLIInstalledMCP(cfg, pluginEntry); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := cfg.Save(); err != nil {
+	if installResult.State == "action_required" {
+		fmt.Printf("installed MCP Registry server %q as %q — authentication required; finish authentication and run `reasonix mcp retry %s`\n", entry.Name, pluginEntry.Name, pluginEntry.Name)
+		return 0
+	}
+	fmt.Printf("installed MCP Registry server %q as %q — ready with %d tools\n", entry.Name, pluginEntry.Name, installResult.ToolCount)
+	return 0
+}
+
+func mcpEnableCLI(args []string, enabled bool) int {
+	if len(args) == 0 {
+		action := "enable"
+		if !enabled {
+			action = "disable"
+		}
+		fmt.Fprintf(os.Stderr, "usage: reasonix mcp %s <name>\n", action)
+		return 2
+	}
+	name := strings.TrimSpace(args[0])
+	cfg, err := config.Load()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	fmt.Printf("installed MCP Registry server %q as %q — loads on the next session\n", entry.Name, pluginEntry.Name)
+	var entry config.PluginEntry
+	found := false
+	for _, p := range cfg.Plugins {
+		if p.Name == name {
+			entry = p
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stderr, "no MCP server named %q in config\n", name)
+		return 1
+	}
+	store := config.DefaultMCPActivationStore()
+	if err := store.SetServerEnabled(entry, "", enabled); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if enabled {
+		fmt.Printf("enabled MCP server %q — tools restore from cache; process starts on first call\n", name)
+	} else {
+		fmt.Printf("disabled MCP server %q — tools removed from the catalog; authorization retained\n", name)
+	}
+	return 0
+}
+
+func mcpRetryCLI(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp retry <name>")
+		return 2
+	}
+	// Standalone CLI cannot talk to a live Host; enabling is the durable
+	// equivalent of "retry next session". In-chat /mcp retry remains live.
+	return mcpEnableCLI(args, true)
+}
+
+func mcpUpdateCLI(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix mcp update <name>")
+		return 2
+	}
+	name := strings.TrimSpace(args[0])
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	var entry config.PluginEntry
+	found := false
+	for _, configured := range cfg.Plugins {
+		if configured.Name == name {
+			entry, found = configured, true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stderr, "no MCP server named %q in config\n", name)
+		return 1
+	}
+	result, probeErr := mcpProbeForInstall(entry)
+	if probeErr != nil {
+		fmt.Fprintf(os.Stderr, "MCP update for %q was not applied: %s\n", name, result.Message)
+		return 1
+	}
+	fmt.Printf("updated MCP server %q — candidate handshake passed with %d tools; cached schema switched atomically\n", name, result.ToolCount)
 	return 0
 }
 
@@ -503,16 +758,72 @@ func mcpAddCLI(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	if err := cfg.UpsertPlugin(entry); err != nil {
+	for _, configured := range cfg.Plugins {
+		if configured.Name == entry.Name {
+			fmt.Fprintf(os.Stderr, "MCP server %q is already configured; remove it first or choose another name\n", entry.Name)
+			return 1
+		}
+	}
+	result, probeErr := mcpProbeForInstall(entry)
+	if probeErr != nil && result.State != "action_required" {
+		fmt.Fprintf(os.Stderr, "MCP server %q was not added: %s\n", entry.Name, result.Message)
+		return 1
+	}
+	if err := persistCLIInstalledMCP(cfg, entry); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if result.State == "action_required" {
+		fmt.Printf("added MCP server %q — authentication required; finish authentication and retry\n", entry.Name)
+		return 0
+	}
+	fmt.Printf("added MCP server %q — ready with %d tools\n", entry.Name, result.ToolCount)
+	return 0
+}
+
+var mcpProbeForInstall = probeMCPReadiness
+
+func probeMCPReadiness(entry config.PluginEntry) (plugin.MCPInstallResult, error) {
+	entry.Source = config.MCPSourceUserConfig
+	workspace, err := os.Getwd()
+	if err != nil {
+		workspace = ""
+	}
+	specs := boot.PluginSpecsForRootWithOptions([]config.PluginEntry{entry}, workspace, boot.PluginSpecOptions{
+		DefaultCallTimeout: 30 * time.Second,
+		ConfigSource:       string(config.MCPSourceUserConfig),
+		StateHome:          config.ReasonixHomeDir(),
+		Network:            true,
+	})
+	if len(specs) != 1 {
+		err := fmt.Errorf("could not build MCP launch specification")
+		return plugin.InstallResultForError(entry.Name, err), err
+	}
+	host := plugin.NewHost()
+	defer host.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	return host.InstallAndConnect(ctx, specs[0])
+}
+
+func persistCLIInstalledMCP(cfg *config.Config, entry config.PluginEntry) error {
+	entry.Source = config.MCPSourceUserConfig
+	if err := cfg.UpsertPlugin(entry); err != nil {
+		return err
 	}
 	if err := cfg.Save(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return err
 	}
-	fmt.Printf("added MCP server %q — loads on the next session (or run `/mcp add` inside chat to connect it live now)\n", entry.Name)
-	return 0
+	store := config.DefaultMCPActivationStore()
+	activationErr := store.SetServerEnabled(entry, "", true)
+	if !entry.ShouldAutoStart() {
+		activationErr = store.ClearServer(entry, "")
+	}
+	if activationErr != nil {
+		cfg.RemovePlugin(entry.Name)
+		return errors.Join(activationErr, cfg.Save())
+	}
+	return nil
 }
 
 func mcpRemoveCLI(args []string) int {
@@ -526,6 +837,13 @@ func mcpRemoveCLI(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	var removed config.PluginEntry
+	for _, p := range cfg.Plugins {
+		if p.Name == name {
+			removed = p
+			break
+		}
+	}
 	if !cfg.RemovePlugin(name) {
 		fmt.Fprintf(os.Stderr, "no MCP server named %q in config\n", name)
 		return 1
@@ -534,22 +852,32 @@ func mcpRemoveCLI(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	// Uninstall clears activation overrides; schema/auth cleanup is handled by
+	// the live session path when present.
+	_ = config.DefaultMCPActivationStore().ClearServer(removed, "")
 	fmt.Printf("removed MCP server %q\n", name)
 	return 0
 }
 
 func mcpUsage() {
-	fmt.Println(`Manage MCP servers (persisted to reasonix.toml).
+	fmt.Println(`Manage MCP servers (persisted to reasonix.toml + mcp-activation.json).
 
 Usage:
   reasonix mcp list
   reasonix mcp get <name>
-  reasonix mcp add <name> <command> [args...]        stdio server
-  reasonix mcp add <name> --http <url> [--header K=V] remote (Streamable HTTP)
-  reasonix mcp add <name> --sse  <url>               remote (legacy SSE)
-  reasonix mcp browse [query] [--limit N] [--json]   browse the official MCP Registry
-  reasonix mcp install <registry-name> [--as <name>] install a registry server
-  reasonix mcp import                                import MCP servers from cc-switch
+  reasonix mcp install <registry-name> [--as <name>]
+  reasonix mcp add -- <command> [args...]            stdio argv (no shell)
+  reasonix mcp add <name> -- <command> [args...]
+  reasonix mcp add <name> <command> [args...]        legacy stdio form
+  reasonix mcp add https://example.com/mcp           remote HTTP
+  reasonix mcp add <name> --http <url> [--header K=V]
+  reasonix mcp add <name> --sse  <url>
+  reasonix mcp enable <name>
+  reasonix mcp disable <name>
+  reasonix mcp retry <name>
+  reasonix mcp update <name>
+  reasonix mcp browse [query] [--limit N] [--json]
+  reasonix mcp import
   reasonix mcp remove <name>
 
 Flags for add:

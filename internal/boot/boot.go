@@ -484,8 +484,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		pluginHost = plugin.NewHost()
 	}
 
-	// Partition configured plugins by tier so eager can block when explicitly
-	// requested while every other enabled MCP warms up in the background.
+	// Enabled MCP servers enter the tool catalog at boot. Cached schemas
+	// register placeholders without starting processes; cache-miss servers get
+	// a single background catalog discovery. First real tool call uses
+	// EnsureConnected so parent/child/tab runtimes share one process.
 	pluginSpecOptions := PluginSpecOptions{
 		DefaultCallTimeout: time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
 		LaunchManager:      mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
@@ -496,7 +498,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Network:            cfg.Sandbox.Network,
 		PackageOwners:      pluginPackageOwners(cfg),
 	}
-	autoStartEntries := cfg.AutoStartPlugins()
+	autoStartEntries := cfg.EnabledPlugins(root, config.DefaultMCPActivationStore())
+	// Legacy eager/background tiers are still parsed for config compatibility
+	// but no longer change process start timing. Keep the partition only so
+	// demotion notices remain meaningful for chronically slow eager configs.
 	eagerEntries, bgEntries := partitionByTier(autoStartEntries)
 	extraPlugins := opts.ExtraPlugins
 	if cfg.SafeMode() {
@@ -577,70 +582,51 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 
-	// Eager: block until handshake. Failures show up in /mcp.
-	if len(eagerSpecs) > 0 {
-		// When using a shared host, reuse already-connected clients and
-		// add new ones directly to the host instead of creating a separate one.
-		if opts.SharedHost != nil {
-			for _, s := range eagerSpecs {
-				if pluginHost.HasClient(s.Name) {
-					tools, err := pluginHost.ToolsFor(ctx, s.Name)
-					if err == nil {
+	// Host-session ExtraPlugins (for example ACP session servers) are explicit
+	// for this controller and still take a short readiness probe so recovery and
+	// session-scoped servers are deterministic. User/project config MCP stays
+	// catalog-first and process-idle until first real tool call.
+	if len(extraSpecs) > 0 && !tokenEconomy {
+		for _, s := range extraSpecs {
+			if pluginHost.HasClient(s.Name) {
+				if tools, err := pluginHost.ToolsFor(ctx, s.Name); err == nil {
+					for _, t := range tools {
+						reg.Add(t)
+					}
+					continue
+				}
+			}
+			addCtx, addCancel := context.WithTimeout(ctx, 5*time.Second)
+			tools, err := pluginHost.EnsureConnectedWithLifecycle(ctx, addCtx, s, 0)
+			addCancel()
+			if err != nil {
+				if plugin.IsServerAlreadyConnected(err) {
+					if tools, err2 := pluginHost.ToolsFor(ctx, s.Name); err2 == nil {
 						for _, t := range tools {
 							reg.Add(t)
 						}
 						continue
 					}
 				}
-				// Use a bounded per-plugin timeout matching StartAvailable's
-				// defaultStartTimeout (5s) so a hanging MCP server doesn't
-				// block the tab boot indefinitely.
-				addCtx, addCancel := context.WithTimeout(ctx, 5*time.Second)
-				tools, err := pluginHost.Add(addCtx, s)
-				addCancel()
-				if err != nil {
-					if plugin.IsServerAlreadyConnected(err) || errors.Is(err, plugin.ErrSpawningInFlight) {
-						// Race: another tab connected the same server between
-						// HasClient and Add, or is currently spawning it.
-						// Fetch tools from the existing client, or wait briefly.
-						tools, err2 := pluginHost.ToolsFor(ctx, s.Name)
-						if err2 == nil {
-							for _, t := range tools {
-								reg.Add(t)
-							}
-							continue
-						}
-					}
-					sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-						Text: "An MCP server failed to start.", Detail: fmt.Sprintf("mcp %s: %v", s.Name, err)})
-					continue
-				}
-				for _, t := range tools {
+				// Leave a catalog entry for diagnostics; failures surface in /mcp.
+				cs, _ := plugin.LoadCachedSchemaForSpec(s)
+				for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, false) {
 					reg.Add(t)
 				}
+				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+					Text: "An MCP server failed to start.", Detail: fmt.Sprintf("mcp %s: %v", s.Name, err)})
+				continue
 			}
-		} else {
-			host, ptools := plugin.StartAvailable(ctx, eagerSpecs)
-			pluginHost = host
-			for _, t := range ptools {
+			for _, t := range tools {
 				reg.Add(t)
-			}
-			// PhaseB (prompts + resources) runs on the boot ctx — which is the
-			// controller's session-scoped PluginCtx — so the auxiliary surfaces
-			// keep streaming in after Start returns without holding up the agent.
-			go host.StartPhaseB(ctx, sink)
-			if text, detail, ok := MCPStartupNotice(host.Failures()); ok {
-				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text, Detail: detail})
 			}
 		}
 	}
 
-	// Background: register placeholder tools now and kick off the real spawn.
-	// Everything shares the same pluginHost so /mcp status, hot-add, and Close
-	// see one cohesive set of servers.
-	registerBackground := func(specs []plugin.Spec) {
+	// Configured enabled MCP: cache-hit placeholders without starting processes;
+	// cache-miss servers get one background catalog discovery.
+	registerEnabledMCP := func(specs []plugin.Spec) {
 		for _, s := range specs {
-			// Already running on the shared host? Register tools directly.
 			if pluginHost.HasClient(s.Name) {
 				tools, err := pluginHost.ToolsFor(ctx, s.Name)
 				if err == nil {
@@ -650,22 +636,33 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 					continue
 				}
 			}
-			if opts.SharedHost != nil {
-				// Shared host relies on Host's spawn guard to avoid duplicate
-				// processes across tabs for the same workspace root.
-				cs, _ := plugin.LoadCachedSchemaForSpec(s)
-				for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, true) {
-					reg.Add(t)
-				}
-			} else {
-				cs, _ := plugin.LoadCachedSchemaForSpec(s)
-				for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, true) {
-					reg.Add(t)
-				}
+			cs, _ := plugin.LoadCachedSchemaForSpec(s)
+			// Only kick a process for catalog discovery when no usable schema is
+			// cached. Cache-hit sessions stay process-idle until first tool call.
+			kick := cs == nil || len(cs.Tools) == 0
+			for _, t := range plugin.LazyToolset(s, cs, pluginHost, reg, ctx, kick) {
+				reg.Add(t)
 			}
 		}
 	}
-	registerBackground(bgSpecs)
+	// eagerSpecs already includes extraSpecs when !tokenEconomy; avoid double
+	// registration of host-session servers that connected above.
+	configSpecs := append(append([]plugin.Spec{}, eagerSpecs...), bgSpecs...)
+	if len(extraSpecs) > 0 && !tokenEconomy {
+		extraNames := map[string]bool{}
+		for _, s := range extraSpecs {
+			extraNames[s.Name] = true
+		}
+		filtered := configSpecs[:0]
+		for _, s := range configSpecs {
+			if extraNames[s.Name] {
+				continue
+			}
+			filtered = append(filtered, s)
+		}
+		configSpecs = filtered
+	}
+	registerEnabledMCP(configSpecs)
 
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
@@ -1711,8 +1708,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 	path := rememberPermissionConfigPath(workspaceRoot)
-	edit := config.LoadForEdit(path)
 	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
+	unlock, err := config.LockConfigFileEdits(path)
+	if err != nil {
+		slog.Warn("lock config for permission rule", "path", path, "err", err)
+		result.Err = err
+		return result
+	}
+	defer unlock()
+
+	edit, err := config.LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		slog.Warn("load config for permission rule", "path", path, "err", err)
+		result.Err = err
+		return result
+	}
 	if coveredBy := coveredPermissionRule(edit.Permissions.Allow, result.Rule); coveredBy != "" {
 		result.CoveredBy = coveredBy
 		return result
@@ -1723,7 +1733,7 @@ func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 		result.Err = err
 		return result
 	}
-	if err := config.WritePermissionsSection(path, edit.Permissions.Allow); err != nil {
+	if err := config.WritePermissionsAllow(path, edit.Permissions.Allow); err != nil {
 		slog.Warn("save config after permission rule", "err", err)
 		result.Err = err
 		return result
@@ -2319,16 +2329,30 @@ func skillMCPBindings(sk skill.Skill, reg *tool.Registry, specs []plugin.Spec, c
 }
 
 func applyMCPIsolation(spec *plugin.Spec, workspaceRoot string, opts PluginSpecOptions) {
-	if spec == nil || strings.TrimSpace(opts.StateHome) == "" {
+	if spec == nil {
+		return
+	}
+	// Authorized user MCP defaults to trusted host process mode. Confined mode
+	// is opt-in for internal managed deployments/tests and is never selected by
+	// ordinary install paths.
+	if spec.ProcessMode == "" {
+		spec.ProcessMode = plugin.MCPProcessHost
+	}
+	if strings.TrimSpace(opts.StateHome) == "" {
 		return
 	}
 	stateDir := plugin.MCPStateDir(opts.StateHome, workspaceRoot, spec.Name)
+	spec.StateDir = stateDir
+	if spec.ResolvedProcessMode() != plugin.MCPProcessConfined {
+		// Host mode still gets a private state/cache/temp tree; only the OS
+		// command sandbox is omitted so local app integrations keep working.
+		return
+	}
 	writerRoots := appendUniquePaths([]string{stateDir}, opts.WriterRoots...)
 	readerRoots := []string{workspaceRoot}
 	if home, err := os.UserHomeDir(); err == nil {
 		readerRoots = appendUniquePaths(readerRoots, home)
 	}
-	spec.StateDir = stateDir
 	spec.Sandbox = sandbox.Spec{
 		Mode: "enforce", WriteRoots: writerRoots,
 		ReadRoots:              readerRoots,

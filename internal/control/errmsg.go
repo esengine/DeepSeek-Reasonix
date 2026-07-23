@@ -27,6 +27,12 @@ func explainError(err error) error {
 	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
+		if msg := providerContentSafetyMessage(apiErr); msg != "" {
+			if reason := apiErrorReason(apiErr); reason != "" {
+				return fmt.Errorf("%s\n%s", msg, reason)
+			}
+			return errors.New(msg)
+		}
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
 		if msg == "" {
 			return err
@@ -67,14 +73,44 @@ func explainError(err error) error {
 // channel, unsupported tools, exhausted quota — in a 402/429/5xx body, and
 // without it those errors are undiagnosable from the category line alone.
 func apiErrorReason(e *provider.APIError) string {
-	reason := providerBodyReason(e.Body)
-	if e.ToolContext == "" {
-		return reason
+	details := make([]string, 0, 3)
+	if reason := providerBodyReason(e.Body); reason != "" {
+		details = append(details, reason)
 	}
-	if reason == "" {
-		return e.ToolContext
+	if traceID := strings.TrimSpace(e.TraceID); traceID != "" {
+		details = append(details, "Trace ID: "+clampRunes(traceID, 200))
 	}
-	return reason + "\n" + e.ToolContext
+	if e.ToolContext != "" {
+		details = append(details, e.ToolContext)
+	}
+	return strings.Join(details, "\n")
+}
+
+var (
+	miniMax1026CodeRe = regexp.MustCompile(`(^|[^0-9])1026([^0-9]|$)`)
+	miniMax1027CodeRe = regexp.MustCompile(`(^|[^0-9])1027([^0-9]|$)`)
+)
+
+// providerContentSafetyMessage recognizes MiniMax's provider-specific content
+// review failures before the generic HTTP 422 mapping calls them invalid
+// parameters. A custom-named MiniMax provider is still recognized by the
+// documented status text; numeric-only errors require a MiniMax provider name
+// so another OpenAI-compatible API cannot accidentally inherit this meaning.
+func providerContentSafetyMessage(e *provider.APIError) string {
+	if e == nil || e.Status != 422 {
+		return ""
+	}
+	body := strings.ToLower(e.Body)
+	providerName := strings.ToLower(e.Provider)
+	isMiniMax := strings.Contains(providerName, "minimax")
+	switch {
+	case strings.Contains(body, "input new_sensitive") || isMiniMax && miniMax1026CodeRe.MatchString(body):
+		return i18n.M.ProviderErrInputSensitive
+	case strings.Contains(body, "output new_sensitive") || isMiniMax && miniMax1027CodeRe.MatchString(body):
+		return i18n.M.ProviderErrOutputSensitive
+	default:
+		return ""
+	}
 }
 
 // Auth failure bodies are where servers echo credentials: providers include a
@@ -125,8 +161,9 @@ func redactAuthReason(s string) string {
 	})
 }
 
-// providerBodyReason pulls the human reason from an OpenAI/Anthropic-shaped error
-// body ({"error":{"message":…}}), falling back to the trimmed raw body.
+// providerBodyReason pulls the human reason from an OpenAI/Anthropic-shaped
+// error body ({"error":{"message":…}}) or MiniMax's base_resp envelope,
+// falling back to the trimmed raw body.
 func providerBodyReason(body string) string {
 	if body == "" {
 		return ""
@@ -135,9 +172,17 @@ func providerBodyReason(body string) string {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
+		BaseResp struct {
+			StatusMsg string `json:"status_msg"`
+		} `json:"base_resp"`
 	}
-	if json.Unmarshal([]byte(body), &parsed) == nil && parsed.Error.Message != "" {
-		return clampRunes(parsed.Error.Message, 800)
+	if json.Unmarshal([]byte(body), &parsed) == nil {
+		switch {
+		case parsed.Error.Message != "":
+			return clampRunes(parsed.Error.Message, 800)
+		case parsed.BaseResp.StatusMsg != "":
+			return clampRunes(parsed.BaseResp.StatusMsg, 800)
+		}
 	}
 	return clampRunes(body, 800)
 }

@@ -50,7 +50,7 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`!define REASONIX_UPDATE_HELPER "reasonix-update-helper.exe"`,
 		`!define REASONIX_GUARD "reasonix-guard.exe"`,
 		`!define REASONIX_LAUNCHER "reasonix-launcher.exe"`,
-		`!define REASONIX_CLI "reasonix.exe"`,
+		`!define REASONIX_CLI "reasonix-cli.exe"`,
 		`!define REASONIX_PORTABLE_ENTRY "Reasonix.exe"`,
 		"Var ReasonixUpdateMode",
 		`${GetOptions} $R0 "/REASONIXUPDATE=" $R1`,
@@ -111,6 +111,7 @@ func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) 
 		`build/windows/installer/$UPDATE_HELPER`,
 		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER"`,
 		`cp "$helper" "$staging/$UPDATE_HELPER"`,
+		`"$ROOT/scripts/verify-windows-portable.sh" "$staging"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh missing %q", want)

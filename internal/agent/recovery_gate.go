@@ -14,16 +14,33 @@ import (
 // how the Controller surfaces confirmations (desktop card, bot prompt, headless
 // blocker). A nil gate means the feature is off for this agent.
 //
-// ObserveResult runs after a tool result is produced. BeforeMutation runs after
-// call resolution and mutation classification, and before permission approval
-// and workspace write-lock acquisition, so a waiting recovery prompt never holds
-// a write lease.
+// ObserveResult runs after a tool result is produced. BeforeMutation also checks
+// host-observed structured plan transitions; it runs after call resolution and
+// mutation classification, and before permission approval and workspace
+// write-lock acquisition, so a waiting decision never holds a write lease.
 type RecoveryGate interface {
 	// ObserveResult records a completed call and returns optional guidance for
 	// the same agent's active turn. The caller, not the gate, owns delivery so a
 	// root or sub-agent failure can never start a concurrent controller turn.
 	ObserveResult(ctx context.Context, result RecoveryObservation) string
 	BeforeMutation(ctx context.Context, proposal RecoveryProposal) (RecoveryDecision, error)
+}
+
+// RecoveryEpisodeControl is an optional Gate capability for host-owned Episode
+// rotation, generation stamping, and turn-stop finalization. Controllers and
+// the live recovery.Gate implement it; simple test doubles may omit it.
+type RecoveryEpisodeControl interface {
+	EpisodeID() string
+	Generation() uint64
+	BeginEpisode()
+	EpisodeStopped(taskID string) bool
+	MarkFinalizationOffered(taskID string)
+	// ConsumeFinalization marks the one-shot finalization round as used when it
+	// was already offered. Returns (offered, alreadyConsumed).
+	ConsumeFinalization(taskID string) (offered, alreadyConsumed bool)
+	// OnModeChange rotates Episode/generation on a real mode change and returns
+	// dismissed recovery approval ids. Same-value replays are no-ops.
+	OnModeChange(mode string) []string
 }
 
 // RecoveryObservation is one finished tool call the checkpoint may react to.
@@ -33,6 +50,16 @@ type RecoveryObservation struct {
 	AgentID string
 	// TaskID isolates recovery state across concurrent top-level tasks.
 	TaskID string
+	// TaskScopeID is the host-owned Goal/task-grant scope that produced this
+	// result. Ordinary user turns get a fresh scope; goal continuations reuse
+	// one. It is independent of EpisodeID (failure/reviewer budgets).
+	TaskScopeID string
+	// EpisodeID is the host-owned temporary Recovery Episode. It is never
+	// model-supplied and never persisted. Failure/reviewer/stop budgets key on it.
+	EpisodeID string
+	// Generation is the gate generation captured before tool execution. Stale
+	// observations from an older generation are ignored after mode switches.
+	Generation uint64
 	// Tool is the permission/evidence name used for the call.
 	Tool string
 	// Args are the resolved arguments for the call.
@@ -72,10 +99,13 @@ type RecoveryObservation struct {
 type RecoveryProposal struct {
 	AgentID string
 	TaskID  string
-	// TaskScopeID is a host-owned execution scope. Goal continuations reuse their
-	// delivery scope; ordinary runs get a unique turn scope. It never comes from
-	// model output and lets temporary grants expire at the real task boundary.
+	// TaskScopeID is a host-owned Goal/task-grant scope. Goal continuations
+	// reuse their delivery scope; ordinary runs get a unique turn scope. It
+	// never comes from model output and is independent of Episode budgets.
 	TaskScopeID string
+	// EpisodeID is the host-owned Recovery Episode (optional on proposal; the
+	// gate uses its live Episode when empty).
+	EpisodeID string
 	// TaskSummary is the bounded task text for the agent proposing the action.
 	// Sub-agents must carry their own task instead of borrowing the root
 	// controller session's latest user message.
@@ -87,11 +117,19 @@ type RecoveryProposal struct {
 	ReadOnly     bool
 	Mutates      bool
 	Verification bool
+	// PlanTransition marks a structural rewrite of an already-active task plan.
+	// The host derives it from canonical todo state; it is never model-asserted.
+	PlanTransition bool
+	// PlanBefore and PlanAfter are bounded, human-readable snapshots supplied to
+	// the isolated reviewer. They are internal evidence, not persisted wire state.
+	PlanBefore string
+	PlanAfter  string
 	// SafeRetry is true when the host can prove this is a same-strategy
 	// verification/idempotent retry (e.g. re-running the same test command).
 	SafeRetry bool
-	// HighRisk marks delete/overwrite/install/config/external/cross-workspace
-	// or clearly expanded write scope; deterministic rules force confirmation.
+	// HighRisk is retained as reviewer evidence and for compatibility helpers.
+	// Auto does not turn execution risk into a user decision; permission,
+	// sandbox, and tool-specific policy own that boundary.
 	HighRisk bool
 	// ExpandedScope marks a write range wider than the failed event's range.
 	ExpandedScope bool
@@ -103,11 +141,25 @@ type RecoveryProposal struct {
 type RecoveryDecision struct {
 	// Allow continues without a user card.
 	Allow bool
+	// AuthorizePlanReplacement grants this one todo_write call permission to
+	// replace the current in_progress step. Only the active Auto Gate may issue
+	// it after reviewing a host-detected structural plan transition; it is never
+	// derived from model arguments or persisted beyond the call.
+	AuthorizePlanReplacement bool
 	// Blocked is true when the mutation must not run (reviewer/user revise, or
 	// headless blocker). Message is fed back to the model.
 	Blocked bool
 	// Message is model-facing text when Blocked is true.
 	Message string
+	// Generation is the gate generation that authorized or blocked this call.
+	// Tool results must carry the same generation for ObserveResult.
+	Generation uint64
+	// StopTurn means the Recovery Episode is exhausted; remaining tools in the
+	// batch must be blocked and the agent gets one summarize-only finalization.
+	StopTurn bool
+	// StopReason is an internal classifier (episode_failures, review_rejects, …).
+	// User-facing surfaces must not expose it.
+	StopReason string
 }
 
 // RecoveryAction is the user decision for a recovery confirmation card.
@@ -119,7 +171,7 @@ const (
 	RecoveryActionRevise       RecoveryAction = "revise"
 )
 
-func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool) {
+func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool, generation uint64) {
 	if a == nil || a.recoveryGate == nil {
 		return
 	}
@@ -139,9 +191,19 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 	if ctx != nil && ctx.Err() != nil {
 		cancelled = true
 	}
+	episodeID := ""
+	if ctrl, ok := a.recoveryGate.(RecoveryEpisodeControl); ok {
+		episodeID = ctrl.EpisodeID()
+		if generation == 0 {
+			generation = ctrl.Generation()
+		}
+	}
 	guidance := a.recoveryGate.ObserveResult(ctx, RecoveryObservation{
 		AgentID:      a.recoveryAgentID,
 		TaskID:       a.recoveryTaskID,
+		TaskScopeID:  recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
+		EpisodeID:    episodeID,
+		Generation:   generation,
 		Tool:         toolName,
 		Args:         args,
 		Subject:      recoverySubject(toolName, args),
@@ -163,6 +225,14 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 		// and a fallback would start a second Agent.Run concurrently.
 		_ = a.Steer(guidance)
 	}
+}
+
+func (a *Agent) recoveryEpisodeControl() RecoveryEpisodeControl {
+	if a == nil || a.recoveryGate == nil {
+		return nil
+	}
+	ctrl, _ := a.recoveryGate.(RecoveryEpisodeControl)
+	return ctrl
 }
 
 func bashCommandFromArgs(args json.RawMessage) string {

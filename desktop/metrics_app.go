@@ -296,7 +296,7 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.TurnDone:
 		m.inc("turns", "total")
-		if e.Err != nil {
+		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused {
 			m.inc("provider_error", errorClass(e.Err.Error()))
 		}
 	case event.ToolResult:

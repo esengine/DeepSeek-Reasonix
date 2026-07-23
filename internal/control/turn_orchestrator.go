@@ -202,6 +202,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	if scopeID, task, ok := c.goals.deliveryScope(); ok {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: task})
 	}
+	// Real user turns open a fresh Recovery Episode. Goal auto-continues and
+	// other synthetic turns inherit the current Episode so budgets accumulate
+	// only within one host-owned execution round.
+	if !turn.synthetic {
+		c.beginRecoveryEpisode()
+	}
 	err = c.runner.Run(ctx, modelInput)
 	c.persistGoalDeliveryCheckpoint()
 	if err == nil {
@@ -259,11 +265,16 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return err
 	}
 	if !allow {
-		return nil // keep planning; plan mode stays on
+		// The host decides whether denial means "revise and keep planning" or
+		// "exit without executing" by leaving plan mode on or switching it off.
+		return nil
 	}
 	c.SetPlanMode(false)
 	todoArgs := c.seedPlanTodos(proposal)
 	execStart := c.sessionMessageCount()
+	// Starting plan execution is a real Recovery Episode boundary even though
+	// the follow-up turn is synthetic.
+	c.beginRecoveryEpisode()
 	// The plan is the go-ahead: don't re-prompt for each write of the approved
 	// work. Auto-approve writers for the duration of this execution turn only; a
 	// later turn (even "continue") falls back to the normal per-tool approval.
@@ -290,11 +301,8 @@ func (o *turnOrchestrator) runGoalLoopWithRawDisplay(ctx context.Context, input,
 	if err := o.runTurnWithRawDisplay(ctx, input, raw, display); err != nil {
 		if ctx.Err() != nil {
 			o.c.stopGoal(GoalStatusStopped)
-		} else {
-			var readiness *agent.FinalReadinessError
-			if errors.As(err, &readiness) {
-				o.c.stopGoal(GoalStatusBlocked)
-			}
+		} else if goalShouldBlockOnError(err) {
+			o.c.stopGoal(GoalStatusBlocked)
 		}
 		return err
 	}
@@ -305,15 +313,22 @@ func (o *turnOrchestrator) runEditedGoalLoopWithRawDisplay(ctx context.Context, 
 	if err := o.runEditedTurnWithRawDisplay(ctx, input, raw, display, original); err != nil {
 		if ctx.Err() != nil {
 			o.c.stopGoal(GoalStatusStopped)
-		} else {
-			var readiness *agent.FinalReadinessError
-			if errors.As(err, &readiness) {
-				o.c.stopGoal(GoalStatusBlocked)
-			}
+		} else if goalShouldBlockOnError(err) {
+			o.c.stopGoal(GoalStatusBlocked)
 		}
 		return err
 	}
 	return o.continueGoal(ctx)
+}
+
+// goalShouldBlockOnError reports host pauses that permanently block a Goal
+// until an explicit resume. Final-answer readiness is terminal for auto-continue
+// and marks blocked. RecoveryPauseError only ends the current automatic loop;
+// the Goal stays running so the next ordinary user message keeps the same
+// Goal/delivery scope without a resume ritual.
+func goalShouldBlockOnError(err error) bool {
+	var readiness *agent.FinalReadinessError
+	return errors.As(err, &readiness)
 }
 
 func (o *turnOrchestrator) continueGoal(ctx context.Context) error {

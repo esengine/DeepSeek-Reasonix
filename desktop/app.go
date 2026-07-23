@@ -5880,6 +5880,9 @@ type Meta struct {
 	Goal              string                   `json:"goal,omitempty"`
 	GoalStatus        string                   `json:"goalStatus,omitempty"`
 	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
+	// A nil pointer means the controller cannot provide an authoritative snapshot;
+	// a non-nil pointer preserves an empty list as an explicit panel clear.
+	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
 }
 
 type AutoResearchCompactView struct {
@@ -6007,6 +6010,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		Goal:              goal,
 		GoalStatus:        goalStatus,
 		AutoResearch:      compactAutoResearchFromController(snap.ctrl),
+		CanonicalTodos:    ctrlTodos(snap.ctrl),
 	}
 }
 
@@ -6014,6 +6018,7 @@ func compactAutoResearchFromController(ctrl control.SessionAPI) *AutoResearchCom
 	if ctrl == nil {
 		return nil
 	}
+
 	summary, ok := ctrl.AutoResearchSummary()
 	if !ok || summary == nil || summary.TaskID == "" {
 		return nil
@@ -6025,6 +6030,20 @@ func compactAutoResearchFromController(ctrl control.SessionAPI) *AutoResearchCom
 		PivotRequired: summary.PivotRequired,
 		StaleCount:    summary.StaleCount,
 	}
+}
+
+// ctrlTodos returns the canonical task list from a session controller, or nil
+// if the controller is not yet bound. Used by MetaForTab so the frontend
+// task panel has access to the authoritative server-side todo state.
+func ctrlTodos(ctrl control.SessionAPI) *[]evidence.TodoItem {
+	if ctrl == nil {
+		return nil
+	}
+	todos := ctrl.Todos()
+	if todos == nil {
+		todos = []evidence.TodoItem{}
+	}
+	return &todos
 }
 
 func compactAutoResearch(tab *WorkspaceTab) *AutoResearchCompactView {
@@ -6519,15 +6538,23 @@ type SkillsSettingsView struct {
 // tool/prompt/resource counts), "deferred" (enabled but idle), "failed" (with
 // the connection error), "initializing" (background startup in progress), or
 // "disabled".
+//
+// Product fields for the simplified MCP panel are Enabled/Installed/
+// Availability/RuntimeState/ToolCount/ToolList/Action. Legacy AutoStart, Tier,
+// and StartIntent remain for one major as derived compatibility fields only.
 type ServerView struct {
 	Name                   string         `json:"name"`
 	Transport              string         `json:"transport"`
 	Status                 string         `json:"status"`
-	StartIntent            string         `json:"startIntent,omitempty"`
+	StartIntent            string         `json:"startIntent,omitempty"` // deprecated: derived from Enabled
 	RuntimeState           string         `json:"runtimeState,omitempty"`
+	Availability           string         `json:"availability,omitempty"`
+	Enabled                bool           `json:"enabled"`
+	Installed              bool           `json:"installed"`
+	Action                 string         `json:"action,omitempty"`
 	BuiltIn                bool           `json:"builtIn,omitempty"`
 	Configured             bool           `json:"configured,omitempty"`
-	AutoStart              bool           `json:"autoStart"`
+	AutoStart              bool           `json:"autoStart"` // deprecated: same as Enabled
 	Tier                   string         `json:"tier,omitempty"`
 	Command                string         `json:"command,omitempty"`
 	Args                   []string       `json:"args,omitempty"`
@@ -6535,11 +6562,12 @@ type ServerView struct {
 	EnvKeys                []string       `json:"envKeys,omitempty"`
 	HeaderKeys             []string       `json:"headerKeys,omitempty"`
 	Tools                  int            `json:"tools"`
+	ToolCount              int            `json:"toolCount"`
 	Prompts                int            `json:"prompts"`
 	Resources              int            `json:"resources"`
 	HasTools               bool           `json:"hasTools,omitempty"`
 	Error                  string         `json:"error,omitempty"`
-	ToolList               []ToolView     `json:"toolList,omitempty"`
+	ToolList               []ToolView     `json:"toolList"`
 	CallTimeoutSeconds     int            `json:"callTimeoutSeconds,omitempty"`
 	ToolTimeoutSeconds     map[string]int `json:"toolTimeoutSeconds,omitempty"`
 	RequiresLaunchApproval bool           `json:"requiresLaunchApproval,omitempty"`
@@ -7014,7 +7042,19 @@ func (a *App) mcpLaunchSpec(root, name string) (plugin.Spec, error) {
 	if entry == nil {
 		return plugin.Spec{}, fmt.Errorf("no configured MCP server named %q", name)
 	}
-	specs := boot.PluginSpecsForRootWithOptions([]config.PluginEntry{*entry}, root, boot.PluginSpecOptions{
+	return a.mcpLaunchSpecForEntryWithConfig(root, *entry, cfg)
+}
+
+func (a *App) mcpLaunchSpecForEntry(root string, entry config.PluginEntry) (plugin.Spec, error) {
+	cfg, err := config.LoadForRoot(root)
+	if err != nil {
+		return plugin.Spec{}, err
+	}
+	return a.mcpLaunchSpecForEntryWithConfig(root, entry, cfg)
+}
+
+func (a *App) mcpLaunchSpecForEntryWithConfig(root string, entry config.PluginEntry, cfg *config.Config) (plugin.Spec, error) {
+	specs := boot.PluginSpecsForRootWithOptions([]config.PluginEntry{entry}, root, boot.PluginSpecOptions{
 		DefaultCallTimeout: time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
 		LaunchManager:      mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
 		ConfigSource:       "workspace_config", StateHome: config.ReasonixHomeDir(),
@@ -7022,7 +7062,7 @@ func (a *App) mcpLaunchSpec(root, name string) (plugin.Spec, error) {
 		Network: cfg.Sandbox.Network,
 	})
 	if len(specs) != 1 {
-		return plugin.Spec{}, fmt.Errorf("failed to build MCP server %q", name)
+		return plugin.Spec{}, fmt.Errorf("failed to build MCP server %q", entry.Name)
 	}
 	return specs[0], nil
 }
@@ -7164,7 +7204,7 @@ func (a *App) mcpServersView() []ServerView {
 				disabledView.StartIntent = "off"
 				disabledView.Error = ""
 				if p, ok := configured[s.Name]; ok {
-					disabledView = withPluginConfig(disabledView, p)
+					disabledView = withPluginConfigInWorkspace(disabledView, p, workspaceRoot)
 				}
 				out = append(out, disabledView)
 				retainedDisabled[s.Name] = disabledView
@@ -7181,7 +7221,7 @@ func (a *App) mcpServersView() []ServerView {
 				ToolList: pluginToolsToView(s.ToolList),
 			}
 			if p, ok := configured[s.Name]; ok {
-				view = withPluginConfig(view, p)
+				view = withPluginConfigInWorkspace(view, p, workspaceRoot)
 			}
 			out = append(out, view)
 		}
@@ -7192,7 +7232,7 @@ func (a *App) mcpServersView() []ServerView {
 				RequiresLaunchApproval: f.RequiresLaunchApproval,
 			}
 			if p, ok := configured[f.Name]; ok {
-				view = withPluginConfig(view, p)
+				view = withPluginConfigInWorkspace(view, p, workspaceRoot)
 			}
 			out = append(out, view)
 		}
@@ -7203,7 +7243,7 @@ func (a *App) mcpServersView() []ServerView {
 			seen[name] = true
 			view := ServerView{Name: name, Status: "initializing", RuntimeState: "connecting"}
 			if p, ok := configured[name]; ok {
-				view = withPluginConfig(view, p)
+				view = withPluginConfigInWorkspace(view, p, workspaceRoot)
 			}
 			out = append(out, view)
 		}
@@ -7219,7 +7259,7 @@ func (a *App) mcpServersView() []ServerView {
 				s.Status = "disabled"
 				s.RuntimeState = "idle"
 				s.StartIntent = "off"
-				s = withPluginConfig(s, p)
+				s = withPluginConfigInWorkspace(s, p, workspaceRoot)
 				s.Error = ""
 				out = append(out, s)
 				retainedDisabled[p.Name] = s
@@ -7229,17 +7269,18 @@ func (a *App) mcpServersView() []ServerView {
 			}
 			status := "disabled"
 			startIntent := "off"
-			if p.ShouldAutoStart() {
+			if mcpEntryEnabled(p, workspaceRoot) {
 				status = "deferred"
-				startIntent = mcpStartIntent(p)
+				startIntent = "automatic"
 			}
-			out = append(out, withPluginConfig(ServerView{Name: p.Name, Status: status, StartIntent: startIntent, RuntimeState: "idle"}, p))
+			out = append(out, withPluginConfigInWorkspace(ServerView{Name: p.Name, Status: status, StartIntent: startIntent, RuntimeState: "idle"}, p, workspaceRoot))
 			seen[p.Name] = true
 		}
 	}
 	out = orderServerViews(out, order)
 	for i := range out {
 		out[i].ManagedByPlugin = managedByPlugin[out[i].Name]
+		out[i] = finalizeServerView(out[i])
 	}
 
 	a.mu.Lock()
@@ -7254,11 +7295,12 @@ func (a *App) mcpServersView() []ServerView {
 	return out
 }
 
-func mcpStartIntent(p config.PluginEntry) string {
-	if !p.ShouldAutoStart() {
-		return "off"
+func mcpEntryEnabled(p config.PluginEntry, workspace string) bool {
+	enabled, err := config.DefaultMCPActivationStore().IsEnabled(p, workspace)
+	if err != nil {
+		return p.ShouldAutoStart()
 	}
-	return "automatic"
+	return enabled
 }
 
 func mcpRuntimeState(status string) string {
@@ -7274,20 +7316,104 @@ func mcpRuntimeState(status string) string {
 	}
 }
 
+func mcpAvailability(v ServerView) string {
+	if !v.Enabled {
+		return "disabled"
+	}
+	switch v.RuntimeState {
+	case "ready":
+		return "connected"
+	case "connecting":
+		return "starting"
+	case "issue":
+		if v.RequiresLaunchApproval {
+			return "project_auth_changed"
+		}
+		if v.AuthStatus == "required" || v.AuthStatus == "possible" {
+			return "auth_required"
+		}
+		return "start_failed"
+	default:
+		// Idle enabled servers are available on demand, not "disconnected".
+		return "available_on_demand"
+	}
+}
+
+func mcpActionForView(v ServerView) string {
+	if v.RequiresLaunchApproval {
+		return "authorize"
+	}
+	if v.AuthStatus == "required" {
+		return "authenticate"
+	}
+	if v.RuntimeState == "issue" {
+		return "retry"
+	}
+	return "none"
+}
+
+func finalizeServerView(v ServerView) ServerView {
+	if v.ToolList == nil {
+		v.ToolList = []ToolView{}
+	}
+	if v.Args == nil {
+		v.Args = []string{}
+	}
+	if v.EnvKeys == nil {
+		v.EnvKeys = []string{}
+	}
+	if v.HeaderKeys == nil {
+		v.HeaderKeys = []string{}
+	}
+	v.ToolCount = v.Tools
+	if v.ToolCount == 0 && len(v.ToolList) > 0 {
+		v.ToolCount = len(v.ToolList)
+		v.Tools = v.ToolCount
+	}
+	v.Installed = v.Configured || v.BuiltIn || v.Status != ""
+	if v.RuntimeState == "" {
+		v.RuntimeState = mcpRuntimeState(v.Status)
+	}
+	v.Availability = mcpAvailability(v)
+	if v.Action == "" {
+		v.Action = mcpActionForView(v)
+	}
+	// Keep deprecated fields derived from the new product state.
+	v.AutoStart = v.Enabled
+	if !v.Enabled {
+		v.StartIntent = "off"
+	} else if v.StartIntent == "" {
+		v.StartIntent = "automatic"
+	}
+	return v
+}
+
 func withPluginConfig(v ServerView, p config.PluginEntry) ServerView {
+	return withPluginConfigInWorkspace(v, p, "")
+}
+
+func withPluginConfigInWorkspace(v ServerView, p config.PluginEntry, workspace string) ServerView {
 	tt := p.Type
 	if tt == "" {
 		tt = "stdio"
 	}
 	v.Transport = tt
 	v.Configured = true
-	v.AutoStart = p.ShouldAutoStart()
+	v.Installed = true
+	v.Enabled = mcpEntryEnabled(p, workspace)
+	v.AutoStart = v.Enabled
 	v.Tier = p.ResolvedTier()
 	if v.StartIntent == "" {
-		v.StartIntent = mcpStartIntent(p)
+		if v.Enabled {
+			v.StartIntent = "automatic"
+		} else {
+			v.StartIntent = "off"
+		}
 	}
-	if v.Status == "disabled" {
+	if !v.Enabled || v.Status == "disabled" {
+		v.Status = "disabled"
 		v.StartIntent = "off"
+		v.RuntimeState = "idle"
 	}
 	if v.RuntimeState == "" {
 		v.RuntimeState = mcpRuntimeState(v.Status)
@@ -7734,24 +7860,13 @@ type MCPServerInput struct {
 	ToolTimeoutSeconds map[string]int    `json:"toolTimeoutSeconds"`
 }
 
-// AddMCPServer connects a server live and persists it to config (Customize → MCP →
-// Add). Returns the number of tools it exposed.
-func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
-	defer a.lockMCPMutation("add")()
-
-	_, ctrl, root := a.activeMCPRuntime()
-	if ctrl == nil {
-		return 0, fmt.Errorf("no active session")
-	}
-	if controllerHasActiveRuntimeWork(ctrl) {
-		return 0, rebuildControllerActiveWorkError("MCP server")
-	}
+func mcpServerInputEntry(in MCPServerInput) config.PluginEntry {
 	entry := config.PluginEntry{
-		Name:               in.Name,
+		Name:               strings.TrimSpace(in.Name),
 		Type:               normalizeMCPTransport(in.Transport),
-		Command:            in.Command,
-		Args:               in.Args,
-		URL:                in.URL,
+		Command:            strings.TrimSpace(in.Command),
+		Args:               append([]string(nil), in.Args...),
+		URL:                strings.TrimSpace(in.URL),
 		Env:                in.Env,
 		Headers:            in.Headers,
 		AutoStart:          in.AutoStart,
@@ -7760,10 +7875,105 @@ func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
 		Source:             config.MCPSourceUserConfig,
 	}
 	entry, _ = config.NormalizePluginCommandLine(entry)
+	return entry
+}
+
+// InstallMCPServer is the desktop's high-level install transaction. A normal
+// handshake failure leaves no config behind; authentication-required servers
+// are retained so the user can complete OAuth and retry. Only a ready result is
+// published to every controller sharing the Host.
+func (a *App) InstallMCPServer(in MCPServerInput) (plugin.MCPInstallResult, error) {
+	defer a.lockMCPMutation("add")()
+
+	_, ctrl, root := a.activeMCPRuntime()
+	if ctrl == nil {
+		return plugin.MCPInstallResult{}, fmt.Errorf("no active session")
+	}
+	host, releaseGates, err := a.lockMCPHostTurnGates("MCP server", ctrl)
+	if err != nil {
+		return plugin.MCPInstallResult{}, err
+	}
+	defer releaseGates()
+
+	entry := mcpServerInputEntry(in)
+	if entry.Name == "" {
+		return plugin.InstallResultForError(entry.Name, fmt.Errorf("MCP server name is required")), nil
+	}
+	if _, found, lookupErr := desktopEffectiveMCPServer(root, entry.Name); lookupErr != nil {
+		return plugin.MCPInstallResult{}, lookupErr
+	} else if found {
+		return plugin.InstallResultForError(entry.Name, fmt.Errorf("MCP server %q is already installed", entry.Name)), nil
+	}
+
+	controllers := a.mcpControllersSharingHost(host, entry.Name, ctrl)
+	toolCount, connectErr := ctrl.ConnectMCPServer(entry)
+	if connectErr != nil {
+		result := plugin.InstallResultForError(entry.Name, connectErr)
+		if result.State != "action_required" {
+			if host != nil {
+				host.ClearFailure(entry.Name)
+			}
+			return result, nil
+		}
+		if err := a.saveDesktopMCPServer(root, entry); err != nil {
+			return plugin.MCPInstallResult{}, err
+		}
+		if err := persistMCPInstallActivation(entry, root); err != nil {
+			_, rollbackErr := a.removeDesktopMCPServer(root, entry.Name)
+			if host != nil {
+				host.ClearFailure(entry.Name)
+			}
+			return plugin.MCPInstallResult{}, errors.Join(err, rollbackErr)
+		}
+		recordMCPFailure(ctrl, entry, connectErr)
+		return result, nil
+	}
+
+	var publishErrs []error
+	for _, target := range controllers {
+		if target.ctrl == ctrl || !target.enabled {
+			continue
+		}
+		if _, err := target.ctrl.ConnectMCPServer(entry); err != nil {
+			publishErrs = append(publishErrs, err)
+		}
+	}
+	if err := errors.Join(publishErrs...); err != nil {
+		disconnectMCPServerControllers(entry.Name, ctrl, controllers)
+		return plugin.MCPInstallResult{}, fmt.Errorf("publish MCP tools: %w", err)
+	}
+
 	if err := a.saveDesktopMCPServer(root, entry); err != nil {
+		disconnectMCPServerControllers(entry.Name, ctrl, controllers)
+		return plugin.MCPInstallResult{}, err
+	}
+	if err := persistMCPInstallActivation(entry, root); err != nil {
+		disconnectMCPServerControllers(entry.Name, ctrl, controllers)
+		_, rollbackErr := a.removeDesktopMCPServer(root, entry.Name)
+		return plugin.MCPInstallResult{}, errors.Join(err, rollbackErr)
+	}
+	return plugin.ReadyInstallResult(entry.Name, toolCount), nil
+}
+
+func persistMCPInstallActivation(entry config.PluginEntry, root string) error {
+	store := config.DefaultMCPActivationStore()
+	if !entry.ShouldAutoStart() {
+		return store.ClearServer(entry, root)
+	}
+	return store.SetServerEnabled(entry, root, true)
+}
+
+// AddMCPServer is retained for old generated Wails clients. New clients use
+// InstallMCPServer so authentication and retry states remain structured.
+func (a *App) AddMCPServer(in MCPServerInput) (int, error) {
+	result, err := a.InstallMCPServer(in)
+	if err != nil {
 		return 0, err
 	}
-	return ctrl.ConnectMCPServer(entry)
+	if result.State != "ready" {
+		return 0, fmt.Errorf("%s", result.Message)
+	}
+	return result.ToolCount, nil
 }
 
 // UpdateMCPServer edits a persisted external MCP server. The name is the stable
@@ -7791,6 +8001,7 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 	if !found {
 		return fmt.Errorf("no configured MCP server named %q", name)
 	}
+	original := updated
 	updated.Type = normalizeMCPTransport(in.Transport)
 	updated.Command = strings.TrimSpace(in.Command)
 	updated.Args = append([]string(nil), in.Args...)
@@ -7819,43 +8030,40 @@ func (a *App) UpdateMCPServer(name string, in MCPServerInput) error {
 		updated.Command = ""
 		updated.Args = nil
 	}
-	if err := a.saveDesktopMCPServer(root, updated); err != nil {
-		return err
-	}
-
 	enabled := false
 	for _, target := range controllers {
 		enabled = enabled || target.enabled
 	}
-	wasConnected := host != nil && host.HasClient(name)
-	if wasConnected {
-		disconnectMCPServerControllers(name, ctrl, controllers)
+	if !enabled {
+		return a.saveDesktopMCPServer(root, updated)
 	}
-	if enabled {
-		spec, specErr := a.mcpLaunchSpec(root, name)
-		if specErr != nil {
-			return specErr
+	spec, specErr := a.mcpLaunchSpecForEntry(root, updated)
+	if specErr != nil {
+		return specErr
+	}
+	if spec.RequireLaunchApproval {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := plugin.AuthorizeProjectSpecLaunch(ctx, spec); err != nil {
+			return err
 		}
-		if spec.RequireLaunchApproval {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			// Editing project-owned configuration is an explicit user action.
-			// Record the exact launch grant without starting a temporary process
-			// process; reconnectMCPServerControllers performs the single real start.
-			if err := plugin.AuthorizeProjectSpecLaunch(ctx, spec); err != nil {
-				recordMCPFailure(ctrl, updated, err)
-				return nil
-			}
-		}
-		if err := reconnectMCPServerControllers(updated, controllers); err != nil {
-			recordMCPFailure(ctrl, updated, err)
-			return nil
-		}
+	}
+	disconnectMCPServerControllers(name, ctrl, controllers)
+	if err := reconnectMCPServerControllers(updated, controllers); err != nil {
+		rollbackErr := reconnectMCPServerControllers(original, controllers)
+		recordMCPFailure(ctrl, updated, err)
+		return errors.Join(err, rollbackErr)
+	}
+	if err := a.saveDesktopMCPServer(root, updated); err != nil {
+		disconnectMCPServerControllers(name, ctrl, controllers)
+		rollbackErr := reconnectMCPServerControllers(original, controllers)
+		return errors.Join(err, rollbackErr)
 	}
 	return nil
 }
 
 // RemoveMCPServer disconnects a live server and drops it from config (the row's ✕).
+// Uninstall also clears durable activation overrides for that server.
 func (a *App) RemoveMCPServer(name string) error {
 	defer a.lockMCPMutation("remove")()
 
@@ -7872,12 +8080,16 @@ func (a *App) RemoveMCPServer(name string) error {
 	if err := ensureMCPServerDirectlyWritable(root, name); err != nil {
 		return err
 	}
+	entry, hasEntry, _ := desktopEffectiveMCPServer(root, name)
 	removed, err := a.removeDesktopMCPServer(root, name)
 	if err != nil {
 		return err
 	}
 	if !removed {
 		return fmt.Errorf("no removable MCP server named %q", name)
+	}
+	if hasEntry {
+		_ = config.DefaultMCPActivationStore().ClearServer(entry, root)
 	}
 	disconnectMCPServerControllers(name, ctrl, controllers)
 	if host != nil {
@@ -7958,9 +8170,10 @@ func (a *App) ClearMCPServerAuthentication(name string) error {
 	return nil
 }
 
-// SetMCPServerEnabled is the connector toggle: on reconnects a configured server
-// for this session, off disconnects it (config untouched either way — like Claude
-// Code's per-conversation enable/disable, it resets on the next session start).
+// SetMCPServerEnabled is the durable enable/disable switch for an installed MCP
+// server. It writes $REASONIX_HOME/mcp-activation.json and updates the live
+// registry: disable removes tools and may stop the process; enable restores
+// cached tools and starts the process only on the next real tool call.
 func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	defer a.lockMCPMutation("set-enabled")()
 
@@ -7978,18 +8191,41 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	if err != nil {
 		return err
 	}
+	if !hasConfiguredEntry {
+		return fmt.Errorf("no configured MCP server named %q", name)
+	}
+	activationStore := config.DefaultMCPActivationStore()
+	scope, workspaceFP, source, owner := config.ActivationIdentity(configuredEntry, root)
+	previousEnabled, previousFound, err := activationStore.Lookup(scope, workspaceFP, source, owner, configuredEntry.Name)
+	if err != nil {
+		return err
+	}
+	if err := activationStore.SetServerEnabled(configuredEntry, root, enabled); err != nil {
+		return err
+	}
 	if enabled {
-		_, err := a.connectConfiguredMCPServerForTab(tab, name)
+		// Restore cached tools (or a cache-miss connect stub) without forcing a
+		// process start. Explicit install/retry remains the readiness-probed path.
+		_, err := a.registerConfiguredMCPServerForTab(tab, name)
 		if err == nil {
 			a.mu.Lock()
 			delete(tab.disabledMCP, name)
 			a.mu.Unlock()
+			return nil
 		}
-		return err
+		var rollbackErr error
+		if previousFound {
+			rollbackErr = activationStore.SetServerEnabled(configuredEntry, root, previousEnabled)
+		} else {
+			rollbackErr = activationStore.ClearServer(configuredEntry, root)
+		}
+		return errors.Join(err, rollbackErr)
 	}
 	if s, ok := findMCPServerView(ctrl, name); ok {
 		s.Status = "disabled"
+		s.Enabled = false
 		s.Error = ""
+		s = finalizeServerView(s)
 		a.mu.Lock()
 		if tab.disabledMCP == nil {
 			tab.disabledMCP = map[string]ServerView{}
@@ -7997,8 +8233,8 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 		tab.disabledMCP[name] = s
 		tab.mcpOrder = mergeServerOrder(tab.mcpOrder, []ServerView{s})
 		a.mu.Unlock()
-	} else if hasConfiguredEntry {
-		s := withPluginConfig(ServerView{Name: name, Status: "disabled"}, configuredEntry)
+	} else {
+		s := finalizeServerView(withPluginConfig(ServerView{Name: name, Status: "disabled", Enabled: false}, configuredEntry))
 		a.mu.Lock()
 		if tab.disabledMCP == nil {
 			tab.disabledMCP = map[string]ServerView{}
@@ -8015,7 +8251,7 @@ func (a *App) SetMCPServerEnabled(name string, enabled bool) error {
 	return nil
 }
 
-func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (int, error) {
+func (a *App) registerConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (int, error) {
 	a.mu.RLock()
 	var ctrl control.SessionAPI
 	root := ""
@@ -8033,7 +8269,7 @@ func (a *App) connectConfiguredMCPServerForTab(tab *WorkspaceTab, name string) (
 	}
 	for _, p := range cfg.Plugins {
 		if p.Name == name {
-			return ctrl.ConnectMCPServer(p)
+			return ctrl.RegisterMCPServerOnDemand(p)
 		}
 	}
 	return 0, fmt.Errorf("no configured MCP server named %q", name)

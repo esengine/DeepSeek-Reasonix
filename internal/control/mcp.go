@@ -74,6 +74,42 @@ func (m *mcpManager) connectSpec(s plugin.Spec) (int, error) {
 	return len(tools), nil
 }
 
+// registerSpecOnDemand restores one enabled server into this session's tool
+// registry without starting a disconnected process. A live shared-host client
+// is reused immediately; otherwise cached lazy tools (or one connect stub on a
+// cache miss) start the server only when the model makes the first real call.
+func (m *mcpManager) registerSpecOnDemand(s plugin.Spec) (int, error) {
+	m.mu.Lock()
+	if m.host == nil {
+		m.host = plugin.NewHost()
+	}
+	host, ctx, reg := m.host, m.pluginCtx, m.reg
+	m.mu.Unlock()
+
+	var tools []tool.Tool
+	if host.HasClient(s.Name) {
+		toolsCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		var err error
+		tools, err = host.ToolsFor(toolsCtx, s.Name)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		cached, _ := plugin.LoadCachedSchemaForSpec(s)
+		tools = plugin.LazyToolset(s, cached, host, reg, ctx, false)
+	}
+	if reg != nil {
+		prefix := plugin.ToolPrefix(s.Name)
+		reg.ResumePrefix(prefix)
+		reg.RemovePrefix(prefix)
+		for _, t := range tools {
+			reg.Add(t)
+		}
+	}
+	return len(tools), nil
+}
+
 // disconnect drops a live server and its tools from the registry. Reports whether
 // a live server was removed.
 func (m *mcpManager) disconnect(name string) bool {

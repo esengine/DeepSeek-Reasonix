@@ -2,12 +2,20 @@
  * Reasonix desktop — single-column, developer-dense, terminal-flavored chat UI.
  *
  * Multi-platform notes:
- *  - System font stack only; no web-font fetches (offline-first, consistent).
+ *  - System font stack for text; bundled icon fonts only (no web-font fetches).
  *  - No backdrop-filter / blur (slow & inconsistent on Linux WebKitGTK).
  *  - Colors via CSS variables + prefers-color-scheme so the webview follows the OS.
  *  - --wails-draggable marks the title region as an OS drag handle (macOS inset
  *    title bar); interactive children opt out with --wails-draggable: no-drag.
  */
+
+@font-face {
+  font-family: "Reasonix Seti";
+  src: url("./assets/file-icons/seti/seti.woff") format("woff");
+  font-style: normal;
+  font-weight: normal;
+  font-display: block;
+}
 
 :root {
   color-scheme: dark;
@@ -4243,6 +4251,9 @@ a[href] {
   font-size: 13px;
   line-height: 1.5;
 }
+.msg-pasted-expanded .md {
+  white-space: normal;
+}
 
 .msg--assistant {
   color: var(--fg);
@@ -8042,6 +8053,47 @@ body > .mermaid-diagram--fullscreen {
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
+.plan-change-delta {
+  display: grid;
+  gap: 8px;
+  max-height: min(240px, 32vh);
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.plan-change-delta__title {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 650;
+}
+.plan-change-delta__group {
+  display: grid;
+  gap: 4px;
+}
+.plan-change-delta__label {
+  color: var(--fg-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.plan-change-delta__line {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 5px;
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.plan-change-delta__group--removed .plan-change-delta__line > span {
+  color: var(--err);
+}
+.plan-change-delta__group--added .plan-change-delta__line > span {
+  color: var(--ok);
+}
 .recovery-details {
   display: grid;
   margin: 0;
@@ -9270,6 +9322,16 @@ body > .mermaid-diagram--fullscreen {
   border-right: 0;
   border-top: 0;
 }
+.tooltip .md {
+  white-space: normal;
+  font-size: inherit;
+  line-height: inherit;
+}
+.tooltip .md pre {
+  max-height: 240px;
+  overflow: auto;
+  font-size: 11px;
+}
 /* past:chats hover preview (PR-C2). Inherits colors from the .tooltip container
    (--fg / --fg-dim / --fg-faint / --border / --bg-elev) and only adjusts layout. */
 .past-chat-hover {
@@ -9490,6 +9552,18 @@ body > .mermaid-diagram--fullscreen {
   font: inherit;
   font-size: 12.5px;
   text-align: left;
+}
+.workspace-tree__guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.workspace-tree__guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--fg-faint) 28%, transparent);
 }
 .workspace-tree__row:hover {
   background: var(--tree-row-hover-bg);
@@ -9849,6 +9923,28 @@ body > .mermaid-diagram--fullscreen {
 }
 .workspace-tree__icon--dir {
   color: var(--fg-dim);
+}
+.workspace-file-icon {
+  width: 14px;
+  height: 16px;
+  flex: 0 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--workspace-file-icon-dark, var(--fg-faint));
+  font-family: "Reasonix Seti";
+  font-size: 16px;
+  font-style: normal;
+  font-weight: normal;
+  line-height: 1;
+}
+:root[data-theme="light"] .workspace-file-icon {
+  color: var(--workspace-file-icon-light, var(--fg-faint));
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .workspace-file-icon {
+    color: var(--workspace-file-icon-light, var(--fg-faint));
+  }
 }
 .workspace-tree__row--active .workspace-tree__icon,
 .workspace-tree__row--active .workspace-tree__icon--dir {
@@ -11959,6 +12055,46 @@ body > .mermaid-diagram--fullscreen {
 .cap-mcp-editor__mode {
   width: fit-content;
   margin: 0 0 18px auto;
+}
+.cap-mcp-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cap-mcp-quick__input {
+  min-height: 126px !important;
+  resize: vertical;
+  font-family: var(--mono);
+  line-height: 1.55;
+}
+.cap-mcp-quick__hint {
+  color: var(--fg-dim);
+  font-size: var(--font-control-small);
+  line-height: 1.55;
+}
+.cap-mcp-quick__benefits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cap-mcp-quick__benefits span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev-2) 74%, transparent);
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+}
+.cap-mcp-quick__benefits span::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+  content: "";
 }
 .cap-mcp-form-grid {
   display: grid;
@@ -34155,18 +34291,23 @@ body > .mermaid-diagram--fullscreen {
 .theme-gallery__menu button:hover { background: var(--bg-soft); }
 .theme-gallery__menu-danger { color: var(--err, #e55) !important; }
 .theme-gallery__editor-overlay {
-  position: fixed; inset: 0; z-index: var(--z-menu);
+  position: fixed; inset: 0; z-index: var(--z-modal);
   background: color-mix(in srgb, #000 58%, transparent);
   display: grid; place-items: center; padding: 20px;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
 }
 .theme-gallery__editor {
   width: min(1180px, 100%);
   height: min(88vh, 860px);
-  max-height: 100%;
+  height: min(88dvh, 860px);
+  max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
   overflow: hidden;
   background: var(--panel); border-radius: var(--r-l, 12px);
   padding: 0; border: 1px solid var(--border);
   box-shadow: 0 24px 72px color-mix(in srgb, #000 42%, transparent);
+  container: theme-editor / inline-size;
 }
 
 /* Isolated preview surface */
@@ -34551,7 +34692,8 @@ body > .mermaid-diagram--fullscreen {
 .theme-editor__recipe-groups .set-seg,
 .theme-editor__base-styles { width: 100%; }
 .theme-editor__recipe-groups .set-seg__btn,
-.theme-editor__base-styles .set-seg__btn { flex: 1; min-width: 0; }
+.theme-editor__base-styles .set-seg__btn,
+.theme-editor__setting-row .set-seg__btn { flex: 1; min-width: 0; }
 .theme-editor__fields--grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -34629,20 +34771,40 @@ body > .mermaid-diagram--fullscreen {
 }
 .theme-editor__warn ul { margin: 6px 0 0; padding-left: 18px; }
 
-@media (max-width: 920px) {
+@container theme-editor (max-width: 920px) {
   .theme-editor__body { grid-template-columns: 1fr; overflow-y: auto; }
   .theme-editor__controls { overflow: visible; }
   .theme-editor__live { border-left: 0; border-top: 1px solid var(--border-soft); }
   .theme-editor__scene-grid { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 620px) {
-  .theme-gallery__editor-overlay { padding: 8px; }
+@container theme-editor (max-width: 620px) {
   .theme-editor__fields--grid,
   .theme-editor__recipe-groups { grid-template-columns: 1fr; }
   .theme-editor__setting-row { align-items: flex-start; flex-direction: column; }
   .theme-editor__setting-row > span { flex-basis: auto; }
   .theme-editor__setting-hint { margin-left: 0; }
+  .theme-editor__base-styles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .theme-gallery__editor > .theme-editor__actions .btn { flex: 1 1 140px; }
+}
+
+@container theme-editor (max-width: 420px) {
+  .theme-editor__base-styles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .theme-editor__header,
+  .theme-editor__controls,
+  .theme-editor__live,
+  .theme-gallery__editor > .theme-editor__actions { padding-left: 12px; padding-right: 12px; }
+}
+
+@media (max-width: 620px) {
+  .theme-gallery__editor-overlay { padding: 8px; }
+  .theme-gallery__editor {
+    max-height: calc(100vh - 16px);
+    max-height: calc(100dvh - 16px);
+  }
 }
 
 /* Restore-default control must stay readable even under broken packs */

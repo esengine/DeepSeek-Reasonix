@@ -185,7 +185,7 @@ func (h *botBridgeHub) observe(tabID string, e event.Event) {
 			// 桌面端主动停止的任务不推送，避免正常操作变成噪音。
 			return
 		}
-		h.enqueue(h.turnDoneNotification(tabID, e.Err))
+		h.enqueue(h.turnDoneNotification(tabID, e))
 	}
 }
 
@@ -359,15 +359,21 @@ func (h *botBridgeHub) askNotification(tabID string, ask event.Ask) desktopBridg
 	return desktopBridgeNotification{text: textFor, card: card}
 }
 
-func (h *botBridgeHub) turnDoneNotification(tabID string, err error) desktopBridgeNotification {
+func (h *botBridgeHub) turnDoneNotification(tabID string, e event.Event) desktopBridgeNotification {
 	label := h.tabLabel(tabID)
-	if err != nil {
+	if e.Outcome == event.TurnOutcomeRecoveryPaused {
+		return desktopBridgeNotification{text: constText(fmt.Sprintf(
+			"⏸️ 桌面会话「%s」已暂停自动恢复。已完成的工作会保留，可直接发送“继续”或补充要求。",
+			label,
+		))}
+	}
+	if e.Err != nil {
 		// Error text can contain paths/tokens; only detail it in a private chat.
 		return desktopBridgeNotification{text: func(route bot.DesktopWatchRoute) string {
 			if isSharedChat(route.ChatType) {
 				return fmt.Sprintf("❌ 桌面会话「%s」任务出错（详情见桌面端或私聊）。", label)
 			}
-			return fmt.Sprintf("❌ 桌面会话「%s」任务出错: %s", label, truncateForBridge(err.Error(), botBridgeErrTextLimit))
+			return fmt.Sprintf("❌ 桌面会话「%s」任务出错: %s", label, truncateForBridge(e.Err.Error(), botBridgeErrTextLimit))
 		}}
 	}
 	return desktopBridgeNotification{text: constText(fmt.Sprintf("✅ 桌面会话「%s」任务完成。", label))}

@@ -608,6 +608,7 @@ const __T = {
     'ready': 'Ready',
     'thinking': 'Thinking...',
     'retrying_status': 'Retrying ({attempt}/{max})...',
+    'recovery_paused': 'Automatic recovery paused. Completed work is kept; send more requirements or reply continue.',
     'stats': 'Stats',
     'statistics': 'Statistics',
     'model': 'Model',
@@ -742,6 +743,7 @@ const __T = {
     'ready': '就绪',
     'thinking': '思考中...',
     'retrying_status': '正在重试 ({attempt}/{max})...',
+    'recovery_paused': '自动恢复已暂停。已完成的工作会保留；可补充要求或直接回复“继续”。',
     'stats': '统计',
     'statistics': '统计',
     'model': '模型',
@@ -1426,7 +1428,7 @@ es.onmessage=ev=>{setConnState('connected');
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
     case 'retrying': setRetrying(e.retryAttempt,e.retryMax); break;
-    case 'turn_done': clearPendingPrompts(); finalizeMsg(); setRunning(false); if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); fetchTodos(); refreshCheckpointAvailability(); break;
+    case 'turn_done': clearPendingPrompts(); finalizeMsg(); setRunning(false); if(e.outcome==='recovery_paused'){showNotice('⏸ '+(e.err||__('recovery_paused')));}else if(e.err){log.appendChild(el('div','msg--error','✗ '+e.err));scrollDown();} fetchStatus(); fetchTodos(); refreshCheckpointAvailability(); break;
   }
 };
 es.onerror=()=>{

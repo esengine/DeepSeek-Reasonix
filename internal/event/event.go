@@ -98,6 +98,11 @@ const (
 
 const TurnOutcomeFinalReadiness = "final_readiness"
 
+// TurnOutcomeRecoveryPaused marks an Auto recovery Episode budget stop. New
+// clients show an informational status (not send-failed); older clients still
+// read Err text and ignore the unknown outcome.
+const TurnOutcomeRecoveryPaused = "recovery_paused"
+
 // Level classifies a Notice so sinks can style or filter it.
 type Level int
 
@@ -185,6 +190,8 @@ type RecoveryApproval struct {
 	ChangeKind      string // same_strategy | strategy | scope | risk | uncertain
 	ChangeRationale string // what changed vs the original approach
 	ReviewRationale string // why the host/reviewer needs confirmation
+	PlanBefore      string // active structured plan before a material transition
+	PlanAfter       string // proposed structured plan after a material transition
 	CanGrantTask    bool   // offer a semantic grant scoped to the current task
 	TaskGrantScope  string // concise host-classified operation + exact target
 }

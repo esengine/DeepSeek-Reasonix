@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { EditorProps } from "../CodeViewer";
-import { highlightToHtml } from "../../lib/highlight";
+import { highlightToHtml, shouldHighlightSource } from "../../lib/highlight";
 import { useT } from "../../lib/i18n";
 import { CopyButton } from "../CopyButton";
 
@@ -12,8 +12,6 @@ const OVERSCAN = 15;
 const SEARCH_DEBOUNCE_MS = 100;
 const WORD_CHARACTER_RE = /[\p{L}\p{N}_]/u;
 export const MAX_SEARCH_MATCHES = 10_000;
-export const MAX_HIGHLIGHT_BYTES = 512 * 1024;
-export const MAX_HIGHLIGHT_LINES = 20_000;
 
 export interface CodeSearchMatch {
   lineIndex: number;
@@ -148,10 +146,6 @@ export function highlightLineMatches(
   return result;
 }
 
-export function shouldHighlightCode(sourceSize: number, lineCount: number): boolean {
-  return sourceSize <= MAX_HIGHLIGHT_BYTES && lineCount <= MAX_HIGHLIGHT_LINES;
-}
-
 // A multiline highlight.js span may cross a newline. Each virtual row needs
 // valid standalone HTML, so close active tags at the boundary and reopen the
 // same stack on the next line.
@@ -203,7 +197,7 @@ export default function LineNumberCode({
 }: EditorProps) {
   const t = useT();
   const lines = useMemo(() => value.split("\n"), [value]);
-  const syntaxHighlight = shouldHighlightCode(sourceSize ?? value.length, lines.length);
+  const syntaxHighlight = shouldHighlightSource(value, sourceSize, lines.length);
   const baseLineHtmls = useMemo(
     () => syntaxHighlight
       ? splitHighlightedCodeLines(highlightToHtml(value, language))

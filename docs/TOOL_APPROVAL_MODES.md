@@ -24,8 +24,8 @@ Ask is the most conservative tool-permission mode. When Reasonix needs approval 
 - `←` / `→` cycle the highlighted action.
 - `Enter` confirms the highlighted ordinary tool-approval action, which defaults to “Allow once”.
 - `1` / `2` / `3` / `4` select the matching numbered ordinary tool-approval action.
-- Plan confirmation has two direct actions: **Start execution** / **Revise plan**. They run with one click or the matching number key; there is no second Confirm click.
-- `Esc` stops the current task.
+- Plan confirmation has three direct actions: **Start execution** / **Revise plan** / **Exit without executing**. On Desktop, use one click or the matching number key. On CLI, use the matching number key or select a row and press `Enter`; `n` / `Esc` keeps planning for compatibility. Exiting rejects the pending plan and returns to Normal without starting an execution turn.
+- Outside a pending CLI Plan confirmation, `Esc` stops the current task.
 - If you `Tab` to a button and press `Enter`, that focused button runs (it is not overridden by the highlight).
 
 ## Auto mode
@@ -45,19 +45,21 @@ Auto still respects:
 
 Auto is designed as a behavior, not another feature to configure:
 
-> Auto handles reversible workspace work automatically. It asks only before a destructive, external, global, or otherwise explicit human-decision boundary.
+> Auto executes operations allowed by the permission policy. It asks only when a new plan, product tradeoff, or other genuinely user-owned decision appears.
 
-- Workspace reads, source/config/workflow edits, project-local dependency changes, tests, and retries stay on the fast path.
-- A change in implementation strategy or file scope inside the same task is handled automatically; it is not a user decision by itself.
-- Destructive commands, remote push/publish/deploy, privilege escalation, system/global installs, and writes outside ordinary workspace policy still require confirmation.
-- After a failure, read-only diagnosis and low-risk recovery continue automatically. Three consecutive failed attempts, or three reviewer-rejected alternatives, escalate to the user.
-- Reviewer unavailability does not turn low-risk work into a prompt; deterministic hard boundaries still fail closed.
-- When confirmation is required, one card shows the next action with two one-click choices: **Continue** / **Try another approach**. For host-classified bounded operations, the Continue choice can also remember the exact displayed operation and target for the current task. Technical details stay collapsed. Whole-task cancellation remains the global Stop control.
-- **Continue** alone authorizes only the waiting call. The optional current-task grant matches the operation type and exact target boundary rather than raw command text; for example, a Git push grant includes both the remote and destination ref. Ambiguous targets, broader targets, behavior-changing options, force/destructive variants, and risk escalation ask again. It is never a permanent grant and is dropped when the task scope changes, on restart, or on session switch.
-- Headless runs fail closed when a human decision is required.
+- Workspace reads/writes, commands, source/config/workflow edits, dependencies, tests, and external operations follow the existing permission policy. Auto Guard no longer adds risk-based prompts.
+- Consequently, default Auto does not ask merely because an operation is `git push`, publish, deploy, destructive, privileged, or global. Explicit `ask` / `deny`, sandbox, MCP, and tool-specific permission boundaries still apply.
+- Creating an initial ordinary task plan stays on the fast path. When an active structured plan is rewritten, the independent reviewer compares the old plan, proposed plan, and user task. Reasonable implementation refinement continues. A genuine product, strategy, or scope choice shows a neutral plan-decision card with the removed and added steps; **Adopt the new plan and continue** proceeds, while **Do not adopt; tell Auto how to adjust** opens an inline feedback field without submitting a decision.
+- Diagnosis and recovery continue automatically after failures within a fixed host-owned Episode budget (no settings): the same exact operation stops after 3 failures; the Episode stops after 6 execution failures without real progress, 3 cumulative reviewer rejections, or 3 re-submissions of already-stopped operations. Parameter or command changes cannot reset the Episode total. Successful mutations and host-recognized verification reset the no-progress budget; diagnostic reads do not.
+- When an Episode hard-stops, Auto blocks remaining tools, gives the model one summarize-only round, and surfaces a calm `recovery_paused` status (not a send failure). The next user message opens a fresh Episode automatically.
+- **Try another approach**, Plan **Start execution**, a real tool-permission mode change, and a new ordinary user message each open a fresh Episode. Goal auto-continues and sub-agents inherit the current Episode. Explicit **Continue task** grants stay on TaskScope across Episode rotation.
+- Reviewer unavailability does not turn ordinary recovery into a prompt. A detected structured plan transition is handed to the user rather than silently decided by Auto.
+- Headless runs fail closed when a genuine plan decision is required.
 - These boundaries are effective only in Auto. Ask and YOLO keep their existing approval semantics, and there is no separate safety setting to learn.
 
 Auto is not a filesystem snapshot or rollback mechanism. Use a clean Git branch or disposable worktree when changes must be reversible. Plan decides whether to start; Auto handles ordinary execution afterward.
+
+Auto Guard has no writer-tool allowlist for users to manage and does not need one. Per-operation stops remain narrow; Episode hard-stops pause only the current automatic recovery turn. Permission policy and the sandbox continue to own capability boundaries.
 
 ## Yolo mode
 

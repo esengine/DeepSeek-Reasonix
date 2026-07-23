@@ -31,6 +31,70 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	}
 }
 
+func TestLedgerMatchesFreshSuccessfulReviewReceipt(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	if !ledger.HasCompletedReview() {
+		t.Fatal("successful dedicated review tool should verify review evidence")
+	}
+	legacy := NewLedger()
+	legacy.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	if !legacy.HasCompletedReview() {
+		t.Fatal("successful task(profile=review) should verify review evidence")
+	}
+	failed := NewLedger()
+	failed.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), false, true))
+	if failed.HasCompletedReview() {
+		t.Fatal("failed review task must not verify review evidence")
+	}
+	background := NewLedger()
+	background.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review","run_in_background":true}`), true, true))
+	if background.HasCompletedReview() {
+		t.Fatal("starting a background review must not count as a completed review")
+	}
+}
+
+func TestLedgerRejectsReviewBeforeLatestMutation(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	if ledger.HasCompletedReview() {
+		t.Fatal("review evidence before the latest mutation must be stale")
+	}
+}
+
+func TestLedgerRequiresReviewCoverageAfterMutation(t *testing.T) {
+	fresh := NewLedger()
+	fresh.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	fresh.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"changed.go"}`), true, true))
+	fresh.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	if !fresh.HasCompletedReview() {
+		t.Fatal("review after reading the latest changed path should count")
+	}
+
+	unrelated := NewLedger()
+	unrelated.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	unrelated.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"other.go"}`), true, true))
+	unrelated.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review something else"}`), true, true))
+	if unrelated.HasCompletedReview() {
+		t.Fatal("review that did not inspect the latest changed path must not count")
+	}
+}
+
+func TestLedgerAcceptsCollectedStructuredReviewReport(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	ledger.Record(Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+		"kind":"review",
+		"verdict":"block",
+		"reviewed_paths":["changed.go"],
+		"findings":[{"severity":"critical","summary":"must fix","path":"changed.go"}]
+	}`)})
+	if !ledger.HasCompletedReview() {
+		t.Fatal("a structured report completes the review activity even when its verdict requires follow-up")
+	}
+}
+
 func TestLedgerHasWriteOrCommandSince(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{ToolName: "todo_write", Success: true, Todos: []TodoItem{{Content: "edit", Status: "in_progress"}}})

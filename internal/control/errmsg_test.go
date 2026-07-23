@@ -85,6 +85,37 @@ func TestExplainError(t *testing.T) {
 		t.Errorf("422 should fall back to the raw body, got %q", rawBody.Error())
 	}
 
+	miniMaxInput := explainError(&provider.APIError{
+		Provider: "custom-m3",
+		Status:   422,
+		Body:     `{"error":{"message":"input new_sensitive (1026)","code":"1026"}}`,
+		TraceID:  "minimax-trace-123",
+	})
+	for _, want := range []string{i18n.M.ProviderErrInputSensitive, "input new_sensitive", "Trace ID: minimax-trace-123"} {
+		if !strings.Contains(miniMaxInput.Error(), want) {
+			t.Errorf("MiniMax 1026 = %q, want %q", miniMaxInput.Error(), want)
+		}
+	}
+	if strings.Contains(miniMaxInput.Error(), i18n.M.ProviderErrUnprocessable) {
+		t.Errorf("MiniMax 1026 must not use the generic 422 message: %q", miniMaxInput.Error())
+	}
+
+	miniMaxOutput := explainError(&provider.APIError{
+		Provider: "minimax-cn-api",
+		Status:   422,
+		Body:     `{"base_resp":{"status_code":1027,"status_msg":"output new_sensitive"}}`,
+	})
+	for _, want := range []string{i18n.M.ProviderErrOutputSensitive, "output new_sensitive"} {
+		if !strings.Contains(miniMaxOutput.Error(), want) {
+			t.Errorf("MiniMax 1027 = %q, want %q", miniMaxOutput.Error(), want)
+		}
+	}
+
+	unrelated1026 := explainError(&provider.APIError{Provider: "other", Status: 422, Body: `{"code":1026,"message":"other meaning"}`})
+	if !strings.Contains(unrelated1026.Error(), i18n.M.ProviderErrUnprocessable) {
+		t.Errorf("another provider's numeric code 1026 must remain generic: %q", unrelated1026.Error())
+	}
+
 	rate := explainError(&provider.APIError{Provider: "deepseek", Status: 429, Body: `{"error":{"message":"slow down"}}`})
 	if !strings.Contains(rate.Error(), i18n.M.ProviderErrRateLimited) || !strings.Contains(rate.Error(), "slow down") {
 		t.Errorf("429 should append the provider reason, got %q", rate.Error())

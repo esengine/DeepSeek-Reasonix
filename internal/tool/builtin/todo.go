@@ -89,8 +89,10 @@ func (todoWrite) Execute(ctx context.Context, args json.RawMessage) (string, err
 	if err := evidence.ValidateSerialTodos(toEvidenceTodos(p.Todos)); err != nil {
 		return "", err
 	}
-	if err := verifyTodoCurrentContinuity(ctx, p.Todos); err != nil {
-		return "", err
+	if !tool.HasPlanReplacementAuthorization(ctx) {
+		if err := verifyTodoCurrentContinuity(ctx, p.Todos); err != nil {
+			return "", err
+		}
 	}
 	if err := verifyCompletedTodoPositions(ctx, p.Todos); err != nil {
 		return "", err
@@ -138,6 +140,9 @@ func verifyCompletedTodoPositions(ctx context.Context, todos []todoItem) error {
 		if !found || match.Index != i+1 {
 			return fmt.Errorf("completed todo %d %q cannot be inserted, duplicated, or reordered; preserve the completed prefix and sign off the current item with complete_step", i+1, todo.Content)
 		}
+	}
+	if len(evidence.IncompleteTodos(previous)) > 0 && !evidence.PreservesCompletedTodoPositions(previous, toEvidenceTodos(todos)) {
+		return fmt.Errorf("completed task history cannot be removed, changed, or reordered while the plan is active; preserve every completed item at its original position")
 	}
 	return nil
 }

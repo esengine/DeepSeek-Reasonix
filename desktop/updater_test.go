@@ -46,10 +46,13 @@ func TestNormalizeVersion(t *testing.T) {
 
 func TestUpdateSiblingNamesCoverEveryReplacedEntryPoint(t *testing.T) {
 	windows := strings.Join(updateSiblingNames("windows"), "\x00")
-	for _, want := range []string{"reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix.exe", "Reasonix.exe"} {
+	for _, want := range []string{"reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix-cli.exe", "Reasonix.exe"} {
 		if !strings.Contains(windows, want) {
 			t.Errorf("Windows release unit omits %q: %q", want, windows)
 		}
+	}
+	if strings.Contains(windows, "reasonix.exe") {
+		t.Fatalf("Windows release unit reintroduces the case-only CLI/launcher collision: %q", windows)
 	}
 	if got := updateSiblingNames("linux"); len(got) != 2 || got[0] != "reasonix-guard" || got[1] != "reasonix" {
 		t.Fatalf("Linux release unit = %q", got)

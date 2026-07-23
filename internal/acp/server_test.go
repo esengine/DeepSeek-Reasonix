@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,7 +86,10 @@ type commandFactory struct {
 	commands []command.Command
 	skills   []skill.Skill
 	seen     chan string
+	dir      string
 }
+
+func (f *commandFactory) SessionDir() string { return f.dir }
 
 func (f *commandFactory) NewSession(_ context.Context, p SessionParams) (*control.Controller, error) {
 	runner := &fakeRunner{
@@ -96,7 +100,7 @@ func (f *commandFactory) NewSession(_ context.Context, p SessionParams) (*contro
 			return nil
 		},
 	}
-	return control.New(control.Options{Runner: runner, Sink: p.Sink, Commands: f.commands, Skills: f.skills}), nil
+	return control.New(control.Options{Runner: runner, Sink: p.Sink, Commands: f.commands, Skills: f.skills, SessionDir: f.dir}), nil
 }
 
 type configurableFactory struct {
@@ -409,6 +413,97 @@ func startServer(t *testing.T, factory Factory) (*rpcClient, func()) {
 	}
 }
 
+type orderedRPCClient struct {
+	enc    *json.Encoder
+	frames chan frame
+}
+
+func newOrderedRPCClient(in io.Writer, out io.Reader) *orderedRPCClient {
+	c := &orderedRPCClient{enc: json.NewEncoder(in), frames: make(chan frame, 16)}
+	dec := json.NewDecoder(out)
+	go func() {
+		defer close(c.frames)
+		for {
+			var f frame
+			if err := dec.Decode(&f); err != nil {
+				return
+			}
+			c.frames <- f
+		}
+	}()
+	return c
+}
+
+func (c *orderedRPCClient) send(t *testing.T, id int, method string, params any) {
+	t.Helper()
+	if err := c.enc.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+		t.Fatalf("%s: send: %v", method, err)
+	}
+}
+
+func (c *orderedRPCClient) next(t *testing.T) frame {
+	t.Helper()
+	select {
+	case f, ok := <-c.frames:
+		if !ok {
+			t.Fatal("ACP output closed")
+		}
+		return f
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ACP frame")
+		return frame{}
+	}
+}
+
+func startOrderedServer(t *testing.T, factory Factory) (*orderedRPCClient, func()) {
+	t.Helper()
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	done := make(chan struct{})
+	go func() {
+		_ = Serve(context.Background(), inR, outW, factory, AgentInfo{Name: "reasonix-test", Version: "0"})
+		close(done)
+	}()
+	client := newOrderedRPCClient(inW, outR)
+	return client, func() {
+		_ = inW.Close()
+		<-done
+		_ = outW.Close()
+	}
+}
+
+func requireResponseFrame(t *testing.T, f frame, id int) {
+	t.Helper()
+	if f.Method != "" || f.ID == nil {
+		t.Fatalf("first frame = %+v, want response %d", f, id)
+	}
+	if f.Error != nil {
+		t.Fatalf("response %d error = %+v", id, f.Error)
+	}
+	var gotID int
+	if err := json.Unmarshal(*f.ID, &gotID); err != nil || gotID != id {
+		t.Fatalf("response id = %d (%v), want %d", gotID, err, id)
+	}
+}
+
+func requireAvailableCommandsFrame(t *testing.T, f frame) {
+	t.Helper()
+	if f.Method != "session/update" || f.ID != nil {
+		t.Fatalf("second frame = %+v, want session/update notification", f)
+	}
+	var params map[string]any
+	if err := json.Unmarshal(f.Params, &params); err != nil {
+		t.Fatalf("available commands update: %v", err)
+	}
+	update, ok := params["update"].(map[string]any)
+	if !ok {
+		t.Fatalf("session update payload = %#v, want object", params["update"])
+	}
+	if got := update["sessionUpdate"]; got != "available_commands_update" {
+		t.Fatalf("session update = %v, want available_commands_update", got)
+	}
+}
+
 // drainPrompt collects session/update notifications until the prompt's response
 // arrives, then sweeps any notifications still buffered.
 func drainPrompt(t *testing.T, c *rpcClient, promptCh chan frame) ([]frame, frame) {
@@ -666,6 +761,89 @@ func TestServeAdvertisesAndExpandsCustomCommands(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("runner did not receive prompt")
 	}
+}
+
+func TestServeRequestRunsAfterResponseHookAfterWritingResult(t *testing.T) {
+	var buf bytes.Buffer
+	conn := NewConn(strings.NewReader(""), &buf)
+	conn.Handle("test/hook", func(context.Context, json.RawMessage) (any, error) {
+		return afterResponse{
+			result: map[string]string{"ok": "yes"},
+			after: func() {
+				_ = conn.Notify("test/notification", map[string]string{"after": "yes"})
+			},
+		}, nil
+	})
+
+	conn.serveRequest(context.Background(), json.RawMessage("1"), "test/hook", nil)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d frames, want 2: %q", len(lines), buf.String())
+	}
+	var response frame
+	if err := json.Unmarshal([]byte(lines[0]), &response); err != nil {
+		t.Fatalf("response frame: %v", err)
+	}
+	requireResponseFrame(t, response, 1)
+	var notification frame
+	if err := json.Unmarshal([]byte(lines[1]), &notification); err != nil {
+		t.Fatalf("notification frame: %v", err)
+	}
+	if notification.Method != "test/notification" || notification.ID != nil {
+		t.Fatalf("second frame = %+v, want notification", notification)
+	}
+}
+
+func TestServeAdvertisesCommandsAfterEverySessionOpenResponse(t *testing.T) {
+	sessionDir := t.TempDir()
+	factory := &commandFactory{
+		dir:      sessionDir,
+		commands: []command.Command{{Name: "review", Description: "Review the target"}},
+	}
+	client, stop := startOrderedServer(t, factory)
+	defer stop()
+
+	client.send(t, 1, "initialize", InitializeParams{ProtocolVersion: 1})
+	requireResponseFrame(t, client.next(t), 1)
+
+	client.send(t, 2, "session/new", SessionNewParams{Cwd: t.TempDir()})
+	newResponse := client.next(t)
+	requireResponseFrame(t, newResponse, 2)
+	requireAvailableCommandsFrame(t, client.next(t))
+	var created SessionNewResult
+	if err := json.Unmarshal(newResponse.Result, &created); err != nil || created.SessionID == "" {
+		t.Fatalf("session/new result: %v (%q)", err, created.SessionID)
+	}
+
+	client.send(t, 3, "session/close", SessionCloseParams{SessionID: created.SessionID})
+	requireResponseFrame(t, client.next(t), 3)
+
+	persistedID := "ordered-session-open"
+	path := transcriptPath(sessionDir, persistedID)
+	if err := agent.NewSession("").Save(path); err != nil {
+		t.Fatalf("save transcript: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := saveACPMeta(path, acpSessionMeta{
+		SessionID: persistedID,
+		Cwd:       sessionDir,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("save ACP metadata: %v", err)
+	}
+
+	client.send(t, 4, "session/load", SessionLoadParams{SessionID: persistedID, Cwd: sessionDir})
+	requireResponseFrame(t, client.next(t), 4)
+	requireAvailableCommandsFrame(t, client.next(t))
+
+	client.send(t, 5, "session/close", SessionCloseParams{SessionID: persistedID})
+	requireResponseFrame(t, client.next(t), 5)
+
+	client.send(t, 6, "session/resume", SessionResumeParams{SessionID: persistedID, Cwd: sessionDir})
+	requireResponseFrame(t, client.next(t), 6)
+	requireAvailableCommandsFrame(t, client.next(t))
 }
 
 func TestServeSessionConfigSwitchesModelAndEffort(t *testing.T) {

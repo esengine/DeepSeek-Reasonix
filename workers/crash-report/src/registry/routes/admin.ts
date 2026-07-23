@@ -5,10 +5,17 @@ import { repos } from "../db";
 import { requireAdmin } from "../http/auth";
 import { writeRateLimit } from "../http/ratelimit";
 import { ApiError } from "../http/errors";
+import { z } from "zod";
 
 const admin = new Hono<AppEnv>();
 
 const now = () => new Date().toISOString();
+
+const ApprovalRevisionSchema = z.object({
+  expectedVersion: z.string().min(1).max(64),
+  expectedUpdatedAt: z.string().min(1).max(64),
+  expectedStatus: z.enum(["pending", "hidden", "rejected"]),
+});
 
 admin.use("*", requireAdmin);
 
@@ -24,19 +31,35 @@ admin.get("/packages", async (c) => {
 admin.post("/packages/:handle/:name/approve", writeRateLimit, async (c) => {
   const slug = `${c.req.param("handle")}/${c.req.param("name")}`;
   const { packages: repo, events } = repos(c.env);
-  const before = await repo.bySlug(slug);
-  if (!before) throw new ApiError(404, "not_found", "No such package.");
-  const row = await repo.setStatus(slug, "active", now());
-  if (!row) throw new ApiError(404, "not_found", "No such package.");
-  if (before.status !== "active") {
-    await events.log({
-      type: "publish",
-      packageId: row.id,
-      actorHandle: row.scope_handle,
-      summary: `published ${row.slug}@${row.latest_version}`,
-      now: now(),
-    });
+  const revision = ApprovalRevisionSchema.safeParse(await c.req.json().catch(() => null));
+  if (!revision.success) {
+    throw new ApiError(400, "invalid_review_revision", "Approval requires the reviewed package revision.");
   }
+  const approvedAt = now();
+  const row = await repo.setStatusIfCurrent(
+    slug,
+    "active",
+    revision.data.expectedVersion,
+    revision.data.expectedUpdatedAt,
+    revision.data.expectedStatus,
+    approvedAt,
+  );
+  if (!row) {
+    const current = await repo.bySlug(slug);
+    if (!current) throw new ApiError(404, "not_found", "No such package.");
+    throw new ApiError(
+      409,
+      "stale_review",
+      "Package changed since it was reviewed. Refresh and review the latest version.",
+    );
+  }
+  await events.log({
+    type: "publish",
+    packageId: row.id,
+    actorHandle: row.scope_handle,
+    summary: `published ${row.slug}@${row.latest_version}`,
+    now: approvedAt,
+  });
   return c.json({ package: toPackageDTO(row) });
 });
 

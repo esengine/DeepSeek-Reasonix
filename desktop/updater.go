@@ -721,7 +721,7 @@ func updateSiblingArtifacts() []string {
 func updateSiblingNames(goos string) []string {
 	switch goos {
 	case "windows":
-		return []string{"reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix.exe", "Reasonix.exe"}
+		return []string{"reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix-cli.exe", "Reasonix.exe"}
 	case "linux":
 		return []string{"reasonix-guard", "reasonix"}
 	default:

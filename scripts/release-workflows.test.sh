@@ -26,6 +26,18 @@ grep -Eq "needs\.build\.result == 'success'" "$repo_root/.github/workflows/relea
 grep -Eq "needs\.publish\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq '^  postflight:$' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'verify-stable-release-artifacts\.sh' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'name: Upload reviewed release notes' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'name: stable-reviewed-release-notes' "$repo_root/.github/workflows/release-stable.yml"
+for channel in cli npm desktop; do
+	grep -Eq '^      publish_'"$channel"':' "$repo_root/.github/workflows/release-stable.yml"
+	grep -Eq "inputs\.publish_$channel" "$repo_root/.github/workflows/release-stable.yml"
+done
+grep -Eq 'public postflight will still verify it' "$repo_root/.github/workflows/release-stable.yml"
+for workflow in release.yml release-desktop.yml; do
+	grep -Eq 'name: Download orchestrator-reviewed release notes' "$repo_root/.github/workflows/$workflow"
+	grep -Eq 'name: stable-reviewed-release-notes' "$repo_root/.github/workflows/$workflow"
+	grep -Eq 'if: \$\{\{ !inputs\.orchestrated' "$repo_root/.github/workflows/$workflow"
+done
 
 git init --bare -q "$test_root/remote.git"
 git clone -q "$test_root/remote.git" "$test_root/repo"

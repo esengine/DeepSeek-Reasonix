@@ -93,6 +93,21 @@ const ordinaryTurnNotice = ordinaryTurnError.items[ordinaryTurnError.items.lengt
 eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.level, "warn", "ordinary turn errors remain warnings");
 eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.text, "provider failed", "ordinary turn errors keep their diagnostic text");
 
+const recoveryPaused = reducer(readinessStarted, {
+  type: "event",
+  e: {
+    kind: "turn_done",
+    outcome: "recovery_paused",
+    err: "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+  } as WireEvent,
+});
+const recoveryNotice = recoveryPaused.items[recoveryPaused.items.length - 1];
+eq(recoveryNotice.kind === "notice" && recoveryNotice.level, "info", "recovery_paused uses informational severity");
+eq(recoveryNotice.kind === "notice" && Boolean(recoveryNotice.title), true, "recovery_paused shows a product title");
+const recoveryUser = recoveryPaused.items.find((it) => it.kind === "user");
+eq(recoveryUser?.kind === "user" && Boolean(recoveryUser.failed), false, "recovery_paused does not mark the user message as failed");
+eq(recoveryPaused.running, false, "recovery_paused frees the composer");
+
 const shellSent = reducer({ ...initialState }, { type: "user", text: "!ls", seq: 0 });
 const shellFailed = reducer(shellSent, { type: "send_failed", error: "Command failed: workspace is still starting" });
 const shellNotice = shellFailed.items[shellFailed.items.length - 1];
@@ -125,6 +140,11 @@ eq(
   /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),
   true,
   "plan approval clears the remembered plan restore intent before execution",
+);
+eq(
+  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*approve\(state\.approval!\.id, false, false, false\);\s*\}\}/.test(appSource),
+  true,
+  "exit-without-executing switches to Normal before rejecting the pending plan",
 );
 eq(
   !/exit_plan_mode[\s\S]{0,240}rememberUserIntent:\s*false/.test(appSource),

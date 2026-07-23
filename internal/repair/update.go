@@ -463,7 +463,7 @@ func allowedUpdateTargetBase(base string, primary bool) bool {
 		return primary
 	case "reasonix.exe":
 		return true
-	case "reasonix-guard", "reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe":
+	case "reasonix-guard", "reasonix-guard.exe", "reasonix-launcher.exe", "reasonix-update-helper.exe", "reasonix-cli.exe":
 		return !primary
 	default:
 		return false

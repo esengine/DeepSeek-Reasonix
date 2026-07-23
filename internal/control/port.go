@@ -162,6 +162,7 @@ type Capabilities interface {
 	RunSkill(input string) (sent string, found bool)
 	AddMCPServer(e config.PluginEntry) (int, error)
 	ConnectMCPServer(e config.PluginEntry) (int, error)
+	RegisterMCPServerOnDemand(e config.PluginEntry) (int, error)
 	ConnectConfiguredMCPServer(name string) (int, error)
 	DisconnectMCPServer(name string) bool
 	RemoveMCPServer(name string) (disconnected bool, err error)

@@ -6,23 +6,52 @@ import (
 	"unicode/utf8"
 )
 
-// taskRuntime is the single source of truth for one task.
-// Pending proposals, approval ids, and reply channels live only in the waiter
-// table so they cannot be restored as durable authorizations after restart.
+// episodeBudget is the host-owned hard-stop budget shared by every TaskID
+// (root and all sub-agents) inside one Recovery Episode. Exact-operation
+// counters remain on taskRuntime; totals and global stop live here so spawning
+// a new sub-agent cannot reset the Episode ceiling.
+type episodeBudget struct {
+	totalFailures        uint8
+	reviewRejects        uint8
+	stoppedOpRetries     uint8
+	stopped              bool
+	stopReason           StopReason
+	finalizationOffered  bool
+	finalizationConsumed bool
+}
+
+func (ep *episodeBudget) clear() {
+	if ep == nil {
+		return
+	}
+	*ep = episodeBudget{}
+}
+
+// taskRuntime holds task-local recovery evidence and exact-operation counters.
+// Episode-level totals, reviewer rejects, and hard stop live on Gate.episode.
 type taskRuntime struct {
-	failure       *activeFailure
-	reviewRejects uint8
-	guidanceSent  bool
+	episodeID string
+
+	// operationFailures counts qualifying failures per exact fingerprint.
+	operationFailures map[string]uint8
+	// stoppedOps records fingerprints that already hit the per-operation limit.
+	stoppedOps map[string]struct{}
+
+	// lastFailure is reviewer/diagnostic evidence for the most recent failure
+	// on this task. It does not itself act as a task-wide lock.
+	lastFailure *activeFailure
+
+	guidanceSent bool
 	// taskGrants are runtime-only semantic authorizations. Snapshot/Restore never
 	// serializes them, so a restart or session switch always drops the grant.
 	taskGrants     map[string]struct{}
 	taskGrantScope string
 }
 
-// activeFailure is the armed failure-recovery context for one task.
+// activeFailure is the latest failure evidence used by the reviewer and UI.
+// Per-operation counts live on taskRuntime; Episode budgets live on Gate.
 type activeFailure struct {
 	evidence      FailureEvent
-	failureCount  uint8
 	safeRetryUsed bool
 	diagnosis     []string
 }
@@ -34,7 +63,16 @@ const (
 )
 
 func (st *taskRuntime) empty() bool {
-	return st == nil || (st.failure == nil && !st.guidanceSent && st.reviewRejects == 0)
+	if st == nil {
+		return true
+	}
+	if st.lastFailure != nil || st.guidanceSent {
+		return false
+	}
+	if len(st.operationFailures) > 0 || len(st.stoppedOps) > 0 {
+		return false
+	}
+	return true
 }
 
 func (st *taskRuntime) hasTaskGrant(key string) bool {
@@ -69,53 +107,106 @@ func (st *taskRuntime) hasTaskGrants() bool {
 	return st != nil && len(st.taskGrants) > 0
 }
 
-func (st *taskRuntime) clearFailure() {
+// clearTaskRecoveryState drops task-local operation counters and evidence.
+// Episode-level totals are cleared separately on the Gate.
+func (st *taskRuntime) clearTaskRecoveryState() {
 	if st == nil {
 		return
 	}
-	st.failure = nil
-	st.reviewRejects = 0
+	st.operationFailures = nil
+	st.stoppedOps = nil
+	st.lastFailure = nil
 	st.guidanceSent = false
 }
 
-func (st *taskRuntime) failureCount() uint8 {
-	if st == nil || st.failure == nil {
+func (st *taskRuntime) ensureMaps() {
+	if st == nil {
+		return
+	}
+	if st.operationFailures == nil {
+		st.operationFailures = map[string]uint8{}
+	}
+	if st.stoppedOps == nil {
+		st.stoppedOps = map[string]struct{}{}
+	}
+}
+
+func (st *taskRuntime) operationFailureCount(fp string) uint8 {
+	if st == nil || fp == "" || st.operationFailures == nil {
 		return 0
 	}
-	return st.failure.failureCount
+	return st.operationFailures[fp]
+}
+
+func (st *taskRuntime) isOperationStopped(fp string) bool {
+	if st == nil || fp == "" {
+		return false
+	}
+	if st.stoppedOps != nil {
+		if _, ok := st.stoppedOps[fp]; ok {
+			return true
+		}
+	}
+	return st.operationFailureCount(fp) >= MaxOperationFailures
+}
+
+func (st *taskRuntime) markOperationStopped(fp string) {
+	if st == nil || fp == "" {
+		return
+	}
+	st.ensureMaps()
+	st.stoppedOps[fp] = struct{}{}
+}
+
+func (st *taskRuntime) failureCount() uint8 {
+	if st == nil {
+		return 0
+	}
+	if st.lastFailure != nil {
+		fp := strings.TrimSpace(st.lastFailure.evidence.Fingerprint)
+		if fp != "" {
+			if n := st.operationFailureCount(fp); n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 func (st *taskRuntime) safeRetryAvailable() bool {
-	if st == nil || st.failure == nil {
+	if st == nil || st.lastFailure == nil {
 		return false
 	}
-	return !st.failure.safeRetryUsed
+	return !st.lastFailure.safeRetryUsed
 }
 
 func (st *taskRuntime) diagnosisNotes() []string {
-	if st == nil || st.failure == nil {
+	if st == nil || st.lastFailure == nil {
 		return nil
 	}
-	return append([]string(nil), st.failure.diagnosis...)
+	return append([]string(nil), st.lastFailure.diagnosis...)
 }
 
 func (st *taskRuntime) evidenceCopy() *FailureEvent {
-	if st == nil || st.failure == nil {
+	if st == nil || st.lastFailure == nil {
 		return nil
 	}
-	return cloneFailureEvent(&st.failure.evidence, st.failure)
+	return cloneFailureEvent(&st.lastFailure.evidence, st.lastFailure, st)
 }
 
 // cloneFailureEvent builds a wire FailureEvent with compatibility fields
-// derived from the active failure runtime truth.
-func cloneFailureEvent(ev *FailureEvent, af *activeFailure) *FailureEvent {
+// derived from the runtime truth.
+func cloneFailureEvent(ev *FailureEvent, af *activeFailure, st *taskRuntime) *FailureEvent {
 	if ev == nil {
 		return nil
 	}
 	cp := *ev
 	cp.Args = append(json.RawMessage(nil), ev.Args...)
 	if af != nil {
-		cp.RepeatCount = int(af.failureCount)
+		fp := strings.TrimSpace(ev.Fingerprint)
+		if st != nil && fp != "" {
+			cp.RepeatCount = int(st.operationFailureCount(fp))
+		}
 		if af.safeRetryUsed {
 			cp.SafeRetryLeft = 0
 		} else {
@@ -128,18 +219,21 @@ func cloneFailureEvent(ev *FailureEvent, af *activeFailure) *FailureEvent {
 	return &cp
 }
 
+// toTaskState projects live runtime truth for debugging / Snapshot().
+// Episode-level fields are filled by the gate after this returns.
 func (st *taskRuntime) toTaskState(phase Phase) *TaskState {
 	if st == nil || st.empty() {
 		return nil
 	}
 	out := &TaskState{
 		Phase:        phase,
-		ReviewBlocks: int(st.reviewRejects),
 		TailInjected: st.guidanceSent,
+		EpisodeID:    st.episodeID,
 	}
-	if st.failure != nil {
-		out.Failure = cloneFailureEvent(&st.failure.evidence, st.failure)
-		out.ConsecutiveFails = int(st.failure.failureCount)
+	if st.lastFailure != nil {
+		out.Failure = cloneFailureEvent(&st.lastFailure.evidence, st.lastFailure, st)
+		out.LastFailure = cloneFailureEvent(&st.lastFailure.evidence, st.lastFailure, st)
+		out.ConsecutiveFails = int(st.failureCount())
 		if out.Phase == PhaseIdle {
 			out.Phase = PhaseDiagnosing
 		}
@@ -149,56 +243,59 @@ func (st *taskRuntime) toTaskState(phase Phase) *TaskState {
 	return out
 }
 
+// toPersistenceState projects only historical evidence. Active locks, Episode
+// counters, generation, and waiters never land on disk.
+func (st *taskRuntime) toPersistenceState() *TaskState {
+	if st == nil || st.lastFailure == nil {
+		return nil
+	}
+	// Evidence-only: no consecutive_fails / review_blocks as re-armable locks.
+	return &TaskState{
+		Phase:       PhaseIdle,
+		LastFailure: cloneFailureEvent(&st.lastFailure.evidence, st.lastFailure, st),
+	}
+}
+
+// taskRuntimeFromState migrates old or new snapshots into historical evidence
+// only. Counters are never re-armed so a restart cannot re-block the user.
 func taskRuntimeFromState(st *TaskState) *taskRuntime {
-	if st == nil || st.Failure == nil {
+	if st == nil {
+		return nil
+	}
+	src := st.LastFailure
+	if src == nil {
+		src = st.Failure
+	}
+	if src == nil {
 		return nil
 	}
 	af := &activeFailure{
 		evidence: FailureEvent{
-			Tool:          st.Failure.Tool,
-			ArgsSummary:   st.Failure.ArgsSummary,
-			Subject:       st.Failure.Subject,
-			ErrSummary:    st.Failure.ErrSummary,
-			OutputExcerpt: st.Failure.OutputExcerpt,
-			SourceAgent:   st.Failure.SourceAgent,
-			TaskID:        st.Failure.TaskID,
-			ReadOnly:      st.Failure.ReadOnly,
-			Verification:  st.Failure.Verification,
-			Mutates:       st.Failure.Mutates,
-			CreatedAt:     st.Failure.CreatedAt,
-			Args:          append(json.RawMessage(nil), st.Failure.Args...),
-			Fingerprint:   st.Failure.Fingerprint,
+			Tool:          src.Tool,
+			ArgsSummary:   src.ArgsSummary,
+			Subject:       src.Subject,
+			ErrSummary:    src.ErrSummary,
+			OutputExcerpt: src.OutputExcerpt,
+			SourceAgent:   src.SourceAgent,
+			TaskID:        src.TaskID,
+			TaskScopeID:   src.TaskScopeID,
+			ReadOnly:      src.ReadOnly,
+			Verification:  src.Verification,
+			Mutates:       src.Mutates,
+			CreatedAt:     src.CreatedAt,
+			Args:          append(json.RawMessage(nil), src.Args...),
+			Fingerprint:   src.Fingerprint,
 		},
-		failureCount: 1,
-		diagnosis:    append([]string(nil), st.Failure.DiagnosisNotes...),
+		// Historical evidence only — fail closed for automatic safe retry after
+		// restore so a restart cannot grant a free second attempt.
+		safeRetryUsed: true,
+		diagnosis:     append([]string(nil), src.DiagnosisNotes...),
 	}
-	switch {
-	case st.ConsecutiveFails > 0:
-		af.failureCount = clampU8(st.ConsecutiveFails)
-	case st.Failure.RepeatCount > 0:
-		af.failureCount = clampU8(st.Failure.RepeatCount)
-	}
-	// SafeRetryLeft > 0 means budget remains. Zero/missing means spent:
-	// old armed snapshots always wrote 1, and fail-closed after restart is
-	// safer than granting a second automatic retry.
-	af.safeRetryUsed = st.Failure.SafeRetryLeft <= 0
-
 	trimDiagnosis(af)
+	// Do not restore consecutive_fails / review_blocks as live locks.
 	return &taskRuntime{
-		failure:       af,
-		reviewRejects: clampU8(st.ReviewBlocks),
-		guidanceSent:  st.TailInjected,
+		lastFailure: af,
 	}
-}
-
-func clampU8(v int) uint8 {
-	if v <= 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return uint8(v)
 }
 
 func trimDiagnosis(af *activeFailure) {

@@ -43,6 +43,7 @@ func buildProjectLaunchIdentity(ctx context.Context, s Spec) (mcplaunch.ProjectL
 	}
 	switch transport {
 	case "stdio":
+		identity.Dir = stdioWorkingDir(s)
 		if strings.TrimSpace(s.Command) == "" {
 			return mcplaunch.ProjectLaunchIdentity{}, fmt.Errorf("stdio plugin %q: command is required", s.Name)
 		}
@@ -50,9 +51,6 @@ func buildProjectLaunchIdentity(ctx context.Context, s Spec) (mcplaunch.ProjectL
 		exe, _, err := resolveStdioExecutable(ctx, s, env)
 		if err != nil {
 			return mcplaunch.ProjectLaunchIdentity{}, err
-		}
-		if abs, err := filepath.Abs(exe); err == nil {
-			exe = abs
 		}
 		identity.CommandPath = exe
 		identity.CommandSHA256, err = mcplaunch.FileSHA256(exe)

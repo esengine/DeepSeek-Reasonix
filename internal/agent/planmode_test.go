@@ -242,6 +242,8 @@ func TestPlanModeCanReplacePriorExecutionTodoState(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(mustBuiltinTool(t, "todo_write"))
 	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+	recoveryGate := &recordingRecoveryGate{decision: RecoveryDecision{Allow: true}}
+	a.SetRecoveryGate(recoveryGate)
 	a.SeedTodoState([]evidence.TodoItem{{Content: "old execution step", Status: "in_progress"}})
 	a.SetPlanMode(true)
 
@@ -259,6 +261,9 @@ func TestPlanModeCanReplacePriorExecutionTodoState(t *testing.T) {
 	got := a.CanonicalTodoState()
 	if len(got) != 2 || got[0].Content != "inspect the new request" {
 		t.Fatalf("plan-mode todo state = %+v, want revised plan", got)
+	}
+	if len(recoveryGate.proposals) != 0 {
+		t.Fatalf("Plan mode sent duplicate Auto plan review proposals: %+v", recoveryGate.proposals)
 	}
 }
 

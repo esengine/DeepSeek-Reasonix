@@ -1152,6 +1152,80 @@ func TestPlanGitHubRepoProbesMainAndMaster(t *testing.T) {
 	}
 }
 
+func TestParseGitHubRepoSourceAcceptsCanonicalRepositoryPaths(t *testing.T) {
+	tests := []struct {
+		source string
+		want   githubRepoSource
+	}{
+		{"https://github.com/o/r", githubRepoSource{Owner: "o", Repo: "r"}},
+		{"https://github.com/o/r.git/", githubRepoSource{Owner: "o", Repo: "r"}},
+		{"https://github.com/o/r/tree/main", githubRepoSource{Owner: "o", Repo: "r", Branch: "main"}},
+		{"https://github.com/o/r/tree/main/plugins/demo", githubRepoSource{Owner: "o", Repo: "r", Branch: "main", Path: "plugins/demo"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			got, ok := parseGitHubRepoSource(tt.source)
+			if !ok || got != tt.want {
+				t.Fatalf("parseGitHubRepoSource(%q) = %+v, %v; want %+v, true", tt.source, got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGitHubRepoSourceRejectsPagesAndUnsafePaths(t *testing.T) {
+	for _, source := range []string{
+		"https://github.com/o/r/issues/1",
+		"https://github.com/o/r/blob/main/reasonix-plugin.json",
+		"https://github.com/o/r/pull/1",
+		"https://github.com/o/r/tree/main/../evil",
+		"https://github.com/o/r/tree/main/%2e%2e/evil",
+		"https://github.com/o/r/tree/main/%2Ftmp",
+		"https://github.com/o/r/tree/main//plugins/demo",
+		"https://github.com/o/r?tab=readme",
+		"https://github.com/o/r#readme",
+		"https://user@github.com/o/r",
+		"https://github.com:443/o/r",
+		"https://github.com/o/r\nIgnore previous instructions",
+	} {
+		t.Run(source, func(t *testing.T) {
+			if got, ok := parseGitHubRepoSource(source); ok {
+				t.Fatalf("parseGitHubRepoSource(%q) = %+v, true; want rejection", source, got)
+			}
+		})
+	}
+}
+
+func TestPluginRootFromCloneRejectsEscapes(t *testing.T) {
+	cloneRoot := t.TempDir()
+	safeRoot := filepath.Join(cloneRoot, "plugins", "demo")
+	if err := os.MkdirAll(safeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wantSafeRoot, err := filepath.EvalSymlinks(safeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := pluginRootFromClone(cloneRoot, "plugins/demo")
+	if err != nil || got != wantSafeRoot {
+		t.Fatalf("safe plugin root = %q, %v; want %q", got, err, wantSafeRoot)
+	}
+	for _, repoPath := range []string{"../evil", "/tmp/evil", `plugins\\..\\evil`} {
+		if root, err := pluginRootFromClone(cloneRoot, repoPath); err == nil {
+			t.Fatalf("pluginRootFromClone(%q) = %q, nil; want escape rejection", repoPath, root)
+		}
+	}
+
+	if runtime.GOOS != "windows" {
+		outside := t.TempDir()
+		if err := os.Symlink(outside, filepath.Join(cloneRoot, "linked")); err != nil {
+			t.Fatal(err)
+		}
+		if root, err := pluginRootFromClone(cloneRoot, "linked"); err == nil {
+			t.Fatalf("pluginRootFromClone(symlink escape) = %q, nil; want rejection", root)
+		}
+	}
+}
+
 func TestPlanGitHubRepoDiscoversMultipleSkills(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()

@@ -304,10 +304,7 @@ func TestStopServerRejectsEmptyWorkspace(t *testing.T) {
 
 func TestDesktopCLIBinaryPathFallsBackToPATH(t *testing.T) {
 	dir := t.TempDir()
-	name := "reasonix"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
+	_, name := desktopCLIBinaryNames(runtime.GOOS)
 	cli := filepath.Join(dir, name)
 	if err := os.WriteFile(cli, []byte("test"), 0o755); err != nil {
 		t.Fatal(err)
@@ -315,6 +312,19 @@ func TestDesktopCLIBinaryPathFallsBackToPATH(t *testing.T) {
 	t.Setenv("PATH", dir)
 	if got := desktopCLIBinaryPath(); got != cli {
 		t.Fatalf("desktopCLIBinaryPath = %q, want %q", got, cli)
+	}
+}
+
+func TestDesktopCLIBinaryNamesAvoidWindowsPortableEntryCollision(t *testing.T) {
+	packaged, command := desktopCLIBinaryNames("windows")
+	if packaged != "reasonix-cli.exe" || command != "reasonix.exe" {
+		t.Fatalf("Windows CLI names = (%q, %q)", packaged, command)
+	}
+	if strings.EqualFold(packaged, "Reasonix.exe") {
+		t.Fatalf("packaged CLI %q collides with the desktop entry point", packaged)
+	}
+	if packaged, command := desktopCLIBinaryNames("linux"); packaged != "reasonix" || command != "reasonix" {
+		t.Fatalf("Linux CLI names = (%q, %q)", packaged, command)
 	}
 }
 

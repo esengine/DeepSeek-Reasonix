@@ -165,10 +165,11 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		}
 		return s.err
 	}
+	completion := classifyRunCompletion(runErr)
 	if s.format == runOutputEventsJSONL {
 		s.sequence++
 		turns := s.turns
-		if turns == 0 && runErr == nil {
+		if turns == 0 && !completion.isError {
 			turns = 1
 		}
 		return s.encoder.Encode(machineRunDone{
@@ -176,28 +177,26 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 			Sequence:      s.sequence,
 			Kind:          "run_done",
 			SessionID:     sessionID,
-			OK:            runErr == nil,
+			OK:            !completion.isError,
 			DurationMS:    time.Since(started).Milliseconds(),
 			NumTurns:      turns,
 			Usage:         machineEventUsage{InputTokens: s.usage.InputTokens, OutputTokens: s.usage.OutputTokens, CacheHitTokens: s.usage.CacheReadInputTokens, CacheMissTokens: s.usage.CacheCreationInputTokens},
 		})
 	}
 	resultText := s.final
-	subtype := "success"
 	if runErr != nil {
-		subtype = "error_during_execution"
 		if resultText == "" {
 			resultText = runErr.Error()
 		}
 	}
 	turns := s.turns
-	if turns == 0 && runErr == nil {
+	if turns == 0 && !completion.isError {
 		turns = 1
 	}
 	return s.encoder.Encode(runResult{
 		Type:         "result",
-		Subtype:      subtype,
-		IsError:      runErr != nil,
+		Subtype:      completion.subtype,
+		IsError:      completion.isError,
 		DurationMS:   time.Since(started).Milliseconds(),
 		NumTurns:     turns,
 		Result:       resultText,

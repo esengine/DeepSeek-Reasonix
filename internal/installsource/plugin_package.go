@@ -504,9 +504,10 @@ func (t *installSourceTool) preparePluginSource(ctx context.Context, source, mod
 		if out, err := rev.Output(); err == nil {
 			commit = strings.TrimSpace(string(out))
 		}
-		root := tmp
-		if src.Path != "" {
-			root = filepath.Join(tmp, filepath.FromSlash(src.Path))
+		root, err := pluginRootFromClone(tmp, src.Path)
+		if err != nil {
+			_ = os.RemoveAll(tmp)
+			return "", "", func() {}, err
 		}
 		return root, commit, func() { _ = os.RemoveAll(tmp) }, nil
 	}
@@ -515,6 +516,34 @@ func (t *installSourceTool) preparePluginSource(ctx context.Context, source, mod
 		return path, "", func() {}, nil
 	}
 	return path, "", func() {}, nil
+}
+
+func pluginRootFromClone(cloneRoot, repoPath string) (string, error) {
+	cloneRoot = filepath.Clean(cloneRoot)
+	if repoPath == "" {
+		return cloneRoot, nil
+	}
+	if strings.Contains(repoPath, "\\") {
+		return "", newErr(ErrUnsupportedKind, "plugin repository path %q is not a safe relative path", repoPath)
+	}
+	rel := filepath.FromSlash(repoPath)
+	if !filepath.IsLocal(rel) {
+		return "", newErr(ErrUnsupportedKind, "plugin repository path %q escapes the cloned repository", repoPath)
+	}
+	root := filepath.Join(cloneRoot, rel)
+	resolvedClone, err := filepath.EvalSymlinks(cloneRoot)
+	if err != nil {
+		return "", newErr(ErrSourceUnreadable, "cannot resolve cloned plugin repository: %v", err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", newErr(ErrSourceUnreadable, "plugin repository path %q is not readable: %v", repoPath, err)
+	}
+	within, err := filepath.Rel(resolvedClone, resolvedRoot)
+	if err != nil || !filepath.IsLocal(within) {
+		return "", newErr(ErrUnsupportedKind, "plugin repository path %q escapes the cloned repository", repoPath)
+	}
+	return resolvedRoot, nil
 }
 
 // verifyCopiedCapabilities re-parses the installed copy and requires its

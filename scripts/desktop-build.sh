@@ -28,6 +28,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APPNAME="Reasonix"            # wails.json productName -> Reasonix.app
 BINNAME="reasonix-desktop"    # wails.json outputfilename -> linux binary name
 CLINAME="reasonix"            # bundled CLI sidecar used for remote serve upload
+WINDOWS_CLINAME="reasonix-cli" # Windows cannot store Reasonix.exe and reasonix.exe separately
 GUARDNAME="reasonix-guard"
 LAUNCHERNAME="reasonix-launcher"
 windows_resource_tool_dir=""
@@ -122,9 +123,9 @@ if [ "$os" = windows ]; then
 	GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
 		-o "build/windows/installer/$UPDATE_HELPER" ./cmd/update-helper
 	stamp_windows_executable "build/windows/installer/$UPDATE_HELPER" "Reasonix Update Helper" "reasonix-update-helper" "$UPDATE_HELPER"
-	cli_out="$ROOT/desktop/build/windows/installer/$CLINAME.exe"
+	cli_out="$ROOT/desktop/build/windows/installer/$WINDOWS_CLINAME.exe"
 	build_cli
-	stamp_windows_executable "$cli_out" "Reasonix CLI" "$CLINAME" "$CLINAME.exe"
+	stamp_windows_executable "$cli_out" "Reasonix CLI" "$WINDOWS_CLINAME" "$WINDOWS_CLINAME.exe"
 fi
 build_args=()
 [ "${DESKTOP_BUILD_CLEAN:-1}" != "0" ] && build_args+=(-clean)
@@ -253,7 +254,8 @@ windows)
 	cp "$launcher_out" "$staging/${APPNAME}.exe"
 	cp "$launcher_out" "$staging/$LAUNCHERNAME.exe"
 	cp "$guard_out" "$staging/$GUARDNAME.exe"
-	cp "build/windows/installer/$CLINAME.exe" "$staging/$CLINAME.exe"
+	cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$staging/$WINDOWS_CLINAME.exe"
+	"$ROOT/scripts/verify-windows-portable.sh" "$staging"
 	staging_win=$(cygpath -w "$staging")
 	zip_win=$(cygpath -w "$ROOT/dist/${APPNAME}-windows-${arch}.zip")
 	powershell.exe -NoProfile -Command "Compress-Archive -Force -Path '$staging_win\\*' -DestinationPath '$zip_win'"

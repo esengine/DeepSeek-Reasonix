@@ -1121,19 +1121,35 @@ async function handleCommunityAction(
     return back;
   }
   if (action === "approve") {
-    const before = await repo.bySlug(slug);
-    const row = await repo.setStatus(slug, "active", now);
-    // Emit the publish event on first approval so the feed only announces
-    // packages that actually went public.
-    if (row && before && before.status !== "active") {
-      await new EventRepo(env.REGISTRY_DB).log({
-        type: "publish",
-        packageId: row.id,
-        actorHandle: row.scope_handle,
-        summary: `published ${row.slug}@${row.latest_version}`,
-        now,
+    const expectedStatus = ["pending", "hidden", "rejected"].includes(form.expectedStatus)
+      ? form.expectedStatus
+      : "";
+    if (!form.expectedVersion || !form.expectedUpdatedAt || !expectedStatus) {
+      return new Response("Package review revision is missing. Refresh the review page and try again.", {
+        status: 409,
       });
     }
+    const row = await repo.setStatusIfCurrent(
+      slug,
+      "active",
+      form.expectedVersion,
+      form.expectedUpdatedAt,
+      expectedStatus,
+      now,
+    );
+    if (!row) {
+      return new Response("Package changed since it was reviewed. Refresh and review the latest version.", {
+        status: 409,
+      });
+    }
+    // Emit the publish event only after the reviewed revision becomes public.
+    await new EventRepo(env.REGISTRY_DB).log({
+      type: "publish",
+      packageId: row.id,
+      actorHandle: row.scope_handle,
+      summary: `published ${row.slug}@${row.latest_version}`,
+      now,
+    });
     await logAction(env, admin, "pkg_approve", slug);
     return back;
   }

@@ -45,17 +45,22 @@ func TestDecisionMatrix(t *testing.T) {
 			want: DecisionResult{Route: RouteAllow},
 		},
 		{
-			name: "pre-action high risk asks without review",
+			name: "execution risk without failure stays on permission path",
 			f:    Facts{AutoMode: true, Mutates: true, HighRisk: true},
-			want: DecisionResult{Route: RouteAsk, AskReason: AskRisk},
+			want: DecisionResult{Route: RouteAllow},
 		},
 		{
-			name: "high risk wins over active failure reviewer path",
+			name: "execution risk does not replace failure reviewer path",
 			f: Facts{
 				AutoMode: true, Mutates: true, HighRisk: true,
 				HasActiveFailure: true, FailureCount: 1,
 			},
-			want: DecisionResult{Route: RouteAsk, AskReason: AskRisk},
+			want: DecisionResult{Route: RouteReview},
+		},
+		{
+			name: "structured plan transition goes to reviewer without failure",
+			f:    Facts{AutoMode: true, ReadOnly: true, PlanTransition: true},
+			want: DecisionResult{Route: RouteReview},
 		},
 		{
 			name: "first safe verification retry allows and consumes budget",
@@ -90,12 +95,20 @@ func TestDecisionMatrix(t *testing.T) {
 			want: DecisionResult{Route: RouteReview},
 		},
 		{
-			name: "third failure during recovery asks",
+			name: "third repeat of the same operation stops",
+			f: Facts{
+				AutoMode: true, Mutates: true,
+				HasActiveFailure: true, FailureCount: 3, SameFailedOperation: true,
+			},
+			want: DecisionResult{Route: RouteStop, StopReason: StopReasonOperationFailures},
+		},
+		{
+			name: "different operation after three failures stays recoverable",
 			f: Facts{
 				AutoMode: true, Mutates: true,
 				HasActiveFailure: true, FailureCount: 3,
 			},
-			want: DecisionResult{Route: RouteAsk, AskReason: AskRepeat},
+			want: DecisionResult{Route: RouteReview},
 		},
 		{
 			name: "ambiguous recovery mutation goes to reviewer",
@@ -129,12 +142,27 @@ func TestDecisionMatrix(t *testing.T) {
 	}
 }
 
-func TestRuleRationaleMatchesThreeFailureThreshold(t *testing.T) {
-	if got := ruleRationale(ChangeRisk, 2); strings.Contains(got, "failure") {
-		t.Fatalf("second failure rationale escalated early: %q", got)
+func TestToEventApprovalCarriesPlanTransitionForDecisionSurfaces(t *testing.T) {
+	approval := ToEventApproval("plan-1", PendingProposal{
+		Tool:       "todo_write",
+		Subject:    "Update the active execution plan",
+		ChangeKind: ChangeScope,
+		Rationale:  "choose the public API direction",
+		PlanBefore: "1. Keep API [in_progress]",
+		PlanAfter:  "1. Replace API [in_progress]",
+	}, nil)
+	if approval.Recovery == nil {
+		t.Fatal("plan transition missing recovery payload")
 	}
-	if got := ruleRationale(ChangeRisk, 3); !strings.Contains(got, "three consecutive recovery failures") {
-		t.Fatalf("third failure rationale = %q", got)
+	if approval.Recovery.PlanBefore != "1. Keep API [in_progress]" || approval.Recovery.PlanAfter != "1. Replace API [in_progress]" {
+		t.Fatalf("plan transition payload = %+v", approval.Recovery)
+	}
+}
+
+func TestRepeatedFailureStopMessageDoesNotAskForRiskApproval(t *testing.T) {
+	got := repeatedFailureStopMessage(3, Proposal{Tool: "bash", Subject: "go test ./..."})
+	if !strings.Contains(got, "after 3") || !strings.Contains(got, "go test ./...") || !strings.Contains(got, "other operations remain available") {
+		t.Fatalf("stop message = %q", got)
 	}
 }
 
@@ -199,12 +227,12 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("pre-action hard boundary prompts without reviewer", func(t *testing.T) {
+	t.Run("execution safety boundary stays on permission path", func(t *testing.T) {
 		got := run(t, nil, Proposal{
 			Tool: "bash", Mutates: true, Subject: "git push origin feature",
 			Args: json.RawMessage(`{"command":"git push origin feature"}`),
 		}, nil)
-		if !got.allow || !got.prompted || got.reviews != 0 {
+		if !got.allow || got.prompted || got.reviews != 0 {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -276,19 +304,35 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("third recovery failure prompts without reviewer", func(t *testing.T) {
+	t.Run("third repeated operation stops without prompting", func(t *testing.T) {
 		got := run(t, func(g *Gate) {
 			for i := 0; i < 3; i++ {
 				g.ObserveResult(context.Background(), Observation{
 					Tool: "write_file", Mutates: true, Subject: "a.go", ErrSummary: "fail",
-					Args: json.RawMessage(`{"path":"a.go"}`),
+					Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
 				})
 			}
 		}, Proposal{
 			Tool: "write_file", Mutates: true, Subject: "a.go",
 			Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
 		}, nil)
-		if !got.allow || !got.prompted || got.reviews != 0 {
+		if got.allow || got.prompted || got.reviews != 0 || !got.blocked {
+			t.Fatalf("got %+v", got)
+		}
+	})
+	t.Run("different edit after three verification failures stays automatic", func(t *testing.T) {
+		got := run(t, func(g *Gate) {
+			for i := 0; i < 3; i++ {
+				g.ObserveResult(context.Background(), Observation{
+					Tool: "bash", Verification: true, Subject: "go test ./...", ErrSummary: "fail",
+					Args: json.RawMessage(`{"command":"go test ./..."}`),
+				})
+			}
+		}, Proposal{
+			Tool: "write_file", Mutates: true, Subject: "a.go",
+			Args: json.RawMessage(`{"path":"a.go","content":"fix"}`),
+		}, nil)
+		if !got.allow || got.prompted || got.reviews != 1 || got.blocked {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -320,6 +364,38 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
+	t.Run("reviewer material plan change prompts immediately", func(t *testing.T) {
+		for _, kind := range []ChangeKind{ChangeStrategy, ChangeScope} {
+			t.Run(string(kind), func(t *testing.T) {
+				got := run(t, func(g *Gate) {
+					g.ObserveResult(context.Background(), Observation{
+						Tool: "bash", Verification: true, ErrSummary: "fail",
+						Args: json.RawMessage(`{"command":"go test"}`),
+					})
+				}, Proposal{
+					Tool: "write_file", Mutates: true, Subject: "adopt replacement plan",
+					Args: json.RawMessage(`{"path":"b.go","content":"x"}`),
+				}, staticReviewer{ReviewVerdict{
+					Outcome: ReviewConfirm, ChangeKind: kind, Rationale: "the task now needs a user-owned plan choice",
+				}})
+				if !got.allow || !got.prompted || got.reviews != 1 || got.blocked {
+					t.Fatalf("got %+v", got)
+				}
+			})
+		}
+	})
+	t.Run("normal execution plan transition prompts immediately", func(t *testing.T) {
+		got := run(t, nil, Proposal{
+			Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+			PlanBefore: "1. Keep current API [in_progress]",
+			PlanAfter:  "1. Replace the public API [in_progress]",
+		}, staticReviewer{ReviewVerdict{
+			Outcome: ReviewConfirm, ChangeKind: ChangeStrategy, Rationale: "public API direction belongs to the user",
+		}})
+		if !got.allow || !got.prompted || got.reviews != 1 || got.blocked {
+			t.Fatalf("got %+v", got)
+		}
+	})
 	t.Run("reviewer reject returns to agent without prompt", func(t *testing.T) {
 		got := run(t, func(g *Gate) {
 			g.ObserveResult(context.Background(), Observation{
@@ -334,7 +410,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("reviewer third reject escalates to prompt", func(t *testing.T) {
+	t.Run("reviewer third reject stops without prompt", func(t *testing.T) {
 		var reviews atomic.Int32
 		var prompts int
 		g := NewGate(Options{
@@ -361,8 +437,8 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			}
 		}
 		dec, err := g.BeforeMutation(context.Background(), prop)
-		if err != nil || !dec.Allow || prompts != 1 || reviews.Load() != 3 {
-			t.Fatalf("escalation = %+v %v prompts=%d reviews=%d", dec, err, prompts, reviews.Load())
+		if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn || prompts != 0 || reviews.Load() != 3 || !strings.Contains(dec.Message, "paused this turn") {
+			t.Fatalf("stop = %+v %v prompts=%d reviews=%d", dec, err, prompts, reviews.Load())
 		}
 	})
 	t.Run("reviewer error keeps low risk work automatic", func(t *testing.T) {
@@ -400,6 +476,17 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			t.Fatalf("post-error reject = %+v %v", dec, err)
 		}
 	})
+	t.Run("reviewer error asks about structural plan transition", func(t *testing.T) {
+		got := run(t, nil, Proposal{
+			Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+			PlanBefore: "1. Existing [in_progress]", PlanAfter: "1. Replacement [in_progress]",
+		}, reviewerFunc(func(context.Context, *FailureEvent, []string, Proposal, string) (ReviewVerdict, error) {
+			return ReviewVerdict{}, errors.New("timeout")
+		}))
+		if !got.allow || !got.prompted || got.reviews != 1 {
+			t.Fatalf("got %+v", got)
+		}
+	})
 	t.Run("bounded strategy and scope changes may continue", func(t *testing.T) {
 		for _, kind := range []ChangeKind{ChangeStrategy, ChangeScope} {
 			t.Run(string(kind), func(t *testing.T) {
@@ -434,13 +521,13 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			})
 		}
 	})
-	t.Run("headless needs confirm fails closed without wait", func(t *testing.T) {
+	t.Run("headless execution risk stays on permission path", func(t *testing.T) {
 		g := NewGate(Options{Headless: true})
 		dec, err := g.BeforeMutation(context.Background(), Proposal{
 			Tool: "bash", Mutates: true, Subject: "git push origin feature",
 			Args: json.RawMessage(`{"command":"git push origin feature"}`),
 		})
-		if err != nil || dec.Allow || !dec.Blocked {
+		if err != nil || !dec.Allow || dec.Blocked {
 			t.Fatalf("got %+v %v", dec, err)
 		}
 	})
@@ -460,18 +547,25 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 	})
 }
 
-func TestChangeKindForAsk(t *testing.T) {
-	if got := ChangeKindForAsk(AskRisk); got != ChangeRisk {
-		t.Fatalf("risk = %q", got)
+func TestReviewerPlanDecisionOnlyAcceptsExplicitMaterialChange(t *testing.T) {
+	tests := []struct {
+		name string
+		v    ReviewVerdict
+		want bool
+	}{
+		{name: "strategy confirm", v: ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeStrategy}, want: true},
+		{name: "scope confirm", v: ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeScope}, want: true},
+		{name: "bounded strategy continues", v: ReviewVerdict{Outcome: ReviewContinue, ChangeKind: ChangeStrategy}},
+		{name: "uncertain remains self-correction", v: ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeUncertain}},
+		{name: "risk stays on risk path", v: ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeRisk}},
+		{name: "same strategy confirm", v: ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeSameStrategy}},
 	}
-	if got := ChangeKindForAsk(AskScope); got != ChangeScope {
-		t.Fatalf("scope = %q", got)
-	}
-	if got := ChangeKindForAsk(AskStrategy); got != ChangeStrategy {
-		t.Fatalf("strategy = %q", got)
-	}
-	if got := ChangeKindForAsk(AskRepeat); got != ChangeRisk {
-		t.Fatalf("repeat = %q", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reviewerPlanDecision(tc.v); got != tc.want {
+				t.Fatalf("reviewerPlanDecision(%+v) = %v, want %v", tc.v, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -1,7 +1,8 @@
 // Run: tsx src/__tests__/edit-replay.test.ts
 
-import { replaySubmitText } from "../lib/editReplay";
+import { replaySubmitText, replaySubmitTextPreservingSelectedContext } from "../lib/editReplay";
 import { invocationSegmentsFromMessage, replaceInvocationTextRange, serializeInvocationSubmit, type ComposerInvocation } from "../lib/invocationDisplay";
+import { formatSelectedTextContext, formatSelectionLabel, stripSelectionLabels } from "../lib/selectedTextContext";
 
 let passed = 0;
 let failed = 0;
@@ -34,6 +35,23 @@ eq(
   replaySubmitText(undefined, "visible prompt", "updated prompt", "updated prompt"),
   "updated prompt",
   "messages without hidden submit context use the rebuilt submit text",
+);
+
+const selectedReferences = [{ id: "chat-1", text: "selected assistant response" }];
+const selectedLabel = formatSelectionLabel(selectedReferences[0]);
+const selectedContext = formatSelectedTextContext(selectedReferences);
+const selectedDisplay = `visible prompt ${selectedLabel}`;
+const selectedEditableDisplay = stripSelectionLabels(selectedDisplay, selectedReferences);
+const replayedSelectedEdit = replaySubmitTextPreservingSelectedContext(
+  `visible prompt\n\n${selectedContext}`,
+  selectedEditableDisplay,
+  "updated prompt",
+  "updated prompt",
+);
+eq(
+  replayedSelectedEdit,
+  `updated prompt\n\n${selectedContext}`,
+  "editing a selected-context message preserves the quoted context suffix without submitting its display label",
 );
 
 eq(

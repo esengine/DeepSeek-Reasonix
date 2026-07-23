@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
@@ -17,8 +16,8 @@ import (
 )
 
 // End-to-end: scripted provider fails verification, runs read-only diagnosis,
-// then a remote-write boundary waits for Continue before executing.
-// Also verifies recovery sidecar persistence and content-free metrics.
+// then performs an external write without turning execution risk into a user
+// decision. Also verifies recovery sidecar persistence and metrics.
 func TestRecoveryCheckpointScriptedE2E(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
@@ -48,30 +47,6 @@ func TestRecoveryCheckpointScriptedE2E(t *testing.T) {
 	c.SetToolApprovalMode(ToolApprovalAuto)
 	c.EnableInteractiveApproval()
 
-	go func() {
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			c.mu.Lock()
-			gate := c.recoveryGate
-			c.mu.Unlock()
-			if gate == nil {
-				time.Sleep(5 * time.Millisecond)
-				continue
-			}
-			for _, st := range gate.Snapshot().Tasks {
-				if st != nil && st.ApprovalID != "" {
-					// Card visible: only the failed verifier has executed.
-					if bash.runs != 1 {
-						return
-					}
-					_ = c.ResolveRecovery(st.ApprovalID, agent.RecoveryActionContinue, "")
-					return
-				}
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
-	}()
-
 	if err := c.Run(context.Background(), "test then fix"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -80,7 +55,7 @@ func TestRecoveryCheckpointScriptedE2E(t *testing.T) {
 		t.Fatalf("expected read-only diagnosis, runs=%d", read.runs)
 	}
 	if bash.runs != 2 {
-		t.Fatalf("bash runs = %d, want failed verification plus confirmed push", bash.runs)
+		t.Fatalf("bash runs = %d, want failed verification plus automatic push", bash.runs)
 	}
 
 	// Sidecar persistence (write a synthetic session path under temp dir).
@@ -105,11 +80,11 @@ func TestRecoveryCheckpointScriptedE2E(t *testing.T) {
 	}
 
 	m := c.RecoveryMetrics()
-	if m.FailureEvents == 0 || m.HumanPrompts == 0 || m.HumanContinues == 0 {
+	if m.FailureEvents == 0 || m.HumanPrompts != 0 || m.HumanContinues != 0 {
 		t.Fatalf("metrics = %+v", m)
 	}
 	delta := c.DrainRecoveryMetrics()
-	if delta.FailureEvents == 0 || delta.HumanPrompts == 0 || delta.HumanContinues == 0 {
+	if delta.FailureEvents == 0 || delta.HumanPrompts != 0 || delta.HumanContinues != 0 {
 		t.Fatalf("drained metrics = %+v", delta)
 	}
 	if next := c.DrainRecoveryMetrics(); next != (recovery.Metrics{}) {

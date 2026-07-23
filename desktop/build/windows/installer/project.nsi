@@ -93,7 +93,7 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 !define REASONIX_UPDATE_HELPER "reasonix-update-helper.exe"
 !define REASONIX_GUARD "reasonix-guard.exe"
 !define REASONIX_LAUNCHER "reasonix-launcher.exe"
-!define REASONIX_CLI "reasonix.exe"
+!define REASONIX_CLI "reasonix-cli.exe"
 !define REASONIX_PORTABLE_ENTRY "Reasonix.exe"
 !define REASONIX_UNLOCK_RETRIES 60
 Var ReasonixUpdateMode

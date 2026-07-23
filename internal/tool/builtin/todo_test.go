@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/tool"
 )
 
 func TestTodoWriteAcceptsLevels(t *testing.T) {
@@ -118,6 +119,33 @@ func TestTodoWriteRejectsDroppingCurrentTodo(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "cannot be removed or replaced") {
 			t.Fatalf("dropping current todo with %s should be rejected: %v", args, err)
 		}
+	}
+}
+
+func TestTodoWriteApprovedPlanReplacementPreservesCompletedHistory(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Inspect environment", Status: "completed"},
+			{Content: "Implement parser", Status: "in_progress"},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	ctx = tool.WithPlanReplacementAuthorization(ctx)
+
+	valid := json.RawMessage(`{"todos":[
+		{"content":"Inspect environment","status":"completed"},
+		{"content":"Replace parser architecture","status":"in_progress"}
+	]}`)
+	if _, err := (todoWrite{}).Execute(ctx, valid); err != nil {
+		t.Fatalf("approved plan replacement should succeed: %v", err)
+	}
+
+	dropsHistory := json.RawMessage(`{"todos":[{"content":"Replace parser architecture","status":"in_progress"}]}`)
+	if _, err := (todoWrite{}).Execute(ctx, dropsHistory); err == nil || !strings.Contains(err.Error(), "completed task history") {
+		t.Fatalf("approved replacement dropped completed history: %v", err)
 	}
 }
 

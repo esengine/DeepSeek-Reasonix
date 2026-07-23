@@ -3,9 +3,69 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func writePortableFixture(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifyWindowsPortableRejectsCaseCollisionsAndCLIOverwrite(t *testing.T) {
+	verify := filepath.Join("..", "scripts", "verify-windows-portable.sh")
+	good := t.TempDir()
+	for _, name := range []string{
+		"reasonix-desktop.exe",
+		"reasonix-guard.exe",
+		"reasonix-update-helper.exe",
+	} {
+		writePortableFixture(t, good, name, name)
+	}
+	writePortableFixture(t, good, "Reasonix.exe", "launcher")
+	writePortableFixture(t, good, "reasonix-launcher.exe", "launcher")
+	writePortableFixture(t, good, "reasonix-cli.exe", "cli")
+	if out, err := exec.Command("bash", verify, good).CombinedOutput(); err != nil {
+		t.Fatalf("valid portable fixture failed: %v\n%s", err, out)
+	}
+
+	overwritten := t.TempDir()
+	for _, name := range []string{
+		"reasonix-desktop.exe",
+		"reasonix-guard.exe",
+		"reasonix-update-helper.exe",
+	} {
+		writePortableFixture(t, overwritten, name, name)
+	}
+	writePortableFixture(t, overwritten, "Reasonix.exe", "cli")
+	writePortableFixture(t, overwritten, "reasonix-launcher.exe", "launcher")
+	writePortableFixture(t, overwritten, "reasonix-cli.exe", "cli")
+	if out, err := exec.Command("bash", verify, overwritten).CombinedOutput(); err == nil || !strings.Contains(string(out), "not the packaged GUI launcher") {
+		t.Fatalf("overwritten launcher result = %v, output %q", err, out)
+	}
+
+	// A case-sensitive test filesystem can represent the exact source-level
+	// mistake that NTFS collapses into one overwritten file. Either filesystem
+	// behavior must be rejected by the verifier.
+	collision := t.TempDir()
+	writePortableFixture(t, collision, "Reasonix.exe", "launcher")
+	writePortableFixture(t, collision, "reasonix.exe", "cli")
+	entries, err := os.ReadDir(collision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, verifyErr := exec.Command("bash", verify, collision).CombinedOutput()
+	if verifyErr == nil {
+		t.Fatal("case-only portable entry names were accepted")
+	}
+	if len(entries) == 2 && !strings.Contains(string(out), "collide case-insensitively") {
+		t.Fatalf("case-collision output = %q", out)
+	}
+}
 
 func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	buildData, err := os.ReadFile("../scripts/desktop-build.sh")
@@ -15,6 +75,7 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	build := string(buildData)
 	for _, want := range []string{
 		`CLINAME="reasonix"`,
+		`WINDOWS_CLINAME="reasonix-cli"`,
 		`./cmd/reasonix`,
 		`cp "$guard_out" "$app/Contents/MacOS/$GUARDNAME"`,
 		`cp "$cli_out" "$app/Contents/MacOS/$CLINAME"`,
@@ -28,7 +89,8 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER" "Reasonix Update Helper"`,
 		`cp "$launcher_out" "$staging/${APPNAME}.exe"`,
 		`cp "$guard_out" "$staging/$GUARDNAME.exe"`,
-		`cp "build/windows/installer/$CLINAME.exe" "$staging/$CLINAME.exe"`,
+		`cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$staging/$WINDOWS_CLINAME.exe"`,
+		`"$ROOT/scripts/verify-windows-portable.sh" "$staging"`,
 		`"$BINNAME" "$GUARDNAME" "$CLINAME"`,
 	} {
 		if !strings.Contains(build, want) {
@@ -42,6 +104,9 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	portableCopy := strings.Index(build, `cp "$launcher_out" "$staging/${APPNAME}.exe"`)
 	if launcherStamp < 0 || portableCopy < 0 || launcherStamp > portableCopy {
 		t.Fatalf("portable Reasonix.exe must copy the already-stamped launcher (stamp=%d copy=%d)", launcherStamp, portableCopy)
+	}
+	if strings.Contains(build, `"$staging/$CLINAME.exe"`) {
+		t.Fatal("Windows package must not collide reasonix.exe with the Reasonix.exe launcher")
 	}
 
 	workflowData, err := os.ReadFile("../.github/workflows/release-desktop.yml")

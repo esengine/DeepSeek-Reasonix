@@ -131,6 +131,64 @@ func TestGoalReadinessFailureBlocksAndKeepsDeliveryScope(t *testing.T) {
 	}
 }
 
+type recoveryPauseRunner struct {
+	scopes []agent.DeliveryExecutionScope
+	calls  int
+}
+
+func (r *recoveryPauseRunner) Run(ctx context.Context, _ string) error {
+	r.calls++
+	if scope, ok := agent.DeliveryExecutionScopeFromContext(ctx); ok {
+		r.scopes = append(r.scopes, scope)
+	}
+	return &agent.RecoveryPauseError{
+		Message:    "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+		StopReason: "episode_failures",
+	}
+}
+
+func TestRecoveryPauseKeepsGoalRunningAndDeliveryScope(t *testing.T) {
+	runner := &recoveryPauseRunner{}
+	c := New(Options{Runner: runner})
+	c.SetGoal("ship the integration")
+	if id, task, ok := c.goals.deliveryScope(); !ok || task != "ship the integration" {
+		t.Fatalf("initial scope = (%q, %q, %v)", id, task, ok)
+	}
+	scopeID, _, _ := c.goals.deliveryScope()
+
+	err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "")
+	var pause *agent.RecoveryPauseError
+	if !errors.As(err, &pause) {
+		t.Fatalf("run err = %v, want RecoveryPauseError", err)
+	}
+	// Recovery pause ends auto-continue only; Goal must stay running so the next
+	// ordinary "continue" keeps the same Goal prompt and delivery scope.
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus = %q, want running after recovery pause", got)
+	}
+	if id, task, ok := c.goals.deliveryScope(); !ok || id != scopeID || task != "ship the integration" {
+		t.Fatalf("scope after pause = (%q, %q, %v), want preserved running Goal", id, task, ok)
+	}
+	if len(runner.scopes) != 1 || runner.scopes[0].ID != scopeID {
+		t.Fatalf("delivery scopes = %+v, want one call with scope %q", runner.scopes, scopeID)
+	}
+
+	// A follow-up ordinary Goal turn reuses the same delivery scope without ResumeGoal.
+	err = newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "continue", "continue", "")
+	if !errors.As(err, &pause) {
+		t.Fatalf("follow-up err = %v, want RecoveryPauseError again", err)
+	}
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus after continue = %q, want running", got)
+	}
+	if id, task, ok := c.goals.deliveryScope(); !ok || id != scopeID || task != "ship the integration" {
+		t.Fatalf("scope after continue = (%q, %q, %v), want same Goal", id, task, ok)
+	}
+	if runner.calls != 2 || len(runner.scopes) != 2 || runner.scopes[1].ID != scopeID {
+		t.Fatalf("follow-up scopes = %+v calls=%d, want same delivery scope reused", runner.scopes, runner.calls)
+	}
+}
+
 func (r *recordingSessionRunner) Run(ctx context.Context, input string) error {
 	r.inputs = append(r.inputs, input)
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})

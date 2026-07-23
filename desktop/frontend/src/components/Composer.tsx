@@ -36,6 +36,8 @@ import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { Markdown } from "./Markdown";
+import { CodeViewer } from "./CodeViewer";
 import { ContextWindowRing } from "./ContextWindowRing";
 import { ImageViewer } from "./ImageViewer";
 import {
@@ -50,6 +52,8 @@ import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToke
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import {
   formatSelectedTextContext,
+  formatSelectionLabel,
+  languageFor,
   normalizeSelectedText,
   selectedTextSnippet,
   type SelectedTextInsertRequest,
@@ -1677,6 +1681,7 @@ export function Composer({
       const displayRefs = [
         ...currentWorkspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
         ...orderedAttachments.map(formatAttachmentDisplayReference),
+        ...selectedTextRefsRef.current.map(formatSelectionLabel),
       ].join(" ");
       const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
       // PR-B: when past:chats refs are attached, prepend their formatted transcript
@@ -3480,7 +3485,9 @@ export function Composer({
             <ComposerContextCard
               key={reference.id}
               variant="selection"
-              tooltipLabel={reference.text}
+              tooltipLabel={reference.path
+                ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
+                : <Markdown text={reference.text} />}
               removeLabel={t("composer.removeSelectedText")}
               onRemove={() => {
                 const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);

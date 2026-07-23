@@ -80,6 +80,7 @@ import { ExternalOpener } from "./components/ExternalOpener";
 import { parseTodos } from "./lib/tools";
 import {
   dismissedTodoKeyForScope,
+  resolveTodoPanelTodos,
   scopedTodoBatchKey,
   scopedTodoDismissalKey,
   shouldShowTodoPanel,
@@ -106,6 +107,7 @@ import {
 } from "./lib/types";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
+import { workspaceTreeVisitId } from "./lib/workspaceTreeMemory";
 import {
   composerProfileFromMeta,
   composerProfileFromTab,
@@ -1546,6 +1548,9 @@ export default function App() {
       ? planRevisionInsertRequest.request
       : null;
   const composerInsertRequest = activeTabId ? composerInsertRequestsByTab[activeTabId] ?? null : null;
+  const handleRevisionActiveChange = useCallback((active: boolean) => {
+    setWorkspaceInsertTarget(active ? "planRevision" : "composer");
+  }, []);
   const selectedTextRequest = activeTabId ? selectedTextRequestsByTab[activeTabId] ?? null : null;
   const prefillSubagentCommand = useCallback((command: string) => {
     if (!activeTabId) return;
@@ -1565,6 +1570,14 @@ export default function App() {
     state.sessionGen,
     workspaceControllerEpoch,
   ].join("\u0000");
+  // A topic may contain multiple saved sessions; the concrete session path is
+  // the runtime conversation identity, with topic/tab ids only as fallbacks.
+  const workspaceTreeMemoryKey = [
+    activeTab?.scope ?? "",
+    activeTab?.workspaceRoot ?? state.meta?.cwd ?? "",
+    activeTab?.sessionPath || state.meta?.sessionPath || activeTab?.topicId || activeTabId || "",
+  ].join("\u0000");
+  const workspaceTreeMemoryVisitId = workspaceTreeVisitId(workspaceTreeMemoryKey);
   const sidebarImDetailConnection = useMemo(
     () => sidebarImConnections.find((connection) => connection.id === sidebarImDetailConnectionId) ?? null,
     [sidebarImConnections, sidebarImDetailConnectionId],
@@ -1856,7 +1869,11 @@ export default function App() {
     return null;
   }, [state.items]);
   const todoItem = todoEntry?.item ?? null;
-  const todos = useMemo(() => (todoItem ? parseTodos(todoItem.args) : []), [todoItem]);
+  const metaTodos = state.meta?.canonicalTodos;
+  const todos = useMemo(
+    () => resolveTodoPanelTodos(metaTodos, todoItem ? parseTodos(todoItem.args) : []),
+    [metaTodos, todoItem],
+  );
   const [dismissedTodoKeys, setDismissedTodoKeys] = useState<Set<string>>(loadDismissedTodoKeys);
   const todoKey = useMemo(() => todoDismissalKey(todos), [todos]);
   const todoBatch = useMemo(() => todoBatchKey(todos), [todos]);
@@ -4198,7 +4215,7 @@ export default function App() {
                 tabId={activeTabId}
                 workspaceScopeKey={workspaceScopeKey}
                 insertRequest={activePlanRevisionInsertRequest}
-                onRevisionActiveChange={(active) => setWorkspaceInsertTarget(active ? "planRevision" : "composer")}
+                onRevisionActiveChange={handleRevisionActiveChange}
                 onAnswer={async (allow, session, persist) => {
                   // Approving an exit_plan_mode plan leaves plan mode; await the
                   // mode switch before sending the approval so the controller
@@ -4441,6 +4458,8 @@ export default function App() {
                   tabId={activeTabId}
                   cwd={state.meta?.cwd}
                   workspaceScopeKey={workspaceScopeKey}
+                  workspaceMemoryKey={workspaceTreeMemoryKey}
+                  workspaceMemoryVisitId={workspaceTreeMemoryVisitId}
                   maximized={workspacePanelMaximized}
                   panelWidth={workspacePanelRenderWidth}
                   onClose={() => setWorkspacePanel(false)}

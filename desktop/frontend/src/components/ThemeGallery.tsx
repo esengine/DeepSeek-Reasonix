@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, Check, CircleHelp, Copy, Download, ImagePlus, MoreHorizontal, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -878,6 +879,14 @@ function ThemeEditorInline({
   const { showToast } = useToast();
   const [previewMode, setPreviewMode] = useState<"light" | "dark">("dark");
   const [previewScene, setPreviewScene] = useState<"home" | "task">("home");
+  const titleId = useId();
+  const editorRef = useRef<HTMLDivElement>(null);
+  const initialFocusRef = useRef<HTMLInputElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const busyRef = useRef(busy);
+  const onCancelRef = useRef(onCancel);
+  busyRef.current = busy;
+  onCancelRef.current = onCancel;
 
   const homeUrl = state.backgroundDataUrl || state.existingBackgroundUrl;
   const taskUrl = state.taskBackgroundDataUrl || state.existingTaskBackgroundUrl;
@@ -902,6 +911,46 @@ function ThemeEditorInline({
   }, [draft]);
 
   useEffect(() => () => cancelThemePreview(), []);
+
+  useLayoutEffect(() => {
+    restoreFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const initialFocus = initialFocusRef.current && !initialFocusRef.current.disabled
+      ? initialFocusRef.current
+      : editorRef.current?.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), button:not([disabled])');
+    (initialFocus || editorRef.current)?.focus();
+    return () => {
+      if (restoreFocusRef.current?.isConnected) restoreFocusRef.current.focus();
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!busyRef.current) onCancelRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        editorRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) || [],
+      ).filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => document.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, []);
 
   const setToken = (key: string, value: string) => {
     const next = {
@@ -948,12 +997,22 @@ function ThemeEditorInline({
     return out;
   }, [state.tokens]);
 
-  return (
-    <div className="theme-gallery__editor-overlay" role="dialog" aria-modal="true">
-      <div className="theme-editor theme-gallery__editor">
+  const appLayoutClass = ["app--classic", "app--workbench", "app--creation"]
+    .find((className) => document.querySelector(`.${className}`)) || "";
+
+  return createPortal(
+    <div className="theme-gallery__editor-overlay">
+      <div
+        ref={editorRef}
+        className={`theme-editor theme-gallery__editor${appLayoutClass ? ` ${appLayoutClass}` : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
         <header className="theme-editor__header">
           <div>
-            <strong>{state.mode === "create" ? t("settings.themeLibrary.editorCreate") : t("settings.themeLibrary.editorEdit")}</strong>
+            <strong id={titleId}>{state.mode === "create" ? t("settings.themeLibrary.editorCreate") : t("settings.themeLibrary.editorEdit")}</strong>
             <p>{t("settings.themeEditor.subtitle")}</p>
           </div>
           <button type="button" className="btn btn--icon" aria-label={t("common.close")} disabled={busy} onClick={onCancel}>
@@ -966,7 +1025,7 @@ function ThemeEditorInline({
             <section className="theme-editor__section">
               <h3>{t("settings.themeEditor.metadata")}</h3>
               <div className="theme-editor__fields theme-editor__fields--grid">
-                <label><span>{t("settings.themeLibrary.fieldId")}</span><input value={state.id} disabled={state.mode === "edit" || busy} onChange={(e) => onChange({ id: e.target.value })} /></label>
+                <label><span>{t("settings.themeLibrary.fieldId")}</span><input ref={initialFocusRef} value={state.id} disabled={state.mode === "edit" || busy} onChange={(e) => onChange({ id: e.target.value })} /></label>
                 <label><span>{t("settings.themeLibrary.fieldName")}</span><input value={state.name} disabled={busy} onChange={(e) => onChange({ name: e.target.value })} /></label>
                 <label><span>{t("settings.themeLibrary.fieldAuthor")}</span><input value={state.author} disabled={busy} onChange={(e) => onChange({ author: e.target.value })} /></label>
                 <label><span>{t("settings.themeEditor.license")}</span><input value={state.license} disabled={busy} placeholder="MIT" onChange={(e) => onChange({ license: e.target.value })} /></label>
@@ -1106,7 +1165,8 @@ function ThemeEditorInline({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

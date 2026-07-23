@@ -11,20 +11,26 @@ import (
 	"time"
 )
 
-func TestHasApprovalIncludesWaiterOnlyHighRisk(t *testing.T) {
-	// Pre-action high risk parks a waiter without arming taskRuntime.
+func TestHasApprovalIncludesWaiterOnlyPlanTransition(t *testing.T) {
+	// A normal-execution plan transition parks a waiter without arming failure
+	// state. Snapshot must not be required for legacy Approve routing.
 	// Snapshot must not be required for legacy Approve routing.
-	g := NewGate(Options{Mode: func() string { return "auto" }})
+	g := NewGate(Options{
+		Mode: func() string { return "auto" },
+		Reviewer: staticReviewer{ReviewVerdict{
+			Outcome: ReviewConfirm, ChangeKind: ChangeStrategy, Rationale: "user-owned architecture choice",
+		}},
+	})
 	done := make(chan Decision, 1)
 	g.opts.EmitPrompt = func(_ context.Context, taskID string, pending PendingProposal, failure *FailureEvent) (string, error) {
 		if failure != nil {
-			t.Fatalf("pre-action high risk should not carry failure: %+v", failure)
+			t.Fatalf("normal plan transition should not carry failure: %+v", failure)
 		}
-		if pending.ChangeKind != ChangeRisk {
+		if pending.ChangeKind != ChangeStrategy {
 			t.Fatalf("change kind = %q", pending.ChangeKind)
 		}
-		g.BindApprovalID(taskID, "risk-only")
-		if !g.HasApproval("risk-only") {
+		g.BindApprovalID(taskID, "plan-only")
+		if !g.HasApproval("plan-only") {
 			t.Fatal("HasApproval missing waiter-only recovery card")
 		}
 		// Snapshot has no taskRuntime (no failure), so ApprovalID is invisible.
@@ -36,16 +42,16 @@ func TestHasApprovalIncludesWaiterOnlyHighRisk(t *testing.T) {
 		go func() {
 			// Resolve via live waiter path after a short delay.
 			time.Sleep(5 * time.Millisecond)
-			if err := g.Resolve("risk-only", ActionContinue, ""); err != nil {
+			if err := g.Resolve("plan-only", ActionContinue, ""); err != nil {
 				t.Errorf("Resolve: %v", err)
 			}
 		}()
-		return "risk-only", nil
+		return "plan-only", nil
 	}
 	go func() {
 		dec, err := g.BeforeMutation(context.Background(), Proposal{
-			Tool: "bash", Subject: "git push origin feature", Mutates: true,
-			Args: json.RawMessage(`{"command":"git push origin feature"}`),
+			Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+			PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Replace API [in_progress]",
 		})
 		if err != nil {
 			t.Errorf("BeforeMutation: %v", err)
@@ -58,9 +64,9 @@ func TestHasApprovalIncludesWaiterOnlyHighRisk(t *testing.T) {
 			t.Fatalf("want allow after resolve, got %+v", dec)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("waiter-only high-risk card did not unblock")
+		t.Fatal("waiter-only plan card did not unblock")
 	}
-	if g.HasApproval("risk-only") {
+	if g.HasApproval("plan-only") {
 		t.Fatal("approval should be cleared after Resolve")
 	}
 }
@@ -79,7 +85,7 @@ func TestNoFailureAllowsMutation(t *testing.T) {
 	}
 }
 
-func TestHighRiskMutationPromptsBeforeAnyFailure(t *testing.T) {
+func TestExecutionRiskDoesNotPromptBeforeAnyFailure(t *testing.T) {
 	g := NewGate(Options{Mode: func() string { return "auto" }})
 	var prompted atomic.Bool
 	g.opts.EmitPrompt = func(_ context.Context, taskID string, pending PendingProposal, failure *FailureEvent) (string, error) {
@@ -100,7 +106,7 @@ func TestHighRiskMutationPromptsBeforeAnyFailure(t *testing.T) {
 		Tool: "bash", Subject: "git push origin feature", Mutates: true,
 		Args: json.RawMessage(`{"command":"git push origin feature"}`),
 	})
-	if err != nil || !dec.Allow || !prompted.Load() {
+	if err != nil || !dec.Allow || prompted.Load() {
 		t.Fatalf("pre-action decision = %+v, %v; prompted=%v", dec, err, prompted.Load())
 	}
 }
@@ -193,79 +199,36 @@ func TestHighRiskClassifierKeepsOrdinaryAndMCPPermissionPathsSeparate(t *testing
 	}
 }
 
-func TestTaskGrantUsesSemanticOperationAndTargetBoundary(t *testing.T) {
+func TestExecutionRiskDoesNotCreateAutoGuardPromptOrGrantState(t *testing.T) {
 	g := NewGate(Options{Mode: func() string { return "auto" }})
 	var prompts atomic.Int32
-	g.opts.EmitPrompt = func(_ context.Context, taskID string, pending PendingProposal, _ *FailureEvent) (string, error) {
-		n := prompts.Add(1)
-		id := fmt.Sprintf("grant-%d", n)
-		g.BindApprovalID(taskID, id)
-		if pending.TaskGrantKey == "" || pending.TaskGrantDisplay == "" || pending.TaskGrantTaskScope == "" {
-			t.Fatalf("ordinary push should expose a bounded task grant: %+v", pending)
-		}
-		action := ActionContinue
-		if n == 1 {
-			action = ActionContinueTask
-		}
-		if err := g.Resolve(id, action, ""); err != nil {
-			t.Fatalf("Resolve(%s): %v", action, err)
-		}
-		return id, nil
+	g.opts.EmitPrompt = func(context.Context, string, PendingProposal, *FailureEvent) (string, error) {
+		prompts.Add(1)
+		return "unexpected", nil
 	}
-
-	pushTask := func(taskScopeID, command string) Decision {
+	for _, command := range []string{
+		"git push origin feature-a",
+		"git push --force origin feature-a",
+		"gh pr merge 12",
+		"npm publish",
+	} {
 		dec, err := g.BeforeMutation(context.Background(), Proposal{
-			TaskID: "root", TaskScopeID: taskScopeID, TaskSummary: "ship feature", Tool: "bash", Subject: command, Mutates: true,
+			TaskID: "root", TaskScopeID: "goal:ship-feature", TaskSummary: "ship feature", Tool: "bash", Subject: command, Mutates: true,
 			Args: json.RawMessage(fmt.Sprintf(`{"command":%q}`, command)),
 		})
-		if err != nil {
-			t.Fatalf("BeforeMutation(%q): %v", command, err)
+		if err != nil || !dec.Allow {
+			t.Fatalf("BeforeMutation(%q) = %+v, %v", command, dec, err)
 		}
-		return dec
 	}
-	push := func(command string) Decision { return pushTask("goal:ship-feature", command) }
-
-	if dec := push("git push origin feature-a"); !dec.Allow {
-		t.Fatalf("first push = %+v", dec)
+	if got := prompts.Load(); got != 0 {
+		t.Fatalf("execution-risk prompts = %d, want 0", got)
 	}
-	// Presentation-only flags do not change the operation or target.
-	if dec := push("git push --set-upstream origin feature-a"); !dec.Allow {
-		t.Fatalf("semantically similar push = %+v", dec)
-	}
-	if got := prompts.Load(); got != 1 {
-		t.Fatalf("same-target prompts = %d, want 1", got)
-	}
-	// A different destination ref is a different external target.
-	if dec := push("git push origin feature-b"); !dec.Allow {
-		t.Fatalf("different-ref push = %+v", dec)
-	}
-	if got := prompts.Load(); got != 2 {
-		t.Fatalf("different-ref prompts = %d, want 2", got)
-	}
-	// A different remote must also ask again.
-	if dec := push("git push upstream feature-b"); !dec.Allow {
-		t.Fatalf("different-remote push = %+v", dec)
-	}
-	if got := prompts.Load(); got != 3 {
-		t.Fatalf("different-remote prompts = %d, want 3", got)
-	}
-	// Root task ids span a chat; a new trusted task summary must not inherit the
-	// previous user request's external-write grant.
-	if dec := pushTask("turn:other-task", "git push origin feature-a"); !dec.Allow {
-		t.Fatalf("different-task push = %+v", dec)
-	}
-	if got := prompts.Load(); got != 4 {
-		t.Fatalf("different-task prompts = %d, want 4", got)
-	}
-	g.mu.Lock()
-	_, retained := g.tasks["root"]
-	g.mu.Unlock()
-	if retained {
-		t.Fatal("expired task grant retained runtime state after the task scope changed")
+	if snap := g.Snapshot(); len(snap.Tasks) != 0 {
+		t.Fatalf("execution risk created Auto Guard task state: %+v", snap)
 	}
 	metrics := g.Metrics()
-	if metrics.TaskGrantContinues != 1 || metrics.TaskGrantUses != 1 {
-		t.Fatalf("task grant metrics = %+v", metrics)
+	if metrics.HumanPrompts != 0 || metrics.TaskGrantContinues != 0 || metrics.TaskGrantUses != 0 {
+		t.Fatalf("unexpected Auto Guard metrics = %+v", metrics)
 	}
 }
 
@@ -300,66 +263,6 @@ func TestTaskGrantKeyRejectsRiskExpansionAndScopesExternalTarget(t *testing.T) {
 	}
 	if a, b := TaskGrantKey(proposal("gh pr comment 12 --body ok")), TaskGrantKey(proposal("gh pr comment 13 --body ok")); a == "" || b == "" || a == b {
 		t.Fatalf("PR target keys = %q / %q, want distinct non-empty keys", a, b)
-	}
-}
-
-func TestTaskGrantNeverCoversCriticalVariantOrPersists(t *testing.T) {
-	g := NewGate(Options{Mode: func() string { return "auto" }})
-	var prompts atomic.Int32
-	g.opts.EmitPrompt = func(_ context.Context, taskID string, pending PendingProposal, _ *FailureEvent) (string, error) {
-		n := prompts.Add(1)
-		id := fmt.Sprintf("critical-%d", n)
-		g.BindApprovalID(taskID, id)
-		if n == 1 {
-			if err := g.Resolve(id, ActionContinueTask, ""); err != nil {
-				t.Fatalf("grant ordinary push: %v", err)
-			}
-		} else if n == 2 {
-			if pending.TaskGrantKey != "" {
-				t.Fatalf("critical variant exposed task grant %q", pending.TaskGrantKey)
-			}
-			if err := g.Resolve(id, ActionContinueTask, ""); err == nil {
-				t.Fatal("force push accepted reusable task grant")
-			}
-			if err := g.Resolve(id, ActionContinue, ""); err != nil {
-				t.Fatalf("one-shot force push confirmation: %v", err)
-			}
-		} else if err := g.Resolve(id, ActionContinue, ""); err != nil {
-			t.Fatalf("post-restore one-shot confirmation: %v", err)
-		}
-		return id, nil
-	}
-	proposal := func(command string) Proposal {
-		return Proposal{TaskID: "root", Tool: "bash", Subject: command, Mutates: true, Args: json.RawMessage(fmt.Sprintf(`{"command":%q}`, command))}
-	}
-	if dec, err := g.BeforeMutation(context.Background(), proposal("git push origin feature")); err != nil || !dec.Allow {
-		t.Fatalf("ordinary push = %+v, %v", dec, err)
-	}
-	if snap := g.Snapshot(); len(snap.Tasks) != 0 {
-		t.Fatalf("runtime-only task grant leaked into snapshot: %+v", snap)
-	}
-	// A successful mutation clears failure state but not the live task grant.
-	g.ObserveResult(context.Background(), Observation{TaskID: "root", Tool: "bash", Mutates: true, Success: true})
-	if dec, err := g.BeforeMutation(context.Background(), proposal("git push origin feature")); err != nil || !dec.Allow {
-		t.Fatalf("grant after successful mutation = %+v, %v", dec, err)
-	}
-	if got := prompts.Load(); got != 1 {
-		t.Fatalf("grant was lost after success; prompts = %d", got)
-	}
-	if dec, err := g.BeforeMutation(context.Background(), proposal("git push --force origin feature")); err != nil || !dec.Allow {
-		t.Fatalf("force push = %+v, %v", dec, err)
-	}
-	if got := prompts.Load(); got != 2 {
-		t.Fatalf("force push prompts = %d, want 2", got)
-	}
-
-	// Restore is the session/restart boundary: runtime-only grants disappear.
-	g.Restore(g.Snapshot())
-	if dec, err := g.BeforeMutation(context.Background(), proposal("git push origin third-ref")); err != nil || !dec.Allow {
-		t.Fatalf("push after restore = %+v, %v", dec, err)
-	}
-	if got := prompts.Load(); got != 3 {
-		t.Fatalf("restore retained task grant; prompts = %d", got)
 	}
 }
 
@@ -417,8 +320,12 @@ func TestQualifyingFailureReturnsGuidanceAndPersistsArmedState(t *testing.T) {
 	select {
 	case snap := <-persisted:
 		st := snap.Tasks["root"]
-		if st == nil || st.Phase != PhaseDiagnosing || st.Failure == nil {
-			t.Fatalf("persisted state = %+v, want armed diagnosing state", st)
+		// Persistence projection keeps historical evidence only — never re-armable locks.
+		if st == nil || st.LastFailure == nil || st.ConsecutiveFails != 0 || st.ReviewBlocks != 0 {
+			t.Fatalf("persisted state = %+v, want evidence-only last_failure", st)
+		}
+		if st.Failure != nil {
+			t.Fatalf("persisted state armed live failure lock: %+v", st)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("armed recovery state was not persisted")
@@ -542,20 +449,217 @@ func TestSafeVerificationRetryOnce(t *testing.T) {
 	}
 }
 
-func TestHighRiskForcesConfirm(t *testing.T) {
+func TestRepeatedFailureStopsOnlyTheSameOperation(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
+	failedArgs := json.RawMessage(`{"command":"mvn test"}`)
+	failed := Observation{
+		TaskScopeID: "turn:1", Tool: "bash", Subject: "mvn test",
+		Verification: true, Args: failedArgs, ErrSummary: "exit 1",
+	}
+	retry := Proposal{
+		TaskScopeID: "turn:1", Tool: "bash", Subject: "mvn test",
+		Verification: true, Args: failedArgs,
+	}
+	g.ObserveResult(context.Background(), failed)
+	for attempt := 0; attempt < 2; attempt++ {
+		dec, err := g.BeforeMutation(context.Background(), retry)
+		if err != nil || !dec.Allow {
+			t.Fatalf("retry %d = %+v, %v", attempt+1, dec, err)
+		}
+		g.ObserveResult(context.Background(), failed)
+	}
+
+	same, err := g.BeforeMutation(context.Background(), retry)
+	if err != nil || same.Allow || !same.Blocked || !strings.Contains(same.Message, "mvn test") {
+		t.Fatalf("same operation = %+v, %v; want a scoped stop", same, err)
+	}
+
+	alternative, err := g.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "turn:1", Tool: "write_file", Subject: "src/Fix.java", Mutates: true,
+		Args: json.RawMessage(`{"path":"src/Fix.java","content":"fixed"}`),
+	})
+	if err != nil || !alternative.Allow || alternative.Blocked {
+		t.Fatalf("alternative edit = %+v, %v; want recovery to continue", alternative, err)
+	}
+}
+
+func TestDifferentFailureStartsFreshRecoveryEpisode(t *testing.T) {
 	g := NewGate(Options{})
+	for i := 0; i < 2; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			TaskScopeID: "turn:1", Tool: "bash", Subject: "go test ./...", Verification: true,
+			Args: json.RawMessage(`{"command":"go test ./..."}`), ErrSummary: "go failed",
+		})
+	}
+	g.ObserveResult(context.Background(), Observation{
+		TaskScopeID: "turn:1", Tool: "bash", Subject: "npm test", Verification: true,
+		Args: json.RawMessage(`{"command":"npm test"}`), ErrSummary: "npm failed",
+	})
+	st := g.Snapshot().Tasks["root"]
+	if st == nil || st.Failure == nil || st.ConsecutiveFails != 1 || st.Failure.Subject != "npm test" {
+		t.Fatalf("fresh failure episode = %+v", st)
+	}
+}
+
+func TestNewOrdinaryTurnRetiresTechnicalFailureLatch(t *testing.T) {
+	g := NewGate(Options{})
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+	for i := 0; i < 3; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			TaskScopeID: "turn:1", Tool: "bash", Subject: "go test ./...",
+			Verification: true, Args: args, ErrSummary: "fail",
+		})
+	}
+	// Host rotates Episode on each real user message.
+	g.BeginEpisode()
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "turn:2", Tool: "bash", Subject: "go test ./...",
+		Verification: true, Args: args,
+	})
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("new turn = %+v, %v; want fresh Auto episode", dec, err)
+	}
+	if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
+		t.Fatalf("new turn retained old technical failure: %+v", st)
+	}
+}
+
+func TestLeavingAutoRetiresTechnicalFailureLatch(t *testing.T) {
+	mode := "auto"
+	g := NewGate(Options{Mode: func() string { return mode }})
+	args := json.RawMessage(`{"command":"go test ./..."}`)
+	for i := 0; i < 3; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			TaskScopeID: "goal:ship", Tool: "bash", Subject: "go test ./...",
+			Verification: true, Args: args, ErrSummary: "fail",
+		})
+	}
+	mode = "yolo"
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "goal:ship", Tool: "write_file", Subject: "a.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
+	})
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("yolo bypass = %+v, %v", dec, err)
+	}
+	mode = "auto"
+	dec, err = g.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "goal:ship", Tool: "write_file", Subject: "b.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"b.go","content":"y"}`),
+	})
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("return to Auto = %+v, %v; want no stale latch", dec, err)
+	}
+	if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
+		t.Fatalf("mode change retained old failure: %+v", st)
+	}
+}
+
+func TestReviseClosesFailureEpisodeBeforeAlternative(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewConfirm, ChangeKind: ChangeStrategy, Rationale: "choose another implementation",
+	}}})
+	g.ObserveResult(context.Background(), Observation{
+		TaskScopeID: "turn:1", Tool: "bash", Subject: "go test ./...", Verification: true,
+		Args: json.RawMessage(`{"command":"go test ./..."}`), ErrSummary: "fail",
+	})
+	g.opts.EmitPrompt = func(_ context.Context, taskID string, _ PendingProposal, _ *FailureEvent) (string, error) {
+		g.BindApprovalID(taskID, "revise-1")
+		if err := g.Resolve("revise-1", ActionRevise, "use a targeted edit"); err != nil {
+			t.Fatalf("Resolve revise: %v", err)
+		}
+		return "revise-1", nil
+	}
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"a.go","content":"first"}`),
+	})
+	if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, "targeted edit") {
+		t.Fatalf("revise decision = %+v, %v", dec, err)
+	}
+	if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
+		t.Fatalf("revise retained old failure episode: %+v", st)
+	}
+
+	alternative, err := g.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "turn:1", Tool: "write_file", Subject: "b.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"b.go","content":"alternative"}`),
+	})
+	if err != nil || !alternative.Allow || alternative.Blocked {
+		t.Fatalf("alternative after revise = %+v, %v", alternative, err)
+	}
+}
+
+func TestReviewerRejectBudgetIsEpisodeCumulative(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "not proven",
+	}}})
+	g.ObserveResult(context.Background(), Observation{
+		TaskScopeID: "turn:1", Tool: "bash", Subject: "go test", Verification: true,
+		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+	})
+	proposalA := Proposal{TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go", Mutates: true, Args: json.RawMessage(`{"path":"a.go"}`)}
+	for i := 0; i < 3; i++ {
+		dec, err := g.BeforeMutation(context.Background(), proposalA)
+		if err != nil || dec.Allow || !dec.Blocked {
+			t.Fatalf("proposal A attempt %d = %+v, %v", i+1, dec, err)
+		}
+	}
+	// Different candidates share the Episode reviewer budget — no fresh allowance.
+	proposalB := Proposal{TaskScopeID: "turn:1", Tool: "write_file", Subject: "b.go", Mutates: true, Args: json.RawMessage(`{"path":"b.go"}`)}
+	dec, err := g.BeforeMutation(context.Background(), proposalB)
+	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn {
+		t.Fatalf("proposal B = %+v, %v; want Episode stop after cumulative rejects", dec, err)
+	}
+	// A new user turn (Episode) restores the budget.
+	g.BeginEpisode()
+	dec, err = g.BeforeMutation(context.Background(), proposalA)
+	if err != nil || !dec.Allow || dec.Blocked {
+		// After BeginEpisode and no active failure, mutation without failure allows.
+		// With no lastFailure after clear, HasActiveFailure is false → Allow.
+		if err != nil || !dec.Allow {
+			t.Fatalf("proposal A in a new episode = %+v, %v; want fresh Episode", dec, err)
+		}
+	}
+}
+
+func TestReviewerRejectBudgetResetsAcrossPlanTurns(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "plan relationship not proven",
+	}}})
+	proposal := Proposal{
+		TaskScopeID: "turn:1", Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Existing [in_progress]", PlanAfter: "1. Replacement [in_progress]",
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		dec, err := g.BeforeMutation(context.Background(), proposal)
+		if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, fmt.Sprintf("attempt %d/3", attempt)) {
+			t.Fatalf("turn 1 attempt %d = %+v, %v", attempt, dec, err)
+		}
+	}
+	// Plan start-execution rotates Episode before the approved run.
+	g.BeginEpisode()
+	proposal.TaskScopeID = "turn:2"
+	dec, err := g.BeforeMutation(context.Background(), proposal)
+	if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, "attempt 1/3") {
+		t.Fatalf("turn 2 decision = %+v, %v; want a fresh reviewer budget", dec, err)
+	}
+}
+
+func TestExecutionRiskDoesNotForceAutoConfirmation(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
 	g.ObserveResult(context.Background(), Observation{
 		Tool: "bash", Subject: "go test ./...", Verification: true,
 		Args: json.RawMessage(`{"command":"go test ./..."}`), ErrSummary: "fail",
 	})
-	var got PendingProposal
-	g.opts.EmitPrompt = func(ctx context.Context, taskID string, pending PendingProposal, failure *FailureEvent) (string, error) {
-		got = pending
-		go func() {
-			time.Sleep(5 * time.Millisecond)
-			_ = g.Resolve("9", ActionRevise, "only edit tests")
-		}()
-		return "9", nil
+	var prompted atomic.Bool
+	g.opts.EmitPrompt = func(context.Context, string, PendingProposal, *FailureEvent) (string, error) {
+		prompted.Store(true)
+		return "unexpected", nil
 	}
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
 		Tool: "bash", Subject: "rm -rf ./dist", Mutates: true,
@@ -564,14 +668,8 @@ func TestHighRiskForcesConfirm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if dec.Allow || !dec.Blocked {
-		t.Fatalf("want blocked revise, got %+v", dec)
-	}
-	if !strings.Contains(dec.Message, "only edit tests") {
-		t.Fatalf("message = %q", dec.Message)
-	}
-	if got.ChangeKind != ChangeRisk && got.ChangeKind != ChangeStrategy {
-		t.Fatalf("change_kind = %q", got.ChangeKind)
+	if !dec.Allow || dec.Blocked || prompted.Load() {
+		t.Fatalf("execution risk should stay on permission path, got %+v prompted=%v", dec, prompted.Load())
 	}
 }
 
@@ -606,10 +704,15 @@ func TestRoutineWorkspaceEditsStayOnReviewerPath(t *testing.T) {
 	}
 }
 
-func TestContinueAppliesOnlyToWaitingCall(t *testing.T) {
-	g := NewGate(Options{})
-	args := json.RawMessage(`{"command":"git push origin feature"}`)
-	prop := Proposal{Tool: "bash", Subject: "git push origin feature", Mutates: true, Args: args}
+func TestPlanContinueAppliesOnlyToWaitingTransition(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewConfirm, ChangeKind: ChangeStrategy, Rationale: "choose API direction",
+	}}})
+	args := json.RawMessage(`{"todos":[{"content":"Replace API","status":"in_progress"}]}`)
+	prop := Proposal{
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true, Args: args,
+		PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Replace API [in_progress]",
+	}
 	fp := CallFingerprint(prop.Tool, prop.Subject, prop.Preview, prop.Args)
 
 	g.opts.EmitPrompt = func(ctx context.Context, taskID string, pending PendingProposal, failure *FailureEvent) (string, error) {
@@ -623,7 +726,7 @@ func TestContinueAppliesOnlyToWaitingCall(t *testing.T) {
 		return "c1", nil
 	}
 	dec, err := g.BeforeMutation(context.Background(), prop)
-	if err != nil || !dec.Allow {
+	if err != nil || !dec.Allow || !dec.AuthorizePlanReplacement {
 		t.Fatalf("first continue = %+v %v", dec, err)
 	}
 
@@ -638,11 +741,24 @@ func TestContinueAppliesOnlyToWaitingCall(t *testing.T) {
 		return "c2", nil
 	}
 	dec, err = g.BeforeMutation(context.Background(), prop)
-	if err != nil || !dec.Allow {
+	if err != nil || !dec.Allow || !dec.AuthorizePlanReplacement {
 		t.Fatalf("second continue = %+v %v", dec, err)
 	}
 	if atomic.LoadInt32(&prompts) != 1 {
 		t.Fatalf("expected re-prompt after fingerprint consumption")
+	}
+}
+
+func TestReviewerContinuedPlanTransitionAuthorizesReplacement(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Rephrase API work [in_progress]",
+	})
+	if err != nil || !dec.Allow || !dec.AuthorizePlanReplacement {
+		t.Fatalf("reviewer-continued plan transition = %+v, %v; want one-call authorization", dec, err)
 	}
 }
 
@@ -675,7 +791,7 @@ func TestReviewerContinueSkipsPrompt(t *testing.T) {
 	}
 }
 
-func TestReviewerBlockReturnsReasonThenEscalates(t *testing.T) {
+func TestReviewerBlockReturnsReasonThenStops(t *testing.T) {
 	g := NewGate(Options{
 		Reviewer: staticReviewer{ReviewVerdict{
 			Outcome: ReviewConfirm, ChangeKind: ChangeUncertain,
@@ -706,8 +822,8 @@ func TestReviewerBlockReturnsReasonThenEscalates(t *testing.T) {
 		}
 	}
 	dec, err := g.BeforeMutation(context.Background(), proposal)
-	if err != nil || !dec.Allow || prompts != 1 {
-		t.Fatalf("escalated decision = %+v, %v; prompts=%d", dec, err, prompts)
+	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn || prompts != 0 || !strings.Contains(dec.Message, "paused this turn") {
+		t.Fatalf("stopped decision = %+v, %v; prompts=%d", dec, err, prompts)
 	}
 }
 
@@ -856,14 +972,20 @@ func TestAskYoloModesInactive(t *testing.T) {
 		if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
 			t.Fatalf("mode %s armed failure", mode)
 		}
+		dec, err := g.BeforeMutation(context.Background(), Proposal{
+			Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		})
+		if err != nil || !dec.Allow || dec.AuthorizePlanReplacement {
+			t.Fatalf("mode %s plan bypass = %+v, %v; must not authorize replacement", mode, dec, err)
+		}
 	}
 }
 
 func TestHeadlessBlocksWithoutWait(t *testing.T) {
 	g := NewGate(Options{Headless: true})
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
-		Tool: "bash", Subject: "git push origin feature", Mutates: true,
-		Args: json.RawMessage(`{"command":"git push origin feature"}`),
+		Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Replace API [in_progress]",
 	})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -926,6 +1048,56 @@ func TestRestoreDropsStalePendingAuthorization(t *testing.T) {
 	}
 }
 
+func TestRestoreNeverRearmsActiveLocks(t *testing.T) {
+	args := json.RawMessage(`{"path":"a.go","content":"x"}`)
+	goal := NewGate(Options{})
+	for i := 0; i < 3; i++ {
+		goal.ObserveResult(context.Background(), Observation{
+			TaskScopeID: "goal:ship", Tool: "write_file", Subject: "a.go",
+			Mutates: true, Args: args, ErrSummary: "fail",
+		})
+	}
+	// Live Snapshot keeps goal scope on evidence for diagnostics.
+	goalSnap := goal.Snapshot()
+	if got := goalSnap.Tasks["root"].Failure.TaskScopeID; got != "goal:ship" {
+		t.Fatalf("live goal scope = %q", got)
+	}
+	// Disk projection is evidence-only.
+	persistSnap := goal.PersistenceSnapshot()
+	if st := persistSnap.Tasks["root"]; st == nil || st.LastFailure == nil || st.ConsecutiveFails != 0 {
+		t.Fatalf("persistence projection = %+v, want last_failure only", st)
+	}
+	restoredGoal := NewGate(Options{})
+	restoredGoal.Restore(goalSnap)
+	dec, err := restoredGoal.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "goal:ship", Tool: "write_file", Subject: "a.go", Mutates: true, Args: args,
+	})
+	// Restart must not re-arm the three-strike lock.
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("restored goal decision = %+v, %v; want no active lock after restore", dec, err)
+	}
+
+	turn := NewGate(Options{})
+	for i := 0; i < 3; i++ {
+		turn.ObserveResult(context.Background(), Observation{
+			TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go",
+			Mutates: true, Args: args, ErrSummary: "fail",
+		})
+	}
+	turnSnap := turn.PersistenceSnapshot()
+	if got := turnSnap.Tasks["root"].LastFailure.TaskScopeID; got != "" {
+		t.Fatalf("ordinary turn scope must not persist, got %q", got)
+	}
+	restoredTurn := NewGate(Options{})
+	restoredTurn.Restore(turnSnap)
+	dec, err = restoredTurn.BeforeMutation(context.Background(), Proposal{
+		TaskScopeID: "turn:2", Tool: "write_file", Subject: "a.go", Mutates: true, Args: args,
+	})
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("restored ordinary turn = %+v, %v; want stale latch retired", dec, err)
+	}
+}
+
 func TestUserRejectAndBlockedDoNotArm(t *testing.T) {
 	g := NewGate(Options{})
 	g.ObserveResult(context.Background(), Observation{
@@ -936,6 +1108,287 @@ func TestUserRejectAndBlockedDoNotArm(t *testing.T) {
 	})
 	if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
 		t.Fatalf("armed on non-qualifying: %+v", st)
+	}
+}
+
+func TestEpisodeTotalFailuresHardStopAcrossFingerprints(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
+	for i := 0; i < MaxEpisodeFailures; i++ {
+		cmd := fmt.Sprintf("go test ./pkg%d", i)
+		g.ObserveResult(context.Background(), Observation{
+			Tool: "bash", Subject: cmd, Verification: true,
+			Args: json.RawMessage(fmt.Sprintf(`{"command":%q}`, cmd)), ErrSummary: "fail",
+		})
+	}
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		Tool: "write_file", Subject: "fresh.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"fresh.go","content":"x"}`),
+	})
+	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn {
+		t.Fatalf("episode hard stop = %+v, %v", dec, err)
+	}
+	// Read-only diagnosis is also blocked once the Episode is exhausted.
+	ro, err := g.BeforeMutation(context.Background(), Proposal{
+		Tool: "read_file", Subject: "fresh.go", ReadOnly: true,
+	})
+	if err != nil || ro.Allow || !ro.Blocked || !ro.StopTurn {
+		t.Fatalf("read-only after stop = %+v, %v", ro, err)
+	}
+}
+
+func TestEpisodeBudgetIsSharedAcrossSubagentTaskIDs(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
+	// Split the Episode failure budget across root and two sub-agents.
+	for i := 0; i < 2; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			TaskID: "root", Tool: "bash", Subject: fmt.Sprintf("root-%d", i), Verification: true,
+			Args: json.RawMessage(fmt.Sprintf(`{"command":"root %d"}`, i)), ErrSummary: "fail",
+		})
+	}
+	for i := 0; i < 2; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			TaskID: "subagent:a", Tool: "bash", Subject: fmt.Sprintf("a-%d", i), Verification: true,
+			Args: json.RawMessage(fmt.Sprintf(`{"command":"a %d"}`, i)), ErrSummary: "fail",
+		})
+	}
+	for i := 0; i < 2; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			TaskID: "subagent:b", Tool: "bash", Subject: fmt.Sprintf("b-%d", i), Verification: true,
+			Args: json.RawMessage(fmt.Sprintf(`{"command":"b %d"}`, i)), ErrSummary: "fail",
+		})
+	}
+	// Sixth failure exhausted the shared Episode budget. A brand-new sub-agent
+	// must not receive a fresh ceiling.
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		TaskID: "subagent:fresh", Tool: "write_file", Subject: "x.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"x.go","content":"x"}`),
+	})
+	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn {
+		t.Fatalf("fresh subagent after shared budget = %+v, %v; want Episode stop", dec, err)
+	}
+	if !g.EpisodeStopped("subagent:fresh") || !g.EpisodeStopped("root") {
+		t.Fatal("EpisodeStopped must be true for every TaskID once exhausted")
+	}
+}
+
+func TestReviewerContinueDoesNotResetCumulativeRejects(t *testing.T) {
+	// reject → reject → continue → reject must still count as attempt 3/3 and stop.
+	var reviews atomic.Int32
+	g := NewGate(Options{
+		Reviewer: reviewerFunc(func(_ context.Context, _ *FailureEvent, _ []string, _ Proposal, _ string) (ReviewVerdict, error) {
+			n := reviews.Add(1)
+			if n == 3 {
+				return ReviewVerdict{Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy}, nil
+			}
+			return ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "not proven"}, nil
+		}),
+	})
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "bash", Subject: "go test", Verification: true,
+		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+	})
+	prop := Proposal{Tool: "write_file", Subject: "a.go", Mutates: true, Args: json.RawMessage(`{"path":"a.go"}`)}
+	// Two rejects.
+	for i := 1; i <= 2; i++ {
+		dec, err := g.BeforeMutation(context.Background(), prop)
+		if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, fmt.Sprintf("attempt %d/3", i)) {
+			t.Fatalf("reject %d = %+v, %v", i, dec, err)
+		}
+	}
+	// Reviewer continue (allow once) must not wipe the cumulative count.
+	dec, err := g.BeforeMutation(context.Background(), prop)
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("continue = %+v, %v; want allow without clearing reject budget", dec, err)
+	}
+	// Next reject is attempt 3 and hard-stops the Episode.
+	dec, err = g.BeforeMutation(context.Background(), prop)
+	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn {
+		t.Fatalf("third cumulative reject = %+v, %v; want Episode stop", dec, err)
+	}
+	if reviews.Load() < 4 {
+		t.Fatalf("reviews = %d, want at least 4 (2 reject + continue + reject)", reviews.Load())
+	}
+}
+
+func TestStoppedOperationRetriesEscalateToEpisodeStop(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
+	args := json.RawMessage(`{"command":"mvn test"}`)
+	for i := 0; i < MaxOperationFailures; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			Tool: "bash", Subject: "mvn test", Verification: true, Args: args, ErrSummary: "fail",
+		})
+	}
+	retry := Proposal{Tool: "bash", Subject: "mvn test", Verification: true, Args: args}
+	// Re-proposing an already-stopped op burns the stopped-op retry budget.
+	for i := 1; i < MaxStoppedOperationRetries; i++ {
+		dec, err := g.BeforeMutation(context.Background(), retry)
+		if err != nil || dec.Allow || !dec.Blocked || dec.StopTurn {
+			t.Fatalf("stopped retry %d = %+v, %v; want op-only block", i, dec, err)
+		}
+	}
+	dec, err := g.BeforeMutation(context.Background(), retry)
+	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn {
+		t.Fatalf("escalated stop = %+v, %v; want Episode stop", dec, err)
+	}
+}
+
+func TestSuccessfulMutationResetsEpisodeBudgets(t *testing.T) {
+	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
+		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
+	}}})
+	for i := 0; i < 4; i++ {
+		g.ObserveResult(context.Background(), Observation{
+			Tool: "bash", Subject: "go test", Verification: true,
+			Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+		})
+	}
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "write_file", Subject: "a.go", Mutates: true, Success: true,
+		Args: json.RawMessage(`{"path":"a.go"}`),
+	})
+	if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
+		t.Fatalf("success retained failure budget: %+v", st)
+	}
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		Tool: "write_file", Subject: "b.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"b.go"}`),
+	})
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("after progress = %+v, %v", dec, err)
+	}
+}
+
+func TestDiagnosticReadDoesNotResetBudgets(t *testing.T) {
+	g := NewGate(Options{})
+	args := json.RawMessage(`{"command":"go test"}`)
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "bash", Subject: "go test", Verification: true, Args: args, ErrSummary: "fail",
+	})
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "read_file", Subject: "a.go", ReadOnly: true, Success: true,
+		Args: json.RawMessage(`{"path":"a.go"}`), Output: "package a",
+	})
+	st := g.Snapshot().Tasks["root"]
+	if st == nil || st.Failure == nil || st.ConsecutiveFails != 1 {
+		t.Fatalf("diagnostic read cleared failure: %+v", st)
+	}
+}
+
+func TestSameValueModeReplayDoesNotRotateEpisode(t *testing.T) {
+	g := NewGate(Options{Mode: func() string { return "auto" }})
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "bash", Subject: "go test", Verification: true,
+		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+	})
+	before := g.EpisodeID()
+	gen := g.Generation()
+	if ids := g.OnModeChange("auto"); len(ids) != 0 {
+		t.Fatalf("same-value mode dismissed waiters: %v", ids)
+	}
+	if g.EpisodeID() != before || g.Generation() != gen {
+		t.Fatalf("same-value mode rotated episode/gen: %s/%d -> %s/%d", before, gen, g.EpisodeID(), g.Generation())
+	}
+	if st := g.Snapshot().Tasks["root"]; st == nil || st.Failure == nil {
+		t.Fatal("same-value mode cleared in-flight failure")
+	}
+}
+
+func TestModeChangeClearsBudgetsAndGeneration(t *testing.T) {
+	mode := "auto"
+	g := NewGate(Options{Mode: func() string { return mode }})
+	g.OnModeChange("auto") // pin baseline without rotating
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "bash", Subject: "go test", Verification: true,
+		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+	})
+	beforeGen := g.Generation()
+	mode = "yolo"
+	g.OnModeChange("yolo")
+	if g.Generation() <= beforeGen {
+		t.Fatalf("mode change did not bump generation: %d -> %d", beforeGen, g.Generation())
+	}
+	mode = "auto"
+	g.OnModeChange("auto")
+	dec, err := g.BeforeMutation(context.Background(), Proposal{
+		Tool: "write_file", Subject: "a.go", Mutates: true,
+		Args: json.RawMessage(`{"path":"a.go"}`),
+	})
+	if err != nil || !dec.Allow || dec.Blocked {
+		t.Fatalf("Auto after Yolo = %+v, %v; want clean Episode", dec, err)
+	}
+}
+
+func TestStaleObservationGenerationIsIgnored(t *testing.T) {
+	g := NewGate(Options{})
+	gen := g.Generation()
+	g.BeginEpisode() // bump generation so gen is stale
+	g.ObserveResult(context.Background(), Observation{
+		Generation: gen, // stale
+		Tool:       "bash", Subject: "go test", Verification: true,
+		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+	})
+	if st := g.Snapshot().Tasks["root"]; st != nil && st.Failure != nil {
+		t.Fatalf("stale observation armed failure: %+v", st)
+	}
+	if g.Metrics().StaleObservationsIgnored < 1 {
+		t.Fatalf("stale observation metric = %d", g.Metrics().StaleObservationsIgnored)
+	}
+}
+
+func TestModeChangeDismissesWaiterWithoutApproving(t *testing.T) {
+	g := NewGate(Options{
+		Reviewer: staticReviewer{ReviewVerdict{
+			Outcome: ReviewConfirm, ChangeKind: ChangeStrategy, Rationale: "choose direction",
+		}},
+	})
+	g.OnModeChange("auto") // pin baseline so yolo is a real change
+	g.ObserveResult(context.Background(), Observation{
+		Tool: "bash", Subject: "go test", Verification: true,
+		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+	})
+	done := make(chan Decision, 1)
+	g.opts.EmitPrompt = func(_ context.Context, taskID string, _ PendingProposal, _ *FailureEvent) (string, error) {
+		g.BindApprovalID(taskID, "wait-1")
+		return "wait-1", nil
+	}
+	go func() {
+		dec, err := g.BeforeMutation(context.Background(), Proposal{
+			Tool: "write_file", Subject: "a.go", Mutates: true,
+			Args: json.RawMessage(`{"path":"a.go"}`),
+		})
+		if err != nil {
+			t.Errorf("BeforeMutation err: %v", err)
+		}
+		done <- dec
+	}()
+	// Wait until the waiter is parked.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if g.HasApproval("wait-1") {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !g.HasApproval("wait-1") {
+		t.Fatal("waiter never parked")
+	}
+	ids := g.OnModeChange("yolo")
+	if len(ids) != 1 || ids[0] != "wait-1" {
+		t.Fatalf("dismissed ids = %v", ids)
+	}
+	select {
+	case dec := <-done:
+		if dec.Allow {
+			t.Fatalf("mode switch auto-approved mutation: %+v", dec)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter was not released on mode change")
 	}
 }
 

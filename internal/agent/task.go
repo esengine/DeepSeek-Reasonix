@@ -122,6 +122,11 @@ func SubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry 
 // SubagentToolRegistryForDepth returns the writer-capable tool set for a spawned
 // subagent at childDepth. Recursive delegation tools are available only when the
 // child still has room to spawn one more subagent.
+//
+// With no explicit allowlist, installed MCP tools follow the parent registry so
+// ordinary and background subagents inherit the same zero-config MCP surface.
+// An explicit profile/call allowlist remains authoritative and may select MCP
+// tools by exact name or wildcard just like built-ins.
 func SubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDepth, maxDepth int) *tool.Registry {
 	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
 	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
@@ -977,8 +982,9 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 	for _, e := range exclude {
 		ex[e] = true
 	}
+	customAllowlist := len(names) > 0
 	src := names
-	if len(src) == 0 {
+	if !customAllowlist {
 		src = parent.Names()
 	} else {
 		src = expandToolPatterns(parent, src)
@@ -987,9 +993,11 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 		if ex[name] {
 			continue
 		}
-		if tl, ok := parent.Get(name); ok {
-			sub.Add(tl)
+		tl, ok := parent.Get(name)
+		if !ok {
+			continue
 		}
+		sub.Add(tl)
 	}
 	addRestrictedCapabilityProxy(parent, sub, names, ex, false)
 	return sub
@@ -1113,7 +1121,13 @@ func ReadOnlySubagentToolRegistry(parent *tool.Registry, names []string) *tool.R
 // ReadOnlySubagentToolRegistryForDepth returns the tool set exposed to read-only
 // subagents. It permits only read-only delegation tools while another depth
 // layer is available. MCP tools must additionally come from an authorized
-// server and must not carry destructiveHint.
+// server, declare readOnly, and must not carry destructiveHint. Writer and
+// destructive MCP tools are omitted from the provider schema entirely.
+//
+// With no explicit allowlist, strict agents inherit every authorized read-only,
+// non-destructive MCP tool from the parent. Custom profile/call allowlists remain
+// authoritative and may select the permitted MCP readers explicitly or by
+// wildcard.
 func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDepth, maxDepth int) *tool.Registry {
 	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
 	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
@@ -1150,10 +1164,14 @@ func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string,
 			sub.Add(readOnlyBash{inner: tl})
 			continue
 		}
-		if !tl.ReadOnly() {
+		if isInstalledMCPTool(tl) {
+			if !mcpServerAuthorized(tl) || !tl.ReadOnly() || mcpDestructiveHint(tl) {
+				continue
+			}
+			sub.Add(tl)
 			continue
 		}
-		if isInstalledMCPTool(tl) && (!mcpServerAuthorized(tl) || mcpDestructiveHint(tl)) {
+		if !tl.ReadOnly() {
 			continue
 		}
 		sub.Add(tl)

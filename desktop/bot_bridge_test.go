@@ -357,6 +357,21 @@ func TestBridgeSuppressesCanceledTurnAndErrorsNotify(t *testing.T) {
 	}
 }
 
+func TestBridgeRecoveryPauseNotifiesAsControlledPause(t *testing.T) {
+	env := newBridgeTestEnv([]TabMeta{{ID: "tab-1", Label: "会话一"}})
+	env.hub.SetWatch(testWatchRoute(), true)
+
+	env.hub.observe("tab-1", event.Event{
+		Kind:    event.TurnDone,
+		Err:     errors.New("automatic recovery paused"),
+		Outcome: event.TurnOutcomeRecoveryPaused,
+	})
+	call := env.waitNotification(t)
+	if strings.Contains(call.msg.Text, "❌") || !strings.Contains(call.msg.Text, "已暂停自动恢复") || !strings.Contains(call.msg.Text, "继续") {
+		t.Fatalf("recovery pause text = %q, want a neutral actionable pause notice", call.msg.Text)
+	}
+}
+
 func TestBridgeAskAnswerRoundTrip(t *testing.T) {
 	env := newBridgeTestEnv([]TabMeta{{ID: "tab-2", Label: "问答会话"}})
 	env.hub.SetWatch(testWatchRoute(), true)

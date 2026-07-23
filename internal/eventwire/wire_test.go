@@ -76,7 +76,7 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
 		"detail?: string;",
-		`outcome?: "final_readiness";`,
+		`outcome?: "final_readiness" | "recovery_paused";`,
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"memoryCitations?: MemoryCitation[];",
@@ -268,6 +268,19 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 			want: []string{
 				`"kind":"recovery"`, `"next_action":"git push origin feature"`, `"can_grant_task":true`,
 				`"task_grant_scope":"git push origin → feature"`,
+			},
+		},
+		{
+			name: "recovery plan transition",
+			in: event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+				ID: "r-plan", Tool: "todo_write", Subject: "Update the active execution plan", Fresh: true, Kind: "recovery",
+				Recovery: &event.RecoveryApproval{
+					ChangeKind: "scope", PlanBefore: "1. Keep API", PlanAfter: "1. Replace API",
+				},
+			}},
+			want: []string{
+				`"kind":"recovery"`, `"change_kind":"scope"`,
+				`"plan_before":"1. Keep API"`, `"plan_after":"1. Replace API"`,
 			},
 		},
 		{

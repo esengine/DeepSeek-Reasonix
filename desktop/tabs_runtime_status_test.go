@@ -264,6 +264,14 @@ func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
 	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusPaused {
 		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusPaused)
 	}
+	recoveryPause := event.Event{
+		Kind:    event.TurnDone,
+		Err:     &agent.RecoveryPauseError{Message: "automatic recovery paused"},
+		Outcome: event.TurnOutcomeRecoveryPaused,
+	}
+	if status, ok := topicActivityStatusFromEvent(recoveryPause); !ok || status != topicStatusPaused {
+		t.Fatalf("recovery pause turn end = (%q, %v), want (%q, true)", status, ok, topicStatusPaused)
+	}
 	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone, Err: io.EOF}); !ok || status != topicStatusError {
 		t.Fatalf("ordinary turn error = (%q, %v), want (%q, true)", status, ok, topicStatusError)
 	}

@@ -139,9 +139,9 @@ type DecisionAction = {
   desc: string;
   tone?: "default" | "danger";
   primary?: boolean;
-  // Plan revision toggles the inline editor instead of submitting.
-  // Recovery uses direct-click submit (no select-then-confirm).
-  kind: "submit" | "toggle-revision" | "direct";
+  // Plan revision and plan guidance open inline editors instead of submitting.
+  // Other recovery actions use direct-click submit (no select-then-confirm).
+  kind: "submit" | "toggle-revision" | "toggle-guidance" | "direct";
   run?: () => void;
 };
 
@@ -167,11 +167,63 @@ function recoveryReasonText(
   }
 }
 
+type PlanLine = { key: string; text: string };
+type PlanDelta = { removed: string[]; added: string[] };
+
+function planLines(raw: string | undefined): PlanLine[] {
+  return (raw ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+\[[^\]\r\n]+\]\s*$/, "").trimEnd())
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const match = line.match(/^(\s*)(?:\d+\.\s*)?(.*)$/);
+      const nested = (match?.[1].length ?? 0) > 0;
+      const body = (match?.[2] ?? line).replace(/\s+/g, " ").trim();
+      return { key: `${nested ? 1 : 0}:${body}`, text: `${nested ? "  " : ""}${body}` };
+    });
+}
+
+// LCS keeps unchanged steps out of the card and turns additions, removals, and
+// reordering into a compact plan-level delta. Status suffixes are ignored.
+function planDelta(beforeRaw: string | undefined, afterRaw: string | undefined): PlanDelta | null {
+  const before = planLines(beforeRaw);
+  const after = planLines(afterRaw);
+  if (before.length === 0 || after.length === 0) return null;
+  const dp = Array.from({ length: before.length + 1 }, () => Array<number>(after.length + 1).fill(0));
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = before[i].key === after[j].key
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const removed: string[] = [];
+  const added: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < before.length && j < after.length) {
+    if (before[i].key === after[j].key) {
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      removed.push(before[i].text);
+      i += 1;
+    } else {
+      added.push(after[j].text);
+      j += 1;
+    }
+  }
+  while (i < before.length) removed.push(before[i++].text);
+  while (j < after.length) added.push(after[j++].text);
+  return removed.length > 0 || added.length > 0 ? { removed, added } : null;
+}
+
 export function ApprovalModal({
   approval,
   onAnswer,
   onResolveRecovery,
   onRevisePlan,
+  onExitPlan,
   onStop,
   cwd,
   tabId,
@@ -197,6 +249,9 @@ export function ApprovalModal({
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
   const recovery = approval.recovery;
+  const recoveryChangeKind = (recovery?.change_kind ?? "").toLowerCase();
+  const isRecoveryPlanChange =
+    isRecoveryApproval && (recoveryChangeKind === "strategy" || recoveryChangeKind === "scope");
   const taskGrantScope = recovery?.task_grant_scope?.trim() ?? "";
   const toolLabel = approvalToolLabel(approval.tool, t);
   const isFreshHumanApproval = approval.fresh === true || requiresFreshHumanApproval(approval.tool) || isRecoveryApproval;
@@ -237,6 +292,9 @@ export function ApprovalModal({
   const recoveryGuidanceRef = useRef<HTMLTextAreaElement | null>(null);
   const recoveryGuidanceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const consumedInsertIdRef = useRef(0);
+  const onRevisionActiveChangeRef = useRef(onRevisionActiveChange);
+  const revisionActiveRef = useRef(false);
+  onRevisionActiveChangeRef.current = onRevisionActiveChange;
   // When consecutive approvals arrive, animate the old card out before
   // the new one slides in.  GSAP fromTo on the shelf wrapper avoids the
   // jarring pop when the API cycles through 4+ pending approvals.
@@ -274,7 +332,23 @@ export function ApprovalModal({
     [onResolveRecovery, onAnswer],
   );
 
-  const toolActions: DecisionAction[] = isRecoveryApproval
+  const toolActions: DecisionAction[] = isRecoveryPlanChange
+    ? [
+        {
+          key: "1",
+          label: t("approval.recoveryAdoptPlan"),
+          desc: t("approval.recoveryAdoptPlanDesc"),
+          kind: "direct",
+          run: () => resolveRecovery("continue"),
+        },
+        {
+          key: "2",
+          label: t("approval.recoveryAdjustPlan"),
+          desc: t("approval.recoveryAdjustPlanDesc"),
+          kind: "toggle-guidance",
+        },
+      ]
+    : isRecoveryApproval
     ? [
         {
           key: "1",
@@ -312,6 +386,15 @@ export function ApprovalModal({
           desc: t("approval.revisePlanDesc"),
           kind: "toggle-revision",
         },
+        ...(onExitPlan
+          ? [{
+              key: "3",
+              label: t("approval.exitPlanWithoutExecution"),
+              desc: t("approval.exitPlanWithoutExecutionDesc"),
+              kind: "direct" as const,
+              run: () => onExitPlan(),
+            }]
+          : []),
       ]
     : [
         {
@@ -403,6 +486,11 @@ export function ApprovalModal({
       setRevisionOpen((open) => !open);
       return;
     }
+    if (action.kind === "toggle-guidance") {
+      setGrantSimilarForTask(false);
+      setRecoveryGuidanceOpen(true);
+      return;
+    }
     if (action.run) answerWithExit(action.run);
   }, [submitting, toolActions, isPlanApproval, isRecoveryApproval]);
 
@@ -416,6 +504,11 @@ export function ApprovalModal({
       setRevisionOpen((open) => !open);
       return;
     }
+    if (action.kind === "toggle-guidance") {
+      setGrantSimilarForTask(false);
+      setRecoveryGuidanceOpen(true);
+      return;
+    }
     setSelectedIndex(index);
   }, [submitting]);
 
@@ -426,7 +519,10 @@ export function ApprovalModal({
         event.preventDefault();
         setRecoveryGuidanceOpen(false);
         setRecoveryGuidanceText("");
-        requestAnimationFrame(() => recoveryGuidanceTriggerRef.current?.focus());
+        requestAnimationFrame(() => {
+          if (isRecoveryPlanChange) cardRef.current?.focus();
+          else recoveryGuidanceTriggerRef.current?.focus();
+        });
         return;
       }
       const target = event.target instanceof Element ? event.target : null;
@@ -481,16 +577,17 @@ export function ApprovalModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionCount, activateAction, confirmSelected, onStop, submitting, isPlanApproval, isRecoveryApproval, recoveryGuidanceOpen, toolActions]);
+  }, [actionCount, activateAction, confirmSelected, onStop, submitting, isPlanApproval, isRecoveryApproval, isRecoveryPlanChange, recoveryGuidanceOpen, toolActions]);
 
   useEffect(() => {
-    if (revisionOpen) {
-      onRevisionActiveChange?.(true);
-      inputRef.current?.focus();
-      return () => onRevisionActiveChange?.(false);
-    }
-    onRevisionActiveChange?.(false);
-  }, [revisionOpen, onRevisionActiveChange]);
+    revisionActiveRef.current = revisionOpen;
+    onRevisionActiveChangeRef.current?.(revisionOpen);
+    if (revisionOpen) inputRef.current?.focus();
+  }, [revisionOpen]);
+
+  useEffect(() => () => {
+    if (revisionActiveRef.current) onRevisionActiveChangeRef.current?.(false);
+  }, []);
 
   const focusRevisionInput = (caret = revisionText.length) => {
     requestAnimationFrame(() => {
@@ -566,7 +663,10 @@ export function ApprovalModal({
   const closeRecoveryGuidance = () => {
     setRecoveryGuidanceOpen(false);
     setRecoveryGuidanceText("");
-    requestAnimationFrame(() => recoveryGuidanceTriggerRef.current?.focus());
+    requestAnimationFrame(() => {
+      if (isRecoveryPlanChange) cardRef.current?.focus();
+      else recoveryGuidanceTriggerRef.current?.focus();
+    });
   };
 
   const submitRecoveryGuidance = () => {
@@ -606,6 +706,9 @@ export function ApprovalModal({
     recovery?.next_tool ||
     subjectSummary ||
     approval.tool;
+  const recoveryPlanDelta = isRecoveryPlanChange
+    ? planDelta(recovery?.plan_before, recovery?.plan_after)
+    : null;
   const hasRecoveryDetails = Boolean(
     recovery?.failed_summary ||
     recovery?.diagnosis ||
@@ -630,11 +733,24 @@ export function ApprovalModal({
         className={isPlanApproval ? "prompt-shelf--plan-approval" : isRecoveryApproval ? "prompt-shelf--recovery-approval" : "prompt-shelf--tool-approval"}
         barRef={cardRef}
         titleId={isPlanApproval ? "plan-approval-title" : isRecoveryApproval ? "recovery-approval-title" : "tool-approval-title"}
-        title={isPlanApproval ? t("approval.planReady") : isRecoveryApproval ? t("approval.recoveryPending") : t("approval.toolPending")}
+        title={
+          isPlanApproval
+            ? t("approval.planReady")
+            : isRecoveryPlanChange
+              ? t("approval.recoveryPlanChangePending")
+              : isRecoveryApproval
+                ? t("approval.recoveryPending")
+                : t("approval.toolPending")
+        }
         badges={
           <>
             {!isPlanApproval && !isRecoveryApproval && <PromptBadge tone="amber">{toolLabel}</PromptBadge>}
             {isPlanApproval && revisionOpen && <PromptBadge>{t("approval.revisePlan")}</PromptBadge>}
+            {isRecoveryPlanChange && (
+              <PromptBadge>
+                {t(recoveryChangeKind === "strategy" ? "approval.recoveryDecisionStrategy" : "approval.recoveryDecisionScope")}
+              </PromptBadge>
+            )}
           </>
         }
         meta={isRecoveryApproval ? undefined : toolMeta}
@@ -681,7 +797,7 @@ export function ApprovalModal({
                   title={action.desc}
                 />
               );
-              if (isRecoveryApproval && index === 1 && recovery?.can_grant_task) {
+              if (isRecoveryApproval && !isRecoveryPlanChange && index === 1 && recovery?.can_grant_task) {
                 return (
                   <div
                     key={action.key}
@@ -745,11 +861,11 @@ export function ApprovalModal({
                     onClick={submitRecoveryGuidance}
                     disabled={submitting || !recoveryGuidanceText.trim()}
                   >
-                    {t("approval.recoveryGuidanceSubmit")}
+                    {t(isRecoveryPlanChange ? "approval.recoveryPlanGuidanceSubmit" : "approval.recoveryGuidanceSubmit")}
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : isRecoveryPlanChange ? undefined : (
               <button
                 ref={recoveryGuidanceTriggerRef}
                 type="button"
@@ -791,11 +907,32 @@ export function ApprovalModal({
             {isRecoveryApproval && (
               <section className="recovery-summary" aria-label={t("approval.recoverySummaryLabel")}>
                 <p className="recovery-summary__reason">{recoveryReason}</p>
-                {recoveryActionSummary && (
+                {!isRecoveryPlanChange && recoveryActionSummary && (
                   <p className="recovery-summary__action">
                     <span>{t("approval.recoveryNextLabel")}</span>
                     <code>{recoveryActionSummary}</code>
                   </p>
+                )}
+              </section>
+            )}
+            {isRecoveryPlanChange && recoveryPlanDelta && (
+              <section className="plan-change-delta" aria-label={t("approval.recoveryPlanDeltaLabel")}>
+                <div className="plan-change-delta__title">{t("approval.recoveryPlanDeltaLabel")}</div>
+                {recoveryPlanDelta.removed.length > 0 && (
+                  <div className="plan-change-delta__group plan-change-delta__group--removed">
+                    <div className="plan-change-delta__label">{t("approval.recoveryPlanRemoved")}</div>
+                    {recoveryPlanDelta.removed.map((line, index) => (
+                      <div className="plan-change-delta__line" key={`removed-${index}-${line}`}><span>−</span>{line}</div>
+                    ))}
+                  </div>
+                )}
+                {recoveryPlanDelta.added.length > 0 && (
+                  <div className="plan-change-delta__group plan-change-delta__group--added">
+                    <div className="plan-change-delta__label">{t("approval.recoveryPlanAdded")}</div>
+                    {recoveryPlanDelta.added.map((line, index) => (
+                      <div className="plan-change-delta__line" key={`added-${index}-${line}`}><span>+</span>{line}</div>
+                    ))}
+                  </div>
                 )}
               </section>
             )}

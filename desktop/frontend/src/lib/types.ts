@@ -1,6 +1,8 @@
 // Wire contract — mirrors desktop/wire.go (itself mirroring internal/serve/wire.go).
 // One event channel carries every kind; `kind` discriminates the payload.
 
+import type { Todo } from "./tools";
+
 export type EventKind =
   | "turn_started"
   | "reasoning"
@@ -94,6 +96,8 @@ export interface WireRecoveryApproval {
   change_kind?: string;
   change_rationale?: string;
   review_rationale?: string;
+  plan_before?: string;
+  plan_after?: string;
   can_grant_task?: boolean;
   task_grant_scope?: string;
 }
@@ -169,7 +173,7 @@ export interface WireEvent {
   compaction?: WireCompaction;
   guardian?: WireGuardian;
   err?: string;
-  outcome?: "final_readiness";
+  outcome?: "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
@@ -497,6 +501,7 @@ export interface Meta {
   goal?: string;
   goalStatus?: GoalStatus;
   autoResearch?: AutoResearchCompactView;
+  canonicalTodos?: Todo[];
 }
 
 export type CollaborationMode = "normal" | "plan" | "goal";
@@ -702,11 +707,19 @@ export interface ServerView {
   name: string;
   transport: string;
   status: "connected" | "deferred" | "failed" | "initializing" | "disabled";
+  /** @deprecated derived from enabled */
   startIntent?: "off" | "automatic" | string;
   runtimeState?: "idle" | "connecting" | "ready" | "issue" | string;
+  /** Product availability: available_on_demand | starting | connected | auth_required | project_auth_changed | start_failed | disabled */
+  availability?: string;
+  enabled?: boolean;
+  installed?: boolean;
+  action?: "none" | "authenticate" | "authorize" | "retry" | string;
   builtIn?: boolean;
   configured?: boolean;
+  /** @deprecated same as enabled */
   autoStart: boolean;
+  /** @deprecated ignored by runtime */
   tier?: "background" | "eager" | string;
   command?: string;
   args?: string[];
@@ -714,6 +727,7 @@ export interface ServerView {
   envKeys?: string[];
   headerKeys?: string[];
   tools: number;
+  toolCount?: number;
   prompts: number;
   resources: number;
   hasTools?: boolean;
@@ -882,6 +896,14 @@ export interface MCPServerInput {
   autoStart?: boolean | null;
   callTimeoutSeconds?: number | null;
   toolTimeoutSeconds?: Record<string, number> | null;
+}
+
+export interface MCPInstallResult {
+  name: string;
+  state: "ready" | "action_required" | "issue";
+  toolCount: number;
+  action: "none" | "authenticate" | "authorize" | "retry";
+  message: string;
 }
 
 export interface MCPMarketplaceEntry {

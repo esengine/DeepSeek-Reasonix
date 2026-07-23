@@ -79,6 +79,7 @@ type APIError struct {
 	Provider    string
 	Status      int
 	Body        string
+	TraceID     string // provider trace identifier from the response headers, when present
 	ToolContext string // resolved Reasonix/MCP identity for provider-indexed tool schema errors
 }
 
@@ -235,11 +236,25 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			}
 			return nil, authErr
 		}
-		apiErr := &APIError{Provider: opts.Provider, Status: resp.StatusCode, Body: strings.TrimSpace(string(msg))}
+		apiErr := &APIError{
+			Provider: opts.Provider,
+			Status:   resp.StatusCode,
+			Body:     strings.TrimSpace(string(msg)),
+			TraceID:  responseTraceID(resp.Header),
+		}
 		if !RetryableStatus(resp.StatusCode) {
 			return nil, apiErr
 		}
 		lastErr = apiErr
 	}
 	return nil, lastErr
+}
+
+func responseTraceID(header http.Header) string {
+	for _, name := range []string{"trace_id", "trace-id", "x-trace-id"} {
+		if value := strings.TrimSpace(header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }

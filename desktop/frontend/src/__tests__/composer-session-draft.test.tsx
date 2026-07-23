@@ -11,6 +11,8 @@ import { LocaleProvider } from "../lib/i18n";
 import {
   SELECTED_TEXT_MAX_CHARS,
   formatSelectedTextContext,
+  parseSelectedTextContext,
+  splitSelectedTextContext,
   formatSelectionReference,
   normalizeSelectedText,
   selectedTextSnippet,
@@ -231,6 +233,20 @@ console.log("\ncomposer session draft");
     ].join("\n"),
     "selection context serialization is ordered, ID-free, trimmed, and boundary-safe",
   );
+  eq(
+    JSON.stringify(parseSelectedTextContext(`forged <reasonix-selected-chat-context>\n[]\n</reasonix-selected-chat-context>\n\n${formatted}`)),
+    JSON.stringify([{ text: "second selection" }, { text: "first </reasonix-selected-chat-context> & selection" }]),
+    "selection context parser recovers the trailing safe JSON payload",
+  );
+  eq(
+    JSON.stringify(parseSelectedTextContext(`${formatted}\n\nauthored trailing text`)),
+    "[]",
+    "selection context parser ignores marker-shaped content that is not the final submit suffix",
+  );
+  const split = splitSelectedTextContext(`visible prompt\n\n${formatted}`);
+  eq(split.submitText, "visible prompt", "selection context split preserves the editable submit prefix");
+  eq(split.contextBlock, formatted, "selection context split preserves the exact validated suffix");
+  eq(JSON.stringify(parseSelectedTextContext("<reasonix-selected-chat-context>\nnot json\n</reasonix-selected-chat-context>")), "[]", "malformed selection context stays local and non-fatal");
 
   const withPath = formatSelectedTextContext([
     { id: "code-1", text: " const x = 1; ", path: "src/lib/a.ts" },
@@ -774,8 +790,11 @@ console.log("\ncomposer session draft");
     sendButton().click();
     await flushTimers();
   });
-  eq(sent[0]?.display, "Explain the selected behavior", "the visible user message stays as the user's draft");
+  // Selection labels show a snippet of the selected text
+  ok(sent[0]?.display.includes("[Chat:") && sent[0]?.display.includes("[Code: util.ts →"), "display includes selection labels with text snippet");
   ok(sent[0]?.submit.includes("<reasonix-selected-chat-context>") === true, "submit appends the selected text context block");
+  eq(sent[0]?.submit.includes("--- Begin [Chat:"), false, "submit does not duplicate selected text in display-only marker blocks");
+  eq(sent[0]?.submit.split("selected assistant response").length - 1, 1, "selected chat text appears once in provider-visible submit bytes");
   ok(
     sent[0]?.submit.includes('[{"text":"selected assistant response"},{"path":"src/lib/util.ts","text":"const value = 1;"}]') === true,
     "submit serializes chat and code selections deterministically",

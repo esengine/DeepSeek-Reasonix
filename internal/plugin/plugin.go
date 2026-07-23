@@ -32,6 +32,31 @@ import (
 // protocolVersion is the MCP revision Reasonix advertises during initialize.
 const protocolVersion = "2024-11-05"
 
+// MCPProcessMode selects how a local stdio MCP process is launched.
+// It is an internal runtime field, not a user-facing config knob.
+type MCPProcessMode string
+
+const (
+	// MCPProcessHost runs authorized stdio MCP as a trusted host process that
+	// does not inherit the agent Bash command sandbox. This is the product
+	// default so servers such as chrome-devtools-mcp can reach the real browser,
+	// Keychain, LaunchServices, and local app services.
+	MCPProcessHost MCPProcessMode = "host"
+	// MCPProcessConfined wraps the process with sandbox.CommandArgs. Reserved for
+	// internal managed deployments and tests; never auto-selected for user installs.
+	MCPProcessConfined MCPProcessMode = "confined"
+)
+
+// ResolvedProcessMode returns the effective process mode. Empty means host.
+func (s Spec) ResolvedProcessMode() MCPProcessMode {
+	switch s.ProcessMode {
+	case MCPProcessConfined:
+		return MCPProcessConfined
+	default:
+		return MCPProcessHost
+	}
+}
+
 // defaultCallTimeout is the MCP JSON-RPC call deadline applied when neither the
 // caller context nor config provides one. It is intentionally finite so a slow
 // or hung MCP server cannot block an agent turn indefinitely.
@@ -97,9 +122,14 @@ type Spec struct {
 	LauncherLocator         string
 	LauncherResolvedVersion string
 	LauncherDigest          string
-	// Sandbox isolates the persistent MCP process. One process serves both reads
-	// and writes, so separate reader/writer specs created configuration without
-	// changing the actual runtime boundary.
+	// ProcessMode selects how an authorized stdio MCP process is launched.
+	// Empty defaults to host (trusted host process, no command sandbox).
+	// confined is reserved for internal managed deployments and tests; it is
+	// never exposed in common settings and never used as an automatic fallback.
+	ProcessMode MCPProcessMode
+	// Sandbox is only applied when ProcessMode is confined. Host-mode servers
+	// keep private state/cache/temp dirs without wrapping the process in the
+	// agent command sandbox.
 	Sandbox  sandbox.Spec
 	StateDir string
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
@@ -461,6 +491,17 @@ func (h *Host) Close() {
 		c.close()
 	}
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
+}
+
+// queueBackgroundWrite keeps detached persistence inside the Host lifecycle.
+// Callers must enqueue before their Close-drained startup owner completes, so
+// Close cannot begin waiting before the WaitGroup increment is visible.
+func (h *Host) queueBackgroundWrite(write func()) {
+	h.bgWrites.Add(1)
+	go func() {
+		defer h.bgWrites.Done()
+		write()
+	}()
 }
 
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
@@ -924,11 +965,29 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 	return h.addWithLifecycle(ctx, ctx, s, 0)
 }
 
-// addDeferred connects a lazy/background server only while the generation
-// registered by LazyToolset remains current. Remove invalidates that generation
-// before cancelling startup, so a late handshake cannot resurrect the server.
-func (h *Host) addDeferred(ctx context.Context, s Spec, generation uint64) ([]tool.Tool, error) {
-	return h.addWithLifecycle(ctx, ctx, s, generation)
+// EnsureConnected returns tools for an already-connected server, or starts the
+// shared single-flight handshake and waits for it. Concurrent callers for the
+// same server share one initialize/tools-list; cancelling a waiter only cancels
+// that wait and never kills a process still used by other runtimes.
+func (h *Host) EnsureConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
+	return h.EnsureConnectedWithLifecycle(ctx, ctx, s, 0)
+}
+
+// EnsureConnectedWithLifecycle is EnsureConnected with separate subprocess
+// lifetime (lifeCtx) and startup/call (callCtx) contexts, plus an optional
+// deferred generation for lazy registration.
+func (h *Host) EnsureConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferredGeneration uint64) ([]tool.Tool, error) {
+	if deferredGeneration != 0 && !h.deferredGenerationCurrent(s.Name, deferredGeneration) {
+		return nil, ErrDeferredSpawnCancelled
+	}
+	if tools, err := h.ToolsFor(callCtx, s.Name); err == nil {
+		return tools, nil
+	}
+	tools, err := h.addWithLifecycle(lifeCtx, callCtx, s, deferredGeneration)
+	if IsServerAlreadyConnected(err) {
+		return h.ToolsFor(callCtx, s.Name)
+	}
+	return tools, err
 }
 
 // AddWithLifecycle connects one server live, allowing caller to specify separate

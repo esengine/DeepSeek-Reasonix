@@ -520,6 +520,12 @@ ok((bridgeSource.match(/paneOpacity:\s*0\.50/g) || []).length === 8, "browser mo
 ok(viteSource.includes('resolve(configDir, "../themes/official")'), "Vite dev server permits only the official theme asset directory");
 ok(stylesSource.includes("container: theme-gallery / inline-size"), "gallery establishes its own responsive container");
 ok(stylesSource.includes("@container theme-gallery (max-width: 760px)"), "gallery collapses from its content width");
+ok(gallerySource.includes('import { createPortal } from "react-dom"') && gallerySource.includes("document.body"), "theme editor escapes settings containing blocks through a body portal");
+ok(gallerySource.includes('role="dialog"') && gallerySource.includes("aria-labelledby={titleId}"), "theme editor portal retains accessible dialog semantics");
+ok(stylesSource.includes("container: theme-editor / inline-size"), "theme editor establishes an independent responsive container");
+ok(stylesSource.includes("@container theme-editor (max-width: 920px)"), "theme editor collapses from its own width");
+ok(stylesSource.includes(".theme-editor__setting-row .set-seg__btn { flex: 1; min-width: 0; }"), "all editor segmented setting buttons share available width");
+ok(stylesSource.includes("grid-template-columns: repeat(3, minmax(0, 1fr))"), "base appearance options wrap at narrow editor widths");
 ok(stylesSource.includes(".theme-gallery__preview-control"), "preview dimensions have labeled layout styling");
 ok(gallerySource.includes("settings.themeGallery.scenePreviewHint") && gallerySource.includes("theme-gallery__preview-help"), "scene preview explains home and workspace behavior");
 ok(localeZh.includes('"settings.themeGallery.sceneHome": "首页展示"') && localeZh.includes('"settings.themeGallery.sceneTask": "工作区展示"'), "scene options use explicit Chinese labels");

@@ -1480,15 +1480,13 @@ func hasUsableServeForward(entries []forward.Entry, targetAddr, localURL string)
 }
 
 func desktopCLIBinaryPath() string {
-	name := "reasonix"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
+	packagedName, commandName := desktopCLIBinaryNames(runtime.GOOS)
 	candidates := []string{}
 	if exe, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(exe), name))
+		dir := filepath.Dir(exe)
+		candidates = append(candidates, filepath.Join(dir, packagedName))
 	}
-	if found, err := exec.LookPath(name); err == nil {
+	if found, err := exec.LookPath(commandName); err == nil {
 		candidates = append(candidates, found)
 	}
 	for _, candidate := range candidates {
@@ -1502,6 +1500,13 @@ func desktopCLIBinaryPath() string {
 		return candidate
 	}
 	return ""
+}
+
+func desktopCLIBinaryNames(goos string) (packaged, command string) {
+	if goos == "windows" {
+		return "reasonix-cli.exe", "reasonix.exe"
+	}
+	return "reasonix", "reasonix"
 }
 
 func desktopNormalizeBind(bind string) string {

@@ -1230,6 +1230,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 	usedAnyTool := false
 	streamRecoveries := 0
 	graceRound := false
+	recoveryGraceRound := false
 	todoProgress, trackingTodoProgress := a.canonicalTodoProgress()
 	todoStallRounds := 0
 	seenTodoProgress := make(map[string]struct{})
@@ -1239,7 +1240,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		}
 	}
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
-	for step := 0; a.maxSteps <= 0 || step < a.maxSteps || graceRound; step++ {
+	for step := 0; a.maxSteps <= 0 || step < a.maxSteps || graceRound || recoveryGraceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -1301,6 +1302,20 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		})
 
 		if len(calls) == 0 {
+			// Recovery finalization produced a summary. Keep it in the session,
+			// but still pause so Goal auto-continue cannot open another Run with
+			// a fresh finalization round. turn_done reports recovery_paused.
+			if recoveryGraceRound {
+				a.maybeCompact(ctx, usage)
+				reason := ""
+				if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
+					_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
+				}
+				return &RecoveryPauseError{
+					Message:    "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+					StopReason: reason,
+				}
+			}
 			finalizeTask := !a.deliveryScopeActive || deliveryDisposition(text) == deliveryGoalFinal
 			readiness := a.finalReadinessCheckFor(finalizeTask)
 			if graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
@@ -1379,12 +1394,37 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		if graceRound {
 			return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
 		}
+		// Recovery Episode exhausted: one finalization round only. Further tool
+		// calls are not executed; return a typed pause so the host can surface
+		// recovery_paused without treating it as a send failure.
+		if recoveryGraceRound {
+			reason := ""
+			if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
+				_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
+			}
+			// Pair tool-call / tool-result without executing.
+			msg := "blocked: Auto recovery already paused this turn. Do not call tools; the user will continue in the next message."
+			for _, call := range calls {
+				a.session.Add(provider.Message{
+					Role:       provider.RoleTool,
+					Content:    msg,
+					ToolCallID: call.ID,
+					Name:       call.Name,
+				})
+			}
+			a.maybeCompact(ctx, usage)
+			return &RecoveryPauseError{
+				Message:    "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+				StopReason: reason,
+			}
+		}
 
 		receiptMark := 0
 		if a.evidence != nil {
 			receiptMark = a.evidence.Len()
 		}
-		results, images := a.executeBatch(ctx, calls)
+		batch := a.executeBatch(ctx, calls)
+		results, images := batch.results, batch.images
 		for i, call := range calls {
 			a.session.Add(provider.Message{
 				Role:       provider.RoleTool,
@@ -1442,6 +1482,24 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// The prompt only grows from here; compact before the next turn so it
 		// stays within the model's window.
 		a.maybeCompact(ctx, usage)
+
+		// When Auto recovery exhausts its Episode budget, offer exactly one
+		// summarize-only finalization round. Successful summary ends cleanly;
+		// further tool calls surface RecoveryPauseError.
+		if batch.recoveryStopTurn && !recoveryGraceRound {
+			recoveryGraceRound = true
+			if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
+				ctrl.MarkFinalizationOffered(a.recoveryTaskID)
+			}
+			nudge := "Auto recovery has reached its limit for this turn. Do not call any more tools. Summarize what was completed, what failed, and what the user should do next. The user can continue in the next message."
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+			a.sink.Emit(event.Event{
+				Kind: event.Notice, Level: event.LevelInfo,
+				Text:   "Automatic recovery paused for this turn.",
+				Detail: firstNonEmpty(batch.recoveryStopReason, "episode recovery budget exhausted"),
+			})
+			continue
+		}
 
 		// When the tool-call budget runs out this round, give the model
 		// one grace round to produce a final answer from completed work.
@@ -2495,15 +2553,22 @@ func (a *Agent) systemPrompt() string {
 	return b.String()
 }
 
+// batchExecution is the result of one provider tool-call batch.
+type batchExecution struct {
+	results            []string
+	images             [][]string
+	recoveryStopTurn   bool
+	recoveryStopReason string
+}
+
 // executeBatch dispatches one model turn's tool calls. A ToolDispatch event is
 // emitted for every call up front, in call order, so a frontend can show the
 // timeline chronologically. Contiguous known ReadOnly calls fan out across
 // goroutines; unknown and writer calls run as single-call serial segments so
 // write/read ordering stays provider-ordered. ToolResult events are emitted
 // after the batch in call order, so emission stays serial even when execution
-// parallelised. The second return carries each call's tool-result images (nil
-// for most calls), aligned by index with the first.
-func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]string, [][]string) {
+// parallelised. Images are aligned by index with results.
+func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) batchExecution {
 	// The assistant message already stored this slice in Session. Keep execution
 	// state separate so refreshing a dependent preview never mutates shared
 	// session memory outside Session's lock.
@@ -2575,9 +2640,38 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]
 		cancelled = true
 	}
 
+	// recoveryBatchStop blocks remaining tools after Episode budgets are
+	// exhausted so tool-call / result pairs stay complete for the provider.
+	recoveryBatchStop := false
+	recoveryStopReason := ""
+	markRecoveryStopped := func(start int, reason string) {
+		msg := "blocked: Auto recovery paused this turn; do not call more tools. Summarize completed work for the user."
+		for j := start; j < len(calls); j++ {
+			if results[j] != "" {
+				continue
+			}
+			results[j] = msg
+			outcomes[j] = toolOutcome{
+				output:             msg,
+				blocked:            true,
+				errMsg:             firstLine(msg),
+				recoveryStopTurn:   true,
+				recoveryStopReason: reason,
+			}
+		}
+		recoveryBatchStop = true
+		if reason != "" {
+			recoveryStopReason = reason
+		}
+	}
+
 	for _, batch := range partitionToolCalls(a.tools, calls) {
 		if ctx.Err() != nil {
 			markCancelled(batch.start)
+			break
+		}
+		if recoveryBatchStop {
+			markRecoveryStopped(batch.start, recoveryStopReason)
 			break
 		}
 		if batch.parallel && batch.end-batch.start > 1 {
@@ -2587,6 +2681,17 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]
 			// we verify here to ensure we don't continue to subsequent batches.
 			if ctx.Err() != nil {
 				markCancelled(ranUntil)
+				break
+			}
+			for i := batch.start; i < batch.end; i++ {
+				if outcomes[i].recoveryStopTurn {
+					recoveryBatchStop = true
+					recoveryStopReason = outcomes[i].recoveryStopReason
+					markRecoveryStopped(batch.end, recoveryStopReason)
+					break
+				}
+			}
+			if recoveryBatchStop {
 				break
 			}
 			continue
@@ -2599,7 +2704,17 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]
 				markCancelled(i)
 				break
 			}
+			if recoveryBatchStop {
+				markRecoveryStopped(i, recoveryStopReason)
+				break
+			}
 			run(i)
+			if outcomes[i].recoveryStopTurn {
+				recoveryBatchStop = true
+				recoveryStopReason = outcomes[i].recoveryStopReason
+				markRecoveryStopped(i+1, recoveryStopReason)
+				break
+			}
 			// After each tool execution, also check if the context was cancelled.
 			// If so, stop executing remaining tools and return immediately so
 			// the agent loop can detect the cancellation and exit.
@@ -2608,7 +2723,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]
 				break
 			}
 		}
-		if cancelled {
+		if cancelled || recoveryBatchStop {
 			break
 		}
 	}
@@ -2637,8 +2752,19 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) ([]
 	images := make([][]string, len(calls))
 	for i := range outcomes {
 		images[i] = outcomes[i].images
+		if outcomes[i].recoveryStopTurn {
+			recoveryBatchStop = true
+			if outcomes[i].recoveryStopReason != "" {
+				recoveryStopReason = outcomes[i].recoveryStopReason
+			}
+		}
 	}
-	return results, images
+	return batchExecution{
+		results:            results,
+		images:             images,
+		recoveryStopTurn:   recoveryBatchStop,
+		recoveryStopReason: recoveryStopReason,
+	}
 }
 
 func (a *Agent) emitFullToolDispatch(c provider.ToolCall, refreshed bool) {
@@ -2945,6 +3071,12 @@ type toolOutcome struct {
 	errMsg    string
 	truncated bool
 	truncMsg  string
+	// recoveryGeneration is the gate generation captured before execution so
+	// ObserveResult can ignore stale results after a mode switch.
+	recoveryGeneration uint64
+	// recoveryStopTurn is set when Auto Episode budgets are exhausted.
+	recoveryStopTurn   bool
+	recoveryStopReason string
 }
 
 // executeOne runs a single tool call. It is pure with respect to the event sink
@@ -3138,32 +3270,60 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	}
 	// Auto Guard: after resolution/mutation classification, before
 	// permission approval and workspace write-lock acquisition, so a waiting
-	// recovery card never holds a write lease.
+	// recovery card never holds a write lease. Consult on mutations,
+	// verification, plan transitions, and again for every tool once an Episode
+	// is exhausted (including read-only). Ask/Yolo still bypass inside the gate.
 	verification := evidenceName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(evidenceArgs))
-	if a.recoveryGate != nil && (mutates || verification) {
+	planTransition, planBefore, planAfter := a.recoveryPlanTransition(evidenceName, evidenceArgs)
+	planReplacementAuthorized := false
+	recoveryGen := uint64(0)
+	episodeStopped := false
+	if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
+		recoveryGen = ctrl.Generation()
+		episodeStopped = ctrl.EpisodeStopped(a.recoveryTaskID)
+	}
+	if a.recoveryGate != nil && (mutates || verification || planTransition || episodeStopped) {
 		subject := recoverySubject(evidenceName, evidenceArgs)
+		if planTransition {
+			subject = "Update the active execution plan"
+		}
 		preview := strings.TrimSpace(call.Diff)
 		if preview == "" {
 			preview = subject
 		}
+		if planTransition {
+			preview = planAfter
+		}
+		episodeID := ""
+		if ctrl := a.recoveryEpisodeControl(); ctrl != nil {
+			episodeID = ctrl.EpisodeID()
+		}
 		dec, rerr := a.recoveryGate.BeforeMutation(ctx, RecoveryProposal{
-			AgentID:      a.recoveryAgentID,
-			TaskID:       a.recoveryTaskID,
-			TaskScopeID:  recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
-			TaskSummary:  a.recoveryTaskSummary,
-			Tool:         evidenceName,
-			Args:         evidenceArgs,
-			Subject:      subject,
-			Preview:      preview,
-			ReadOnly:     readOnly,
-			Mutates:      mutates,
-			Verification: verification,
+			AgentID:        a.recoveryAgentID,
+			TaskID:         a.recoveryTaskID,
+			TaskScopeID:    recoveryTaskScopeID(a.deliveryScopeID, a.recoveryRunSeq.Load()),
+			EpisodeID:      episodeID,
+			TaskSummary:    a.recoveryTaskSummary,
+			Tool:           evidenceName,
+			Args:           evidenceArgs,
+			Subject:        subject,
+			Preview:        preview,
+			ReadOnly:       readOnly,
+			Mutates:        mutates,
+			Verification:   verification,
+			PlanTransition: planTransition,
+			PlanBefore:     planBefore,
+			PlanAfter:      planAfter,
 		})
+		if dec.Generation != 0 {
+			recoveryGen = dec.Generation
+		}
 		if rerr != nil && !dec.Blocked {
 			return toolOutcome{
-				output:  fmt.Sprintf("blocked: Auto Guard error: %v", rerr),
-				blocked: true,
-				errMsg:  "blocked: Auto Guard error",
+				output:             fmt.Sprintf("blocked: Auto Guard error: %v", rerr),
+				blocked:            true,
+				errMsg:             "blocked: Auto Guard error",
+				recoveryGeneration: recoveryGen,
 			}
 		}
 		if dec.Blocked || !dec.Allow {
@@ -3177,9 +3337,15 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			return toolOutcome{
 				output:  msg,
 				blocked: true,
-				errMsg:  "blocked by Auto Guard",
+				// Surface the concrete stopped operation and next step in the
+				// failed tool card instead of exposing only an internal guard name.
+				errMsg:             firstLine(msg),
+				recoveryGeneration: recoveryGen,
+				recoveryStopTurn:   dec.StopTurn,
+				recoveryStopReason: dec.StopReason,
 			}
 		}
+		planReplacementAuthorized = planTransition && dec.AuthorizePlanReplacement
 	}
 	if isInstalledMCPTool(execTool) {
 		if !mcpServerAuthorized(execTool) {
@@ -3289,6 +3455,9 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 	if !a.planMode.Load() {
 		cctx = evidence.WithTodoState(cctx, a.CanonicalTodoState())
 	}
+	if planReplacementAuthorized {
+		cctx = tool.WithPlanReplacementAuthorization(cctx)
+	}
 	if len(a.projectChecks) > 0 {
 		cctx = instruction.WithChecks(cctx, a.projectChecks)
 	}
@@ -3372,7 +3541,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		}
 	}
 	if a.recoveryGate != nil {
-		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false)
+		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false, recoveryGen)
 	}
 	if err != nil {
 		detail := result
@@ -3384,7 +3553,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 			detail = strings.TrimRight(detail, "\n") + "\nThe arguments were not valid JSON. Re-emit them exactly per this schema:\n" + string(t.Schema())
 		}
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
-		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg}
+		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg, recoveryGeneration: recoveryGen}
 	}
 	a.recordRepeatSuccess(call, t)
 	// A foreground `task` sub-agent just finished — its result is the final answer.
@@ -3394,7 +3563,62 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 		a.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutput(result)
-	return toolOutcome{output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg}
+	return toolOutcome{output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg, recoveryGeneration: recoveryGen}
+}
+
+// recoveryPlanTransition detects structural rewrites of an active canonical
+// task list. Initial plans and progress-only status updates stay on the fast
+// path; changing step identity, order, or hierarchy while work remains is a
+// semantic transition for the independent Auto reviewer.
+func (a *Agent) recoveryPlanTransition(toolName string, args json.RawMessage) (bool, string, string) {
+	if a == nil || toolName != "todo_write" || a.planMode.Load() {
+		return false, "", ""
+	}
+	before := a.CanonicalTodoState()
+	if len(before) == 0 || len(evidence.IncompleteTodos(before)) == 0 {
+		return false, "", ""
+	}
+	after := evidence.ReceiptFromToolCall("todo_write", args, true, true).Todos
+	if len(after) == 0 || evidence.ValidateSerialTodos(after) != nil || !evidence.PreservesCompletedTodoPositions(before, after) {
+		// Let todo_write report malformed or invalid state directly; an invalid
+		// task list is not a meaningful plan proposal for the reviewer.
+		return false, "", ""
+	}
+	if samePlanStructure(before, after) {
+		return false, "", ""
+	}
+	return true, planReviewText(before), planReviewText(after)
+}
+
+func samePlanStructure(a, b []evidence.TodoItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Level != b[i].Level || normalizePlanStep(a[i].Content) != normalizePlanStep(b[i].Content) {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizePlanStep(s string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+}
+
+func planReviewText(todos []evidence.TodoItem) string {
+	var b strings.Builder
+	for i, todo := range todos {
+		indent := ""
+		if todo.Level == 1 {
+			indent = "  "
+		}
+		fmt.Fprintf(&b, "%s%d. %s [%s]", indent, i+1, normalizePlanStep(todo.Content), canonicalTodoStatus(todo.Status))
+		if i+1 < len(todos) {
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }
 
 func recoveryTaskScopeID(deliveryScopeID string, runSeq uint64) string {

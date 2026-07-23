@@ -334,6 +334,7 @@ type TodoStepMatch struct {
 type Receipt struct {
 	ToolName  string          `json:"tool_name"`
 	Args      json.RawMessage `json:"args,omitempty"`
+	Profile   string          `json:"profile,omitempty"`
 	Success   bool            `json:"success"`
 	Command   string          `json:"command,omitempty"`
 	Step      string          `json:"step,omitempty"`
@@ -558,6 +559,70 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 		}
 	}
 	return false
+}
+
+// HasCompletedReview reports whether a review completed with evidence that is
+// fresh for the latest mutation. Structured review_report receipts are the
+// strongest proof and also cover collected background reviews. Foreground
+// review/task adapters remain compatible, but after a mutation their child
+// receipts must show that the changed result was actually inspected.
+func (l *Ledger) HasCompletedReview() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+
+	mutation := -1
+	for i, r := range receipts {
+		if r.Success && r.Mutation {
+			mutation = i
+		}
+	}
+	start := mutation + 1
+	requiredPaths := []string(nil)
+	if mutation >= 0 {
+		requiredPaths = receipts[mutation].Paths
+	}
+
+	for i := start; i < len(receipts); i++ {
+		r := receipts[i]
+		if completedStructuredReviewReceipt(r, requiredPaths) {
+			return true
+		}
+		if !successfulForegroundReviewReceipt(r) {
+			continue
+		}
+		if mutation < 0 || receiptsReviewChanges(receipts, start, i, mutation) {
+			return true
+		}
+	}
+	return false
+}
+
+func successfulForegroundReviewReceipt(r Receipt) bool {
+	if !r.Success {
+		return false
+	}
+	if r.ToolName == "review" {
+		return true
+	}
+	if r.ToolName != "task" || r.Profile != "review" {
+		return false
+	}
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	return json.Unmarshal(r.Args, &p) == nil && !p.RunInBackground
+}
+
+func completedStructuredReviewReceipt(r Receipt, requiredPaths []string) bool {
+	if !r.Success || r.ToolName != "review_report" {
+		return false
+	}
+	report, err := ParseReviewReport(r.Args)
+	return err == nil && report.Kind == ReviewKindReview && report.CoversPaths(requiredPaths)
 }
 
 // HasFailedCommand reports whether the cited command ran this turn but exited
@@ -908,6 +973,26 @@ func MatchTodoIdentity(todo TodoItem, todos []TodoItem) (TodoStepMatch, bool) {
 	}
 	candidate := todos[found]
 	return TodoStepMatch{Found: true, Index: found + 1, Content: candidate.Content, Status: candidate.Status, ActiveForm: candidate.ActiveForm}, true
+}
+
+// PreservesCompletedTodoPositions reports whether every previously completed
+// item remains completed at the same index in the replacement list. Completed
+// sub-steps can sit behind a pending phase header, so this checks every item
+// rather than assuming the literal list begins with completed statuses.
+func PreservesCompletedTodoPositions(previous, next []TodoItem) bool {
+	for i, todo := range previous {
+		if todoStatus(todo.Status) != "completed" {
+			continue
+		}
+		if i >= len(next) || todoStatus(next[i].Status) != "completed" {
+			return false
+		}
+		match, found := MatchTodoIdentity(todo, next)
+		if !found || match.Index != i+1 {
+			return false
+		}
+	}
+	return true
 }
 
 // HasAnySuccessfulReceipt reports whether any tool succeeded this turn — the
@@ -1351,6 +1436,9 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 	if err := json.Unmarshal(args, &fields); err == nil {
 		if toolName == "bash" {
 			r.Command = stringField(fields, "command")
+		}
+		if toolName == "task" {
+			r.Profile = stringField(fields, "profile")
 		}
 		if toolName == "complete_step" {
 			r.Step = completeStepIdentity(fields)

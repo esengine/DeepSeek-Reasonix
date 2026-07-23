@@ -321,6 +321,20 @@ func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	}
 }
 
+func TestServeIndexPresentsRecoveryPauseAsNotice(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"e.outcome==='recovery_paused'",
+		"showNotice('⏸ '+(e.err||__('recovery_paused')))",
+		"'recovery_paused': 'Automatic recovery paused. Completed work is kept; send more requirements or reply continue.'",
+		"'recovery_paused': '自动恢复已暂停。已完成的工作会保留；可补充要求或直接回复“继续”。'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing recovery pause support %q", want)
+		}
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

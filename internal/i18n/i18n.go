@@ -92,6 +92,7 @@ type Messages struct {
 	ChatStatusCacheAvgFmt                  string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval                 string // shortcuts hint while a plan is pending
 	PlanApprovalPrompt                     string // one-line "plan above is ready" banner shown above the input
+	PlanApprovalChoices                    string // start / revise / exit-without-executing choice list
 	ChatStatusToolApproval                 string // shortcuts hint while a tool call awaits approval
 	ToolApprovalPromptFmt                  string // approval banner — tool, subject suffix, source/intent detail, choices
 	ToolApprovalChoices                    string // standard approval choice list
@@ -99,6 +100,10 @@ type Messages struct {
 	PlanModeReadOnlyCommandChoices         string // approval choice list for plan-mode read-only command trust
 	FreshHumanApprovalChoices              string // approval choice list for prompts that cannot be remembered
 	RecoveryApprovalChoices                string // one-shot Auto Guard decision list
+	RecoveryPlanChangeChoices              string // material Auto plan transition decision list
+	RecoveryPlanDecisionPrompt             string // neutral title for a material Auto plan transition
+	RecoveryPlanBeforeFmt                  string // compact previous-plan line, one %s
+	RecoveryPlanAfterFmt                   string // compact proposed-plan line, one %s
 	RecoveryTaskGrantChoices               string // Auto Guard list with a current-task semantic grant
 	SandboxEscapeApprovalChoices           string // approval choice list for OS sandbox escape prompts
 	ApprovalNeededFmt                      string // notification text for a pending approval, tool only
@@ -501,6 +506,8 @@ type Messages struct {
 	ProviderErrAuthRejected        string // 401 — a key was sent but the server rejected it
 	ProviderErrInsufficientBalance string // 402
 	ProviderErrUnprocessable       string // 422
+	ProviderErrInputSensitive      string // MiniMax 1026
+	ProviderErrOutputSensitive     string // MiniMax 1027
 	ProviderErrRateLimited         string // 429
 	ProviderErrServer              string // 500
 	ProviderErrServerBusy          string // 503

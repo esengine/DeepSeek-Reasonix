@@ -21,7 +21,10 @@ import (
 	"reasonix/internal/tool"
 )
 
-const closeWaitBudget = 5 * time.Second
+const (
+	closeWaitBudget         = 5 * time.Second
+	gracefulCloseWaitBudget = 750 * time.Millisecond
+)
 
 // stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
 // stdin/stdout — the MCP stdio convention (one JSON message per line, no
@@ -76,25 +79,30 @@ func newStdioTransport(ctx context.Context, s Spec) (*stdioTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A stateful stdio process cannot switch its OS sandbox after launch. Keep
-	// one process in the server's process sandbox; Plan and strict read-only
-	// checks still decide which tools may be dispatched over the shared transport.
+	// Private state/cache/temp always apply so MCP processes do not pollute the
+	// user's home caches. Command-sandbox wrapping is separate and only used for
+	// confined mode; authorized user installs run as trusted host processes so
+	// Chrome, Keychain, and local app services keep working.
 	processSandbox := s.Sandbox
-	processSandbox.MinimalWrites = true
 	processSandbox, env, err = prepareMCPPrivateState(s, processSandbox, env)
 	if err != nil {
 		return nil, err
 	}
-	argv, _ := sandbox.CommandArgs(processSandbox, append([]string{exe}, effectiveLaunchArgs(s)...))
+	launchArgs := append([]string{exe}, effectiveLaunchArgs(s)...)
+	var argv []string
+	if s.ResolvedProcessMode() == MCPProcessConfined {
+		processSandbox.MinimalWrites = true
+		argv, _ = sandbox.CommandArgs(processSandbox, launchArgs)
+	} else {
+		argv = launchArgs
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	proc.HideWindow(cmd)
 	if s.LowPriority {
 		proc.LowPriority(cmd)
 	}
 	cmd.Env = env
-	if s.Dir != "" {
-		cmd.Dir = s.Dir // pin cwd-aware servers (e.g. CodeGraph) to the project root
-	}
+	cmd.Dir = stdioWorkingDir(s)
 	stderr := &tailBuffer{limit: 16 * 1024}
 	cmd.Stderr = stderr
 	if s.Stderr != nil {
@@ -240,7 +248,18 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 	env = enrichStdioShellPATH(ctx, env)
 
 	if hasPathSeparator(s.Command) {
-		return s.Command, env, nil
+		exe := s.Command
+		if !filepath.IsAbs(exe) {
+			if dir := stdioWorkingDir(s); dir != "" {
+				exe = filepath.Join(dir, exe)
+			}
+			abs, err := filepath.Abs(exe)
+			if err != nil {
+				return "", env, fmt.Errorf("stdio plugin %q: resolve command %q: %w", s.Name, s.Command, err)
+			}
+			exe = abs
+		}
+		return exe, env, nil
 	}
 	if exe, ok := lookPathInEnv(s.Command, env); ok {
 		return exe, env, nil
@@ -261,6 +280,19 @@ func resolveStdioExecutable(ctx context.Context, s Spec, env []string) (string, 
 
 	return "", env, fmt.Errorf("stdio plugin %q: command %q not found on PATH; GUI launches and non-interactive sessions may not inherit your shell PATH. Use an absolute command path or set PATH in the MCP server env. PATH=%q",
 		s.Name, s.Command, currentPath)
+}
+
+// stdioWorkingDir keeps WorkspaceRoot's roots/list role separate from process
+// execution for user-installed servers. Only repository-declared servers need
+// relative arguments to resolve against the project that supplied the config.
+func stdioWorkingDir(s Spec) string {
+	if s.Dir != "" {
+		return s.Dir
+	}
+	if s.RequireLaunchApproval {
+		return s.WorkspaceRoot
+	}
+	return ""
 }
 
 // enrichStdioShellPATH probes the user's interactive login shell for its PATH
@@ -699,18 +731,24 @@ func (t *stdioTransport) wait() {
 // complete the reap in the background, so wait must be safe to abandon
 // (stdioTransport.wait is single-shot via waitOnce).
 func waitWithBudget(wait func(), budget time.Duration) {
+	_ = waitFinishedWithinBudget(wait, budget)
+}
+
+func waitFinishedWithinBudget(wait func(), budget time.Duration) bool {
 	done := make(chan struct{})
 	go func() { wait(); close(done) }()
 	select {
 	case <-done:
+		return true
 	case <-time.After(budget):
+		return false
 	}
 }
 
-// close kills the whole process tree (a launcher's surviving grandchild keeps
-// the inherited stdio pipes open, so a plain Process.Kill leaves cmd.Wait
-// blocking forever) and reaps it under a budget so one wedged server can never
-// stall a boot or a turn teardown.
+// close first offers a short stdin-EOF grace period, then kills the whole
+// process tree if needed (a launcher's surviving grandchild can otherwise keep
+// inherited pipes open). Both paths are budgeted so one wedged server can never
+// stall a boot or turn teardown.
 func (t *stdioTransport) close() {
 	if t.releaseSlot != nil {
 		t.releaseSlot() // idempotent; frees the bounded CodeGraph instance slot
@@ -719,6 +757,13 @@ func (t *stdioTransport) close() {
 		_ = t.stdin.Close()
 	}
 	if t.cmd == nil || t.cmd.Process == nil {
+		return
+	}
+	// Give protocol-aware servers a short chance to observe stdin EOF and clean
+	// up resources they launched outside the process group (Chrome isolated
+	// profiles are the important case). Hard-kill after the bounded grace period
+	// so an unresponsive MCP still cannot stall teardown.
+	if waitFinishedWithinBudget(t.wait, gracefulCloseWaitBudget) {
 		return
 	}
 	proc.KillTracked(t.cmd, t.job)

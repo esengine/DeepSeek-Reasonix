@@ -42,6 +42,25 @@ func TestApprovalCardCarriesChatType(t *testing.T) {
 		t.Fatalf("task-grant card actions = %#v", grantCard.Elements[1].Extra["actions"])
 	}
 
+	planApproval := event.Approval{ID: "r3", Kind: "recovery", Recovery: &event.RecoveryApproval{
+		ChangeKind: "strategy", NextAction: "replace the storage backend", ChangeRationale: "the original approach cannot satisfy the requirement",
+		PlanBefore: "1. Keep the current storage backend", PlanAfter: "1. Replace the storage backend",
+	}}
+	if got := renderRecoveryText(planApproval); !strings.Contains(got, "执行计划需要你的决定") ||
+		!strings.Contains(got, "原计划:\n1. Keep the current storage backend") ||
+		!strings.Contains(got, "新计划:\n1. Replace the storage backend") ||
+		!strings.Contains(got, "回复 1 采用新计划并继续，2 不采用并让 Auto 调整") {
+		t.Fatalf("plan-change recovery text = %q", got)
+	}
+	planKeyboard := recoveryKeyboard(planApproval)
+	if len(planKeyboard.Rows) != 1 || planKeyboard.Rows[0].Buttons[0].Label != "1 采用并继续" || planKeyboard.Rows[0].Buttons[0].Style != 0 {
+		t.Fatalf("plan-change keyboard = %#v", planKeyboard)
+	}
+	planCard := recoveryCard(planApproval, ChatDM, "allowed-user")
+	if planCard.Header != "执行计划需要你的决定" {
+		t.Fatalf("plan-change card header = %q", planCard.Header)
+	}
+
 	card := approvalCard(event.Approval{ID: "approval-1", Tool: "bash", Subject: "ls"}, ChatDM, "allowed-user")
 	if len(card.Elements) < 2 {
 		t.Fatalf("approval card elements = %d, want at least 2", len(card.Elements))

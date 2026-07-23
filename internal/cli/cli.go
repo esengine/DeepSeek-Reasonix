@@ -634,8 +634,13 @@ func runAgent(args []string) int {
 	}
 
 	runErr := ctrl.Run(ctx, prompt)
+	completion := classifyRunCompletion(runErr)
 	if cfg != nil {
-		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{Kind: event.TurnDone, Err: runErr})
+		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{
+			Kind:    event.TurnDone,
+			Err:     runErr,
+			Outcome: completion.outcome,
+		})
 	}
 	if metrics != nil {
 		if exec := ctrl.Executor(); exec != nil {
@@ -665,12 +670,18 @@ func runAgent(args []string) int {
 		}
 	}
 	if runErr != nil {
+		if !completion.isError {
+			if format == runOutputText {
+				fmt.Fprintln(os.Stderr, "\n"+runErr.Error())
+			}
+			return completion.exitCode
+		}
 		if resultOutput == nil {
 			fmt.Fprintln(os.Stderr, "\n"+i18n.M.ErrorPrefix, runErr)
 		}
-		return 1
+		return completion.exitCode
 	}
-	return 0
+	return completion.exitCode
 }
 
 // runServe exposes the controller over HTTP+SSE: events stream to the browser,
