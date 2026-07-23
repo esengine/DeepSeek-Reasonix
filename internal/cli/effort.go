@@ -41,8 +41,8 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("model switching is unavailable in this session")
 		return nil
 	}
-	if m.ctrl.Running() {
-		m.notice("finish or cancel the current turn before changing effort")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before changing effort")
 		return nil
 	}
 	if m.modelSwitchPending {

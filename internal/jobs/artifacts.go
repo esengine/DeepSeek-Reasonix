@@ -40,6 +40,7 @@ type artifactMeta struct {
 	Kind                    string                    `json:"kind"`
 	Label                   string                    `json:"label,omitempty"`
 	SessionID               string                    `json:"sessionId,omitempty"`
+	OwnerID                 string                    `json:"ownerId,omitempty"`
 	Status                  Status                    `json:"status"`
 	StartedAt               int64                     `json:"startedAt"`
 	FinishedAt              int64                     `json:"finishedAt,omitempty"`

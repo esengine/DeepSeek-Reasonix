@@ -13,6 +13,8 @@ package jobs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/event"
@@ -29,6 +32,14 @@ import (
 )
 
 var renamePath = os.Rename
+
+var (
+	managerOwnerSeq   atomic.Uint64
+	liveManagerOwners = struct {
+		sync.RWMutex
+		ids map[string]struct{}
+	}{ids: map[string]struct{}{}}
+)
 
 // Status is a job's lifecycle state.
 type Status string
@@ -142,6 +153,8 @@ type Manager struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 	onJobStart func(done <-chan struct{})
+	ownerID    string
+	ownerDone  sync.Once
 
 	mu           sync.Mutex
 	seq          int
@@ -217,13 +230,55 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 		loaded:        map[string]bool{},
 		tempRoot:      tempRoot,
 		teardownGrace: DefaultTeardownGrace,
+		ownerID:       newManagerOwnerID(),
 	}
+	registerManagerOwner(m.ownerID)
 	for _, opt := range opts {
 		if opt != nil {
 			opt(m)
 		}
 	}
 	return m
+}
+
+func newManagerOwnerID() string {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err == nil {
+		return hex.EncodeToString(token[:])
+	}
+	return fmt.Sprintf("%d-%d-%d", os.Getpid(), time.Now().UnixNano(), managerOwnerSeq.Add(1))
+}
+
+func registerManagerOwner(ownerID string) {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return
+	}
+	liveManagerOwners.Lock()
+	liveManagerOwners.ids[ownerID] = struct{}{}
+	liveManagerOwners.Unlock()
+}
+
+func managerOwnerIsLive(ownerID string) bool {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return false
+	}
+	liveManagerOwners.RLock()
+	_, ok := liveManagerOwners.ids[ownerID]
+	liveManagerOwners.RUnlock()
+	return ok
+}
+
+func (m *Manager) releaseOwner() {
+	if m == nil {
+		return
+	}
+	m.ownerDone.Do(func() {
+		liveManagerOwners.Lock()
+		delete(liveManagerOwners.ids, m.ownerID)
+		liveManagerOwners.Unlock()
+	})
 }
 
 // jobWriter appends a job's streamed output under its lock so a concurrent
@@ -443,6 +498,7 @@ func (m *Manager) writeJobMetaLocked(j *Job, st Status) error {
 		Kind:             j.Kind,
 		Label:            j.Label,
 		SessionID:        j.SessionID,
+		OwnerID:          m.ownerID,
 		Status:           st,
 		StartedAt:        j.startedAt,
 		FinishedAt:       j.finishedAt,
@@ -1321,6 +1377,7 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 		return
 	}
 	var loaded []*Job
+	deferredLiveOwner := false
 	maxSeq := 0
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != jobMetaExt {
@@ -1331,23 +1388,27 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 		if err != nil || strings.TrimSpace(meta.ID) == "" {
 			continue
 		}
+		id := strings.TrimSpace(meta.ID)
+		if seq := maxJobSeq(id); seq > maxSeq {
+			maxSeq = seq
+		}
 		// A persisted Running record belongs to a process that no longer owns
-		// this newly loaded manager. The previous loader assumed only terminal
-		// tombstones existed, which became false once start metadata was added:
-		// resurrecting it as Running creates a closed-done job with no cancel
-		// function. Normalize it before publication and best-effort persist the
-		// terminal projection so older readers also stop treating it as live.
+		// this newly loaded manager only when its owner is no longer live in this
+		// process. Runtime rebuilds can construct another manager before the old
+		// controller is retired; never let that observer interrupt or publish a
+		// fake tombstone for the still-running job. Leave the session reloadable so
+		// a later bind can adopt the terminal artifact after the owner finishes.
 		if meta.Status == Running {
+			if managerOwnerIsLive(meta.OwnerID) {
+				deferredLiveOwner = true
+				continue
+			}
 			meta.Status = Interrupted
 			if meta.FinishedAt == 0 {
 				meta.FinishedAt = nowMs()
 			}
 			meta.ArtifactComplete = false
 			_ = writeMeta(metaPath, meta)
-		}
-		id := strings.TrimSpace(meta.ID)
-		if seq := maxJobSeq(id); seq > maxSeq {
-			maxSeq = seq
 		}
 		done := make(chan struct{})
 		close(done)
@@ -1386,7 +1447,7 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 	if maxSeq > m.seq {
 		m.seq = maxSeq
 	}
-	m.loaded[parentSession] = true
+	m.loaded[parentSession] = !deferredLiveOwner
 }
 
 // BeginDestroySession marks a parent session as being removed from active use
@@ -1501,6 +1562,7 @@ func (m *Manager) CloseAsync() {
 	m.cancel()
 	go func() {
 		m.wg.Wait()
+		m.releaseOwner()
 		m.removeTempRoot()
 	}()
 }
@@ -1512,6 +1574,7 @@ func (m *Manager) CloseWithGrace(grace time.Duration) TeardownResult {
 	done := make(chan struct{})
 	go func() {
 		m.wg.Wait()
+		m.releaseOwner()
 		close(done)
 	}()
 	result, timedOut := waitTeardownTargets(context.Background(), m.closeTargets(), grace, done)

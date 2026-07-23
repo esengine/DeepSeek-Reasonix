@@ -125,8 +125,8 @@ func (m *chatTUI) skillSaveEnabledChanges(changes map[string]bool) {
 		m.notice("skill toggle unavailable in this session")
 		return
 	}
-	if m.ctrl.Running() {
-		m.notice("cannot change skills while a turn is running")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before changing skills")
 		return
 	}
 	if m.modelSwitchPending {
@@ -193,8 +193,8 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 	if m.ctrl == nil {
 		return false
 	}
-	if m.ctrl.Running() {
-		m.notice("cannot refresh skills while a turn is running")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before refreshing skills")
 		return false
 	}
 	if m.modelSwitchPending {

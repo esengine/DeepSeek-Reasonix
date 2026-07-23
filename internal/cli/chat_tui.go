@@ -379,6 +379,14 @@ type controllerBuildSpec struct {
 	EffortOverride   *string
 }
 
+func (m *chatTUI) runtimeSwitchBusy() bool {
+	if m == nil || m.ctrl == nil {
+		return false
+	}
+	status := m.ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0 || m.pendingApproval != nil || m.chooser != nil
+}
+
 // agentEventMsg is one typed event from the agent's run loop.
 type agentEventMsg event.Event
 

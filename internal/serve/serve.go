@@ -176,8 +176,8 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 
 	// Snapshot the current controller under a short read of s.mu only.
 	cur := s.ctl()
-	if cur.Running() {
-		return fmt.Errorf("cannot switch model while a turn is running")
+	if controllerHasActiveRuntimeWork(cur) {
+		return fmt.Errorf("cannot switch model while active work or background jobs are running")
 	}
 
 	// Off-lock: snapshot, carry history, and build the replacement. None of these
@@ -273,8 +273,8 @@ func (s *Server) build(ctx context.Context, ref string) (*control.Controller, er
 // rebuilds via switchModel (which serializes on bindMu).
 func (s *Server) switchEffort(ctx context.Context, level string) error {
 	cur := s.ctl()
-	if cur.Running() {
-		return fmt.Errorf("cannot change effort while a turn is running")
+	if controllerHasActiveRuntimeWork(cur) {
+		return fmt.Errorf("cannot change effort while active work or background jobs are running")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -313,6 +313,14 @@ func (s *Server) switchEffort(ctx context.Context, level string) error {
 		return err
 	}
 	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
+}
+
+func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
+	if ctrl == nil {
+		return false
+	}
+	status := ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 }
 
 // applyEffortEdit writes effort onto entry within edit, mirroring CLI/desktop

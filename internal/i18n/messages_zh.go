@@ -314,7 +314,7 @@ var Chinese = Messages{
 	GoalSetFmt:                "目标已设置 → %s",
 	GoalCleared:               "目标已清除",
 	ModelSwitchUnavailable:    "本会话不支持切换模型",
-	ModelSwitchBusy:           "请先完成或取消当前这一轮再切换模型",
+	ModelSwitchBusy:           "请先完成或取消当前工作，并停止后台任务后再切换模型",
 	ModelAlreadyOnFmt:         "已经在使用 %s",
 	ModelSwitchingFmt:         "正在切换到 %s…",
 	ModelSwitchedFmt:          "已切换到 %s（会保留当前对话，但提示词缓存会重新计算）",

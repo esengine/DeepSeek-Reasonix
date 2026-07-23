@@ -223,6 +223,72 @@ func TestRestoreRunningArtifactAsInterrupted(t *testing.T) {
 	}
 }
 
+func TestRestoreRunningArtifactFromClosedOwnerAsInterrupted(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	metaPath := filepath.Join(dir, "task-1"+jobMetaExt)
+	owner := NewManager(event.Discard)
+	ownerID := owner.ownerID
+	owner.Close()
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:        "task-1",
+		Kind:      "task",
+		OwnerID:   ownerID,
+		Status:    Running,
+		StartedAt: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := NewManager(event.Discard)
+	defer restored.Close()
+	restored.SetActiveSessionPath("session", sessionPath)
+	result := restored.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("restored result = %+v, want interrupted after the original owner closed", result)
+	}
+}
+
+func TestRestoreDoesNotInterruptJobOwnedByLiveManager(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	first := NewManager(event.Discard)
+	defer first.Close()
+	first.SetActiveSessionPath("session", sessionPath)
+
+	release := make(chan struct{})
+	job := first.StartForSession("session", "task", "running", func(context.Context, io.Writer) (string, error) {
+		<-release
+		return "done", nil
+	})
+	metaPath := filepath.Join(ArtifactDir(sessionPath), job.ID+jobMetaExt)
+
+	second := NewManager(event.Discard)
+	defer second.Close()
+	second.SetActiveSessionPath("session", sessionPath)
+
+	meta, err := readMeta(metaPath)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	if meta.Status != Running {
+		close(release)
+		t.Fatalf("a replacement manager interrupted a still-live job: status=%q", meta.Status)
+	}
+	if got := second.RunningForSession("session"); len(got) != 0 {
+		close(release)
+		t.Fatalf("replacement manager published an unowned live job: %+v", got)
+	}
+
+	close(release)
+	<-job.done
+	second.SetActiveSessionPath("session", sessionPath)
+	result := second.WaitForSession(context.Background(), "session", []string{job.ID}, 1)
+	if len(result) != 1 || result[0].Status != Done {
+		t.Fatalf("replacement manager did not load the terminal artifact after owner completion: %+v", result)
+	}
+}
+
 func TestRunningJobArtifactMetadataIsIncomplete(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	m := NewManager(event.Discard)

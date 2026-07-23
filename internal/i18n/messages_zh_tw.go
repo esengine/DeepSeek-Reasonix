@@ -294,7 +294,7 @@ var ChineseTraditional = Messages{
 	QuickRememberEmpty:        "沒有要記錄的內容",
 	QuickRememberDoneFmt:      "已記住 → %s",
 	ModelSwitchUnavailable:    "本會話不支援切換模型",
-	ModelSwitchBusy:           "請先完成或取消當前這一輪再切換模型",
+	ModelSwitchBusy:           "請先完成或取消目前工作，並停止背景任務後再切換模型",
 	ModelAlreadyOnFmt:         "已經在使用 %s",
 	ModelSwitchingFmt:         "正在切換到 %s…",
 	ModelSwitchedFmt:          "已切換到 %s（會保留當前對話，但提示詞快取會重新計算）",

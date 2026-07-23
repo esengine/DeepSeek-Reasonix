@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,8 +14,61 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
+
+func chatTUIWithRunningBackgroundJob(t *testing.T) chatTUI {
+	t.Helper()
+	manager := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{Jobs: manager})
+	t.Cleanup(ctrl.Close)
+	manager.Start("task", "running", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.modelRef = "deepseek-flash/deepseek-v4-flash"
+	m.runtimeProfile = "full"
+	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
+		t.Fatal("runtime switch built a replacement while a background job was running")
+		return nil, nil
+	}
+	return m
+}
+
+func TestRuntimeSwitchesRejectRunningBackgroundJobs(t *testing.T) {
+	t.Run("model", func(t *testing.T) {
+		m := chatTUIWithRunningBackgroundJob(t)
+		m.runModelSubcommand("/model deepseek-chat/deepseek-chat")
+		if m.pendingModelSwitch != nil {
+			t.Fatal("model switch queued a rebuild while a background job was running")
+		}
+	})
+
+	t.Run("effort", func(t *testing.T) {
+		isolateUserConfig(t)
+		m := chatTUIWithRunningBackgroundJob(t)
+		if cmd := m.runEffortCommand("/effort max"); cmd != nil {
+			t.Fatal("effort switch queued a rebuild while a background job was running")
+		}
+	})
+
+	t.Run("skill refresh", func(t *testing.T) {
+		m := chatTUIWithRunningBackgroundJob(t)
+		if m.scheduleSkillSessionRefresh("skill refresh", "") {
+			t.Fatal("skill refresh queued a rebuild while a background job was running")
+		}
+	})
+
+	t.Run("work mode", func(t *testing.T) {
+		m := chatTUIWithRunningBackgroundJob(t)
+		if cmd := m.runWorkModeCommand("/work-mode delivery"); cmd != nil {
+			t.Fatal("work-mode switch queued a rebuild while a background job was running")
+		}
+	})
+}
 
 // divergedSessionController builds a controller whose in-memory transcript has
 // diverged from what path holds on disk, so its next Snapshot hits a conflict

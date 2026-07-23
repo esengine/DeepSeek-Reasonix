@@ -313,7 +313,7 @@ var English = Messages{
 	GoalSetFmt:                "goal set → %s",
 	GoalCleared:               "goal cleared",
 	ModelSwitchUnavailable:    "model switching is unavailable in this session",
-	ModelSwitchBusy:           "finish or cancel the current turn before switching models",
+	ModelSwitchBusy:           "finish or cancel active work and stop background jobs before switching models",
 	ModelAlreadyOnFmt:         "already on %s",
 	ModelSwitchingFmt:         "switching to %s…",
 	ModelSwitchedFmt:          "switched to %s (conversation carried over; prompt cache resets)",
