@@ -112,7 +112,7 @@ export interface WireApproval {
   fresh?: boolean;
   kind?: "tool" | "plan" | "recovery" | "sandbox_capability" | string;
   recovery?: WireRecoveryApproval;
-  sandboxCapability?: WireSandboxCapabilityPrompt;
+  sandbox_capability?: WireSandboxCapabilityPrompt;
 }
 
 // ── Sandbox capability types ──

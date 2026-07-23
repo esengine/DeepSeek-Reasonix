@@ -2207,7 +2207,7 @@ function makeMockApp(): AppBindings {
             reason: "The model requests network access to PyPI and write access to system site-packages.",
             fresh: true,
             kind: "sandbox_capability",
-            sandboxCapability: {
+            sandbox_capability: {
               review: {
                 state: "ready",
                 request: {

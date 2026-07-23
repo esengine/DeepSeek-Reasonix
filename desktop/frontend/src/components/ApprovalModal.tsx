@@ -251,13 +251,13 @@ export function ApprovalModal({
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
-  const isSandboxCapability = approval.kind === "sandbox_capability" || Boolean(approval.sandboxCapability);
+  const isSandboxCapability = approval.kind === "sandbox_capability" || Boolean(approval.sandbox_capability);
 
   // Early return for sandbox capability — handled by dedicated component
   if (isSandboxCapability) {
     return (
       <SandboxCapabilityApproval
-        sandboxCapability={approval.sandboxCapability!}
+        sandboxCapability={approval.sandbox_capability!}
         onResolve={(action) => onResolveSandboxCapability?.(action)}
       />
     );
