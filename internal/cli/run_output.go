@@ -34,6 +34,15 @@ func parseRunOutputFormat(value string) (runOutputFormat, error) {
 	}
 }
 
+// runOutputSessionID preserves the established json/stream-json contract while
+// keeping the redacted events-jsonl surface independent from transcript names.
+func runOutputSessionID(format runOutputFormat, rawSessionID string) string {
+	if format == runOutputEventsJSONL {
+		return machineSessionID(rawSessionID)
+	}
+	return rawSessionID
+}
+
 type runResultUsage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`

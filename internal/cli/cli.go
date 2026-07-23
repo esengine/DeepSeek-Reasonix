@@ -658,7 +658,8 @@ func runAgent(args []string) int {
 		}
 	}
 	if resultOutput != nil {
-		if err := resultOutput.Finalize(machineSessionID(agent.BranchID(ctrl.SessionPath())), started, runErr); err != nil {
+		sessionID := runOutputSessionID(format, agent.BranchID(ctrl.SessionPath()))
+		if err := resultOutput.Finalize(sessionID, started, runErr); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}

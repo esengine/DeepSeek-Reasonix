@@ -49,6 +49,18 @@ func TestRunOutputJSONResult(t *testing.T) {
 	}
 }
 
+func TestRunOutputSessionIDPreservesExistingFormats(t *testing.T) {
+	const raw = "20260723-120000.000000000-model"
+	for _, format := range []runOutputFormat{runOutputText, runOutputJSON, runOutputStreamJSON} {
+		if got := runOutputSessionID(format, raw); got != raw {
+			t.Fatalf("format %q session id = %q, want raw id %q", format, got, raw)
+		}
+	}
+	if got := runOutputSessionID(runOutputEventsJSONL, raw); got != machineSessionID(raw) {
+		t.Fatalf("events-jsonl session id = %q, want machine id %q", got, machineSessionID(raw))
+	}
+}
+
 func TestRunOutputStreamJSONEndsWithErrorResult(t *testing.T) {
 	var out bytes.Buffer
 	sink := newRunOutputSink(&out, runOutputStreamJSON)
