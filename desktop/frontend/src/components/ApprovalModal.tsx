@@ -342,7 +342,6 @@ export function ApprovalModal({
         key: "allow_once",
         label: t("approval.sandboxCapabilityAllowOnce"),
         desc: t("approval.allowOnceDesc"),
-        primary: true,
         kind: "submit",
       },
     ];
