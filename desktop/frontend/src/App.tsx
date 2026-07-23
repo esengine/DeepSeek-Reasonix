@@ -2148,12 +2148,7 @@ export default function App() {
 
   const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
-    setTabMetas((prev) => {
-      if (prev.length === tabs.length && prev.every((t, i) => JSON.stringify(t) === JSON.stringify(tabs[i]))) {
-        return prev;
-      }
-      return tabs;
-    });
+    setTabMetas(tabs);
     return tabs;
   }, []);
   const seedActiveTabMeta = useCallback((tab: TabMeta): void => {
