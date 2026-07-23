@@ -67,6 +67,7 @@ type SessionController interface {
 	History() []provider.Message
 	Turn() int
 	Running() bool
+	RuntimeStatus() control.RuntimeStatus
 	Submit(string)
 	Cancel()
 	Close()
@@ -74,6 +75,17 @@ type SessionController interface {
 	SetSessionPath(string)
 	EnsureSessionPath()
 	AdoptHistory([]provider.Message, string)
+}
+
+func sessionHasActiveWorkLocked(sess *session) bool {
+	if sess == nil || sess.ctrl == nil {
+		return false
+	}
+	if sess.currentTurn != "" || sess.currentOp != nil {
+		return true
+	}
+	status := sess.ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 }
 
 type Server struct {
@@ -843,7 +855,7 @@ func (s *Server) closeSession(p protocol.SessionCloseParams) (protocol.SessionCl
 		return protocol.SessionCloseResult{}, err
 	}
 	s.mu.Lock()
-	busy := sess.currentTurn != "" || sess.currentOp != nil || sess.ctrl.Running()
+	busy := sessionHasActiveWorkLocked(sess)
 	s.mu.Unlock()
 	if busy {
 		return protocol.SessionCloseResult{Disposition: protocol.SessionRetainedActive}, nil
@@ -1205,7 +1217,7 @@ func (s *Server) setProfile(ctx context.Context, p protocol.SessionProfileSetPar
 		return protocol.SessionProfileSetResult{}, err
 	}
 	s.mu.Lock()
-	busy := sess.currentTurn != "" || sess.currentOp != nil || sess.ctrl.Running()
+	busy := sessionHasActiveWorkLocked(sess)
 	s.mu.Unlock()
 	if busy {
 		return protocol.SessionProfileSetResult{}, protocol.MustRemoteError(protocol.ErrSessionBusy, protocol.ErrorOptions{Target: &p.Target})
@@ -1266,7 +1278,7 @@ func (s *Server) setProfile(ctx context.Context, p protocol.SessionProfileSetPar
 	newController.AdoptHistory(sess.ctrl.History(), sess.ctrl.SessionPath())
 	applyControllerProfile(newController, collaboration, toolApproval)
 	s.mu.Lock()
-	if s.sessions[sess.id] != sess || sess.currentTurn != "" || sess.currentOp != nil || sess.ctrl.Running() {
+	if s.sessions[sess.id] != sess || sessionHasActiveWorkLocked(sess) {
 		s.mu.Unlock()
 		newController.Close()
 		return protocol.SessionProfileSetResult{}, protocol.MustRemoteError(protocol.ErrSessionBusy, protocol.ErrorOptions{Target: &p.Target})

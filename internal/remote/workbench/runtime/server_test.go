@@ -33,6 +33,7 @@ import (
 type fakeController struct {
 	model   string
 	history []provider.Message
+	status  control.RuntimeStatus
 }
 
 type blockingController struct {
@@ -253,7 +254,10 @@ func (c *fakeController) History() []provider.Message {
 	return append([]provider.Message(nil), c.history...)
 }
 func (c *fakeController) Turn() int     { return len(c.history) }
-func (c *fakeController) Running() bool { return false }
+func (c *fakeController) Running() bool { return c.status.Running }
+func (c *fakeController) RuntimeStatus() control.RuntimeStatus {
+	return c.status
+}
 func (c *fakeController) Submit(input string) {
 	c.history = append(c.history, provider.Message{Role: provider.RoleUser, Content: input})
 }
@@ -866,6 +870,117 @@ func TestSetProfileRegistryFailurePreservesUsableSession(t *testing.T) {
 			t.Fatalf("replacement controllers = %d closed=%v", len(*built), len(*built) == 1 && (*built)[0].closed)
 		}
 	})
+}
+
+func TestSetProfileRejectsAllControllerActiveWork(t *testing.T) {
+	tests := []struct {
+		name   string
+		status control.RuntimeStatus
+	}{
+		{name: "foreground turn", status: control.RuntimeStatus{Running: true}},
+		{name: "pending prompt", status: control.RuntimeStatus{PendingPrompt: true}},
+		{name: "background job", status: control.RuntimeStatus{BackgroundJobs: 1}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			built := false
+			srv := New(Options{
+				Workspace: t.TempDir(), SessionDir: t.TempDir(),
+				BuildController: func(context.Context, string, *string, event.Sink) (SessionController, error) {
+					built = true
+					return nil, errors.New("replacement must not be built while work is active")
+				},
+			})
+			old := &profileFakeController{persistentFakeController: &persistentFakeController{
+				fakeController: &fakeController{model: "local/old", status: tc.status}, sessionDir: t.TempDir(),
+			}}
+			target := srv.installTestSession(old)
+			model := "local/new"
+			_, err := srv.setProfile(context.Background(), protocol.SessionProfileSetParams{
+				SessionMutation: protocol.SessionMutation{
+					ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+				},
+				Patch: protocol.ProfilePatch{Model: &model},
+			})
+			var remoteErr *protocol.RemoteError
+			if !errors.As(err, &remoteErr) || remoteErr.Code != protocol.ErrSessionBusy {
+				t.Fatalf("setProfile error = %v, want SESSION_BUSY", err)
+			}
+			if built || old.closed {
+				t.Fatalf("active controller lifecycle changed: built=%v oldClosed=%v", built, old.closed)
+			}
+		})
+	}
+}
+
+func TestSetProfileRechecksActiveWorkBeforeSwap(t *testing.T) {
+	var old *profileFakeController
+	var replacement *profileFakeController
+	sessionDir := t.TempDir()
+	srv := New(Options{
+		Workspace: t.TempDir(), SessionDir: sessionDir,
+		BuildController: func(_ context.Context, model string, _ *string, _ event.Sink) (SessionController, error) {
+			old.status.BackgroundJobs = 1
+			replacement = &profileFakeController{persistentFakeController: &persistentFakeController{
+				fakeController: &fakeController{model: model}, sessionDir: sessionDir,
+			}}
+			return replacement, nil
+		},
+	})
+	old = &profileFakeController{persistentFakeController: &persistentFakeController{
+		fakeController: &fakeController{model: "local/old"}, sessionDir: sessionDir,
+	}}
+	target := srv.installTestSession(old)
+	model := "local/new"
+	_, err := srv.setProfile(context.Background(), protocol.SessionProfileSetParams{
+		SessionMutation: protocol.SessionMutation{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+		Patch: protocol.ProfilePatch{Model: &model},
+	})
+	var remoteErr *protocol.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr.Code != protocol.ErrSessionBusy {
+		t.Fatalf("setProfile error = %v, want SESSION_BUSY", err)
+	}
+	srv.mu.Lock()
+	sess := srv.sessions[target.SessionID]
+	srv.mu.Unlock()
+	if replacement == nil || !replacement.closed || sess == nil || sess.ctrl != old || old.closed {
+		t.Fatalf("swap was not failure-atomic: replacementClosed=%v oldInstalled=%v oldClosed=%v", replacement != nil && replacement.closed, sess != nil && sess.ctrl == old, old.closed)
+	}
+}
+
+func TestCloseSessionRetainsPromptAndBackgroundWork(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status control.RuntimeStatus
+	}{
+		{name: "pending prompt", status: control.RuntimeStatus{PendingPrompt: true}},
+		{name: "background job", status: control.RuntimeStatus{BackgroundJobs: 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := New(Options{Workspace: t.TempDir(), SessionDir: t.TempDir()})
+			old := &profileFakeController{persistentFakeController: &persistentFakeController{
+				fakeController: &fakeController{model: "local/old", status: tc.status}, sessionDir: t.TempDir(),
+			}}
+			target := srv.installTestSession(old)
+			result, err := srv.closeSession(protocol.SessionCloseParams{SessionMutation: protocol.SessionMutation{
+				ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Disposition != protocol.SessionRetainedActive || old.closed {
+				t.Fatalf("close result = %+v, oldClosed=%v", result, old.closed)
+			}
+			srv.mu.Lock()
+			installed := srv.sessions[target.SessionID] != nil
+			srv.mu.Unlock()
+			if !installed {
+				t.Fatal("active session was removed")
+			}
+		})
+	}
 }
 
 func TestSessionRotationRegistryFailureReturnsCommittedEpoch(t *testing.T) {

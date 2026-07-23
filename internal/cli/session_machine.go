@@ -1,21 +1,33 @@
 package cli
 
 import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
+	"reasonix/internal/filelock"
+	"reasonix/internal/fileutil"
 	"reasonix/internal/recovery"
 	"reasonix/internal/store"
 )
 
-const machineSchemaVersion = 1
+const (
+	machineSchemaVersion    = 1
+	machineIdentityKeyBytes = 32
+	machineIdentityKeyFile  = "machine-id.key"
+)
 
 type machineSession struct {
 	ID        string `json:"id"`
@@ -96,14 +108,18 @@ func runSessionCommand(args []string, out io.Writer) int {
 	if options.dir == "" {
 		options.dir = resolveCLISessionDir()
 	}
+	identityKey, err := loadMachineIdentityKey()
+	if err != nil {
+		return writeMachineError(out, command, "machine_identity_unavailable", "machine identity is unavailable")
+	}
 	if operation == "recovery" {
-		recoveries, err := machineRecoveries(options.dir, options.target)
+		recoveries, err := machineRecoveries(options.dir, options.target, identityKey)
 		if err != nil {
 			return writeMachineError(out, command, "recovery_state_unavailable", "recovery state is unavailable")
 		}
 		return writeMachineJSON(out, machineRecoveryList{SchemaVersion: machineSchemaVersion, Command: command, Recoveries: recoveries})
 	}
-	sessions, err := machineSessions(options.dir)
+	sessions, err := machineSessions(options.dir, identityKey)
 	if err != nil {
 		return writeMachineError(out, command, "session_dir_unavailable", "session directory is unavailable")
 	}
@@ -158,14 +174,14 @@ func parseSessionMachineOptions(args []string, operation string) (sessionMachine
 	return options, "", ""
 }
 
-func machineRecoveries(dir, target string) ([]machineRecovery, error) {
+func machineRecoveries(dir, target string, identityKey []byte) ([]machineRecovery, error) {
 	ordered, err := agent.ListSessionOrder(dir)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]machineRecovery, 0, len(ordered))
 	for _, info := range ordered {
-		sessionID := machineSessionID(agent.BranchID(info.Path))
+		sessionID := machineSessionIDWithKey(agent.BranchID(info.Path), identityKey)
 		if target != "" && sessionID != target {
 			continue
 		}
@@ -226,7 +242,7 @@ func parseMachineTime(value string) time.Time {
 	return parsed
 }
 
-func machineSessions(dir string) ([]machineSession, error) {
+func machineSessions(dir string, identityKey []byte) ([]machineSession, error) {
 	ordered, err := agent.ListSessionOrder(dir)
 	if err != nil {
 		return nil, err
@@ -254,7 +270,7 @@ func machineSessions(dir string) ([]machineSession, error) {
 			scope = "global"
 		}
 		out = append(out, machineSession{
-			ID:        machineSessionID(agent.BranchID(info.Path)),
+			ID:        machineSessionIDWithKey(agent.BranchID(info.Path), identityKey),
 			CreatedAt: machineTime(info.CreatedAt),
 			UpdatedAt: machineTime(info.LastActivityAt),
 			Scope:     scope,
@@ -279,15 +295,70 @@ func machineTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339Nano)
 }
 
-// machineSessionID keeps the public machine contract stable without exposing
-// the transcript filename, which includes the configured model label.
-func machineSessionID(branchID string) string {
+func loadMachineIdentityKey() ([]byte, error) {
+	root := strings.TrimSpace(config.MemoryUserDir())
+	if root == "" {
+		return nil, fmt.Errorf("machine identity: Reasonix state directory is unavailable")
+	}
+	path := filepath.Join(root, machineIdentityKeyFile)
+	key, err := readMachineIdentityKey(path)
+	if err == nil {
+		return key, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return nil, fmt.Errorf("machine identity: create state directory: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	unlock, err := filelock.Acquire(ctx, path+".lock")
+	if err != nil {
+		return nil, fmt.Errorf("machine identity: initialize key: %w", err)
+	}
+	defer unlock()
+
+	key, err = readMachineIdentityKey(path)
+	if err == nil {
+		return key, nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	key = make([]byte, machineIdentityKeyBytes)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("machine identity: generate key: %w", err)
+	}
+	if err := fileutil.AtomicWriteFile(path, key, 0o600); err != nil {
+		return nil, fmt.Errorf("machine identity: persist key: %w", err)
+	}
+	return key, nil
+}
+
+func readMachineIdentityKey(path string) ([]byte, error) {
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != machineIdentityKeyBytes {
+		return nil, fmt.Errorf("machine identity: invalid key length %d", len(key))
+	}
+	return key, nil
+}
+
+// machineSessionIDWithKey keeps the public machine contract stable without
+// exposing or making offline guesses about transcript filenames, which include
+// creation timestamps and configured model labels.
+func machineSessionIDWithKey(branchID string, identityKey []byte) string {
 	branchID = strings.TrimSpace(branchID)
-	if branchID == "" {
+	if branchID == "" || len(identityKey) != machineIdentityKeyBytes {
 		return ""
 	}
-	sum := sha256.Sum256([]byte("reasonix-machine-session-v1\x00" + branchID))
-	return "session_" + hex.EncodeToString(sum[:16])
+	digest := hmac.New(sha256.New, identityKey)
+	_, _ = digest.Write([]byte("reasonix-machine-session-v1\x00"))
+	_, _ = digest.Write([]byte(branchID))
+	return "session_" + hex.EncodeToString(digest.Sum(nil)[:16])
 }
 
 func writeMachineJSON(out io.Writer, value any) int {

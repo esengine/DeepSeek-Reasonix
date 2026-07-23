@@ -13,6 +13,7 @@ import (
 )
 
 func TestSessionMachineRecoveryIsContentFree(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "recoverable", time.Date(2026, 7, 23, 14, 0, 0, 0, time.UTC))
 	path := filepath.Join(dir, "recoverable.jsonl")
@@ -37,7 +38,7 @@ func TestSessionMachineRecoveryIsContentFree(t *testing.T) {
 		t.Fatalf("recoveries = %+v", response.Recoveries)
 	}
 	item := response.Recoveries[0]
-	if item.SessionID != machineSessionID("recoverable") || item.State != "awaiting_decision" || item.Tasks != 1 || item.Pending != 1 || !item.InFlight {
+	if item.SessionID != machineSessionIDWithKey("recoverable", identityKey) || item.State != "awaiting_decision" || item.Tasks != 1 || item.Pending != 1 || !item.InFlight {
 		t.Fatalf("recovery = %+v", item)
 	}
 	if strings.Contains(out.String(), "PRIVATE") || strings.Contains(out.String(), dir) {

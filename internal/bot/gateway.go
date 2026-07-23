@@ -1665,7 +1665,9 @@ func (gw *BotGateway) handleUseProjectCommand(key, text string) string {
 		return "用法: /use project <项目 id|名称|路径>，或 /use project default 恢复默认路由。"
 	}
 	if isDefaultBotSelector(selector) {
-		gw.setSessionRuntimeOverride(key, sessionRuntimeOverride{}, false)
+		if !gw.setSessionRuntimeOverride(key, sessionRuntimeOverride{}, false) {
+			return botRuntimeSwitchBusyText()
+		}
 		return "已恢复当前远端会话的默认项目路由。下一条消息会按 bot 配置重新选择 workspace。"
 	}
 	projects := gw.buildProjectIndex()
@@ -1676,10 +1678,12 @@ func (gw *BotGateway) handleUseProjectCommand(key, text string) string {
 		}
 		return "没有匹配的项目。可先用 /projects 查看当前索引。"
 	}
-	gw.setSessionRuntimeOverride(key, sessionRuntimeOverride{
+	if !gw.setSessionRuntimeOverride(key, sessionRuntimeOverride{
 		channel: ChannelConfig{WorkspaceRoot: project.Root},
 		label:   "project:" + project.ID,
-	}, true)
+	}, true) {
+		return botRuntimeSwitchBusyText()
+	}
 	return fmt.Sprintf("已将当前远端会话切到项目 %s %s。\n下一条消息将在 %s 中运行。", project.ID, project.Name, displayBotPath(project.Root))
 }
 
@@ -1737,11 +1741,13 @@ func (gw *BotGateway) handleAttachSessionCommand(key, text string) string {
 		project := botProjectForPath(projects, session.SessionPath)
 		workspaceRoot = project.Root
 	}
-	gw.setSessionRuntimeOverride(key, sessionRuntimeOverride{
+	if !gw.setSessionRuntimeOverride(key, sessionRuntimeOverride{
 		channel:     ChannelConfig{WorkspaceRoot: workspaceRoot},
 		sessionPath: session.SessionPath,
 		label:       "session:" + session.ID,
-	}, true)
+	}, true) {
+		return botRuntimeSwitchBusyText()
+	}
 	projectName := firstNonEmptyString(session.ProjectName, botProjectName(workspaceRoot), "global")
 	return fmt.Sprintf("已 attach 到会话 %s（%s）。\n下一条消息会从 %s 继续。", session.ID, projectName, displayBotPath(session.SessionPath))
 }
@@ -1769,23 +1775,57 @@ func (gw *BotGateway) handleProjectSearchCommand(ctx context.Context, text strin
 	return formatBotProjectSearchResults(results, botSearchListLimit)
 }
 
-func (gw *BotGateway) setSessionRuntimeOverride(key string, override sessionRuntimeOverride, enabled bool) {
-	var old *sessionState
-	gw.mu.Lock()
-	if state, ok := gw.controllers[key]; ok {
-		old = state
-		delete(gw.controllers, key)
+func botRuntimeSwitchBusyText() string {
+	return "当前会话仍有正在运行、等待确认或后台执行的任务。请先完成或停止这些任务，再切换项目或 attach 会话。"
+}
+
+func (gw *BotGateway) setSessionRuntimeOverride(key string, override sessionRuntimeOverride, enabled bool) bool {
+	return gw.sessions.runIfIdle(key, func() bool {
+		var old *sessionState
+		gw.mu.Lock()
+		if state, ok := gw.controllers[key]; ok {
+			if botSessionHasActiveWork(state) {
+				gw.mu.Unlock()
+				return false
+			}
+			old = state
+			delete(gw.controllers, key)
+		}
+		if enabled {
+			override.sessionPath = canonicalBotPath(override.sessionPath)
+			override.channel.WorkspaceRoot = canonicalBotPath(override.channel.WorkspaceRoot)
+			gw.sessionOverrides[key] = override
+		} else {
+			delete(gw.sessionOverrides, key)
+		}
+		gw.mu.Unlock()
+		gw.closeSessionState(old)
+		return true
+	})
+}
+
+func botSessionHasActiveWork(state *sessionState) bool {
+	if state == nil || state.ctrl == nil {
+		return false
 	}
-	if enabled {
-		override.sessionPath = canonicalBotPath(override.sessionPath)
-		override.channel.WorkspaceRoot = canonicalBotPath(override.channel.WorkspaceRoot)
-		gw.sessionOverrides[key] = override
-	} else {
-		delete(gw.sessionOverrides, key)
+	status, ok := safeBotControllerRuntimeStatus(state.ctrl)
+	if !ok {
+		return true
 	}
-	gw.mu.Unlock()
-	gw.closeSessionState(old)
-	gw.sessions.ForceRelease(key)
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
+}
+
+func safeBotControllerRuntimeStatus(ctrl botController) (status control.RuntimeStatus, ok bool) {
+	if ctrl == nil {
+		return control.RuntimeStatus{}, false
+	}
+	defer func() {
+		if recover() != nil {
+			status = control.RuntimeStatus{}
+			ok = false
+		}
+	}()
+	return ctrl.RuntimeStatus(), true
 }
 
 func (gw *BotGateway) sessionRuntimeOverrideForMessage(msg InboundMessage) (sessionRuntimeOverride, bool) {
@@ -2132,6 +2172,12 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	gw.mu.Lock()
 	if state, ok := gw.controllers[key]; ok {
 		if !sessionStateMatchesRuntime(state, profile) {
+			if botSessionHasActiveWork(state) {
+				gw.mu.Unlock()
+				safeBotSetToolApprovalMode(state.ctrl, profile.toolApprovalMode)
+				gw.logger.Warn("bot session runtime change deferred while work is active", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8])
+				return state
+			}
 			delete(gw.controllers, key)
 			stale = state
 			gw.mu.Unlock()

@@ -140,7 +140,10 @@ Every line has `schema_version`, `sequence`, and `kind`; the final line is
 `--output-format`.
 
 The following read-only commands expose persisted state without transcript,
-label, command, output, path, PID, or host-name content:
+label, command, output, path, PID, or host-name content. Here, read-only means
+the commands do not mutate transcript, runtime, recovery, or query state. The
+first redacted-machine invocation may initialize a private identity key in the
+Reasonix user-state directory:
 
 ```sh
 reasonix session list --json [--dir SESSION_DIR]
@@ -157,7 +160,11 @@ For `session` and `task`, `--dir` explicitly selects the session storage
 directory; without it, Reasonix selects the current project's session store.
 For `hook`, `--dir` is an alias for `--project-root`.
 
-Machine session IDs are deterministic opaque hashes, not transcript file names.
+Machine session IDs are keyed opaque hashes, not transcript file names. They
+remain stable for the same session and Reasonix user-state directory, while a
+different installation key produces unrelated IDs and prevents offline guesses
+from timestamps or model labels. Preserve the private identity key when moving
+the Reasonix state directory if automation depends on existing machine IDs.
 Task `finished_at` is empty while a task is running, and
 `artifact_complete=true` is emitted only for a terminal task whose persisted
 artifact exists. A `running` record without a live session lease is reported as

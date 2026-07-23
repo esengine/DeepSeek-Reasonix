@@ -190,6 +190,46 @@ func TestSessionManager_ForceRelease(t *testing.T) {
 	}
 }
 
+func TestSessionManagerRunIfIdleSerializesNewAdmission(t *testing.T) {
+	sm := NewSessionManager(100 * time.Millisecond)
+	msg := InboundMessage{Text: "test", Platform: PlatformQQ, ChatType: ChatDM, ChatID: "c1", UserID: "u1"}
+	key := BuildSessionKey(msg.Session())
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	switchDone := make(chan bool, 1)
+	go func() {
+		switchDone <- sm.runIfIdle(key, func() bool {
+			close(entered)
+			<-release
+			return true
+		})
+	}()
+	<-entered
+
+	admitted := make(chan bool, 1)
+	go func() {
+		acquired, _ := sm.TryAcquire(key, msg)
+		admitted <- acquired
+	}()
+	select {
+	case acquired := <-admitted:
+		t.Fatalf("message admission completed during runtime switch: acquired=%v", acquired)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	if !<-switchDone {
+		t.Fatal("idle runtime switch was rejected")
+	}
+	select {
+	case acquired := <-admitted:
+		if !acquired {
+			t.Fatal("message was not admitted after runtime switch")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("message admission remained blocked after runtime switch")
+	}
+}
+
 func TestHashID(t *testing.T) {
 	h1 := hashID("user_12345")
 	h2 := hashID("user_12345")

@@ -64,7 +64,11 @@ func runTaskCommand(args []string, out io.Writer) int {
 	if options.dir == "" {
 		options.dir = resolveCLISessionDir()
 	}
-	tasks, err := machineTasks(options.dir, options.sessionID)
+	identityKey, err := loadMachineIdentityKey()
+	if err != nil {
+		return writeMachineError(out, command, "machine_identity_unavailable", "machine identity is unavailable")
+	}
+	tasks, err := machineTasks(options.dir, options.sessionID, identityKey)
 	if err != nil {
 		return writeMachineError(out, command, "task_state_unavailable", "task state is unavailable")
 	}
@@ -124,7 +128,7 @@ func parseTaskMachineOptions(args []string, operation string) (taskMachineOption
 	return options, "", ""
 }
 
-func machineTasks(dir, sessionFilter string) ([]machineTask, error) {
+func machineTasks(dir, sessionFilter string, identityKey []byte) ([]machineTask, error) {
 	ordered, err := agent.ListSessionOrder(dir)
 	if err != nil {
 		return nil, err
@@ -132,7 +136,7 @@ func machineTasks(dir, sessionFilter string) ([]machineTask, error) {
 	out := make([]machineTask, 0)
 	for _, session := range ordered {
 		rawSessionID := agent.BranchID(session.Path)
-		sessionID := machineSessionID(rawSessionID)
+		sessionID := machineSessionIDWithKey(rawSessionID, identityKey)
 		if sessionFilter != "" && sessionID != sessionFilter {
 			continue
 		}

@@ -206,6 +206,19 @@ func (c *rotatingBotController) NewSession() error {
 func (c *rotatingBotController) SessionPath() string { return c.path }
 func (c *rotatingBotController) Close()              { c.closed = true }
 
+type runtimeStatusBotController struct {
+	botController
+	status        control.RuntimeStatus
+	workspaceRoot string
+	sessionPath   string
+	closed        bool
+}
+
+func (c *runtimeStatusBotController) RuntimeStatus() control.RuntimeStatus { return c.status }
+func (c *runtimeStatusBotController) WorkspaceRoot() string                { return c.workspaceRoot }
+func (c *runtimeStatusBotController) SessionPath() string                  { return c.sessionPath }
+func (c *runtimeStatusBotController) Close()                               { c.closed = true }
+
 type blockingApprovalController struct {
 	botController
 	emit     func(event.Event)
@@ -1322,6 +1335,68 @@ func TestGatewaySessionsSearchAndAttachSessionOverride(t *testing.T) {
 	}
 	if canonicalBotPath(profile.workspaceRoot) != canonicalBotPath(projectRoot) {
 		t.Fatalf("attached workspace root = %q, want %q", profile.workspaceRoot, projectRoot)
+	}
+}
+
+func TestGatewayRuntimeOverridePreservesControllersWithActiveWork(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       control.RuntimeStatus
+		admittedTurn bool
+	}{
+		{name: "foreground turn", status: control.RuntimeStatus{Running: true}},
+		{name: "pending prompt", status: control.RuntimeStatus{PendingPrompt: true}},
+		{name: "background job", status: control.RuntimeStatus{BackgroundJobs: 1}},
+		{name: "admitted turn", admittedTurn: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			gw := NewGateway(GatewayConfig{}, nil, logger)
+			msg := InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+			key := BuildSessionKey(msg.Session())
+			ctrl := &runtimeStatusBotController{status: tc.status, workspaceRoot: "/old"}
+			state := &sessionState{ctrl: ctrl, workspaceRoot: "/old"}
+			gw.controllers[key] = state
+			gw.sessionOverrides[key] = sessionRuntimeOverride{channel: ChannelConfig{WorkspaceRoot: "/old"}, label: "project:old"}
+			if tc.admittedTurn {
+				if result := gw.sessions.TryAcquireWithQueue(key, msg, QueueOptions{}); !result.Acquired {
+					t.Fatalf("admit turn: %+v", result)
+				}
+			}
+
+			text := gw.handleUseProjectCommand(key, "/use project default")
+			if !strings.Contains(text, "请先完成或停止") {
+				t.Fatalf("busy response = %q", text)
+			}
+			if ctrl.closed || gw.controllers[key] != state {
+				t.Fatalf("active controller was replaced or closed: closed=%v installed=%v", ctrl.closed, gw.controllers[key] == state)
+			}
+			if override, ok := gw.sessionOverrides[key]; !ok || override.label != "project:old" {
+				t.Fatalf("active override changed: %+v, present=%v", override, ok)
+			}
+		})
+	}
+}
+
+func TestGatewayDefersProfileMismatchWhileBackgroundWorkIsActive(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	newRoot := t.TempDir()
+	gw := NewGateway(GatewayConfig{WorkspaceRoot: newRoot}, nil, logger)
+	msg := InboundMessage{Platform: PlatformFeishu, ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+	key := BuildSessionKey(msg.Session())
+	ctrl := &runtimeStatusBotController{
+		status: control.RuntimeStatus{BackgroundJobs: 1}, workspaceRoot: t.TempDir(),
+	}
+	state := &sessionState{ctrl: ctrl, workspaceRoot: ctrl.workspaceRoot}
+	gw.controllers[key] = state
+
+	got := gw.getOrCreateSession(context.Background(), key, msg)
+	if got != state || gw.controllers[key] != state || ctrl.closed {
+		t.Fatalf("profile mismatch canceled active work: gotOld=%v installed=%v closed=%v", got == state, gw.controllers[key] == state, ctrl.closed)
+	}
+	if state.workspaceRoot == newRoot {
+		t.Fatalf("deferred runtime change mutated the live profile to %q", state.workspaceRoot)
 	}
 }
 

@@ -134,7 +134,8 @@ reasonix run --events-jsonl "运行 focused tests"
 组合使用。
 
 以下只读命令可以查询持久化状态，但不会输出 transcript、label、command、output、路径、
-PID 或 hostname：
+PID 或 hostname。这里的“只读”是指不会修改 transcript、runtime、recovery 或被查询的
+状态；首次使用脱敏机器接口时，Reasonix 可能会在用户状态目录初始化一个私有身份密钥：
 
 ```sh
 reasonix session list --json [--dir SESSION_DIR]
@@ -150,7 +151,10 @@ reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录；未指定时，Reasonix
 选择当前项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
 
-机器 session ID 是稳定的 opaque hash，不是 transcript 文件名。任务仍在运行时
+机器 session ID 是带密钥的 opaque hash，不是 transcript 文件名。在同一个 Reasonix
+用户状态目录中，同一 session 的 ID 保持稳定；不同安装密钥会生成互不关联的 ID，无法再
+根据时间戳或模型 label 离线猜测。迁移 Reasonix 状态目录时，如果自动化依赖已有 machine
+ID，需要一并保留该私有身份密钥。任务仍在运行时
 `finished_at` 为空；只有任务已经结束并且持久化产物存在时，才会输出
 `artifact_complete=true`。没有 live session lease 的 `running` 记录会显示为
 `interrupted`；再次打开该 session 时也会自动修复持久化生命周期状态。

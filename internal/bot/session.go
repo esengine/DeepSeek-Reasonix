@@ -354,6 +354,23 @@ func (sm *SessionManager) IsActive(key string) bool {
 	return sm.active[key]
 }
 
+// runIfIdle holds the per-gateway admission lock while fn switches runtime
+// ownership for key. A normal message cannot become active between the idle
+// check and the controller unlink/close sequence.
+func (sm *SessionManager) runIfIdle(key string, fn func() bool) bool {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.active[key] || fn == nil {
+		return false
+	}
+	if !fn() {
+		return false
+	}
+	delete(sm.pending, key)
+	delete(sm.dropped, key)
+	return true
+}
+
 // ActiveCount 返回当前活跃 session 数。
 func (sm *SessionManager) ActiveCount() int {
 	sm.mu.Lock()

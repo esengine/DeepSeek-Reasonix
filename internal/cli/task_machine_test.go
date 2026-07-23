@@ -17,6 +17,7 @@ import (
 )
 
 func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "session", time.Date(2026, 7, 23, 13, 0, 0, 0, time.UTC))
 	path := filepath.Join(dir, "session.jsonl")
@@ -39,7 +40,7 @@ func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
 	if len(response.Tasks) != 1 || response.Tasks[0].ID != job.ID || response.Tasks[0].Status != "done" {
 		t.Fatalf("tasks = %+v", response.Tasks)
 	}
-	if response.Tasks[0].Kind != "background" || response.Tasks[0].SessionID != machineSessionID("session") {
+	if response.Tasks[0].Kind != "background" || response.Tasks[0].SessionID != machineSessionIDWithKey("session", identityKey) {
 		t.Fatalf("task projection = %+v", response.Tasks[0])
 	}
 	if strings.Contains(out.String(), "PRIVATE") || strings.Contains(out.String(), dir) {
@@ -48,6 +49,7 @@ func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
 }
 
 func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "session", time.Now())
 	subDir := filepath.Join(dir, "subagents")
@@ -73,7 +75,7 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		t.Fatal(err)
 	}
 
-	tasks, err := machineTasks(dir, machineSessionID("session"))
+	tasks, err := machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		t.Fatal(err)
 	}
 	defer lease.Release()
-	tasks, err = machineTasks(dir, machineSessionID("session"))
+	tasks, err = machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +110,7 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 }
 
 func TestTaskMachineShowRequiresNonZeroForMissingTask(t *testing.T) {
+	installMachineTestIdentity(t)
 	dir := t.TempDir()
 	var out bytes.Buffer
 	if code := runTaskCommand([]string{"show", "--json", "missing", "--dir", dir}, &out); code != 1 {
@@ -123,6 +126,7 @@ func TestTaskMachineShowRequiresNonZeroForMissingTask(t *testing.T) {
 }
 
 func TestTaskMachineEmptyListUsesAnArray(t *testing.T) {
+	installMachineTestIdentity(t)
 	var out bytes.Buffer
 	if code := runTaskCommand([]string{"list", "--json", "--dir", t.TempDir()}, &out); code != 0 {
 		t.Fatalf("task list exit code = %d, output = %s", code, out.String())

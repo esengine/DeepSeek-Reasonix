@@ -494,6 +494,14 @@ func runAgent(args []string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.UsageRunHint)
 		return 2
 	}
+	var machineIdentityKey []byte
+	if format == runOutputEventsJSONL {
+		machineIdentityKey, err = loadMachineIdentityKey()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "machine identity is unavailable")
+			return 1
+		}
+	}
 
 	// Resolve the resume target up front so --copy and the session lease can be
 	// handled before any heavy assembly. --resume takes precedence over
@@ -663,7 +671,7 @@ func runAgent(args []string) int {
 		}
 	}
 	if resultOutput != nil {
-		sessionID := runOutputSessionID(format, agent.BranchID(ctrl.SessionPath()))
+		sessionID := runOutputSessionID(format, agent.BranchID(ctrl.SessionPath()), machineIdentityKey)
 		if err := resultOutput.Finalize(sessionID, started, runErr); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1

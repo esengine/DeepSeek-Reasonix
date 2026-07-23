@@ -13,6 +13,7 @@ import (
 )
 
 func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "older", time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC))
 	saveMachineTestSession(t, dir, "newer", time.Date(2026, 7, 23, 11, 0, 0, 0, time.UTC))
@@ -31,10 +32,10 @@ func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
 	if len(response.Sessions) != 2 {
 		t.Fatalf("sessions = %+v, want two sessions", response.Sessions)
 	}
-	if got := response.Sessions[0].ID; got != machineSessionID("newer") {
+	if got := response.Sessions[0].ID; got != machineSessionIDWithKey("newer", identityKey) {
 		t.Errorf("first session = %q, want opaque newer id", got)
 	}
-	if got := response.Sessions[1].ID; got != machineSessionID("older") {
+	if got := response.Sessions[1].ID; got != machineSessionIDWithKey("older", identityKey) {
 		t.Errorf("second session = %q, want opaque older id", got)
 	}
 	if response.Sessions[0].Turns != 1 || response.Sessions[0].Scope != "project" {
@@ -46,6 +47,7 @@ func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
 }
 
 func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "busy", time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
 	path := filepath.Join(dir, "busy.jsonl")
@@ -57,7 +59,7 @@ func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 
 	for _, operation := range []string{"show", "status"} {
 		var out bytes.Buffer
-		args := []string{operation, "--json", machineSessionID("busy"), "--dir", dir}
+		args := []string{operation, "--json", machineSessionIDWithKey("busy", identityKey), "--dir", dir}
 		if code := runSessionCommand(args, &out); code != 0 {
 			t.Fatalf("%s exit code = %d, output = %s", operation, code, out.String())
 		}
@@ -76,19 +78,25 @@ func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 
 func TestMachineSessionIDIsStableAndOpaque(t *testing.T) {
 	raw := "20260723-120000.000000000-private-provider-model"
-	first := machineSessionID(raw)
-	if first == "" || first != machineSessionID(raw) {
+	identityKey := bytes.Repeat([]byte{0x41}, machineIdentityKeyBytes)
+	otherKey := bytes.Repeat([]byte{0x42}, machineIdentityKeyBytes)
+	first := machineSessionIDWithKey(raw, identityKey)
+	if first == "" || first != machineSessionIDWithKey(raw, identityKey) {
 		t.Fatalf("machine session id is not stable: %q", first)
 	}
 	if strings.Contains(first, "private-provider-model") || first == raw {
 		t.Fatalf("machine session id exposed raw branch identity: %q", first)
 	}
-	if first == machineSessionID(raw+"-other") {
+	if first == machineSessionIDWithKey(raw+"-other", identityKey) {
 		t.Fatalf("different branch ids collided: %q", first)
+	}
+	if first == machineSessionIDWithKey(raw, otherKey) {
+		t.Fatalf("different installations produced the same machine id: %q", first)
 	}
 }
 
 func TestSessionMachineErrorsAreJSONAndNonZero(t *testing.T) {
+	installMachineTestIdentity(t)
 	dir := t.TempDir()
 	cases := []struct {
 		name string
