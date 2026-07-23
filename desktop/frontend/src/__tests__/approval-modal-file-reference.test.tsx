@@ -353,6 +353,7 @@ console.log("\napproval modal file references");
   selection?.removeAllRanges();
   selection?.addRange(range);
 
+  // App refreshes tab metadata periodically; emulate callback churn from a parent rerender.
   await rerender({ onRevisionActiveChange: () => undefined });
 
   ok(document.activeElement === transcriptText, "parent rerender does not return focus to plan revision");
