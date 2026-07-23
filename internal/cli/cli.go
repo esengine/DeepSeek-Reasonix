@@ -134,6 +134,15 @@ func Run(args []string, version string) int {
 			configureCLIThemeFromConfigNoProbe()
 		}
 		return doctorCommand(rest, version)
+	case "session":
+		configureCLIThemeFromConfigNoProbe()
+		return sessionCommand(rest)
+	case "hook", "hooks":
+		configureCLIThemeFromConfigNoProbe()
+		return hookCommand(rest)
+	case "task":
+		configureCLIThemeFromConfigNoProbe()
+		return taskCommand(rest)
 	case "review":
 		configureCLIThemeFromConfigNoProbe()
 		return reviewCommand(rest)
@@ -424,6 +433,7 @@ func runAgent(args []string) int {
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
 	printOnly := fs.BoolP("print", "p", false, "print only the final response")
+	eventsJSONL := fs.Bool("events-jsonl", false, "emit a redacted structured event stream as JSONL")
 	outputFormat := fs.String("output-format", "text", "output format: text | json | stream-json")
 	var additionalDirs []string
 	fs.StringArrayVar(&additionalDirs, "add-dir", nil, "allow tool access to an additional directory (repeatable)")
@@ -442,6 +452,9 @@ func runAgent(args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
+	}
+	if *eventsJSONL {
+		format = runOutputEventsJSONL
 	}
 	profile, err := parseRuntimeProfile(*profileFlag)
 	if err != nil {

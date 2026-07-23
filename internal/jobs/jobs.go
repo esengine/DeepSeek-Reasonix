@@ -283,6 +283,12 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	m.jobs[key] = j
 	m.order = append(m.order, key)
 	m.mu.Unlock()
+	j.mu.Lock()
+	if err := m.writeJobMetaLocked(j, Running); err != nil {
+		j.artifactComplete = false
+		j.artifactErr = err.Error()
+	}
+	j.mu.Unlock()
 	if m.onJobStart != nil {
 		m.onJobStart(j.done)
 	}

@@ -505,6 +505,7 @@ var Chinese = Messages{
   reasonix [--model NAME] [-c|--continue] [-r|--resume [QUERY]] [--permission-mode MODE] [--effort LEVEL] [--add-dir PATH]   交互式会话
   reasonix -p|--print [--model NAME] [--output-format text|json|stream-json] [--allowed-tools RULES] [--add-dir PATH] <task>
   reasonix run [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] [--output-format FORMAT] <task>
+  reasonix run --events-jsonl [--model NAME] <task>      输出脱敏结构化事件 JSONL
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI 代码审查（基于本地 diff）
   reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  通过 HTTP+SSE 提供服务（支持可选认证）
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
@@ -515,6 +516,11 @@ var Chinese = Messages{
   reasonix init                                         查看如何生成项目记忆（AGENTS.md）
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix doctor session <branch-id> [--zip] [--out PATH]  导出会话冲突诊断 zip
+  reasonix session list --json [--dir PATH]             为机器客户端列出脱敏会话
+  reasonix session show|status <branch-id> --json [--dir PATH]  查询单个脱敏会话
+  reasonix session recovery [<branch-id>] --json [--dir PATH]  查询脱敏恢复状态
+  reasonix hook list|status --json [--dir PATH]         查看脱敏 Hook 状态
+  reasonix task list|show --json [--dir PATH]           查看脱敏 Task 状态
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
   reasonix upgrade [--check] [--force]                   自更新到最新版本（也可用：reasonix update）
   reasonix version

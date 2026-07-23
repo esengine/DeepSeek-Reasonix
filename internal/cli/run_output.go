@@ -15,9 +15,10 @@ import (
 type runOutputFormat string
 
 const (
-	runOutputText       runOutputFormat = "text"
-	runOutputJSON       runOutputFormat = "json"
-	runOutputStreamJSON runOutputFormat = "stream-json"
+	runOutputText        runOutputFormat = "text"
+	runOutputJSON        runOutputFormat = "json"
+	runOutputStreamJSON  runOutputFormat = "stream-json"
+	runOutputEventsJSONL runOutputFormat = "events-jsonl"
 )
 
 func parseRunOutputFormat(value string) (runOutputFormat, error) {
@@ -28,8 +29,10 @@ func parseRunOutputFormat(value string) (runOutputFormat, error) {
 		return runOutputJSON, nil
 	case runOutputStreamJSON:
 		return runOutputStreamJSON, nil
+	case runOutputEventsJSONL:
+		return runOutputEventsJSONL, nil
 	default:
-		return "", fmt.Errorf("unknown output format %q (want text, json, or stream-json)", value)
+		return "", fmt.Errorf("unknown output format %q (want text, json, stream-json, or events-jsonl)", value)
 	}
 }
 
@@ -52,16 +55,65 @@ type runResult struct {
 	Usage        runResultUsage `json:"usage"`
 }
 
+type machineEventUsage struct {
+	InputTokens     int `json:"input_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	CacheHitTokens  int `json:"cache_hit_tokens"`
+	CacheMissTokens int `json:"cache_miss_tokens"`
+}
+
+// machineEventRecord is deliberately content-free. The existing stream-json
+// format is a rich UI transport and includes prompts, tool arguments, results,
+// and reasoning; this contract is for automation that must not receive them.
+type machineEventRecord struct {
+	SchemaVersion  int                `json:"schema_version"`
+	Sequence       uint64             `json:"sequence"`
+	Kind           string             `json:"kind"`
+	Code           string             `json:"code,omitempty"`
+	Level          string             `json:"level,omitempty"`
+	ToolID         string             `json:"tool_id,omitempty"`
+	ToolName       string             `json:"tool_name,omitempty"`
+	ToolReadOnly   bool               `json:"tool_read_only,omitempty"`
+	ToolError      bool               `json:"tool_error,omitempty"`
+	ToolTruncated  bool               `json:"tool_truncated,omitempty"`
+	ToolDurationMS int64              `json:"tool_duration_ms,omitempty"`
+	Usage          *machineEventUsage `json:"usage,omitempty"`
+	ApprovalID     string             `json:"approval_id,omitempty"`
+	ApprovalKind   string             `json:"approval_kind,omitempty"`
+	AskID          string             `json:"ask_id,omitempty"`
+	Outcome        string             `json:"outcome,omitempty"`
+	Cancelled      bool               `json:"cancelled,omitempty"`
+	Error          bool               `json:"error,omitempty"`
+	RetryAttempt   int                `json:"retry_attempt,omitempty"`
+	RetryMax       int                `json:"retry_max,omitempty"`
+	CompactionType string             `json:"compaction_type,omitempty"`
+	CompactionMsgs int                `json:"compaction_messages,omitempty"`
+	GuardianResult string             `json:"guardian_result,omitempty"`
+	GuardianRisk   string             `json:"guardian_risk,omitempty"`
+}
+
+type machineRunDone struct {
+	SchemaVersion int               `json:"schema_version"`
+	Sequence      uint64            `json:"sequence"`
+	Kind          string            `json:"kind"`
+	SessionID     string            `json:"session_id,omitempty"`
+	OK            bool              `json:"ok"`
+	DurationMS    int64             `json:"duration_ms"`
+	NumTurns      int               `json:"num_turns"`
+	Usage         machineEventUsage `json:"usage"`
+}
+
 type runOutputSink struct {
-	mu      sync.Mutex
-	format  runOutputFormat
-	out     io.Writer
-	encoder *json.Encoder
-	final   string
-	usage   runResultUsage
-	cost    float64
-	turns   int
-	err     error
+	mu       sync.Mutex
+	format   runOutputFormat
+	out      io.Writer
+	encoder  *json.Encoder
+	final    string
+	usage    runResultUsage
+	cost     float64
+	turns    int
+	sequence uint64
+	err      error
 }
 
 func newRunOutputSink(out io.Writer, format runOutputFormat) *runOutputSink {
@@ -88,6 +140,9 @@ func (s *runOutputSink) Emit(e event.Event) {
 	}
 	if s.format == runOutputStreamJSON && s.err == nil {
 		s.err = s.encoder.Encode(eventwire.ToWire(e))
+	} else if s.format == runOutputEventsJSONL && s.err == nil {
+		s.sequence++
+		s.err = s.encoder.Encode(machineEventRecordFor(e, s.sequence))
 	}
 }
 
@@ -102,6 +157,23 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 			_, s.err = fmt.Fprintln(s.out, s.final)
 		}
 		return s.err
+	}
+	if s.format == runOutputEventsJSONL {
+		s.sequence++
+		turns := s.turns
+		if turns == 0 && runErr == nil {
+			turns = 1
+		}
+		return s.encoder.Encode(machineRunDone{
+			SchemaVersion: machineSchemaVersion,
+			Sequence:      s.sequence,
+			Kind:          "run_done",
+			SessionID:     sessionID,
+			OK:            runErr == nil,
+			DurationMS:    time.Since(started).Milliseconds(),
+			NumTurns:      turns,
+			Usage:         machineEventUsage{InputTokens: s.usage.InputTokens, OutputTokens: s.usage.OutputTokens, CacheHitTokens: s.usage.CacheReadInputTokens, CacheMissTokens: s.usage.CacheCreationInputTokens},
+		})
 	}
 	resultText := s.final
 	subtype := "success"
@@ -126,4 +198,55 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		TotalCostUSD: s.cost,
 		Usage:        s.usage,
 	})
+}
+
+func machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {
+	record := machineEventRecord{SchemaVersion: machineSchemaVersion, Sequence: sequence, Kind: machineEventKind(e.Kind)}
+	switch e.Kind {
+	case event.Notice:
+		record.Code = e.Code
+		if e.Level == event.LevelWarn {
+			record.Level = "warn"
+		} else {
+			record.Level = "info"
+		}
+	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
+		record.ToolID = e.Tool.ID
+		record.ToolName = e.Tool.Name
+		record.ToolReadOnly = e.Tool.ReadOnly
+		record.ToolError = e.Tool.Err != ""
+		record.ToolTruncated = e.Tool.Truncated
+		record.ToolDurationMS = e.Tool.DurationMs
+	case event.Usage:
+		if e.Usage != nil {
+			record.Usage = &machineEventUsage{InputTokens: e.Usage.PromptTokens, OutputTokens: e.Usage.CompletionTokens, CacheHitTokens: e.Usage.CacheHitTokens, CacheMissTokens: e.Usage.CacheMissTokens}
+		}
+	case event.ApprovalRequest:
+		record.ApprovalID = e.Approval.ID
+		record.ApprovalKind = e.Approval.Kind
+	case event.AskRequest:
+		record.AskID = e.Ask.ID
+	case event.TurnDone:
+		record.Outcome = e.Outcome
+		record.Cancelled = e.Cancelled
+		record.Error = e.Err != nil
+	case event.CompactionStarted, event.CompactionDone:
+		record.CompactionType = e.Compaction.Trigger
+		record.CompactionMsgs = e.Compaction.Messages
+	case event.GuardianAssessment:
+		record.GuardianResult = e.Guardian.Outcome
+		record.GuardianRisk = e.Guardian.RiskLevel
+	case event.Retrying:
+		record.RetryAttempt = e.RetryAttempt
+		record.RetryMax = e.RetryMax
+	}
+	return record
+}
+
+func machineEventKind(kind event.Kind) string {
+	names := eventwire.KindNames()
+	if int(kind) >= 0 && int(kind) < len(names) {
+		return names[kind]
+	}
+	return "unknown"
 }

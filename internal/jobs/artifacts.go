@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,62 @@ type artifactMeta struct {
 	LogPath                 string                    `json:"logPath,omitempty"`
 	MutationEvidenceVersion int                       `json:"mutationEvidenceVersion,omitempty"`
 	MutationEvidence        *artifactMutationEvidence `json:"mutationEvidence,omitempty"`
+}
+
+// ArtifactView is the content-free projection used by machine-facing status
+// surfaces. It deliberately excludes labels, outputs, paths, and mutation
+// evidence because those fields may contain user or workspace data.
+type ArtifactView struct {
+	ID               string
+	Kind             string
+	Status           Status
+	StartedAt        int64
+	FinishedAt       int64
+	ArtifactComplete bool
+}
+
+// ListArtifactViews returns persisted background-job metadata for one session.
+// Missing artifact directories are normal and return an empty list.
+func ListArtifactViews(sessionPath string) ([]ArtifactView, error) {
+	dir := ArtifactDir(sessionPath)
+	if strings.TrimSpace(dir) == "" {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]ArtifactView, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), jobMetaExt) {
+			continue
+		}
+		meta, err := readMeta(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(meta.ID) == "" {
+			continue
+		}
+		out = append(out, ArtifactView{
+			ID:               meta.ID,
+			Kind:             meta.Kind,
+			Status:           meta.Status,
+			StartedAt:        meta.StartedAt,
+			FinishedAt:       meta.FinishedAt,
+			ArtifactComplete: meta.ArtifactComplete,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].StartedAt == out[j].StartedAt {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].StartedAt > out[j].StartedAt
+	})
+	return out, nil
 }
 
 // artifactMutationEvidence deliberately excludes receipt args, commands, and

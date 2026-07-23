@@ -73,3 +73,32 @@ func TestRunOutputStreamJSONEndsWithErrorResult(t *testing.T) {
 		t.Fatalf("error result = %+v", result)
 	}
 }
+
+func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
+	var out bytes.Buffer
+	sink := newRunOutputSink(&out, runOutputEventsJSONL)
+	sink.Emit(event.Event{Kind: event.Text, Text: "PRIVATE ANSWER"})
+	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		ID: "call-1", Name: "bash", Args: `{"command":"PRIVATE COMMAND"}`, Output: "PRIVATE OUTPUT", Err: "PRIVATE ERROR",
+	}})
+	sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 4, CompletionTokens: 2}})
+	if err := sink.Finalize("session-1", time.Now(), nil); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("event lines = %d, output = %s", len(lines), out.String())
+	}
+	for i, line := range lines {
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(line), &payload); err != nil {
+			t.Fatalf("line %d: %v", i, err)
+		}
+		if payload["schema_version"] != float64(machineSchemaVersion) || payload["sequence"] != float64(i+1) {
+			t.Fatalf("line %d envelope = %#v", i, payload)
+		}
+	}
+	if strings.Contains(out.String(), "PRIVATE") || !strings.Contains(out.String(), `"kind":"run_done"`) {
+		t.Fatalf("event stream was not redacted or terminated: %s", out.String())
+	}
+}
