@@ -966,7 +966,7 @@ export function ApprovalModal({
         {(approvalModeRelaxed ||
           isRecoveryApproval ||
           isSandboxCapability ||
-          (!isPlanApproval && !isRecoveryApproval && (subject || (reasonOpen && reason))) ||
+          (!isPlanApproval && !isRecoveryApproval && !isSandboxCapability && (subject || (reasonOpen && reason))) ||
           (isPlanApproval && revisionOpen)) && (
           <>
             {isSandboxCapability && approval.sandboxCapability && (
@@ -1039,7 +1039,7 @@ export function ApprovalModal({
                 )}
               </dl>
             )}
-            {!isPlanApproval && !isRecoveryApproval && subject && (
+            {!isPlanApproval && !isRecoveryApproval && !isSandboxCapability && subject && (
               <div className="approval-details">
                 <pre className="approval-subject">{subject}</pre>
                 {reasonOpen && reason && <div className="approval-reason">{reason}</div>}
