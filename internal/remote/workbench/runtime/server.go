@@ -155,6 +155,38 @@ func (sess *session) rebindSessionLease(path string) error {
 	return sess.leases.Rebind(path)
 }
 
+// retireSessionAfterLeaseFailure fails closed after a controller has already
+// committed a path rotation that cannot be protected by a session lease. The
+// controller mutation cannot be rolled back safely, so the runtime must stop
+// serving it: leaving it registered would let the old runtime epoch drive a new,
+// unleased transcript. Registry cleanup is best-effort because the primary
+// invariant is that no further writes are admitted through this process.
+func (s *Server) retireSessionAfterLeaseFailure(sess *session, operation string, leaseErr error) {
+	if sess == nil {
+		return
+	}
+	removed := false
+	s.mu.Lock()
+	if s.sessions[sess.id] == sess {
+		delete(s.sessions, sess.id)
+		for id, sub := range s.subs {
+			if sub.sessionID == sess.id {
+				delete(s.subs, id)
+			}
+		}
+		removed = true
+	}
+	s.mu.Unlock()
+	if !removed {
+		return
+	}
+	closeRuntimeSession(sess)
+	s.logRegistryError(operation+" session lease", leaseErr)
+	if err := s.persistSessionRegistry(); err != nil {
+		s.logRegistryError("persist retired session after lease failure", err)
+	}
+}
+
 type subscription struct {
 	id        protocol.SubscriptionID
 	gen       uint64
@@ -1082,6 +1114,7 @@ func (s *Server) newSession(p protocol.SessionNewParams) (protocol.SessionNewRes
 		return protocol.SessionNewResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
 	if err := sess.rebindSessionLease(sess.ctrl.SessionPath()); err != nil {
+		s.retireSessionAfterLeaseFailure(sess, "new", err)
 		return protocol.SessionNewResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
 	epoch := s.commitSessionRotation(sess)
@@ -1107,6 +1140,7 @@ func (s *Server) clearSession(p protocol.SessionClearParams) (protocol.SessionCl
 		return protocol.SessionClearResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
 	if err := sess.rebindSessionLease(sess.ctrl.SessionPath()); err != nil {
+		s.retireSessionAfterLeaseFailure(sess, "clear", err)
 		return protocol.SessionClearResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
 	epoch := s.commitSessionRotation(sess)

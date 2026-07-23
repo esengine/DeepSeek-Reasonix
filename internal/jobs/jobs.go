@@ -32,6 +32,7 @@ import (
 )
 
 var renamePath = os.Rename
+var repairArtifactMeta = writeMeta
 
 var (
 	managerOwnerSeq   atomic.Uint64
@@ -1389,6 +1390,7 @@ func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 	}
 	var loaded []*Job
 	deferredLiveOwner := false
+	var repairErrors []string
 	maxSeq := 0
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != jobMetaExt {
@@ -1422,7 +1424,15 @@ func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 				meta.FinishedAt = nowMs()
 			}
 			meta.ArtifactComplete = false
-			_ = writeMeta(metaPath, meta)
+			if err := repairArtifactMeta(metaPath, meta); err != nil {
+				// Do not publish an in-memory Interrupted tombstone when the durable
+				// state still says Running. Keep the session reloadable so a later bind
+				// can retry the repair, and surface the failure instead of letting live
+				// and machine-facing status silently disagree.
+				deferredLiveOwner = true
+				repairErrors = append(repairErrors, fmt.Sprintf("repair job %s metadata: %v", id, err))
+				continue
+			}
 		}
 		done := make(chan struct{})
 		close(done)
@@ -1446,6 +1456,14 @@ func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 			artifactErr:      meta.ArtifactError,
 			tombstone:        true,
 			evidence:         mutationEvidenceFromArtifact(meta),
+		})
+	}
+	if len(repairErrors) > 0 {
+		m.sink.Emit(event.Event{
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Text:   "Background job recovery did not complete.",
+			Detail: strings.Join(repairErrors, "; "),
 		})
 	}
 	m.mu.Lock()

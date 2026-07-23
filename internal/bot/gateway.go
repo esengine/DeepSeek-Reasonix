@@ -649,6 +649,22 @@ func (gw *BotGateway) closeSessionState(state *sessionState) {
 	}
 }
 
+// unlinkAndCloseSessionState removes state from the live gateway before closing
+// it. It is used when a controller has already rotated its transcript but the
+// replacement lease could not be acquired: retaining that state would let the
+// next message reuse a controller that no longer owns its active session path.
+func (gw *BotGateway) unlinkAndCloseSessionState(key string, state *sessionState) {
+	if state == nil {
+		return
+	}
+	gw.mu.Lock()
+	if gw.controllers[key] == state {
+		delete(gw.controllers, key)
+	}
+	gw.mu.Unlock()
+	gw.closeSessionState(state)
+}
+
 func (gw *BotGateway) dispatchLoop(ctx context.Context, binding AdapterBinding) {
 	for {
 		select {
@@ -1325,8 +1341,9 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 			if state.leases != nil {
 				if err := state.leases.Rebind(state.ctrl.SessionPath()); err != nil {
 					gw.logger.Warn("new session lease failed", "err", control.SessionInUseMessage(err))
+					gw.unlinkAndCloseSessionState(key, state)
 					gw.sessions.ForceRelease(key)
-					_ = gw.sendText(ctx, adapter, msg, "新会话已创建，但暂时无法取得写入权限，请关闭其他 Reasonix 窗口或进程后重试。")
+					_ = gw.sendText(ctx, adapter, msg, "新会话创建失败：无法取得写入权限。请关闭其他 Reasonix 窗口或进程后重试。")
 					return
 				}
 			}

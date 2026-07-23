@@ -111,20 +111,30 @@ type machineRunDone struct {
 }
 
 type runOutputSink struct {
-	mu       sync.Mutex
-	format   runOutputFormat
-	out      io.Writer
-	encoder  *json.Encoder
-	final    string
-	usage    runResultUsage
-	cost     float64
-	turns    int
-	sequence uint64
-	err      error
+	mu                  sync.Mutex
+	format              runOutputFormat
+	out                 io.Writer
+	encoder             *json.Encoder
+	final               string
+	usage               runResultUsage
+	cost                float64
+	turns               int
+	sequence            uint64
+	machineToolIDs      map[string]string
+	machineToolNames    map[string]string
+	nextMachineToolID   uint64
+	nextMachineToolName uint64
+	err                 error
 }
 
 func newRunOutputSink(out io.Writer, format runOutputFormat) *runOutputSink {
-	return &runOutputSink{format: format, out: out, encoder: json.NewEncoder(out)}
+	return &runOutputSink{
+		format:           format,
+		out:              out,
+		encoder:          json.NewEncoder(out),
+		machineToolIDs:   make(map[string]string),
+		machineToolNames: make(map[string]string),
+	}
 }
 
 func (s *runOutputSink) Emit(e event.Event) {
@@ -149,7 +159,7 @@ func (s *runOutputSink) Emit(e event.Event) {
 		s.err = s.encoder.Encode(eventwire.ToWire(e))
 	} else if s.format == runOutputEventsJSONL && s.err == nil {
 		s.sequence++
-		s.err = s.encoder.Encode(machineEventRecordFor(e, s.sequence))
+		s.err = s.encoder.Encode(s.machineEventRecordFor(e, s.sequence))
 	}
 }
 
@@ -206,7 +216,7 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 	})
 }
 
-func machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {
+func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {
 	record := machineEventRecord{SchemaVersion: machineSchemaVersion, Sequence: sequence, Kind: machineEventKind(e.Kind)}
 	switch e.Kind {
 	case event.Notice:
@@ -217,8 +227,12 @@ func machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {
 			record.Level = "info"
 		}
 	case event.ToolDispatch, event.ToolResult, event.ToolProgress:
-		record.ToolID = e.Tool.ID
-		record.ToolName = e.Tool.Name
+		// Tool-call IDs and names originate in the provider stream. Treat both as
+		// untrusted content: an OpenAI-compatible endpoint may put arbitrary prompt
+		// or argument text in either field. Per-run opaque aliases preserve event
+		// correlation without exposing the provider-controlled values.
+		record.ToolID = machineOpaqueValue(s.machineToolIDs, &s.nextMachineToolID, "tool", e.Tool.ID)
+		record.ToolName = machineOpaqueValue(s.machineToolNames, &s.nextMachineToolName, "tool_name", e.Tool.Name)
 		record.ToolReadOnly = e.Tool.ReadOnly
 		record.ToolError = e.Tool.Err != ""
 		record.ToolTruncated = e.Tool.Truncated
@@ -247,6 +261,19 @@ func machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {
 		record.RetryMax = e.RetryMax
 	}
 	return record
+}
+
+func machineOpaqueValue(values map[string]string, next *uint64, prefix, value string) string {
+	if value == "" {
+		return ""
+	}
+	if opaque := values[value]; opaque != "" {
+		return opaque
+	}
+	(*next)++
+	opaque := fmt.Sprintf("%s_%d", prefix, *next)
+	values[value] = opaque
+	return opaque
 }
 
 func machineEventKind(kind event.Kind) string {

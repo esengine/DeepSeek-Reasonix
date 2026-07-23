@@ -189,6 +189,23 @@ func (c *queueTestController) wasCanceled() bool {
 	return c.canceled
 }
 
+type rotatingBotController struct {
+	botController
+	path     string
+	newPath  string
+	newCalls int
+	closed   bool
+}
+
+func (c *rotatingBotController) Running() bool { return false }
+func (c *rotatingBotController) NewSession() error {
+	c.newCalls++
+	c.path = c.newPath
+	return nil
+}
+func (c *rotatingBotController) SessionPath() string { return c.path }
+func (c *rotatingBotController) Close()              { c.closed = true }
+
 type blockingApprovalController struct {
 	botController
 	emit     func(event.Event)
@@ -836,6 +853,69 @@ func TestGatewayNewSessionRemembersRotatedSessionPath(t *testing.T) {
 	}
 	oldLease.Release()
 	gw.closeSessions()
+}
+
+func TestGatewayNewSessionLeaseFailureRetiresSession(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	readyCalls := 0
+	gw := NewGateway(GatewayConfig{
+		OnSessionReady: func(InboundMessage, string) error {
+			readyCalls++
+			return nil
+		},
+	}, nil, logger)
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-weixin",
+		Domain:       "weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "/new",
+	}
+	key := BuildSessionKey(msg.Session())
+	sessionDir := t.TempDir()
+	oldPath := filepath.Join(sessionDir, "old.jsonl")
+	newPath := filepath.Join(sessionDir, "new.jsonl")
+	ctrl := &rotatingBotController{path: oldPath, newPath: newPath}
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(oldPath); err != nil {
+		t.Fatalf("bind old session lease: %v", err)
+	}
+	blocker, err := agent.TryAcquireSessionLease(newPath)
+	if err != nil {
+		t.Fatalf("hold rotated session lease: %v", err)
+	}
+	defer blocker.Release()
+	gw.controllers[key] = &sessionState{ctrl: ctrl, leases: leases, sessionPath: oldPath}
+
+	gw.handleSlashCommand(context.Background(), adapter, key, msg)
+
+	gw.mu.Lock()
+	_, exists := gw.controllers[key]
+	gw.mu.Unlock()
+	if exists {
+		t.Fatal("lease-failed session remains registered")
+	}
+	if ctrl.newCalls != 1 || !ctrl.closed {
+		t.Fatalf("controller lifecycle = new calls %d closed %v, want 1/true", ctrl.newCalls, ctrl.closed)
+	}
+	if got := leases.HeldPath(); got != "" {
+		t.Fatalf("old lease remained held after retirement: %q", got)
+	}
+	oldLease, err := agent.TryAcquireSessionLease(oldPath)
+	if err != nil {
+		t.Fatalf("old session lease was not released after retirement: %v", err)
+	}
+	oldLease.Release()
+	if readyCalls != 0 {
+		t.Fatalf("session-ready callback ran %d times after failed creation", readyCalls)
+	}
+	sent := adapter.sentMessages()
+	if len(sent) != 1 || !strings.Contains(sent[0].Text, "新会话创建失败") || strings.Contains(sent[0].Text, "已开始新会话") {
+		t.Fatalf("sent messages = %+v, want a single creation-failed response", sent)
+	}
 }
 
 func TestGatewayCloseSessionStateReleasesSessionLease(t *testing.T) {

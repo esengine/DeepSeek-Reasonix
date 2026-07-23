@@ -93,15 +93,20 @@ func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
 	sink := newRunOutputSink(&out, runOutputEventsJSONL)
 	sink.Emit(event.Event{Kind: event.Text, Text: "PRIVATE ANSWER"})
 	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
-		ID: "call-1", Name: "bash", Args: `{"command":"PRIVATE COMMAND"}`, Output: "PRIVATE OUTPUT", Err: "PRIVATE ERROR",
+		ID: "PRIVATE TOOL ID", Name: "PRIVATE TOOL NAME", Args: `{"command":"PRIVATE COMMAND"}`, Output: "PRIVATE OUTPUT", Err: "PRIVATE ERROR",
 	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "PRIVATE TOOL ID", Name: "PRIVATE TOOL NAME"}})
 	sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 4, CompletionTokens: 2}})
 	if err := sink.Finalize("session-1", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 4 {
+	if len(lines) != 5 {
 		t.Fatalf("event lines = %d, output = %s", len(lines), out.String())
+	}
+	var toolAliases []struct {
+		ToolID   string `json:"tool_id"`
+		ToolName string `json:"tool_name"`
 	}
 	for i, line := range lines {
 		var payload map[string]any
@@ -111,9 +116,22 @@ func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
 		if payload["schema_version"] != float64(machineSchemaVersion) || payload["sequence"] != float64(i+1) {
 			t.Fatalf("line %d envelope = %#v", i, payload)
 		}
+		if payload["kind"] == "tool_result" || payload["kind"] == "tool_progress" {
+			var aliases struct {
+				ToolID   string `json:"tool_id"`
+				ToolName string `json:"tool_name"`
+			}
+			if err := json.Unmarshal([]byte(line), &aliases); err != nil {
+				t.Fatal(err)
+			}
+			toolAliases = append(toolAliases, aliases)
+		}
 	}
 	if strings.Contains(out.String(), "PRIVATE") || !strings.Contains(out.String(), `"kind":"run_done"`) {
 		t.Fatalf("event stream was not redacted or terminated: %s", out.String())
+	}
+	if len(toolAliases) != 2 || toolAliases[0].ToolID != "tool_1" || toolAliases[0].ToolName != "tool_name_1" || toolAliases[1] != toolAliases[0] {
+		t.Fatalf("tool aliases = %+v, want stable per-run opaque identities", toolAliases)
 	}
 }
 

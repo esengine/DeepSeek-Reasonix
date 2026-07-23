@@ -225,6 +225,78 @@ func TestRestoreRunningArtifactAsInterrupted(t *testing.T) {
 	}
 }
 
+func TestRestoreRunningArtifactDefersTombstoneWhenRepairWriteFails(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	metaPath := filepath.Join(dir, "task-1"+jobMetaExt)
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:        "task-1",
+		Kind:      "task",
+		Status:    Running,
+		StartedAt: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalRepair := repairArtifactMeta
+	repairArtifactMeta = func(string, artifactMeta) error {
+		return errors.New("simulated repair failure")
+	}
+	t.Cleanup(func() { repairArtifactMeta = originalRepair })
+
+	sink := &recordingSink{}
+	m := NewManager(sink, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	if result := m.WaitForSession(context.Background(), "session", []string{"task-1"}, 1); len(result) != 0 {
+		t.Fatalf("failed repair published an in-memory tombstone: %+v", result)
+	}
+	persisted, err := readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != Running || persisted.FinishedAt != 0 {
+		t.Fatalf("failed repair changed durable metadata: %+v", persisted)
+	}
+	m.mu.Lock()
+	loaded := m.loaded["session"]
+	m.mu.Unlock()
+	if loaded {
+		t.Fatal("failed repair marked the session loaded and prevented retry")
+	}
+	sink.mu.Lock()
+	events := append([]event.Event(nil), sink.events...)
+	sink.mu.Unlock()
+	if len(events) != 1 || events[0].Kind != event.Notice || events[0].Level != event.LevelWarn ||
+		events[0].Text != "Background job recovery did not complete." ||
+		!strings.Contains(events[0].Detail, "task-1") || !strings.Contains(events[0].Detail, "simulated repair failure") {
+		t.Fatalf("repair failure notice = %+v", events)
+	}
+
+	repairArtifactMeta = originalRepair
+	m.SetActiveSessionPath("session", sessionPath)
+	result := m.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("retried repair result = %+v, want interrupted", result)
+	}
+	m.mu.Lock()
+	loaded = m.loaded["session"]
+	m.mu.Unlock()
+	if !loaded {
+		t.Fatal("successful retry did not mark the session loaded")
+	}
+	persisted, err = readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != Interrupted || persisted.FinishedAt == 0 || persisted.ArtifactComplete {
+		t.Fatalf("retried repair metadata = %+v, want durable interrupted tombstone", persisted)
+	}
+}
+
 func TestRestoreRunningArtifactFromClosedOwnerAsInterrupted(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	dir := ArtifactDir(sessionPath)

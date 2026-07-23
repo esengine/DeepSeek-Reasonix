@@ -935,6 +935,85 @@ func TestSessionRotationRegistryFailureReturnsCommittedEpoch(t *testing.T) {
 	})
 }
 
+func TestSessionRotationLeaseFailureRetiresSession(t *testing.T) {
+	for _, operation := range []string{"new", "clear"} {
+		t.Run(operation, func(t *testing.T) {
+			sessionDir := t.TempDir()
+			srv := New(Options{
+				Workspace:    t.TempDir(),
+				SessionDir:   sessionDir,
+				RegistryPath: filepath.Join(t.TempDir(), "remote-sessions.json"),
+			})
+			t.Cleanup(srv.snapshotAndClose)
+
+			oldPath := filepath.Join(sessionDir, "old.jsonl")
+			rotatedPath := filepath.Join(sessionDir, operation+".jsonl")
+			ctrl := &rotatingFakeController{
+				persistentFakeController: &persistentFakeController{
+					fakeController: &fakeController{model: "local/test"},
+					sessionDir:     sessionDir,
+					sessionPath:    oldPath,
+				},
+				newPath: rotatedPath, clearPath: rotatedPath,
+			}
+			target := srv.installTestSession(ctrl)
+			srv.registryRead = true
+			srv.mu.Lock()
+			sess := srv.sessions[target.SessionID]
+			srv.subs["subscription_test"] = &subscription{sessionID: sess.id}
+			srv.mu.Unlock()
+
+			leases := control.NewSessionLeaseKeeper()
+			if err := leases.Rebind(oldPath); err != nil {
+				t.Fatalf("bind old session lease: %v", err)
+			}
+			sess.leases = leases
+			blocker, err := agent.TryAcquireSessionLease(rotatedPath)
+			if err != nil {
+				t.Fatalf("hold rotated session lease: %v", err)
+			}
+			t.Cleanup(blocker.Release)
+
+			previousEpoch := sess.runtimeEpoch
+			switch operation {
+			case "new":
+				_, err = srv.newSession(protocol.SessionNewParams{SessionMutation: protocol.SessionMutation{
+					ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: previousEpoch,
+				}})
+			case "clear":
+				_, err = srv.clearSession(protocol.SessionClearParams{SessionMutation: protocol.SessionMutation{
+					ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: previousEpoch,
+				}})
+			}
+			if err == nil {
+				t.Fatalf("%s session succeeded despite rotated-path lease conflict", operation)
+			}
+
+			srv.mu.Lock()
+			_, sessionExists := srv.sessions[sess.id]
+			_, subscriptionExists := srv.subs["subscription_test"]
+			srv.mu.Unlock()
+			if sessionExists || subscriptionExists {
+				t.Fatalf("retired session remains published: session=%v subscription=%v", sessionExists, subscriptionExists)
+			}
+			if !ctrl.closed {
+				t.Fatal("controller was not closed after lease failure")
+			}
+			if got := leases.HeldPath(); got != "" {
+				t.Fatalf("old lease remained held after retirement: %q", got)
+			}
+			oldLease, err := agent.TryAcquireSessionLease(oldPath)
+			if err != nil {
+				t.Fatalf("old session lease was not released after retirement: %v", err)
+			}
+			oldLease.Release()
+			if sess.runtimeEpoch != previousEpoch {
+				t.Fatalf("runtime epoch changed on failed rotation: got %q want %q", sess.runtimeEpoch, previousEpoch)
+			}
+		})
+	}
+}
+
 func TestTurnDoneClearsPendingPromptAndReplayEvents(t *testing.T) {
 	tests := []struct {
 		name   string
