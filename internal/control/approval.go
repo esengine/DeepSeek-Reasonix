@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
+	"reasonix/internal/recovery"
 	"reasonix/internal/sandboxauth"
 )
 
@@ -331,12 +332,30 @@ func (a *approvalManager) cancel(id string) {
 }
 
 // resolve removes and returns the pending approval for id (Approve path).
-func (a *approvalManager) resolve(id string) pendingApproval {
+func (a *approvalManager) resolve(id string) (pendingApproval, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p := a.approvals[id]
+	p, ok := a.approvals[id]
+	if !ok {
+		return pendingApproval{}, false
+	}
 	delete(a.approvals, id)
-	return p
+	return p, true
+}
+
+// resolveNonRecovery removes an ordinary approval while leaving recovery
+// mirrors owned by the recovery gate. This kind check and removal must stay in
+// one critical section: a typed recovery resolver may have consumed the gate
+// waiter but not yet retired its mirror.
+func (a *approvalManager) resolveNonRecovery(id string) (pendingApproval, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.approvals[id]
+	if !ok || p.kind == recovery.ApprovalKindRecovery {
+		return pendingApproval{}, false
+	}
+	delete(a.approvals, id)
+	return p, true
 }
 
 // registerAsk allocates an ask ID, records the pending question batch, and

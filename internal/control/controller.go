@@ -1811,39 +1811,57 @@ func (c *Controller) Turn() int {
 	return c.turn
 }
 
-// Approve answers a pending ApprovalRequest by ID: allow runs the call, session
-// also remembers a grant for the rest of the session so the same approval scope
-// is not re-prompted. Unknown/expired IDs are ignored.
+// Approve answers a pending ApprovalRequest by ID. It retains the legacy
+// fire-and-forget API; transports that must distinguish stale IDs should call
+// ResolveApproval instead.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
+	c.ResolveApproval(id, allow, session, persist)
+}
+
+// ResolveApproval answers a pending ApprovalRequest by ID and reports whether
+// the ID was still live. The lookup and removal happen inside the owning
+// approval registry, so transports can reject stale decisions without a
+// check-then-act race or visibility into registry internals.
+func (c *Controller) ResolveApproval(id string, allow, session, persist bool) bool {
 	// Recovery cards are strict fresh decisions. Prefer ResolveRecovery so a
 	// continue/deny from an old client that only knows Approve still maps onto
 	// the recovery state machine (allow=continue, deny=revise without feedback).
 	// Session/persist grants are intentionally ignored for recovery.
-	//
-	// Lookup must use the live waiter table (HasApproval), not Snapshot: pre-
-	// normal-execution plan prompts park a waiter without an armed taskRuntime, so
-	// they never appear in the persistence snapshot.
 	c.mu.Lock()
 	gate := c.recoveryGate
 	c.mu.Unlock()
-	if gate != nil && gate.HasApproval(id) {
+	if gate != nil {
 		action := agent.RecoveryActionRevise
 		if allow {
 			action = agent.RecoveryActionContinue
 		}
-		_ = c.ResolveRecovery(id, action, "")
-		return
+		// Resolve is the recovery decision's single atomic owner. Do not inspect
+		// the gate first: typed and legacy callers must contend on the same
+		// consume operation so at most one can report success.
+		if err := gate.Resolve(id, recovery.Action(action), ""); err == nil {
+			pending, ok := c.approval.resolve(id)
+			if ok && pending.reply != nil {
+				pending.reply <- approvalReply{allow: allow}
+			}
+			return true
+		}
 	}
-	pending := c.approval.resolve(id)
+	// A recovery entry here is only a UI/replay mirror. It cannot own a second
+	// decision after another caller consumed the gate waiter.
+	pending, ok := c.approval.resolveNonRecovery(id)
+	if !ok {
+		return false
+	}
 	if pending.kind == sandboxauth.ApprovalKind && pending.capabilityReply != nil {
 		// Old boolean transports cannot express capability authority. Both allow
 		// and deny therefore choose the unchanged base sandbox safely.
 		pending.capabilityReply <- sandboxauth.RunSandboxed
-		return
+		return true
 	}
 	if pending.reply != nil {
 		pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
 	}
+	return true
 }
 
 // ResolveSandboxCapability answers a typed capability approval. Invalid
@@ -5330,7 +5348,7 @@ func (c *Controller) ApplyToolApprovalMode(mode string) []string {
 	c.refreshInteractiveGate()
 	// Clear recovery cards dismissed by the mode switch outside the gate lock.
 	for _, id := range recoveryDismissed {
-		p := c.approval.resolve(id)
+		p, _ := c.approval.resolve(id)
 		if p.reply != nil {
 			// Do not approve the pending mutation; signal cancel/deny so legacy
 			// paths drop the card.

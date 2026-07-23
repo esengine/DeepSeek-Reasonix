@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 )
 
 func TestToWireRetryingJSON(t *testing.T) {
@@ -23,6 +24,33 @@ func TestToWireRetryingJSON(t *testing.T) {
 	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("retrying JSON = %s, want it to contain %s", s, want)
+		}
+	}
+}
+
+func TestToWireSandboxCapabilityApprovalPreservesStructuredPrompt(t *testing.T) {
+	prompt := sandboxauth.Prompt{
+		CanonicalExecutable: "/usr/bin/printf",
+		Argv:                []string{"printf", "a b"},
+		GrantPrefix:         []string{"printf"},
+		Reusable:            true,
+	}
+	w := ToWire(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "cap-1", Kind: sandboxauth.ApprovalKind, SandboxCapability: &prompt,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"kind":"sandbox_capability"`,
+		`"sandbox_capability":{`,
+		`"canonical_executable":"/usr/bin/printf"`,
+		`"argv":["printf","a b"]`,
+		`"grant_prefix":["printf"]`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("sandbox capability wire JSON = %s, want %s", b, want)
 		}
 	}
 }

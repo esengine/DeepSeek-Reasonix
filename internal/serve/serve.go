@@ -29,6 +29,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/store"
 )
 
@@ -43,7 +44,8 @@ var logoWordmarkSVG []byte
 type Server struct {
 	mu sync.RWMutex // guards ctrl, which switchModel swaps at runtime
 	// bindMu serializes every entry point that changes the active session
-	// path — /resume, /new, /fork, and switchModel. net/http runs handlers
+	// path — /resume, /new, /fork, and switchModel — and every HTTP mutation of
+	// same-session state carried by switchModel. net/http runs handlers
 	// concurrently and serve serves multiple browser tabs, so without this
 	// two interleaved rebinds can leave the controller writing one session
 	// while the lease keeper guards another (the exact split this feature
@@ -86,6 +88,16 @@ func (s *Server) ctl() control.SessionAPI {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.ctrl
+}
+
+// mutateActiveController serializes a same-session mutation with controller
+// rebuild/publication and applies it to the controller that is authoritative
+// when the mutation wins the lock. Callbacks must stay short and must not call
+// switchModel or another method that takes bindMu.
+func (s *Server) mutateActiveController(fn func(control.SessionAPI)) {
+	s.bindMu.Lock()
+	defer s.bindMu.Unlock()
+	fn(s.ctl())
 }
 
 // SetSessionLeases hands the server the session-lease keeper that guards its
@@ -201,8 +213,15 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	// back to the original file, re-conflicting on every later save.
 	prevPath := cur.SessionPath()
 	carried := cur.History()
+	planMode := cur.PlanMode()
+	toolApprovalMode := cur.ToolApprovalMode()
+	var sessionAuthorizations *control.SessionAuthorizations
+	if prev, ok := cur.(*control.Controller); ok {
+		auth := prev.SessionAuthorizations()
+		sessionAuthorizations = &auth
+	}
 
-	newCtrl, err := s.build(ctx, ref)
+	newCtrl, err := s.build(ctx, ref, sessionAuthorizations)
 	if err != nil {
 		return fmt.Errorf("switch model: %w", err)
 	}
@@ -221,12 +240,18 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 		}
 	}
 	newCtrl.AdoptHistory(carried, newPath)
-	// A rebuild must not force the user to re-approve tools already granted
-	// this session, or re-trust Plan-mode read-only commands already trusted
-	// this session.
-	if prev, ok := cur.(*control.Controller); ok {
-		newCtrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+	// AdoptHistory uses the ordinary history-resume path, which intentionally
+	// expires transcript-scoped authority. This is a same-session rebuild, so
+	// restore the boot-carried state once more after adoption and before posture.
+	if sessionAuthorizations != nil {
+		newCtrl.RestoreSessionAuthorizations(*sessionAuthorizations)
 	}
+	// Apply the serve frontend posture only after boot has restored same-session
+	// authority. This keeps the Controller authoritative and preserves the same
+	// ordering used by initial interactive startup.
+	newCtrl.EnableInteractiveApproval()
+	newCtrl.SetPlanMode(planMode)
+	newCtrl.SetToolApprovalMode(toolApprovalMode)
 	// Persist before publishing the replacement. A failed write leaves cur and
 	// the on-disk transcript coherent and lets the caller retry; publishing first
 	// would report a successful switch whose refreshed system contract disappears
@@ -278,14 +303,19 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 
 // build returns the replacement controller for a model switch, using the
 // injected builder in tests and boot.Build in production.
-func (s *Server) build(ctx context.Context, ref string) (*control.Controller, error) {
+func (s *Server) build(ctx context.Context, ref string, auth *control.SessionAuthorizations) (*control.Controller, error) {
 	if s.buildController != nil {
-		return s.buildController(ctx, ref)
+		ctrl, err := s.buildController(ctx, ref)
+		if err == nil && auth != nil {
+			ctrl.RestoreSessionAuthorizations(*auth)
+		}
+		return ctrl, err
 	}
 	return boot.Build(ctx, boot.Options{
-		Model:  ref,
-		Sink:   s.bc,
-		Stderr: os.Stderr,
+		Model:                 ref,
+		Sink:                  s.bc,
+		Stderr:                os.Stderr,
+		SessionAuthorizations: auth,
 	})
 }
 
@@ -385,6 +415,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /submit", s.submit)
 	mux.HandleFunc("POST /cancel", s.cancel)
 	mux.HandleFunc("POST /approve", s.approve)
+	mux.HandleFunc("POST /capability-approve", s.capabilityApprove)
+	mux.HandleFunc("POST /yolo-acknowledge", s.yoloAcknowledge)
 	mux.HandleFunc("POST /plan", s.plan)
 	mux.HandleFunc("POST /compact", s.compact)
 	mux.HandleFunc("POST /new", s.newSession)
@@ -598,7 +630,12 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.ctl().SubmitHTTP(body.Input)
+	// Serialize controller selection and turn admission with rebuilds. Without
+	// bindMu, switchModel can pass its idle check while this request still admits
+	// a turn on the outgoing controller, which is then closed and loses the input.
+	s.mutateActiveController(func(ctrl control.SessionAPI) {
+		ctrl.SubmitHTTP(body.Input)
+	})
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -618,8 +655,71 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
 	}
-	s.ctl().Approve(body.ID, body.Allow, body.Session, body.Persist)
+	resolved := false
+	s.mutateActiveController(func(ctrl control.SessionAPI) {
+		resolved = ctrl.ResolveApproval(body.ID, body.Allow, body.Session, body.Persist)
+	})
+	if !resolved {
+		http.Error(w, "unknown or expired approval", http.StatusConflict)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) capabilityApprove(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID     string `json:"id"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.ID == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	action := sandboxauth.Action(body.Action)
+	if !action.Valid() {
+		http.Error(w, "invalid action: "+body.Action, http.StatusBadRequest)
+		return
+	}
+	var resolveErr error
+	s.mutateActiveController(func(ctrl control.SessionAPI) {
+		resolveErr = ctrl.ResolveSandboxCapability(body.ID, action)
+	})
+	if resolveErr != nil {
+		http.Error(w, resolveErr.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) yoloAcknowledge(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Accept *bool `json:"accept"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Accept == nil {
+		http.Error(w, "bad body", http.StatusBadRequest)
+		return
+	}
+	var (
+		resolved bool
+		state    sandboxauth.YOLOPolicyState
+		ok       bool
+	)
+	s.mutateActiveController(func(ctrl control.SessionAPI) {
+		if _, ok = ctrl.SandboxCapabilityYOLOState(); !ok {
+			return
+		}
+		resolved = ctrl.AcknowledgeSandboxCapabilityYOLO(*body.Accept)
+		state, ok = ctrl.SandboxCapabilityYOLOState()
+	})
+	if !ok {
+		http.Error(w, "sandbox capability policy unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if !resolved {
+		writeJSONStatus(w, http.StatusConflict, map[string]any{"resolved": resolved, "state": state})
+		return
+	}
+	writeJSON(w, map[string]any{"resolved": resolved, "state": state})
 }
 
 func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
@@ -630,7 +730,7 @@ func (s *Server) plan(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	s.ctl().SetPlanMode(body.On)
+	s.mutateActiveController(func(ctrl control.SessionAPI) { ctrl.SetPlanMode(body.On) })
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -724,6 +824,14 @@ func (s *Server) context(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		slog.Warn("serve: writeJSON encode failed", "err", err)
+	}
+}
+
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		slog.Warn("serve: writeJSON encode failed", "err", err)
 	}
@@ -893,7 +1001,7 @@ func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad body", http.StatusBadRequest)
 		return
 	}
-	s.ctl().SetAutoApproveTools(body.On)
+	s.mutateActiveController(func(ctrl control.SessionAPI) { ctrl.SetAutoApproveTools(body.On) })
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -909,7 +1017,7 @@ func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
 	}
 	switch strings.ToLower(strings.TrimSpace(body.Mode)) {
 	case control.ToolApprovalAsk, control.ToolApprovalAuto, control.ToolApprovalYolo:
-		s.ctl().SetToolApprovalMode(body.Mode)
+		s.mutateActiveController(func(ctrl control.SessionAPI) { ctrl.SetToolApprovalMode(body.Mode) })
 	default:
 		http.Error(w, "mode must be ask, auto, or yolo", http.StatusBadRequest)
 		return
@@ -934,13 +1042,15 @@ func (s *Server) goal(w http.ResponseWriter, r *http.Request) {
 	}
 	goal := strings.TrimSpace(body.Goal)
 	if goal == "" {
-		s.ctl().ClearGoal()
+		s.mutateActiveController(func(ctrl control.SessionAPI) { ctrl.ClearGoal() })
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	// Disable plan mode before setting the goal, mirroring the desktop.
-	s.ctl().SetPlanMode(false)
-	s.ctl().SetGoal(goal)
+	s.mutateActiveController(func(ctrl control.SessionAPI) {
+		ctrl.SetPlanMode(false)
+		ctrl.SetGoal(goal)
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1155,27 +1265,31 @@ func currentModelRef(c control.SessionAPI) string {
 
 // status returns a combined status snapshot.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	used, window := s.ctl().ContextSnapshot()
-	hit, miss := s.ctl().SessionCache()
+	ctrl := s.ctl()
+	used, window := ctrl.ContextSnapshot()
+	hit, miss := ctrl.SessionCache()
 	sess := map[string]any{
-		"label":            s.ctl().Label(),
-		"running":          s.ctl().Running(),
-		"plan":             s.ctl().PlanMode(),
-		"autoApproveTools": s.ctl().AutoApproveTools(),
-		"bypass":           s.ctl().AutoApproveTools(),
-		"toolApprovalMode": s.ctl().ToolApprovalMode(),
-		"goal":             s.ctl().Goal(),
-		"goalStatus":       s.ctl().GoalStatus(),
-		"cwd":              s.ctl().SessionDir(),
+		"label":            ctrl.Label(),
+		"running":          ctrl.Running(),
+		"plan":             ctrl.PlanMode(),
+		"autoApproveTools": ctrl.AutoApproveTools(),
+		"bypass":           ctrl.AutoApproveTools(),
+		"toolApprovalMode": ctrl.ToolApprovalMode(),
+		"goal":             ctrl.Goal(),
+		"goalStatus":       ctrl.GoalStatus(),
+		"cwd":              ctrl.SessionDir(),
 		"used":             used,
 		"window":           window,
 		"cacheHit":         hit,
 		"cacheMiss":        miss,
 	}
-	if u := s.ctl().LastUsage(); u != nil {
+	if state, ok := ctrl.SandboxCapabilityYOLOState(); ok {
+		sess["sandboxCapabilityYOLO"] = state
+	}
+	if u := ctrl.LastUsage(); u != nil {
 		sess["lastUsage"] = u
 	}
-	if b, err := s.ctl().Balance(r.Context()); err == nil && b != nil {
+	if b, err := ctrl.Balance(r.Context()); err == nil && b != nil {
 		sess["balance"] = map[string]any{
 			"display":   b.Display(),
 			"available": b.Available,
@@ -1184,7 +1298,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		slog.Warn("serve: balance fetch failed", "err", err)
 	}
-	if j := s.ctl().Jobs(); len(j) > 0 {
+	if j := ctrl.Jobs(); len(j) > 0 {
 		sess["jobs"] = j
 	}
 	writeJSON(w, sess)

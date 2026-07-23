@@ -76,6 +76,7 @@ type TurnControl interface {
 // posture (ask/auto/yolo). It mirrors the approvalManager surface.
 type Approvals interface {
 	Approve(id string, allow, session, persist bool)
+	ResolveApproval(id string, allow, session, persist bool) bool
 	ResolveSandboxCapability(id string, action sandboxauth.Action) error
 	SandboxCapabilityYOLOState() (sandboxauth.YOLOPolicyState, bool)
 	AcknowledgeSandboxCapabilityYOLO(accept bool) bool

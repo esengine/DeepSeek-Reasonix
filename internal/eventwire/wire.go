@@ -2,6 +2,8 @@
 package eventwire
 
 import (
+	"encoding/json"
+
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -82,6 +84,13 @@ func ToWire(e event.Event) Event {
 		w.Approval = &Approval{
 			ID: e.Approval.ID, Tool: e.Approval.Tool, Subject: e.Approval.Subject,
 			Reason: e.Approval.Reason, Fresh: e.Approval.Fresh, Kind: e.Approval.Kind,
+		}
+		if e.Approval.SandboxCapability != nil {
+			raw, err := json.Marshal(e.Approval.SandboxCapability)
+			if err == nil {
+				rawMessage := json.RawMessage(raw)
+				w.Approval.SandboxCapabilityRaw = &rawMessage
+			}
 		}
 		if e.Approval.Recovery != nil {
 			r := e.Approval.Recovery
@@ -255,8 +264,11 @@ type Approval struct {
 	Subject  string            `json:"subject" externalizable:"true"`
 	Reason   string            `json:"reason,omitempty" externalizable:"true"`
 	Fresh    bool              `json:"fresh,omitempty"`
-	Kind     string            `json:"kind,omitempty"` // tool | plan | recovery
+	Kind     string            `json:"kind,omitempty"` // "" | plan | recovery | sandbox_capability
 	Recovery *RecoveryApproval `json:"recovery,omitempty"`
+	// SandboxCapabilityRaw carries the structured sandboxauth.Prompt JSON when
+	// Kind is sandbox_capability. Omitted otherwise.
+	SandboxCapabilityRaw *json.RawMessage `json:"sandbox_capability,omitempty"`
 }
 
 // RecoveryApproval is the JSON form of an event.RecoveryApproval.

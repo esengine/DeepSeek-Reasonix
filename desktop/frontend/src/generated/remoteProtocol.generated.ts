@@ -2,7 +2,7 @@
 
 export const REMOTE_SCHEMA_FORMAT = "reasonix.remote.schema.v1" as const;
 export const REMOTE_PROTOCOL_VERSION = "1" as const;
-export const REMOTE_SCHEMA_HASH = "sha256:d54a081817469abfad9b84c82d908a9480e083b6832727f0d35cc13f83c8cd12" as const;
+export const REMOTE_SCHEMA_HASH = "sha256:847bae5a9e131e9546fe865d0ef498aef84f5ae91ded11f636a09b935eb536e3" as const;
 
 export const REMOTE_FIXED_RESOURCES = {
   "protocol": {
@@ -157,6 +157,7 @@ export type RemoteEventRaw = {
       "source_agent"?: string;
       "task_grant_scope"?: string;
     };
+    "sandbox_capability"?: RemoteJSONValue;
     "subject": string | null;
     "tool": string;
   };
@@ -306,6 +307,7 @@ export type RemoteEventHydrated = {
       "source_agent"?: string;
       "task_grant_scope"?: string;
     };
+    "sandbox_capability"?: RemoteJSONValue;
     "subject": string;
     "tool": string;
   };
@@ -3060,6 +3062,7 @@ export type SessionEventRaw = {
         "source_agent"?: string;
         "task_grant_scope"?: string;
       };
+      "sandbox_capability"?: RemoteJSONValue;
       "subject": string | null;
       "tool": string;
     };
@@ -3230,6 +3233,7 @@ export type SessionEventHydrated = {
         "source_agent"?: string;
         "task_grant_scope"?: string;
       };
+      "sandbox_capability"?: RemoteJSONValue;
       "subject": string;
       "tool": string;
     };
@@ -4304,6 +4308,7 @@ export type SessionSubscribeResultRaw = {
             "source_agent"?: string;
             "task_grant_scope"?: string;
           };
+          "sandbox_capability"?: RemoteJSONValue;
           "subject": string | null;
           "tool": string;
         };
@@ -4723,6 +4728,7 @@ export type SessionSubscribeResultHydrated = {
             "source_agent"?: string;
             "task_grant_scope"?: string;
           };
+          "sandbox_capability"?: RemoteJSONValue;
           "subject": string;
           "tool": string;
         };

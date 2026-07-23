@@ -335,6 +335,64 @@ func TestServeIndexPresentsRecoveryPauseAsNotice(t *testing.T) {
 	}
 }
 
+func TestServeIndexUsesAuthoritativeSandboxCapabilityState(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"function renderYOLOPolicyState(state)",
+		"renderYOLOPolicyState(s.sandboxCapabilityYOLO);",
+		"state.acknowledgement==='required'&&state.yolo&&state.interactive&&state.effective",
+		"const response=await post('/yolo-acknowledge',{accept});",
+		"if(!response.ok&&!result?.state)",
+		"c.grant_prefix&&c.grant_prefix.length",
+		"JSON.stringify(String(arg))",
+		"const response=await post('/capability-approve',{id:a.id,action});",
+		"case 'notice': log.appendChild",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing sandbox capability contract %q", want)
+		}
+	}
+	if strings.Contains(html, "showYOLOAckBanner") {
+		t.Fatal("headless warning notices must not drive the interactive YOLO banner")
+	}
+}
+
+func TestServeIndexCapabilityCardContracts(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"const shortcut=String(key).toLowerCase()",
+		"keyActs.push({action,key:shortcut})",
+		"review.risk?.findings",
+		"c.warnings",
+		"list.appendChild(el('li','',value))",
+		"d.querySelector('[data-cap-risk-findings]')",
+		"d.querySelector('[data-cap-warnings]')",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing rendered capability contract %q", want)
+		}
+	}
+
+	start := strings.Index(html, "const resolve=async action=>")
+	if start < 0 {
+		t.Fatal("capability resolver block not found")
+	}
+	end := strings.Index(html[start:], "const onkey=e=>")
+	if end < 0 {
+		t.Fatal("capability key handler not found")
+	}
+	resolver := html[start : start+end]
+	failed := strings.Index(resolver, "if(!response.ok)throw")
+	cleanup := strings.Index(resolver, "cleanup();")
+	catch := strings.Index(resolver, "}catch(err){")
+	if failed < 0 || cleanup < failed || catch < cleanup {
+		t.Fatalf("capability resolver must cleanup only after a successful response:\n%s", resolver)
+	}
+	if strings.Contains(resolver[catch:], "cleanup();") {
+		t.Fatal("failed capability response must retain the decision card")
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
