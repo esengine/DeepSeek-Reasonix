@@ -100,6 +100,7 @@ import type {
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
+  WireYOLOPolicyState,
 } from "./types";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
@@ -499,6 +500,12 @@ export interface AppBindings {
   WorkbenchRemoteRequest(method: string, paramsJSON: string): Promise<string>;
   WorkbenchResolveProviderTrust(accept: boolean): Promise<void>;
   WorkbenchPendingProviderTrust(): Promise<ProviderTrustPrompt | null>;
+  // ── Sandbox Capability ──
+  ResolveSandboxCapability(id: string, action: string): Promise<void>;
+  ResolveSandboxCapabilityTab(tabID: string, id: string, action: string): Promise<void>;
+  SandboxCapabilityYOLOState(): Promise<WireYOLOPolicyState>;
+  AcknowledgeSandboxCapabilityYOLO(accept: boolean): Promise<boolean>;
+  ReloadSandboxCapabilityYOLO(): Promise<WireYOLOPolicyState>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -4720,6 +4727,26 @@ function makeMockApp(): AppBindings {
     async WorkbenchResolveProviderTrust() {},
     async WorkbenchPendingProviderTrust() {
       return null;
+    },
+    // ── Sandbox Capability mock ──
+    async ResolveSandboxCapability(_id, _action) {
+      if (!pendingApprovalPreview) return;
+      pendingApprovalPreview = false;
+      pendingApprovalPreviewPrompt = undefined;
+      emit({ kind: "message", text: `sandbox capability resolved: ${_action}` });
+      emitMockTurnDone();
+    },
+    async ResolveSandboxCapabilityTab(_tabID, id, action) {
+      await withMockTabScope(_tabID, () => this.ResolveSandboxCapability(id, action));
+    },
+    async SandboxCapabilityYOLOState() {
+      return { workspace: "", effective: false, yolo: false, interactive: false, acknowledgement: "not_required" };
+    },
+    async AcknowledgeSandboxCapabilityYOLO(_accept) {
+      return true;
+    },
+    async ReloadSandboxCapabilityYOLO() {
+      return { workspace: "", effective: false, yolo: false, interactive: false, acknowledgement: "not_required" };
     },
   };
 }

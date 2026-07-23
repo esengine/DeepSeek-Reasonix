@@ -2611,6 +2611,17 @@ export function useController() {
     });
   }, [activeTabId, dispatchTo]);
 
+  const resolveSandboxCapability = useCallback((id: string, action: string) => {
+    if (!activeTabId) return;
+    const tabId = activeTabId;
+    const epoch = statesRef.current.get(tabId)?.promptEpoch ?? 0;
+    dispatchTo(tabId, { type: "clearApproval" });
+    app.ResolveSandboxCapabilityTab(tabId, id, action).catch(() => {
+      dispatchTo(tabId, { type: "submit_prompt_failed", id, epoch });
+      replayPendingPromptsForActiveTab(tabId);
+    });
+  }, [activeTabId, dispatchTo]);
+
   const answerQuestion = useCallback((id: string, answers: QuestionAnswer[]) => {
     if (!activeTabId) return;
     const tabId = activeTabId;
@@ -3250,7 +3261,7 @@ export function useController() {
   return {
     state: activeState,
     activeTabId,
-    send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, resolveRecovery, answerQuestion, setControllerMode,
+    send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, resolveRecovery, resolveSandboxCapability, answerQuestion, setControllerMode,
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,

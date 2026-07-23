@@ -10,6 +10,7 @@ import {
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
+import { SandboxCapabilityCard } from "./SandboxCapabilityCard";
 import { DUR_FAST } from "../lib/gsapAnimations";
 import {
   FileReferenceMenu,
@@ -231,6 +232,7 @@ export function ApprovalModal({
   insertRequest,
   onRevisionActiveChange,
   toolApprovalMode,
+  onResolveSandboxCapability,
 }: {
   approval: WireApproval;
   onAnswer: (allow: boolean, session: boolean, persist: boolean) => void;
@@ -244,10 +246,12 @@ export function ApprovalModal({
   insertRequest?: ComposerInsertRequest | null;
   onRevisionActiveChange?: (active: boolean) => void;
   toolApprovalMode?: ToolApprovalMode;
+  onResolveSandboxCapability?: (action: string) => void;
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
+  const isSandboxCapability = approval.kind === "sandbox_capability" || Boolean(approval.sandboxCapability);
   const recovery = approval.recovery;
   const recoveryChangeKind = (recovery?.change_kind ?? "").toLowerCase();
   const isRecoveryPlanChange =
@@ -332,7 +336,45 @@ export function ApprovalModal({
     [onResolveRecovery, onAnswer],
   );
 
-  const toolActions: DecisionAction[] = isRecoveryPlanChange
+  function buildSandboxCapabilityActions(prompt: WireApproval["sandboxCapability"], t: Translator): DecisionAction[] {
+    const actions: DecisionAction[] = [
+      {
+        key: "allow_once",
+        label: t("approval.sandboxCapabilityAllowOnce"),
+        desc: t("approval.allowOnceDesc"),
+        primary: true,
+        kind: "submit",
+      },
+    ];
+    if (prompt?.reusable) {
+      actions.push({
+        key: "allow_session",
+        label: t("approval.sandboxCapabilityAllowSession"),
+        desc: t("approval.allowRuleSessionDesc"),
+        kind: "submit",
+      });
+      if (!prompt.suspected_secret) {
+        actions.push({
+          key: "allow_persistent",
+          label: t("approval.sandboxCapabilityAllowPersistent"),
+          desc: t("approval.allowRulePersistentDesc"),
+          kind: "submit",
+        });
+      }
+    }
+    actions.push({
+      key: "run_sandboxed",
+      label: t("approval.sandboxCapabilityRunSandboxed"),
+      desc: t("approval.denyDesc"),
+      tone: "danger",
+      kind: "submit",
+    });
+    return actions;
+  }
+
+  const toolActions: DecisionAction[] = isSandboxCapability
+    ? buildSandboxCapabilityActions(approval.sandboxCapability, t)
+    : isRecoveryPlanChange
     ? [
         {
           key: "1",
@@ -491,8 +533,12 @@ export function ApprovalModal({
       setRecoveryGuidanceOpen(true);
       return;
     }
+    if (isSandboxCapability) {
+      onResolveSandboxCapability?.(action.key);
+      return;
+    }
     if (action.run) answerWithExit(action.run);
-  }, [submitting, toolActions, isPlanApproval, isRecoveryApproval]);
+  }, [submitting, toolActions, isPlanApproval, isRecoveryApproval, isSandboxCapability, onResolveSandboxCapability]);
 
   const activateAction = useCallback((action: DecisionAction, index: number) => {
     if (submitting) return;
@@ -571,13 +617,17 @@ export function ApprovalModal({
         }
         setSelectedIndex(index);
       } else if (event.key === "Escape") {
+        if (isSandboxCapability) {
+          // Blocking: sandbox capability cannot be dismissed via Escape
+          return;
+        }
         event.preventDefault();
         answerWithExit(onStop);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionCount, activateAction, confirmSelected, onStop, submitting, isPlanApproval, isRecoveryApproval, isRecoveryPlanChange, recoveryGuidanceOpen, toolActions]);
+  }, [actionCount, activateAction, confirmSelected, onStop, submitting, isPlanApproval, isRecoveryApproval, isRecoveryPlanChange, recoveryGuidanceOpen, toolActions, isSandboxCapability]);
 
   useEffect(() => {
     revisionActiveRef.current = revisionOpen;
@@ -730,21 +780,24 @@ export function ApprovalModal({
       <PromptShelf
         decision
         actionsRole={isPlanApproval || isRecoveryApproval ? "group" : "listbox"}
-        className={isPlanApproval ? "prompt-shelf--plan-approval" : isRecoveryApproval ? "prompt-shelf--recovery-approval" : "prompt-shelf--tool-approval"}
+        className={isPlanApproval ? "prompt-shelf--plan-approval" : isSandboxCapability ? "prompt-shelf--sandbox-capability" : isRecoveryApproval ? "prompt-shelf--recovery-approval" : "prompt-shelf--tool-approval"}
         barRef={cardRef}
-        titleId={isPlanApproval ? "plan-approval-title" : isRecoveryApproval ? "recovery-approval-title" : "tool-approval-title"}
+        titleId={isPlanApproval ? "plan-approval-title" : isSandboxCapability ? "sandbox-capability-title" : isRecoveryApproval ? "recovery-approval-title" : "tool-approval-title"}
         title={
           isPlanApproval
             ? t("approval.planReady")
-            : isRecoveryPlanChange
-              ? t("approval.recoveryPlanChangePending")
-              : isRecoveryApproval
-                ? t("approval.recoveryPending")
-                : t("approval.toolPending")
+            : isSandboxCapability
+              ? t("approval.sandboxCapabilityTitle")
+              : isRecoveryPlanChange
+                ? t("approval.recoveryPlanChangePending")
+                : isRecoveryApproval
+                  ? t("approval.recoveryPending")
+                  : t("approval.toolPending")
         }
         badges={
           <>
-            {!isPlanApproval && !isRecoveryApproval && <PromptBadge tone="amber">{toolLabel}</PromptBadge>}
+            {isSandboxCapability && <PromptBadge tone="danger">{t("approval.sandboxCapabilityBadge")}</PromptBadge>}
+            {!isPlanApproval && !isRecoveryApproval && !isSandboxCapability && <PromptBadge tone="amber">{toolLabel}</PromptBadge>}
             {isPlanApproval && revisionOpen && <PromptBadge>{t("approval.revisePlan")}</PromptBadge>}
             {isRecoveryPlanChange && (
               <PromptBadge>
@@ -753,20 +806,35 @@ export function ApprovalModal({
             )}
           </>
         }
-        meta={isRecoveryApproval ? undefined : toolMeta}
+        meta={isSandboxCapability ? approval.sandboxCapability?.canonical_executable ?? toolMeta : isRecoveryApproval ? undefined : toolMeta}
         headerActions={
           <>
+            {isSandboxCapability && (
+              <PromptHeaderAction onClick={() => setReasonOpen((open) => !open)} disabled={submitting}>
+                {t(reasonOpen ? "approval.hideDetails" : "approval.details")}
+              </PromptHeaderAction>
+            )}
+            {isSandboxCapability && (
+              <PromptHeaderAction
+                onClick={() => {
+                  onResolveSandboxCapability?.("cancel_command");
+                }}
+                disabled={submitting}
+              >
+                {t("approval.sandboxCapabilityCancel")}
+              </PromptHeaderAction>
+            )}
             {isRecoveryApproval && hasRecoveryDetails && (
               <PromptHeaderAction onClick={() => setReasonOpen((open) => !open)} disabled={submitting}>
                 {t(reasonOpen ? "approval.recoveryHideTechnicalDetails" : "approval.recoveryTechnicalDetails")}
               </PromptHeaderAction>
             )}
-            {!isPlanApproval && !isRecoveryApproval && hasToolDetails && reason && (
+            {!isPlanApproval && !isRecoveryApproval && !isSandboxCapability && hasToolDetails && reason && (
               <PromptHeaderAction onClick={() => setReasonOpen((open) => !open)} disabled={submitting}>
                 {t(reasonOpen ? "approval.hideDetails" : "approval.details")}
               </PromptHeaderAction>
             )}
-            {!isPlanApproval && !isRecoveryApproval && (
+            {!isPlanApproval && !isRecoveryApproval && !isSandboxCapability && (
               <PromptHeaderAction
                 onClick={() => answerWithExit(onStop)}
                 ariaLabel={t("decision.stopTask")}
@@ -898,10 +966,14 @@ export function ApprovalModal({
       >
         {(approvalModeRelaxed ||
           isRecoveryApproval ||
+          isSandboxCapability ||
           (!isPlanApproval && !isRecoveryApproval && (subject || (reasonOpen && reason))) ||
           (isPlanApproval && revisionOpen)) && (
           <>
-            {approvalModeRelaxed && !isRecoveryApproval && (
+            {isSandboxCapability && approval.sandboxCapability && (
+              <SandboxCapabilityCard sandboxCapability={approval.sandboxCapability} />
+            )}
+            {approvalModeRelaxed && !isRecoveryApproval && !isSandboxCapability && (
               <div className="approval-mode-hint">{t("approval.modeSwitchPendingHint")}</div>
             )}
             {isRecoveryApproval && (

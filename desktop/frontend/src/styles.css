@@ -8683,6 +8683,151 @@ body > .mermaid-diagram--fullscreen {
   height: 30px;
   padding: 0 9px;
 }
+
+/* 🧪 Sandbox capability card */
+.sandbox-capability-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 4px;
+}
+.sandbox-capability-card__section {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+}
+.sandbox-capability-card__label {
+  flex: 0 0 100px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+  font-weight: 620;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sandbox-capability-card__justification {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--fg);
+}
+.sandbox-capability-card__command {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.sandbox-capability-card__args {
+  color: var(--fg-dim);
+}
+.sandbox-capability-card__toggle {
+  font-size: 11px;
+  font-weight: 620;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-dim);
+  color: var(--fg-dim);
+}
+.sandbox-capability-card__toggle--on {
+  background: rgba(220, 120, 0, 0.15);
+  color: var(--amber);
+}
+.sandbox-capability-card__path-list,
+.sandbox-capability-card__device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sandbox-capability-card__path-item,
+.sandbox-capability-card__device-item {
+  display: flex;
+  gap: 8px;
+  font-size: 11.5px;
+}
+.sandbox-capability-card__path-identity,
+.sandbox-capability-card__device-path {
+  font-weight: 620;
+  min-width: 70px;
+}
+.sandbox-capability-card__path-canonical,
+.sandbox-capability-card__device-canonical {
+  color: var(--fg-dim);
+  overflow-wrap: anywhere;
+}
+.sandbox-capability-card__path-kind,
+.sandbox-capability-card__device-kind {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+}
+.sandbox-capability-card__device-major-minor {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+}
+.sandbox-capability-card__finding-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sandbox-capability-card__finding-item {
+  display: flex;
+  gap: 6px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.sandbox-capability-card__finding-item--critical {
+  background: rgba(200, 40, 40, 0.1);
+  color: var(--danger);
+}
+.sandbox-capability-card__finding-code {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  min-width: 60px;
+}
+.sandbox-capability-card__warning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sandbox-capability-card__warning-item {
+  font-size: 11px;
+  padding: 2px 0;
+}
+.sandbox-capability-card__risk--critical {
+  border: 1px solid rgba(200, 40, 40, 0.3);
+  border-radius: 4px;
+  padding: 6px;
+  margin-top: 4px;
+}
+/* Danger banner */
+.sandbox-capability-card__danger-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  background: rgba(200, 40, 40, 0.08);
+  color: var(--danger);
+  border: 1px solid rgba(200, 40, 40, 0.2);
+}
+.sandbox-capability-card__danger-banner-icon {
+  flex: 0 0 auto;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.sandbox-capability-card__danger-banner--critical {
+  background: rgba(200, 40, 40, 0.12);
+  border-color: rgba(200, 40, 40, 0.35);
+  font-weight: 620;
+}
+
 .modal__plannote {
   margin: 0 0 16px;
   color: var(--fg-dim);
