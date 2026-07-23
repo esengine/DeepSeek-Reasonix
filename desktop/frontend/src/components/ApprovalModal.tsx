@@ -969,8 +969,26 @@ export function ApprovalModal({
           (!isPlanApproval && !isRecoveryApproval && !isSandboxCapability && (subject || (reasonOpen && reason))) ||
           (isPlanApproval && revisionOpen)) && (
           <>
-            {isSandboxCapability && approval.sandboxCapability && (
+            {isSandboxCapability && approval.sandboxCapability && reasonOpen && (
               <SandboxCapabilityCard sandboxCapability={approval.sandboxCapability} />
+            )}
+            {isSandboxCapability && approval.sandboxCapability && !reasonOpen && (
+              <div className="sandbox-capability-card">
+                {(approval.sandboxCapability.preserve_background_processes || approval.sandboxCapability.review.risk.level === "critical") && <>
+                  {approval.sandboxCapability.preserve_background_processes && (
+                    <div className="sandbox-capability-card__danger-banner">
+                      <span className="sandbox-capability-card__danger-banner-icon">⚠</span>
+                      <span>{t("approval.sandboxCapabilityPreserveWarning")}</span>
+                    </div>
+                  )}
+                  {approval.sandboxCapability.review.risk.level === "critical" && (
+                    <div className="sandbox-capability-card__danger-banner sandbox-capability-card__danger-banner--critical">
+                      <span className="sandbox-capability-card__danger-banner-icon">⚠</span>
+                      <span>{t("approval.sandboxCapabilityCriticalRiskWarning")}</span>
+                    </div>
+                  )}
+                </>}
+              </div>
             )}
             {approvalModeRelaxed && !isRecoveryApproval && !isSandboxCapability && (
               <div className="approval-mode-hint">{t("approval.modeSwitchPendingHint")}</div>
