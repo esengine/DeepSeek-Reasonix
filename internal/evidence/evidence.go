@@ -561,22 +561,68 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 	return false
 }
 
-// HasSuccessfulReview reports whether the built-in review completed in this
-// turn. The current host exposes it as the dedicated `review` tool; the
-// task(profile="review") form is retained for compatibility with hosts that
-// provide that adapter.
-func (l *Ledger) HasSuccessfulReview() bool {
+// HasCompletedReview reports whether a review completed with evidence that is
+// fresh for the latest mutation. Structured review_report receipts are the
+// strongest proof and also cover collected background reviews. Foreground
+// review/task adapters remain compatible, but after a mutation their child
+// receipts must show that the changed result was actually inspected.
+func (l *Ledger) HasCompletedReview() bool {
 	if l == nil {
 		return false
 	}
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	for _, r := range l.receipts {
-		if r.Success && (r.ToolName == "review" || (r.ToolName == "task" && r.Profile == "review")) {
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+
+	mutation := -1
+	for i, r := range receipts {
+		if r.Success && r.Mutation {
+			mutation = i
+		}
+	}
+	start := mutation + 1
+	requiredPaths := []string(nil)
+	if mutation >= 0 {
+		requiredPaths = receipts[mutation].Paths
+	}
+
+	for i := start; i < len(receipts); i++ {
+		r := receipts[i]
+		if completedStructuredReviewReceipt(r, requiredPaths) {
+			return true
+		}
+		if !successfulForegroundReviewReceipt(r) {
+			continue
+		}
+		if mutation < 0 || receiptsReviewChanges(receipts, start, i, mutation) {
 			return true
 		}
 	}
 	return false
+}
+
+func successfulForegroundReviewReceipt(r Receipt) bool {
+	if !r.Success {
+		return false
+	}
+	if r.ToolName == "review" {
+		return true
+	}
+	if r.ToolName != "task" || r.Profile != "review" {
+		return false
+	}
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	return json.Unmarshal(r.Args, &p) == nil && !p.RunInBackground
+}
+
+func completedStructuredReviewReceipt(r Receipt, requiredPaths []string) bool {
+	if !r.Success || r.ToolName != "review_report" {
+		return false
+	}
+	report, err := ParseReviewReport(r.Args)
+	return err == nil && report.Kind == ReviewKindReview && report.CoversPaths(requiredPaths)
 }
 
 // HasFailedCommand reports whether the cited command ran this turn but exited
