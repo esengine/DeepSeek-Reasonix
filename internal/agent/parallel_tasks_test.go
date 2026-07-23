@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
+	"reasonix/internal/workspacelease"
 )
 
 func TestParallelTasksToolIsReadOnly(t *testing.T) {
@@ -21,7 +22,7 @@ func TestParallelTasksToolIsReadOnly(t *testing.T) {
 		t.Fatal("parallel_tasks must be read-only because spawned sub-agents receive only read-only tools")
 	}
 	if !p.PlanModeSafe() {
-		t.Fatal("parallel_tasks must be plan-mode safe because spawned sub-agents receive only read-only tools")
+		t.Fatal("parallel_tasks must explicitly allow the planning phase")
 	}
 }
 
@@ -123,6 +124,54 @@ func TestParallelTasksInjectsWorkspaceContextIntoChildren(t *testing.T) {
 	}
 }
 
+// TestParallelTasksDeliveryClassifiesPristinePrompt pins the trusted
+// classifier channel on the parallel_tasks path: delivery intent must be
+// judged from the child's pristine prompt, not the workspace-wrapped text.
+// The wrapper is long enough that the IsTask length fallback classifies it as
+// a task; without ClassifierTaskText a plain conversational child ("Who are
+// you?") would be required to produce work receipts it has no reason to earn
+// and would exhaust final-answer readiness instead of answering.
+func TestParallelTasksDeliveryClassifiesPristinePrompt(t *testing.T) {
+	workspace := t.TempDir()
+	task := NewTaskTool(promptRoutingProvider{}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(NewSubagentStore(t.TempDir()), workspace, "base-model", "base-effort").
+		WithDeliveryProfile(true)
+	parallel := NewParallelTasksTool(task, tool.NewRegistry())
+	ctx := withCallContext(context.Background(), "parallel-call", event.Discard, nil, false)
+
+	out, err := parallel.Execute(ctx, json.RawMessage(`{"tasks":[{"prompt":"Who are you?"},{"prompt":"Nice to meet you"}]}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(out, "readiness") {
+		t.Fatalf("delivery readiness leaked into a conversational parallel child: %q", out)
+	}
+	// The echo provider replays the child's full user turn; both children must
+	// have answered (their prompts echo back with the trailing " ok").
+	if !strings.Contains(out, "Who are you?") || !strings.Contains(out, "Nice to meet you") || strings.Count(out, " ok") < 2 {
+		t.Fatalf("parallel output = %q, want both children's answers", out)
+	}
+}
+
+// TestParallelTasksInheritLanguagePreferencesFromContext pins parallel children
+// to the same transient language injection the task tool applies: both the
+// response- and reasoning-language blocks must reach each child's user turn.
+func TestParallelTasksInheritLanguagePreferencesFromContext(t *testing.T) {
+	task := newTestTaskTool(t, promptRoutingProvider{}, tool.NewRegistry(), "sys", "", "", nil)
+	parallel := NewParallelTasksTool(task, tool.NewRegistry())
+	ctx := withCallContext(context.Background(), "parallel-call", event.Discard, nil, false)
+	ctx = WithResponseLanguagePreference(ctx, "zh")
+	ctx = WithReasoningLanguagePreference(ctx, "zh")
+
+	out, err := parallel.Execute(ctx, json.RawMessage(`{"tasks":[{"prompt":"inspect one"},{"prompt":"inspect two"}]}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "<response-language>") || !strings.Contains(out, "<reasoning-language>") {
+		t.Fatalf("parallel output = %q, want response/reasoning language blocks injected into child prompts", out)
+	}
+}
+
 func TestParallelTasksDoesNotExposeWriterToolsToChildren(t *testing.T) {
 	var writerCalls int32
 	parentReg := tool.NewRegistry()
@@ -142,6 +191,38 @@ func TestParallelTasksDoesNotExposeWriterToolsToChildren(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&writerCalls); got != 0 {
 		t.Fatalf("writer tool was exposed to read-only sub-agents and called %d times", got)
+	}
+	if !strings.Contains(out, "Completed 2 parallel tasks") {
+		t.Fatalf("missing aggregate output: %s", out)
+	}
+}
+
+func TestParallelTasksBlocksWriterResolvedThroughReadOnlyProxy(t *testing.T) {
+	var writerCalls int32
+	parentReg := tool.NewRegistry()
+	target := parallelResolvedWriterTarget{calls: &writerCalls}
+	parentReg.Add(readOnlyBoundaryProxy{resolved: tool.ResolvedCall{
+		ProxyAction: "call",
+		TargetName:  target.Name(),
+		Target:      target,
+		ReadOnly:    false,
+		Args:        json.RawMessage(`{}`),
+	}})
+	task := newTestTaskTool(t, proxyWriterCallingProvider{}, parentReg, "sys", "", "", nil)
+	parallel := NewParallelTasksTool(task, parentReg)
+	ctx := withCallContext(context.Background(), "parallel-call", event.Discard, nil, false)
+
+	out, err := parallel.Execute(ctx, json.RawMessage(`{
+		"tasks": [
+			{"prompt": "resolve writer one"},
+			{"prompt": "resolve writer two"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v\n%s", err, out)
+	}
+	if got := atomic.LoadInt32(&writerCalls); got != 0 {
+		t.Fatalf("use_capability resolved writer executed %d times, want 0", got)
 	}
 	if !strings.Contains(out, "Completed 2 parallel tasks") {
 		t.Fatalf("missing aggregate output: %s", out)
@@ -238,6 +319,39 @@ func (writerCallingProvider) Stream(_ context.Context, req provider.Request) (<-
 	return ch, nil
 }
 
+type proxyWriterCallingProvider struct{}
+
+func (proxyWriterCallingProvider) Name() string { return "proxy-writer-calling" }
+
+func (proxyWriterCallingProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 2)
+	if !hasToolResult(req, "use_capability") {
+		ch <- toolCallChunk("proxy-write-1", "use_capability", `{"action":"call","capability_id":"mcp-tool:test/write","arguments":{}}`)
+		ch <- provider.Chunk{Type: provider.ChunkDone}
+		close(ch)
+		return ch, nil
+	}
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "writer blocked"}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+type parallelResolvedWriterTarget struct {
+	calls *int32
+}
+
+func (parallelResolvedWriterTarget) Name() string        { return "mcp__test__write" }
+func (parallelResolvedWriterTarget) Description() string { return "" }
+func (parallelResolvedWriterTarget) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object"}`)
+}
+func (parallelResolvedWriterTarget) ReadOnly() bool { return false }
+func (t parallelResolvedWriterTarget) Execute(context.Context, json.RawMessage) (string, error) {
+	atomic.AddInt32(t.calls, 1)
+	return "writer executed", nil
+}
+
 func hasToolResult(req provider.Request, name string) bool {
 	for _, m := range req.Messages {
 		if m.Role == provider.RoleTool && m.Name == name {
@@ -250,3 +364,59 @@ func hasToolResult(req provider.Request, name string) bool {
 type stringsError string
 
 func (e stringsError) Error() string { return string(e) }
+
+// TestChildMaxStepsSharedDefault pins the single step-budget rule shared by
+// task, read_only_task, and parallel_tasks children: explicit request wins,
+// a finite parent yields half its budget (min 5), an unbounded parent yields
+// an unbounded child. parallel_tasks used to hardcode 20 instead.
+func TestChildMaxStepsSharedDefault(t *testing.T) {
+	cases := []struct {
+		name      string
+		parent    int
+		requested int
+		want      int
+	}{
+		{"explicit request wins", 30, 7, 7},
+		{"finite parent halves", 30, 0, 15},
+		{"half is floored at 5", 8, 0, 5},
+		{"unbounded parent stays unbounded", 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &TaskTool{maxSteps: tc.parent}
+			if got := task.childMaxSteps(tc.requested); got != tc.want {
+				t.Fatalf("childMaxSteps(parent=%d, requested=%d) = %d, want %d", tc.parent, tc.requested, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
+	task := (&TaskTool{}).WithDeliveryProfile(true)
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "")
+	if !opts.DeliveryProfile {
+		t.Fatal("sub-agent options did not inherit delivery profile")
+	}
+}
+
+func TestTaskToolSharesWorkspaceLeaseWithSubagents(t *testing.T) {
+	owner, err := workspacelease.New(t.TempDir(), t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("New workspace lease: %v", err)
+	}
+	task := (&TaskTool{}).WithWorkspaceLease(owner)
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "")
+	if opts.WorkspaceLease != owner {
+		t.Fatal("sub-agent options did not share the parent's workspace lease owner")
+	}
+}
+
+func TestSubagentRecoveryTaskIDIsStableAndIsolated(t *testing.T) {
+	ctx := WithToolCallContext(context.Background(), "call-17", event.Discard, nil, false)
+	if got := subagentRecoveryTaskID(ctx, ""); got != "subagent:call-17" {
+		t.Fatalf("call-scoped recovery task id = %q", got)
+	}
+	if got := subagentRecoveryTaskID(ctx, "ref-abc"); got != "subagent:ref-abc" {
+		t.Fatalf("transcript-scoped recovery task id = %q", got)
+	}
+}

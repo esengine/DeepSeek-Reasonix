@@ -27,6 +27,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 const (
@@ -253,7 +254,7 @@ func (a *adapter) loadContextTokens() {
 	if path == "" {
 		return
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return
 	}

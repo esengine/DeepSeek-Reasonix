@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "paper-dawn",
+  "name": "Paper Dawn",
+  "author": "Reasonix",
+  "description": "Template theme — solid tokens only, no background image. Royalty-free starter.",
+  "license": "CC0-1.0",
+  "baseStyle": "graphite",
+  "tokens": {
+    "light": {
+      "bg": "#f7f4ef",
+      "panel": "#ffffff",
+      "sidebar": "#f3efe8",
+      "chat": "#fbfaf7",
+      "fg": "#1c1917",
+      "fgDim": "#57534e",
+      "fgFaint": "#a8a29e",
+      "border": "#e7e5e4",
+      "accent": "#c2410c",
+      "accentFg": "#fff7ed",
+      "ok": "#15803d",
+      "warn": "#b45309",
+      "err": "#b91c1c"
+    },
+    "dark": {
+      "bg": "#0c0b0a",
+      "panel": "#171412",
+      "sidebar": "#141210",
+      "chat": "#0c0b0a",
+      "fg": "#f5f5f4",
+      "fgDim": "#a8a29e",
+      "fgFaint": "#78716c",
+      "border": "#292524",
+      "accent": "#fb923c",
+      "accentFg": "#0c0b0a",
+      "ok": "#4ade80",
+      "warn": "#fbbf24",
+      "err": "#f87171"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  }
+}

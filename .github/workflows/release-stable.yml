@@ -1,0 +1,214 @@
+name: Release stable
+run-name: Release stable ${{ inputs.tag || github.ref_name }}
+
+# Stable publication has exactly one GitHub environment gate. Push the CLI,
+# npm, and desktop tags atomically; the vX.Y.Z tag starts this workflow,
+# preflight verifies that all three tags point to the current main-v2 commit,
+# and one GitHub approval releases every channel. A manual recovery runs the
+# fixed control plane from protected main-v2 while preserving an older tagged
+# candidate on main-v2 history. SignPath intentionally keeps its separate
+# manual confirmations. Prerelease and canary workflows remain independently
+# callable.
+on:
+  push:
+    tags:
+      - 'v*'
+      - '!v*-*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing stable CLI tag to recover (for example v1.18.0)"
+        required: true
+        type: string
+      publish_cli:
+        description: "Recover the CLI/Homebrew channel"
+        required: false
+        default: true
+        type: boolean
+      publish_npm:
+        description: "Recover the npm channel"
+        required: false
+        default: true
+        type: boolean
+      publish_desktop:
+        description: "Recover the Desktop/R2 channel"
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: stable-release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+# Reusable release workflows can only reduce caller permissions, so the
+# orchestrator grants the union needed by CLI/Desktop publication.
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  preflight:
+    name: validate stable release set
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      cli_tag: ${{ steps.release.outputs.cli_tag }}
+      npm_tag: ${{ steps.release.outputs.npm_tag }}
+      desktop_tag: ${{ steps.release.outputs.desktop_tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # A recovery dispatch uses the fixed workflow/scripts from protected
+          # main-v2. Publishers still check out the immutable approved tag SHA.
+          ref: ${{ github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Resolve stable release
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          ALLOW_STABLE_RECOVERY: ${{ github.event_name == 'workflow_dispatch' }}
+        run: bash scripts/resolve-stable-release.sh
+      - name: Validate reviewed release notes
+        run: node scripts/release-notes.mjs render --version "${{ steps.release.outputs.cli_tag }}" --output /tmp/release-notes.md
+      # Recovery builds deliberately check out the immutable tagged candidate,
+      # which can predate its reviewed release-note entry. Carry the exact file
+      # validated by this protected control-plane job into both publishers.
+      - name: Upload reviewed release notes
+        uses: actions/upload-artifact@v7
+        with:
+          name: stable-reviewed-release-notes
+          path: /tmp/release-notes.md
+          if-no-files-found: error
+          retention-days: 1
+      - name: Cache hit guard
+        run: ./scripts/cache-guard.sh
+
+  authorize:
+    name: approve stable release
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.approved.outputs.version }}
+      cli_tag: ${{ steps.approved.outputs.cli_tag }}
+      npm_tag: ${{ steps.approved.outputs.npm_tag }}
+      desktop_tag: ${{ steps.approved.outputs.desktop_tag }}
+      sha: ${{ steps.approved.outputs.sha }}
+    steps:
+      - name: Record approved release
+        id: approved
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          CLI_TAG: ${{ needs.preflight.outputs.cli_tag }}
+          NPM_TAG: ${{ needs.preflight.outputs.npm_tag }}
+          DESKTOP_TAG: ${{ needs.preflight.outputs.desktop_tag }}
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          {
+            echo "version=$VERSION"
+            echo "cli_tag=$CLI_TAG"
+            echo "npm_tag=$NPM_TAG"
+            echo "desktop_tag=$DESKTOP_TAG"
+            echo "sha=$RELEASE_SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "Approved stable release $VERSION at $RELEASE_SHA"
+
+  cli:
+    name: publish CLI and Homebrew
+    needs: authorize
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_cli }}
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+    secrets: inherit
+
+  npm:
+    name: publish npm
+    needs: authorize
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
+    uses: ./.github/workflows/release-npm.yml
+    with:
+      channel: stable
+      base_version: ${{ needs.authorize.outputs.version }}
+      tag: ${{ needs.authorize.outputs.npm_tag }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+    secrets: inherit
+
+  desktop:
+    name: publish desktop
+    needs: authorize
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_desktop }}
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      channel: stable
+      tag: ${{ needs.authorize.outputs.desktop_tag }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+    secrets: inherit
+
+  postflight:
+    name: verify stable release artifacts
+    needs: [authorize, cli, npm, desktop]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Require every publisher to succeed
+        env:
+          PUBLISH_CLI: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_cli }}
+          PUBLISH_NPM: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
+          PUBLISH_DESKTOP: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_desktop }}
+          CLI_RESULT: ${{ needs.cli.result }}
+          NPM_RESULT: ${{ needs.npm.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+        run: |
+          set -euo pipefail
+          for channel in cli npm desktop; do
+            selected_var="PUBLISH_${channel^^}"
+            result_var="${channel^^}_RESULT"
+            selected="${!selected_var}"
+            result="${!result_var}"
+            if [ "$selected" != "true" ]; then
+              echo "$channel recovery skipped; public postflight will still verify it"
+              continue
+            fi
+            if [ "$result" != "success" ]; then
+              echo "::error::$channel stable publisher result is $result, expected success"
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@v7
+        with:
+          # Postflight belongs to the trusted control plane, not the old build
+          # candidate, which may predate this verifier.
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Verify public artifacts and npm latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.authorize.outputs.version }}
+          CLI_TAG: ${{ needs.authorize.outputs.cli_tag }}
+          DESKTOP_TAG: ${{ needs.authorize.outputs.desktop_tag }}
+        run: bash scripts/verify-stable-release-artifacts.sh

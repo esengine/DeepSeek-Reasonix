@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,33 +15,17 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/memory"
+	"reasonix/internal/provider"
 	"reasonix/internal/skill"
+	"reasonix/internal/tool"
 )
 
-type fakeAutoPlanClassifier struct {
-	needsPlan bool
-	reason    string
-	err       error
-	calls     int
-}
-
-func (f *fakeAutoPlanClassifier) NeedsPlan(ctx context.Context, input string, score int) (bool, string, error) {
-	f.calls++
-	return f.needsPlan, f.reason, f.err
-}
-
 type fakeTurnRunner struct {
-	inputs               []string
-	memoryCompilerInputs []string
-	memoryCompilerSkips  []bool
+	inputs []string
 }
 
 func (f *fakeTurnRunner) Run(ctx context.Context, input string) error {
 	f.inputs = append(f.inputs, input)
-	f.memoryCompilerSkips = append(f.memoryCompilerSkips, agent.MemoryCompilerSkipFromContext(ctx))
-	if source, ok := agent.MemoryCompilerSourceInputFromContext(ctx); ok {
-		f.memoryCompilerInputs = append(f.memoryCompilerInputs, source)
-	}
 	return nil
 }
 
@@ -97,6 +80,428 @@ func TestSkillsReflectStoreChangesAfterControllerBuild(t *testing.T) {
 	}
 }
 
+func TestSubmitSlashSubagentRunsIsolatedAndPersistsDistilledAnswer(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 16)
+	mainRunner := &fakeTurnRunner{}
+	var calls int
+	var gotSkill skill.Skill
+	var gotTask, gotParent, gotCallID string
+	var gotPlanMode bool
+	var gotHostInitiated bool
+	runner := func(ctx context.Context, sk skill.Skill, task string, opts skill.SubagentRunOptions) (string, error) {
+		calls++
+		gotSkill = sk
+		gotTask = task
+		gotParent = agent.ParentSession(ctx)
+		gotCallID, _, _, _ = agent.CallContext(ctx)
+		gotPlanMode = agent.PlanModeFromContext(ctx)
+		gotHostInitiated = opts.HostInitiated
+		agent.NestedSink(ctx, event.Discard).Emit(event.Event{
+			Kind: event.ToolDispatch,
+			Tool: event.Tool{ID: "child-read", Name: "read_file", ReadOnly: true},
+		})
+		return "isolated answer", nil
+	}
+	c := New(Options{
+		Runner:      mainRunner,
+		Executor:    exec,
+		Sink:        event.FuncSink(func(e event.Event) { events <- e }),
+		SessionDir:  dir,
+		SessionPath: path,
+		Skills: []skill.Skill{{
+			Name: "helper", Description: "isolated helper", Body: "secret child system prompt",
+			RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: runner,
+		ReadOnlySkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			t.Fatal("normal-mode slash invocation must not use the read-only runner")
+			return "", nil
+		},
+		SkillProfile: func(skill.Skill) *event.Profile { return &event.Profile{Model: "test/model", Effort: "high"} },
+	})
+	defer c.Close()
+
+	c.SubmitDisplay("/helper inspect auth", "/helper inspect auth")
+	gotEvents := waitForTurnEvents(t, events)
+	if calls != 1 || gotSkill.Name != "helper" || !strings.Contains(gotTask, "inspect auth") {
+		t.Fatalf("isolated runner calls=%d skill=%q task=%q", calls, gotSkill.Name, gotTask)
+	}
+	if len(mainRunner.inputs) != 0 {
+		t.Fatalf("main runner must not receive a runAs=subagent slash turn: %q", mainRunner.inputs)
+	}
+	if gotParent != agent.BranchID(path) || !strings.HasPrefix(gotCallID, "slash-skill-") || gotPlanMode || !gotHostInitiated {
+		t.Fatalf("runner context parent=%q call=%q plan=%v hostInitiated=%v", gotParent, gotCallID, gotPlanMode, gotHostInitiated)
+	}
+	msgs := c.History()
+	if len(msgs) != 3 || msgs[1].Role != provider.RoleUser || msgs[2].Role != provider.RoleAssistant {
+		t.Fatalf("parent history = %+v, want system/user/assistant", msgs)
+	}
+	if !strings.Contains(msgs[1].Content, "inspect auth") || strings.Contains(msgs[1].Content, gotSkill.Body) {
+		t.Fatalf("parent user message should contain the task but not child system prompt: %q", msgs[1].Content)
+	}
+	if msgs[2].Content != "isolated answer" {
+		t.Fatalf("parent distilled answer = %q", msgs[2].Content)
+	}
+	var sawStart, sawParent, sawNested, sawText bool
+	for _, e := range gotEvents {
+		switch {
+		case e.Kind == event.TurnStarted:
+			sawStart = true
+		case e.Kind == event.ToolDispatch && e.Tool.Name == "run_skill":
+			sawParent = e.Tool.Profile != nil && e.Tool.Profile.Model == "test/model"
+		case e.Kind == event.ToolDispatch && e.Tool.Name == "read_file":
+			sawNested = e.Tool.ParentID == gotCallID && strings.HasPrefix(e.Tool.ID, gotCallID+"/")
+		case e.Kind == event.Text && e.Text == "isolated answer":
+			sawText = true
+		}
+	}
+	if !sawStart || !sawParent || !sawNested || !sawText {
+		t.Fatalf("slash subagent events missing: start=%v parent=%v nested=%v text=%v events=%+v", sawStart, sawParent, sawNested, sawText, gotEvents)
+	}
+
+	// The isolated turn must release the ordinary foreground admission gate so
+	// the same session can keep chatting immediately afterwards.
+	waitIdle(t, c)
+	c.SubmitUserTurn("next turn", "next turn")
+	waitForTurnEvents(t, events)
+	if len(mainRunner.inputs) != 1 || !strings.Contains(mainRunner.inputs[0], "next turn") {
+		t.Fatalf("normal chat did not resume after slash subagent: %q", mainRunner.inputs)
+	}
+}
+
+func TestSubmitInvocationDisplayExecutesStructuredEntitiesInVisualOrder(t *testing.T) {
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 24)
+	mainRunner := &fakeTurnRunner{}
+	var names, tasks []string
+	c := New(Options{
+		Runner:   mainRunner,
+		Executor: exec,
+		Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{
+			{Name: "format", Body: "FORMAT_RULE", RunAs: skill.RunInline, Scope: skill.ScopeGlobal},
+			{Name: "first", Body: "FIRST_SYSTEM", RunAs: skill.RunSubagent, Scope: skill.ScopeGlobal},
+			{Name: "second", Body: "SECOND_SYSTEM", RunAs: skill.RunSubagent, Scope: skill.ScopeGlobal},
+		},
+		SkillRunner: func(_ context.Context, sk skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+			names = append(names, sk.Name)
+			tasks = append(tasks, task)
+			return sk.Name + " answer", nil
+		},
+	})
+	defer c.Close()
+
+	input := "历史会话：prior\n\n当前用户问题：\ninspect auth"
+	c.SubmitInvocationDisplay("inspect auth", input, []InvocationRequest{
+		{Name: "second", Kind: "subagent", Offset: 20},
+		{Name: "format", Kind: "skill", Offset: 0},
+		{Name: "first", Kind: "subagent", Offset: 10},
+	})
+	waitForTurnEvents(t, events)
+	waitIdle(t, c)
+
+	if strings.Join(names, ",") != "first,second" {
+		t.Fatalf("subagent execution order = %v, want visual order first,second", names)
+	}
+	if len(tasks) != 2 || !strings.Contains(tasks[0], "FORMAT_RULE") || !strings.Contains(tasks[0], "历史会话：prior") || tasks[0] != tasks[1] {
+		t.Fatalf("structured tasks = %#v", tasks)
+	}
+	if len(mainRunner.inputs) != 0 {
+		t.Fatalf("main runner received structured subagent turn: %q", mainRunner.inputs)
+	}
+	msgs := c.History()
+	if len(msgs) != 4 || msgs[1].Role != provider.RoleUser || msgs[2].Content != "first answer" || msgs[3].Content != "second answer" {
+		t.Fatalf("parent history = %+v", msgs)
+	}
+}
+
+func TestSubmitInvocationDisplayPreparesPluginSubagentBindings(t *testing.T) {
+	home := t.TempDir()
+	pluginRoot := t.TempDir()
+	writeControlSkill(t, pluginRoot, "helper/SKILL.md", "---\ndescription: Plugin helper\nrunAs: subagent\n---\nCall search.")
+	store := skill.New(skill.Options{
+		HomeDir: home, CustomPaths: []string{pluginRoot},
+		PluginPaths: map[string][]string{pluginRoot: {"search-plugin"}}, DisableBuiltins: true,
+	})
+	store.ConfigureToolBindings(func(skill.Skill) []tool.MCPBinding {
+		return []tool.MCPBinding{{
+			Package: "search-plugin", Server: "search", RawName: "search",
+			VisibleName: "search", CallableName: "mcp__search__search", CapabilityID: "mcp-tool:search/search",
+		}}
+	})
+
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 12)
+	var got skill.Skill
+	c := New(Options{
+		Executor: exec, SkillStore: store, Skills: store.List(),
+		Sink: event.FuncSink(func(e event.Event) { events <- e }),
+		SkillRunner: func(_ context.Context, sk skill.Skill, _ string, _ skill.SubagentRunOptions) (string, error) {
+			got = sk
+			return "done", nil
+		},
+	})
+	defer c.Close()
+
+	c.SubmitInvocationDisplay("inspect", "inspect", []InvocationRequest{{Name: "search-plugin:helper", Kind: "subagent"}})
+	waitForTurnEvents(t, events)
+	waitIdle(t, c)
+	if !strings.Contains(got.Body, "## Runtime MCP tool bindings") || !strings.Contains(got.Body, "`mcp__search__search`") {
+		t.Fatalf("structured plugin subagent was not prepared: %q", got.Body)
+	}
+}
+
+func TestRunSubagentProfilePreparesPluginBindings(t *testing.T) {
+	home := t.TempDir()
+	pluginRoot := t.TempDir()
+	writeControlSkill(t, pluginRoot, "helper/SKILL.md", "---\ndescription: Plugin helper\nrunAs: subagent\n---\nCall search.")
+	store := skill.New(skill.Options{
+		HomeDir: home, CustomPaths: []string{pluginRoot},
+		PluginPaths: map[string][]string{pluginRoot: {"search-plugin"}}, DisableBuiltins: true,
+	})
+	store.ConfigureToolBindings(func(skill.Skill) []tool.MCPBinding {
+		return []tool.MCPBinding{{
+			Package: "search-plugin", Server: "search", RawName: "search",
+			VisibleName: "search", CallableName: "mcp__search__search", CapabilityID: "mcp-tool:search/search",
+		}}
+	})
+
+	var got skill.Skill
+	c := New(Options{
+		SkillStore: store, Skills: store.List(),
+		SkillRunner: func(_ context.Context, sk skill.Skill, _ string, _ skill.SubagentRunOptions) (string, error) {
+			got = sk
+			return "done", nil
+		},
+	})
+	defer c.Close()
+
+	answer, err := c.RunSubagentProfile(context.Background(), "search-plugin:helper", "inspect", false)
+	if err != nil || answer != "done" {
+		t.Fatalf("RunSubagentProfile() = %q, %v", answer, err)
+	}
+	if !strings.Contains(got.Body, "## Runtime MCP tool bindings") || !strings.Contains(got.Body, "`mcp__search__search`") {
+		t.Fatalf("headless plugin subagent was not prepared: %q", got.Body)
+	}
+}
+
+func TestSubmitInvocationDisplayRunsInlineSkillWithoutArguments(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	c := New(Options{
+		Runner: runner,
+		Skills: []skill.Skill{{Name: "init", Body: "INITIALIZE_PROJECT", RunAs: skill.RunInline, Scope: skill.ScopeGlobal}},
+	})
+	c.SubmitInvocationDisplay("", "", []InvocationRequest{{Name: "init", Kind: "skill", Offset: 0}})
+	waitIdle(t, c)
+	if len(runner.inputs) != 1 || !strings.Contains(runner.inputs[0], "INITIALIZE_PROJECT") {
+		t.Fatalf("inline-only structured input = %q", runner.inputs)
+	}
+}
+
+func TestSubmitSlashSubagentUsesPermissionedRunnerInPlanMode(t *testing.T) {
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 12)
+	var normalCalls, readOnlyCalls int
+	var gotTask string
+	var gotPlanMode bool
+	c := New(Options{
+		Executor: exec,
+		Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{{
+			Name: "helper", Description: "isolated helper", Body: "child prompt",
+			RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(ctx context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+			normalCalls++
+			gotTask = task
+			gotPlanMode = agent.PlanModeFromContext(ctx)
+			return "permissioned answer", nil
+		},
+		ReadOnlySkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			readOnlyCalls++
+			return "", nil
+		},
+	})
+	c.SetPlanMode(true)
+	c.Submit("/helper inspect only")
+	gotEvents := waitForTurnEvents(t, events)
+	if normalCalls != 1 || readOnlyCalls != 0 || !gotPlanMode || !strings.Contains(gotTask, PlanModeMarker) {
+		t.Fatalf("plan-mode runners normal=%d readonly=%d plan=%v task=%q", normalCalls, readOnlyCalls, gotPlanMode, gotTask)
+	}
+	for _, e := range gotEvents {
+		if e.Kind == event.ToolDispatch && e.Tool.Name == "run_skill" && e.Tool.ReadOnly {
+			t.Fatal("Plan must not relabel a writer-capable slash skill as read-only")
+		}
+	}
+}
+
+func TestSubmitStructuredSubagentUsesPermissionedRunnerInPlanMode(t *testing.T) {
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 12)
+	var normalCalls, readOnlyCalls int
+	var gotTask string
+	var gotPlanMode bool
+	c := New(Options{
+		Executor: exec,
+		Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{{
+			Name: "helper", Description: "isolated helper", Body: "child prompt",
+			RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(ctx context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+			normalCalls++
+			gotTask = task
+			gotPlanMode = agent.PlanModeFromContext(ctx)
+			return "permissioned answer", nil
+		},
+		ReadOnlySkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			readOnlyCalls++
+			return "", nil
+		},
+	})
+	c.SetPlanMode(true)
+	c.SubmitInvocationDisplay("inspect only", "inspect only", []InvocationRequest{{Name: "helper", Kind: "subagent"}})
+	gotEvents := waitForTurnEvents(t, events)
+	if normalCalls != 1 || readOnlyCalls != 0 || !gotPlanMode || !strings.Contains(gotTask, PlanModeMarker) {
+		t.Fatalf("plan structured runners normal=%d readonly=%d plan=%v task=%q", normalCalls, readOnlyCalls, gotPlanMode, gotTask)
+	}
+	for _, e := range gotEvents {
+		if e.Kind == event.ToolDispatch && e.Tool.Name == "run_skill" && e.Tool.ReadOnly {
+			t.Fatal("Plan must not relabel a writer-capable structured subagent as read-only")
+		}
+	}
+}
+
+func TestSubmitSlashSubagentRequiresTask(t *testing.T) {
+	events := make(chan event.Event, 2)
+	var calls int
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{{
+			Name: "helper", RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
+			calls++
+			return "", nil
+		},
+	})
+	c.Submit("/helper")
+	select {
+	case e := <-events:
+		if e.Kind != event.Notice || !strings.Contains(e.Text, "usage: /helper <task>") {
+			t.Fatalf("event = %+v", e)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing usage notice")
+	}
+	if calls != 0 || c.Running() || len(c.History()) != 0 {
+		t.Fatalf("taskless invocation calls=%d running=%v history=%v", calls, c.Running(), c.History())
+	}
+}
+
+func TestSubmitSlashSubagentWithoutRunnerFinishesWithError(t *testing.T) {
+	events := make(chan event.Event, 2)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{{
+			Name: "helper", RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+	})
+	c.Submit("/helper inspect auth")
+	gotEvents := waitForTurnEvents(t, events)
+	waitIdle(t, c)
+	if len(gotEvents) != 1 || gotEvents[0].Kind != event.TurnDone || gotEvents[0].Err == nil ||
+		!strings.Contains(gotEvents[0].Err.Error(), "runner is unavailable") {
+		t.Fatalf("missing terminal runner error: %+v", gotEvents)
+	}
+}
+
+func TestCancelSlashSubagentStopsChildAndKeepsParentSessionUsable(t *testing.T) {
+	sess := agent.NewSession("parent system")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 12)
+	started := make(chan struct{})
+	c := New(Options{
+		Executor: exec,
+		Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+		Skills: []skill.Skill{{
+			Name: "helper", RunAs: skill.RunSubagent, Invocation: "manual", Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(ctx context.Context, _ skill.Skill, _ string, _ skill.SubagentRunOptions) (string, error) {
+			close(started)
+			<-ctx.Done()
+			return "", ctx.Err()
+		},
+	})
+	c.Submit("/helper inspect auth")
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("slash subagent did not start")
+	}
+	c.Cancel()
+	gotEvents := waitForTurnEvents(t, events)
+	waitIdle(t, c)
+	if c.Running() {
+		t.Fatal("controller still running after cancelling slash subagent")
+	}
+	msgs := c.History()
+	if len(msgs) != 2 || msgs[1].Role != provider.RoleUser {
+		t.Fatalf("cancelled slash history = %+v, want system + preserved user task", msgs)
+	}
+	for _, e := range gotEvents {
+		if e.Kind == event.Message || (e.Kind == event.Text && e.Text != "") {
+			t.Fatalf("cancelled slash subagent emitted a final answer: %+v", e)
+		}
+	}
+}
+
+func waitForTurnEvents(t *testing.T, events <-chan event.Event) []event.Event {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	var got []event.Event
+	for {
+		select {
+		case e := <-events:
+			got = append(got, e)
+			if e.Kind == event.TurnDone {
+				return got
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for TurnDone; events=%+v", got)
+		}
+	}
+}
+
+func TestRunSkillUsesQualifiedPluginNameAndHiddenShortCompatibility(t *testing.T) {
+	home := t.TempDir()
+	pluginRoot := t.TempDir()
+	writeControlSkill(t, pluginRoot, "plan/SKILL.md", "---\ndescription: Plugin plan\n---\nPlugin body")
+	store := skill.New(skill.Options{
+		HomeDir: home, CustomPaths: []string{pluginRoot},
+		PluginPaths: map[string][]string{pluginRoot: {"superpowers"}}, DisableBuiltins: true,
+	})
+	c := New(Options{SkillStore: store, Skills: store.List()})
+
+	if visible := c.SlashSkills(); len(visible) != 1 || visible[0].SlashName() != "superpowers:plan" {
+		t.Fatalf("SlashSkills() = %+v", visible)
+	}
+	for _, input := range []string{"/superpowers:plan now", "/plan now"} {
+		sent, ok := c.RunSkill(input)
+		if !ok || !strings.Contains(sent, "Plugin body") || !strings.Contains(sent, "Arguments: now") {
+			t.Fatalf("RunSkill(%q) = %q, %v", input, sent, ok)
+		}
+	}
+}
+
 func writeControlSkill(t *testing.T, root, rel, body string) {
 	t.Helper()
 	path := filepath.Join(root, rel)
@@ -122,20 +527,10 @@ func TestComposePlanModeMarker(t *testing.T) {
 	}
 }
 
-func TestPlanModeMarkerMatchesPolicy(t *testing.T) {
-	for _, want := range []string{"research", "ask", "todo_write", "read_only_task", "read_only_skill"} {
+func TestPlanModeMarkerSeparatesWorkflowFromPermissions(t *testing.T) {
+	for _, want := range []string{"planning workflow", "research", "ask", "todo_write", "Do not begin implementation", "not a permission boundary", "Permissions and Sandbox"} {
 		if !strings.Contains(PlanModeMarker, want) {
-			t.Fatalf("PlanModeMarker should describe %q as available:\n%s", want, PlanModeMarker)
-		}
-	}
-	for _, forbidden := range []string{"task", "complete_step"} {
-		if strings.Contains(PlanModeMarker, forbidden+" are available") || strings.Contains(PlanModeMarker, forbidden+",") {
-			t.Fatalf("PlanModeMarker must not list blocked tool %q as available:\n%s", forbidden, PlanModeMarker)
-		}
-	}
-	for _, blocked := range []string{"write files", "unsafe shell commands", "install capabilities", "mutate memory", "delegate", "mark execution steps complete"} {
-		if !strings.Contains(PlanModeMarker, blocked) {
-			t.Fatalf("PlanModeMarker should mention blocked capability %q:\n%s", blocked, PlanModeMarker)
+			t.Fatalf("PlanModeMarker missing %q:\n%s", want, PlanModeMarker)
 		}
 	}
 }
@@ -388,31 +783,6 @@ func TestGoalCommandPreservesResearchModeFlags(t *testing.T) {
 	}
 }
 
-func TestAutoStartResearchGoalUsesOnlyStrongSignals(t *testing.T) {
-	for _, input := range []string{
-		"持续排查这个线上卡顿直到根因明确，并验证修复",
-		"不要原地打转，把这个方向完整做成方案并验证",
-		"thoroughly implement, test, optimize, and document this feature",
-		"继续 .reasonix/autoresearch/20260618-224530-cache-audit/ 这个任务",
-	} {
-		if !shouldAutoStartResearchGoal(input) {
-			t.Fatalf("shouldAutoStartResearchGoal(%q) = false, want true", input)
-		}
-	}
-
-	for _, input := range []string{
-		"长期来看这个模块怎么优化？",
-		"研究一下这个函数怎么用",
-		"验证一下这个小修复",
-		"/goal 持续排查直到根因明确",
-		"!go test ./...",
-	} {
-		if shouldAutoStartResearchGoal(input) {
-			t.Fatalf("shouldAutoStartResearchGoal(%q) = true, want false", input)
-		}
-	}
-}
-
 func TestParseGoalCommandResearchFlags(t *testing.T) {
 	cmd, ok := ParseGoalCommand("/goal --research fix the typo")
 	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "fix the typo" || cmd.ResearchMode != GoalResearchOn {
@@ -575,8 +945,7 @@ func TestSubmitHashNumberStartsTurn(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		AutoPlan: "off",
-		Runner:   runner,
+		Runner: runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			events <- e
 		}),
@@ -606,8 +975,7 @@ func TestSubmitSlashPathDiagnosticStartsTurnWithFileContext(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		AutoPlan: "off",
-		Runner:   runner,
+		Runner: runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			events <- e
 		}),
@@ -633,8 +1001,7 @@ func TestSubmitMissingSlashPathDiagnosticStartsTurn(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		AutoPlan: "off",
-		Runner:   runner,
+		Runner: runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			events <- e
 		}),
@@ -653,8 +1020,7 @@ func TestSubmitBlockCommentPrefixStartsTurn(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		AutoPlan: "off",
-		Runner:   runner,
+		Runner: runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			events <- e
 		}),
@@ -673,8 +1039,7 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		AutoPlan: "off",
-		Runner:   runner,
+		Runner: runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			events <- e
 		}),
@@ -690,7 +1055,7 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
 			t.Fatalf("event = %+v, want unknown-command notice", e)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timed out waiting for unknown-command notice")
 	}
 }
@@ -699,8 +1064,7 @@ func TestSubmitUserTurnBypassesCommandDispatch(t *testing.T) {
 	runner := &fakeTurnRunner{}
 	events := make(chan event.Event, 4)
 	c := New(Options{
-		AutoPlan: "off",
-		Runner:   runner,
+		Runner: runner,
 		Sink: event.FuncSink(func(e event.Event) {
 			events <- e
 		}),
@@ -709,6 +1073,9 @@ func TestSubmitUserTurnBypassesCommandDispatch(t *testing.T) {
 	for _, input := range []string{"!echo should stay a prompt", "/clear"} {
 		c.SubmitUserTurn(input, input)
 		waitForTurnDone(t, events)
+		// The next SubmitUserTurn must wait out the finishing window or it is
+		// silently dropped by runGuarded — see waitIdle.
+		waitIdle(t, c)
 	}
 
 	if len(runner.inputs) != 2 {
@@ -741,9 +1108,29 @@ func TestSubmitRememberCommandQuickAddsMemory(t *testing.T) {
 	}
 }
 
+// waitIdle blocks until the controller's turn-admission gate reopens.
+// TurnDone is emitted INSIDE the finishing window (finishGuardedTurn sets
+// running=false, finishing=true, emits, then clears finishing), and runGuarded
+// silently no-ops while finishing is set — so "received TurnDone" does NOT
+// mean "may submit the next turn". A submit raced into that window is
+// dropped, and the next turn's TurnDone never arrives; under parallel test
+// load the window is wide enough to hit (observed in CI and on a clean
+// main-v2 worktree). Poll the same running||finishing gate the controller
+// admission checks.
+func waitIdle(t *testing.T, c *Controller) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for c.Running() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the controller to return to idle")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func waitForTurnDone(t *testing.T, events <-chan event.Event) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(30 * time.Second)
 	for {
 		select {
 		case e := <-events:
@@ -756,164 +1143,6 @@ func waitForTurnDone(t *testing.T, events <-chan event.Event) {
 		case <-deadline:
 			t.Fatal("timed out waiting for turn_done")
 		}
-	}
-}
-
-func TestRunTurnAutoPlanComplexTask(t *testing.T) {
-	var notices []string
-	runner := &fakeTurnRunner{}
-	c := New(Options{
-		AutoPlan: "on",
-		Runner:   runner,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
-		}),
-	})
-
-	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
-	if err := c.runTurn(context.Background(), input); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("complex task should auto-enter plan mode, inputs=%q", runner.inputs)
-	}
-	if !c.PlanMode() {
-		t.Fatal("controller plan mode should be on after auto-plan")
-	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "auto plan") {
-		t.Fatalf("notice = %v, want one auto-plan notice", notices)
-	}
-}
-
-func TestRunTurnAutoPlanSkipsSimpleQuestion(t *testing.T) {
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "on", Runner: runner})
-
-	if err := c.runTurn(context.Background(), "解释一下这个函数做什么？"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("simple question should not auto-plan: inputs=%q", runner.inputs)
-	}
-	if c.PlanMode() {
-		t.Fatal("controller plan mode should remain off")
-	}
-}
-
-func TestRunTurnAutoPlanOff(t *testing.T) {
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "off", Runner: runner})
-
-	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
-	if err := c.runTurn(context.Background(), input); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || StripComposePrefixes(runner.inputs[0]) != input {
-		t.Fatalf("auto_plan=off should compose verbatim, inputs=%q", runner.inputs)
-	}
-	if c.PlanMode() {
-		t.Fatal("controller plan mode should remain off")
-	}
-}
-
-func TestSetAutoPlanAffectsNextTurn(t *testing.T) {
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "off", Runner: runner})
-	c.SetAutoPlan("on")
-
-	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
-	if err := c.runTurn(context.Background(), input); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("SetAutoPlan should affect next turn, inputs=%q", runner.inputs)
-	}
-}
-
-func TestRunTurnAutoPlanClassifierBorderlineTrue(t *testing.T) {
-	classifier := &fakeAutoPlanClassifier{needsPlan: true, reason: "borderline multi-step"}
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
-
-	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("classifier true should auto-plan, inputs=%q", runner.inputs)
-	}
-	if classifier.calls != 1 {
-		t.Fatalf("classifier calls = %d, want 1", classifier.calls)
-	}
-}
-
-func TestRunTurnAutoPlanClassifierBorderlineFalse(t *testing.T) {
-	classifier := &fakeAutoPlanClassifier{needsPlan: false, reason: "single obvious edit"}
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
-
-	if err := c.runTurn(context.Background(), "实现一个小的配置入口"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("classifier false should skip auto-plan, inputs=%q", runner.inputs)
-	}
-	if c.PlanMode() {
-		t.Fatal("controller plan mode should remain off")
-	}
-	if classifier.calls != 1 {
-		t.Fatalf("classifier calls = %d, want 1", classifier.calls)
-	}
-}
-
-func TestRunTurnAutoPlanClassifierFallback(t *testing.T) {
-	classifier := &fakeAutoPlanClassifier{err: errors.New("bad json")}
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
-
-	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("score 2 should fall back to heuristic auto-plan, inputs=%q", runner.inputs)
-	}
-	if classifier.calls != 1 {
-		t.Fatalf("classifier calls = %d, want 1", classifier.calls)
-	}
-}
-
-func TestRunTurnAutoPlanTypedNilClassifierFallsBack(t *testing.T) {
-	var classifier *ProviderAutoPlanClassifier
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "on", Classifier: classifier, Runner: runner})
-
-	if err := c.runTurn(context.Background(), "实现 README 文档更新"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("typed nil classifier should fall back to heuristic auto-plan, inputs=%q", runner.inputs)
-	}
-}
-
-func TestRunTurnAutoPlanScoresRawPromptNotResolvedRefs(t *testing.T) {
-	runner := &fakeTurnRunner{}
-	c := New(Options{AutoPlan: "on", Runner: runner})
-
-	resolved := "Referenced context:\n\n" +
-		strings.Repeat("实现 重构 配置 测试 文档 多个文件\n", 20) +
-		"\n\n解释 @foo.go"
-	if err := c.runTurnWithRaw(context.Background(), resolved, "解释 @foo.go"); err != nil {
-		t.Fatal(err)
-	}
-	if len(runner.inputs) != 1 {
-		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
-	}
-	if strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), PlanModeMarker) {
-		t.Fatalf("resolved context should not trigger auto-plan when raw prompt is simple: %q", runner.inputs[0])
-	}
-	if c.PlanMode() {
-		t.Fatal("controller plan mode should remain off")
 	}
 }
 

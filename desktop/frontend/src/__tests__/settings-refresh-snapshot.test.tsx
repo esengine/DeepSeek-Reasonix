@@ -42,6 +42,19 @@ function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function installCanvasMock(win: Window) {
+  Object.defineProperty(win.HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value(type: string) {
+      if (type !== "2d") return null;
+      return {
+        font: "",
+        measureText: () => ({ width: 0 }),
+      } as unknown as CanvasRenderingContext2D;
+    },
+  });
+}
+
 async function waitFor(label: string, predicate: () => boolean) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await act(async () => {
@@ -65,7 +78,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     permissions: { mode: "ask", allow: [], ask: [], deny: [] },
     sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto" },
     network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },
-    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: false,
       model: "",
@@ -119,11 +132,10 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     displayMode,
     statusBarStyle: "text",
     statusBarItems: ["model", "workspace", "git_branch", "cache", "balance"],
-    defaultToolApprovalMode: "ask",
+    defaultToolApprovalMode: "auto",
     checkUpdates: true,
     telemetry: true,
     metrics: true,
-    memoryCompilerEnabled: true,
     configPath: "/tmp/reasonix/config.toml",
     providerKinds: [],
     autoApproveTools: false,
@@ -172,6 +184,7 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
   pretendToBeVisual: true,
   url: "http://localhost/",
 });
+installCanvasMock(dom.window as unknown as Window);
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
@@ -226,6 +239,10 @@ await act(async () => {
 
 const compactButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Compact") as HTMLButtonElement | undefined;
 if (!compactButton) throw new Error("compact display mode button did not render");
+eq(document.querySelectorAll(".step-limit-control").length, 0, "general settings hide executor and planner step-limit controls");
+ok(!document.body.textContent?.includes("step limit"), "general settings keep automatic progress free of step-limit copy");
+ok(!document.body.textContent?.includes("Automatic plan mode"), "general settings omit the retired automatic Plan Mode control");
+ok(!document.body.textContent?.includes("planning defaults"), "general settings omit retired automatic Plan Mode copy");
 
 await act(async () => {
   compactButton.click();
@@ -288,6 +305,51 @@ ok(document.body.textContent?.includes("Settings could not be loaded.") === fals
 
 await act(async () => {
   retryRoot.unmount();
+});
+
+const windowsSandboxRootEl = document.createElement("div");
+document.body.appendChild(windowsSandboxRootEl);
+const windowsSandboxRoot = createRoot(windowsSandboxRootEl);
+let windowsSetSandboxCalls = 0;
+window.go = {
+  main: {
+    App: {
+      // Deliberately return a stale enforce value: the Windows UI must still
+      // render the effective immutable off state.
+      Settings: async () => baseSettings("standard"),
+      SetSandbox: async () => {
+        windowsSetSandboxCalls += 1;
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  windowsSandboxRoot.render(
+    <LocaleProvider>
+      <SettingsPanel
+        initialTab="sandbox"
+        desktopPlatform="windows"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+await waitFor("Windows Bash sandbox control", () => document.body.textContent?.includes("This setting is fixed to off.") === true);
+
+const windowsBashSelect = Array.from(windowsSandboxRootEl.querySelectorAll("select")).find((select) =>
+  Array.from(select.options).some((option) => option.value === "off"),
+);
+if (!windowsBashSelect) throw new Error("Windows Bash sandbox select did not render");
+ok(windowsBashSelect.disabled, "Windows Bash sandbox selector is disabled");
+eq(windowsBashSelect.value, "off", "Windows Bash sandbox selector is fixed to off");
+ok(!Array.from(windowsBashSelect.options).some((option) => option.value === "enforce"), "Windows Bash sandbox selector omits enforce");
+eq(windowsSetSandboxCalls, 0, "Windows immutable Bash sandbox state does not save enforce");
+
+await act(async () => {
+  windowsSandboxRoot.unmount();
 });
 
 const zoomRootEl = document.createElement("div");

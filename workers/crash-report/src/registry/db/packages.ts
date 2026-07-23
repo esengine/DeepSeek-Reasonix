@@ -1,11 +1,11 @@
-import type { PackageRow, VersionRow, RegistryUser } from "../types";
+import type { PackageKind, PackageRow, VersionRow, RegistryUser } from "../types";
 import type { PublishInput } from "../lib/validation";
 import { ApiError } from "../http/errors";
 
 const TRENDING_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface ListParams {
-  kind: "skill" | "mcp" | "all";
+  kind: PackageKind | "all";
   q: string;
   sort: "new" | "trending" | "installs";
   limit: number;
@@ -77,10 +77,11 @@ export class PackageRepo {
     return res.results ?? [];
   }
 
-  // Create a new package or append a version to an owned one. New packages from
-  // non-admins land as 'pending' (hidden until an admin approves); versions of an
-  // already-approved package stay live. Republishing an existing version is
-  // refused (409) so version history stays immutable.
+  // Create a new package or append a version to an owned one. New packages and
+  // updates from non-admins land as 'pending' (hidden until an admin approves).
+  // Every accepted update appends an immutable version, so its source, manifest,
+  // metadata, and capability kind must all cross the same moderation boundary.
+  // Republishing an existing version is refused (409).
   async publish(user: RegistryUser, input: PublishInput, now: string): Promise<PublishResult> {
     const slug = `${user.handle}/${input.name}`;
     const existing = await this.bySlug(slug);
@@ -89,15 +90,23 @@ export class PackageRepo {
       if (existing.publisher_id !== user.id && user.role !== "admin") {
         throw new ApiError(403, "not_owner", "That name belongs to another publisher.");
       }
+      // A new version may change executable source or manifest content even
+      // when its public kind stays the same. Only trusted admin updates bypass
+      // re-review; publisher updates always lose verification until approved.
+      const publisherNeedsReview = user.role !== "admin";
+      const status = publisherNeedsReview ? "pending" : existing.status;
+      const verified = publisherNeedsReview ? 0 : existing.verified;
       const version = input.version || nextPatch(existing.latest_version);
       await this.insertVersion(existing.id, version, input, now);
       await this.db
         .prepare(
-          `UPDATE packages SET summary = ?1, description = ?2, source = ?3, install_kind = ?4,
-             homepage = ?5, repo_url = ?6, tags = ?7, latest_version = ?8, updated_at = ?9
-           WHERE id = ?10`,
+          `UPDATE packages SET kind = ?1, summary = ?2, description = ?3, source = ?4, install_kind = ?5,
+             homepage = ?6, repo_url = ?7, tags = ?8, latest_version = ?9, updated_at = ?10,
+             status = ?11, verified = ?12
+           WHERE id = ?13`,
         )
         .bind(
+          input.kind,
           input.summary,
           input.description,
           input.source,
@@ -107,6 +116,8 @@ export class PackageRepo {
           input.tags.join(","),
           version,
           now,
+          status,
+          verified,
           existing.id,
         )
         .run();
@@ -215,6 +226,28 @@ export class PackageRepo {
       .run();
     if ((res.meta.changes ?? 0) === 0) return null;
     return this.bySlug(slug);
+  }
+
+  // Admin approval must be bound to the exact row the reviewer inspected.
+  // The version protects publisher updates, while updated_at + status also
+  // fence concurrent moderation actions. D1 evaluates the predicate and write
+  // atomically, so a package cannot change between a preflight read and approval.
+  async setStatusIfCurrent(
+    slug: string,
+    status: string,
+    expectedVersion: string,
+    expectedUpdatedAt: string,
+    expectedStatus: string,
+    now: string,
+  ): Promise<PackageRow | null> {
+    return this.db
+      .prepare(
+        `UPDATE packages SET status = ?1, updated_at = ?2
+         WHERE slug = ?3 AND latest_version = ?4 AND updated_at = ?5 AND status = ?6
+         RETURNING *`,
+      )
+      .bind(status, now, slug, expectedVersion, expectedUpdatedAt, expectedStatus)
+      .first<PackageRow>();
   }
 
   // Admin: grant or revoke the verified trust badge.

@@ -82,8 +82,8 @@ func (completeStep) ReadOnly() bool { return true }
 
 // PlanModeSafe reports false: although complete_step is read-only, it signs off a
 // completed execution step, which is meaningful only after plan approval — not
-// during planning. This self-report backs up its knownBlockedTools entry so the
-// gate refuses it even if the classifier wiring regresses.
+// during planning. This explicit phase opt-out is the Plan gate's enforced
+// exception to the ordinary Permissions/Sandbox path.
 func (completeStep) PlanModeSafe() bool { return false }
 
 func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -121,12 +121,15 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 		kinds = append(kinds, e.Kind)
 	}
 
-	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
+	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
 	if err != nil {
 		return "", err
 	}
-	todoMatch, hasTodo, err := verifyTodoStep(ctx, step)
+	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
 	if err != nil {
+		if hasTodo && todoMatch.Status == "in_progress" {
+			return "", fmt.Errorf("%v; todo %d %q remains in_progress — repair the evidence and retry this step before moving on", err, todoMatch.Index, todoMatch.Content)
+		}
 		return "", err
 	}
 	projectVerified, err := verifyProjectChecks(ctx, p.Evidence)
@@ -145,8 +148,12 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if projectVerified > 0 {
 		projectStatus = fmt.Sprintf(" Project checks: project checks %d.", projectVerified)
 	}
-	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s The host advanced the task list; continue with the next step.",
-		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus), nil
+	advanceStatus := " The host advanced the task list; continue with the next step."
+	if hasTodo && todoMatch.Status == "completed" {
+		advanceStatus = " The matched todo was already completed; the task list is unchanged."
+	}
+	return fmt.Sprintf("Step %q signed off with %d evidence item(s) [%s].%s%s",
+		step, len(p.Evidence), strings.Join(kinds, ", "), hostStatus+todoStatus+projectStatus, advanceStatus), nil
 }
 
 func completeStepIdentity(step string, stepIndex int) string {
@@ -174,6 +181,10 @@ func verifyStepEvidence(ctx context.Context, items []stepEvidence) (hostVerified
 				}
 				hint := allCommandHints(ctx, ledger)
 				return 0, 0, fmt.Errorf("evidence %d: verification command %q has no matching successful receipt — cite the command exactly as it ran in the session%s", i+1, command, hint)
+			}
+			_, deliveryHasMutation := ledger.LatestSuccessfulMutationIndex()
+			if evidence.DeliveryProfileFromContext(ctx) && deliveryHasMutation && !evidence.IsDeliveryVerificationCommand(command) {
+				return 0, 0, fmt.Errorf("evidence %d: command %q ran successfully but is not a recognized delivery verification; do not cite an opaque command as verification. Use a project test/check/lint command, or for JavaScript syntax use node --check <file> (a read-only extraction pipeline ending in node --check also works). If this was only a visible/manual inspection, cite kind manual or files without a command, then rerun and cite a recognized verifier after any opaque mutation", i+1, command)
 			}
 			hostVerified++
 		case "review":
@@ -255,21 +266,55 @@ func checkSource(check instruction.VerifyCheck) string {
 
 func verifyTodoStep(ctx context.Context, step string) (evidence.TodoStepMatch, bool, error) {
 	ledger, ok := evidence.FromContext(ctx)
-	if !ok {
+	var todos []evidence.TodoItem
+	if ok {
+		todos, _ = ledger.LatestTodos()
+	}
+	if len(todos) == 0 {
+		todos, _ = evidence.TodoStateFromContext(ctx)
+	}
+	if len(todos) == 0 {
 		return evidence.TodoStepMatch{}, false, nil
 	}
-	match, hasTodo := ledger.MatchLatestTodoStep(step)
-	if !hasTodo {
-		return evidence.TodoStepMatch{}, false, nil
-	}
-	if !match.Found {
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in this turn; cite a todo verbatim or by number: %s", step, todoInventory(ledger))
+	match, found := evidence.MatchStep(step, todos)
+	if !found {
+		allCompleted := true
+		for _, todo := range todos {
+			if strings.TrimSpace(todo.Status) != "completed" {
+				allCompleted = false
+				break
+			}
+		}
+		if allCompleted {
+			last := len(todos) - 1
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item and every current todo is already completed; this is a renewal sign-off, so retry complete_step with step_index %d (the final existing todo %q) and the fresh evidence — do not invent a new step or rewrite the completed list", step, last+1, todos[last].Content)
+		}
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q has no matching todo_write item in the current task list; cite a todo verbatim or by number: %s", step, todoListInventory(todos))
 	}
 	switch match.Status {
-	case "", "pending", "in_progress", "completed":
+	case "in_progress":
+		if unfinished, ok := evidence.FirstUnfinishedSubStep(todos, match.Index-1); ok && unfinished >= 0 {
+			return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches phase %d %q whose sub-steps are unfinished; complete sub-step %d %q first, then sign the phase off", step, match.Index, match.Content, unfinished+1, todos[unfinished].Content)
+		}
 		return match, true, nil
+	case "completed":
+		return match, true, nil
+	case "", "pending":
+		current := ""
+		for i, todo := range todos {
+			if strings.TrimSpace(todo.Status) != "in_progress" {
+				continue
+			}
+			// The deepest in_progress item is the signable end of the current
+			// chain: prefer an active sub-step over its phase header.
+			current = fmt.Sprintf("; finish todo %d %q first", i+1, todo.Content)
+			if todo.Level == 1 {
+				break
+			}
+		}
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches pending todo %d %q; complete_step only signs the current in_progress item%s", step, match.Index, match.Content, current)
 	default:
-		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires pending, in_progress, or completed", step, match.Index, match.Content, match.Status)
+		return evidence.TodoStepMatch{}, true, fmt.Errorf("step %q matches todo %d (%q) but its status is %q; complete_step requires in_progress or completed", step, match.Index, match.Content, match.Status)
 	}
 }
 
@@ -278,6 +323,10 @@ func todoInventory(ledger *evidence.Ledger) string {
 	if !ok || len(todos) == 0 {
 		return "(no todos recorded this turn)"
 	}
+	return todoListInventory(todos)
+}
+
+func todoListInventory(todos []evidence.TodoItem) string {
 	parts := make([]string, 0, len(todos))
 	for i, t := range todos {
 		content := t.Content

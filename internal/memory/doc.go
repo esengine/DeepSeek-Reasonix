@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // Scope labels where a doc source was discovered, so the assembled block can
@@ -128,6 +130,7 @@ func readDoc(path string) (string, os.FileInfo, bool) {
 	if err != nil {
 		return "", nil, false
 	}
+	b = fileencoding.DecodeToUTF8(b)
 	body := strings.TrimSpace(string(b))
 	if body == "" {
 		return "", nil, false
@@ -218,7 +221,7 @@ func resolveImports(body, baseDir string, seen map[string]bool, depth int) strin
 			lines[i] = line + "  <!-- skipped: import cycle -->"
 			continue
 		}
-		b, err := os.ReadFile(path)
+		b, err := fileencoding.ReadFileUTF8(path)
 		if err != nil {
 			continue // leave the @line untouched; nothing to inline
 		}

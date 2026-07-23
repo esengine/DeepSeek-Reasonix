@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,8 @@ import (
 	"sync"
 	"time"
 	"unicode"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 var safeTaskID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -260,16 +263,20 @@ func (s *Store) Findings(taskID string, limit int) ([]Finding, error) {
 		return nil, err
 	}
 	defer storeRoot.Close()
+	path := filepath.Join(taskRel, "state", "findings.jsonl")
+	// Bounded requests (the newest-N views) read only the file tail; limit 0
+	// keeps the full scan because accepted-evidence lookups need every entry.
+	lines, err := tailJSONLLines(storeRoot, path, limit)
+	if err != nil {
+		return nil, err
+	}
 	var findings []Finding
-	if err := readJSONL(storeRoot, filepath.Join(taskRel, "state", "findings.jsonl"), func(data []byte) error {
+	for _, line := range lines {
 		var f Finding
-		if err := json.Unmarshal(data, &f); err != nil {
-			return err
+		if err := json.Unmarshal(fileencoding.DecodeToUTF8(line), &f); err != nil {
+			return nil, fmt.Errorf("autoresearch: parse %s: %w", path, err)
 		}
 		findings = append(findings, f)
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 	for i, j := 0, len(findings)-1; i < j; i, j = i+1, j-1 {
 		findings[i], findings[j] = findings[j], findings[i]
@@ -307,16 +314,21 @@ func (s *Store) Heartbeats(taskID string, limit int) ([]Heartbeat, error) {
 		return nil, err
 	}
 	defer storeRoot.Close()
+	path := filepath.Join(taskRel, "logs", "heartbeat.jsonl")
+	// Bounded requests only need the file tail; heartbeat logs grow one line
+	// per turn for the life of a task, so a full scan per read is a per-turn
+	// cost that keeps rising.
+	lines, err := tailJSONLLines(storeRoot, path, limit)
+	if err != nil {
+		return nil, err
+	}
 	var heartbeats []Heartbeat
-	if err := readJSONL(storeRoot, filepath.Join(taskRel, "logs", "heartbeat.jsonl"), func(data []byte) error {
+	for _, line := range lines {
 		var h Heartbeat
-		if err := json.Unmarshal(data, &h); err != nil {
-			return err
+		if err := json.Unmarshal(fileencoding.DecodeToUTF8(line), &h); err != nil {
+			return nil, fmt.Errorf("autoresearch: parse %s: %w", path, err)
 		}
 		heartbeats = append(heartbeats, h)
-		return nil
-	}); err != nil {
-		return nil, err
 	}
 	if limit > 0 && len(heartbeats) > limit {
 		heartbeats = heartbeats[len(heartbeats)-limit:]
@@ -366,15 +378,20 @@ func (s *Store) RecordDirection(taskID string, d Direction) (*Progress, error) {
 	if err != nil {
 		return nil, err
 	}
-	fp := slugify(d.Summary)
+	fp := directionFingerprint(d.Summary)
 	repeated := false
 	for i := range directions {
-		if directions[i].Fingerprint == fp {
-			repeated = true
-			directions[i].Count++
-			directions[i].LastSeenIteration = progress.Iteration
-			break
+		// Legacy entries carry pre-hash fingerprints; recompute from the
+		// stored summary so repeats recorded by older versions still match,
+		// then migrate the entry in place.
+		if directions[i].Fingerprint != fp && directionFingerprint(directions[i].Summary) != fp {
+			continue
 		}
+		repeated = true
+		directions[i].Fingerprint = fp
+		directions[i].Count++
+		directions[i].LastSeenIteration = progress.Iteration
+		break
 	}
 	if !repeated {
 		directions = append(directions, DirectionTried{
@@ -576,6 +593,7 @@ func readJSONFile(root *os.Root, path string, out any) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
+	data = fileencoding.DecodeToUTF8(data)
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
@@ -619,12 +637,94 @@ func readJSONL(root *os.Root, path string, each func([]byte) error) error {
 	return nil
 }
 
+// tailJSONLLines returns the last limit non-empty lines of a JSONL file in
+// file order, reading backward in fixed-size chunks so per-turn readers do not
+// rescan an append-only log that grows for the life of a task. limit <= 0
+// reads the whole file (legacy unbounded behavior).
+func tailJSONLLines(root *os.Root, path string, limit int) ([][]byte, error) {
+	if limit <= 0 {
+		var lines [][]byte
+		if err := readJSONL(root, path, func(data []byte) error {
+			line := make([]byte, len(data))
+			copy(line, data)
+			lines = append(lines, line)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		return lines, nil
+	}
+	f, err := root.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("autoresearch: open %s: %w", path, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("autoresearch: stat %s: %w", path, err)
+	}
+	const chunkSize = 64 * 1024
+	var (
+		buf []byte
+		off = info.Size()
+	)
+	for off > 0 {
+		readLen := int64(chunkSize)
+		if off < readLen {
+			readLen = off
+		}
+		off -= readLen
+		chunk := make([]byte, readLen)
+		if _, err := f.ReadAt(chunk, off); err != nil {
+			return nil, fmt.Errorf("autoresearch: read %s: %w", path, err)
+		}
+		buf = append(chunk, buf...)
+		// Stop once the buffered tail holds enough complete lines. Count
+		// newline-separated non-empty segments after the first newline (the
+		// first segment may be a partial line unless we reached offset 0).
+		if countCompleteTailLines(buf, off == 0) > limit {
+			break
+		}
+	}
+	segments := strings.Split(string(buf), "\n")
+	if off > 0 && len(segments) > 0 {
+		segments = segments[1:] // drop the leading partial line
+	}
+	var lines [][]byte
+	for _, seg := range segments {
+		seg = strings.TrimSpace(seg)
+		if seg == "" {
+			continue
+		}
+		lines = append(lines, []byte(seg))
+	}
+	if len(lines) > limit {
+		lines = lines[len(lines)-limit:]
+	}
+	return lines, nil
+}
+
+func countCompleteTailLines(buf []byte, atStart bool) int {
+	segments := strings.Split(string(buf), "\n")
+	if !atStart && len(segments) > 0 {
+		segments = segments[1:]
+	}
+	count := 0
+	for _, seg := range segments {
+		if strings.TrimSpace(seg) != "" {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *Store) loadDirections(root *os.Root, taskRel string) ([]DirectionTried, error) {
 	path := filepath.Join(taskRel, "state", "directions_tried.json")
 	data, err := root.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	data = fileencoding.DecodeToUTF8(data)
 	if strings.TrimSpace(string(data)) == "" {
 		return nil, nil
 	}
@@ -711,4 +811,59 @@ func slugify(s string) string {
 		return "task"
 	}
 	return slug
+}
+
+// directionFingerprint identifies a direction for repeat detection. slugify
+// alone truncates to 56 chars and drops non-ASCII runes, so two different
+// directions sharing a long ASCII prefix (or differing only in CJK text)
+// collapsed to one fingerprint and wrongly inflated StaleCount/PivotCount on
+// long tasks. Append a hash of the full normalized text when slugify lost
+// distinguishing content (truncation or non-ASCII letters/digits); keep the
+// bare slug otherwise so fingerprints recorded by older versions still match,
+// and punctuation-only differences stay fuzzy-matched as before.
+func directionFingerprint(summary string) string {
+	slug := slugify(summary)
+	if slug == slugifyUnbounded(summary) && !containsNonASCIIWord(summary) {
+		return slug
+	}
+	normalized := strings.Join(strings.Fields(strings.ToLower(summary)), " ")
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(normalized))
+	return fmt.Sprintf("%s-%08x", slug, h.Sum32())
+}
+
+// slugifyUnbounded matches slugify without the 56-char cap, used to detect
+// whether truncation dropped content.
+func slugifyUnbounded(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		switch {
+		case r <= unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)):
+			b.WriteRune(r)
+			lastDash = false
+		default:
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return "task"
+	}
+	return slug
+}
+
+// containsNonASCIIWord reports whether s carries letters/digits that slugify
+// discards entirely (e.g. CJK), meaning distinct summaries could share a slug.
+func containsNonASCIIWord(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return true
+		}
+	}
+	return false
 }

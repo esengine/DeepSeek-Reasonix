@@ -5,6 +5,18 @@ compatibility_date = "2026-06-01"
 
 routes = [{ pattern = "crash.reasonix.io", custom_domain = true }]
 
+# First entry: daily retention purge (03:47 Beijing) — drops time-series rows
+# past the dashboard's query horizon so the D1 database plateaus instead of
+# hitting the size cap and failing every ingest write (purgeExpiredStatsRows).
+# Second entry: ingest sentinel four times a day (runIngestSentinel) — canary
+# write + checkpointed ping growth; alerts via the optional ALERT_WEBHOOK worker
+# secret, log-only when unset. The secret is mirrored from the GitHub repo
+# secret of the same name by deploy-crash-worker.yml on every deploy — set it
+# under repo Settings → Secrets → Actions, no Cloudflare login needed. The
+# sentinel expression must stay in sync with SENTINEL_CRON in src/index.ts.
+[triggers]
+crons = ["47 19 * * *", "17 1,7,13,19 * * *"]
+
 [vars]
 # Emails force-promoted to dashboard admin — the owner is never locked out even
 # if the role migration misses them.

@@ -163,6 +163,9 @@ func TestMcpSpecsConversion(t *testing.T) {
 	if got[0].Dir != "/workspace" {
 		t.Errorf("dir = %q, want /workspace", got[0].Dir)
 	}
+	if got[0].WorkspaceRoot != "/workspace" || got[1].WorkspaceRoot != "/workspace" {
+		t.Errorf("workspace roots = %q, %q, want /workspace", got[0].WorkspaceRoot, got[1].WorkspaceRoot)
+	}
 	if got[1].Name != "remote" || got[1].Type != "http" || got[1].URL != "https://mcp.example.test" {
 		t.Errorf("http spec = %+v", got[1])
 	}
@@ -256,7 +259,11 @@ func TestMCPHeadersAcceptsLegacyMap(t *testing.T) {
 }
 
 func TestMcpSpecsRejectsUnsupportedTransport(t *testing.T) {
-	_, err := mcpSpecs([]MCPServerSpec{{Name: "remote", Type: "sse", URL: "https://example.test/sse"}}, "/tmp")
+	got, err := mcpSpecs([]MCPServerSpec{{Name: "remote", Type: "sse", URL: "https://example.test/sse"}}, "/tmp")
+	if err != nil || len(got) != 1 || got[0].Type != "sse" {
+		t.Fatalf("mcpSpecs legacy SSE = %+v, %v", got, err)
+	}
+	_, err = mcpSpecs([]MCPServerSpec{{Name: "remote", Type: "websocket", URL: "https://example.test/ws"}}, "/tmp")
 	if err == nil || !strings.Contains(err.Error(), "unsupported transport") {
 		t.Fatalf("mcpSpecs unsupported transport err = %v", err)
 	}

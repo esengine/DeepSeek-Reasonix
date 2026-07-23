@@ -1,12 +1,37 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
 import gsap from "gsap";
 import { DUR_FAST, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
+import { isEditableTarget } from "./keyboardShortcuts";
+
+type GsapModule = typeof gsap & { gsap?: typeof gsap };
 
 const BOTTOM_THRESHOLD_PX = 80;
+const TOUCH_SCROLL_THRESHOLD_PX = 2;
+const SCROLL_BREAK_KEYS = new Set([
+  "ArrowUp",
+  "PageUp",
+  "Home",
+]);
+const CONDITIONAL_SCROLL_KEYS = new Set([
+  "ArrowDown",
+  "PageDown",
+  "End",
+  " ",
+  "Spacebar",
+]);
 
 function isNearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_THRESHOLD_PX;
 }
+
+function isScrollable(el: HTMLElement): boolean {
+  return el.scrollHeight - el.clientHeight > 1;
+}
+
+const gsapApi = typeof gsap.killTweensOf === "function"
+  ? gsap
+  : ((gsap as GsapModule).gsap ?? gsap);
 
 /**
  * useScrollManager — GSAP-driven auto-scroll for the transcript container.
@@ -25,6 +50,7 @@ export function useScrollManager() {
   const repinFrame = useRef<number | null>(null);
   const pendingRepinHeightDelta = useRef(0);
   const layoutScrollFrames = useRef<number[]>([]);
+  const touchStartY = useRef<number | null>(null);
   const lastClientHeight = useRef<number | null>(null);
   const lastFooterHeight = useRef<number | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -47,6 +73,74 @@ export function useScrollManager() {
     return atBottom;
   }, []);
 
+  const cancelPendingBottomScroll = useCallback(() => {
+    if (resizeFrame.current !== null) {
+      cancelAnimationFrame(resizeFrame.current);
+      resizeFrame.current = null;
+    }
+    if (repinFrame.current !== null) {
+      cancelAnimationFrame(repinFrame.current);
+      repinFrame.current = null;
+    }
+    pendingRepinHeightDelta.current = 0;
+    for (const frame of layoutScrollFrames.current) cancelAnimationFrame(frame);
+    layoutScrollFrames.current = [];
+  }, []);
+
+  const releaseAutoScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) gsapApi.killTweensOf(el);
+    cancelPendingBottomScroll();
+    stick.current = false;
+    setIsAtBottom(false);
+  }, [cancelPendingBottomScroll]);
+
+  const onWheelIntent = useCallback((event: ReactWheelEvent<HTMLElement>) => {
+    const el = scrollRef.current;
+    // ctrlKey marks a pinch-zoom gesture synthesized as a wheel event (trackpads on
+    // macOS/Chrome), not a scroll — treating it as scroll intent would release
+    // tail-follow on a zoom that never actually moved scrollTop.
+    if (!el || !isScrollable(el) || event.ctrlKey || event.deltaY === 0 || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return false;
+    if (event.deltaY < 0 || !isNearBottom(el)) {
+      releaseAutoScroll();
+      return true;
+    }
+    return false;
+  }, [releaseAutoScroll]);
+
+  const onTouchStartIntent = useCallback((event: ReactTouchEvent<HTMLElement>) => {
+    touchStartY.current = event.touches[0]?.clientY ?? null;
+  }, []);
+
+  const onTouchMoveIntent = useCallback((event: ReactTouchEvent<HTMLElement>) => {
+    const el = scrollRef.current;
+    const startY = touchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (!el || !isScrollable(el) || startY === null || currentY === undefined) return false;
+    const deltaY = currentY - startY;
+    if (Math.abs(deltaY) < TOUCH_SCROLL_THRESHOLD_PX) return false;
+    if (deltaY > 0 || !isNearBottom(el)) {
+      releaseAutoScroll();
+      return true;
+    }
+    return false;
+  }, [releaseAutoScroll]);
+
+  const onKeyScrollIntent = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    const el = scrollRef.current;
+    // The transcript's scroll keys (Home/End/arrows/space/page keys) are also
+    // ordinary text-editing keys. This listener runs on the capture phase, ahead
+    // of a nested message-edit textarea's own key handling, so without this guard
+    // moving the cursor while editing an earlier message would release tail-follow
+    // on a completely unrelated stream, even though nothing was scrolled.
+    if (!el || !isScrollable(el) || isEditableTarget(event.target)) return false;
+    if (SCROLL_BREAK_KEYS.has(event.key) || (CONDITIONAL_SCROLL_KEYS.has(event.key) && !isNearBottom(el))) {
+      releaseAutoScroll();
+      return true;
+    }
+    return false;
+  }, [releaseAutoScroll]);
+
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (el) updateBottomState(el);
@@ -66,7 +160,7 @@ export function useScrollManager() {
     const containerRect = el.getBoundingClientRect();
     const top = el.scrollTop + rect.top - containerRect.top - offset;
     const reduced = prefersReducedMotion();
-    gsap.to(el, {
+    gsapApi.to(el, {
       scrollTo: { y: Math.max(0, top) },
       duration: reduced ? 0.001 : DUR_FAST * 2,
       ease: EASE_OUT,
@@ -95,7 +189,7 @@ export function useScrollManager() {
         setIsAtBottom(true);
       }
       const reduced = prefersReducedMotion();
-      gsap.to(el, {
+      gsapApi.to(el, {
         scrollTo: { y: "max" },
         duration: reduced ? 0.001 : DUR_FAST,
         ease: "none",
@@ -115,7 +209,7 @@ export function useScrollManager() {
       cancelAnimationFrame(resizeFrame.current);
       resizeFrame.current = null;
     }
-    gsap.killTweensOf(el);
+    gsapApi.killTweensOf(el);
     stick.current = true;
     el.scrollTop = el.scrollHeight;
     setIsAtBottom(true);
@@ -193,6 +287,10 @@ export function useScrollManager() {
     scrollRef,
     stick,
     onScroll,
+    onWheelIntent,
+    onTouchStartIntent,
+    onTouchMoveIntent,
+    onKeyScrollIntent,
     isAtBottom,
     smoothScrollTo,
     scrollToBottom,

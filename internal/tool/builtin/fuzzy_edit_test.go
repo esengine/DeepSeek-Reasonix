@@ -89,6 +89,35 @@ func TestEditFileFuzzyCRLFPreservesLineEndings(t *testing.T) {
 	}
 }
 
+func TestEditFileCRLFNotFoundHintAvoidsMisattribution(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "win.txt")
+	seed := "one\r\ntwo\r\nthree\r\n"
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (editFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"path":       path,
+		"old_string": "one\nmissing",
+		"new_string": "ONE\nMISSING",
+	}))
+	if err == nil {
+		t.Fatal("expected old_string not found")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"old_string not found",
+		"CRLF line endings",
+		"already tolerate LF-only old_string",
+		"stale, incomplete, or non-unique context",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
 func TestEditFileFuzzyAmbiguousDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dup.txt")

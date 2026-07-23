@@ -48,7 +48,7 @@ func (p *ParallelTasksTool) Schema() json.RawMessage {
         "prompt":{"type":"string","description":"The task prompt for the sub-agent."},
         "description":{"type":"string","description":"Optional short label shown in the job list."},
         "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist for the sub-agent."},
-        "max_steps":{"type":"integer","description":"Optional max tool-call rounds.","minimum":1},
+        "max_steps":{"type":"integer","description":"Optional max tool-call rounds. Defaults to half the parent agent's step budget (minimum 5), same as task.","minimum":1},
         "model":{"type":"string","description":"Optional model override."},
         "effort":{"type":"string","description":"Optional reasoning effort override."}
       },
@@ -155,6 +155,23 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		go func() {
 			defer wg.Done()
 			nested := subSinkFor(subID, sink)
+			// Session scheduler bounds total concurrency for parallel_tasks the
+			// same way as fleet (read-only slots; no write claims).
+			releaseSlot, slotErr := p.taskTool.acquireSlot(ctx, AcquireRequest{
+				Writer: false,
+				Nested: SubagentDepth(ctx) > 0,
+				Label:  label,
+			})
+			if slotErr != nil {
+				sink.Emit(event.Event{
+					Kind: event.ToolResult,
+					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: slotErr.Error()},
+				})
+				doneCh <- subResult{index: idx, err: slotErr}
+				return
+			}
+			defer releaseSlot()
+
 			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
 			childDepth, depthErr := p.taskTool.nextSubagentDepth(ctx)
 			if depthErr != nil {
@@ -167,10 +184,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			}
 			subReg := ReadOnlySubagentToolRegistryForDepth(p.taskTool.parentReg, t.Tools, childDepth, p.taskTool.maxDepth())
 
-			max := t.MaxSteps
-			if max <= 0 {
-				max = 20
-			}
+			max := p.taskTool.childMaxSteps(t.MaxSteps)
 
 			prov, pricing, ctxWin, err := resolveSubagentProvider(p.taskTool, modelRef, effortRef)
 			if err != nil {
@@ -182,24 +196,16 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				return
 			}
 
+			// Ordinary parallel_tasks (no profile) keep the concise read-only
+			// default system prompt — profile-aware batches use fleet instead.
 			sess := NewSession(DefaultReadOnlyTaskSystemPrompt)
-			output, runErr := RunSubAgentWithSession(ctx, prov, subReg, sess, p.taskTool.withWorkspaceContext(t.Prompt), Options{
-				MaxSteps:            max,
-				Temperature:         p.taskTool.temperature,
-				Pricing:             pricing,
-				UsageSource:         event.UsageSourceSubagent,
-				Gate:                p.taskTool.gate,
-				ContextWindow:       ctxWin,
-				RecentKeep:          p.taskTool.recentKeep,
-				SoftCompactRatio:    p.taskTool.softCompactRatio,
-				ToolResultSnipRatio: p.taskTool.toolResultSnipRatio,
-				CompactRatio:        p.taskTool.compactRatio,
-				CompactForceRatio:   p.taskTool.compactForceRatio,
-				ArchiveDir:          p.taskTool.archiveDir,
-				KeepPolicy:          p.taskTool.keepPolicy,
-				SubagentDepth:       childDepth,
-				MaxSubagentDepth:    p.taskTool.maxDepth(),
-			}, nested)
+			opts := p.taskTool.subagentOptions(ctx, max, pricing, ctxWin, childDepth, "subagent:"+subID)
+			// Same contract as runSubSession: capture the pristine task before
+			// host framing is prepended so delivery intent classification judges
+			// the task, not the wrapper.
+			opts.ClassifierTaskText = t.Prompt
+			output, runErr := RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, p.taskTool.withWorkspaceContext(t.Prompt),
+				opts, nested)
 
 			if ctx.Err() != nil && runErr == nil {
 				runErr = ctx.Err()

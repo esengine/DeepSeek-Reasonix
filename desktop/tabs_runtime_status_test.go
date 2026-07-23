@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -132,13 +131,13 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 	}
 	statusByPath := map[string]string{}
 	for _, child := range topic.Children {
-		statusByPath[filepath.Clean(child.SessionPath)] = child.Status
+		statusByPath[sessionRuntimeKey(child.SessionPath)] = child.Status
 	}
-	if statusByPath[filepath.Clean(sessionA)] != topicStatusWaitingConfirmation {
-		t.Fatalf("session A status = %q, want waiting; children=%#v", statusByPath[filepath.Clean(sessionA)], topic.Children)
+	if statusByPath[sessionRuntimeKey(sessionA)] != topicStatusWaitingConfirmation {
+		t.Fatalf("session A status = %q, want waiting; children=%#v", statusByPath[sessionRuntimeKey(sessionA)], topic.Children)
 	}
-	if statusByPath[filepath.Clean(sessionB)] != topicStatusThinking {
-		t.Fatalf("session B status = %q, want thinking; children=%#v", statusByPath[filepath.Clean(sessionB)], topic.Children)
+	if statusByPath[sessionRuntimeKey(sessionB)] != topicStatusThinking {
+		t.Fatalf("session B status = %q, want thinking; children=%#v", statusByPath[sessionRuntimeKey(sessionB)], topic.Children)
 	}
 
 	close(runnerA.release)
@@ -253,5 +252,22 @@ func waitNoJobs(t *testing.T, ctrl control.SessionAPI) {
 			t.Fatalf("controller still has jobs: %+v", ctrl.Jobs())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestTopicActivityStatusPresentsReadinessAsPaused(t *testing.T) {
+	readiness := event.Event{
+		Kind:    event.TurnDone,
+		Err:     &agent.FinalReadinessError{Attempts: 3, Reason: "missing verification"},
+		Outcome: event.TurnOutcomeFinalReadiness,
+	}
+	if status, ok := topicActivityStatusFromEvent(readiness); !ok || status != topicStatusPaused {
+		t.Fatalf("readiness turn end = (%q, %v), want (%q, true)", status, ok, topicStatusPaused)
+	}
+	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone, Err: io.EOF}); !ok || status != topicStatusError {
+		t.Fatalf("ordinary turn error = (%q, %v), want (%q, true)", status, ok, topicStatusError)
+	}
+	if status, ok := topicActivityStatusFromEvent(event.Event{Kind: event.TurnDone}); !ok || status != "" {
+		t.Fatalf("clean turn end = (%q, %v), want cleared status", status, ok)
 	}
 }

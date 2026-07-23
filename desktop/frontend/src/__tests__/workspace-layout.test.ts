@@ -147,9 +147,14 @@ eq(
   "live sidebar drag recomputes dock width from the dragged sidebar width",
 );
 eq(
-  /const closeWorkspacePanel = useCallback\(\(\) => \{[\s\S]*?setLiveWorkspacePanelRenderWidth\(null\);[\s\S]*?setWorkspacePanelOpen\(false\);/.test(appSource),
+  /const closeWorkspacePanel = useCallback\(\(\) => \{[\s\S]*?setLiveWorkspacePanelRenderWidth\(null\);[\s\S]*?setWorkspacePanelOpen\(false\);[\s\S]*?saveWorkspacePanelOpen\(false\);/.test(appSource),
   true,
-  "closing the dock clears the transient render width before hiding the panel",
+  "closing the dock clears the transient render width, hides the panel, and persists the collapsed preference",
+);
+eq(
+  /setWorkspacePanelOpen\(true\);[\s\S]*?saveWorkspacePanelOpen\(true\);/.test(appSource),
+  true,
+  "opening the dock persists the expanded preference for the next launch",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

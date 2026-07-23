@@ -144,7 +144,13 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   const statusFilterRef = useRef<HTMLButtonElement>(null);
   const [workspaceMap, setWorkspaceMap] = useState<Record<string, string>>({});
   const backdropRef = useRef<HTMLDivElement>(null);
+  const dirtyRef = useRef(false);
   const startedRef = useRef(false);
+
+  // Reset dirty ref when leaving edit mode
+  useEffect(() => {
+    if (!editing) dirtyRef.current = false;
+  }, [editing]);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -269,7 +275,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
 
   const handleBackdrop = useCallback(
     (e: React.MouseEvent) => {
-      if (e.target === backdropRef.current) onClose();
+      if (e.target === backdropRef.current && !dirtyRef.current) onClose();
     },
     [onClose],
   );
@@ -277,7 +283,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   useEffect(() => {
     if (!open) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !dirtyRef.current && !document.querySelector("[data-anchored-popover='active']")) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -298,7 +304,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   };
 
   return (
-    <div ref={backdropRef} className="heartbeat-backdrop" onClick={handleBackdrop}>
+    <div ref={backdropRef} className="heartbeat-backdrop" onMouseDown={handleBackdrop}>
       <div className="heartbeat-modal">
         <header className="heartbeat-modal__header">
           {editing ? (
@@ -319,7 +325,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
         </header>
 
         {editing ? (
-          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} />
+          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} onDirtyChange={(d) => { dirtyRef.current = d; }} />
         ) : (
           <div className="heartbeat-modal__body">
             <div className="heartbeat-toolbar">
@@ -831,11 +837,13 @@ function TaskEditor({
   onSave,
   onCancel,
   onDelete,
+  onDirtyChange,
 }: {
   task: HeartbeatTask;
   onSave: (t: HeartbeatTask) => void;
   onCancel: () => void;
   onDelete: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useT();
   const titleRef = useRef<HTMLInputElement>(null);
@@ -861,6 +869,23 @@ function TaskEditor({
   }, [projectOpen]);
 
   const [draft, setDraft] = useState(task);
+  const initialTaskRef = useRef(task);
+  const isDirty = draft.title !== initialTaskRef.current.title
+    || draft.prompt !== initialTaskRef.current.prompt
+    || draft.interval !== initialTaskRef.current.interval
+    || draft.enabled !== initialTaskRef.current.enabled
+    || draft.approvalMode !== initialTaskRef.current.approvalMode
+    || draft.newConversationEachRun !== initialTaskRef.current.newConversationEachRun
+    || draft.notifyChannels !== initialTaskRef.current.notifyChannels
+    || draft.scope !== initialTaskRef.current.scope
+    || draft.workspaceRoot !== initialTaskRef.current.workspaceRoot
+    || draft.timeWindowStart !== initialTaskRef.current.timeWindowStart
+    || draft.timeWindowEnd !== initialTaskRef.current.timeWindowEnd;
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
   const intervalBeforeCycle = useRef<string | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1174,7 +1199,8 @@ function TaskEditor({
         <button
           className="heartbeat-btn heartbeat-btn--primary"
           onClick={() => onSave(draft)}
-          disabled={!draft.title.trim() || !draft.prompt.trim()}
+          disabled={!draft.title.trim() || !draft.prompt.trim() || !isDirty}
+          title={!draft.title.trim() || !draft.prompt.trim() ? "请填写标题和提示词" : !isDirty ? "无修改内容" : undefined}
         >
           {isNew ? t("heartbeat.add") : t("heartbeat.save")}
         </button>

@@ -48,11 +48,10 @@ func textTurn(text string) []provider.Chunk {
 	return []provider.Chunk{{Type: provider.ChunkText, Text: text}, {Type: provider.ChunkDone}}
 }
 
-// TestAutoPlanGateEndToEnd drives the whole gate through a real agent: a complex
-// request auto-enters plan mode (marker reaches the model), the agent answers
-// with a plan, the controller asks for approval, and on approval it exits plan
-// mode, seeds the task list, and runs the execution turn.
-func TestAutoPlanGateEndToEnd(t *testing.T) {
+// TestPlanGateEndToEnd drives explicit Plan Mode through a real agent: the plan
+// marker reaches the model, the controller asks for approval, and approval exits
+// Plan Mode, seeds the task list, and runs the execution turn.
+func TestPlanGateEndToEnd(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("Plan:\n1. Add the config field\n2. Wire it into boot\n3. Add tests"),
 		textTurn("Done — implemented the plan."),
@@ -62,7 +61,6 @@ func TestAutoPlanGateEndToEnd(t *testing.T) {
 	approvalID := make(chan string, 1)
 	var seeded bool
 	c := New(Options{
-		AutoPlan: "on",
 		Runner:   ag,
 		Executor: ag,
 		Sink: event.FuncSink(func(e event.Event) {
@@ -76,6 +74,7 @@ func TestAutoPlanGateEndToEnd(t *testing.T) {
 			}
 		}),
 	})
+	c.SetPlanMode(true)
 
 	go func() { c.Approve(<-approvalID, true, false, false) }()
 
@@ -86,7 +85,7 @@ func TestAutoPlanGateEndToEnd(t *testing.T) {
 
 	msgs := ag.Session().Messages
 	if got := agent.StripTransientUserBlocks(firstUserMessage(msgs)); !strings.HasPrefix(got, PlanModeMarker) {
-		t.Fatalf("first model input = %q, want the auto-plan marker prefixed", got)
+		t.Fatalf("first model input = %q, want the plan marker prefixed", got)
 	}
 	if c.PlanMode() {
 		t.Fatal("plan mode should be off after approval")
@@ -112,7 +111,6 @@ func TestApprovedPlanSeedClearsAfterExecutionWithoutModelTodoWrite(t *testing.T)
 	approvalID := make(chan string, 1)
 	var planSeedResults []string
 	c := New(Options{
-		AutoPlan: "on",
 		Runner:   ag,
 		Executor: ag,
 		Sink: event.FuncSink(func(e event.Event) {
@@ -126,6 +124,7 @@ func TestApprovedPlanSeedClearsAfterExecutionWithoutModelTodoWrite(t *testing.T)
 			}
 		}),
 	})
+	c.SetPlanMode(true)
 
 	go func() { c.Approve(<-approvalID, true, false, false) }()
 
@@ -146,9 +145,9 @@ func TestApprovedPlanSeedClearsAfterExecutionWithoutModelTodoWrite(t *testing.T)
 	}
 }
 
-// TestAutoPlanGateRejectionStaysInPlan proves a rejected plan keeps plan mode on
+// TestPlanGateRejectionStaysInPlan proves a rejected plan keeps plan mode on
 // and never runs the execution turn: only the plan turn reached the model.
-func TestAutoPlanGateRejectionStaysInPlan(t *testing.T) {
+func TestPlanGateRejectionStaysInPlan(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("Plan:\n1. Add the config field\n2. Add tests"),
 	}}
@@ -157,7 +156,6 @@ func TestAutoPlanGateRejectionStaysInPlan(t *testing.T) {
 	approvalID := make(chan string, 1)
 	var seeded bool
 	c := New(Options{
-		AutoPlan: "on",
 		Runner:   ag,
 		Executor: ag,
 		Sink: event.FuncSink(func(e event.Event) {
@@ -171,6 +169,7 @@ func TestAutoPlanGateRejectionStaysInPlan(t *testing.T) {
 			}
 		}),
 	})
+	c.SetPlanMode(true)
 
 	go func() { c.Approve(<-approvalID, false, false, false) }()
 

@@ -9,8 +9,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 // fakeNotifier captures Notify calls and answers Request via an injectable hook,
@@ -76,6 +78,21 @@ func (f *fakeNotifier) updateMap(t *testing.T, i int) map[string]any {
 		t.Errorf("notif %d sessionId = %q, want sess-1", i, decoded.SessionID)
 	}
 	return decoded.Update
+}
+
+func TestUpdateSinkReplayStripsSteerWrapper(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.replay([]provider.Message{{
+		Role:    provider.RoleUser,
+		Content: agent.MidTurnSteerPrefix + "\nuse plan B",
+	}})
+
+	u := fn.updateMap(t, 0)
+	content, _ := u["content"].(map[string]any)
+	if content["text"] != "use plan B" {
+		t.Fatalf("replayed steer = %v, want raw user text", content["text"])
+	}
 }
 
 func TestUpdateSinkMapsEvents(t *testing.T) {
@@ -510,6 +527,18 @@ func TestUpdateSinkApprovalUsesTurnContext(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("turn context cancellation did not deny permission request")
+	}
+}
+
+func TestApprovalOptionsFreshDynamicToolOnlyAllowOnceOrReject(t *testing.T) {
+	options := approvalOptions("extension__wipe", "extension/wipe", true)
+	if len(options) != 2 || options[0].Kind != OptAllowOnce || options[1].Kind != OptRejectOnce {
+		t.Fatalf("fresh dynamic-tool options = %+v, want allow-once/reject", options)
+	}
+	for _, option := range options {
+		if option.Kind == OptAllowAlways {
+			t.Fatalf("fresh dynamic-tool decision offered remembered permission: %+v", options)
+		}
 	}
 }
 

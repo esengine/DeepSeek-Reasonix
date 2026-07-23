@@ -14,7 +14,7 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 1. 打开桌面端“设置 -> Hooks”。
 2. 选择范围：
-   - “全局”：保存到 `~/.reasonix/settings.json`，始终加载。
+   - “全局”：保存到 `<Reasonix home>/settings.json`，始终加载；Windows 默认是 `%APPDATA%\reasonix\settings.json`，macOS/Linux 默认是 `~/.reasonix/settings.json`。
    - “项目”：保存到当前工作区的 `.reasonix/settings.json`，必须点击“信任此工作区”后才会加载。
 3. 在 JSON 配置框里编辑 `hooks`。
 4. 保存后，重启桌面端，让新配置进入会话。`/new` 只开启新对话，不会重新读取 hooks 配置。
@@ -45,10 +45,10 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 | 范围 | 文件 | 是否需要信任 | 加载顺序 |
 | --- | --- | --- | --- |
-| 全局 | `~/.reasonix/settings.json` | 不需要 | 项目 hooks 之后 |
+| 全局 | `<Reasonix home>/settings.json` | 不需要 | 项目 hooks 之后 |
 | 项目 | `<workspace>/.reasonix/settings.json` | 需要 | 全局 hooks 之前 |
 
-项目 hooks 的信任状态不写在项目文件里，而是写在用户自己的 `~/.reasonix/trust.json`。这样克隆来的仓库不能靠提交 `.reasonix/settings.json` 自动执行命令。
+项目 hooks 的信任状态不写在项目文件里，而是写在用户自己的 `<Reasonix home>/trust.json`。这样克隆来的仓库不能靠提交 `.reasonix/settings.json` 自动执行命令。
 
 同一个事件下，项目 hooks 先运行，全局 hooks 后运行；同一范围内按数组顺序运行。阻塞型事件遇到第一个阻塞 hook 后，会停止继续执行后面的 hook。
 
@@ -104,7 +104,12 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 
 `match` 是锚定正则：`"file"` 不会匹配 `read_file`，需要写成 `".*file"`。正则非法时该 hook 不会触发。
 
-`command` 会通过平台 shell 执行：macOS/Linux 使用 `sh -c`，Windows 使用 `cmd /c`。stdin 是 Reasonix 写入的一行 JSON，见下面的 payload 表。
+`command` 默认通过平台 shell 执行：macOS/Linux 使用 `sh -c`，Windows 使用
+`cmd /c`。如果 Windows hook 自己显式写了裸命令 `sh -c` 或 `bash -c`，Reasonix
+会查找 Git for Windows 自带的 Bash 并直接使用它；带目录的显式解释器路径保持不变。
+找不到 Git Bash 时会返回可操作的依赖提示。Hook stdout/stderr 中的 Windows 旧代码页
+文本会转换为 UTF-8，避免中文错误信息显示成乱码。stdin 是 Reasonix 写入的一行 JSON，
+见下面的 payload 表。
 
 ## 配置里的事件 key
 
@@ -251,7 +256,7 @@ if (/\brm\s+-rf\b/.test(command) || /\bgit\s+push\b/.test(command)) {
 ## 排障
 
 - 保存后当前会话没有变化：Hooks 在会话构建时加载。重启桌面端后才会重新读取配置；`/new` 只开启新对话，不会重新加载 hooks。
-- 项目 hooks 不执行：确认当前是项目工作区，并在“设置 -> Hooks -> 项目”点击“信任此工作区”。CLI 中也可以运行 `/hooks trust`。
+- 项目 hooks 不执行：确认当前是项目工作区，并在“设置 -> Hooks -> 项目”点击“信任此工作区”。CLI 中也可以运行 `/hooks trust`。也可用只读诊断：`reasonix doctor capabilities` 或桌面端 **设置 → 诊断**（见 [能力诊断](./CAPABILITY_DIAGNOSTICS.zh-CN.md)），关注 `hook.untrusted_project` / `hook.invalid_matcher`。
 - `match` 没生效：它只对 `PreToolUse` 和 `PostToolUse` 生效，并且是锚定正则。
 - JSON 报 unknown hook event：事件 key 必须完全等于上表的大小写。
 - hook 输出太长：每路 stdout/stderr 最多捕获 256KB，超出会截断并显示截断提示。

@@ -1,8 +1,8 @@
 ---
 import '../styles/global.css';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const { title, description, titleEn, titleZh } = Astro.props;
-const canonical = new URL(Astro.url.pathname, Astro.site).href;
+const { title, description, titleEn, titleZh, canonical: canonicalOverride } = Astro.props;
+const canonical = canonicalOverride ?? new URL(Astro.url.pathname, Astro.site).href;
 const ogImage = new URL(`${base}/og.png`, Astro.site).href;
 ---
 <!doctype html>
@@ -16,6 +16,9 @@ const ogImage = new URL(`${base}/og.png`, Astro.site).href;
   <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
   <link rel="sitemap" href={`${base}/sitemap-index.xml`} />
   <meta name="theme-color" content="#ffffff" />
+  <script is:inline>
+    (function(){try{var p=localStorage.getItem("reasonix-theme")||"system";var d=p==="dark"||(p==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light";var m=document.querySelector('meta[name="theme-color"]');if(m)m.content=d?"#1f232b":"#ffffff";}catch(e){}})();
+  </script>
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Reasonix" />
   <meta property="og:title" content={title} />
@@ -34,7 +37,6 @@ const ogImage = new URL(`${base}/og.png`, Astro.site).href;
   <slot name="head" />
 </head>
 <body data-motion="rich" data-lang="en" data-title-en={titleEn ?? title} data-title-zh={titleZh ?? title}>
-  <div class="cursor-glow"></div>
   <slot />
   <script>
     import '../scripts/site.js';

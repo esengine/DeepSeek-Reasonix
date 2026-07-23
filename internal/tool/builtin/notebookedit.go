@@ -27,6 +27,7 @@ func init() { tool.RegisterBuiltin(notebookEdit{}) }
 type notebookEdit struct {
 	roots   []string
 	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -81,7 +82,7 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 		return "", err
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
-	if err := confineWrite(n.roots, n.guard, a.Path); err != nil {
+	if err := confineWrite(ctx, n.roots, n.guard, n.managed, a.Path); err != nil {
 		return "", err
 	}
 	data, err := os.ReadFile(a.Path)

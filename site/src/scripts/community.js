@@ -2,6 +2,8 @@
 // gates posting on the shared id.reasonix.io session (cookie sent cross-subdomain).
 // Bilingual like the rest of the site: static labels via .l-en/.l-zh spans that the
 // shared `reasonix-lang` choice toggles; plain-text strings pick the current lang.
+import { initTheme } from "./theme.js";
+
 const FORUM = (import.meta.env.PUBLIC_FORUM_API || "https://forum.reasonix.io").replace(/\/$/, "");
 const ACCOUNTS = (import.meta.env.PUBLIC_ACCOUNTS_API || "https://id.reasonix.io").replace(/\/$/, "");
 
@@ -306,6 +308,7 @@ async function renderNew() {
 }
 
 (async function () {
+  initTheme();
   initLang();
   await loadAccount();
   if (el("topic-list")) renderHome();

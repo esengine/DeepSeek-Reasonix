@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // legacyConfig is the subset of the v0.x (~/.reasonix/config.json) schema this
@@ -114,7 +114,7 @@ func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
 		return res, err
 	}
 	src := filepath.Join(home, ".reasonix", "config.json")
-	data, err := os.ReadFile(src)
+	data, err := fileencoding.ReadFileUTF8(src)
 	if err != nil {
 		return nil, nil
 	}
@@ -214,7 +214,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 	if dest == "" {
 		return nil, nil
 	}
-	userCfg, err := loadForEditStrict(dest, true)
+	userCfg, err := loadForEditStrict(dest, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -274,6 +274,15 @@ func mcpGlobalMigrationMarkerPath() string {
 	return filepath.Join(dir, "mcp-global-migration-v1")
 }
 
+func mcpGlobalMigrationComplete() bool {
+	marker := mcpGlobalMigrationMarkerPath()
+	if marker == "" {
+		return false
+	}
+	_, err := os.Stat(marker)
+	return err == nil
+}
+
 func mcpMigrationLegacyTOMLPaths(dest, home string) []string {
 	var paths []string
 	for _, path := range legacyTOMLPaths(dest, home) {
@@ -294,7 +303,7 @@ func loadPluginEntriesFromTOML(path string) []PluginEntry {
 		return nil
 	}
 	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	if _, err := decodeTOMLFile(path, &cfg); err != nil {
 		return nil
 	}
 	out := make([]PluginEntry, 0, len(cfg.Plugins))
@@ -309,7 +318,7 @@ func loadLegacyConfigPlugins(path string) []PluginEntry {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return nil
 	}
@@ -359,7 +368,7 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 		if src == "" {
 			continue
 		}
-		data, err := os.ReadFile(src)
+		data, err := fileencoding.ReadFileUTF8(src)
 		if err != nil {
 			continue
 		}

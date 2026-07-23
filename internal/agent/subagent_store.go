@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
 )
@@ -151,7 +152,7 @@ func ListSubagentsByParent(sessionDir, parentSession string) ([]SubagentArtifact
 			continue
 		}
 		metaPath := filepath.Join(dir, entry.Name())
-		data, err := os.ReadFile(metaPath)
+		data, err := fileencoding.ReadFileUTF8(metaPath)
 		if err != nil {
 			return nil, err
 		}
@@ -566,7 +567,7 @@ func (s *SubagentStore) LoadMeta(ref string) (SubagentMeta, error) {
 	if !validSubagentRef(ref) {
 		return meta, fmt.Errorf("invalid subagent reference %q", ref)
 	}
-	data, err := os.ReadFile(s.metaPath(ref))
+	data, err := fileencoding.ReadFileUTF8(s.metaPath(ref))
 	if err != nil {
 		return meta, fmt.Errorf("load subagent metadata %q: %w", ref, err)
 	}

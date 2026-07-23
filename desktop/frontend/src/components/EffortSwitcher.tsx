@@ -64,7 +64,7 @@ export function EffortSwitcher({
         aria-expanded={open && !closing}
         onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
-        <Gauge size={13} className="modelsw__kind" />
+        <Gauge size={14} className="modelsw__kind" />
         <span className="modelsw__label">{current}</span>
         <ChevronsUpDown size={11} />
       </button>

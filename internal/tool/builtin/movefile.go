@@ -24,6 +24,7 @@ var renameFile = os.Rename
 type moveFile struct {
 	roots   []string
 	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -55,10 +56,10 @@ func (m moveFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	src := resolveIn(m.workDir, p.SourcePath)
 	dst := resolveIn(m.workDir, p.DestinationPath)
-	if err := confineWrite(m.roots, m.guard, src); err != nil {
+	if err := confineWrite(ctx, m.roots, m.guard, m.managed, src); err != nil {
 		return "", err
 	}
-	if err := confineWrite(m.roots, m.guard, dst); err != nil {
+	if err := confineWrite(ctx, m.roots, m.guard, m.managed, dst); err != nil {
 		return "", err
 	}
 	info, err := os.Stat(src)

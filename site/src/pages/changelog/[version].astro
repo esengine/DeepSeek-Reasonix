@@ -1,0 +1,12 @@
+---
+import ChangelogPage from '../../components/ChangelogPage.astro';
+import { releases } from '../../data/releases';
+
+export function getStaticPaths() {
+  return releases.map((release) => ({ params: { version: `v${release.version}` }, props: { release } }));
+}
+
+const { release } = Astro.props;
+---
+
+<ChangelogPage release={release} releases={releases} />

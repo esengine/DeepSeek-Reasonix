@@ -8,33 +8,32 @@ import (
 	"strings"
 	"sync"
 
-	"reasonix/internal/agent"
-	"reasonix/internal/planmode"
-	"reasonix/internal/plugin"
 	"reasonix/internal/tool"
 )
 
 const (
-	TokenModeFull    = "full"
-	TokenModeEconomy = "economy"
+	TokenModeFull     = "full"
+	TokenModeEconomy  = "economy"
+	TokenModeDelivery = "delivery"
 )
 
-const tokenEconomyPrompt = `Token economy mode is on. Keep the default tool surface lean. Optional sources are hidden behind connect_tool_source; enable skills, read_only_skill, MCP servers, LSP, web_fetch, install_source, task, or read_only_task only when the current request actually needs them.`
+const tokenEconomyPrompt = `Economy mode is on. Keep work direct and use connect_tool_source only when the task needs a capability absent from the core file and shell tools.`
+
+const tokenDeliveryPrompt = `<delivery-profile>
+Prioritize a verified, complete result over minimizing model calls or tokens.
+For action requests: establish acceptance criteria; reproduce bugs when practical;
+inspect the relevant code and project rules; fix the root cause; run focused
+verification; review the resulting diff and adjacent behavior; and continue until
+the request is complete or a genuine blocker remains. Do not claim success without
+evidence. State any unverified result or assumption explicitly.
+</delivery-profile>`
 
 var tokenEconomyCoreBuiltins = []string{
 	"bash",
 	"bash_output",
-	"code_index",
-	"complete_step",
 	"edit_file",
-	"glob",
-	"grep",
 	"kill_shell",
-	"ls",
-	"move_file",
-	"multi_edit",
 	"read_file",
-	"todo_write",
 	"wait",
 	"write_file",
 }
@@ -43,6 +42,8 @@ func NormalizeTokenMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case TokenModeEconomy, "eco", "save", "saving", "low", "lite", "minimal":
 		return TokenModeEconomy
+	case TokenModeDelivery, "deliver", "quality", "performance":
+		return TokenModeDelivery
 	default:
 		return TokenModeFull
 	}
@@ -79,17 +80,20 @@ type toolSourceConnector struct {
 	install       func(context.Context) (string, error)
 	webFetch      func(context.Context) (string, error)
 	lsp           func(context.Context) (string, error)
+	sessions      func(context.Context) (string, error)
+	memory        func(context.Context) (string, error)
+	commands      func(context.Context) (string, error)
+	search        func(context.Context) (string, error)
+	files         func(context.Context) (string, error)
+	workflow      func(context.Context) (string, error)
 	mcp           func(context.Context, string) (string, error)
 	mcpNames      []string
-
-	planModeAllowedTools     []string
-	planModeTrustedMCPServer map[string]bool
 }
 
 func (*toolSourceConnector) Name() string { return "connect_tool_source" }
 
 func (*toolSourceConnector) Description() string {
-	return "Token economy mode only: enable an optional tool source when the task needs it. Sources: skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, read_only_task. For mcp, pass the configured server name; omit name to list servers. Newly enabled tools are available on the next model request."
+	return "Economy mode only: enable optional tools for the current task. For mcp, pass a configured server name or omit it to list servers. Enabled tools are available on the next model request."
 }
 
 func (*toolSourceConnector) ReadOnly() bool { return true }
@@ -98,7 +102,7 @@ func (*toolSourceConnector) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",
 		"properties":{
-			"source":{"type":"string","description":"Tool source to enable: skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
+			"source":{"type":"string","description":"Tool source to enable: search, files, workflow, sessions, memory, commands, skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
 			"name":{"type":"string","description":"For source=mcp, the configured server name. Omit to list configured MCP servers without connecting them."}
 		},
 		"required":["source"]
@@ -139,16 +143,12 @@ func (t *toolSourceConnector) Execute(ctx context.Context, args json.RawMessage)
 // executeLocked dispatches a connect_tool_source call under t.mu. Fast sources
 // (registry-only mutations) run to completion while the lock is held. For an
 // MCP connect with a server name it performs only the quick pre-checks
-// (plan-mode gate, callback availability) and returns the connect callback as
+// (callback availability and source arguments) and returns the connect callback as
 // mcpConnect; the caller invokes it after releasing t.mu. When mcpConnect is
 // nil, out/err are the final result.
 func (t *toolSourceConnector) executeLocked(ctx context.Context, source, name, rawSource string) (out string, mcpConnect func(context.Context, string) (string, error), err error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-
-	if blocked, msg := t.planModeSourceBlocked(ctx, source, name); blocked {
-		return msg, nil, nil
-	}
 
 	switch source {
 	case "skills":
@@ -165,6 +165,18 @@ func (t *toolSourceConnector) executeLocked(ctx context.Context, source, name, r
 		out, err = runSourceInstaller(ctx, "web_fetch", t.webFetch)
 	case "lsp":
 		out, err = runSourceInstaller(ctx, "lsp", t.lsp)
+	case "sessions":
+		out, err = runSourceInstaller(ctx, "sessions", t.sessions)
+	case "memory":
+		out, err = runSourceInstaller(ctx, "memory", t.memory)
+	case "commands":
+		out, err = runSourceInstaller(ctx, "commands", t.commands)
+	case "search":
+		out, err = runSourceInstaller(ctx, "search", t.search)
+	case "files":
+		out, err = runSourceInstaller(ctx, "files", t.files)
+	case "workflow":
+		out, err = runSourceInstaller(ctx, "workflow", t.workflow)
 	case "mcp":
 		if name == "" {
 			if len(t.mcpNames) == 0 {
@@ -184,35 +196,6 @@ func (t *toolSourceConnector) executeLocked(ctx context.Context, source, name, r
 	return out, nil, err
 }
 
-func (t *toolSourceConnector) planModeSourceBlocked(ctx context.Context, source, name string) (bool, string) {
-	if !agent.PlanModeFromContext(ctx) {
-		return false, ""
-	}
-	if source == "mcp" {
-		if name == "" || planModeAllowsMCPServer(t.planModeAllowedTools, name) || t.planModeTrustedMCPServer[name] {
-			return false, ""
-		}
-		return true, fmt.Sprintf("blocked: MCP source %q is not available in plan mode until at least one concrete tool is trusted. Connect it outside plan mode, choose always allow from the read-only trust prompt, pre-seed trusted_read_only_tools, or declare a concrete %q tool in plan_mode_allowed_tools. Keep exploring with read-only tools, then write your plan for approval before using this MCP server.", name, plugin.ToolPrefix(name))
-	}
-	// Sources are read-only iff they expose only read-only research surfaces; the
-	// moderate plan-mode gate then trusts that ReadOnly flag (step 6), while any
-	// other source stays non-read-only and is fail-closed by the policy.
-	readOnlySource := source == "web_fetch" || source == "lsp" || source == "read_only_task" || source == "read_only_skill"
-	decision := planmode.Policy{}.Decide(planmode.Call{Name: source, ReadOnly: readOnlySource})
-	return decision.Blocked, decision.Message
-}
-
-func planModeAllowsMCPServer(allowedTools []string, server string) bool {
-	prefix := plugin.ToolPrefix(server)
-	for _, name := range allowedTools {
-		name = strings.TrimSpace(name)
-		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func normalizeToolSource(source string) string {
 	switch strings.ToLower(strings.TrimSpace(source)) {
 	case "skill", "skills":
@@ -227,6 +210,18 @@ func normalizeToolSource(source string) string {
 		return "web_fetch"
 	case "install", "install_source", "installer":
 		return "install_source"
+	case "session", "sessions", "history", "conversation", "conversations":
+		return "sessions"
+	case "memory", "memories", "remember":
+		return "memory"
+	case "command", "commands", "slash", "slash_command", "slash-command":
+		return "commands"
+	case "search", "searches", "find", "grep":
+		return "search"
+	case "file", "files", "file_ops", "file-ops", "file_operations", "file-operations":
+		return "files"
+	case "workflow", "workflows", "todo", "todos":
+		return "workflow"
 	case "read_only_task", "readonly_task", "read-only-task", "read_only_subagent", "readonly_subagent", "read-only-subagent", "research_task", "research-subagent":
 		return "read_only_task"
 	case "task", "subagent", "subagents":
@@ -249,6 +244,24 @@ func (t *toolSourceConnector) availableSources() []string {
 	}
 	if t.lsp != nil {
 		out = append(out, "lsp")
+	}
+	if t.sessions != nil {
+		out = append(out, "sessions")
+	}
+	if t.memory != nil {
+		out = append(out, "memory")
+	}
+	if t.commands != nil {
+		out = append(out, "commands")
+	}
+	if t.search != nil {
+		out = append(out, "search")
+	}
+	if t.files != nil {
+		out = append(out, "files")
+	}
+	if t.workflow != nil {
+		out = append(out, "workflow")
 	}
 	if t.webFetch != nil {
 		out = append(out, "web_fetch")

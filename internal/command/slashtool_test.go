@@ -126,3 +126,38 @@ func TestSlashToolNameClashCommandWins(t *testing.T) {
 		t.Errorf("later entry should win the clash: %q", out)
 	}
 }
+
+func TestPluginSlashToolShowsOnlyCanonicalQualifiedName(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "plan.md", "---\ndescription: Plan work\n---\nPlan $ARGUMENTS")
+	plain, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owned, err := LoadRoots(Root{Path: dir, Plugin: "pwf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := func(cmds []Command) []SlashEntry {
+		out := make([]SlashEntry, 0, len(cmds))
+		for _, cmd := range cmds {
+			if cmd.Hidden {
+				continue
+			}
+			cmd := cmd
+			out = append(out, SlashEntry{Name: cmd.Name, Description: cmd.Description, ArgHint: cmd.ArgHint, Render: func(args []string) string { return cmd.Render(args) }})
+		}
+		return out
+	}
+	plainTool := NewSlashCommandTool(entries(plain))
+	ownedTool := NewSlashCommandTool(entries(owned))
+	if !strings.Contains(plainTool.Description(), "Available: plan.") {
+		t.Fatalf("plain tool description = %q", plainTool.Description())
+	}
+	if !strings.Contains(ownedTool.Description(), "Available: pwf:plan.") || strings.Contains(ownedTool.Description(), "Available: plan,") {
+		t.Fatalf("plugin tool should list one canonical name, got %q", ownedTool.Description())
+	}
+	if string(plainTool.Schema()) != string(ownedTool.Schema()) {
+		t.Fatal("plugin qualification must not change the slash_command schema")
+	}
+}

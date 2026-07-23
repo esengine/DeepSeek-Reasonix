@@ -16,13 +16,16 @@ import (
 	"strings"
 	"sync"
 
+	"reasonix/internal/command"
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
 )
 
 const (
 	NativeManifest = "reasonix-plugin.json"
 	CodexManifest  = ".codex-plugin/plugin.json"
+	ClaudeManifest = ".claude-plugin/plugin.json"
 	StateFilename  = "plugin-packages.json"
 
 	claudeSettingsPath = ".claude/settings.json"
@@ -33,15 +36,30 @@ var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 
 // Package is one parsed plugin package rooted on disk.
 type Package struct {
-	Root         string
-	ManifestKind string
-	Manifest     Manifest
+	Root          string
+	ManifestKind  string
+	Manifest      Manifest
+	Compatibility Compatibility
 }
 
 type Inventory struct {
 	Skills     []SkillRef
+	Agents     []AgentRef
+	Commands   []CommandRef
 	Hooks      []HookRef
 	MCPServers []MCPServerRef
+}
+
+type Compatibility struct {
+	Status  string               `json:"status"`
+	Mapped  []string             `json:"mapped,omitempty"`
+	Skipped []CompatibilityIssue `json:"skipped,omitempty"`
+}
+
+type CompatibilityIssue struct {
+	Capability string `json:"capability"`
+	Path       string `json:"path,omitempty"`
+	Reason     string `json:"reason"`
 }
 
 type SkillRef struct {
@@ -50,6 +68,25 @@ type SkillRef struct {
 	Path        string
 	Invocation  string
 	RunAs       string
+}
+
+type AgentRef struct {
+	Name         string
+	Description  string
+	Path         string
+	Invocation   string
+	Model        string
+	AllowedTools []string
+}
+
+// CommandRef is one custom slash command a plugin contributes: a flat <name>.md
+// prompt template invoked as /<name> (Claude plugin commands map here 1:1).
+type CommandRef struct {
+	Name        string
+	Description string
+	ArgHint     string
+	Path        string
+	Invocation  string
 }
 
 type HookRef struct {
@@ -61,10 +98,13 @@ type HookRef struct {
 }
 
 type MCPServerRef struct {
-	Name      string
-	Transport string
-	Command   string
-	URL       string
+	Name        string
+	DisplayName string
+	Description string
+	Transport   string
+	Command     string
+	URL         string
+	AutoStart   bool
 }
 
 // Manifest is the normalized manifest shape used by Reasonix.
@@ -75,30 +115,43 @@ type Manifest struct {
 	Homepage    string
 	Repository  string
 	Skills      []string
-	Hooks       map[string][]Hook
-	MCPServers  map[string]MCPServer
+	// Agents are directories of Claude-style flat agent Markdown files. They are
+	// loaded as plugin-owned, manually invoked Reasonix subagent profiles.
+	Agents []string
+	// Commands are directories of flat <name>.md slash-command prompt templates
+	// (rendered with $ARGUMENTS/$1..$N on /<name>). Declared explicitly in a
+	// manifest or adopted from a Claude plugin's conventional commands/ dir.
+	Commands   []string
+	Hooks      map[string][]Hook
+	MCPServers map[string]MCPServer
 }
 
 type Hook struct {
-	Match        string            `json:"match,omitempty"`
-	Command      string            `json:"command,omitempty"`
-	ContextFile  string            `json:"contextFile,omitempty"`
-	ShellCommand bool              `json:"shellCommand,omitempty"`
-	Description  string            `json:"description,omitempty"`
-	Timeout      int               `json:"timeout,omitempty"`
-	Cwd          string            `json:"cwd,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
+	Match         string            `json:"match,omitempty"`
+	Command       string            `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	ContextFile   string            `json:"contextFile,omitempty"`
+	ShellCommand  bool              `json:"shellCommand,omitempty"`
+	Async         bool              `json:"async,omitempty"`
+	PayloadFormat string            `json:"payloadFormat,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Timeout       int               `json:"timeout,omitempty"`
+	Cwd           string            `json:"cwd,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
 }
 
 type MCPServer struct {
-	Type      string            `json:"type,omitempty"`
-	Command   string            `json:"command,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	URL       string            `json:"url,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	AutoStart *bool             `json:"auto_start,omitempty"`
-	Tier      string            `json:"tier,omitempty"`
+	Type        string            `json:"type,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	AutoStart   *bool             `json:"auto_start,omitempty"`
+	Tier        string            `json:"tier,omitempty"`
+	DisplayName string            `json:"display_name,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Imported    bool              `json:"imported,omitempty"`
 }
 
 // State is persisted at <Reasonix home>/plugin-packages.json.
@@ -115,6 +168,7 @@ type InstalledPlugin struct {
 	Description  string `json:"description,omitempty"`
 	ManifestKind string `json:"manifestKind,omitempty"`
 	Enabled      bool   `json:"enabled"`
+	Commit       string `json:"commit,omitempty"`
 }
 
 type InstalledPackage struct {
@@ -139,7 +193,7 @@ func InstallRoot(reasonixHome, name string) string {
 
 func LoadState(reasonixHome string) (State, error) {
 	var st State
-	b, err := os.ReadFile(StatePath(reasonixHome))
+	b, err := fileencoding.ReadFileUTF8(StatePath(reasonixHome))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return State{Version: 1}, nil
@@ -274,7 +328,10 @@ func ParseDir(root string) (Package, []string, error) {
 	if pkg, warnings, err := parseCodex(filepath.Join(root, CodexManifest), root); err == nil {
 		return pkg, warnings, nil
 	}
-	return Package{}, nil, fmt.Errorf("no %s or %s found", NativeManifest, CodexManifest)
+	if pkg, warnings, err := parseClaudePlugin(filepath.Join(root, ClaudeManifest), root); err == nil {
+		return pkg, warnings, nil
+	}
+	return Package{}, nil, fmt.Errorf("no %s, %s, or %s found", NativeManifest, CodexManifest, ClaudeManifest)
 }
 
 func parseNative(path, root string) (Package, []string, error) {
@@ -285,6 +342,7 @@ func parseNative(path, root string) (Package, []string, error) {
 		Homepage    string               `json:"homepage"`
 		Repository  string               `json:"repository"`
 		Skills      json.RawMessage      `json:"skills"`
+		Commands    json.RawMessage      `json:"commands"`
 		Hooks       map[string][]Hook    `json:"hooks"`
 		MCPServers  map[string]MCPServer `json:"mcpServers"`
 	}
@@ -295,39 +353,7 @@ func parseNative(path, root string) (Package, []string, error) {
 	if err != nil {
 		return Package{}, nil, err
 	}
-	manifest := Manifest{
-		Name:        strings.TrimSpace(raw.Name),
-		Version:     strings.TrimSpace(raw.Version),
-		Description: strings.TrimSpace(raw.Description),
-		Homepage:    strings.TrimSpace(raw.Homepage),
-		Repository:  strings.TrimSpace(raw.Repository),
-		Skills:      skills,
-		Hooks:       normalizeHooks(raw.Hooks),
-		MCPServers:  raw.MCPServers,
-	}
-	if err := validateManifest(root, &manifest); err != nil {
-		return Package{}, nil, err
-	}
-	warnings := applyClaudeCompatibility(root, &manifest)
-	if err := validateManifest(root, &manifest); err != nil {
-		return Package{}, warnings, err
-	}
-	return Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}, warnings, nil
-}
-
-func parseCodex(path, root string) (Package, []string, error) {
-	var raw struct {
-		Name        string          `json:"name"`
-		Version     string          `json:"version"`
-		Description string          `json:"description"`
-		Homepage    string          `json:"homepage"`
-		Repository  string          `json:"repository"`
-		Skills      json.RawMessage `json:"skills"`
-	}
-	if err := readJSONFile(path, &raw); err != nil {
-		return Package{}, nil, err
-	}
-	skills, err := parseSkillPaths(raw.Skills)
+	commands, err := parseSkillPaths(raw.Commands)
 	if err != nil {
 		return Package{}, nil, err
 	}
@@ -338,27 +364,193 @@ func parseCodex(path, root string) (Package, []string, error) {
 		Homepage:    strings.TrimSpace(raw.Homepage),
 		Repository:  strings.TrimSpace(raw.Repository),
 		Skills:      skills,
+		Commands:    commands,
+		Hooks:       normalizeHooks(raw.Hooks),
+		MCPServers:  raw.MCPServers,
 	}
-	hookPath := filepath.Join(root, "hooks", "session-start-codex")
-	if info, err := os.Stat(hookPath); err == nil && info.Mode().IsRegular() {
-		manifest.Hooks = map[string][]Hook{
-			"SessionStart": {{
-				Command:     hookPath,
-				Cwd:         root,
-				Description: "Codex-compatible session start hook from " + manifest.Name,
-			}},
-		}
+	if err := validateManifest(root, &manifest); err != nil {
+		return Package{}, nil, err
 	}
-	warnings := applyClaudeCompatibility(root, &manifest)
+	warnings, issues := applyClaudeCompatibility(root, &manifest)
 	if err := validateManifest(root, &manifest); err != nil {
 		return Package{}, warnings, err
 	}
-	return Package{Root: root, ManifestKind: "codex", Manifest: manifest}, warnings, nil
+	pkg := Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}
+	pkg.Compatibility = compatibilityFor(pkg, issues)
+	return pkg, warnings, nil
 }
 
-func applyClaudeCompatibility(root string, manifest *Manifest) []string {
+func parseCodex(path, root string) (Package, []string, error) {
+	return parseCodexLike(path, root, "codex", true)
+}
+
+func parseClaudePlugin(path, root string) (Package, []string, error) {
+	return parseCodexLike(path, root, "claude", false)
+}
+
+func parseCodexLike(path, root, kind string, includeCodexSessionStartHook bool) (Package, []string, error) {
+	var raw struct {
+		Name        string          `json:"name"`
+		Version     string          `json:"version"`
+		Description string          `json:"description"`
+		Homepage    string          `json:"homepage"`
+		Repository  string          `json:"repository"`
+		Skills      json.RawMessage `json:"skills"`
+		Commands    json.RawMessage `json:"commands"`
+	}
+	if err := readJSONFile(path, &raw); err != nil {
+		return Package{}, nil, err
+	}
+	skills, err := parseSkillPaths(raw.Skills)
+	if err != nil {
+		return Package{}, nil, err
+	}
+	commands, err := parseSkillPaths(raw.Commands)
+	if err != nil {
+		return Package{}, nil, err
+	}
+	manifest := Manifest{
+		Name:        strings.TrimSpace(raw.Name),
+		Version:     strings.TrimSpace(raw.Version),
+		Description: strings.TrimSpace(raw.Description),
+		Homepage:    strings.TrimSpace(raw.Homepage),
+		Repository:  strings.TrimSpace(raw.Repository),
+		Skills:      skills,
+		Commands:    commands,
+	}
+	hookPath := filepath.Join(root, "hooks", "session-start-codex")
+	if includeCodexSessionStartHook {
+		if info, err := os.Stat(hookPath); err == nil && info.Mode().IsRegular() {
+			manifest.Hooks = map[string][]Hook{
+				"SessionStart": {{
+					Command:     hookPath,
+					Cwd:         root,
+					Description: "Codex-compatible session start hook from " + manifest.Name,
+				}},
+			}
+		}
+	}
+	var warnings []string
+	var issues []CompatibilityIssue
+	if kind == "claude" {
+		warnings = append(warnings, applyClaudeConventionDirs(root, &manifest)...)
+	}
+	compatWarnings, compatIssues := applyClaudeCompatibility(root, &manifest)
+	warnings = append(warnings, compatWarnings...)
+	issues = append(issues, compatIssues...)
+	if err := validateManifest(root, &manifest); err != nil {
+		return Package{}, warnings, err
+	}
+	pkg := Package{Root: root, ManifestKind: kind, Manifest: manifest}
+	pkg.Compatibility = compatibilityFor(pkg, issues)
+	return pkg, warnings, nil
+}
+
+// claudeConventionSkillDirs are the directories a Claude plugin loads skills
+// from BY CONVENTION — the official plugin layout auto-discovers skills/ (and
+// packs in the wild use .claude/skills/) without declaring them in
+// plugin.json, whose manifest usually carries metadata only.
+var claudeConventionSkillDirs = []string{"skills", ".claude/skills"}
+
+// claudeConventionCommandDirs are the directories a Claude plugin loads slash
+// commands from by convention. A command is a flat <name>.md prompt template
+// the user invokes as /<name> — exactly Reasonix's custom-command shape
+// (internal/command) — so these directories map onto Manifest.Commands and
+// join command discovery at the lowest priority. Unlike skill dirs they are
+// adopted even when the manifest declares skills explicitly, because
+// plugin.json never lists commands.
+var claudeConventionCommandDirs = []string{"commands", ".claude/commands"}
+
+var claudeConventionAgentDirs = []string{"agents"}
+
+// applyClaudeConventionDirs fills manifest.Skills from the conventional skill
+// directories when the manifest declares none (the standard Claude plugin
+// shape), adopts conventional command directories into manifest.Commands, and
+// reports the conventional capabilities Reasonix cannot map.
+func applyClaudeConventionDirs(root string, manifest *Manifest) []string {
+	var warnings []string
+	if len(manifest.Skills) == 0 {
+		for _, rel := range claudeConventionSkillDirs {
+			dir := filepath.Join(root, filepath.FromSlash(rel))
+			if dirContainsSkill(dir) {
+				manifest.Skills = append(manifest.Skills, rel)
+			}
+		}
+	}
+	for _, rel := range claudeConventionCommandDirs {
+		dir := filepath.Join(root, filepath.FromSlash(rel))
+		if dirContainsCommandMd(dir) && !containsPathEntry(manifest.Commands, rel) {
+			manifest.Commands = append(manifest.Commands, rel)
+		}
+	}
+	for _, rel := range claudeConventionAgentDirs {
+		dir := filepath.Join(root, filepath.FromSlash(rel))
+		if dirContainsAgentMd(dir) && !containsPathEntry(manifest.Agents, rel) {
+			manifest.Agents = append(manifest.Agents, rel)
+		}
+	}
+	return warnings
+}
+
+// containsPathEntry reports whether the manifest path list already names rel
+// (slash-normalized), so convention adoption never duplicates an explicit entry.
+func containsPathEntry(paths []string, rel string) bool {
+	for _, p := range paths {
+		if filepath.ToSlash(filepath.Clean(filepath.FromSlash(p))) == rel {
+			return true
+		}
+	}
+	return false
+}
+
+// dirContainsSkill reports whether dir holds at least one skill definition
+// (<dir>/<name>/SKILL.md), so an empty conventional directory is not adopted
+// as a skill root.
+func dirContainsSkill(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(dir, e.Name(), "SKILL.md")); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// dirContainsCommandMd reports whether dir holds at least one command
+// definition. It delegates to the runtime loader (internal/command), so the
+// adoption gate and what /<name> actually loads can never diverge — including
+// arbitrarily nested namespace layouts like commands/a/b/c/commit.md.
+func dirContainsCommandMd(dir string) bool {
+	cmds, _ := command.Load(dir) // best-effort: a missing dir or malformed files load nothing
+	return len(cmds) > 0
+}
+
+func ManifestPath(kind string) string {
+	switch kind {
+	case "reasonix":
+		return NativeManifest
+	case "codex":
+		return CodexManifest
+	case "claude":
+		return ClaudeManifest
+	default:
+		return NativeManifest
+	}
+}
+
+func ManifestPaths() []string {
+	return []string{NativeManifest, CodexManifest, ClaudeManifest}
+}
+
+func applyClaudeCompatibility(root string, manifest *Manifest) ([]string, []CompatibilityIssue) {
 	appendRootClaudeInstructions(root, manifest)
-	return appendClaudeSettingsHooks(root, manifest)
+	return appendClaudeCompatibility(root, manifest)
 }
 
 func appendRootClaudeInstructions(root string, manifest *Manifest) {
@@ -375,70 +567,6 @@ func appendRootClaudeInstructions(root string, manifest *Manifest) {
 		Cwd:         ".",
 		Description: "Plugin CLAUDE.md startup context from " + manifest.Name,
 	})
-}
-
-func appendClaudeSettingsHooks(root string, manifest *Manifest) []string {
-	path := filepath.Join(root, claudeSettingsPath)
-	body, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var raw struct {
-		Hooks map[string][]struct {
-			Matcher string `json:"matcher"`
-			Match   string `json:"match"`
-			Hooks   []struct {
-				Type        string            `json:"type"`
-				Command     string            `json:"command"`
-				Description string            `json:"description"`
-				Timeout     int               `json:"timeout"`
-				Env         map[string]string `json:"env"`
-			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return []string{fmt.Sprintf("%s: %v", claudeSettingsPath, err)}
-	}
-	if len(raw.Hooks) == 0 {
-		return nil
-	}
-	if manifest.Hooks == nil {
-		manifest.Hooks = map[string][]Hook{}
-	}
-	var warnings []string
-	for event, blocks := range raw.Hooks {
-		event = strings.TrimSpace(event)
-		if event == "" {
-			continue
-		}
-		for _, block := range blocks {
-			match := strings.TrimSpace(block.Matcher)
-			if match == "" {
-				match = strings.TrimSpace(block.Match)
-			}
-			for _, item := range block.Hooks {
-				typ := strings.TrimSpace(item.Type)
-				command := strings.TrimSpace(item.Command)
-				if typ != "" && typ != "command" {
-					warnings = append(warnings, fmt.Sprintf("%s: skipped unsupported hook type %q for %s", claudeSettingsPath, typ, event))
-					continue
-				}
-				if command == "" {
-					continue
-				}
-				manifest.Hooks[event] = append(manifest.Hooks[event], Hook{
-					Match:        match,
-					Command:      command,
-					ShellCommand: true,
-					Description:  firstNonEmpty(strings.TrimSpace(item.Description), "Claude-compatible hook from "+claudeSettingsPath),
-					Timeout:      claudeTimeoutMillis(item.Timeout),
-					Cwd:          ".",
-					Env:          cloneHookEnv(item.Env),
-				})
-			}
-		}
-	}
-	return warnings
 }
 
 func claudeTimeoutMillis(seconds int) int {
@@ -471,7 +599,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 func readJSONFile(path string, v any) error {
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return err
 	}
@@ -553,6 +681,16 @@ func validateManifest(root string, m *Manifest) error {
 			return err
 		}
 	}
+	for _, p := range m.Commands {
+		if err := validateRelativePath(p); err != nil {
+			return err
+		}
+	}
+	for _, p := range m.Agents {
+		if err := validateRelativePath(p); err != nil {
+			return err
+		}
+	}
 	for event, hooks := range m.Hooks {
 		if strings.TrimSpace(event) == "" {
 			return fmt.Errorf("hook event is required")
@@ -609,8 +747,29 @@ func (p Package) SkillRoots() []string {
 	return out
 }
 
-func (p Package) CapabilityCounts() (skills, hooks, mcp int) {
+func (p Package) AgentRoots() []string {
+	var out []string
+	for _, rel := range p.Manifest.Agents {
+		out = append(out, filepath.Join(p.Root, filepath.FromSlash(rel)))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CommandRoots returns the absolute command directories this package
+// contributes to custom slash-command discovery.
+func (p Package) CommandRoots() []string {
+	var out []string
+	for _, rel := range p.Manifest.Commands {
+		out = append(out, filepath.Join(p.Root, filepath.FromSlash(rel)))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (p Package) CapabilityCounts() (skills, commands, hooks, mcp int) {
 	skills = len(p.skillRefs())
+	commands = len(p.commandRefs())
 	for _, hs := range p.Manifest.Hooks {
 		hooks += len(hs)
 	}
@@ -618,12 +777,38 @@ func (p Package) CapabilityCounts() (skills, hooks, mcp int) {
 	return
 }
 
+func (p Package) AgentCount() int { return len(p.agentRefs()) }
+
 func (p Package) Inventory() Inventory {
 	return Inventory{
 		Skills:     p.skillRefs(),
+		Agents:     p.agentRefs(),
+		Commands:   p.commandRefs(),
 		Hooks:      p.hookRefs(),
 		MCPServers: p.mcpServerRefs(),
 	}
+}
+
+// commandRefs loads the package's command dirs through the same loader the
+// runtime uses (internal/command), so names, namespacing, and frontmatter
+// semantics can never drift between the inventory and actual invocation.
+func (p Package) commandRefs() []CommandRef {
+	roots := p.CommandRoots()
+	if len(roots) == 0 {
+		return nil
+	}
+	cmds, _ := command.Load(roots...) // best-effort: malformed files are surfaced at load time elsewhere
+	out := make([]CommandRef, 0, len(cmds))
+	for _, c := range cmds {
+		out = append(out, CommandRef{
+			Name:        c.Name,
+			Description: c.Description,
+			ArgHint:     c.ArgHint,
+			Path:        c.Source,
+			Invocation:  "/" + c.Name,
+		})
+	}
+	return out
 }
 
 func (p Package) skillRefs() []SkillRef {
@@ -722,7 +907,7 @@ func parseSkillRef(path, stem string) (SkillRef, bool) {
 	if !IsValidName(stem) {
 		return SkillRef{}, false
 	}
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return SkillRef{}, false
 	}
@@ -785,10 +970,13 @@ func (p Package) mcpServerRefs() []MCPServerRef {
 	for _, name := range names {
 		server := p.Manifest.MCPServers[name]
 		out = append(out, MCPServerRef{
-			Name:      name,
-			Transport: pluginMCPTransport(server),
-			Command:   strings.TrimSpace(server.Command),
-			URL:       strings.TrimSpace(server.URL),
+			Name:        name,
+			DisplayName: firstNonEmpty(strings.TrimSpace(server.DisplayName), name),
+			Description: strings.TrimSpace(server.Description),
+			Transport:   pluginMCPTransport(server),
+			Command:     strings.TrimSpace(server.Command),
+			URL:         strings.TrimSpace(server.URL),
+			AutoStart:   server.AutoStart == nil || *server.AutoStart,
 		})
 	}
 	return out

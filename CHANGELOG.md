@@ -6,12 +6,94 @@ branch.
 
 ## Unreleased
 
+### Added
+
+- Added a **Remote SSH** module (VS Code Remote-SSH style): a user-global
+  `[remote]` host config, `reasonix remote` CLI (add/list/remove/import/test/
+  connect/status/forward/serve/fs) and `/remote` slash command, an SSH transport
+  with trust-on-first-use host-key verification, keepalive + exponential-backoff
+  reconnect, `-L`/`-R` port forwarding, and SFTP file access. `connect`
+  bootstraps a persistent `reasonix serve` on the remote host and tunnels its
+  loopback port so the full agent runs remotely. The desktop app adds a
+  **Settings -> Remote SSH** host manager, a remote file browser/editor, a
+  port-forwarding panel, and a status-bar connection chip. Linux/macOS remotes.
+- Added `reasonix serve --port-file/--token-file/--pid-file` so a supervised
+  headless serve can bind an ephemeral port and read its auth token from a file
+  (keeping it out of `ps`).
+- Added Claude Code-style searchable CLI pickers for models, providers, and
+  sessions, with arrow, Vim, and `Ctrl+P` / `Ctrl+N` navigation.
+- Added `-p` / `--print`, `text`, `json`, and `stream-json` output modes for
+  one-shot use and automation.
+- Added session-scoped `--allowed-tools`, repeatable `--add-dir`, Claude-compatible
+  permission modes, flexible `--resume [QUERY]`, and the `--copy` resume escape
+  hatch.
+- Added `/status` details for the active model, effort, cache, Git state,
+  background jobs, work profile, and provider balance where available.
+
 ### Changed
 
-- Agent runtime defaults now leave both executor and dedicated planner tool-call
-  rounds unlimited (`max_steps = 0`, `planner_max_steps = 0`). Step limits now
-  come from the user/global config only; project `reasonix.toml` does not
-  override them.
+- Automatic Plan Mode has been retired. Plan Mode is now always entered through
+  an explicit user choice, and the one-time config v5 upgrade removes legacy
+  `agent.auto_plan` and `agent.auto_plan_classifier` values so upgraded users
+  receive the same behavior as new users.
+- `Shift+Tab` now cycles CLI safe modes from Ask to Auto to Plan, while YOLO
+  remains an independent `Ctrl+Y` toggle.
+- Model, provider, resume, and approval menus now use consistent row selection;
+  slash completion, help, aliases, and dispatch share one command registry.
+- The full-screen CLI composer now uses theme-accented borders and a slim bar
+  cursor by default, grows within the available terminal height, scrolls long
+  drafts independently, and preserves selections across explicit image paste.
+- The persistent CLI footer now uses a responsive, theme-aware layout for
+  interaction state, model, effort, localized work mode, Git identity, cache,
+  context, compaction headroom, jobs, and balance. Narrow terminals move or
+  compact complete groups instead of clipping labels.
+- CLI clipboard actions now separate terminal-native text paste from explicit
+  image paste: `Ctrl+V` on macOS/Linux, `Alt+V` on Windows, or `/paste-image`.
+  Local transcript copy verifies the native clipboard write, while SSH uses a
+  clearly labelled OSC 52 fallback.
+- Runtime rebuilds after model, effort, or work-mode changes now preserve the
+  conversation, session permission overrides, additional directories, and
+  session lease ownership.
+- Agent execution now monitors host-observed Todo progress automatically. A
+  stalled current item receives a recovery nudge after 8 tool-call rounds with
+  no new completion, unique read, command, or mutation, and pauses with saved
+  work after 16. Exact repeats do not renew the progress lease; real work does.
+  Two-level task lists keep the single in_progress contract: the active
+  sub-step is the only current item while its phase stays pending, and the
+  phase becomes in_progress to sign off only after all of its sub-steps are
+  completed. A level-1 sub-step with no phase header above it is rejected.
+  Executor and planner rounds now use automatic progress management. Retired
+  `[agent].max_steps` and `planner_max_steps` keys remain parseable for upgrades,
+  but are ignored and removed by a one-time migration so stale hidden limits
+  cannot truncate new behavior. One-off CLI and unattended bot limits remain.
+
+### Fixed
+
+- Isolated the Windows desktop WebView2 shell from stale system proxies, so an
+  exited proxy client cannot leave the embedded UI hidden during startup. If
+  WebView2 still does not reach DOM-ready within 15 seconds, Reasonix now shows
+  the native window with a recovery prompt instead of appearing not to launch.
+  Remote Markdown images are fetched by the backend with Reasonix's proxy
+  configuration instead of bypassing that proxy through the isolated WebView.
+- Restored captured-mouse right-click text paste, made composer drag selection
+  copy through the verified native clipboard path, and kept non-Git footer
+  telemetry left-aligned without reserving an empty data band.
+- Restored stateful MCP behavior after the v1.17.13 regression: user-added
+  servers work without extra trust settings (including delivery-mode on-demand
+  calls), repository-provided servers use one exact launch confirmation, and
+  stdio tools reuse one persistent process so browser sessions survive across
+  calls without repeated startup latency. The former trust/reverify/catalog
+  management UI and CLI are removed.
+- Localized persistent-footer labels and displayed work-mode values in English,
+  Simplified Chinese, and Traditional Chinese, while keeping command arguments
+  stable.
+- Restored the `0.53` content boundary: model output, tool output, session
+  transcripts, recovery branches, and background-job artifacts retain their
+  original text instead of being rewritten by heuristic secret redaction.
+  Credential masking remains in key-entry summaries and explicit diagnostic or
+  session-cleanup paths. Transcript-bearing session/job sidecars are kept
+  private (`0600`, with private job directories), and the retired
+  `redact_tool_output` setting is removed with a one-time upgrade notice.
 
 ## [1.0.0] — 2026-06-03
 

@@ -14,6 +14,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 const (
@@ -296,7 +297,7 @@ func removePairingCode(code string) (PairingRequest, error) {
 
 func loadPairingFile(path string) (pairingFile, error) {
 	var store pairingFile
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return store, nil
 	}

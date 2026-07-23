@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/hook"
 	"reasonix/internal/memory"
@@ -141,11 +140,6 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "auto") || !has(items, "disabled") || !has(items, "high") || !has(items, "max") || has(items, "off") {
 		t.Errorf("/effort should offer auto/disabled/high/max; got %v", labelsOf(items))
 	}
-	// /auto-plan
-	items, _ = SlashArgItems("/auto-plan ", data)
-	if !has(items, "off") || !has(items, "on") || has(items, "ask") {
-		t.Errorf("/auto-plan should offer only off/on; got %v", labelsOf(items))
-	}
 	// /goal
 	items, _ = SlashArgItems("/goal ", data)
 	if !has(items, "--research") || !has(items, "--simple") || !has(items, "status") || !has(items, "clear") {
@@ -158,11 +152,6 @@ func TestSlashArgItems(t *testing.T) {
 	items, _ = SlashArgItems("/reasoning-language ", data)
 	if !has(items, "auto") || !has(items, "zh") || !has(items, "en") || has(items, "中文") {
 		t.Errorf("/reasoning-language should offer only auto/zh/en; got %v", labelsOf(items))
-	}
-	// /memory-v5
-	items, _ = SlashArgItems("/memory-v5 ", data)
-	if !has(items, "status") || !has(items, "off") || !has(items, "observe") || !has(items, "compact") || !has(items, "on") {
-		t.Errorf("/memory-v5 should offer status/off/observe/compact/on; got %v", labelsOf(items))
 	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
@@ -251,30 +240,6 @@ func TestManagementHooksTrustUsesWorkspaceRoot(t *testing.T) {
 	}
 	if !hook.IsTrusted(project, "") {
 		t.Fatal("/hooks trust did not trust the controller workspace root")
-	}
-}
-
-func TestManagementMemoryV5WritesUserConfig(t *testing.T) {
-	isolateControlConfigHome(t)
-	var notices []string
-	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
-			notices = append(notices, e.Text)
-		}
-	})})
-
-	if !c.managementNotice("/memory-v5 off") {
-		t.Fatal("/memory-v5 was not handled")
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.MemoryCompilerEnabled() {
-		t.Fatal("memory_compiler.enabled = true, want false")
-	}
-	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
-		t.Fatalf("memory_compiler.verbosity = %q, want observe", got)
-	}
-	if !strings.Contains(strings.Join(notices, "\n"), "memory-v5 set to off") {
-		t.Fatalf("missing memory-v5 notice: %v", notices)
 	}
 }
 

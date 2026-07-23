@@ -9,17 +9,14 @@
   &nbsp;·&nbsp;
   <a href="./docs/GUIDE.zh-CN.md">指南</a>
   &nbsp;·&nbsp;
-  <a href="./docs/SPEC.md">规格</a>
+  <a href="./docs/ACP.zh-CN.md">ACP</a>
+  &nbsp;·&nbsp;
+  <a href="./docs/SPEC.zh-CN.md">规格</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
   &nbsp;·&nbsp;
   <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
-
-> [!IMPORTANT]
-> **Reasonix 1.0 是用 Go 从零重写的版本** —— 本分支(`main-v2`)已是新的默认分支,后续开发都在这里。
-> 早期的 `0.x` TypeScript 版本转为 **legacy**,保留在 [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) 分支(仅维护)。
-> 详见**[迁移指南](./docs/MIGRATING.md)**。`npm i -g reasonix` 仍是安装命令——`1.0.0`+ 装的是 Go 二进制,`0.x` 是 legacy TS 版。
 
 <p align="center">
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
@@ -58,6 +55,13 @@
 
 ## 安装
 
+选择适合你的使用路径。CLI/TUI、桌面端和 VS Code 扩展都使用同一套本地
+Reasonix 引擎。
+
+### 路径 A：CLI / TUI
+
+任意支持的平台都可以通过 npm 安装原生二进制；macOS 也可以使用 Homebrew：
+
 ```sh
 npm i -g reasonix                  # 任意系统;自动拉取对应平台的原生二进制
 brew install esengine/reasonix/reasonix   # macOS
@@ -66,109 +70,103 @@ brew install esengine/reasonix/reasonix   # macOS
 预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个
 [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases)。
 
-### 代码签名
+### 路径 B：桌面端
 
-Windows 构建使用 [SignPath 基金会](https://signpath.org/) 提供的免费代码签名证书,
-通过 [SignPath.io](https://signpath.io/) 完成签名。
+前往[官方下载页](https://reasonix.io/?download=desktop#start)获取最新桌面版本。
 
-### 从源码构建
+| 平台 | 安装包 | 架构 |
+| --- | --- | --- |
+| macOS | 通用 `.dmg` 或 `.zip` | Apple Silicon / Intel |
+| Windows | 安装器 `.exe` 或便携 `.zip` | x64 / ARM64 |
+| Linux | `.deb` 或 `.tar.gz` | x64 |
+
+Windows 安装器通过 [SignPath.io](https://signpath.io/) 完成代码签名，证书由
+[SignPath 基金会](https://signpath.org/) 免费提供。
+
+### 路径 C：VS Code 扩展
+
+请先完成路径 A。扩展不内置 CLI，而是启动本机的 `reasonix acp` 后端，
+并提供原生聊天、编辑器上下文、工具调用审批、模型选择和工作区会话。
+
+- **VS Code：** [从 Visual Studio Marketplace 安装](https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent)
+- **VSCodium / Eclipse Theia：** [从 Open VSX Registry 安装](https://open-vsx.org/extension/SivanLiu/reasonix-agent)
+- **扩展 ID：** `SivanLiu.reasonix-agent` · [源码与使用说明](https://github.com/SivanCola/reasonix-vscode)
+
+### 路径 D：从源码构建
 
 ```sh
+git clone https://github.com/esengine/DeepSeek-Reasonix.git
+cd DeepSeek-Reasonix
 make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
 ```
 
 ## 快速开始
 
+### CLI / TUI
+
+以下命令仅适用于通过路径 A 安装的 CLI/TUI：
+
 ```sh
-reasonix setup                      # 配置向导 → ./reasonix.toml
-export DEEPSEEK_API_KEY=sk-...      # 也可以让 setup 保存到 Reasonix 全局 .env
-reasonix                            # 然后在会话里运行 /init 生成 AGENTS.md（项目记忆）
+reasonix setup                      # 配置 provider 和模型
+reasonix                            # 启动交互式会话
 reasonix run "把 main.go 里的 TODO 实现掉"
-reasonix run --model deepseek-pro "给这个函数补单元测试"
-echo "解释这段代码" | reasonix run
 ```
 
-## 配置
+需要项目指令时，可在交互式会话中运行 `/init`。
 
-一个最小的 `reasonix.toml`——一个 provider 加一个默认模型——就够跑起来:
+### 桌面端
 
-```toml
-default_model = "deepseek-flash"
+从[官方下载页](https://reasonix.io/?download=desktop#start)下载对应系统的安装包，
+安装并启动 Reasonix，然后在应用内配置 provider 和模型即可使用。桌面端无需执行
+上面的 CLI 命令。
 
-[[providers]]
-name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
-model       = "deepseek-v4-flash"
-api_key_env = "DEEPSEEK_API_KEY"
-```
-
-优先级为 **flag > `./reasonix.toml` > 用户配置文件 > 内置默认值**；从
-**Reasonix v1.8.1** 开始，用户配置位于 macOS/Linux 的 `~/.reasonix/config.toml`，
-Windows 为 `%AppData%\reasonix\config.toml`。迁移细节见
-**[配置路径](./docs/CONFIG_PATHS.zh-CN.md)**，其中也说明了全局 `config.toml`
-和 `.env` 的完整结构。Provider 通过 `api_key_env` 命名密钥，真实密钥值保存在
-CLI 与桌面端共用的 Reasonix 全局 `<Reasonix home>/.env`；项目 `.env` 不再作为
-provider key 的运行时 fallback，但仍会作为当前 workspace 范围内的 MCP/plugin 非 provider `${VAR}` 展开来源，不导入 Reasonix 控制变量。权限、沙盒、插件(MCP)、
-斜杠命令、`@` 引用与双模型设置,全部在 **[指南](./docs/GUIDE.zh-CN.md)** 里。
+CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**、
+**[指南](./docs/GUIDE.zh-CN.md)** 和
+**[配置路径](./docs/CONFIG_PATHS.zh-CN.md)**。
 
 ## 文档
 
-- **[指南](./docs/GUIDE.zh-CN.md)** —— 配置、权限与沙盒、插件(MCP)、斜杠命令、
-  `@` 引用、双模型协同。
-- **[机器人使用指南](./docs/BOT_GUIDE.zh-CN.md)** —— 桌面端连接飞书、Lark、微信
-  Bot，以及 IM 里的审批、YOLO 和命令交互。
-- **[规格](./docs/SPEC.md)** —— 工程契约:架构、registry、数据类型与路线图。
-- **[任务合约与暂停策略](./docs/TASK_CONTRACT.zh-CN.md)** —— 用背景、输出边界、约束和暂停条件组织复杂请求。
-- **[工具合约](./docs/TOOL_CONTRACT.zh-CN.md)** —— provider 可见的内置工具名、
-  read-only 标记和 schema 快照保护。
-- **[从 0.x 迁移](./docs/MIGRATING.md)** —— 从 legacy TypeScript 版本迁到 1.0 Go 重写版。
-- **[Checkpoints 与 rewind](./docs/CHECKPOINTS.md)** —— 基于快照的编辑安全网
-  (Esc-Esc / `/rewind`)。
-
-<br/>
+- **开始使用：** [指南](./docs/GUIDE.zh-CN.md) ·
+  [CLI 命令参考](./docs/CLI.zh-CN.md) · [配置路径](./docs/CONFIG_PATHS.zh-CN.md) ·
+  [ACP 编辑器接入](./docs/ACP.zh-CN.md)
+- **功能与排障：** [子智能体 Profile](./docs/SUBAGENT_PROFILES.zh-CN.md) ·
+  [能力诊断](./docs/CAPABILITY_DIAGNOSTICS.zh-CN.md) ·
+  [恢复与安全模式](./docs/RECOVERY.zh-CN.md) ·
+  [机器人使用指南](./docs/BOT_GUIDE.zh-CN.md) ·
+  [Checkpoints 与 rewind](./docs/CHECKPOINTS.zh-CN.md)
+- **工程与迁移：** [规格](./docs/SPEC.zh-CN.md) ·
+  [任务合约与暂停策略](./docs/TASK_CONTRACT.zh-CN.md) ·
+  [工具合约](./docs/TOOL_CONTRACT.zh-CN.md) ·
+  [从 0.x 迁移](./docs/MIGRATING.zh-CN.md)
 
 ## Star 趋势
 
 <a href="https://www.star-history.com/?repos=esengine%2FDeepSeek-Reasonix&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/star-history/assets/star-history/star-history-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/star-history/assets/star-history/star-history-light.svg" />
+   <img alt="Star History Chart" src="https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/star-history/assets/star-history/star-history-light.svg" />
  </picture>
 </a>
 
 <br/>
 
-## 支持本项目
-
-如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。捐助不会换来 feature 优先级，也不会影响 issue 的处理顺序——就是「谢谢」。
-
-- **国内** — 微信支付（扫下方二维码）
-- **海外** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
-
-<p align="center">
-  <img src=".github/sponsor/wechat-pay.jpg" alt="微信支付收款码" width="240"/>
-</p>
-
-<br/>
-
 ## 致谢
 
-下面这些朋友的工作塑造了 Reasonix 今天的样子 —— 综合 commit 数和代码量两个维度。
-**按字母顺序排列，排名不分先后。** 完整贡献者列表在
-[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors)。
+下面这些朋友的工作塑造了 Reasonix 今天的样子 —— 当前按 commit 数统计的前 20 名贡献者。
+完整贡献者列表在
+[GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors?all=1)。
 
-- [**ctharvey**](https://github.com/ctharvey)
-- [**dimasd-angga**](https://github.com/dimasd-angga)（Dimas D. Angga）
-- [**Evan-Pycraft**](https://github.com/Evan-Pycraft)
-- [**ForeverYoungPp**](https://github.com/ForeverYoungPp)
-- [**GTC2080**](https://github.com/GTC2080)（TaoMu）
-- [**kabaka9527**](https://github.com/kabaka9527)
-- [**lisniuse**](https://github.com/lisniuse)（Richie）
-- [**wade19990814-hue**](https://github.com/wade19990814-hue)
-- [**wviana**](https://github.com/wviana)（Wesley Viana）
+<!-- reasonix-top-contributors:start -->
+| Contributor | Contributor | Contributor | Contributor |
+| --- | --- | --- | --- |
+| [**SivanCola**](https://github.com/SivanCola) | [**esengine**](https://github.com/esengine) | [**ttmouse**](https://github.com/ttmouse) | [**lifu963**](https://github.com/lifu963) |
+| **reasonix**（anonymous） | [**HUQIANTAO**](https://github.com/HUQIANTAO) | [**GTC2080**](https://github.com/GTC2080) | [**light-front-theory**](https://github.com/light-front-theory) |
+| **merge-order-check**（anonymous） | [**Li-Charles-One**](https://github.com/Li-Charles-One) | [**eghrhegpe**](https://github.com/eghrhegpe) | **wufengfan**（anonymous） |
+| [**CVEngineer66**](https://github.com/CVEngineer66) | [**dependabot\[bot\]**](https://github.com/apps/dependabot) | [**lanshi17**](https://github.com/lanshi17) | [**SuMuxi66**](https://github.com/SuMuxi66) |
+| [**CnsMaple**](https://github.com/CnsMaple) | [**cyq1017**](https://github.com/cyq1017) | [**JesonChou**](https://github.com/JesonChou) | [**XTLine**](https://github.com/XTLine) |
+<!-- reasonix-top-contributors:end -->
 
 另外特别感谢 [**Bernardxu123**](https://github.com/Bernardxu123) 设计的项目 logo，
 以及 [AIGC Link](https://xhslink.com/m/80ngts127cA) 在小红书上的推广。
@@ -187,4 +185,18 @@ provider key 的运行时 fallback，但仍会作为当前 workspace 范围内�
   <sub>MIT —— 见 <a href="./LICENSE">LICENSE</a></sub>
   <br/>
   <sub>由 <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a> 社区共建</sub>
+</p>
+
+---
+
+<p align="center"><sub><strong>支持本项目</strong></sub></p>
+
+如果 Reasonix 帮你省了时间或 token，欢迎请杯咖啡。捐助不会换来 feature
+优先级，也不会影响 issue 的处理顺序——就是「谢谢」。
+
+- **国内** — 微信支付（扫下方二维码）
+- **海外** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
+
+<p align="center">
+  <img src=".github/sponsor/wechat-pay.jpg" alt="微信支付收款码" width="180"/>
 </p>

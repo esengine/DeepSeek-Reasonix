@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
+
+	"reasonix/internal/tool"
 )
 
 // maxHTTPBody caps how much of a JSON / SSE response body we read, so a
@@ -27,10 +30,12 @@ const maxHTTPBody = 16 << 20 // 16 MiB
 // different transports and stay concurrent. Correctness over latency for P1 —
 // it also keeps nextID and the session id race-free.
 type httpTransport struct {
-	name    string
-	url     string
-	headers map[string]string
-	client  *http.Client
+	name     string
+	url      string
+	headers  map[string]string
+	client   *http.Client
+	roots    []mcpRoot
+	progress progressRouter
 
 	mu      sync.Mutex
 	nextID  int
@@ -41,12 +46,45 @@ func newHTTPTransport(s Spec) (*httpTransport, error) {
 	if s.URL == "" {
 		return nil, fmt.Errorf("http plugin %q: url is required", s.Name)
 	}
+	headers := make(map[string]string, len(s.Headers))
+	for key, value := range s.Headers {
+		headers[key] = value
+	}
 	return &httpTransport{
 		name:    s.Name,
 		url:     s.URL,
-		headers: s.Headers,
-		client:  &http.Client{},
+		headers: headers,
+		roots:   mcpRoots(s.WorkspaceRoot),
+		client: &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) == 0 || sameHTTPOrigin(via[0].URL, req.URL) {
+				return nil
+			}
+			// Do not send configured credentials to another origin. Returning
+			// ErrUseLastResponse exposes the 3xx to the normal status handling
+			// without issuing the redirected request.
+			return http.ErrUseLastResponse
+		}},
 	}, nil
+}
+
+func sameHTTPOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil || !strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Hostname(), b.Hostname()) {
+		return false
+	}
+	effectivePort := func(u *url.URL) string {
+		if port := u.Port(); port != "" {
+			return port
+		}
+		switch strings.ToLower(u.Scheme) {
+		case "http":
+			return "80"
+		case "https":
+			return "443"
+		default:
+			return ""
+		}
+	}
+	return effectivePort(a) == effectivePort(b)
 }
 
 func (t *httpTransport) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -81,7 +119,7 @@ func (t *httpTransport) call(ctx context.Context, method string, params any) (js
 	}
 
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
-		return t.readSSEResponse(resp.Body, id)
+		return t.readSSEResponse(ctx, resp.Body, id)
 	}
 	return decodeRPCResult(resp.Body, t.name)
 }
@@ -109,6 +147,10 @@ func (t *httpTransport) notify(ctx context.Context, method string, params any) e
 
 func (t *httpTransport) close() {
 	t.client.CloseIdleConnections()
+}
+
+func (t *httpTransport) registerProgress(token string, sink tool.ProgressFunc) func() {
+	return t.progress.registerProgress(token, sink)
 }
 
 // do POSTs one JSON-RPC body with the standard MCP headers, the configured
@@ -162,7 +204,7 @@ func isHTTPSessionExpiredResponse(status int, body []byte) bool {
 // skipping server notifications and any other-id messages. Per the SSE spec,
 // consecutive data: lines within one event are joined with "\n" and an event is
 // dispatched on the blank line that terminates it.
-func (t *httpTransport) readSSEResponse(body io.Reader, id int) (json.RawMessage, error) {
+func (t *httpTransport) readSSEResponse(ctx context.Context, body io.Reader, id int) (json.RawMessage, error) {
 	sc := bufio.NewScanner(io.LimitReader(body, maxHTTPBody))
 	sc.Buffer(make([]byte, 0, 64*1024), maxHTTPBody)
 
@@ -175,9 +217,25 @@ func (t *httpTransport) readSSEResponse(body io.Reader, id int) (json.RawMessage
 		}
 		payload := data.String()
 		data.Reset()
+		message, ok := decodeInboundMessage([]byte(payload))
+		if !ok {
+			return nil, false, nil // not a JSON-RPC message we care about
+		}
+		if message.Method != "" {
+			if isNotificationID(message.ID) {
+				if message.Method == "notifications/progress" {
+					t.progress.dispatchProgress(message.Params)
+				}
+				return nil, false, nil
+			}
+			if err := t.replyServerRequest(ctx, message); err != nil {
+				return nil, false, err
+			}
+			return nil, false, nil
+		}
 		var resp rpcResponse
 		if err := json.Unmarshal([]byte(payload), &resp); err != nil {
-			return nil, false, nil // not a JSON-RPC message we care about
+			return nil, false, nil
 		}
 		if resp.ID != id {
 			return nil, false, nil // a notification or another call's response
@@ -211,6 +269,27 @@ func (t *httpTransport) readSSEResponse(body io.Reader, id int) (json.RawMessage
 		return res, err
 	}
 	return nil, fmt.Errorf("plugin %q: SSE stream ended without a response to id %d", t.name, id)
+}
+
+// replyServerRequest sends a JSON-RPC response on a separate Streamable HTTP
+// POST while the original response stream remains open. call holds t.mu here,
+// so do can safely read the current session id without taking another lock.
+func (t *httpTransport) replyServerRequest(ctx context.Context, message inboundMessage) error {
+	body, err := json.Marshal(serverRequestReply(message.ID, message.Method, t.roots))
+	if err != nil {
+		return err
+	}
+	resp, err := t.do(ctx, body)
+	if err != nil {
+		return fmt.Errorf("plugin %q: reply to %s: %w", t.name, message.Method, err)
+	}
+	defer resp.Body.Close()
+	t.captureSession(resp)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxHTTPBody))
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("plugin %q: reply to %s: http %d", t.name, message.Method, resp.StatusCode)
+	}
+	return nil
 }
 
 // decodeRPCResult parses a single application/json JSON-RPC response body.

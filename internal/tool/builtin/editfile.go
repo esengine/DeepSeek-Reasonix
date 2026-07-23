@@ -17,6 +17,7 @@ func init() { tool.RegisterBuiltin(editFile{}) }
 type editFile struct {
 	roots   []string
 	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -48,7 +49,7 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("old_string is required")
 	}
 	p.Path = resolveIn(e.workDir, p.Path)
-	if err := confineWrite(e.roots, e.guard, p.Path); err != nil {
+	if err := confineWrite(ctx, e.roots, e.guard, e.managed, p.Path); err != nil {
 		return "", err
 	}
 
@@ -70,8 +71,9 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if err := writeFileEncoded(p.Path, applied.updated, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
+	summary := fmt.Sprintf("edited %s", p.Path)
 	if applied.fuzzy {
-		return fmt.Sprintf("edited %s (fuzzy match)", p.Path), nil
+		summary += " (fuzzy match)"
 	}
-	return fmt.Sprintf("edited %s", p.Path), nil
+	return withActualPostWriteReceipts(summary, []editReplacementReceipt{applied.receipt}), nil
 }

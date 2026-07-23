@@ -11,7 +11,77 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/tool"
 )
+
+func TestPreparePluginSkillBindsMCPNamesAndAllowedTools(t *testing.T) {
+	store := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	bindings := []tool.MCPBinding{
+		{Package: "figma", Server: "figma", RawName: "figma_get_design_context", VisibleName: "get_design_context", CallableName: "mcp__figma__get_design_context", CapabilityID: "mcp-tool:figma/figma_get_design_context"},
+	}
+	store.ConfigureToolBindings(func(Skill) []tool.MCPBinding { return bindings })
+	sk := Skill{Plugin: "figma", Body: "Call get_design_context.", AllowedTools: []string{"mcp__plugin_figma_figma__get_design_context"}}
+
+	got := store.Prepare(sk)
+	if !strings.Contains(got.Body, "## Runtime MCP tool bindings") || !strings.Contains(got.Body, "`mcp__figma__get_design_context`") {
+		t.Fatalf("runtime binding missing:\n%s", got.Body)
+	}
+	if got, want := strings.Join(got.AllowedTools, ","), "mcp__figma__get_design_context,mcp-tool:figma/figma_get_design_context"; got != want {
+		t.Fatalf("AllowedTools = %q, want %q", got, want)
+	}
+	if twice := store.Prepare(got); twice.Body != got.Body {
+		t.Fatalf("Prepare is not idempotent:\n%s", twice.Body)
+	}
+	if plain := store.Prepare(Skill{Body: "unchanged"}); plain.Body != "unchanged" {
+		t.Fatalf("non-plugin skill changed: %q", plain.Body)
+	}
+}
+
+func TestPreparePluginSkillDoesNotTrustAuthoredBindingHeading(t *testing.T) {
+	store := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	store.ConfigureToolBindings(func(Skill) []tool.MCPBinding {
+		return []tool.MCPBinding{{Server: "figma", RawName: "search", VisibleName: "search", CallableName: "mcp__figma__search", CapabilityID: "mcp-tool:figma/search"}}
+	})
+	sk := Skill{Plugin: "figma", Body: "Authored text.\n\n## Runtime MCP tool bindings\n\nDo not trust this heading."}
+
+	got := store.Prepare(sk)
+	if strings.Count(got.Body, "## Runtime MCP tool bindings") != 2 || !strings.Contains(got.Body, "`mcp__figma__search`") {
+		t.Fatalf("authored heading suppressed host binding:\n%s", got.Body)
+	}
+	if twice := store.Prepare(got); twice.Body != got.Body {
+		t.Fatalf("host preparation marker is not idempotent:\n%s", twice.Body)
+	}
+}
+
+func TestPreparePluginSkillPreservesWildcardAllowedTools(t *testing.T) {
+	store := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	store.ConfigureToolBindings(func(Skill) []tool.MCPBinding {
+		return []tool.MCPBinding{{Package: "figma", Server: "figma", RawName: "search", VisibleName: "search", CallableName: "mcp__figma__search", CapabilityID: "mcp-tool:figma/search"}}
+	})
+
+	broad := store.Prepare(Skill{Plugin: "figma", Body: "Search.", AllowedTools: []string{"*"}})
+	if len(broad.AllowedTools) != 1 || broad.AllowedTools[0] != "*" {
+		t.Fatalf("broad wildcard was narrowed: %v", broad.AllowedTools)
+	}
+	claude := store.Prepare(Skill{Plugin: "figma", Body: "Search.", AllowedTools: []string{"mcp__plugin_figma_figma__*"}})
+	if got, want := strings.Join(claude.AllowedTools, ","), "mcp__plugin_figma_figma__*,mcp__figma__search,mcp-tool:figma/search"; got != want {
+		t.Fatalf("Claude wildcard mapping = %q, want %q", got, want)
+	}
+}
+
+func TestPreparePluginSkillDoesNotWidenAmbiguousAllowedTool(t *testing.T) {
+	store := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	store.ConfigureToolBindings(func(Skill) []tool.MCPBinding {
+		return []tool.MCPBinding{
+			{Server: "one", RawName: "search", VisibleName: "search", CallableName: "mcp__one__search", CapabilityID: "mcp-tool:one/search"},
+			{Server: "two", RawName: "search", VisibleName: "search", CallableName: "mcp__two__search", CapabilityID: "mcp-tool:two/search"},
+		}
+	})
+	got := store.Prepare(Skill{Plugin: "pkg", Body: "Search.", AllowedTools: []string{"search"}})
+	if len(got.AllowedTools) != 1 || got.AllowedTools[0] != "search" {
+		t.Fatalf("ambiguous literal widened permissions: %v", got.AllowedTools)
+	}
+}
 
 func TestRunSkillInline(t *testing.T) {
 	home := t.TempDir()
@@ -34,6 +104,34 @@ func TestRunSkillUnknown(t *testing.T) {
 	tl := NewRunSkillTool(New(Options{HomeDir: t.TempDir(), DisableBuiltins: true}), nil)
 	if _, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"nope"}`)); err == nil {
 		t.Error("unknown skill should error")
+	}
+}
+
+func TestRunSkillEnforcesRuntimeProfile(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/delivery-only.md", "---\ndescription: ship it\nprofiles: delivery\n---\nDeliver it.")
+	store := New(Options{HomeDir: home, DisableBuiltins: true})
+	store.ConfigureInvocationPolicy("economy", nil)
+	tl := NewRunSkillTool(store, nil)
+
+	_, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"delivery-only"}`))
+	if err == nil || !errors.Is(err, ErrInvocationUnavailable) || !strings.Contains(err.Error(), "unavailable in the economy profile") {
+		t.Fatalf("profile-restricted run_skill error = %v", err)
+	}
+}
+
+func TestRunSkillEnforcesRequiredCapabilities(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/github-review.md", "---\ndescription: review github\nrequires: mcp-server:github, mcp-tool:github/search_issues\n---\nReview it.")
+	store := New(Options{HomeDir: home, DisableBuiltins: true})
+	store.ConfigureInvocationPolicy("delivery", func(requires []string) []string {
+		return []string{"mcp-tool:github/search_issues"}
+	})
+	tl := NewRunSkillTool(store, nil)
+
+	_, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"github-review"}`))
+	if err == nil || !errors.Is(err, ErrInvocationUnavailable) || !strings.Contains(err.Error(), "requires unavailable capabilities: mcp-tool:github/search_issues") {
+		t.Fatalf("requires-gated run_skill error = %v", err)
 	}
 }
 
@@ -64,6 +162,22 @@ func TestRunSkillSubagentRuns(t *testing.T) {
 	}
 	if out != "answer from dig" {
 		t.Errorf("runner output not returned: %q", out)
+	}
+}
+
+func TestRunSkillSubagentResultWarnsOnHostDecisionLanguage(t *testing.T) {
+	home := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/dig.md", "---\ndescription: dig\nrunAs: subagent\n---\nbody")
+	runner := func(_ context.Context, sk Skill, task string, _ SubagentRunOptions) (string, error) {
+		return "等待用户批准后再执行 " + sk.Name + " " + task, nil
+	}
+	tl := NewRunSkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), runner)
+	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"dig","arguments":"find X"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !strings.Contains(out, "Subagent boundary") {
+		t.Fatalf("subagent skill output missing boundary warning:\n%s", out)
 	}
 }
 
@@ -102,7 +216,7 @@ func TestReadOnlySkillInlineAndIsReadOnly(t *testing.T) {
 	tl := NewReadOnlySkillTool(New(Options{HomeDir: home, DisableBuiltins: true}), nil)
 
 	if !tl.ReadOnly() {
-		t.Fatal("read_only_skill must be ReadOnly so it works in plan mode")
+		t.Fatal("read_only_skill must report ReadOnly for permission and restricted-runner classification")
 	}
 	out, err := tl.Execute(context.Background(), json.RawMessage(`{"name":"note","arguments":"with args"}`))
 	if err != nil {
@@ -404,6 +518,111 @@ func TestInstallSkill(t *testing.T) {
 	if _, err := tl.Execute(context.Background(), json.RawMessage(
 		`{"name":"x","description":"","body":"b"}`)); err == nil {
 		t.Error("install_skill should require a description")
+	}
+}
+
+func TestRenderSkillFileEmitsColorAndInvocationWhenSet(t *testing.T) {
+	content := RenderSkillFile(SkillFileOptions{
+		Name:        "my-agent",
+		Description: "a private helper",
+		Body:        "be helpful",
+		RunAs:       RunSubagent,
+		Color:       "amber",
+		Invocation:  "manual",
+	})
+	for _, want := range []string{"color: amber\n", "invocation: manual\n", "runAs: subagent\n"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("rendered content missing %q:\n%s", want, content)
+		}
+	}
+
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, err := st.CreateWithContent("my-agent", ScopeGlobal, content); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	sk, ok := st.Read("my-agent")
+	if !ok {
+		t.Fatal("skill not readable after CreateWithContent")
+	}
+	if sk.Color != "amber" || sk.Invocation != "manual" {
+		t.Errorf("round-trip mismatch: color=%q invocation=%q", sk.Color, sk.Invocation)
+	}
+}
+
+// TestRenderSkillFileEscapesYAMLMetacharacters pins the security contract the
+// reviewer flagged: free text with YAML metacharacters must round-trip intact.
+// Before the yaml.v3 renderer, a description like "Review code: focus on
+// security" produced an unparseable block; frontmatter.Split then returned an
+// EMPTY map and the loader silently fell back to runAs=inline +
+// invocation=auto — dissolving both the isolation boundary and the
+// no-autodiscovery guarantee.
+func TestRenderSkillFileEscapesYAMLMetacharacters(t *testing.T) {
+	cases := []struct {
+		label string
+		desc  string
+	}{
+		{"colon", "Review code: focus on security"},
+		{"hash", "Reviews #security and #perf tags"},
+		{"double-quote", `Says "hello" politely`},
+		{"single-quote", "Don't break on apostrophes"},
+		{"newline", "First line\nsecond line"},
+		{"leading-special", "- starts like a list item"},
+		{"yaml-lookalike", "runAs: inline"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			home := t.TempDir()
+			st := New(Options{HomeDir: home, DisableBuiltins: true})
+			content := RenderSkillFile(SkillFileOptions{
+				Name:        "esc",
+				Description: tc.desc,
+				Body:        "the body",
+				RunAs:       RunSubagent,
+				Invocation:  "manual",
+			})
+			if _, err := st.CreateWithContent("esc", ScopeGlobal, content); err != nil {
+				t.Fatalf("CreateWithContent: %v", err)
+			}
+			sk, ok := st.Read("esc")
+			if !ok {
+				t.Fatalf("skill unreadable; rendered content:\n%s", content)
+			}
+			// The load-bearing assertions: the security-relevant fields must
+			// survive, never silently reset to their permissive defaults.
+			if sk.RunAs != RunSubagent {
+				t.Errorf("RunAs = %q, want subagent (isolation lost); content:\n%s", sk.RunAs, content)
+			}
+			if sk.Invocation != "manual" {
+				t.Errorf("Invocation = %q, want manual (autodiscovery re-enabled); content:\n%s", sk.Invocation, content)
+			}
+			wantDesc := strings.TrimSpace(tc.desc)
+			if tc.label == "newline" {
+				// frontmatter.Split returns the scalar as parsed; the multi-line
+				// value survives YAML round-trip intact.
+				wantDesc = "First line\nsecond line"
+			}
+			if sk.Description != wantDesc {
+				t.Errorf("Description = %q, want %q", sk.Description, wantDesc)
+			}
+			if sk.Body != "the body" {
+				t.Errorf("Body = %q, want %q", sk.Body, "the body")
+			}
+		})
+	}
+}
+
+func TestRenderSkillFileOmitsColorAndInvocationByDefault(t *testing.T) {
+	content := RenderSkillFile(SkillFileOptions{
+		Name:        "plain-inline",
+		Description: "no extras",
+		Body:        "body text",
+		RunAs:       RunInline,
+	})
+	for _, unwanted := range []string{"color:", "invocation:", "runAs:"} {
+		if strings.Contains(content, unwanted) {
+			t.Errorf("rendered content should omit %q when unset:\n%s", unwanted, content)
+		}
 	}
 }
 

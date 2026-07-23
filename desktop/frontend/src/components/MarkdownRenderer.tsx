@@ -8,6 +8,7 @@ import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
 import { normalizeMath } from "./mathNormalize";
 import { openExternal } from "../lib/bridge";
+import { markdownImageSource } from "../lib/markdownImage";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -126,6 +127,15 @@ function createComponents(plainStatusBlocks: boolean): Components {
       >
         {children}
       </a>
+    ),
+    img: ({ src, alt, title }) => (
+      <img
+        src={markdownImageSource(src)}
+        alt={alt ?? ""}
+        title={title}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+      />
     ),
   };
 }

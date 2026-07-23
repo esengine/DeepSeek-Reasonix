@@ -153,3 +153,22 @@ func TestRecoveryGCFirstSweepWaitsForTabRestore(t *testing.T) {
 	// markTabsRestored is idempotent (restore + recover paths may both fire).
 	app.markTabsRestored()
 }
+
+func TestRecoveryGCSkipsSweepInSafeMode(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_SAFE_MODE", "1")
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	_, branchPath := forkCoveredRecoveryBranch(t, dir, "safe")
+
+	app := &App{tabs: map[string]*WorkspaceTab{}, detachedSessions: map[string]*WorkspaceTab{}}
+	if got := app.reclaimRecoveryBranchesIn([]string{dir}, time.Now().Add(48*time.Hour)); got != 0 {
+		t.Fatalf("safe mode reclaimed = %d, want 0", got)
+	}
+	if _, err := os.Stat(branchPath); err != nil {
+		t.Fatalf("safe mode must leave recovery branches untouched: %v", err)
+	}
+}

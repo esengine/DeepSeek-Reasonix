@@ -88,3 +88,50 @@ func TestDeleteSessionKeepsDuplicateLiveSessionHeldByOtherRuntime(t *testing.T) 
 		t.Fatalf("live session must stay intact, got %q err=%v", string(got), readErr)
 	}
 }
+
+// TestEnsureBlankTabSkipsIndexedTopicHeldByForeignRuntime reproduces #6028:
+// a blank topic whose session lease is still held by another runtime (a
+// lingering background/tray-hidden instance, or a leftover from a crash) must
+// not be handed back to a "new conversation" click. Reusing it would collide
+// the new tab with that holder, so every lease-gated switch (effort, model,
+// token mode) would fail as "open in another Reasonix window" no matter how
+// many times the user retries — because it keeps re-picking the same stuck
+// topic instead of ever landing on a fresh one.
+func TestEnsureBlankTabSkipsIndexedTopicHeldByForeignRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	stuckTopic, err := app.CreateTopic("global", "", "")
+	if err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	globalRoot := globalWorkspaceRoot()
+	dir := desktopSessionDir(globalRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	stubPath := filepath.Join(dir, "stuck-blank-stub.jsonl")
+	if err := os.WriteFile(stubPath, nil, 0o644); err != nil {
+		t.Fatalf("write empty stub: %v", err)
+	}
+	now := time.Now()
+	if err := agent.SaveBranchMetaPreserveUpdated(stubPath, agent.BranchMeta{
+		CreatedAt:     now.Add(-time.Minute),
+		UpdatedAt:     now,
+		Scope:         "global",
+		WorkspaceRoot: globalRoot,
+		TopicID:       stuckTopic.ID,
+		TopicTitle:    defaultTopicTitle,
+	}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+	simulateForeignSessionLeaseHolder(t, stubPath)
+
+	meta, err := app.EnsureBlankTab("global", "")
+	if err != nil {
+		t.Fatalf("EnsureBlankTab: %v", err)
+	}
+	if meta.TopicID == stuckTopic.ID {
+		t.Fatalf("EnsureBlankTab reused topic %q even though its session is held by another runtime", stuckTopic.ID)
+	}
+}

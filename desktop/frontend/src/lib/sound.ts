@@ -156,3 +156,56 @@ export function playAttentionChime(): void {
     void playWav(pref, 0.25, playSynthAttention);
   }
 }
+
+export type AttentionChimeEvent = {
+  kind?: string;
+  tabId?: string;
+  approval?: { id?: string };
+  ask?: { id?: string };
+};
+
+export function attentionChimeEventKey(event: AttentionChimeEvent): string | undefined {
+  if (event.kind === "approval_request" && event.approval?.id) return `approval:${event.tabId ?? ""}:${event.approval.id}`;
+  if (event.kind === "ask_request" && event.ask?.id) return `ask:${event.tabId ?? ""}:${event.ask.id}`;
+  return undefined;
+}
+
+// attentionChimeSeenCap bounds the dedupe set. Prompt ids are unique per
+// prompt, so the set only ever grows; past the cap the oldest half is dropped
+// (insertion order) — replay dedupe only needs to cover recently replayed
+// prompts, not the whole session history.
+const attentionChimeSeenCap = 512;
+
+// clearAttentionChimeKeys drops dedupe keys after a runtime rebuild. Approval
+// and ask ids are per-controller counters starting at "1", so a rebuilt
+// controller (model/effort/settings switch) reissues ids an earlier prompt on
+// the same tab already used — without this, the first prompt after a rebuild
+// is misread as a replay and stays silent. A ready event without a tab id
+// (settings rebuilds emit tab-less ready) clears everything: over-clearing
+// only re-chimes a replayed pending prompt, which is a desirable reminder,
+// while under-clearing mutes a live prompt.
+export function clearAttentionChimeKeys(seen: Set<string>, tabId?: string): void {
+  if (tabId === undefined || tabId === "") {
+    seen.clear();
+    return;
+  }
+  for (const key of [...seen]) {
+    if (key.startsWith(`approval:${tabId}:`) || key.startsWith(`ask:${tabId}:`)) {
+      seen.delete(key);
+    }
+  }
+}
+
+export function shouldPlayAttentionChimeForEvent(event: AttentionChimeEvent, seen: Set<string>): boolean {
+  const key = attentionChimeEventKey(event);
+  if (!key || seen.has(key)) return false;
+  if (seen.size >= attentionChimeSeenCap) {
+    let drop = seen.size - attentionChimeSeenCap / 2;
+    for (const k of seen) {
+      if (drop-- <= 0) break;
+      seen.delete(k);
+    }
+  }
+  seen.add(key);
+  return true;
+}

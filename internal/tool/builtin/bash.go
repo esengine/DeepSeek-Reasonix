@@ -21,18 +21,13 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/proc"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 )
 
 const (
 	bashWaitDelay = 5 * time.Second
-	// windowsBackgroundSandboxLockWait is the Windows sandbox root-lock wait
-	// budget for background jobs. A detached job blocks nobody while it queues,
-	// so it keeps the patient wait; a foreground command uses the sandbox's
-	// short default and fails fast with the lock holder named instead of
-	// hanging the whole turn.
-	windowsBackgroundSandboxLockWait = 10 * time.Minute
 )
 
 var errBashTimeout = errors.New("bash foreground timeout")
@@ -42,9 +37,8 @@ func init() { tool.RegisterBuiltin(bash{}) }
 var bashShellPATH = cachedBashShellPATH
 
 var (
-	bashSandboxCommand               = sandbox.Command
-	bashSandboxEscapePromptEnabled   = func() bool { return runtime.GOOS == "windows" }
-	bashWindowsSandboxRuntimeFailure = isWindowsSandboxRuntimeFailure
+	bashSandboxCommand             = sandbox.Command
+	bashSandboxEscapePromptEnabled = func() bool { return runtime.GOOS == "windows" }
 )
 
 // cachedBashShellPATH memoizes the login-shell PATH probe per login shell so a
@@ -88,6 +82,11 @@ type bash struct {
 	guard   SessionDataGuard
 	workDir string
 	timeout time.Duration
+	// terminal, when non-nil, runs foreground commands in a host-owned terminal
+	// (ACP terminal/*). Only consulted when the local OS sandbox is not
+	// enforcing — a host terminal cannot honor the confinement configuration —
+	// and never for background jobs, which need the local job manager.
+	terminal TerminalRunner
 }
 
 type bashParams struct {
@@ -168,12 +167,20 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			"conditional chaining, or issue the commands as separate calls")
 	}
 
-	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	sbSpec := b.sb
-	if p.RunInBackground {
-		sbSpec.WindowsLockWait = windowsBackgroundSandboxLockWait
+	// A host-owned terminal runs the command where the user watches it live.
+	// Never when the OS sandbox is enforcing (the host cannot honor the local
+	// confinement config), never when [secrets].filter_subprocess_env is on
+	// (the host terminal spawns with its own unfiltered environment, which
+	// would leak the credentials the user asked to strip), and never for
+	// background jobs. ok=false falls back to local execution unchanged.
+	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
+		if out, ok, err := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.timeout); ok {
+			return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
+		}
 	}
-	argv, wrapped := bashSandboxCommand(sbSpec, sh, p.Command)
+
+	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
+	argv, wrapped := bashSandboxCommand(b.sb, sh, p.Command)
 	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, p.Command, args) {
 		argv = unconfinedShellArgv(sh, p.Command)
 		wrapped = false
@@ -218,19 +225,6 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	}
 
 	out, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv)
-	if bashWindowsSandboxRuntimeFailure(argv, out, err) {
-		allow, reason, approveErr := approveBashSandboxEscape(ctx, p.Command, args, i18n.M.SandboxEscapeRuntimeReason)
-		if approveErr != nil {
-			return out, approveErr
-		}
-		if !allow {
-			if reason != "" {
-				return out, fmt.Errorf("%s", reason)
-			}
-			return out, err
-		}
-		out, err = b.runForeground(ctx, p, sh, unconfinedShellArgv(sh, p.Command), false, cmdEnv)
-	}
 	return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
 }
 
@@ -283,26 +277,6 @@ func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args j
 		Args:    append(json.RawMessage(nil), args...),
 		Reason:  i18n.M.SandboxEscapeRuntimeReason,
 	})
-}
-
-func isWindowsSandboxRuntimeFailure(argv []string, out string, err error) bool {
-	if !bashSandboxEscapePromptEnabled() || err == nil {
-		return false
-	}
-	code, ok := bashExitCode(err)
-	if !ok || code != 126 {
-		return false
-	}
-	marker, ok := sandbox.WindowsSandboxFailureMarkerFromCommand(argv)
-	return ok && strings.Contains(out, marker+" windows sandbox:")
-}
-
-func bashExitCode(err error) (int, bool) {
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		return 0, false
-	}
-	return exitErr.ExitCode(), true
 }
 
 func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string) (string, error) {
@@ -496,7 +470,7 @@ func commandPreview(cmd string) string {
 }
 
 func bashCommandEnv(ctx context.Context) []string {
-	env := os.Environ()
+	env := secrets.ProcessEnv()
 	if runtime.GOOS == "windows" {
 		return env
 	}
@@ -554,6 +528,9 @@ func runShellPATHCommand(parent context.Context, shell string, args []string) []
 	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, shell, args...)
+	// Explicit env so the login-shell probe honors [secrets]
+	// filter_subprocess_env instead of inheriting the full environment.
+	cmd.Env = secrets.ProcessEnv()
 	proc.PrepareShellPATHProbe(cmd)
 	cmd.Stdin = strings.NewReader("")
 	out, _ := cmd.CombinedOutput()

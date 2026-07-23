@@ -136,17 +136,17 @@ eq(
     { cacheHitTokens: 800, cacheMissTokens: 200 },
     { sessionCacheHitTokens: 700, sessionCacheMissTokens: 300 },
   ),
-  { hit: 900, miss: 100 },
-  "all-sources panel telemetry beats executor-only wire counters",
+  { hit: 800, miss: 200 },
+  "live shared ContextInfo beats a stale all-sources panel snapshot",
 );
 eq(
   contextSessionCache(
-    { sessionCacheHitTokens: 0, sessionCacheMissTokens: 0 },
-    { cacheHitTokens: 800, cacheMissTokens: 200 },
+    { sessionCacheHitTokens: 900, sessionCacheMissTokens: 100 },
+    { cacheHitTokens: 0, cacheMissTokens: 0 },
     { sessionCacheHitTokens: 700, sessionCacheMissTokens: 300 },
   ),
-  { hit: 800, miss: 200 },
-  "ContextInfo telemetry is the second all-sources choice",
+  { hit: 900, miss: 100 },
+  "panel telemetry remains the all-sources fallback without live ContextInfo",
 );
 eq(
   contextSessionCache(

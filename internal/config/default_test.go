@@ -2,7 +2,7 @@ package config
 
 import "testing"
 
-func TestDefaultAutoPlanOff(t *testing.T) {
+func TestDefaultRetiredAutoPlanCompatibilityOff(t *testing.T) {
 	if got := Default().Agent.AutoPlan; got != "off" {
 		t.Fatalf("default auto_plan = %q, want off", got)
 	}
@@ -11,16 +11,6 @@ func TestDefaultAutoPlanOff(t *testing.T) {
 func TestDefaultReasoningLanguageAuto(t *testing.T) {
 	if got := Default().ReasoningLanguage(); got != "auto" {
 		t.Fatalf("default reasoning_language = %q, want auto", got)
-	}
-}
-
-func TestDefaultMemoryCompilerEnabled(t *testing.T) {
-	cfg := Default()
-	if !cfg.MemoryCompilerEnabled() {
-		t.Fatal("default memory compiler = false, want true")
-	}
-	if got := cfg.MemoryCompilerVerbosity(); got != MemoryCompilerVerbosityObserve {
-		t.Fatalf("default memory compiler verbosity = %q, want observe", got)
 	}
 }
 

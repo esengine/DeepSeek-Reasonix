@@ -16,8 +16,8 @@ import (
 	"reasonix/internal/provider"
 )
 
-// TestResumeDispatchOpensPicker proves bare "/resume" writes the session list
-// to the scrollback (above the input) AND opens the interactive picker overlay.
+// TestResumeDispatchOpensPicker proves bare "/resume" opens the interactive
+// picker without duplicating the same list in transcript scrollback.
 func TestResumeDispatchOpensPicker(t *testing.T) {
 	dir := t.TempDir()
 	saveTestSession(t, filepath.Join(dir, "a.jsonl"), "alpha prompt")
@@ -37,10 +37,9 @@ func TestResumeDispatchOpensPicker(t *testing.T) {
 	if len(m.resumePick.sessions) != 2 {
 		t.Fatalf("picker should have 2 sessions, got %d", len(m.resumePick.sessions))
 	}
-	// Session list must also appear in the scrollback transcript (above input).
 	out := strings.Join(m.transcript, "\n")
-	if !strings.Contains(out, "alpha prompt") || !strings.Contains(out, "beta prompt") {
-		t.Fatalf("scrollback should contain session previews:\n%s", out)
+	if strings.Contains(out, "alpha prompt") || strings.Contains(out, "beta prompt") {
+		t.Fatalf("picker previews should not be duplicated in scrollback:\n%s", out)
 	}
 }
 

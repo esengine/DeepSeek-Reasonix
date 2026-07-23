@@ -180,7 +180,11 @@ func (p *mcpManager) renderTools(width int) string {
 			limit = mcpToolMaxRows
 		}
 		for _, t := range v.ToolList[:limit] {
-			desc := viewCompactText(t.Description, viewBudget(width, 24))
+			desc := t.Description
+			if t.SchemaError != "" {
+				desc = "unavailable: " + t.SchemaError
+			}
+			desc = viewCompactText(desc, viewBudget(width, 24))
 			fmt.Fprintf(&b, "  %-20s %s\n", t.Name, viewMeta(desc))
 		}
 		if extra := len(v.ToolList) - limit; extra > 0 {

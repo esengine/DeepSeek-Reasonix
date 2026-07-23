@@ -140,6 +140,7 @@ var slashCommands = map[string]bool{
 	"/sessions": true,
 	"/attach":   true,
 	"/search":   true,
+	"/desktop":  true,
 	"/status":   true,
 	"/help":     true,
 }

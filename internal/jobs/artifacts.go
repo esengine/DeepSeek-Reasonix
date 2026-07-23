@@ -8,13 +8,16 @@ import (
 	"strconv"
 	"strings"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
 
 const (
-	jobLogExt        = ".log"
-	jobMetaExt       = ".json"
-	defaultTailBytes = 64 * 1024
+	jobLogExt                       = ".log"
+	jobMetaExt                      = ".json"
+	defaultTailBytes                = 64 * 1024
+	mutationEvidenceVersion         = 1
+	recoveredBackgroundTaskToolName = "background_task_recovery"
 )
 
 // ArtifactDir returns the sidecar directory for a persistent session transcript.
@@ -32,23 +35,33 @@ func RemoveArtifacts(sessionPath string) error {
 }
 
 type artifactMeta struct {
-	ID               string `json:"id"`
-	Kind             string `json:"kind"`
-	Label            string `json:"label,omitempty"`
-	SessionID        string `json:"sessionId,omitempty"`
-	Status           Status `json:"status"`
-	StartedAt        int64  `json:"startedAt"`
-	FinishedAt       int64  `json:"finishedAt,omitempty"`
-	ArtifactComplete bool   `json:"artifactComplete"`
-	ArtifactError    string `json:"artifactError,omitempty"`
-	LogPath          string `json:"logPath,omitempty"`
+	ID                      string                    `json:"id"`
+	Kind                    string                    `json:"kind"`
+	Label                   string                    `json:"label,omitempty"`
+	SessionID               string                    `json:"sessionId,omitempty"`
+	Status                  Status                    `json:"status"`
+	StartedAt               int64                     `json:"startedAt"`
+	FinishedAt              int64                     `json:"finishedAt,omitempty"`
+	ArtifactComplete        bool                      `json:"artifactComplete"`
+	ArtifactError           string                    `json:"artifactError,omitempty"`
+	LogPath                 string                    `json:"logPath,omitempty"`
+	MutationEvidenceVersion int                       `json:"mutationEvidenceVersion,omitempty"`
+	MutationEvidence        *artifactMutationEvidence `json:"mutationEvidence,omitempty"`
+}
+
+// artifactMutationEvidence deliberately excludes receipt args, commands, and
+// review contents. After a restart the parent must re-inspect and re-verify the
+// recovered mutation rather than trusting stale child sign-off evidence.
+type artifactMutationEvidence struct {
+	Risk  string   `json:"risk"`
+	Paths []string `json:"paths,omitempty"`
 }
 
 func writeMeta(path string, meta artifactMeta) error {
 	if path == "" {
 		return fmt.Errorf("empty metadata path")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(meta, "", "  ")
@@ -74,7 +87,7 @@ func writeMeta(path string, meta artifactMeta) error {
 
 func readMeta(path string) (artifactMeta, error) {
 	var meta artifactMeta
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return meta, err
 	}

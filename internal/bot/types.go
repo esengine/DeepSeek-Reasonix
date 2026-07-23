@@ -2,7 +2,10 @@
 // 架构参考 Hermes Agent 的 gateway/adapter/session 模式。
 package bot
 
-import "context"
+import (
+	"context"
+	"strings"
+)
 
 // Platform 标识 IM 平台。
 type Platform string
@@ -35,6 +38,17 @@ type SessionSource struct {
 	ThreadID     string   `json:"thread_id,omitempty"`
 }
 
+// InboundMedia is an authenticated inbound attachment. Adapters may provide
+// Data directly, or a lazy Load callback for platform resources that must not
+// be fetched until the gateway has admitted the sender through its allowlist.
+type InboundMedia struct {
+	Name        string                                        `json:"name,omitempty"`
+	MIME        string                                        `json:"mime,omitempty"`
+	Data        []byte                                        `json:"-"`
+	Load        func(context.Context) ([]byte, string, error) `json:"-"`
+	FailureText string                                        `json:"-"`
+}
+
 // InboundMessage 是从任一平台收到的入站消息。
 type InboundMessage struct {
 	Platform     Platform `json:"platform"`
@@ -45,12 +59,16 @@ type InboundMessage struct {
 	UserID       string   `json:"user_id"`
 	UserName     string   `json:"user_name"`
 	// OperatorID, when set, is the authenticated actor gated by the allowlist; UserID stays routing-only.
-	OperatorID string   `json:"operator_id,omitempty"`
-	Text       string   `json:"text"`
-	MessageID  string   `json:"message_id"`
-	ThreadID   string   `json:"thread_id,omitempty"`
-	MediaURLs  []string `json:"media_urls,omitempty"`
-	Raw        any      `json:"-"`
+	OperatorID string         `json:"operator_id,omitempty"`
+	Text       string         `json:"text"`
+	MessageID  string         `json:"message_id"`
+	ThreadID   string         `json:"thread_id,omitempty"`
+	MediaURLs  []string       `json:"media_urls,omitempty"`
+	Media      []InboundMedia `json:"-"`
+	// ResolveUserName performs optional platform enrichment after admission.
+	// UserName remains the safe fallback when the callback is nil or fails.
+	ResolveUserName func(context.Context) string `json:"-"`
+	Raw             any                          `json:"-"`
 }
 
 // Session derives the SessionSource from this message.
@@ -112,8 +130,50 @@ type InteractiveCardElement struct {
 
 // SendResult 是发送消息的结果。
 type SendResult struct {
-	MessageID string `json:"message_id,omitempty"`
-	Err       error  `json:"err,omitempty"`
+	MessageID  string   `json:"message_id,omitempty"`
+	MessageIDs []string `json:"message_ids,omitempty"`
+	Err        error    `json:"err,omitempty"`
+}
+
+// DeliveredMessageIDs returns every known delivered message ID, including the
+// legacy singular MessageID field, in delivery order without duplicates.
+func (r SendResult) DeliveredMessageIDs() []string {
+	ids := make([]string, 0, len(r.MessageIDs)+1)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		for _, existing := range ids {
+			if existing == id {
+				return
+			}
+		}
+		ids = append(ids, id)
+	}
+	for _, id := range r.MessageIDs {
+		add(id)
+	}
+	add(r.MessageID)
+	return ids
+}
+
+// Merge appends delivered IDs from another send while keeping MessageID as the
+// last delivered ID for callers using the legacy singular field.
+func (r *SendResult) Merge(delivered SendResult) {
+	for _, id := range delivered.DeliveredMessageIDs() {
+		duplicate := false
+		for _, existing := range r.MessageIDs {
+			if existing == id {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			r.MessageIDs = append(r.MessageIDs, id)
+		}
+		r.MessageID = id
+	}
 }
 
 // Adapter 是平台适配器接口，每个平台实现一个。

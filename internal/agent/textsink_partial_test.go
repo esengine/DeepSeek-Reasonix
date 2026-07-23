@@ -18,9 +18,10 @@ func TestTextSinkSkipsPartialDispatch(t *testing.T) {
 	s.Emit(event.Event{Kind: event.TurnStarted})
 	s.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "read_file", Partial: true}})
 	s.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "read_file", Args: `{"path":"a"}`}})
+	s.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "read_file", Args: `{"path":"a"}`, Refreshed: true}})
 
 	got := b.String()
 	if n := strings.Count(got, "-> read_file"); n != 1 {
-		t.Errorf("want exactly one dispatch line, got %d:\n%q", n, got)
+		t.Errorf("want exactly one dispatch line after partial/full/refresh, got %d:\n%q", n, got)
 	}
 }

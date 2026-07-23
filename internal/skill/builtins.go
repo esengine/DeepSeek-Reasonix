@@ -283,7 +283,7 @@ func appendUniqueToolNames(base []string, extra ...string) []string {
 func builtinSkills() []Skill {
 	readCodeTools := []string{"read_file", "ls", "glob", "grep", "code_index"}
 	reviewTools := append(append([]string(nil), readCodeTools...), "bash")
-	return []Skill{
+	base := []Skill{
 		{
 			Name:        "init",
 			Description: "Bootstrap or refresh this project's AGENTS.md — analyze the codebase (structure, build/test commands, architecture, conventions) and write a concise memory file loaded into every future session. Inlined — runs in the main loop so you see and approve the write.",
@@ -291,6 +291,8 @@ func builtinSkills() []Skill {
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
 			RunAs:       RunInline,
+			Triggers:    []string{"agents.md", "initialize project", "bootstrap project", "初始化项目", "项目记忆", "生成 agents.md"},
+			AutoUse:     "suggest",
 		},
 		{
 			Name:         "explore",
@@ -300,15 +302,20 @@ func builtinSkills() []Skill {
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
 			AllowedTools: append([]string(nil), readCodeTools...),
+			Triggers:     []string{"how does", "find all", "architecture", "callers", "references", "impact analysis", "代码架构", "怎么实现", "如何实现", "调用链", "所有引用", "影响范围", "分析代码"},
+			AutoUse:      "suggest",
 		},
 		{
-			Name:         "research",
-			Description:  "Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported by lib Y', 'what's the canonical way to do Z', 'compare our impl against the spec'.",
-			Body:         builtinResearchBody,
-			Scope:        ScopeBuiltin,
-			Path:         "(builtin)",
-			RunAs:        RunSubagent,
-			AllowedTools: append(append([]string(nil), readCodeTools...), "web_fetch"),
+			Name:           "research",
+			Description:    "Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported by lib Y', 'what's the canonical way to do Z', 'compare our impl against the spec'.",
+			Body:           builtinResearchBody,
+			Scope:          ScopeBuiltin,
+			Path:           "(builtin)",
+			RunAs:          RunSubagent,
+			AllowedTools:   append(append([]string(nil), readCodeTools...), "web_fetch"),
+			Triggers:       []string{"canonical", "documentation", "specification", "compare against", "is supported", "official docs", "官方文档", "规范", "是否支持", "对比实现", "外部资料", "最新文档"},
+			AutoUse:        "suggest",
+			NeedsFreshData: true,
 		},
 		{
 			Name:        "install-capability",
@@ -317,6 +324,8 @@ func builtinSkills() []Skill {
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
 			RunAs:       RunInline,
+			Triggers:    []string{"install skill", "install mcp", "install plugin", "安装 skill", "安装 mcp", "安装插件"},
+			AutoUse:     "suggest",
 		},
 		{
 			Name:         "review",
@@ -326,6 +335,9 @@ func builtinSkills() []Skill {
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
 			AllowedTools: append([]string(nil), reviewTools...),
+			ReadOnly:     true,
+			Triggers:     []string{"review changes", "review diff", "code review", "评审变更", "审查代码", "检查改动"},
+			AutoUse:      "suggest",
 		},
 		{
 			Name:         "security-review",
@@ -335,6 +347,9 @@ func builtinSkills() []Skill {
 			Path:         "(builtin)",
 			RunAs:        RunSubagent,
 			AllowedTools: append([]string(nil), reviewTools...),
+			ReadOnly:     true,
+			Triggers:     []string{"security review", "authentication", "authorization", "token handling", "injection", "安全评审", "安全审查", "鉴权", "权限", "令牌", "注入", "漏洞"},
+			AutoUse:      "suggest",
 		},
 		{
 			Name:        "test",
@@ -343,8 +358,13 @@ func builtinSkills() []Skill {
 			Scope:       ScopeBuiltin,
 			Path:        "(builtin)",
 			RunAs:       RunInline,
+			Triggers:    []string{"run tests", "test failure", "failing test", "ci failure", "运行测试", "测试失败", "修复测试", "ci 失败"},
+			AutoUse:     "suggest",
 		},
 	}
+	// Embedded directory skills (reasonix-guide, …) append after the const
+	// playbooks so the index order stays deterministic and bodies stay on-demand.
+	return append(base, loadEmbeddedBuiltins()...)
 }
 
 // BuiltinNames returns the built-in skill names, used by callers that wire

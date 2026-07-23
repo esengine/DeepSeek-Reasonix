@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"os"
 	"path/filepath"
@@ -22,22 +23,12 @@ import (
 
 	// Blank imports wire compile-time built-ins into their registries, exactly as
 	// cmd/reasonix does — boot.Build resolves providers/tools from these registries.
+	"reasonix/internal/config"
 	_ "reasonix/internal/provider/anthropic"
 	_ "reasonix/internal/provider/openai"
-	"reasonix/internal/sandbox"
+	"reasonix/internal/repair"
 	_ "reasonix/internal/tool/builtin"
 )
-
-// runWindowsSandboxHelperIfRequested reports whether argv (os.Args-shaped, so
-// argv[0] is the program name) asks this process to act as the hidden Windows
-// sandbox helper, and runs it when so. Split from main so tests can pin that
-// the desktop binary keeps the helper route the sandbox wrapper depends on.
-func runWindowsSandboxHelperIfRequested(argv []string) (int, bool) {
-	if len(argv) > 1 && argv[1] == sandbox.WindowsHelperCommand {
-		return sandbox.RunWindowsSandboxHelper(argv[2:], os.Stdin, os.Stdout, os.Stderr), true
-	}
-	return 0, false
-}
 
 // assets embeds the built frontend. `all:` so dotfiles (e.g. the dist .gitkeep
 // that keeps this directive compilable before the first `pnpm build`) are
@@ -102,17 +93,48 @@ func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
 }
 
 func main() {
-	// The Windows bash sandbox relaunches the current executable as a hidden
-	// helper process. Dispatch it before any Wails or single-instance setup:
-	// otherwise every sandboxed command starts a second GUI instance that
-	// forwards to the running app and exits 0 with no output, so bash silently
-	// returns empty on Windows (#6051, #6067, #6072).
-	if code, ok := runWindowsSandboxHelperIfRequested(os.Args); ok {
-		os.Exit(code)
+	// OpenSSH launches the Desktop executable itself as the short-lived
+	// SSH_ASKPASS helper. Handle that one-time capability before configuration,
+	// startup tracking, single-instance setup, Wails, or any logging/persistence.
+	if handled, exitCode := RunRemoteAskPassHelper(context.Background(), os.Args[1:], os.Getenv, os.Stdout); handled {
+		os.Exit(exitCode)
 	}
-	sandbox.RegisterHelperDispatch()
+
+	launch := parseDesktopLaunchArgs(os.Args[1:])
+	if config.SafeModeRequested() {
+		launch.SafeMode = true
+	}
+
+	tracker := repair.NewStartupTracker("")
+	var continueLaunch bool
+	launch.SafeMode, continueLaunch = preparePackagedStartupRecovery(tracker, tracker.SafeModeRecommended(), launch.SafeMode)
+	if !continueLaunch {
+		return
+	}
+	if launch.SafeMode {
+		_ = os.Setenv("REASONIX_SAFE_MODE", "1")
+	}
+	// Begin runs before the Wails single-instance gate, but it refuses to
+	// overwrite the recorded state while its owner PID is alive, so a duplicate
+	// launch — which Wails terminates via os.Exit without OnShutdown — never
+	// counts as a crash toward the Safe Mode threshold.
+	startupState, _ := tracker.Begin(version, launch.SafeMode)
+	trackerOwned := startupState.PID == os.Getpid()
+	// Keep WebKit acceleration enabled during normal Linux launches. If the
+	// startup tracker selects Safe Mode after a crash loop (or the user requests
+	// it explicitly), NVIDIA systems use the broader renderer fallback before
+	// Wails creates the WebKit process. Other platforms provide a no-op.
+	configureWebKitRendererRecovery(launch.SafeMode)
 
 	app := NewApp()
+	if trackerOwned {
+		app.startupTracker = tracker
+	}
+	title := "Reasonix"
+	singleInstance := singleInstanceLock(app)
+	appMenu := app.createAppMenu()
+	dragAndDrop := &options.DragAndDrop{EnableFileDrop: true}
+	bindings := []any{app}
 
 	// Restore saved window size, or fall back to the default.
 	width, height := 1240, 720
@@ -131,8 +153,12 @@ func main() {
 		zoomFactor = zf
 	}
 
+	// On Linux, cover JavaScriptCore's lazy signal-handler installation window.
+	// Other platforms provide a no-op implementation.
+	scheduleWebKitSignalHandlerRepair()
+
 	err := wails.Run(&options.App{
-		Title:     "Reasonix",
+		Title:     title,
 		Width:     width,
 		Height:    height,
 		Frameless: goruntime.GOOS == "windows",
@@ -140,26 +166,34 @@ func main() {
 		MinHeight: 480,
 		// Match the dark UI shell so the initial webview background doesn't flash
 		// white before CSS loads — particularly visible on WebKitGTK.
-		BackgroundColour:   &options.RGBA{R: 26, G: 26, B: 46, A: 255},
-		AssetServer:        &assetserver.Options{Assets: assets, Middleware: app.workspaceMediaMiddleware()},
+		BackgroundColour: &options.RGBA{R: 26, G: 26, B: 46, A: 255},
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+			Middleware: assetserver.ChainMiddleware(
+				app.jsProfilingMiddleware(),
+				app.remoteMarkdownImageMiddleware(),
+				app.workspaceMediaMiddleware(),
+				app.themeAssetMiddleware(),
+			),
+		},
 		OnStartup:          app.startup,
 		OnDomReady:         app.domReady,
 		OnBeforeClose:      app.beforeClose,
 		OnShutdown:         app.shutdown,
-		Bind:               []any{app},
-		SingleInstanceLock: singleInstanceLock(app),
+		Bind:               bindings,
+		SingleInstanceLock: singleInstance,
 
 		// Start hidden — domReady positions and shows the window after restoring
 		// geometry, so the user never sees the default size/position flash.
 		StartHidden: true,
 
 		// Native application menu (File > Settings, Edit, Window).
-		Menu: app.createAppMenu(),
+		Menu: appMenu,
 
 		// Native OS file drops: the webview withholds dropped files' paths from the
 		// HTML drop event, so the frontend (composer) reads them via runtime.OnFileDrop
 		// against the --wails-drop-target element instead.
-		DragAndDrop: &options.DragAndDrop{EnableFileDrop: true},
+		DragAndDrop: dragAndDrop,
 
 		// --- per-platform adaptation (see desktop/README.md for the rationale) ---
 		Mac: &mac.Options{
@@ -189,6 +223,23 @@ func main() {
 		},
 	})
 	if err != nil {
+		if trackerOwned {
+			_ = tracker.MarkFailed(err)
+		}
 		println("Error:", err.Error())
 	}
+}
+
+type desktopLaunchOptions struct {
+	SafeMode bool
+}
+
+func parseDesktopLaunchArgs(args []string) desktopLaunchOptions {
+	var out desktopLaunchOptions
+	for _, arg := range args {
+		if arg == "--safe-mode" {
+			out.SafeMode = true
+		}
+	}
+	return out
 }

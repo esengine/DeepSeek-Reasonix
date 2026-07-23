@@ -38,6 +38,13 @@ type controlSendRequest struct {
 	ReplyToMsgID string   `json:"reply_to_msg_id,omitempty"`
 }
 
+type controlSendResponse struct {
+	MessageID  string   `json:"message_id,omitempty"`
+	MessageIDs []string `json:"message_ids,omitempty"`
+	Partial    bool     `json:"partial,omitempty"`
+	Error      string   `json:"error,omitempty"`
+}
+
 func (gw *BotGateway) startControlServer(parent context.Context) error {
 	if !gw.cfg.ControlEnabled {
 		return nil
@@ -72,11 +79,14 @@ func (gw *BotGateway) startControlServer(parent context.Context) error {
 	gw.controlServer = control
 	gw.mu.Unlock()
 
+	gw.gatewayWG.Add(2)
 	go func() {
+		defer gw.gatewayWG.Done()
 		<-parent.Done()
 		gw.stopControlServer()
 	}()
 	go func() {
+		defer gw.gatewayWG.Done()
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			gw.logger.Warn("bot control server stopped with error", "addr", control.addr, "err", err)
 		}
@@ -194,10 +204,19 @@ func (gw *BotGateway) handleControlSend(w http.ResponseWriter, r *http.Request) 
 		ReplyToMsgID: req.ReplyToMsgID,
 	})
 	if err != nil {
+		if len(result.DeliveredMessageIDs()) > 0 {
+			writeControlJSONStatus(w, http.StatusMultiStatus, controlSendResponse{
+				MessageID:  result.MessageID,
+				MessageIDs: result.MessageIDs,
+				Partial:    true,
+				Error:      err.Error(),
+			})
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	writeControlJSON(w, result)
+	writeControlJSON(w, controlSendResponse{MessageID: result.MessageID, MessageIDs: result.MessageIDs})
 }
 
 func (gw *BotGateway) handleControlMetrics(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +253,12 @@ func (gw *BotGateway) handleControlMetrics(w http.ResponseWriter, r *http.Reques
 }
 
 func writeControlJSON(w http.ResponseWriter, v any) {
+	writeControlJSONStatus(w, http.StatusOK, v)
+}
+
+func writeControlJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }
 

@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/BurntSushi/toml"
-
 	"reasonix/internal/provider"
 )
 
@@ -139,6 +137,7 @@ func longCat20Prices(models []string) map[string]*provider.Pricing {
 const (
 	deepSeekPricingResetConfigVersion      = 3
 	windowsBashSandboxDefaultConfigVersion = 4
+	retiredAutoPlanConfigVersion           = 5
 )
 
 // ApplyUserConfigUpgradesOnStartup applies one-time startup migrations. It
@@ -156,7 +155,7 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 		return false, err
 	}
 	var header Config
-	if _, err := toml.DecodeFile(path, &header); err != nil {
+	if _, err := decodeTOMLFile(path, &header); err != nil {
 		return false, fmt.Errorf("config %s: %w", path, err)
 	}
 	if header.ConfigVersion >= Default().ConfigVersion {
@@ -172,6 +171,13 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 		resetWindowsBashSandboxDefaultOnUpgrade(cfg)
 		// Mark the Windows v4 migration even when the user was already on off,
 		// so a later manual enforce choice is not treated as the old template default.
+		changed = true
+	}
+	if header.ConfigVersion < retiredAutoPlanConfigVersion {
+		normalizeRetiredAutoPlan(cfg)
+		// Mark every older config as migrated even when Auto Plan was already off;
+		// the v5 renderer removes both retired keys so older binaries also observe
+		// the manual-only default after a downgrade.
 		changed = true
 	}
 	if !changed {

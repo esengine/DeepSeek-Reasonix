@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,41 @@ func TestRunCopyRequiresResumeTarget(t *testing.T) {
 	})
 	if !strings.Contains(errOut, "--copy requires --resume or --continue") {
 		t.Fatalf("run --copy stderr = %q, want usage error", errOut)
+	}
+}
+
+// TestRunResumeCopyJSONKeepsStdoutClean guards that --copy under a structured
+// output format writes its human notice to stderr, leaving stdout a single valid
+// JSON object (the copy notice used to pollute it).
+func TestRunResumeCopyJSONKeepsStdoutClean(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "held-src.jsonl")
+	saveTestSession(t, src, "copy me")
+	holdSessionLease(t, src)
+
+	var rc int
+	var errOut string
+	out := captureStdout(t, func() {
+		errOut = captureStderr(t, func() {
+			rc = runAgent([]string{"--resume", src, "--copy", "--output-format", "json", "continue task"})
+		})
+	})
+	// Setup fails in the isolated home (no provider), so the run ends with a JSON
+	// error object — but the copy still happened first.
+	if rc != 1 {
+		t.Fatalf("rc = %d, want 1 (setup fails in isolated home)", rc)
+	}
+	if strings.Contains(out, "continuing in a session copy") {
+		t.Fatalf("json stdout leaked the copy notice:\n%s", out)
+	}
+	if !strings.Contains(errOut, "continuing in a session copy: ") {
+		t.Fatalf("copy notice should be on stderr, got stderr:\n%s", errOut)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &obj); err != nil {
+		t.Fatalf("stdout is not a single JSON object: %v\nstdout:\n%s", err, out)
 	}
 }
 

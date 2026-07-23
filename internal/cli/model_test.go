@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/config"
 )
 
@@ -29,6 +31,25 @@ func TestModelRefsFromConfig(t *testing.T) {
 		if strings.HasPrefix(r, "mimo") {
 			t.Errorf("ref %q from a provider without an API key should be filtered out", r)
 		}
+	}
+}
+
+func TestBareModelOpensKeyboardPicker(t *testing.T) {
+	isolateUserConfig(t)
+	if _, err := config.SetCredential("DEEPSEEK_API_KEY", "test-key"); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestChatTUI()
+	m.runModelSubcommand("/model")
+	if m.quickPick == nil || m.quickPick.kind != quickPickerModel {
+		t.Fatalf("bare /model picker = %+v", m.quickPick)
+	}
+	if m.renderQuickPicker() == "" || !m.hideComposer() {
+		t.Fatal("model picker should render as a modal panel")
+	}
+	next, _ := m.handleQuickPickerKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if next.(chatTUI).quickPick != nil {
+		t.Fatal("Esc should close model picker")
 	}
 }
 

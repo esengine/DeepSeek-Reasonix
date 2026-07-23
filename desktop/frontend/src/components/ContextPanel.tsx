@@ -21,6 +21,10 @@ interface ContextPanelProps {
   balance?: BalanceInfo;
   sessionGen?: number;
   refreshKey?: number;
+  // Monotonic counter bumped by EVERY usage event (executor and subagent).
+  // The executor-gated `usage` prop freezes during sub-agent runs, which used
+  // to pin 会话指标/用量分析 for minutes; this keeps the snapshot ticking.
+  usageSeq?: number;
 }
 
 function fmtFullTokens(n: number): string {
@@ -142,21 +146,23 @@ export function contextCostDisplay({
 }
 
 // contextSessionCache picks the session-cumulative cache hit/miss pair for the
-// panel's session average. All-sources telemetry (panel info, then ContextInfo)
-// wins over the wire session counters, which the Go agent scopes to the
-// executor only — the same preference StatusBar applies — and the pair always
-// comes from a single source so the computed rate never mixes scopes.
+// panel's session average. The shared ContextInfo is refreshed after every
+// usage event and also drives StatusBar, so prefer it over the panel's
+// independently throttled snapshot. Panel telemetry remains the all-sources
+// fallback for callers without live context; executor-only wire counters only
+// bridge the pre-refresh gap. The pair always comes from one source so the
+// computed rate never mixes scopes.
 export function contextSessionCache(
   info?: Pick<ContextPanelInfo, "sessionCacheHitTokens" | "sessionCacheMissTokens"> | null,
   context?: Pick<ContextInfo, "cacheHitTokens" | "cacheMissTokens">,
   usage?: Pick<WireUsage, "sessionCacheHitTokens" | "sessionCacheMissTokens">,
 ): { hit: number; miss: number } {
-  const infoHit = info?.sessionCacheHitTokens ?? 0;
-  const infoMiss = info?.sessionCacheMissTokens ?? 0;
-  if (infoHit + infoMiss > 0) return { hit: infoHit, miss: infoMiss };
   const ctxHit = context?.cacheHitTokens ?? 0;
   const ctxMiss = context?.cacheMissTokens ?? 0;
   if (ctxHit + ctxMiss > 0) return { hit: ctxHit, miss: ctxMiss };
+  const infoHit = info?.sessionCacheHitTokens ?? 0;
+  const infoMiss = info?.sessionCacheMissTokens ?? 0;
+  if (infoHit + infoMiss > 0) return { hit: infoHit, miss: infoMiss };
   return { hit: usage?.sessionCacheHitTokens ?? 0, miss: usage?.sessionCacheMissTokens ?? 0 };
 }
 
@@ -314,6 +320,7 @@ export function ContextPanel({
   balance,
   sessionGen,
   refreshKey,
+  usageSeq,
 }: ContextPanelProps) {
   const { locale, t } = useI18n();
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
@@ -345,16 +352,18 @@ export function ContextPanel({
     void refresh();
   }, [refresh, refreshKey]);
 
-  // Refresh the panel snapshot while usage events stream. The key includes
-  // general token fields so providers without cache telemetry still tick.
+  // Refresh the panel snapshot while usage events stream — from any source:
+  // usageSeq covers sub-agent/title requests the executor-gated usage prop
+  // never reflects, and usageRefreshKey keeps ticking for providers whose
+  // events lack a seq. Throttled to once per second.
   useEffect(() => {
-    if (!usageRefreshKey) return;
+    if (!usageRefreshKey && !usageSeq) return;
     const now = Date.now();
     if (now - lastRefreshTime.current >= 1000) {
       lastRefreshTime.current = now;
       void refresh();
     }
-  }, [usageRefreshKey, refresh]);
+  }, [usageRefreshKey, usageSeq, refresh]);
 
   const usedTokens = context?.used && context.used > 0 ? context.used : info?.usedTokens ?? 0;
   const windowTokens = context?.window && context.window > 0 ? context.window : info?.windowTokens ?? 0;

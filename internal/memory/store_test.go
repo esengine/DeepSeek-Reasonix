@@ -3,9 +3,86 @@ package memory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
+
+// TestRenderEscapesYAMLMetacharacters pins the frontmatter-corruption fix: a
+// title or description with YAML metacharacters must survive a save→load
+// round-trip. The previous hand-concatenated renderer produced unparseable
+// YAML for "Plan: step one"-style titles; frontmatter.Split then returned an
+// empty map and the reloaded memory silently lost its name, title, and type.
+func TestRenderEscapesYAMLMetacharacters(t *testing.T) {
+	cases := []struct {
+		label, title, desc string
+	}{
+		{"colon", "My plan: step one", "Covers: the rollout"},
+		{"hash", "Ship #42", "Tracks #release notes"},
+		{"double-quote", `The "golden" path`, `Says "hello"`},
+		{"single-quote", "Don't drop this", "User's preference"},
+		{"leading-special", "- looks like a list", "* also a list"},
+		{"yaml-lookalike", "type: reference", "metadata: nested"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			dir := t.TempDir()
+			s := Store{Dir: filepath.Join(dir, "memory")}
+			if _, err := s.Save(Memory{
+				Name:        "esc-" + tc.label,
+				Title:       tc.title,
+				Description: tc.desc,
+				Type:        TypeProject,
+				Body:        "the body",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			list := s.List()
+			if len(list) != 1 {
+				t.Fatalf("want 1 memory, got %d", len(list))
+			}
+			got := list[0]
+			if got.Title != tc.title {
+				t.Errorf("Title = %q, want %q", got.Title, tc.title)
+			}
+			if got.Description != tc.desc {
+				t.Errorf("Description = %q, want %q", got.Description, tc.desc)
+			}
+			if got.Type != TypeProject {
+				t.Errorf("Type = %q, want project (metadata lost)", got.Type)
+			}
+			if got.Body != "the body" {
+				t.Errorf("Body = %q", got.Body)
+			}
+		})
+	}
+}
+
+// TestRenderPlainValuesKeepLegacyBytes pins byte-compatibility for the common
+// case: memories whose title/description need no escaping must render exactly
+// as the previous hand-built format did, so existing files rewritten on save
+// do not churn.
+func TestRenderPlainValuesKeepLegacyBytes(t *testing.T) {
+	got := render(Memory{
+		Title:       "Prefers tabs",
+		Description: "User prefers tabs over spaces",
+		Type:        TypeUser,
+		Body:        "Always indent with tabs.",
+	}, "prefers-tabs")
+	want := "---\n" +
+		"name: prefers-tabs\n" +
+		"title: Prefers tabs\n" +
+		"description: User prefers tabs over spaces\n" +
+		"metadata:\n" +
+		"  type: user\n" +
+		"---\n\n" +
+		"Always indent with tabs.\n"
+	if got != want {
+		t.Fatalf("plain-value render changed bytes:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
 
 // TestStoreSaveAndIndex covers the round-trip: Save writes a frontmatter file,
 // reindex adds exactly one index line, and List parses it back.
@@ -41,6 +118,31 @@ func TestStoreSaveAndIndex(t *testing.T) {
 	}
 	if !strings.Contains(m.Body, "indent with tabs") {
 		t.Fatalf("body not preserved: %q", m.Body)
+	}
+}
+
+func TestStoreListDecodesGB18030MemoryFile(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `---
+title: 中文偏好
+description: 使用中文回答
+type: user
+---
+用户希望默认使用中文。`
+	if err := os.WriteFile(filepath.Join(s.Dir, "cn-pref.md"), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	memories := s.List()
+	if len(memories) != 1 {
+		t.Fatalf("List() = %+v, want one decoded memory", memories)
+	}
+	m := memories[0]
+	if m.Title != "中文偏好" || m.Description != "使用中文回答" || !strings.Contains(m.Body, "默认使用中文") {
+		t.Fatalf("decoded memory = %+v", m)
 	}
 }
 
@@ -356,7 +458,13 @@ func TestStoreForSlug(t *testing.T) {
 	if strings.Count(filepath.Base(filepath.Dir(s.Dir)), "/") != 0 {
 		t.Fatalf("slug should have no separators: %s", s.Dir)
 	}
-	if !strings.Contains(s.Dir, "-Users-me-proj") {
+	// config.WorkspaceSlug folds case on Windows (equivalent spellings of one
+	// folder must share a slug); unix slugs keep the original case.
+	want := "-Users-me-proj"
+	if runtime.GOOS == "windows" {
+		want = "-users-me-proj"
+	}
+	if !strings.Contains(s.Dir, want) {
 		t.Fatalf("unexpected slug: %s", s.Dir)
 	}
 }

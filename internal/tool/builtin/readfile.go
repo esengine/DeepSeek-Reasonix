@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/text/transform"
@@ -34,6 +35,10 @@ type readFile struct {
 	workDir     string
 	paths       *PathResolver
 	forbidRoots []string
+	// overlay, when non-nil, serves content from the host transport (unsaved
+	// editor buffers) before falling back to disk. Consulted only after path
+	// resolution and read confinement, and never for external alias paths.
+	overlay FileOverlay
 }
 
 const (
@@ -93,6 +98,15 @@ func (r readFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	}
 	if p.Limit <= 0 {
 		p.Limit = readFileDefaultLimit
+	}
+
+	// The host overlay (unsaved editor buffers) wins over the disk when it can
+	// serve the path. Content arrives already decoded as text, so the encoding
+	// and binary-detection pipeline below applies to the disk fallback only.
+	if r.overlay != nil && !rp.External && filepath.IsAbs(p.Path) {
+		if content, ok := r.overlay.ReadTextFile(ctx, p.Path); ok {
+			return r.scan(strings.NewReader(content), p.Offset, p.Limit)
+		}
 	}
 
 	// A directory can be os.Open'd but not read as text — catch it up front with

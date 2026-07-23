@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // Probe snapshots persist across process restarts so the environment section —
@@ -50,7 +51,7 @@ func loadProbeSnapshot(dir, fingerprint string) (probeSnapshot, bool) {
 	if path == "" {
 		return probeSnapshot{}, false
 	}
-	b, err := os.ReadFile(path)
+	b, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return probeSnapshot{}, false
 	}

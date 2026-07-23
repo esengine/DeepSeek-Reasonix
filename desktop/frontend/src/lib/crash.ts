@@ -2,6 +2,7 @@
 // whole tree (blank window), and global errors/rejections leave no trace either.
 
 import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
+import { writeClipboardText } from "./clipboard";
 import { t } from "./i18n";
 
 declare const __BUILD_COMMIT__: string;
@@ -33,8 +34,9 @@ export type PerformanceSnapshot = {
     count: number;
     totalMs: number;
     maxMs: number;
-    recent: { startMs: number; durationMs: number }[];
+    recent: { startMs: number; durationMs: number; attribution?: string }[];
   };
+  longTaskFrames?: { label: string; samples: number }[];
   connection?: {
     effectiveType?: string;
     downlinkMbps?: number;
@@ -54,6 +56,10 @@ export type CrashPayload = {
   stack?: string;
   componentStack?: string;
   topFrame?: string;
+  // Optional, non-display grouping context for otherwise opaque WebView errors.
+  // It is deliberately restricted to build/view/breadcrumb categories and never
+  // contains breadcrumb messages, tab IDs, paths, or user content.
+  fingerprintHint?: string;
   buildCommit: string;
   channel: string;
   language: string;
@@ -71,7 +77,24 @@ type NormalizedError = {
 type LongTaskSample = {
   startMs: number;
   durationMs: number;
+  attribution?: string;
 };
+
+// WICG JS Self-Profiling API (https://wicg.github.io/js-self-profiling/), available
+// in Chromium WebViews when the document is served with `Document-Policy: js-profiling`.
+export type ProfilerTrace = {
+  resources?: string[];
+  frames?: { name?: string; resourceId?: number; line?: number; column?: number }[];
+  stacks?: { frameId: number; parentId?: number }[];
+  samples?: { timestamp: number; stackId?: number }[];
+};
+
+type ProfilerLike = {
+  stop(): Promise<ProfilerTrace>;
+  addEventListener?: (type: string, listener: () => void) => void;
+};
+
+type ProfilerConstructor = new (options: { sampleInterval: number; maxBufferSize: number }) => ProfilerLike;
 
 type BrowserPerformanceMemory = {
   usedJSHeapSize?: number;
@@ -91,8 +114,11 @@ type BrowserNavigator = Navigator & {
 
 const LONG_TASK_WINDOW_MS = 60_000;
 const LONG_TASK_PROMPT_MS = 800;
-const LONG_TASK_TOTAL_PROMPT_MS = 1_500;
+// Streaming renders routinely accumulate ~1.5s of 70-240ms tasks per minute without
+// user-visible jank, so the cumulative prompt only fires past half of that budget spent blocked.
+const LONG_TASK_TOTAL_PROMPT_MS = 3_000;
 const EVENT_LOOP_LAG_PROMPT_MS = 1_200;
+const EVENT_LOOP_LAG_CONSECUTIVE_SAMPLES = 2;
 const STARTUP_GRACE_MS = 15_000;
 const PROMPT_COOLDOWN_MS = 10 * 60_000;
 const MAX_LAG_SAMPLES = 60;
@@ -102,6 +128,51 @@ const longTasks: LongTaskSample[] = [];
 const lagSamples: number[] = [];
 let performanceMonitorInstalled = false;
 let lastPerformancePromptAt = 0;
+
+// Rolling self-profiling sampler (Chromium WebViews only; requires the asset server
+// to send `Document-Policy: js-profiling`, see jsProfilingMiddleware on the Go side).
+// ~10ms native sampling; the buffer covers the same 60s window as longTasks.
+const PROFILER_SAMPLE_INTERVAL_MS = 10;
+const PROFILER_MAX_BUFFER_SAMPLES = LONG_TASK_WINDOW_MS / PROFILER_SAMPLE_INTERVAL_MS;
+let activeProfiler: ProfilerLike | null = null;
+
+function startLongTaskProfiler(): void {
+  const ProfilerCtor = (globalThis as { Profiler?: ProfilerConstructor }).Profiler;
+  if (!ProfilerCtor) return;
+  try {
+    const profiler = new ProfilerCtor({
+      sampleInterval: PROFILER_SAMPLE_INTERVAL_MS,
+      maxBufferSize: PROFILER_MAX_BUFFER_SAMPLES,
+    });
+    // A full buffer stops sampling silently; drop the stale trace and roll over.
+    profiler.addEventListener?.("samplebufferfull", () => {
+      if (activeProfiler !== profiler) return;
+      activeProfiler = null;
+      void profiler.stop().catch(() => {});
+      startLongTaskProfiler();
+    });
+    activeProfiler = profiler;
+  } catch {
+    // Document policy missing or the API is disabled in this WebView.
+    activeProfiler = null;
+  }
+}
+
+async function collectLongTaskFrames(
+  windows: { startMs: number; durationMs: number }[],
+): Promise<{ label: string; samples: number }[]> {
+  const profiler = activeProfiler;
+  if (!profiler) return [];
+  activeProfiler = null;
+  try {
+    const trace = await profiler.stop();
+    return aggregateLongTaskProfile(trace, windows);
+  } catch {
+    return [];
+  } finally {
+    startLongTaskProfiler();
+  }
+}
 
 const PERF_REPORTED_STORAGE_KEY = "reasonix:perf-reported";
 
@@ -333,12 +404,19 @@ export function formatPerformanceContext(snapshot: PerformanceSnapshot): string 
   }
   if (snapshot.longTasks) {
     const recent = snapshot.longTasks.recent
-      .map((t) => `${fmtNumber(t.durationMs)}ms @ ${fmtNumber(t.startMs / 1000, 1)}s`)
+      .map(
+        (t) =>
+          `${fmtNumber(t.durationMs)}ms @ ${fmtNumber(t.startMs / 1000, 1)}s${t.attribution ? ` (${t.attribution})` : ""}`,
+      )
       .join("; ");
     lines.push(
       `long tasks: ${snapshot.longTasks.count} in the last 60s, max ${fmtNumber(snapshot.longTasks.maxMs)}ms, total ${fmtNumber(snapshot.longTasks.totalMs)}ms`,
     );
     if (recent) lines.push(`recent long tasks: ${recent}`);
+  }
+  if (snapshot.longTaskFrames?.length) {
+    lines.push("long task top frames (sampled):");
+    for (const frame of snapshot.longTaskFrames) lines.push(`  ${frame.samples}x ${frame.label}`);
   }
   if (snapshot.connection) {
     const parts = [
@@ -373,14 +451,91 @@ export function shouldRecordLongTaskSample(
   return durationMs >= 50 && startMs >= graceUntilMs && startMs - visibleSinceMs >= VISIBILITY_RESUME_GRACE_MS;
 }
 
+export function shouldPromptForLongTasks(summary: { count: number; totalMs: number; maxMs: number }): boolean {
+  return summary.maxMs >= LONG_TASK_PROMPT_MS || (summary.count >= 3 && summary.totalMs >= LONG_TASK_TOTAL_PROMPT_MS);
+}
+
+export function shouldPromptForEventLoopLag(
+  samples: readonly number[],
+  longTask?: { count: number; totalMs: number; maxMs: number },
+): boolean {
+  const recent = samples.slice(-EVENT_LOOP_LAG_CONSECUTIVE_SAMPLES);
+  const sustained =
+    recent.length === EVENT_LOOP_LAG_CONSECUTIVE_SAMPLES &&
+    recent.every((sample) => sample >= EVENT_LOOP_LAG_PROMPT_MS);
+  const current = samples.length ? samples[samples.length - 1] : 0;
+  const corroborated = current >= EVENT_LOOP_LAG_PROMPT_MS && Boolean(longTask && shouldPromptForLongTasks(longTask));
+  return sustained || corroborated;
+}
+
+type TaskAttributionLike = {
+  containerType?: string;
+  containerName?: string;
+  containerId?: string;
+  containerSrc?: string;
+};
+
+// Longtask entries carry no stacks, only a culprit descriptor ("self", "same-origin",
+// iframe container, ...). "self" and "unknown" are the expected no-signal cases, so
+// only anomalies (cross-context culprits, named containers) make it into the report.
+export function formatLongTaskAttribution(entryName?: string, attribution?: TaskAttributionLike[]): string {
+  const parts: string[] = [];
+  if (entryName && entryName !== "unknown" && entryName !== "self") parts.push(entryName);
+  const culprit = attribution?.[0];
+  if (culprit) {
+    const container = culprit.containerName || culprit.containerId || culprit.containerSrc || "";
+    const containerType = culprit.containerType && culprit.containerType !== "window" ? culprit.containerType : "";
+    const detail = [containerType, container].filter(Boolean).join(":");
+    if (detail) parts.push(detail);
+  }
+  return parts.join(" ");
+}
+
+// Self-time view of a self-profiling trace: count each sample that landed inside a
+// long-task window against its leaf frame, so the report names the code that was
+// actually on-CPU while the UI was blocked.
+export function aggregateLongTaskProfile(
+  trace: ProfilerTrace,
+  windows: { startMs: number; durationMs: number }[],
+  maxFrames = 8,
+): { label: string; samples: number }[] {
+  if (!windows.length) return [];
+  const counts = new Map<number, number>();
+  for (const sample of trace.samples ?? []) {
+    if (sample.stackId === undefined) continue;
+    const inWindow = windows.some(
+      (w) => sample.timestamp >= w.startMs && sample.timestamp <= w.startMs + w.durationMs,
+    );
+    if (!inWindow) continue;
+    const stack = trace.stacks?.[sample.stackId];
+    if (!stack) continue;
+    counts.set(stack.frameId, (counts.get(stack.frameId) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxFrames)
+    .map(([frameId, samples]) => ({ label: formatProfilerFrame(trace, frameId), samples }));
+}
+
+function formatProfilerFrame(trace: ProfilerTrace, frameId: number): string {
+  const frame = trace.frames?.[frameId];
+  if (!frame) return `frame#${frameId}`;
+  const name = frame.name || "(anonymous)";
+  const resource = frame.resourceId !== undefined ? trace.resources?.[frame.resourceId] : undefined;
+  if (!resource) return name;
+  const line = frame.line !== undefined ? `:${frame.line}${frame.column !== undefined ? `:${frame.column}` : ""}` : "";
+  return `${name} (${resource}${line})`;
+}
+
 export function shouldRecordEventLoopLagSample(
   visibilityHidden: boolean,
   msSinceVisible: number,
   focused = true,
+  msSinceFocused = msSinceVisible,
 ): boolean {
   if (!focused) return false;
   if (visibilityHidden) return false;
-  return msSinceVisible >= VISIBILITY_RESUME_GRACE_MS;
+  return msSinceVisible >= VISIBILITY_RESUME_GRACE_MS && msSinceFocused >= VISIBILITY_RESUME_GRACE_MS;
 }
 
 export function buildPerformancePayload(snapshot: PerformanceSnapshot): CrashPayload {
@@ -438,6 +593,23 @@ export function buildCrashPayload(label: string, err: unknown, extra?: string): 
   };
 }
 
+export function opaqueScriptFingerprintHint(
+  rawView = currentView(),
+  breadcrumbs = snapshotBreadcrumbs(),
+  buildCommit = currentBuildCommit(),
+): string {
+  const view = rawView
+    .replace(/[?#].*$/, "")
+    .replace(/\b[0-9a-f]{8,}\b/gi, "_")
+    .replace(/\/\d+(?=\/|$)/g, "/_");
+  const categories = breadcrumbs
+    .slice(-8)
+    .map((crumb) => crumb.cat?.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "_") ?? "")
+    .filter(Boolean)
+    .join(">");
+  return clip(`build:${buildCommit.slice(0, 16)}|view:${view}|cats:${categories || "none"}`, 300);
+}
+
 function sendButton(
   payload: CrashPayload,
   className = "crash-overlay__send",
@@ -457,11 +629,41 @@ function sendButton(
       await report(payload.kind, JSON.stringify(payload));
       send.textContent = t("crash.sent");
       onSent?.();
-    } catch {
+    } catch (err) {
       send.textContent = t("crash.sendFailed");
+      send.title = err instanceof Error ? err.message : String(err);
+      send.disabled = false;
     }
   };
   return send;
+}
+
+const COPY_FEEDBACK_MS = 2_000;
+
+function copyButton(text: string, className: string): HTMLButtonElement {
+  const copy = document.createElement("button");
+  copy.className = className;
+  copy.textContent = t("crash.copy");
+  copy.onclick = async () => {
+    copy.disabled = true;
+    let copied = false;
+    // The crash overlay is the last-resort surface, so the button must re-enable
+    // even if the clipboard path throws unexpectedly — a stuck disabled Copy is
+    // exactly the #6388 unresponsive symptom. Catch so a rejection can't escape as
+    // an unhandledrejection into the global crash handler either.
+    try {
+      copied = await writeClipboardText(text);
+    } catch {
+      copied = false;
+    } finally {
+      copy.textContent = copied ? t("crash.copied") : t("crash.copyFailed");
+      copy.disabled = false;
+      window.setTimeout(() => {
+        copy.textContent = t("crash.copy");
+      }, COPY_FEEDBACK_MS);
+    }
+  };
+  return copy;
 }
 
 function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnapshot) {
@@ -481,10 +683,7 @@ function paintPerformancePrompt(payload: CrashPayload, snapshot: PerformanceSnap
   const actions = document.createElement("div");
   actions.className = "performance-report__actions";
   const send = sendButton(payload, "performance-report__send", () => markPerfReported(payload.label));
-  const copy = document.createElement("button");
-  copy.className = "performance-report__copy";
-  copy.textContent = t("crash.copy");
-  copy.onclick = () => void navigator.clipboard?.writeText(payload.message);
+  const copy = copyButton(payload.message, "performance-report__copy");
   const dismiss = document.createElement("button");
   dismiss.className = "performance-report__dismiss";
   dismiss.textContent = t("performanceReport.dismiss");
@@ -513,10 +712,7 @@ function paint(payload: CrashPayload) {
   const body = document.createElement("pre");
   body.className = "crash-overlay__body";
   body.textContent = payload.message;
-  const copy = document.createElement("button");
-  copy.className = "crash-overlay__copy";
-  copy.textContent = t("crash.copy");
-  copy.onclick = () => void navigator.clipboard?.writeText(payload.message);
+  const copy = copyButton(payload.message, "crash-overlay__copy");
   const actions = document.createElement("div");
   actions.className = "crash-overlay__actions";
   const send = sendButton(payload);
@@ -563,7 +759,17 @@ function globalCrashEventMessages(e: GlobalCrashEventLike): string[] {
 export function shouldReportGlobalCrashEvent(e: GlobalCrashEventLike): boolean {
   if (e.defaultPrevented) return false;
   if (globalCrashEventMessages(e).some((message) => RESIZE_OBSERVER_LOOP_MESSAGE_RE.test(message))) return false;
+  if (globalCrashEventMessages(e).some((message) => /Minified React error #520\b/.test(message))) return false;
   return true;
+}
+
+export function isOpaqueScriptErrorEvent(e: GlobalCrashEventLike): boolean {
+  return (
+    (e.error === undefined || e.error === null) &&
+    typeof e.message === "string" &&
+    e.message.trim() === OPAQUE_SCRIPT_ERROR_MESSAGE &&
+    globalScriptErrorLocation(e) === ""
+  );
 }
 
 function globalScriptErrorLocation(e: GlobalCrashEventLike): string {
@@ -614,7 +820,21 @@ function promptPerformanceReport(reason: string, currentLagMs = 0): void {
   lastPerformancePromptAt = now;
   addBreadcrumb("performance", reason);
   const snapshot = performanceSnapshot(reason, currentLagMs);
-  paintPerformancePrompt(buildPerformancePayload(snapshot), snapshot);
+  if (!activeProfiler) {
+    paintPerformancePrompt(buildPerformancePayload(snapshot), snapshot);
+    return;
+  }
+  // Attribute samples to the blocked spans: every recorded long task, plus the lag
+  // spike itself for event-loop reports (profiler timestamps share performance.now()'s origin).
+  const windows = [...longTasks];
+  if (currentLagMs > 0) {
+    const nowMs = performance.now();
+    windows.push({ startMs: Math.max(0, nowMs - currentLagMs), durationMs: currentLagMs });
+  }
+  void collectLongTaskFrames(windows).then((frames) => {
+    if (frames.length) snapshot.longTaskFrames = frames;
+    paintPerformancePrompt(buildPerformancePayload(snapshot), snapshot);
+  });
 }
 
 function maybePromptForHeapPressure(): void {
@@ -634,33 +854,61 @@ export function installPerformancePressureMonitor() {
   const isHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
   const isFocused = () => typeof document === "undefined" || document.hasFocus?.() !== false;
   let visibleSince = isHidden() ? Number.POSITIVE_INFINITY : startedAt;
+  let focusedSince = isFocused() ? startedAt : Number.POSITIVE_INFINITY;
   let expected = performance.now() + 1000;
+  let eventLoopLagPrimed = false;
+  // When the view is shown or focused again, overdue timer callbacks can run before
+  // the queued visibilitychange/focus task, so visibleSince/focusedSince may still
+  // describe the previous settled period at that point. The sampler tracks hidden and
+  // unfocused observations itself and restarts both windows on the first settled tick
+  // instead of trusting the listener-maintained timestamps.
+  let pendingResume = isHidden() || !isFocused();
 
   const pastGrace = () => performance.now() >= graceUntil;
   const inspectLongTasks = () => {
     if (!pastGrace()) return;
     const summary = longTaskSummary();
     if (!summary) return;
-    if (summary.maxMs >= LONG_TASK_PROMPT_MS || (summary.count >= 3 && summary.totalMs >= LONG_TASK_TOTAL_PROMPT_MS)) {
+    if (shouldPromptForLongTasks(summary)) {
       promptPerformanceReport(`long task ${fmtNumber(summary.maxMs)}ms`);
     }
   };
 
+  startLongTaskProfiler();
+
+  // Blur/hide park the timestamps at +Infinity so a stale read before the matching
+  // resume listener has run can never satisfy the grace windows.
+  const resetSamples = () => {
+    const now = performance.now();
+    longTasks.length = 0;
+    lagSamples.length = 0;
+    expected = now + 1000;
+    eventLoopLagPrimed = false;
+    visibleSince = isHidden() ? Number.POSITIVE_INFINITY : now;
+    focusedSince = isFocused() ? now : Number.POSITIVE_INFINITY;
+    pendingResume = isHidden() || !isFocused();
+  };
+
   if (typeof document !== "undefined") {
-    document.addEventListener("visibilitychange", () => {
-      longTasks.length = 0;
-      lagSamples.length = 0;
-      expected = performance.now() + 1000;
-      if (!isHidden()) visibleSince = performance.now();
-    });
+    document.addEventListener("visibilitychange", resetSamples);
   }
+  window.addEventListener("focus", resetSamples);
+  window.addEventListener("blur", resetSamples);
 
   if (typeof PerformanceObserver !== "undefined") {
     try {
       const observer = new PerformanceObserver((list) => {
         for (const entry of list.getEntries()) {
           if (!shouldRecordLongTaskSample(entry.startTime, entry.duration, graceUntil, isHidden(), visibleSince, isFocused())) continue;
-          longTasks.push({ startMs: Math.round(entry.startTime), durationMs: Math.round(entry.duration) });
+          const attribution = formatLongTaskAttribution(
+            entry.name,
+            (entry as PerformanceEntry & { attribution?: TaskAttributionLike[] }).attribution,
+          );
+          longTasks.push({
+            startMs: Math.round(entry.startTime),
+            durationMs: Math.round(entry.duration),
+            ...(attribution ? { attribution } : {}),
+          });
         }
         pruneLongTasks();
         inspectLongTasks();
@@ -673,20 +921,45 @@ export function installPerformancePressureMonitor() {
 
   window.setInterval(() => {
     const now = performance.now();
+    if (isHidden() || !isFocused()) {
+      pendingResume = true;
+    } else if (pendingResume) {
+      pendingResume = false;
+      visibleSince = now;
+      focusedSince = now;
+      longTasks.length = 0;
+      lagSamples.length = 0;
+      expected = now + 1000;
+      eventLoopLagPrimed = false;
+      return;
+    }
+    if (!pastGrace()) {
+      expected = now + 1000;
+      return;
+    }
+    if (!eventLoopLagPrimed) {
+      expected = now + 1000;
+      eventLoopLagPrimed = true;
+      return;
+    }
     const lagMs = Math.max(0, now - expected);
     expected = now + 1000;
-    if (!pastGrace()) return;
-    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused())) return;
+    if (!shouldRecordEventLoopLagSample(isHidden(), now - visibleSince, isFocused(), now - focusedSince)) return;
     lagSamples.push(lagMs);
     if (lagSamples.length > MAX_LAG_SAMPLES) lagSamples.shift();
-    if (lagMs >= EVENT_LOOP_LAG_PROMPT_MS) promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
+    if (shouldPromptForEventLoopLag(lagSamples, longTaskSummary(now))) {
+      promptPerformanceReport(`event loop lag ${fmtNumber(lagMs)}ms`, lagMs);
+    }
     maybePromptForHeapPressure();
   }, 1000);
 }
 
 export function installGlobalCrashHandlers() {
   window.addEventListener("error", (e) => {
-    if (shouldReportGlobalCrashEvent(e)) reportCrash("window.error", globalCrashReportReason(e));
+    if (!shouldReportGlobalCrashEvent(e)) return;
+    const payload = buildCrashPayload("window.error", globalCrashReportReason(e));
+    if (isOpaqueScriptErrorEvent(e)) payload.fingerprintHint = opaqueScriptFingerprintHint();
+    paint(payload);
   });
   window.addEventListener("unhandledrejection", (e) => {
     if (shouldReportGlobalCrashEvent(e)) reportCrash("unhandledrejection", e.reason);

@@ -90,6 +90,45 @@ func TestStreamInsufficientBalance(t *testing.T) {
 	}
 }
 
+func TestStreamAnnotatesIndexedToolSchemaError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"Tool 1 function has invalid 'parameters' schema"}}`))
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "mimo", BaseURL: srv.URL, Model: "mimo-v2.5-pro", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Tools: []provider.ToolSchema{
+			{Name: "read_file", Parameters: json.RawMessage(`{"type":"object"}`)},
+			{Name: "mcp__files__search", Parameters: json.RawMessage(`{"type":"object"}`)},
+		},
+	})
+	var apiErr *provider.APIError
+	if !errors.As(err, &apiErr) || !strings.Contains(apiErr.ToolContext, `MCP server "files"`) {
+		t.Fatalf("Stream error = %v, want MCP tool source context", err)
+	}
+}
+
+func TestBuildRequestScopesLegacyTupleMigrationToMiMo(t *testing.T) {
+	legacy := json.RawMessage(`{"type":"object","properties":{"pair":{"type":"array","items":[{"type":"string"},{"type":"number"}]}}}`)
+	req := provider.Request{Tools: []provider.ToolSchema{{Name: "tuple", Parameters: legacy}}}
+
+	mimo := (&client{mimo: true}).buildRequest(req)
+	if got := string(mimo.Tools[0].Function.Parameters); !strings.Contains(got, `"prefixItems"`) || strings.Contains(got, `"items":[`) {
+		t.Fatalf("MiMo parameters = %s, want Draft 2020-12 tuple keywords", got)
+	}
+
+	other := (&client{}).buildRequest(req)
+	if got := string(other.Tools[0].Function.Parameters); got != string(legacy) {
+		t.Fatalf("non-MiMo parameters changed:\n got: %s\nwant: %s", got, legacy)
+	}
+}
+
 // TestStreamAuthError verifies a 401 surfaces as an actionable *provider.AuthError
 // (naming the provider and its key env var) rather than a raw status body.
 func TestStreamAuthError(t *testing.T) {
@@ -245,6 +284,9 @@ func TestStreamUsesMiMoAPIKeyHeader(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := p.(*client)
+	if !c.mimo {
+		t.Fatal("official MiMo endpoint did not enable the Draft 2020-12 schema adapter")
+	}
 	c.chatURL = srv.URL
 
 	ch, err := p.Stream(context.Background(), provider.Request{
@@ -512,13 +554,13 @@ func TestBuildRequestDropsReasoningOnPlainAssistantTurn(t *testing.T) {
 	}
 }
 
-func TestBuildRequestDropsMemoryCitations(t *testing.T) {
+func TestBuildRequestDropsLocalMetadata(t *testing.T) {
 	c := &client{model: "deepseek-chat", deepseek: true}
 	req := c.buildRequest(provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "continue"},
 			{Role: provider.RoleUser, Content: "edited prompt", Edited: true, Original: "original prompt"},
-			{Role: provider.RoleAssistant, Content: "done", MemoryCitations: []provider.MemoryCitation{{
+			{Role: provider.RoleAssistant, Content: "done", WorkDurationMs: 24_000, MemoryCitations: []provider.MemoryCitation{{
 				ID: "mem-1", Source: "MEMORY.md", LineStart: 116, LineEnd: 123, Note: "workflow",
 			}}},
 		},
@@ -529,6 +571,9 @@ func TestBuildRequestDropsMemoryCitations(t *testing.T) {
 	}
 	if strings.Contains(string(b), "memoryCitations") || strings.Contains(string(b), "MEMORY.md") {
 		t.Fatalf("local memory citations leaked into OpenAI-compatible request: %s", b)
+	}
+	if strings.Contains(string(b), "workDurationMs") || strings.Contains(string(b), "work_duration_ms") {
+		t.Fatalf("local work duration leaked into OpenAI-compatible request: %s", b)
 	}
 	if strings.Contains(string(b), "original prompt") || strings.Contains(string(b), `"edited"`) || strings.Contains(string(b), `"original"`) {
 		t.Fatalf("local edit metadata leaked into OpenAI-compatible request: %s", b)
@@ -821,8 +866,12 @@ func TestNewThinkingConfigParsing(t *testing.T) {
 }
 
 // TestBuildRequestDeepSeekDisabled covers both user-facing ways to turn
-// DeepSeek thinking off. Either input must route to thinking.type=disabled and
-// drop reasoning_effort.
+// DeepSeek thinking off. Either input must route to thinking.type=disabled,
+// drop reasoning_effort, and keep the pre-fix tool-call history bytes: a
+// tool_calls turn with no reasoning omits the reasoning_content key entirely
+// (only thinking mode requires it), while reasoning left over from a
+// thinking-mode round still round-trips so the prompt-cache prefix of a mixed
+// thinking-on→off session stays stable.
 func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 	base := provider.Config{Name: "ds", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4", APIKey: "k"}
 	for _, tc := range []struct {
@@ -839,12 +888,30 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New(%v): %v", tc.extra, err)
 			}
-			req := p.(*client).buildRequest(provider.Request{})
+			req := p.(*client).buildRequest(provider.Request{
+				Messages: []provider.Message{
+					{Role: provider.RoleUser, Content: "inspect"},
+					{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+						ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
+					}}},
+					{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
+					{Role: provider.RoleAssistant, ReasoningContent: "from a thinking round", ToolCalls: []provider.ToolCall{{
+						ID: "call_2", Name: "read_file", Arguments: `{"path":"go.mod"}`,
+					}}},
+					{Role: provider.RoleTool, ToolCallID: "call_2", Name: "read_file", Content: "module demo"},
+				},
+			})
 			if req.Thinking == nil || req.Thinking.Type != "disabled" {
 				t.Fatalf("Thinking = %+v, want disabled", req.Thinking)
 			}
 			if req.ReasoningEffort != "" {
 				t.Fatalf("disabled DeepSeek must not send reasoning_effort, got %q", req.ReasoningEffort)
+			}
+			if rc := req.Messages[1].ReasoningContent; rc != nil {
+				t.Fatalf("disabled mode must omit reasoning_content on a reasoning-less tool_calls turn, got %q", *rc)
+			}
+			if rc := req.Messages[3].ReasoningContent; rc == nil || *rc != "from a thinking round" {
+				t.Fatalf("disabled mode must keep round-tripping thinking-round reasoning, got %v", rc)
 			}
 		})
 	}
@@ -946,6 +1013,207 @@ func TestNewReadsEffortFromConfig(t *testing.T) {
 	}
 	if got := p.(*client).effort; got != "medium" {
 		t.Errorf("effort = %q, want medium", got)
+	}
+}
+
+func TestStreamReadsReasoningFallbackField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"reasoning":"vllm thinking","content":"answer"}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "vllm", BaseURL: srv.URL, Model: "qwen", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var reasoning, text strings.Builder
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkReasoning:
+			reasoning.WriteString(chunk.Text)
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkError:
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if reasoning.String() != "vllm thinking" {
+		t.Fatalf("reasoning = %q, want vLLM fallback field", reasoning.String())
+	}
+	if text.String() != "answer" {
+		t.Fatalf("text = %q, want answer", text.String())
+	}
+}
+
+func TestStreamReasoningContentTakesPrecedenceOverFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"reasoning_content":"standard","reasoning":"fallback"}}]}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	p, err := New(provider.Config{Name: "vllm", BaseURL: srv.URL, Model: "qwen", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var reasoning strings.Builder
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkReasoning:
+			reasoning.WriteString(chunk.Text)
+		case provider.ChunkError:
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if reasoning.String() != "standard" {
+		t.Fatalf("reasoning = %q, want reasoning_content precedence", reasoning.String())
+	}
+}
+
+// TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls proves the wire
+// contract verified against the live API: DeepSeek thinking mode 400s an
+// assistant tool_calls turn whose reasoning_content KEY is missing from the
+// request JSON, but accepts an empty string. A turn whose reasoning was lost
+// upstream (gateway renamed/dropped the field, legacy session, model switch)
+// must therefore still serialize the key — while plain assistant text turns
+// keep omitting it.
+func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-proxy",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-pro",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "deepseek"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	body, err := json.Marshal(p.(*client).buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "inspect"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+				ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
+			}}},
+			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
+			{Role: provider.RoleAssistant, Content: "plain text turn"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	var req struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if len(req.Messages) != 4 {
+		t.Fatalf("messages = %d, want 4", len(req.Messages))
+	}
+	rc, ok := req.Messages[1]["reasoning_content"]
+	if !ok {
+		t.Fatal("tool_calls turn with lost reasoning must still serialize the reasoning_content key")
+	}
+	if string(rc) != `""` {
+		t.Fatalf("reasoning_content = %s, want empty string", rc)
+	}
+	if _, ok := req.Messages[3]["reasoning_content"]; ok {
+		t.Fatal("plain assistant text turn must keep omitting reasoning_content")
+	}
+}
+
+func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) {
+	tests := []struct {
+		name  string
+		model string
+		want  bool
+	}{
+		{name: "exact flash", model: "deepseek-v4-flash", want: false},
+		{name: "namespaced flash", model: "deepseek/deepseek-v4-flash", want: false},
+		{name: "exact pro", model: "deepseek-v4-pro", want: true},
+		{name: "namespaced pro", model: "deepseek/deepseek-v4-pro", want: true},
+		{name: "mixed case pro", model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
+		{name: "reasoner", model: "deepseek-reasoner", want: true},
+		{name: "r1", model: "deepseek-ai/DeepSeek-R1-0528", want: true},
+		{name: "generic deepseek", model: "deepseek-chat", want: false},
+		{name: "gateway deepseek v3", model: "deepseek-ai/DeepSeek-V3.2", want: false},
+		{name: "prover is not pro", model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
+		{name: "dated pro variant", model: "deepseek-v4-pro-0923", want: true},
+		{name: "dotted pro variant", model: "deepseek-v4-pro.1", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := New(provider.Config{
+				Name:    "deepseek-proxy",
+				BaseURL: "https://gateway.example/v1",
+				Model:   tc.model,
+				APIKey:  "k",
+				Extra:   map[string]any{"reasoning_protocol": "deepseek"},
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if !provider.RequiresToolCallReasoning(p) {
+				t.Fatal("DeepSeek protocol should keep conservative reasoning_content replay for tool-call turns")
+			}
+			if got := provider.WarnOnMissingToolCallReasoning(p); got != tc.want {
+				t.Fatalf("WarnOnMissingToolCallReasoning() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	p, err := New(provider.Config{
+		Name:    "deepseek-v4-pro-openai-protocol",
+		BaseURL: "https://gateway.example/v1",
+		Model:   "deepseek-v4-pro",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "openai"},
+	})
+	if err != nil {
+		t.Fatalf("New OpenAI protocol: %v", err)
+	}
+	if provider.WarnOnMissingToolCallReasoning(p) {
+		t.Fatal("OpenAI protocol should not warn using DeepSeek reasoning_content policy")
+	}
+}
+
+// TestBuildRequestRoundTripsDeepSeekToolCallReasoning keeps the healthy-path
+// bytes intact: when the session has the provider-issued reasoning, it is
+// replayed verbatim on the tool_calls turn.
+func TestBuildRequestRoundTripsDeepSeekToolCallReasoning(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek-proxy",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-pro",
+		APIKey:  "k",
+		Extra:   map[string]any{"reasoning_protocol": "deepseek"},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	out := p.(*client).buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "inspect"},
+			{Role: provider.RoleAssistant, ReasoningContent: "read main.go first", ToolCalls: []provider.ToolCall{{
+				ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
+			}}},
+			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
+		},
+	})
+	got := out.Messages[1].ReasoningContent
+	if got == nil || *got != "read main.go first" {
+		t.Fatalf("reasoning_content = %v, want provider-issued reasoning round-tripped", got)
 	}
 }
 

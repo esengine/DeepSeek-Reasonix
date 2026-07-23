@@ -80,8 +80,9 @@ func (s *TextSink) Emit(e event.Event) {
 
 	case event.ToolDispatch:
 		// The early (Partial) dispatch carries no args — the full one prints the
-		// line. Without this the headless stream shows every call twice.
-		if e.Tool.Partial {
+		// line. A same-ID preview refresh is for upsert-capable frontends; this
+		// append-only stream ignores it so every tool still prints exactly once.
+		if e.Tool.Partial || e.Tool.Refreshed {
 			break
 		}
 		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, CompactArgs(e.Tool.Args))

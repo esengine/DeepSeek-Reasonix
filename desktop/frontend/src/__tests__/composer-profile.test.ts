@@ -77,6 +77,14 @@ console.log("\ncomposer profile");
 
 {
   let profiles: ComposerProfilesByTab = {};
+  profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ tokenMode: "delivery" })]);
+  eq(profiles["tab-1"].tokenMode, "delivery", "delivery runtime profile hydrates from persisted tabs");
+  profiles = hydrateComposerProfileFromMeta(profiles, "tab-1", meta({ tokenMode: "delivery" }));
+  eq(Boolean(profiles["tab-1"].pending.tokenMode), false, "delivery runtime profile is acknowledged by meta");
+}
+
+{
+  let profiles: ComposerProfilesByTab = {};
   profiles = hydrateComposerProfilesFromTabs(profiles, [tab({ tokenMode: "economy" })]);
   profiles = patchComposerProfile(
     profiles,

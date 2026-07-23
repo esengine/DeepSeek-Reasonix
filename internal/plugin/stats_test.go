@@ -220,3 +220,161 @@ func containsAny(s, chars string) bool {
 	}
 	return false
 }
+
+// TestStatsSlugCollisionDoesNotCrossDemote: "foo.bar" and "foo-bar" collapse
+// to one slug. Each server now gets its own hash-suffixed file, so a slow
+// server's samples must not demote the other, and interleaved startups must
+// not reset each other's windows (the old shared-file ownership check made
+// each writer wipe the other's history, so neither could ever accumulate
+// enough consecutive samples to demote).
+func TestStatsSlugCollisionDoesNotCrossDemote(t *testing.T) {
+	withTempCache(t)
+
+	// Interleave a chronically slow server with a healthy one sharing the slug.
+	for i := 0; i < defaultDemoteAfter; i++ {
+		if err := RecordStartup("foo.bar", 5*time.Second); err != nil {
+			t.Fatalf("RecordStartup foo.bar: %v", err)
+		}
+		if err := RecordStartup("foo-bar", 10*time.Millisecond); err != nil {
+			t.Fatalf("RecordStartup foo-bar: %v", err)
+		}
+	}
+	// Both windows must have accumulated independently despite interleaving.
+	slow := readStats(t, "foo.bar")
+	fast := readStats(t, "foo-bar")
+	if len(slow.SamplesMs) != defaultDemoteAfter || slow.Name != "foo.bar" {
+		t.Fatalf("foo.bar window = %+v, want %d samples owned by foo.bar", slow, defaultDemoteAfter)
+	}
+	if len(fast.SamplesMs) != defaultDemoteAfter || fast.Name != "foo-bar" {
+		t.Fatalf("foo-bar window = %+v, want %d samples owned by foo-bar", fast, defaultDemoteAfter)
+	}
+	// The slow server demotes on its own history; the healthy one does not.
+	if rec := Recommend("foo.bar", time.Second, 0); !rec.Demote {
+		t.Fatalf("foo.bar should demote on its own history: %+v", rec)
+	}
+	if rec := Recommend("foo-bar", time.Second, 0); rec.Demote {
+		t.Fatalf("foo-bar demoted off foo.bar's samples: %+v", rec)
+	}
+}
+
+// TestStatsLegacyNamedFileMigrated: a pre-hash stats file whose recorded Name
+// matches is this server's own history — Recommend keeps working from it and
+// the next write carries it into the hashed path.
+func TestStatsLegacyNamedFileMigrated(t *testing.T) {
+	withTempCache(t)
+
+	legacy := StartupStats{Version: statsVersion, Name: "legacy", LastSeen: time.Now()}
+	for i := 0; i < 3; i++ {
+		legacy.SamplesMs = append(legacy.SamplesMs, 100)
+	}
+	if err := writeStatsAtomic(legacyStatsPath("legacy"), legacy); err != nil {
+		t.Fatalf("write legacy stats: %v", err)
+	}
+
+	if rec := Recommend("legacy", time.Second, 0); rec.P99 == 0 {
+		t.Fatalf("legacy named stats not readable: %+v", rec)
+	}
+	if err := RecordStartup("legacy", 100*time.Millisecond); err != nil {
+		t.Fatalf("RecordStartup after legacy: %v", err)
+	}
+	s := readStats(t, "legacy")
+	if s.Name != "legacy" || len(s.SamplesMs) != 4 {
+		t.Fatalf("legacy migration = %+v, want name kept and 4 samples", s)
+	}
+}
+
+// TestStatsLegacyNamelessCollisionNotTrusted: a pre-ownership legacy file has
+// no Name, so it is shared by every server whose name collapses to the slug
+// and its samples cannot be attributed. It must not demote anyone and must
+// not seed a new window.
+func TestStatsLegacyNamelessCollisionNotTrusted(t *testing.T) {
+	withTempCache(t)
+
+	nameless := StartupStats{Version: statsVersion, LastSeen: time.Now()}
+	for i := 0; i < defaultDemoteAfter; i++ {
+		nameless.SamplesMs = append(nameless.SamplesMs, 5000) // over budget
+	}
+	if err := writeStatsAtomic(legacyStatsPath("foo.bar"), nameless); err != nil {
+		t.Fatalf("write nameless legacy stats: %v", err)
+	}
+
+	// Neither colliding server may be demoted off unattributable samples.
+	if rec := Recommend("foo.bar", time.Second, 0); rec.Demote {
+		t.Fatalf("foo.bar demoted off nameless legacy samples: %+v", rec)
+	}
+	if rec := Recommend("foo-bar", time.Second, 0); rec.Demote {
+		t.Fatalf("foo-bar demoted off nameless legacy samples: %+v", rec)
+	}
+	// A new write starts a fresh window instead of inheriting the samples.
+	if err := RecordStartup("foo.bar", 10*time.Millisecond); err != nil {
+		t.Fatalf("RecordStartup: %v", err)
+	}
+	s := readStats(t, "foo.bar")
+	if s.Name != "foo.bar" || len(s.SamplesMs) != 1 {
+		t.Fatalf("window after nameless legacy = %+v, want fresh single-sample window", s)
+	}
+}
+
+// TestStatsLegacyFileWithoutNameAdopted: a nameless file at the hashed path is
+// unambiguous — the hash pins it to exactly one server name — so its samples
+// stay usable and the next write adopts it without dropping history. (Nameless
+// files at the shared legacy path are the untrusted case, covered above.)
+func TestStatsLegacyFileWithoutNameAdopted(t *testing.T) {
+	withTempCache(t)
+
+	for i := 0; i < 3; i++ {
+		if err := RecordStartup("legacy", 100*time.Millisecond); err != nil {
+			t.Fatalf("RecordStartup: %v", err)
+		}
+	}
+	// Simulate a legacy file: strip the Name field.
+	path := statsPath("legacy")
+	s := readStats(t, "legacy")
+	s.Name = ""
+	if err := writeStatsAtomic(path, s); err != nil {
+		t.Fatalf("write legacy stats: %v", err)
+	}
+
+	// Recommend still reads the legacy file (no ownership check possible).
+	if rec := Recommend("legacy", time.Second, 0); rec.P99 == 0 {
+		t.Fatalf("legacy stats not readable: %+v", rec)
+	}
+	// The next write adopts the file without dropping history.
+	if err := RecordStartup("legacy", 100*time.Millisecond); err != nil {
+		t.Fatalf("RecordStartup after legacy: %v", err)
+	}
+	s = readStats(t, "legacy")
+	if s.Name != "legacy" || len(s.SamplesMs) != 4 {
+		t.Fatalf("legacy adoption = %+v, want name set and 4 samples kept", s)
+	}
+}
+
+// TestStatsPathBoundedForLongNames: the hash suffix added for collision
+// safety must not push a previously-writable long slug past the 255-byte
+// filename component limit (slugs of 236-244 bytes could write
+// "<slug>.stats.json" before, but "<slug>-<hash>.stats.json" would exceed it).
+func TestStatsPathBoundedForLongNames(t *testing.T) {
+	withTempCache(t)
+
+	long := strings.Repeat("a", 240)
+	p := statsPath(long)
+	if p == "" {
+		t.Fatal("statsPath returned empty")
+	}
+	if base := filepath.Base(p); len(base) > 255 {
+		t.Fatalf("component = %d bytes, exceeds 255 limit: %q", len(base), base)
+	}
+	// The bounded path must still be writable and readable end-to-end.
+	if err := RecordStartup(long, 100*time.Millisecond); err != nil {
+		t.Fatalf("RecordStartup long name: %v", err)
+	}
+	s := readStats(t, long)
+	if s.Name != long || len(s.SamplesMs) != 1 {
+		t.Fatalf("long-name stats = %+v, want one owned sample", s)
+	}
+	// Distinct long names sharing the truncated stem must keep distinct files.
+	other := strings.Repeat("a", 240) + "b"
+	if statsPath(other) == p {
+		t.Fatalf("distinct long names collapsed to one stats path: %q", p)
+	}
+}

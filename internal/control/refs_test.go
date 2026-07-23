@@ -31,6 +31,44 @@ func TestFileRefLine(t *testing.T) {
 	if _, ok := FileRefLine(""); ok {
 		t.Fatal("empty must not resolve as a file ref")
 	}
+
+	spaced := filepath.Join(dir, "report 2026.pdf")
+	if err := os.WriteFile(spaced, []byte("%PDF-1.4 fake"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := FileRefLine(spaced); !ok || got != "@"+EscapeRefPath(spaced) {
+		t.Fatalf("FileRefLine(spaced) = %q, %v; want escaped ref", got, ok)
+	}
+}
+
+func TestEscapeRefPathRoundTrip(t *testing.T) {
+	cases := []struct{ in, escaped string }{
+		{"plain.txt", "plain.txt"},
+		{"my file.txt", `my\ file.txt`},
+		{"a\tb.txt", "a\\\tb.txt"},
+		{`C:\dir\file.png`, `C:\dir\file.png`},
+	}
+	for _, c := range cases {
+		if got := EscapeRefPath(c.in); got != c.escaped {
+			t.Errorf("EscapeRefPath(%q) = %q, want %q", c.in, got, c.escaped)
+		}
+		if got := UnescapeRefPath(c.escaped); got != c.in {
+			t.Errorf("UnescapeRefPath(%q) = %q, want %q", c.escaped, got, c.in)
+		}
+	}
+}
+
+// TestDetectRefsEscapedSpacePath closes the loop pastedFileRef and completion
+// rely on: an @token with escaped spaces resolves to the real workspace file.
+func TestDetectRefsEscapedSpacePath(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "my file.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := (&Controller{workspaceRoot: workspace}).detectRefs(`see @my\ file.txt after`)
+	if len(refs) != 1 || refs[0].kind != refFile || refs[0].path != "my file.txt" {
+		t.Fatalf("refs = %+v, want one file ref for \"my file.txt\"", refs)
+	}
 }
 
 func TestSlashCodeCommentLine(t *testing.T) {
@@ -63,6 +101,10 @@ func TestParseRefTokens(t *testing.T) {
 		{"dedup @a @a", []string{"a"}},
 		{"no refs here", nil},
 		{"email a@b.com keeps token", []string{"b.com"}},
+		{`open @docs/my\ file.md now`, []string{"docs/my file.md"}},
+		{`trailing @my\ file.md.`, []string{"my file.md"}},
+		{`win @C:\dir\shot.png ok`, []string{`C:\dir\shot.png`}},
+		{`unescaped @my file.md`, []string{"my"}},
 	}
 	for _, c := range cases {
 		got := parseRefTokens(c.line)

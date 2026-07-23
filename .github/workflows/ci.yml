@@ -28,6 +28,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install and verify Linux sandbox backend
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true || \
+            echo "::warning::bubblewrap is installed but this runner denies user namespaces; unavailable-backend tests will run fail-closed"
+
       # Skipped on Windows: the runner checks out CRLF, so gofmt -l flags every
       # file. gofmt output is OS-independent, so the Unix legs already cover it.
       - name: gofmt
@@ -78,6 +92,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Install and verify Linux sandbox backend
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          if sysctl -n kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl -n kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --dev /dev --proc /proc -- true || \
+            echo "::warning::bubblewrap is installed but this runner denies user namespaces; unavailable-backend tests will run fail-closed"
 
       # The matrix never runs -race (it needs cgo); the project's concurrency
       # (plugin fan-out, background phase B, jobs Kill/Wait) would otherwise
@@ -163,6 +190,60 @@ jobs:
       - name: test
         run: go test ./...
 
+  # Desktop project-root matching is case-insensitive only on Windows
+  # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
+  # regression tests for that contract are named *OnWindows and can never
+  # run on the ubuntu leg above.
+  desktop-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
+
+      - name: Install Wails CLI
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      # go:embed of frontend/dist needs a built frontend before the package
+      # compiles, same as the ubuntu desktop leg.
+      - name: Build frontend
+        run: |
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: test (Windows desktop and update helper)
+        timeout-minutes: 15
+        run: go test ./...
+
+      - name: Install NSIS
+        run: pwsh -NoProfile -File ../scripts/install-nsis.ps1
+
+      - name: Build Windows installer and portable archive
+        timeout-minutes: 20
+        run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -178,6 +259,35 @@ jobs:
         with:
           version: v2.12.2
           args: --timeout=5m
+
+      - name: release workflow contracts
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \
+            -ignore 'label "windows-11-arm" is unknown' \
+            .github/workflows/release-stable.yml \
+            .github/workflows/release.yml \
+            .github/workflows/release-npm.yml \
+            .github/workflows/release-desktop.yml
+          bash scripts/release-workflows.test.sh
+
+  # The site/ auth client has security-sensitive redirect-validation logic
+  # (safeNext) covered by node:test unit tests. Those tests use only Node
+  # builtins, so no `npm install` is needed — run them directly on every PR so
+  # a regression in redirect validation fails the build instead of shipping.
+  site:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: test
+        run: npm test
 
   govulncheck:
     runs-on: ubuntu-latest

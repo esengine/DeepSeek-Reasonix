@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -42,6 +44,26 @@ func TestRunStatuslineCmd(t *testing.T) {
 	// A failing command yields an empty line, not an error.
 	if got := runStatuslineCmd(failCmd, "{}"); got != "" {
 		t.Errorf("failed command should yield empty, got %q", got)
+	}
+}
+
+func TestRunStatuslineCmdNormalizesQuotedNodeEval(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not available")
+	}
+	script := "let input = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const payload = JSON.parse(input); console.log(payload.model) })"
+	cmd := `node -e "\"` + script + `\""`
+	timeout := statuslineCommandTimeout
+	if runtime.GOOS == "windows" {
+		// Windows CI cold-starts node.exe through Defender scanning while the
+		// rest of the module compiles and tests in parallel; a fresh toolchain
+		// (empty setup-go cache) pushes that past 10s. The production timeout
+		// is not under test here — only the quoted-eval normalization is.
+		timeout = 30 * time.Second
+	}
+
+	if got := runStatuslineCmdWithTimeout(cmd, `{"model":"deepseek"}`, timeout); got != "deepseek" {
+		t.Fatalf("normalized statusline node -e output = %q, want deepseek", got)
 	}
 }
 
@@ -100,7 +122,7 @@ func TestIdleStatuslineIsCompact(t *testing.T) {
 	if !strings.Contains(plain, "Auto") || !strings.Contains(plain, "ready") {
 		t.Fatalf("idle status line missing mode status:\n%s", plain)
 	}
-	if !strings.Contains(plain, "(shift+tab toggles plan · ctrl+y yolo)") {
+	if !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
 		t.Fatalf("idle status line missing plan-toggle hint:\n%s", plain)
 	}
 	for _, old := range []string{"Shift-Tab", "Ctrl-O", "Ctrl-D", "Enter sends", "Esc clears/exits state", "PgUp/PgDn"} {
@@ -121,7 +143,7 @@ func TestYoloStatuslineUsesDangerPill(t *testing.T) {
 
 	content := renderStatuslineView(t, true)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "YOLO") || !strings.Contains(plain, "approvals skipped") || !strings.Contains(plain, "(shift+tab toggles plan · ctrl+y yolo)") {
+	if !strings.Contains(plain, "YOLO") || !strings.Contains(plain, "approvals skipped") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
 		t.Fatalf("YOLO status line missing warning text:\n%s", plain)
 	}
 	if strings.Contains(plain, "[YOLO]") {
@@ -137,7 +159,7 @@ func TestPlanStatuslineUsesBluePill(t *testing.T) {
 
 	content := renderPlanStatuslineView(t)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Plan") || !strings.Contains(plain, "ready") || !strings.Contains(plain, "(shift+tab toggles plan · ctrl+y yolo)") {
+	if !strings.Contains(plain, "Plan") || !strings.Contains(plain, "ready") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
 		t.Fatalf("plan status line missing mode status:\n%s", plain)
 	}
 	if !strings.Contains(content, "\x1b[48;2;37;99;235m") {
@@ -151,10 +173,10 @@ func TestStatuslineCycleHintFollowsLanguage(t *testing.T) {
 
 	content := renderStatuslineView(t, false)
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Auto") || !strings.Contains(plain, "就绪") || !strings.Contains(plain, "(shift+tab 切换计划 · ctrl+y yolo)") {
+	if !strings.Contains(plain, "Auto") || !strings.Contains(plain, "就绪") || !strings.Contains(plain, "Shift+Tab 询问/自动/计划 · Ctrl+Y YOLO") {
 		t.Fatalf("localized plan-toggle hint missing:\n%s", plain)
 	}
-	if strings.Contains(plain, "ready") || strings.Contains(plain, "shift+tab toggles plan · ctrl+y yolo") {
+	if strings.Contains(plain, "ready") || strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
 		t.Fatalf("localized status line should not fall back to English:\n%s", plain)
 	}
 }
@@ -164,73 +186,100 @@ func TestDesktopShortcutStatuslineUsesPlanToggleHint(t *testing.T) {
 
 	content := renderStatuslineViewWithShortcutLayout(t, "desktop")
 	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "Ask") || !strings.Contains(plain, "(shift+tab toggles plan · ctrl+y yolo)") {
+	if !strings.Contains(plain, "Ask") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
 		t.Fatalf("desktop shortcut status line missing unified plan-toggle hint:\n%s", plain)
-	}
-	if strings.Contains(plain, "ask/auto/plan") {
-		t.Fatalf("desktop shortcut status line should not advertise Ask/Auto/Plan cycling:\n%s", plain)
 	}
 }
 
-func TestStatuslineShowsEffort(t *testing.T) {
+func TestStatuslineShowsEffortInPersistentFooter(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineViewWithEffort(t, "auto")
-	lines := bottomStatusPlainLines(content)
-	if len(lines) != 2 {
-		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
-	}
-	if !strings.Contains(lines[0], "effort auto") {
-		t.Fatalf("mode row should show effort:\n%s", strings.Join(lines, "\n"))
-	}
-	if strings.Contains(lines[1], "effort auto") {
-		t.Fatalf("data row should not show effort:\n%s", strings.Join(lines, "\n"))
+	lines := strings.Split(ansi.Strip(content), "\n")
+	statusLine := lines[len(lines)-1]
+	if !strings.Contains(statusLine, "MODEL deepseek-v4-flash   EFFORT auto") {
+		t.Fatalf("session row should keep effort beside the model:\n%s", statusLine)
 	}
 }
 
-func TestStatuslineKeepsCacheRatesInPrimaryDataRow(t *testing.T) {
+func TestStatuslineShowsCacheRatesInPersistentFooter(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineViewWithCache(t)
 	lines := bottomStatusPlainLines(content)
-	if len(lines) != 2 {
-		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 3 {
+		t.Fatalf("status block lines = %d, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	want := "deepseek-v4-flash · turn hit 90.00% · avg 90.00%"
-	if !strings.Contains(lines[1], want) {
-		t.Fatalf("data row should keep cache rates next to model:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash") {
+		t.Fatalf("mode row should show model:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[2], "CACHE turn hit 90.00% · avg 90.00%") {
+		t.Fatalf("telemetry row should show cache rates:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
-func TestStatuslinePutsGitIdentityOnModeRow(t *testing.T) {
+func TestStatuslineShowsGitAndEffortInPersistentFooter(t *testing.T) {
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineViewWithGitAndEffort(t)
 	lines := bottomStatusPlainLines(content)
-	if len(lines) != 2 {
-		t.Fatalf("status block lines = %d, want 2:\n%s", len(lines), strings.Join(lines, "\n"))
+	if len(lines) != 3 {
+		t.Fatalf("status block lines = %d, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(lines[0], "effort auto · Reasonix@codex/demo (+3 -1 ?2)") {
-		t.Fatalf("mode row should include effort before git identity:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash   EFFORT auto") {
+		t.Fatalf("session row should keep effort beside the model:\n%s", strings.Join(lines, "\n"))
 	}
-	if strings.Contains(lines[1], "Reasonix@codex/demo") {
-		t.Fatalf("data row should not include git identity:\n%s", strings.Join(lines, "\n"))
-	}
-	if !strings.Contains(lines[1], "deepseek-v4-flash") || strings.Contains(lines[1], "effort auto") {
-		t.Fatalf("data row should keep model without effort:\n%s", strings.Join(lines, "\n"))
+	if !strings.Contains(lines[2], "Reasonix@codex/demo  +3 -1 ?2") {
+		t.Fatalf("telemetry row should start with git identity:\n%s", strings.Join(lines, "\n"))
 	}
 }
 
-func TestStatuslineExplicitEffortUsesBlue(t *testing.T) {
+func TestStatuslineShowsWorkModeAndBalanceInPersistentFooter(t *testing.T) {
 	i18n.DetectLanguage("en")
 
-	content := renderStatuslineViewWithEffort(t, "max")
-	plain := bottomStatusPlain(content)
-	if !strings.Contains(plain, "effort max") {
-		t.Fatalf("status data line should show explicit effort:\n%s", plain)
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	m.label = "deepseek-v4-flash"
+	m.runtimeProfile = "delivery"
+	m.balance = "¥12.34"
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	lines := bottomStatusPlainLines(next.(chatTUI).View().Content)
+	if len(lines) != 3 {
+		t.Fatalf("status block lines = %d, want 3:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
-	if !strings.Contains(content, "\x1b[1;38;2;37;99;235m") {
-		t.Fatalf("explicit effort should use blue foreground, got:\n%q", content)
+	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash   WORK delivery") {
+		t.Fatalf("mode row should show model and work mode:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(lines[2], "BAL ¥12.34") {
+		t.Fatalf("telemetry row should show balance:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+func TestEffortTagExplicitValueUsesThemeInfo(t *testing.T) {
+	i18n.DetectLanguage("en")
+	t.Setenv("COLORTERM", "")
+	t.Setenv("TERM_PROGRAM", "")
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = true
+
+	for _, tt := range []struct {
+		mode, infoSGR string
+	}{
+		{mode: "dark", infoSGR: "\033[1;38;5;80m"},
+		{mode: "light", infoSGR: "\033[1;38;5;25m"},
+	} {
+		t.Run(tt.mode, func(t *testing.T) {
+			configureCLITheme(tt.mode)
+			m := newTestChatTUI()
+			m.effortLevel = "max"
+			content := m.effortTag()
+			if !strings.Contains(ansi.Strip(content), "EFFORT max") {
+				t.Fatalf("status data line should show explicit effort:\n%s", ansi.Strip(content))
+			}
+			if !strings.Contains(content, tt.infoSGR+"max") {
+				t.Fatalf("%s explicit effort should use theme info colour, got:\n%q", tt.mode, content)
+			}
+		})
 	}
 }
 
@@ -273,10 +322,10 @@ func renderStatuslineViewWithEffort(t *testing.T, effort string) string {
 	t.Helper()
 
 	ctrl := control.New(control.Options{})
-	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
 	m.label = "deepseek-v4-flash"
 	m.effortLevel = effort
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	return next.(chatTUI).View().Content
 }
 
@@ -339,8 +388,8 @@ func bottomStatusPlain(content string) string {
 
 func bottomStatusPlainLines(content string) []string {
 	lines := strings.Split(ansi.Strip(content), "\n")
-	if len(lines) < 2 {
+	if len(lines) < 3 {
 		return lines
 	}
-	return lines[len(lines)-2:]
+	return lines[len(lines)-3:]
 }

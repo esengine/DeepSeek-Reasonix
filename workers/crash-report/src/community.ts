@@ -1,4 +1,4 @@
-// Moderation console for user-published skills/MCP servers. Gated on the unified
+// Moderation console for user-published skills/plugins/MCP servers. Gated on the unified
 // dashboard admin role; reads and writes the registry database.
 import { esc, page } from "./shell";
 import { type User, userNav } from "./auth";
@@ -14,7 +14,11 @@ const STATUS_TABS = [
 function actionForm(pkg: PackageRow, action: string, label: string, cls: string, backStatus: string, confirm?: string): string {
   const onsubmit = confirm ? ` onsubmit="return confirm('${esc(confirm)}')"` : "";
   return `<form method="post" action="/community/${esc(pkg.scope_handle)}/${esc(pkg.name)}/${action}" class="inline"${onsubmit}>
-<input type="hidden" name="status" value="${esc(backStatus)}"><button class="btn ${cls} sm" type="submit">${esc(label)}</button></form>`;
+<input type="hidden" name="status" value="${esc(backStatus)}">
+<input type="hidden" name="expectedVersion" value="${esc(pkg.latest_version)}">
+<input type="hidden" name="expectedUpdatedAt" value="${esc(pkg.updated_at)}">
+<input type="hidden" name="expectedStatus" value="${esc(pkg.status)}">
+<button class="btn ${cls} sm" type="submit">${esc(label)}</button></form>`;
 }
 
 function rowActions(pkg: PackageRow, backStatus: string): string {
@@ -41,7 +45,7 @@ function sourceLinks(pkg: PackageRow): string {
 // not here — source/repo_url are what actually carry the reviewable content.
 function reviewBlob(pkg: PackageRow): string {
   return [
-    `Skill submission — ${pkg.slug}`,
+    `Registry submission — ${pkg.slug}`,
     `kind: ${pkg.kind}`,
     `status: ${pkg.status}`,
     `publisher: @${pkg.scope_handle}`,
@@ -86,7 +90,7 @@ export function renderCommunity(viewer: User, packages: PackageRow[], status: st
   return page(
     "Reasonix · Community",
     "community",
-    `<h1>Community</h1><p class="sub">Review user-published skills and MCP servers — approve to publish, verify to badge, hide to take down</p>
+    `<h1>Community</h1><p class="sub">Review user-published skills, plugins, and MCP servers — approve to publish, verify to badge, hide to take down</p>
 <div class="filter-tabs">${tabs}</div>
 <div class="card full"><table class="reg-table"><colgroup><col class="c-pkg"><col class="c-kind"><col class="c-pub"><col class="c-ver"><col class="c-sub"><col class="c-act"></colgroup><thead><tr><th>package</th><th>kind</th><th>publisher</th><th>version · installs · stars</th><th>submitted</th><th></th></tr></thead>
 <tbody>${rows}</tbody></table></div>`,

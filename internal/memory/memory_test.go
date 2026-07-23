@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 // TestComposeEmptyIsIdentity is the cache-first invariant: with no memory at
@@ -66,6 +68,20 @@ func TestDiscoverPrecedenceOrder(t *testing.T) {
 	iu, ip, il := strings.Index(block, "USER LEVEL"), strings.Index(block, "PROJECT LEVEL"), strings.Index(block, "LOCAL LEVEL")
 	if !(iu >= 0 && iu < ip && ip < il) {
 		t.Fatalf("precedence order wrong in block: user=%d project=%d local=%d\n%s", iu, ip, il, block)
+	}
+}
+
+func TestDiscoverDecodesGB18030PrimaryDoc(t *testing.T) {
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	body := "# 项目约定\n\n始终使用中文回答。"
+	if err := os.WriteFile(filepath.Join(proj, "AGENTS.md"), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj})
+	if len(set.Docs) != 1 || !strings.Contains(set.Docs[0].Body, "始终使用中文回答") {
+		t.Fatalf("decoded docs = %+v", set.Docs)
 	}
 }
 

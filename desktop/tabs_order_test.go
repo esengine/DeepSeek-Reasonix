@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/remote/workbench/target"
 )
 
 func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
@@ -337,6 +338,16 @@ func TestConcurrentActivateTopicSerializesSingleSurfacePruning(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	app := NewApp()
 	t.Cleanup(func() { app.shutdown(context.Background()) })
+	_, remoteGen, err := app.workbench().targets.BeginRemoteConnect("remote-host", "/srv/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.workbench().targets.MarkRemoteConnected(remoteGen); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := app.workbench().targets.ActivateRemote(remoteGen); err != nil {
+		t.Fatal(err)
+	}
 
 	topics := []string{
 		"topic-a",
@@ -375,6 +386,39 @@ func TestConcurrentActivateTopicSerializesSingleSurfacePruning(t *testing.T) {
 	}
 	if !tabs[0].Active {
 		t.Fatalf("remaining tab is not active: %+v", tabs[0])
+	}
+	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindLocal {
+		t.Fatalf("local topic navigation left execution target at %+v", active)
+	}
+}
+
+func TestSetActiveTabSwitchesRemoteProjectionOnlyForDifferentTab(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+	_, remoteGen, err := app.workbench().targets.BeginRemoteConnect("remote-host", "/srv/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.workbench().targets.MarkRemoteConnected(remoteGen); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := app.workbench().targets.ActivateRemote(remoteGen); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := app.SetActiveTab("a"); err != nil {
+		t.Fatal(err)
+	}
+	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindRemote {
+		t.Fatalf("same-tab hydration switched target to %+v", active)
+	}
+	if err := app.SetActiveTab("b"); err != nil {
+		t.Fatal(err)
+	}
+	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindLocal {
+		t.Fatalf("different local tab left target at %+v", active)
+	}
+	if app.activeTabID != "b" {
+		t.Fatalf("active tab = %q, want b", app.activeTabID)
 	}
 }
 

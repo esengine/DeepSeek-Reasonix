@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS pings (
   PRIMARY KEY (date, install_id)
 );
 
+-- Single-row checkpoint used by the scheduled ingest sentinel to detect when
+-- launch totals stop advancing between runs. The worker also creates this
+-- table at runtime so existing databases need no manual migration.
+CREATE TABLE IF NOT EXISTS ingest_sentinel_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  day TEXT NOT NULL,
+  ping_count INTEGER NOT NULL,
+  open_count INTEGER NOT NULL,
+  checked_at TEXT NOT NULL
+);
+
 -- Opt-in aggregate desktop metrics: anonymous per-day (signal, bucket) counters,
 -- no content. Generic shape so a new signal is just new rows.
 CREATE TABLE IF NOT EXISTS metrics (

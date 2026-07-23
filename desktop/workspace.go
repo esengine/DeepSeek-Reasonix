@@ -62,7 +62,7 @@ func loadWorkspace() string {
 	if p == "" {
 		return ""
 	}
-	b, err := os.ReadFile(p)
+	b, err := readFileUTF8(p)
 	if err != nil {
 		return ""
 	}
@@ -75,7 +75,7 @@ func loadWorkspaces() []string {
 		return nil
 	}
 	var paths []string
-	b, err := os.ReadFile(p)
+	b, err := readFileUTF8(p)
 	if err != nil || json.Unmarshal(b, &paths) != nil {
 		return nil
 	}

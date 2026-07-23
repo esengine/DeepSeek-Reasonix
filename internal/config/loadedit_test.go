@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestLoadForEdit(t *testing.T) {
@@ -35,6 +37,31 @@ api_key_env = "X_KEY"
 	// Missing file: falls back to the built-in defaults.
 	if cfg := LoadForEdit(filepath.Join(dir, "absent.toml")); cfg.DefaultModel != Default().DefaultModel {
 		t.Errorf("missing-file default = %q, want %q", cfg.DefaultModel, Default().DefaultModel)
+	}
+}
+
+func TestLoadForEditDecodesGB18030TOML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `default_model = "local/中文模型"
+
+[[providers]]
+name = "local"
+kind = "openai"
+base_url = "https://example.com/v1"
+model = "中文模型"
+api_key_env = "LOCAL_KEY"
+`
+	if err := os.WriteFile(path, fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := LoadForEdit(path)
+	if cfg.DefaultModel != "local/中文模型" {
+		t.Fatalf("default_model = %q", cfg.DefaultModel)
+	}
+	if len(cfg.Providers) != 1 || cfg.Providers[0].Model != "中文模型" {
+		t.Fatalf("providers = %+v, want decoded Chinese model", cfg.Providers)
 	}
 }
 
@@ -70,6 +97,33 @@ model = "m"
 	}
 	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `name = "local"`) {
 		t.Fatalf("migration should preserve ordinary config:\n%s", updated)
+	}
+}
+
+func TestLoadForEditReadOnlyStrictDoesNotMigrateDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	body := []byte(`
+[[plugins]]
+name = "playwright"
+command = "npx"
+tier = "lazy"
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].Tier != "" {
+		t.Fatalf("read-only normalized plugins = %+v", cfg.Plugins)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(body) {
+		t.Fatalf("read-only load changed config on disk:\n%s", after)
 	}
 }
 

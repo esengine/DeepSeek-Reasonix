@@ -204,6 +204,9 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if longcat.BaseURL != "https://api.longcat.chat/openai/v1" || longcat.ModelsURL != "https://api.longcat.chat/openai/v1/models" || longcat.APIKeyEnv != "LONGCAT_API_KEY" {
 		t.Fatalf("longcat-openai endpoint/key mismatch: %+v", longcat)
 	}
+	if longcat.ContextWindow != longCat20ContextWindow {
+		t.Fatalf("longcat-openai context_window = %d, want %d", longcat.ContextWindow, longCat20ContextWindow)
+	}
 	if cap := EffortCapabilityForEntry(longcat); !cap.Supported || cap.Default != "enabled" || !containsString(cap.Levels, "disabled") {
 		t.Fatalf("longcat-openai effort capability = %+v, want enabled/disabled", cap)
 	}
@@ -216,6 +219,9 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if longcatAnthropic.Kind != "anthropic" || longcatAnthropic.BaseURL != "https://api.longcat.chat/anthropic" || longcatAnthropic.ModelsURL != "https://api.longcat.chat/anthropic/v1/models" || !longcatAnthropic.AuthHeader || longcatAnthropic.Thinking != "enabled" {
 		t.Fatalf("longcat-anthropic capability mismatch: %+v", longcatAnthropic)
+	}
+	if longcatAnthropic.ContextWindow != longCat20ContextWindow {
+		t.Fatalf("longcat-anthropic context_window = %d, want %d", longcatAnthropic.ContextWindow, longCat20ContextWindow)
 	}
 
 	mimo, ok := cfg.Provider("mimo-api")
@@ -437,5 +443,43 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if cap := EffortCapabilityForEntry(ollama); !cap.Supported || cap.Default != "auto" || !containsString(cap.Levels, "max") || !containsString(cap.Levels, "none") {
 		t.Fatalf("ollama-cloud effort capability = %+v, want none/max", cap)
+	}
+}
+
+func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
+	var cfg Config
+	for _, preset := range CuratedProviderPresets() {
+		for _, entry := range preset.Entries {
+			if err := cfg.UpsertProvider(entry); err != nil {
+				t.Fatalf("upsert preset %q: %v", preset.ID, err)
+			}
+		}
+	}
+
+	tests := []struct {
+		ref  string
+		want string
+	}{
+		{ref: "opencode-go/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
+		{ref: "opencode-go/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
+		{ref: "ollama-cloud/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
+		{ref: "ollama-cloud/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
+		{ref: "novita/deepseek/deepseek-v4-pro"},
+		{ref: "novita/deepseek/deepseek-v4-flash"},
+		{ref: "gmi/deepseek-ai/DeepSeek-V4-Pro"},
+		{ref: "gmi/deepseek-ai/DeepSeek-V4-Flash"},
+		{ref: "nvidia/deepseek-ai/deepseek-v4-pro"},
+		{ref: "vercel-ai-gateway/deepseek/deepseek-v4-pro"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.ref, func(t *testing.T) {
+			entry, ok := cfg.ResolveModel(tc.ref)
+			if !ok {
+				t.Fatalf("ResolveModel(%q) failed", tc.ref)
+			}
+			if got := ReasoningProtocolForEntry(entry); got != tc.want {
+				t.Fatalf("ReasoningProtocolForEntry(%q) = %q, want %q", tc.ref, got, tc.want)
+			}
+		})
 	}
 }

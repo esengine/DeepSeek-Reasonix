@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { createContext, createElement, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { app, onUpdaterProgress } from "./bridge";
 import type { UpdateInfo } from "./types";
 
@@ -30,7 +30,9 @@ function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-export function useUpdater(): Updater {
+const UpdaterContext = createContext<Updater | null>(null);
+
+function useUpdaterInternal(): Updater {
   const [status, setStatus] = useState<UpdateStatus>({ kind: "idle" });
 
   // A single long-lived subscription advances the state machine through the apply
@@ -107,4 +109,15 @@ export function useUpdater(): Updater {
   const reset = useCallback(() => setStatus({ kind: "idle" }), []);
 
   return { status, check, download, install, openDownload, reset };
+}
+
+export function UpdaterProvider({ children }: { children: ReactNode }) {
+  const updater = useUpdaterInternal();
+  return createElement(UpdaterContext.Provider, { value: updater, children });
+}
+
+export function useUpdater(): Updater {
+  const updater = useContext(UpdaterContext);
+  if (!updater) throw new Error("useUpdater must be used within an UpdaterProvider");
+  return updater;
 }

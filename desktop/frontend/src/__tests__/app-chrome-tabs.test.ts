@@ -11,6 +11,9 @@ const commandPaletteSource = readFileSync(resolve(testDir, "../components/Comman
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
+const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
+const bridgeSource = readFileSync(resolve(testDir, "../lib/bridge.ts"), "utf8");
 const layoutStoreSource = readFileSync(resolve(testDir, "../store/layout.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -76,9 +79,23 @@ ok(
 );
 
 ok(
-  /const WORKSPACE_PANEL_DEFAULT_OPEN = false;/.test(layoutStoreSource) &&
-    /workspacePanelOpen:\s*WORKSPACE_PANEL_DEFAULT_OPEN/.test(layoutStoreSource),
-  "right dock starts collapsed on launch",
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar", "--wails-draggable") === "drag" &&
+    finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .tabbar", "--wails-draggable") === "drag",
+  "classic tabbar whitespace drags the window on macOS and frameless Windows",
+);
+
+ok(
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar *", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar *", "--wails-draggable") === "no-drag",
+  "classic tabbar controls and tab gaps remain interactive no-drag regions",
+);
+
+ok(
+  /const WORKSPACE_PANEL_DEFAULT_OPEN = true;/.test(layoutStoreSource) &&
+    /workspacePanelOpen:\s*loadWorkspacePanelOpen\(\)/.test(layoutStoreSource) &&
+    /export function saveWorkspacePanelOpen\(open: boolean\)/.test(layoutStoreSource) &&
+    /reasonix\.workspacePanel\.open/.test(layoutStoreSource),
+  "right dock open state is restored from localStorage with expanded first-launch default",
 );
 
 ok(
@@ -109,6 +126,48 @@ ok(
 ok(
   finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar > .tooltip-trigger:has(.tabbar__new)", "flex")?.includes("--chrome-panel-control-size"),
   "themed AppChrome new-tab button keeps a stable slot beside the tabs",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tab--active", "box-shadow")?.includes(
+    "inset 0 -2px 0 var(--project-accent, var(--accent))",
+  ),
+  "active themed tab carries the project-accent underline",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tab--active:focus-visible", "box-shadow")?.includes(
+    "inset 0 -2px 0 var(--project-accent, var(--accent))",
+  ) &&
+    finalDeclaration(":root[data-theme-style] .tabbar__tab--active:focus-visible", "box-shadow")?.includes(
+      "0 0 0 3px var(--accent-soft)",
+    ),
+  "keyboard focus on the active tab keeps both the focus ring and the accent underline",
+);
+
+ok(
+  matchingBlocks(".app--darwin .app-chrome--tabs .tabbar__tab--active").every(
+    (block) => !block.includes("inset 0 2px"),
+  ),
+  "macOS active tab declares no dead top-edge accent (the themed bottom-edge layer owns it)",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tabs", "gap") === "6px" &&
+    finalDeclaration(":root[data-theme-style] .tabbar__tab", "border") === "1px solid var(--border)",
+  "themed tabs keep distinct full outlines with visible spacing",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tab + .tabbar__tab:not(.tabbar__tab--drop-before)::before", "width") === "1px" &&
+    finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tab + .tabbar__tab:not(.tabbar__tab--drop-before)::before", "background") === "var(--border-2)",
+  "adjacent AppChrome tabs render a stronger divider inside their gap",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tab--active", "border-color") === "var(--border-2)" &&
+    finalDeclaration(":root[data-theme-style] .tabbar__tab--active", "font-weight") === "600",
+  "active themed tabs combine a stronger border outline and heavier label weight",
 );
 
 ok(
@@ -179,24 +238,79 @@ ok(
 );
 
 ok(
-  /const \[rewindCommitting, setRewindCommitting\] = useState\(false\);/.test(appSource) &&
-    /rewindStateRef\.current = null;/.test(appSource) &&
-    /setRewindCommitting\(true\);/.test(appSource),
-  "committing optimistic rewind clears undo state before awaiting the backend",
+  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindState>>\(\{\}\);/.test(appSource) &&
+    /setRewindStateForTab\(sourceTabId, null\);/.test(appSource) &&
+    /setRewindCommittingForTab\(sourceTabId, true\);/.test(appSource),
+  "committing optimistic rewind clears only the source tab before awaiting the backend",
 );
 
 ok(
-  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
-    /if \(!controllerReady\) return;\s*void commitThenSend\(text\)\.catch/.test(appSource) &&
+  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending && !runtimeTransitioning;/.test(appSource) &&
+    /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
 );
 
 ok(
+  /pendingPlanRevisionsByTab\[activeTabId\]/.test(appSource) &&
+    /commitThenSendRef\.current\(activeTabId, text\)/.test(appSource) &&
+    !/const \[pendingPlanRevision, setPendingPlanRevision\]/.test(appSource),
+  "queued plan revisions stay scoped to their source tab",
+);
+
+ok(
+  /commitThenSendRef\.current\(sourceTabId, trimmed, submitText\.trim\(\), structured\)/.test(appSource) &&
+    /sendToTab\(sourceTabId, displayText, submitText, undefined, structured\)/.test(appSource) &&
+    /onSteer=\{handleSteer\}/.test(appSource) &&
+    /composerInsertRequestsByTab\[activeTabId\]/.test(appSource) &&
+    /consumedInsertIdByDraftRef\.current\[draftKey\]/.test(composerSource),
+  "composer sends and steers carry an explicit source tab through async preparation",
+);
+
+ok(
+  appSource.includes('key={`${activeTabId ?? ""}:${state.approval.id}`}') &&
+    appSource.includes('key={`${activeTabId ?? ""}:${state.ask.id}`}') &&
+    /planRevisionInsertRequest\.tabId === activeTabId/.test(appSource) &&
+    /planRevisionInsertRequest\.approvalId === state\.approval\?\.id/.test(appSource),
+  "approval and ask local state is scoped by tab plus prompt identity",
+);
+
+ok(
+  /app\.NewSessionForTab\(tabId\)/.test(controllerSource) &&
+    /app\.ClearSessionForTab\(tabId\)/.test(controllerSource) &&
+    /app\.CompactForTab\(tabId\)/.test(controllerSource) &&
+    /app\.RewindForTab\(sourceTabId, turn, actionScope\)/.test(controllerSource) &&
+    /app\.ForkForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /app\.SummarizeFromForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /NewSessionForTab\(tabID: string\)/.test(bridgeSource) &&
+    /CompactForTab\(tabID: string\)/.test(bridgeSource) &&
+    /RewindForTab\(tabID: string, turn: number, scope: string\)/.test(bridgeSource),
+  "session-changing controller actions use explicit tab-scoped Wails bindings",
+);
+
+ok(
   /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
     /hydrating=\{transcriptHydrating\}/.test(appSource),
   "Welcome is suppressed only until transcript history has loaded",
+);
+
+ok(
+  /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
+    /const workspaceScopeKey = \[/.test(appSource) &&
+    /activeTab\?\.sessionPath/.test(appSource) &&
+    /state\.meta\?\.sessionPath/.test(appSource) &&
+    /state\.meta\?\.cwd/.test(appSource) &&
+    /state\.sessionGen/.test(appSource) &&
+    /workspaceControllerEpoch/.test(appSource) &&
+    Array.from(appSource.matchAll(/workspaceScopeKey=\{workspaceScopeKey\}/g)).length === 3,
+  "workspace file consumers receive a session and controller scoped identity",
+);
+
+ok(
+  /const unsubReady = onReady\(\(readyTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource) &&
+    /const unsubRebuilt = onRuntimeRebuilt\(\(rebuiltTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource),
+  "controller ready and rebuilt events invalidate active workspace file scopes",
 );
 
 const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
@@ -287,6 +401,20 @@ ok(
     finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .app-chrome__drag-rail", "right")?.includes("--windows-window-controls-safe") &&
     finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar", "--wails-draggable") === "no-drag",
   "Windows classic chrome keeps a draggable rail while tabs remain clickable",
+);
+
+ok(
+  finalDeclaration(".sidebar", "--wails-draggable") === "drag" &&
+    finalDeclaration(".app--windows .sidebar", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".sidebar-resizer", "--wails-draggable") === "no-drag",
+  "Windows sidebar avoids native window drag without changing other platforms",
+);
+
+ok(
+  finalDeclaration(".app--windows.app--creation .topicbar", "position") === "relative" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "z-index") === "var(--z-app-chrome)" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "transform") === "translateY(-4px) !important",
+  "Windows Creation topic bar lifts its menus above conversation content without changing titlebar alignment",
 );
 
 for (const selector of [

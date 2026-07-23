@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"reasonix/internal/skill"
 )
@@ -150,21 +151,59 @@ func (s githubRepoSource) branches() []string {
 
 func parseGitHubRepoSource(source string) (githubRepoSource, bool) {
 	u, err := url.Parse(source)
-	if err != nil || !strings.EqualFold(u.Hostname(), "github.com") {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		!strings.EqualFold(u.Hostname(), "github.com") || u.User != nil ||
+		u.Port() != "" || u.RawQuery != "" || u.Fragment != "" ||
+		hasUnsafeGitHubSourceCharacters(source) {
 		return githubRepoSource{}, false
 	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(parts) < 2 {
+	escapedPath := u.EscapedPath()
+	if !strings.HasPrefix(escapedPath, "/") || strings.Contains(strings.TrimPrefix(escapedPath, "/"), "//") {
 		return githubRepoSource{}, false
 	}
-	out := githubRepoSource{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}
-	if len(parts) >= 4 && parts[2] == "tree" {
-		out.Branch = parts[3]
-		if len(parts) > 4 {
-			out.Path = strings.Join(parts[4:], "/")
+	escapedPath = strings.TrimPrefix(escapedPath, "/")
+	escapedPath = strings.TrimSuffix(escapedPath, "/")
+	if escapedPath == "" {
+		return githubRepoSource{}, false
+	}
+	escapedParts := strings.Split(escapedPath, "/")
+	parts := make([]string, 0, len(escapedParts))
+	for _, escapedPart := range escapedParts {
+		part, err := url.PathUnescape(escapedPart)
+		if err != nil || part == "" || part == "." || part == ".." ||
+			strings.ContainsAny(part, "/\\") || hasUnsafeGitHubSourceCharacters(part) {
+			return githubRepoSource{}, false
 		}
+		parts = append(parts, part)
+	}
+	if len(parts) < 2 || !packageNameRe.MatchString(parts[0]) {
+		return githubRepoSource{}, false
+	}
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if !packageNameRe.MatchString(repo) {
+		return githubRepoSource{}, false
+	}
+	out := githubRepoSource{Owner: parts[0], Repo: repo}
+	if len(parts) == 2 {
+		return out, true
+	}
+	if len(parts) < 4 || parts[2] != "tree" {
+		return githubRepoSource{}, false
+	}
+	out.Branch = parts[3]
+	if len(parts) > 4 {
+		out.Path = strings.Join(parts[4:], "/")
 	}
 	return out, true
+}
+
+func hasUnsafeGitHubSourceCharacters(value string) bool {
+	for _, r := range value {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
 
 type githubContentEntry struct {

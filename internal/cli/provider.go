@@ -4,66 +4,59 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
 )
 
-// runProviderCommand handles "/provider": with no argument it lists the configured
-// providers and marks the active one; "/provider <name>" switches to that
+// runProviderCommand handles "/provider": with no argument it opens the provider
+// picker; "/provider <name>" switches to that
 // provider's default model (or prompts the user to pick one when multiple models
 // are configured).
 func (m *chatTUI) runProviderCommand(input string) {
 	args := tokenizeArgs(input) // args[0] == "/provider"
 	if len(args) < 2 {
-		m.showProviders()
+		m.openProviderPicker()
 		return
 	}
 	name := args[1]
 	m.switchToProvider(name)
 }
 
-// showProviders lists all configured providers, marking the one backing the
-// current model.
-func (m *chatTUI) showProviders() {
+func (m *chatTUI) openProviderPicker() {
 	cfg, err := config.Load()
 	if err != nil {
 		m.notice("provider: " + err.Error())
 		return
 	}
-	var lines []string
-	lines = append(lines, viewHeader("%s", i18n.M.ProviderListHeader))
-
-	// Determine the current provider name from m.modelRef ("provider/model").
-	curProvider := ""
-	if parts := strings.SplitN(m.modelRef, "/", 2); len(parts) == 2 {
-		curProvider = parts[0]
-	}
-
+	curProvider := strings.SplitN(m.modelRef, "/", 2)[0]
+	var items []quickPickerItem
+	selected := 0
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
 		if !p.Configured() {
 			continue
 		}
-		// Prefer chat models for display; fall back to the full model list
-		// (which includes non-chat models like embeddings) for count/label.
 		models := p.ChatModelList()
 		if len(models) == 0 {
 			models = p.ModelList()
 		}
-
 		status := ""
 		if p.Name == curProvider {
-			status = "  " + viewStatus("active")
+			status = "active"
+			selected = len(items)
 		}
-		modelLabel := fmt.Sprintf("%d models", len(models))
-		if len(models) == 1 {
-			modelLabel = models[0]
-		}
-		line := fmt.Sprintf("  %-16s  %-20s  %s%s", p.Name, modelLabel, dim(p.Kind), status)
-		lines = append(lines, line)
+		items = append(items, quickPickerItem{
+			ID: p.Name, Label: p.Name,
+			Description: fmt.Sprintf("%s · %d model(s)", p.Kind, len(models)), Status: status,
+		})
 	}
-	lines = append(lines, viewHint(viewCompactText("switch with /provider <name>", m.width)))
-	m.commitLine(strings.Join(lines, "\n"))
+	if len(items) == 0 {
+		m.notice("provider: no configured providers")
+		return
+	}
+	m.quickPick = &quickPicker{kind: quickPickerProvider, title: "Select provider", items: items, selected: selected}
 }
 
 // switchToProvider switches the session to the named provider's default model.
@@ -115,21 +108,57 @@ func (m *chatTUI) switchToProvider(name string) {
 		return
 	}
 
-	// If already on this provider, just notify.
-	if entry.Name == curProvider {
-		m.notice(fmt.Sprintf(i18n.M.ProviderAlreadyOnFmt, name))
-		return
-	}
-
-	// Multiple models — use the TUI notice to list them and tell the user to
-	// pick one with /model. We don't launch raw-mode selectOne from inside the
-	// bubbletea event loop because it would conflict with bubbletea's terminal
-	// management. Instead, we show the available models and suggest /model.
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\n", viewHeader("%s", fmt.Sprintf(i18n.M.ProviderPickLabel, name)))
+	items := make([]quickPickerItem, 0, len(models))
+	selected := 0
 	for _, model := range models {
-		fmt.Fprintf(&b, "  %s\n", model)
+		ref := entry.Name + "/" + model
+		status := ""
+		if ref == m.modelRef {
+			status = "active"
+			selected = len(items)
+		}
+		items = append(items, quickPickerItem{ID: ref, Label: model, Description: entry.Name, Status: status})
 	}
-	fmt.Fprintf(&b, "%s", viewHint(viewCompactText(fmt.Sprintf("switch with /model %s/<model>", entry.Name), m.width)))
-	m.commitLine(strings.TrimRight(b.String(), "\n"))
+	m.quickPick = &quickPicker{
+		kind: quickPickerProviderModel, title: fmt.Sprintf(i18n.M.ProviderPickLabel, name),
+		items: items, selected: selected,
+	}
+}
+
+func (m chatTUI) handleQuickPickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	p := m.quickPick
+	if p == nil {
+		return m, nil
+	}
+	result := p.handleKey(msg)
+	if result.cancelled {
+		m.quickPick = nil
+		return m, nil
+	}
+	if result.choice == nil {
+		return m, nil
+	}
+	kind := p.kind
+	choice := *result.choice
+	m.quickPick = nil
+	switch kind {
+	case quickPickerModel, quickPickerProviderModel:
+		m.runModelSubcommand("/model " + choice.ID)
+		if m.pendingModelSwitch != nil {
+			return m, m.pendingModelSwitch
+		}
+	case quickPickerProvider:
+		m.switchToProvider(choice.ID)
+		if m.pendingModelSwitch != nil {
+			return m, m.pendingModelSwitch
+		}
+	}
+	return m, nil
+}
+
+func (m chatTUI) renderQuickPicker() string {
+	if m.quickPick == nil {
+		return ""
+	}
+	return m.quickPick.render(m.width)
 }

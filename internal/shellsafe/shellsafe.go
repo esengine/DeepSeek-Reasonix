@@ -1,10 +1,7 @@
 // Package shellsafe is the single source of truth for which shell commands are
-// read-only — they don't modify filesystem, network, or process state. Both the
-// permission auto-approve path (internal/permission) and the plan-mode gate
-// (internal/planmode) classify command membership against these tables, so the
-// two can't drift (the drift was #5341: a git subcommand auto-approved by
-// permission yet blocked while planning). Each consumer still layers its own
-// argument-rigor on top — plan mode is intentionally stricter than auto-approve.
+// read-only — they don't modify filesystem, network, or process state. The
+// permission auto-approve path and explicitly read-only runners share these
+// tables so their command classification cannot drift.
 package shellsafe
 
 import (

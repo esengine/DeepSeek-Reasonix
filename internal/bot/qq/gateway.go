@@ -222,23 +222,20 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 	if parsed, parseErr := url.Parse(gatewayURL); parseErr == nil {
 		a.logger.Info("qq gateway endpoint resolved", "host", parsed.Hostname(), "sandbox", a.cfg.Sandbox)
 	}
-	cfg, err := websocket.NewConfig(gatewayURL, gatewayURL)
-	if err != nil {
-		return err
-	}
-	cfg.Header = http.Header{}
-	cfg.Header.Set("Authorization", "QQBot "+token)
-	cfg.Header.Set("X-Union-Appid", a.appID())
-
-	conn, err := websocket.DialConfig(cfg)
+	conn, err := a.dialGateway(ctx, gatewayURL, token)
 	if err != nil {
 		return fmt.Errorf("dial gateway: %w", err)
 	}
 	defer conn.Close()
+	defer a.dropConn(conn)
+	if !a.trackConn(ctx, conn) {
+		// Stop already closed the tracked conn slot; entering a blocking read
+		// now would leave a connection Stop can no longer unblock.
+		return ctx.Err()
+	}
 	a.logger.Info("qq gateway connected", "sandbox", a.cfg.Sandbox)
 
 	ws := &wsClient{conn: conn, token: token, logger: a.logger}
-	a.ws = ws
 
 	var msg gatewayPayload
 	decoder := json.NewDecoder(conn)
@@ -347,6 +344,54 @@ func (a *adapter) connectGateway(ctx context.Context, token string) error {
 			<-heartbeatDone
 			return nil
 		}
+	}
+}
+
+// dialGateway dials the QQ gateway honoring ctx. The conn only becomes
+// trackable after the dial returns, so Stop can interrupt a stalled TCP dial
+// or WebSocket/TLS handshake only through ctx cancellation —
+// websocket.DialConfig would dial with context.Background() and leave Stop's
+// loopWG.Wait blocked with nothing to close.
+func (a *adapter) dialGateway(ctx context.Context, gatewayURL, token string) (*websocket.Conn, error) {
+	cfg, err := websocket.NewConfig(gatewayURL, gatewayURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Header = http.Header{}
+	cfg.Header.Set("Authorization", "QQBot "+token)
+	cfg.Header.Set("X-Union-Appid", a.appID())
+	return cfg.DialContext(ctx)
+}
+
+// trackConn publishes the live gateway connection so Stop can close it and
+// unblock the blocking websocket reads, which do not honor ctx. Publication is
+// refused once ctx is cancelled, so a conn that finishes dialing concurrently
+// with Stop can never be left open but unreachable.
+func (a *adapter) trackConn(ctx context.Context, conn *websocket.Conn) bool {
+	a.connMu.Lock()
+	defer a.connMu.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	a.conn = conn
+	return true
+}
+
+func (a *adapter) dropConn(conn *websocket.Conn) {
+	a.connMu.Lock()
+	if a.conn == conn {
+		a.conn = nil
+	}
+	a.connMu.Unlock()
+}
+
+func (a *adapter) closeConn() {
+	a.connMu.Lock()
+	conn := a.conn
+	a.conn = nil
+	a.connMu.Unlock()
+	if conn != nil {
+		conn.Close()
 	}
 }
 
@@ -515,7 +560,7 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 	if truncated {
 		a.logger.Warn("qq passive reply truncated", "chat_type", msg.ChatType, "chunks", originalChunkCount, "limit", len(chunks))
 	}
-	var last bot.SendResult
+	var delivered bot.SendResult
 	for _, chunk := range chunks {
 		seq := a.nextMessageSeq(msg.ReplyToMsgID)
 		var result bot.SendResult
@@ -532,12 +577,12 @@ func (a *adapter) sendMessage(ctx context.Context, msg bot.OutboundMessage) (bot
 		}
 		if err != nil {
 			a.logger.Error("qq message send failed", "chat_type", msg.ChatType, "err", err)
-			return last, err
+			return delivered, err
 		}
 		a.logger.Info("qq message sent", "chat_type", msg.ChatType, "message_id_set", strings.TrimSpace(result.MessageID) != "")
-		last = result
+		delivered.Merge(result)
 	}
-	return last, nil
+	return delivered, nil
 }
 
 func (a *adapter) sendPlainMessageChunk(ctx context.Context, msg bot.OutboundMessage, text string, seq int) (bot.SendResult, error) {

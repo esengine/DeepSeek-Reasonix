@@ -7,14 +7,14 @@
 -- client-side through the install_source tool (SSRF-guarded, risk-rated).
 CREATE TABLE IF NOT EXISTS packages (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind           TEXT    NOT NULL,                    -- skill | mcp
+  kind           TEXT    NOT NULL,                    -- skill | plugin | mcp
   scope_handle   TEXT    NOT NULL,                    -- publisher handle (namespace)
   name           TEXT    NOT NULL,                    -- capability slug within the scope
   slug           TEXT    NOT NULL UNIQUE,             -- '<handle>/<name>' canonical id
   summary        TEXT    NOT NULL DEFAULT '',         -- one-liner (SKILL.md description)
   description    TEXT    NOT NULL DEFAULT '',         -- long markdown (README)
   source         TEXT    NOT NULL DEFAULT '',         -- what install_source pulls from
-  install_kind   TEXT    NOT NULL DEFAULT 'auto',     -- auto | skill | mcp
+  install_kind   TEXT    NOT NULL DEFAULT 'auto',     -- auto | skill | plugin | mcp
   homepage       TEXT    NOT NULL DEFAULT '',
   repo_url       TEXT    NOT NULL DEFAULT '',
   tags           TEXT    NOT NULL DEFAULT '',         -- comma-separated

@@ -6,7 +6,8 @@
     "dev": "astro dev",
     "prebuild": "node scripts/fetch-community.mjs",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "test": "node --test src/scripts/*.test.mjs"
   },
   "dependencies": {
     "@astrojs/sitemap": "^3.7.3",

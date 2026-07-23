@@ -1,0 +1,74 @@
+name: Update Star History chart
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main-v2
+    paths:
+      - '.github/workflows/update-star-history.yml'
+      - 'scripts/update-star-history.mjs'
+      - 'scripts/update-star-history.test.mjs'
+  schedule:
+    - cron: '23 */3 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-star-history
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'esengine/DeepSeek-Reasonix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Test chart generator
+        run: node --test scripts/update-star-history.test.mjs
+      - name: Generate chart assets
+        env:
+          STAR_HISTORY_GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_GITHUB_TOKEN }}
+          STAR_HISTORY_OUTPUT_DIR: ${{ runner.temp }}/star-history
+        run: node scripts/update-star-history.mjs
+      - name: Publish chart assets
+        env:
+          OUTPUT_DIR: ${{ runner.temp }}/star-history
+          TARGET_BRANCH: star-history
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git fetch origin "$TARGET_BRANCH"; then
+            git switch --force-create "$TARGET_BRANCH" "origin/$TARGET_BRANCH"
+          else
+            git switch --create "$TARGET_BRANCH"
+          fi
+
+          mkdir -p assets/star-history
+          cp "$OUTPUT_DIR/star-history-light.svg" assets/star-history/star-history-light.svg
+          cp "$OUTPUT_DIR/star-history-dark.svg" assets/star-history/star-history-dark.svg
+          git add assets/star-history
+
+          if git diff --cached --quiet; then
+            echo "Star History chart is already current."
+            exit 0
+          fi
+
+          git commit \
+            -m "docs: update Star History chart" \
+            -m "Automated update:
+          Refresh the repository-hosted light and dark Star History SVGs from the authenticated GitHub stargazers API.
+
+          Verification:
+          - chart generator tests passed
+          - both SVG assets were rendered from timestamped stargazer data"
+          git push origin HEAD:"$TARGET_BRANCH"

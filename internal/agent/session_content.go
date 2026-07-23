@@ -58,6 +58,9 @@ func LoadSessionUserMessages(path string) ([]SessionUserMessage, error) {
 				if i < len(replay.times) {
 					at = replay.times[i]
 				}
+				if m.CreatedAt > 0 {
+					at = time.UnixMilli(m.CreatedAt)
+				}
 				out = append(out, SessionUserMessage{Text: m.Content, At: at})
 			}
 			return out, nil
@@ -72,7 +75,11 @@ func LoadSessionUserMessages(path string) ([]SessionUserMessage, error) {
 		if m.Role != provider.RoleUser {
 			continue
 		}
-		out = append(out, SessionUserMessage{Text: m.Content})
+		at := time.Time{}
+		if m.CreatedAt > 0 {
+			at = time.UnixMilli(m.CreatedAt)
+		}
+		out = append(out, SessionUserMessage{Text: m.Content, At: at})
 	}
 	return out, nil
 }

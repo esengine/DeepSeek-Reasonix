@@ -7,7 +7,9 @@ import (
 	"regexp"
 	"strings"
 
+	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
+	"reasonix/internal/planmode"
 	"reasonix/internal/tool"
 )
 
@@ -58,6 +60,9 @@ func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, er
 	text, status, found := jm.OutputForSession(jobs.SessionFromContext(ctx), p.JobID)
 	if !found {
 		return "", fmt.Errorf("no background job %q", p.JobID)
+	}
+	if status != jobs.Running {
+		collectBackgroundEvidence(ctx, jm, p.JobID)
 	}
 	if p.Filter != "" && text != "" {
 		filtered, err := filterLines(text, p.Filter)
@@ -160,6 +165,9 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 	}
 	var b strings.Builder
 	for i, r := range results {
+		if r.Status != jobs.Running {
+			collectBackgroundEvidence(ctx, jm, r.ID)
+		}
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
@@ -173,4 +181,39 @@ func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error
 		}
 	}
 	return b.String(), nil
+}
+
+func collectBackgroundEvidence(ctx context.Context, jm *jobs.Manager, jobID string) {
+	// A Plan turn should not consume a finished background writer's mutation
+	// receipts before the workflow reaches execution. Writers may still run after
+	// Permissions approval; leave their evidence on the job so the first
+	// post-approval collection can merge and audit it.
+	if planmode.Active(ctx) {
+		return
+	}
+	ledger, ok := evidence.FromContext(ctx)
+	if !ok || ledger == nil || jm == nil {
+		return
+	}
+	session := jobs.SessionFromContext(ctx)
+	// A non-Running status from bash_output/wait does not guarantee the job's
+	// run goroutine has actually flushed PublishEvidence and closed done: kill_shell
+	// flips status to Killed synchronously, well before its cancelled goroutine
+	// unwinds. Check readiness before noting the lease — noting it on an empty,
+	// not-yet-ready read would dedupe away every later retry in this turn (the
+	// lease is idempotent per turn) while the job later publishes real mutation
+	// evidence nobody ever merges or reviews.
+	summary, ready := jm.TryLeaseEvidenceForSession(session, jobID)
+	if !ready {
+		return
+	}
+	// Note the lease before merging so a second wait/bash_output in the same
+	// turn does not double-count. The merge is provisional: the lease does not
+	// consume, so if this turn fails the agent never commits and the next turn
+	// re-collects. The agent commits leased jobs only after the turn passes its
+	// delivery gates.
+	if !ledger.NoteBackgroundLease(session, jobID) {
+		return
+	}
+	ledger.MergeChild(summary)
 }

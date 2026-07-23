@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-noir-gold",
+  "name": "Noir Gold",
+  "author": "Reasonix Contributors",
+  "description": "Black velvet stage and gold spotlights around an original creative gentleman.",
+  "license": "MIT",
+  "baseStyle": "carbon",
+  "tokens": {
+    "light": {
+      "bg": "#FCF8EE",
+      "bgSoft": "#F6F0DF",
+      "bgElev": "#FEFBF4",
+      "panel": "#FEFBF4",
+      "sidebar": "#F5EFDD",
+      "chat": "#FDFAF2",
+      "workspace": "#FEFBF4",
+      "workspaceFiles": "#F7F1E1",
+      "border": "#CCBE94",
+      "borderSoft": "#EFE8D2",
+      "fg": "#2A241B",
+      "fgDim": "#5C5340",
+      "fgFaint": "#9A8F74",
+      "accent": "#7A5A16",
+      "accentFg": "#FCF8EE"
+    },
+    "dark": {
+      "bg": "#0D0B09",
+      "bgSoft": "#15120E",
+      "bgElev": "#1D1913",
+      "panel": "#171410",
+      "sidebar": "#14110D",
+      "chat": "#131009",
+      "workspace": "#1D1913",
+      "workspaceFiles": "#15120E",
+      "border": "#463B27",
+      "borderSoft": "#2A2418",
+      "fg": "#F8F1DF",
+      "fgDim": "#D6CBAE",
+      "fgFaint": "#968C6E",
+      "accent": "#D9B45B",
+      "accentFg": "#1D1503"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.73,
+    "focusY": 0.43,
+    "safeArea": "left",
+    "homeOpacity": 0.94,
+    "taskOpacity": 0.18,
+    "overlayStrength": 0.74,
+    "paneOpacity": 0.5
+  }
+}
