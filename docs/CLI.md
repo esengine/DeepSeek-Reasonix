@@ -124,6 +124,53 @@ Execution failures use `subtype: "error_during_execution"` and
 `is_error: true`. Structured modes keep runtime errors in JSON instead of also
 printing a duplicate human-readable error.
 
+### Redacted machine interfaces
+
+Use the dedicated event flag when an automation needs lifecycle telemetry but
+must not receive prompts, reasoning, tool arguments, tool output, or approval
+text:
+
+```sh
+reasonix run --events-jsonl "run the focused tests"
+```
+
+Every line has `schema_version`, `sequence`, and `kind`; the final line is
+`kind: "run_done"`. `--events-jsonl` is intentionally separate from the richer
+`--output-format stream-json` contract and cannot be combined with
+`--output-format`.
+
+The following read-only commands expose persisted state without transcript,
+label, command, output, path, PID, or host-name content:
+
+```sh
+reasonix session list --json [--dir SESSION_DIR]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
+reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix hook list --json [--project-root PATH] [--home-dir PATH]
+reasonix hook status --json [--project-root PATH] [--home-dir PATH]
+```
+
+For `session` and `task`, `--dir` explicitly selects the session storage
+directory; without it, Reasonix selects the current project's session store.
+For `hook`, `--dir` is an alias for `--project-root`.
+
+Machine session IDs are deterministic opaque hashes, not transcript file names.
+Task `finished_at` is empty while a task is running, and
+`artifact_complete=true` is emitted only for a terminal task whose persisted
+artifact exists. A `running` record without a live session lease is reported as
+`interrupted`; opening that session also repairs the persisted lifecycle state.
+
+Schema compatibility rules for version 1:
+
+- consumers must ignore unknown fields;
+- fields are not removed or retyped within the same schema version;
+- empty collections are encoded as `[]`;
+- argument errors exit with status `2`, state/query errors with status `1`;
+- machine-command errors are JSON objects with a stable `error.code`.
+
 ## Resume sessions
 
 ```sh

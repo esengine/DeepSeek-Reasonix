@@ -31,11 +31,11 @@ func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
 	if len(response.Sessions) != 2 {
 		t.Fatalf("sessions = %+v, want two sessions", response.Sessions)
 	}
-	if got := response.Sessions[0].ID; got != "newer" {
-		t.Errorf("first session = %q, want newer", got)
+	if got := response.Sessions[0].ID; got != machineSessionID("newer") {
+		t.Errorf("first session = %q, want opaque newer id", got)
 	}
-	if got := response.Sessions[1].ID; got != "older" {
-		t.Errorf("second session = %q, want older", got)
+	if got := response.Sessions[1].ID; got != machineSessionID("older") {
+		t.Errorf("second session = %q, want opaque older id", got)
 	}
 	if response.Sessions[0].Turns != 1 || response.Sessions[0].Scope != "project" {
 		t.Errorf("session metadata = %+v", response.Sessions[0])
@@ -57,7 +57,7 @@ func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 
 	for _, operation := range []string{"show", "status"} {
 		var out bytes.Buffer
-		args := []string{operation, "--json", "busy", "--dir", dir}
+		args := []string{operation, "--json", machineSessionID("busy"), "--dir", dir}
 		if code := runSessionCommand(args, &out); code != 0 {
 			t.Fatalf("%s exit code = %d, output = %s", operation, code, out.String())
 		}
@@ -71,6 +71,20 @@ func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 		if strings.Contains(out.String(), dir) || strings.Contains(out.String(), "PRIVATE") {
 			t.Fatalf("%s output leaked private data: %s", operation, out.String())
 		}
+	}
+}
+
+func TestMachineSessionIDIsStableAndOpaque(t *testing.T) {
+	raw := "20260723-120000.000000000-private-provider-model"
+	first := machineSessionID(raw)
+	if first == "" || first != machineSessionID(raw) {
+		t.Fatalf("machine session id is not stable: %q", first)
+	}
+	if strings.Contains(first, "private-provider-model") || first == raw {
+		t.Fatalf("machine session id exposed raw branch identity: %q", first)
+	}
+	if first == machineSessionID(raw+"-other") {
+		t.Fatalf("different branch ids collided: %q", first)
 	}
 }
 

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -163,7 +165,7 @@ func machineRecoveries(dir, target string) ([]machineRecovery, error) {
 	}
 	out := make([]machineRecovery, 0, len(ordered))
 	for _, info := range ordered {
-		sessionID := agent.BranchID(info.Path)
+		sessionID := machineSessionID(agent.BranchID(info.Path))
 		if target != "" && sessionID != target {
 			continue
 		}
@@ -252,7 +254,7 @@ func machineSessions(dir string) ([]machineSession, error) {
 			scope = "global"
 		}
 		out = append(out, machineSession{
-			ID:        agent.BranchID(info.Path),
+			ID:        machineSessionID(agent.BranchID(info.Path)),
 			CreatedAt: machineTime(info.CreatedAt),
 			UpdatedAt: machineTime(info.LastActivityAt),
 			Scope:     scope,
@@ -275,6 +277,17 @@ func machineTime(value time.Time) string {
 		return ""
 	}
 	return value.UTC().Format(time.RFC3339Nano)
+}
+
+// machineSessionID keeps the public machine contract stable without exposing
+// the transcript filename, which includes the configured model label.
+func machineSessionID(branchID string) string {
+	branchID = strings.TrimSpace(branchID)
+	if branchID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("reasonix-machine-session-v1\x00" + branchID))
+	return "session_" + hex.EncodeToString(sum[:16])
 }
 
 func writeMachineJSON(out io.Writer, value any) int {

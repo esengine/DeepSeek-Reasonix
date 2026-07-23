@@ -34,10 +34,11 @@ var renamePath = os.Rename
 type Status string
 
 const (
-	Running Status = "running"
-	Done    Status = "done"
-	Failed  Status = "failed"
-	Killed  Status = "killed"
+	Running     Status = "running"
+	Done        Status = "done"
+	Failed      Status = "failed"
+	Killed      Status = "killed"
+	Interrupted Status = "interrupted"
 )
 
 // DefaultTeardownGrace bounds Close and destroy waits for non-cooperative jobs.
@@ -445,7 +446,7 @@ func (m *Manager) writeJobMetaLocked(j *Job, st Status) error {
 		Status:           st,
 		StartedAt:        j.startedAt,
 		FinishedAt:       j.finishedAt,
-		ArtifactComplete: j.artifactComplete && j.artifactErr == "",
+		ArtifactComplete: st != Running && j.artifactComplete && j.artifactErr == "",
 		ArtifactError:    j.artifactErr,
 		LogPath:          filepath.Base(j.artifactPath),
 	}
@@ -1325,9 +1326,24 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != jobMetaExt {
 			continue
 		}
-		meta, err := readMeta(filepath.Join(dir, entry.Name()))
+		metaPath := filepath.Join(dir, entry.Name())
+		meta, err := readMeta(metaPath)
 		if err != nil || strings.TrimSpace(meta.ID) == "" {
 			continue
+		}
+		// A persisted Running record belongs to a process that no longer owns
+		// this newly loaded manager. The previous loader assumed only terminal
+		// tombstones existed, which became false once start metadata was added:
+		// resurrecting it as Running creates a closed-done job with no cancel
+		// function. Normalize it before publication and best-effort persist the
+		// terminal projection so older readers also stop treating it as live.
+		if meta.Status == Running {
+			meta.Status = Interrupted
+			if meta.FinishedAt == 0 {
+				meta.FinishedAt = nowMs()
+			}
+			meta.ArtifactComplete = false
+			_ = writeMeta(metaPath, meta)
 		}
 		id := strings.TrimSpace(meta.ID)
 		if seq := maxJobSeq(id); seq > maxSeq {

@@ -131,10 +131,12 @@ func machineTasks(dir, sessionFilter string) ([]machineTask, error) {
 	}
 	out := make([]machineTask, 0)
 	for _, session := range ordered {
-		sessionID := agent.BranchID(session.Path)
+		rawSessionID := agent.BranchID(session.Path)
+		sessionID := machineSessionID(rawSessionID)
 		if sessionFilter != "" && sessionID != sessionFilter {
 			continue
 		}
+		sessionActive := agent.SessionLeaseHeld(session.Path)
 		views, err := jobs.ListArtifactViews(session.Path)
 		if err != nil {
 			return nil, err
@@ -143,17 +145,25 @@ func machineTasks(dir, sessionFilter string) ([]machineTask, error) {
 			if view.Kind != "task" {
 				continue
 			}
+			status := view.Status
+			finishedAt := machineUnixMillis(view.FinishedAt)
+			artifactComplete := view.ArtifactComplete
+			if status == jobs.Running && !sessionActive {
+				status = jobs.Interrupted
+				finishedAt = ""
+				artifactComplete = false
+			}
 			out = append(out, machineTask{
 				ID:               view.ID,
 				SessionID:        sessionID,
 				Kind:             "background",
-				Status:           string(view.Status),
+				Status:           string(status),
 				StartedAt:        machineUnixMillis(view.StartedAt),
-				FinishedAt:       machineUnixMillis(view.FinishedAt),
-				ArtifactComplete: view.ArtifactComplete,
+				FinishedAt:       finishedAt,
+				ArtifactComplete: artifactComplete,
 			})
 		}
-		artifacts, err := agent.ListSubagentsByParent(dir, sessionID)
+		artifacts, err := agent.ListSubagentsByParent(dir, rawSessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -161,14 +171,25 @@ func machineTasks(dir, sessionFilter string) ([]machineTask, error) {
 			if artifact.Meta.Kind != "task" {
 				continue
 			}
+			status := artifact.Meta.Status
+			finishedAt := ""
+			artifactComplete := false
+			if status == agent.SubagentRunning {
+				if !sessionActive {
+					status = agent.SubagentInterrupted
+				}
+			} else {
+				finishedAt = machineTime(artifact.Meta.UpdatedAt)
+				artifactComplete = machineArtifactComplete(artifact.SessionPath)
+			}
 			out = append(out, machineTask{
 				ID:               artifact.Ref,
 				SessionID:        sessionID,
 				Kind:             "subagent",
-				Status:           string(artifact.Meta.Status),
+				Status:           string(status),
 				StartedAt:        machineTime(artifact.Meta.CreatedAt),
-				FinishedAt:       machineTime(artifact.Meta.UpdatedAt),
-				ArtifactComplete: true,
+				FinishedAt:       finishedAt,
+				ArtifactComplete: artifactComplete,
 			})
 		}
 	}
@@ -182,6 +203,11 @@ func machineTasks(dir, sessionFilter string) ([]machineTask, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+func machineArtifactComplete(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
 }
 
 func validMachineID(value string) bool {

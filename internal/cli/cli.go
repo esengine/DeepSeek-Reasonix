@@ -454,6 +454,10 @@ func runAgent(args []string) int {
 		return 2
 	}
 	if *eventsJSONL {
+		if fs.Changed("output-format") {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--events-jsonl cannot be combined with --output-format")
+			return 2
+		}
 		format = runOutputEventsJSONL
 	}
 	profile, err := parseRuntimeProfile(*profileFlag)
@@ -654,7 +658,7 @@ func runAgent(args []string) int {
 		}
 	}
 	if resultOutput != nil {
-		if err := resultOutput.Finalize(agent.BranchID(ctrl.SessionPath()), started, runErr); err != nil {
+		if err := resultOutput.Finalize(machineSessionID(agent.BranchID(ctrl.SessionPath())), started, runErr); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}

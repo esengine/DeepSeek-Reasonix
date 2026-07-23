@@ -29,10 +29,8 @@ func parseRunOutputFormat(value string) (runOutputFormat, error) {
 		return runOutputJSON, nil
 	case runOutputStreamJSON:
 		return runOutputStreamJSON, nil
-	case runOutputEventsJSONL:
-		return runOutputEventsJSONL, nil
 	default:
-		return "", fmt.Errorf("unknown output format %q (want text, json, stream-json, or events-jsonl)", value)
+		return "", fmt.Errorf("unknown output format %q (want text, json, or stream-json)", value)
 	}
 }
 

@@ -119,6 +119,50 @@ reasonix run "运行测试" --output-format stream-json
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。
 结构化模式会把运行时错误保留在 JSON 中，不再额外重复输出一份人类可读错误。
 
+### 脱敏机器接口
+
+自动化只需要生命周期遥测、不能接收 prompt、reasoning、工具参数/输出或审批文本时，
+使用独立的事件参数：
+
+```sh
+reasonix run --events-jsonl "运行 focused tests"
+```
+
+每行都包含 `schema_version`、`sequence` 和 `kind`，最后一行为
+`kind: "run_done"`。`--events-jsonl` 与包含更多内容的
+`--output-format stream-json` 是两个独立契约，不能和 `--output-format`
+组合使用。
+
+以下只读命令可以查询持久化状态，但不会输出 transcript、label、command、output、路径、
+PID 或 hostname：
+
+```sh
+reasonix session list --json [--dir SESSION_DIR]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
+reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix hook list --json [--project-root PATH] [--home-dir PATH]
+reasonix hook status --json [--project-root PATH] [--home-dir PATH]
+```
+
+对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录；未指定时，Reasonix
+选择当前项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
+
+机器 session ID 是稳定的 opaque hash，不是 transcript 文件名。任务仍在运行时
+`finished_at` 为空；只有任务已经结束并且持久化产物存在时，才会输出
+`artifact_complete=true`。没有 live session lease 的 `running` 记录会显示为
+`interrupted`；再次打开该 session 时也会自动修复持久化生命周期状态。
+
+Schema version 1 的兼容规则：
+
+- 消费端必须忽略未知字段；
+- 同一 schema version 内不会删除字段或改变字段类型；
+- 空集合编码为 `[]`；
+- 参数错误退出码为 `2`，状态/查询错误退出码为 `1`；
+- 机器命令错误是带稳定 `error.code` 的 JSON 对象。
+
 ## 恢复会话
 
 ```sh

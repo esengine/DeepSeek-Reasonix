@@ -37,7 +37,7 @@ func TestSessionMachineRecoveryIsContentFree(t *testing.T) {
 		t.Fatalf("recoveries = %+v", response.Recoveries)
 	}
 	item := response.Recoveries[0]
-	if item.SessionID != "recoverable" || item.State != "awaiting_decision" || item.Tasks != 1 || item.Pending != 1 || !item.InFlight {
+	if item.SessionID != machineSessionID("recoverable") || item.State != "awaiting_decision" || item.Tasks != 1 || item.Pending != 1 || !item.InFlight {
 		t.Fatalf("recovery = %+v", item)
 	}
 	if strings.Contains(out.String(), "PRIVATE") || strings.Contains(out.String(), dir) {

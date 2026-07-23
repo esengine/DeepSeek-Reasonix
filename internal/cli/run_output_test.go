@@ -102,3 +102,16 @@ func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
 		t.Fatalf("event stream was not redacted or terminated: %s", out.String())
 	}
 }
+
+func TestEventsJSONLHasOneCanonicalFlag(t *testing.T) {
+	if _, err := parseRunOutputFormat("events-jsonl"); err == nil {
+		t.Fatal("events-jsonl must use the dedicated --events-jsonl flag")
+	}
+	var code int
+	stderr := captureStderr(t, func() {
+		code = runAgent([]string{"--events-jsonl", "--output-format", "json", "task"})
+	})
+	if code != 2 || !strings.Contains(stderr, "cannot be combined") {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+}

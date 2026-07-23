@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 )
@@ -37,11 +39,71 @@ func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
 	if len(response.Tasks) != 1 || response.Tasks[0].ID != job.ID || response.Tasks[0].Status != "done" {
 		t.Fatalf("tasks = %+v", response.Tasks)
 	}
-	if response.Tasks[0].Kind != "background" || response.Tasks[0].SessionID != "session" {
+	if response.Tasks[0].Kind != "background" || response.Tasks[0].SessionID != machineSessionID("session") {
 		t.Fatalf("task projection = %+v", response.Tasks[0])
 	}
 	if strings.Contains(out.String(), "PRIVATE") || strings.Contains(out.String(), dir) {
 		t.Fatalf("task output leaked private data: %s", out.String())
+	}
+}
+
+func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.T) {
+	dir := t.TempDir()
+	saveMachineTestSession(t, dir, "session", time.Now())
+	subDir := filepath.Join(dir, "subagents")
+	if err := os.MkdirAll(subDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	metas := []agent.SubagentMeta{
+		{Ref: "sa_running", CreatedAt: now, UpdatedAt: now, Status: agent.SubagentRunning, Kind: "task", ParentSession: "session"},
+		{Ref: "sa_complete", CreatedAt: now.Add(-time.Minute), UpdatedAt: now, Status: agent.SubagentCompleted, Kind: "task", ParentSession: "session"},
+		{Ref: "sa_missing", CreatedAt: now.Add(-2 * time.Minute), UpdatedAt: now, Status: agent.SubagentCompleted, Kind: "task", ParentSession: "session"},
+	}
+	for _, meta := range metas {
+		data, err := json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(subDir, meta.Ref+".meta.json"), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "sa_complete.jsonl"), []byte("persisted transcript\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := machineTasks(dir, machineSessionID("session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := make(map[string]machineTask, len(tasks))
+	for _, task := range tasks {
+		byID[task.ID] = task
+	}
+	if got := byID["sa_running"]; got.Status != string(agent.SubagentInterrupted) || got.FinishedAt != "" || got.ArtifactComplete {
+		t.Fatalf("stale running projection = %+v", got)
+	}
+	if got := byID["sa_complete"]; got.Status != string(agent.SubagentCompleted) || got.FinishedAt == "" || !got.ArtifactComplete {
+		t.Fatalf("completed projection = %+v", got)
+	}
+	if got := byID["sa_missing"]; got.FinishedAt == "" || got.ArtifactComplete {
+		t.Fatalf("missing artifact projection = %+v", got)
+	}
+
+	lease, err := agent.TryAcquireSessionLease(filepath.Join(dir, "session.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lease.Release()
+	tasks, err = machineTasks(dir, machineSessionID("session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range tasks {
+		if task.ID == "sa_running" && (task.Status != string(agent.SubagentRunning) || task.FinishedAt != "" || task.ArtifactComplete) {
+			t.Fatalf("live running projection = %+v", task)
+		}
 	}
 }
 

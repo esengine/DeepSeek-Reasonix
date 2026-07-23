@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -181,6 +182,77 @@ func TestRestoreSessionArtifactsAndAdvanceSequence(t *testing.T) {
 	<-next.done
 	if next.ID == j.ID {
 		t.Fatalf("new job reused restored id %q", next.ID)
+	}
+}
+
+func TestRestoreRunningArtifactAsInterrupted(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	metaPath := filepath.Join(dir, "task-1"+jobMetaExt)
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:               "task-1",
+		Kind:             "task",
+		Status:           Running,
+		StartedAt:        time.Now().Add(-time.Minute).UnixMilli(),
+		ArtifactComplete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(event.Discard)
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	if got := m.RunningForSession("session"); len(got) != 0 {
+		t.Fatalf("restored stale job remained live: %+v", got)
+	}
+	if m.KillForSession("session", "task-1") {
+		t.Fatal("restored interrupted job must not be killable")
+	}
+	result := m.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("restored result = %+v, want interrupted", result)
+	}
+
+	persisted, err := readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != Interrupted || persisted.FinishedAt == 0 || persisted.ArtifactComplete {
+		t.Fatalf("persisted restored metadata = %+v", persisted)
+	}
+}
+
+func TestRunningJobArtifactMetadataIsIncomplete(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	m := NewManager(event.Discard)
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	release := make(chan struct{})
+	job := m.StartForSession("session", "task", "running", func(context.Context, io.Writer) (string, error) {
+		<-release
+		return "done", nil
+	})
+	metaPath := filepath.Join(ArtifactDir(sessionPath), job.ID+jobMetaExt)
+	meta, err := readMeta(metaPath)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	if meta.Status != Running || meta.FinishedAt != 0 || meta.ArtifactComplete {
+		close(release)
+		t.Fatalf("running metadata = %+v", meta)
+	}
+
+	close(release)
+	<-job.done
+	meta, err = readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != Done || meta.FinishedAt == 0 || !meta.ArtifactComplete {
+		t.Fatalf("terminal metadata = %+v", meta)
 	}
 }
 
