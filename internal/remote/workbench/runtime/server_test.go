@@ -878,6 +878,7 @@ func TestSessionRotationRegistryFailureReturnsCommittedEpoch(t *testing.T) {
 			RegistryPath: t.TempDir(), // AtomicWriteFile cannot replace this directory.
 			Logger:       log,
 		})
+		t.Cleanup(srv.snapshotAndClose)
 		ctrl := &rotatingFakeController{
 			persistentFakeController: &persistentFakeController{
 				fakeController: &fakeController{model: "local/test", history: []provider.Message{{Role: provider.RoleUser, Content: "old"}}},
@@ -1300,6 +1301,7 @@ func TestRuntimeControllerUsesDesktopBrokerWithoutHostKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := New(Options{Workspace: workspace, Version: "test", SourceRevision: revision})
+	t.Cleanup(srv.snapshotAndClose)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	hostSide, desktopSide := net.Pipe()
