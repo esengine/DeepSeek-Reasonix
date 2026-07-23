@@ -144,6 +144,10 @@ type Options struct {
 	// different mode than they passed here should also pass it here, or
 	// sub-agent gates will not match the parent executor's mode.
 	HeadlessApprovalMode string
+	// SessionAuthorizations carries ephemeral authorization and warning-delivery
+	// state into a same-session controller rebuild. It must be nil for a new
+	// logical session or history resume and must never be persisted.
+	SessionAuthorizations *control.SessionAuthorizations
 	// SessionRecoveryMeta and OnSessionRecovered let richer frontends attach
 	// local UI metadata to automatic transcript recovery branches.
 	SessionRecoveryMeta func(control.SessionRecoveryRequest) agent.BranchMeta
@@ -173,6 +177,49 @@ func sandboxCapabilityEngineForOptions(opts Options) *sandboxauth.Engine {
 		Source: opts.SandboxCapabilityGrantSource, Persister: opts.SandboxCapabilityPersister,
 		Hook: opts.SandboxCapabilityPolicyHook, AutoOnce: opts.SandboxCapabilityAutoOnce,
 		Audit: opts.SandboxCapabilityAudit,
+	}
+}
+
+func applyProductionSandboxCapabilityAdapters(engine *sandboxauth.Engine, root string) {
+	store := config.CapabilityGrantStore{Workspace: root}
+	if engine.Source == nil {
+		engine.Source = store
+	}
+	if engine.Persister == nil {
+		engine.Persister = store
+	}
+	if engine.AutoOnce == nil {
+		engine.AutoOnce = sandboxauth.NewYOLOPolicy(config.ResolveYOLOPolicyConfig(root))
+	}
+}
+
+type sandboxCapabilityEventAudit struct {
+	sink event.Sink
+}
+
+func (a sandboxCapabilityEventAudit) RecordSandboxCapabilityDecision(_ context.Context, record sandboxauth.AuditRecord) {
+	recordCopy := record
+	switch record.Decision.Origin {
+	case sandboxauth.OriginYOLOAutoOnce:
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelWarn,
+			Code:   event.NoticeCodeSandboxCapabilityYOLO,
+			Text:   "YOLO auto-approved sandbox capabilities for this invocation.",
+			Detail: "No reusable authorization was created.", SandboxCapabilityAudit: &recordCopy,
+		})
+	case sandboxauth.OriginSessionGrant, sandboxauth.OriginProjectGrant:
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelInfo,
+			Code:                   event.NoticeCodeSandboxCapabilityGrant,
+			Text:                   "Applied sandbox capabilities from an existing grant.",
+			SandboxCapabilityAudit: &recordCopy,
+		})
+	}
+}
+
+func applyProductionSandboxCapabilityAudit(engine *sandboxauth.Engine, sink event.Sink) {
+	if engine.Audit == nil {
+		engine.Audit = sandboxCapabilityEventAudit{sink: sink}
 	}
 }
 
@@ -846,6 +893,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	)
 	subagentScheduler := agent.NewSubagentScheduler(maxSubagentConcurrency, maxParallelWriters)
 	sandboxCapabilityEngine := sandboxCapabilityEngineForOptions(opts)
+	applyProductionSandboxCapabilityAdapters(sandboxCapabilityEngine, root)
+	applyProductionSandboxCapabilityAudit(sandboxCapabilityEngine, sink)
 	sandboxCapabilityEngine.Hook = sandboxCapabilityPolicyHooks{
 		configured: hookRunner,
 		upstream:   sandboxCapabilityEngine.Hook,
@@ -1778,6 +1827,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ctrlOpts.RecoveryHeadless = recoveryHeadlessMode(opts)
 	}
 	ctrl := control.New(ctrlOpts)
+	if opts.SessionAuthorizations != nil {
+		ctrl.RestoreSessionAuthorizations(*opts.SessionAuthorizations)
+	}
+	if strings.TrimSpace(opts.HeadlessApprovalMode) != "" {
+		ctrl.ApplyHeadlessApprovalMode(opts.HeadlessApprovalMode)
+	}
 	// Share the recovery checkpoint with task/fleet sub-agents so background
 	// writers observe the same failure state as the root agent.
 	if taskTool != nil {

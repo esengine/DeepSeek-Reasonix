@@ -236,15 +236,15 @@ func (p *memoryPersister) SaveSandboxCapabilityGrant(_ context.Context, grant Gr
 
 type memoryGrantSource struct{ grants []Grant }
 
-func (s memoryGrantSource) SandboxCapabilityGrants(context.Context, string) ([]Grant, []string) {
+func (s memoryGrantSource) SandboxCapabilityGrants(context.Context, string) ([]Grant, []Diagnostic) {
 	return cloneGrants(s.grants), nil
 }
 
 type allowAutoOnce struct{ calls int }
 
-func (p *allowAutoOnce) AutoApproveSandboxCapabilityOnce(context.Context, Request) bool {
+func (p *allowAutoOnce) DecideSandboxCapabilityAutoOnce(context.Context, Request) AutoOnceDecision {
 	p.calls++
-	return true
+	return AutoOnceDecision{Action: AutoOnceAllow}
 }
 
 func TestSuppliedProjectGrantAndAutoOncePolicy(t *testing.T) {

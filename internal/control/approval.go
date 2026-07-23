@@ -285,13 +285,15 @@ func (a *approvalManager) grantPlanModeReadOnlyCommand(prefix string) {
 	a.planModeReadOnlyCommands[prefix] = true
 }
 
-// SessionAuthorizations is the same-session tool-grant and Plan-mode
-// read-only command trust state a controller rebuild must carry forward; see
-// Controller.SessionAuthorizations / RestoreSessionAuthorizations.
+// SessionAuthorizations is ephemeral same-session authorization state and
+// non-authority delivery bookkeeping a controller rebuild must carry forward;
+// see Controller.SessionAuthorizations / RestoreSessionAuthorizations. It must
+// never be persisted to a transcript or restored for a history resume.
 type SessionAuthorizations struct {
 	Grants                   []string
 	PlanModeReadOnlyCommands []string
 	SandboxCapabilityGrants  []sandboxauth.Grant
+	SandboxCapabilityYOLO    sandboxauth.YOLOSessionState
 }
 
 func (a *approvalManager) snapshotSessionAuthorizations() SessionAuthorizations {

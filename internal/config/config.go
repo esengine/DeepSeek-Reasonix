@@ -932,6 +932,9 @@ type SandboxConfig struct {
 	// Network allows network egress from inside the bash sandbox. Defaults true
 	// so module/package downloads keep working; the boundary is then writes.
 	Network bool `toml:"network"`
+	// YOLOAutoApproveCapabilities permits only the current requested sandbox
+	// capability invocation when the runtime is already in YOLO mode.
+	YOLOAutoApproveCapabilities bool `toml:"yolo_auto_approve_capabilities"`
 }
 
 // WriteRoots returns the directories file-writer tools may modify: the

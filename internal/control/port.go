@@ -77,6 +77,9 @@ type TurnControl interface {
 type Approvals interface {
 	Approve(id string, allow, session, persist bool)
 	ResolveSandboxCapability(id string, action sandboxauth.Action) error
+	SandboxCapabilityYOLOState() (sandboxauth.YOLOPolicyState, bool)
+	AcknowledgeSandboxCapabilityYOLO(accept bool) bool
+	ReloadSandboxCapabilityYOLO() (sandboxauth.YOLOPolicyState, bool)
 	// ResolveRecovery answers an Auto Guard card: continue|continue_task|revise. Revise
 	// refuses the mutation and steers feedback.
 	ResolveRecovery(id string, action agent.RecoveryAction, feedback string) error

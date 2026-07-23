@@ -3,11 +3,14 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
@@ -15,6 +18,149 @@ import (
 	"reasonix/internal/sandboxauth"
 	"reasonix/internal/tool"
 )
+
+func TestHeadlessYOLOProjectWarningEmitsExactlyOnceOnEntry(t *testing.T) {
+	workspace := t.TempDir()
+	policy := sandboxauth.NewYOLOPolicy(sandboxauth.YOLOPolicyConfig{Workspace: workspace, Effective: true, ProjectExpansion: true})
+	engine := &sandboxauth.Engine{AutoOnce: policy}
+	var events []event.Event
+	c := New(Options{
+		WorkspaceRoot: workspace, SandboxCapabilityEngine: engine,
+		Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard),
+		Sink:     event.FuncSink(func(e event.Event) { events = append(events, e) }),
+	})
+	c.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	c.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	var warnings []event.Event
+	for _, e := range events {
+		if e.Code == event.NoticeCodeSandboxCapabilityWarning {
+			warnings = append(warnings, e)
+		}
+	}
+	if len(warnings) != 1 || warnings[0].SandboxCapabilityWarning == nil || !warnings[0].SandboxCapabilityWarning.Mandatory {
+		t.Fatalf("startup warnings=%+v", warnings)
+	}
+}
+
+func TestHeadlessYOLONonExpandedPolicyDoesNotEmitProjectWarning(t *testing.T) {
+	workspace := t.TempDir()
+	policy := sandboxauth.NewYOLOPolicy(sandboxauth.YOLOPolicyConfig{Workspace: workspace})
+	engine := &sandboxauth.Engine{AutoOnce: policy}
+	var warnings int
+	c := New(Options{
+		WorkspaceRoot: workspace, SandboxCapabilityEngine: engine,
+		Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard),
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Code == event.NoticeCodeSandboxCapabilityWarning {
+				warnings++
+			}
+		}),
+	})
+	c.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	c.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	if warnings != 0 {
+		t.Fatalf("non-expanded startup warnings=%d", warnings)
+	}
+}
+
+func TestHeadlessYOLOProjectWarningLifetimeAcrossControllerSessions(t *testing.T) {
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix-home"))
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newController := func(workspace string, events *[]event.Event) *Controller {
+		policy := sandboxauth.NewYOLOPolicy(sandboxauth.YOLOPolicyConfig{Workspace: workspace, Effective: true, ProjectExpansion: true})
+		return New(Options{
+			WorkspaceRoot: workspace, SandboxCapabilityEngine: &sandboxauth.Engine{AutoOnce: policy},
+			Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard),
+			Sink: event.FuncSink(func(e event.Event) {
+				if e.Code == event.NoticeCodeSandboxCapabilityWarning {
+					*events = append(*events, e)
+				}
+			}),
+		})
+	}
+
+	var originalEvents []event.Event
+	original := newController(workspace, &originalEvents)
+	original.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	if len(originalEvents) != 1 {
+		t.Fatalf("first entry warnings=%d", len(originalEvents))
+	}
+
+	var rebuiltEvents []event.Event
+	rebuilt := newController(workspace, &rebuiltEvents)
+	rebuilt.RestoreSessionAuthorizations(original.SessionAuthorizations())
+	rebuilt.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	rebuilt.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	if len(rebuiltEvents) != 0 {
+		t.Fatalf("same-session rebuild warnings=%d", len(rebuiltEvents))
+	}
+
+	if err := rebuilt.NewSession(); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if len(rebuiltEvents) != 1 {
+		t.Fatalf("new session warnings=%d", len(rebuiltEvents))
+	}
+	if err := rebuilt.ClearSession(); err != nil {
+		t.Fatalf("clear session: %v", err)
+	}
+	if len(rebuiltEvents) != 2 {
+		t.Fatalf("clear session warnings=%d", len(rebuiltEvents))
+	}
+	rebuilt.Resume(agent.NewSession("sys"), "")
+	if len(rebuiltEvents) != 3 {
+		t.Fatalf("resume warnings=%d", len(rebuiltEvents))
+	}
+
+	var changedWorkspaceEvents []event.Event
+	changedRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(changedRoot, "reasonix.toml"), []byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changedWorkspace := newController(changedRoot, &changedWorkspaceEvents)
+	changedWorkspace.RestoreSessionAuthorizations(original.SessionAuthorizations())
+	changedWorkspace.ApplyHeadlessApprovalMode(ToolApprovalYolo)
+	if len(changedWorkspaceEvents) != 1 {
+		t.Fatalf("workspace change warnings=%d", len(changedWorkspaceEvents))
+	}
+}
+
+func TestReloadSandboxCapabilityYOLOProjectExpansionRequiresAcknowledgement(t *testing.T) {
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix-home"))
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "reasonix.toml")
+	if err := os.WriteFile(path, []byte("[sandbox]\nyolo_auto_approve_capabilities = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	policy := sandboxauth.NewYOLOPolicy(config.ResolveYOLOPolicyConfig(workspace))
+	engine := &sandboxauth.Engine{AutoOnce: policy}
+	c := New(Options{
+		WorkspaceRoot: workspace, SandboxCapabilityEngine: engine,
+		Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard),
+	})
+	c.EnableInteractiveApproval()
+	c.SetToolApprovalMode(ToolApprovalYolo)
+	if state, _ := c.SandboxCapabilityYOLOState(); state.Acknowledgement != sandboxauth.YOLONotRequired {
+		t.Fatalf("initial state=%+v", state)
+	}
+	if err := os.WriteFile(path, []byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	state, ok := c.ReloadSandboxCapabilityYOLO()
+	if !ok || !state.Effective || state.Acknowledgement != sandboxauth.YOLORequired {
+		t.Fatalf("reloaded state=%+v ok=%v", state, ok)
+	}
+	decision := policy.DecideSandboxCapabilityAutoOnce(context.Background(), sandboxauth.Request{})
+	if decision.Action != sandboxauth.AutoOnceRunSandboxed {
+		t.Fatalf("pending reload decision=%+v", decision)
+	}
+	if !c.AcknowledgeSandboxCapabilityYOLO(true) {
+		t.Fatal("reloaded acknowledgement was not accepted")
+	}
+}
 
 type controllerCapabilityTool struct {
 	mu      sync.Mutex
@@ -172,20 +318,34 @@ func TestLegacyBooleanCapabilityApprovalAlwaysRunsSandboxed(t *testing.T) {
 }
 
 func TestSandboxCapabilitySessionGrantsCarryAcrossRebuildButNotResume(t *testing.T) {
-	grant := sandboxauth.Grant{Workspace: t.TempDir(), CanonicalExecutable: "/bin/tool", ArgvPrefix: []string{"tool"}, Capabilities: sandbox.CapabilitySet{Network: true}}
-	oldEngine := &sandboxauth.Engine{}
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix-home"))
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	grant := sandboxauth.Grant{Workspace: workspace, CanonicalExecutable: "/bin/tool", ArgvPrefix: []string{"tool"}, Capabilities: sandbox.CapabilitySet{Network: true}}
+	oldPolicy := sandboxauth.NewYOLOPolicy(sandboxauth.YOLOPolicyConfig{Workspace: workspace, Effective: true, ProjectExpansion: true})
+	oldPolicy.Acknowledge(true)
+	oldEngine := &sandboxauth.Engine{AutoOnce: oldPolicy}
 	oldEngine.RestoreSessionGrants([]sandboxauth.Grant{grant})
-	old := New(Options{SandboxCapabilityEngine: oldEngine, Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)})
+	old := New(Options{WorkspaceRoot: workspace, SandboxCapabilityEngine: oldEngine, Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)})
 
-	newEngine := &sandboxauth.Engine{}
-	fresh := New(Options{SandboxCapabilityEngine: newEngine, Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)})
+	newPolicy := sandboxauth.NewYOLOPolicy(sandboxauth.YOLOPolicyConfig{Workspace: workspace, Effective: true, ProjectExpansion: true})
+	newEngine := &sandboxauth.Engine{AutoOnce: newPolicy}
+	fresh := New(Options{WorkspaceRoot: workspace, SandboxCapabilityEngine: newEngine, Executor: agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)})
 	fresh.RestoreSessionAuthorizations(old.SessionAuthorizations())
 	if got := len(newEngine.SessionGrants()); got != 1 {
 		t.Fatalf("rebuild grants=%d", got)
 	}
+	if state, _ := newEngine.YOLOState(); state.Acknowledgement != sandboxauth.YOLOAccepted {
+		t.Fatalf("rebuild acknowledgement=%+v", state)
+	}
 	fresh.Resume(agent.NewSession("sys"), "")
 	if got := len(newEngine.SessionGrants()); got != 0 {
 		t.Fatalf("resume retained %d session grants", got)
+	}
+	if state, _ := newEngine.YOLOState(); state.Acknowledgement != sandboxauth.YOLORequired {
+		t.Fatalf("resume retained acknowledgement=%+v", state)
 	}
 }
 

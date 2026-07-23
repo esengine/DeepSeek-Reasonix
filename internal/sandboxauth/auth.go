@@ -73,8 +73,38 @@ type Decision struct {
 	Use                 sandbox.CapabilityUse
 	Cancel              bool
 	Diagnostic          string
+	Origin              DecisionOrigin
+	Warnings            []Warning
+	ConfigDiagnostics   []Diagnostic
 	CanonicalExecutable string
 	Argv                []string
+}
+
+// DecisionOrigin identifies the authority or fallback that selected a runtime decision.
+type DecisionOrigin string
+
+const (
+	// OriginBaseSandbox means the requested delta was not applied.
+	OriginBaseSandbox DecisionOrigin = "base_sandbox"
+	// OriginYOLOAutoOnce means YOLO authorized this invocation without reusable state.
+	OriginYOLOAutoOnce DecisionOrigin = "yolo_auto_once"
+	// OriginSessionGrant means an in-memory same-session grant matched.
+	OriginSessionGrant DecisionOrigin = "session_grant"
+	// OriginProjectGrant means a persisted project grant matched.
+	OriginProjectGrant DecisionOrigin = "project_grant"
+	// OriginHumanOnce means a fresh human allowed only this invocation.
+	OriginHumanOnce DecisionOrigin = "human_once"
+	// OriginHumanSession means a fresh human created or fell back to a session grant.
+	OriginHumanSession DecisionOrigin = "human_session"
+	// OriginHumanPersistent means a fresh human grant was persisted successfully.
+	OriginHumanPersistent DecisionOrigin = "human_persistent"
+)
+
+// Warning is transport-neutral security information that frontends must not discard.
+type Warning struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Mandatory bool   `json:"mandatory"`
 }
 
 // Prompt is the authoritative structured payload shown to the user.
@@ -106,12 +136,40 @@ type PolicyHook interface {
 // GrantSource supplies already-validated project/runtime grants. Concrete
 // configuration loading belongs to the caller (Issue #6), not this package.
 type GrantSource interface {
-	SandboxCapabilityGrants(context.Context, string) ([]Grant, []string)
+	SandboxCapabilityGrants(context.Context, string) ([]Grant, []Diagnostic)
 }
 
-// AutoOncePolicy may supply one-call authority without creating a grant.
+// Diagnostic identifies one disabled configuration entry without disabling siblings.
+type Diagnostic struct {
+	Source  string `json:"source"`
+	Entry   int    `json:"entry"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// AutoOncePolicy decides only the YOLO capability-specific branch. Defer leaves
+// ordinary non-YOLO authorization unchanged; RunSandboxed prevents a prompt.
 type AutoOncePolicy interface {
-	AutoApproveSandboxCapabilityOnce(context.Context, Request) bool
+	DecideSandboxCapabilityAutoOnce(context.Context, Request) AutoOnceDecision
+}
+
+// AutoOnceAction is the exhaustive capability auto-once policy result.
+type AutoOnceAction string
+
+const (
+	// AutoOnceDefer leaves authorization to grants and the ordinary approval flow.
+	AutoOnceDefer AutoOnceAction = "defer"
+	// AutoOnceAllow authorizes only the current invocation.
+	AutoOnceAllow AutoOnceAction = "allow_once"
+	// AutoOnceRunSandboxed executes with the unchanged base sandbox without prompting.
+	AutoOnceRunSandboxed AutoOnceAction = "run_sandboxed"
+)
+
+// AutoOnceDecision carries the policy result and typed warning metadata.
+type AutoOnceDecision struct {
+	Action     AutoOnceAction
+	Diagnostic string
+	Warnings   []Warning
 }
 
 // AuditSink observes the final runtime decision without affecting authority.
@@ -124,6 +182,7 @@ type AuditRecord struct {
 	Request  Request
 	Decision Decision
 	Err      string
+	Visible  bool
 }
 
 // Persister is the project-grant boundary. Implementations are responsible for
@@ -161,6 +220,80 @@ type Engine struct {
 	session []Grant
 }
 
+// yoloPolicyLifecycle is an optional cohesive extension. Custom AutoOncePolicy
+// adapters can implement only the minimal authorization method.
+type yoloPolicyLifecycle interface {
+	AutoOncePolicy
+	SetRuntimeMode(bool, bool)
+	State() YOLOPolicyState
+	Acknowledge(bool) bool
+	SessionState() YOLOSessionState
+	RestoreSessionState(YOLOSessionState)
+	ClearSessionState()
+	Configure(YOLOPolicyConfig)
+	TakeStartupWarnings() []Warning
+}
+
+func (e *Engine) yoloLifecycle() (yoloPolicyLifecycle, bool) {
+	policy, ok := e.AutoOnce.(yoloPolicyLifecycle)
+	return policy, ok
+}
+
+// SetYOLORuntimeMode updates a policy that supports the built-in typed state.
+func (e *Engine) SetYOLORuntimeMode(yolo, interactive bool) {
+	if policy, ok := e.yoloLifecycle(); ok {
+		policy.SetRuntimeMode(yolo, interactive)
+	}
+}
+
+// YOLOState returns the typed auto-once policy state when configured.
+func (e *Engine) YOLOState() (YOLOPolicyState, bool) {
+	if policy, ok := e.yoloLifecycle(); ok {
+		return policy.State(), true
+	}
+	return YOLOPolicyState{}, false
+}
+
+// AcknowledgeYOLOProjectExpansion accepts or refuses the pending expansion.
+func (e *Engine) AcknowledgeYOLOProjectExpansion(accept bool) bool {
+	if policy, ok := e.yoloLifecycle(); ok {
+		return policy.Acknowledge(accept)
+	}
+	return false
+}
+
+// YOLOSessionState snapshots ephemeral same-session policy state for rebuilds.
+func (e *Engine) YOLOSessionState() YOLOSessionState {
+	if policy, ok := e.yoloLifecycle(); ok {
+		return policy.SessionState()
+	}
+	return YOLOSessionState{}
+}
+
+// RestoreYOLOSessionState restores ephemeral state only when workspace matches.
+func (e *Engine) RestoreYOLOSessionState(state YOLOSessionState) {
+	if policy, ok := e.yoloLifecycle(); ok {
+		policy.RestoreSessionState(state)
+	}
+}
+
+// ConfigureYOLOPolicy applies reloaded configuration to the built-in policy.
+func (e *Engine) ConfigureYOLOPolicy(cfg YOLOPolicyConfig) bool {
+	if policy, ok := e.yoloLifecycle(); ok {
+		policy.Configure(cfg)
+		return true
+	}
+	return false
+}
+
+// TakeYOLOStartupWarnings returns newly pending mandatory headless warnings once.
+func (e *Engine) TakeYOLOStartupWarnings() []Warning {
+	if policy, ok := e.yoloLifecycle(); ok {
+		return policy.TakeStartupWarnings()
+	}
+	return nil
+}
+
 // SessionGrants returns a defensive snapshot for same-session Controller rebuilds.
 func (e *Engine) SessionGrants() []Grant {
 	e.mu.RLock()
@@ -181,6 +314,9 @@ func (e *Engine) ClearSessionGrants() {
 	e.mu.Lock()
 	e.session = nil
 	e.mu.Unlock()
+	if policy, ok := e.yoloLifecycle(); ok {
+		policy.ClearSessionState()
+	}
 }
 
 // Authorize applies hook, grant and strict-fresh approval decisions in order.
@@ -192,13 +328,14 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 	if e.Audit != nil {
 		defer func() {
 			record := AuditRecord{Request: cloneRequest(req), Decision: cloneDecision(decision)}
+			record.Visible = decision.Origin == OriginYOLOAutoOnce
 			if err != nil {
 				record.Err = err.Error()
 			}
 			e.Audit.RecordSandboxCapabilityDecision(ctx, record)
 		}()
 	}
-	base := Decision{Use: sandbox.BaseOnly}
+	base := Decision{Use: sandbox.BaseOnly, Origin: OriginBaseSandbox}
 	if !req.Review.Authority.Requested {
 		return base, nil
 	}
@@ -220,16 +357,32 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 
 	commandID, identityErr := commandIdentity(req)
 	project, projectDiagnostics := e.projectGrants(ctx, req.Workspace)
+	base.ConfigDiagnostics = cloneDiagnostics(projectDiagnostics)
+	projectMessages := diagnosticMessages(projectDiagnostics)
 	if identityErr == nil {
-		grants := append(e.SessionGrants(), project...)
-		if grant, ok := matchingGrant(grants, commandID, req); ok {
+		session := e.SessionGrants()
+		grants := append(session, project...)
+		if grant, index, ok := matchingGrant(grants, commandID, req); ok {
 			directArgv := append([]string(nil), commandID.argv...)
 			directArgv[0] = grant.CanonicalExecutable
-			return Decision{Use: sandbox.AuthorizedDelta, Diagnostic: strings.Join(projectDiagnostics, "; "), CanonicalExecutable: grant.CanonicalExecutable, Argv: directArgv}, nil
+			origin := OriginProjectGrant
+			if index < len(session) {
+				origin = OriginSessionGrant
+			}
+			return Decision{Use: sandbox.AuthorizedDelta, Origin: origin, Diagnostic: strings.Join(projectMessages, "; "), ConfigDiagnostics: cloneDiagnostics(projectDiagnostics), CanonicalExecutable: grant.CanonicalExecutable, Argv: directArgv}, nil
 		}
 	}
-	if e.AutoOnce != nil && e.AutoOnce.AutoApproveSandboxCapabilityOnce(ctx, cloneRequest(req)) {
-		return Decision{Use: sandbox.AuthorizedDelta, Diagnostic: strings.Join(projectDiagnostics, "; ")}, nil
+	if e.AutoOnce != nil {
+		auto := e.AutoOnce.DecideSandboxCapabilityAutoOnce(ctx, cloneRequest(req))
+		diagnostic := strings.Join(append(projectMessages, auto.Diagnostic), "; ")
+		switch auto.Action {
+		case AutoOnceAllow:
+			return Decision{Use: sandbox.AuthorizedDelta, Origin: OriginYOLOAutoOnce, Diagnostic: diagnostic, Warnings: append([]Warning(nil), auto.Warnings...), ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
+		case AutoOnceRunSandboxed:
+			base.Diagnostic = firstNonEmpty(diagnostic, "YOLO capability auto-approval is disabled; using the base sandbox")
+			base.Warnings = append([]Warning(nil), auto.Warnings...)
+			return base, nil
+		}
 	}
 	if req.Subagent {
 		base.Diagnostic = "sub-agent capability request has no eligible delegated grant; using the base sandbox"
@@ -241,7 +394,7 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 	}
 
 	prompt := buildPrompt(req, commandID, identityErr)
-	prompt.Warnings = append(prompt.Warnings, projectDiagnostics...)
+	prompt.Warnings = append(prompt.Warnings, projectMessages...)
 	action, err := e.Approver.ApproveSandboxCapability(ctx, clonePrompt(prompt))
 	if err != nil {
 		base.Diagnostic = fmt.Sprintf("sandbox capability approval failed: %v; using the base sandbox", err)
@@ -249,14 +402,14 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 	}
 	switch action {
 	case AllowOnce:
-		return Decision{Use: sandbox.AuthorizedDelta}, nil
+		return Decision{Use: sandbox.AuthorizedDelta, Origin: OriginHumanOnce, ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
 	case AllowSession:
 		if identityErr != nil {
 			base.Diagnostic = "session capability grant is unavailable for this command; using the base sandbox"
 			return base, nil
 		}
 		e.addSession(commandID.grant(req))
-		return Decision{Use: sandbox.AuthorizedDelta}, nil
+		return Decision{Use: sandbox.AuthorizedDelta, Origin: OriginHumanSession, ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
 	case AllowPersistent:
 		if identityErr != nil || prompt.SuspectedSecret {
 			base.Diagnostic = "persistent capability grant is unsafe for this command; using the base sandbox"
@@ -265,15 +418,15 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 		grant := commandID.grant(req)
 		if e.Persister == nil {
 			e.addSession(grant)
-			return Decision{Use: sandbox.AuthorizedDelta, Diagnostic: "project grant persistence is unavailable; downgraded to a session grant"}, nil
+			return Decision{Use: sandbox.AuthorizedDelta, Origin: OriginHumanSession, Diagnostic: "project grant persistence is unavailable; downgraded to a session grant", ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
 		}
 		if err := e.Persister.SaveSandboxCapabilityGrant(ctx, cloneGrant(grant)); err != nil {
 			e.addSession(grant)
-			return Decision{Use: sandbox.AuthorizedDelta, Diagnostic: fmt.Sprintf("persist capability grant: %v; downgraded to a session grant", err)}, nil
+			return Decision{Use: sandbox.AuthorizedDelta, Origin: OriginHumanSession, Diagnostic: fmt.Sprintf("persist capability grant: %v; downgraded to a session grant", err), ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
 		}
-		return Decision{Use: sandbox.AuthorizedDelta}, nil
+		return Decision{Use: sandbox.AuthorizedDelta, Origin: OriginHumanPersistent, ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
 	case CancelCommand:
-		return Decision{Use: sandbox.BaseOnly, Cancel: true, Diagnostic: "sandbox capability request canceled the command"}, nil
+		return Decision{Use: sandbox.BaseOnly, Cancel: true, Origin: OriginBaseSandbox, Diagnostic: "sandbox capability request canceled the command", ConfigDiagnostics: cloneDiagnostics(projectDiagnostics)}, nil
 	case RunSandboxed:
 		return base, nil
 	default:
@@ -343,13 +496,13 @@ func (id identity) grant(req Request) Grant {
 	return Grant{Workspace: id.workspace, CanonicalExecutable: id.executable, ArgvPrefix: append([]string(nil), id.prefix...), Capabilities: cloneCapabilitySet(req.Review.EffectiveDelta), Background: req.Background, PreserveBackgroundProcesses: req.PreserveBackgroundProcesses}
 }
 
-func matchingGrant(grants []Grant, id identity, req Request) (Grant, bool) {
-	for _, g := range grants {
+func matchingGrant(grants []Grant, id identity, req Request) (Grant, int, bool) {
+	for i, g := range grants {
 		if g.Workspace == id.workspace && g.CanonicalExecutable == id.executable && argvHasPrefix(id.argv, g.ArgvPrefix) && capabilitySetCovers(g.Capabilities, req.Review.EffectiveDelta) && (!req.Background || g.Background) && (!req.PreserveBackgroundProcesses || g.PreserveBackgroundProcesses) {
-			return g, true
+			return g, i, true
 		}
 	}
-	return Grant{}, false
+	return Grant{}, -1, false
 }
 
 func capabilitySetCovers(granted, requested sandbox.CapabilitySet) bool {
@@ -410,12 +563,12 @@ func reusableCommandWrapper(name string) bool {
 	}
 }
 
-func (e *Engine) projectGrants(ctx context.Context, workspace string) ([]Grant, []string) {
+func (e *Engine) projectGrants(ctx context.Context, workspace string) ([]Grant, []Diagnostic) {
 	if e.Source == nil {
 		return nil, nil
 	}
 	grants, diagnostics := e.Source.SandboxCapabilityGrants(ctx, workspace)
-	return cloneGrants(grants), append([]string(nil), diagnostics...)
+	return cloneGrants(grants), cloneDiagnostics(diagnostics)
 }
 
 func withinDelegation(set sandbox.CapabilitySet, delegation Delegation) bool {
@@ -519,7 +672,21 @@ func cloneRequest(in Request) Request {
 
 func cloneDecision(in Decision) Decision {
 	in.Argv = append([]string(nil), in.Argv...)
+	in.Warnings = append([]Warning(nil), in.Warnings...)
+	in.ConfigDiagnostics = cloneDiagnostics(in.ConfigDiagnostics)
 	return in
+}
+
+func cloneDiagnostics(in []Diagnostic) []Diagnostic {
+	return append([]Diagnostic(nil), in...)
+}
+
+func diagnosticMessages(in []Diagnostic) []string {
+	out := make([]string, 0, len(in))
+	for _, diagnostic := range in {
+		out = append(out, diagnostic.Message)
+	}
+	return out
 }
 
 func clonePrompt(in Prompt) Prompt {
