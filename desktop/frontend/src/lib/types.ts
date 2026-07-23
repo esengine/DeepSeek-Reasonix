@@ -150,6 +150,7 @@ export interface WireCapabilityRisk {
 
 export interface WireCapabilityReview {
   state: string;
+  requested?: boolean;
   request: WireCapabilitySet;
   effective_delta: WireCapabilitySet;
   argv_prefix?: string[];

@@ -2193,6 +2193,62 @@ function makeMockApp(): AppBindings {
         });
         return;
       }
+      if (trimmedInput === "/sandbox-preview" || trimmedInput === "sandbox capability preview" || trimmedInput === "沙箱能力预览") {
+        pendingApprovalPreview = true;
+        pendingApprovalPreviewPrompt = { id: "mock-sandbox-capability-preview", tool: "bash" };
+        await delay(250);
+        if (cancelled) return;
+        emit({
+          kind: "approval_request",
+          approval: {
+            id: "mock-sandbox-capability-preview",
+            tool: "bash",
+            subject: "pip install -r requirements.txt --break-system-packages",
+            reason: "The model requests network access to PyPI and write access to system site-packages.",
+            fresh: true,
+            kind: "sandbox_capability",
+            sandboxCapability: {
+              review: {
+                state: "ready",
+                request: {
+                  network: true,
+                  read_paths: [{ identity: "workspace_relative", path: "requirements.txt", canonical: "/home/user/project/requirements.txt", kind: "file" }],
+                  write_paths: [{ identity: "canonical_absolute", path: "/usr/lib/python3.12/site-packages", canonical: "/usr/lib/python3.12/site-packages", kind: "directory" }],
+                  devices: [{ path: "/dev/dri", canonical: "/dev/dri", kind: "directory", major: 226, minor: 0 }],
+                },
+                effective_delta: {
+                  network: true,
+                  read_paths: [{ identity: "workspace_relative", path: "requirements.txt", canonical: "/home/user/project/requirements.txt", kind: "file" }],
+                  write_paths: [{ identity: "canonical_absolute", path: "/usr/lib/python3.12/site-packages", canonical: "/usr/lib/python3.12/site-packages", kind: "directory" }],
+                  devices: [{ path: "/dev/dri", canonical: "/dev/dri", kind: "directory", major: 226, minor: 0 }],
+                },
+                argv_prefix: ["pip", "install"],
+                justification: "Writing to site-packages requires write access outside the project.",
+                risk: {
+                  level: "critical",
+                  findings: [
+                    { code: "broad_write_path", message: "Write path targets a system-wide directory outside the workspace." },
+                    { code: "network_access", message: "Network access combined with write path enables supply-chain risk." },
+                    { code: "device_access", message: "Device access grants direct hardware control." },
+                  ],
+                },
+                authority: { requested: true, supported: true, prepared: true, applied: "false" },
+                requested: true,
+              },
+              workspace: "/home/user/project",
+              canonical_executable: "/usr/bin/pip",
+              argv: ["install", "-r", "requirements.txt", "--break-system-packages"],
+              grant_prefix: ["pip", "install"],
+              background: false,
+              preserve_background_processes: true,
+              reusable: true,
+              suspected_secret: false,
+              warnings: ["This command runs with expanded sandbox permissions."],
+            },
+          },
+        });
+        return;
+      }
       if (trimmedInput === "/ask-preview" || trimmedInput === "ask preview" || trimmedInput === "ask预览") {
         pendingAskPreview = true;
         await delay(250);
