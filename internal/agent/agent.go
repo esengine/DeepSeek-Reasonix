@@ -3326,8 +3326,8 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) toolOutc
 				msg = "blocked: " + msg
 			}
 			return toolOutcome{
-				output:             msg,
-				blocked:            true,
+				output:  msg,
+				blocked: true,
 				// Surface the concrete stopped operation and next step in the
 				// failed tool card instead of exposing only an internal guard name.
 				errMsg:             firstLine(msg),

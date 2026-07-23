@@ -276,7 +276,7 @@ func (st *taskRuntime) toPersistenceState() *TaskState {
 	}
 	// Evidence-only: no consecutive_fails / review_blocks as re-armable locks.
 	return &TaskState{
-		Phase: PhaseIdle,
+		Phase:       PhaseIdle,
 		LastFailure: cloneFailureEvent(&st.lastFailure.evidence, st.lastFailure, st),
 	}
 }

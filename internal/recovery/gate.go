@@ -66,11 +66,11 @@ type Gate struct {
 
 	// episodeSeq / episodeID identify the current host-owned Recovery Episode.
 	// generation invalidates in-flight tool observations across mode switches.
-	episodeSeq  uint64
-	episodeID   string
-	generation  uint64
-	lastMode    string
-	haveMode    bool
+	episodeSeq uint64
+	episodeID  string
+	generation uint64
+	lastMode   string
+	haveMode   bool
 
 	// persistMu orders asynchronous snapshots. A newer state may be scheduled
 	// before an older goroutine reaches disk; sequence checks prevent that older
