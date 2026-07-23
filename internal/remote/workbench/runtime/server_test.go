@@ -652,6 +652,98 @@ func TestRuntimeRestoresSessionRegistryAfterProcessRestart(t *testing.T) {
 	}
 }
 
+func TestRuntimeSessionLeaseBlocksConcurrentRestoreAndReleasesOnClose(t *testing.T) {
+	workspace := t.TempDir()
+	sessionDir := filepath.Join(t.TempDir(), "sessions")
+	registryPath := filepath.Join(t.TempDir(), "remote-sessions.json")
+	build := func(_ context.Context, model string, _ *string, _ event.Sink) (SessionController, error) {
+		return &persistentFakeController{
+			fakeController: &fakeController{model: model},
+			sessionDir:     sessionDir,
+		}, nil
+	}
+	first := New(Options{
+		Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath,
+		BuildController: build,
+	})
+	model := "local/test-model"
+	created, err := first.create(context.Background(), protocol.SessionCreateParams{
+		HostMutation: protocol.HostMutation{ExpectedHostEpoch: first.hostEpoch},
+		WorkspaceID:  first.workspaceID,
+		Topic:        protocol.TopicSelection{Kind: protocol.TopicNew},
+		Profile:      protocol.ProfileSelection{Model: &model},
+	})
+	if err != nil {
+		t.Fatalf("create first runtime session: %v", err)
+	}
+	first.mu.Lock()
+	firstSession := first.sessions[created.Target.SessionID]
+	first.mu.Unlock()
+	if firstSession == nil {
+		t.Fatal("created session missing from first runtime")
+	}
+	path := firstSession.ctrl.SessionPath()
+	if lease, leaseErr := agent.TryAcquireSessionLease(path); !errors.Is(leaseErr, agent.ErrSessionLeaseHeld) {
+		if lease != nil {
+			lease.Release()
+		}
+		t.Fatalf("concurrent lease acquire err = %v, want ErrSessionLeaseHeld", leaseErr)
+	}
+
+	second := New(Options{
+		Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath,
+		BuildController: build,
+	})
+	listed, err := second.list(context.Background(), protocol.SessionListParams{
+		ExpectedHostEpoch: second.hostEpoch,
+		WorkspaceID:       second.workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("list while first runtime owns lease: %v", err)
+	}
+	if len(listed.Items) != 0 {
+		t.Fatalf("concurrent restore published sessions = %+v, want none", listed.Items)
+	}
+	if _, ok := second.dormant[created.Target.SessionID]; !ok {
+		t.Fatal("lease-blocked restore was not kept dormant")
+	}
+
+	first.snapshotAndClose()
+	listed, err = second.list(context.Background(), protocol.SessionListParams{
+		ExpectedHostEpoch: second.hostEpoch,
+		WorkspaceID:       second.workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("list after first runtime released lease: %v", err)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].Target.SessionID != created.Target.SessionID {
+		t.Fatalf("restored sessions = %+v, want %s", listed.Items, created.Target.SessionID)
+	}
+	second.mu.Lock()
+	restored := second.sessions[created.Target.SessionID]
+	second.mu.Unlock()
+	if restored == nil {
+		t.Fatal("second runtime did not restore the released session")
+	}
+
+	closed, err := second.closeSession(protocol.SessionCloseParams{SessionMutation: protocol.SessionMutation{
+		ExpectedHostEpoch:    second.hostEpoch,
+		Target:               second.target(created.Target.SessionID),
+		ExpectedRuntimeEpoch: restored.runtimeEpoch,
+	}})
+	if err != nil {
+		t.Fatalf("close restored runtime session: %v", err)
+	}
+	if closed.Disposition != protocol.SessionReleased {
+		t.Fatalf("close disposition = %q, want released", closed.Disposition)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("lease was not released on close: %v", err)
+	}
+	lease.Release()
+}
+
 func TestRuntimeDefersRestoreWhenControllerBuilderReturnsTypedNil(t *testing.T) {
 	workspace := t.TempDir()
 	sessionDir := t.TempDir()

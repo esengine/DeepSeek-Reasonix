@@ -202,6 +202,7 @@ type botController interface {
 type sessionState struct {
 	ctrl             botController
 	sink             *sessionEventSink
+	leases           *control.SessionLeaseKeeper
 	platform         Platform
 	connectionID     string
 	model            string
@@ -642,6 +643,9 @@ func (gw *BotGateway) closeSessionState(state *sessionState) {
 	}
 	if state.ctrl != nil {
 		state.ctrl.Close()
+	}
+	if state.leases != nil {
+		state.leases.Release()
 	}
 }
 
@@ -1318,6 +1322,27 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 				_ = gw.sendText(ctx, adapter, msg, "新会话创建失败，请稍后重试。")
 				return
 			}
+			if state.leases != nil {
+				if err := state.leases.Rebind(state.ctrl.SessionPath()); err != nil {
+					gw.logger.Warn("new session lease failed", "err", control.SessionInUseMessage(err))
+					gw.sessions.ForceRelease(key)
+					_ = gw.sendText(ctx, adapter, msg, "新会话已创建，但暂时无法取得写入权限，请关闭其他 Reasonix 窗口或进程后重试。")
+					return
+				}
+			}
+			// /new leaves an attached transcript and continues in the freshly
+			// rotated path. Clear only the path pin while preserving any project
+			// override, otherwise the next message would rebuild the old attached
+			// transcript and silently undo the rotation.
+			gw.mu.Lock()
+			if gw.controllers[key] == state {
+				state.sessionPath = ""
+				if override, exists := gw.sessionOverrides[key]; exists && override.sessionPath != "" {
+					override.sessionPath = ""
+					gw.sessionOverrides[key] = override
+				}
+			}
+			gw.mu.Unlock()
 			gw.rememberSessionReady(msg, state.ctrl)
 		}
 		gw.sessions.ForceRelease(key)
@@ -2123,10 +2148,18 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		gw.logger.Error("build controller failed", "err", err)
 		return nil
 	}
+	leases := control.NewSessionLeaseKeeper()
 	if profile.sessionPath != "" {
+		if err := leases.Rebind(profile.sessionPath); err != nil {
+			ctrl.Close()
+			leases.Release()
+			gw.logger.Error("attached bot session is in use", "err", control.SessionInUseMessage(err))
+			return nil
+		}
 		loaded, err := agent.LoadSession(profile.sessionPath)
 		if err != nil {
 			ctrl.Close()
+			leases.Release()
 			if os.IsNotExist(err) {
 				gw.logger.Error("attached bot session missing", "session_path", profile.sessionPath)
 			} else {
@@ -2139,6 +2172,12 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(profile.toolApprovalMode)
 	ctrl.EnsureSessionPath()
+	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+		ctrl.Close()
+		leases.Release()
+		gw.logger.Error("bot session lease failed", "err", control.SessionInUseMessage(err))
+		return nil
+	}
 
 	var replace *sessionState
 	gw.mu.Lock()
@@ -2150,6 +2189,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 			updateSessionStateRuntime(existing, msg, profile)
 			gw.mu.Unlock()
 			ctrl.Close()
+			leases.Release()
 			safeBotSetToolApprovalMode(existing.ctrl, profile.toolApprovalMode)
 			gw.logger.Info("bot session built concurrently; discarding duplicate", "platform", msg.Platform, "chat", hashID(msg.ChatID), "session", key[:8])
 			return existing
@@ -2160,6 +2200,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	state := &sessionState{
 		ctrl:             ctrl,
 		sink:             sessionSink,
+		leases:           leases,
 		platform:         msg.Platform,
 		connectionID:     strings.TrimSpace(msg.ConnectionID),
 		model:            profile.model,

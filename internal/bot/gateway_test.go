@@ -810,7 +810,11 @@ func TestGatewayNewSessionRemembersRotatedSessionPath(t *testing.T) {
 	oldPath := agent.NewSessionPath(sessionDir, "old-model")
 	exec := agent.New(gatewayFakeProvider{}, tool.NewRegistry(), agent.NewSession("system"), agent.Options{}, event.Discard)
 	ctrl := control.New(control.Options{Executor: exec, SessionDir: sessionDir, SessionPath: oldPath, Label: "fake-model"})
-	gw.controllers[key] = &sessionState{ctrl: ctrl}
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(oldPath); err != nil {
+		t.Fatalf("bind old session lease: %v", err)
+	}
+	gw.controllers[key] = &sessionState{ctrl: ctrl, leases: leases, sessionPath: oldPath}
 
 	gw.handleSlashCommand(context.Background(), adapter, key, msg)
 
@@ -823,6 +827,34 @@ func TestGatewayNewSessionRemembersRotatedSessionPath(t *testing.T) {
 	if ctrl.SessionPath() == oldPath {
 		t.Fatalf("controller session path was not rotated")
 	}
+	if got := leases.HeldPath(); got != agent.CanonicalSessionPath(ctrl.SessionPath()) {
+		t.Fatalf("held lease = %q, want rotated path %q", got, agent.CanonicalSessionPath(ctrl.SessionPath()))
+	}
+	oldLease, err := agent.TryAcquireSessionLease(oldPath)
+	if err != nil {
+		t.Fatalf("old session lease was not released: %v", err)
+	}
+	oldLease.Release()
+	gw.closeSessions()
+}
+
+func TestGatewayCloseSessionStateReleasesSessionLease(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(path); err != nil {
+		t.Fatalf("bind session lease: %v", err)
+	}
+	ctrl := control.New(control.Options{})
+
+	gw.closeSessionState(&sessionState{ctrl: ctrl, leases: leases})
+
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("session lease was not released after controller close: %v", err)
+	}
+	lease.Release()
 }
 
 func TestGatewayYoloCommandUpdatesCurrentSessionAndConnectionDefault(t *testing.T) {

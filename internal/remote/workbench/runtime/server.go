@@ -25,6 +25,7 @@ import (
 
 	"reasonix/internal/billing"
 	"reasonix/internal/boot"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/fileref"
@@ -111,6 +112,7 @@ type Server struct {
 type session struct {
 	id            protocol.SessionID
 	ctrl          SessionController
+	leases        *control.SessionLeaseKeeper
 	model         string
 	effort        string
 	collaboration protocol.CollaborationMode
@@ -129,6 +131,28 @@ type session struct {
 	pendingPrompt *protocol.PendingPrompt
 	liveEvents    []eventwire.Event
 	sink          *sessionSink
+}
+
+func closeRuntimeSession(sess *session) {
+	if sess == nil {
+		return
+	}
+	if sess.ctrl != nil {
+		sess.ctrl.Close()
+	}
+	if sess.leases != nil {
+		sess.leases.Release()
+	}
+}
+
+func (sess *session) rebindSessionLease(path string) error {
+	if sess == nil {
+		return nil
+	}
+	if sess.leases == nil {
+		sess.leases = control.NewSessionLeaseKeeper()
+	}
+	return sess.leases.Rebind(path)
 }
 
 type subscription struct {
@@ -709,6 +733,12 @@ func (s *Server) create(ctx context.Context, p protocol.SessionCreateParams) (pr
 		return protocol.SessionCreateResult{}, errors.New("controller builder returned nil")
 	}
 	ctrl.EnsureSessionPath()
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+		ctrl.Close()
+		leases.Release()
+		return protocol.SessionCreateResult{}, protocol.MustRemoteError(protocol.ErrRuntimeStartFailed, protocol.ErrorOptions{})
+	}
 	now := time.Now().UnixMilli()
 	title := strings.TrimSpace(p.Topic.Title)
 	if title == "" {
@@ -719,7 +749,7 @@ func (s *Server) create(ctx context.Context, p protocol.SessionCreateParams) (pr
 		topicID = protocol.TopicID("topic_" + randomHex(8))
 	}
 	sess := &session{
-		id: id, ctrl: ctrl, model: ctrl.ModelRef(), effort: effort,
+		id: id, ctrl: ctrl, leases: leases, model: ctrl.ModelRef(), effort: effort,
 		collaboration: collaboration, tokenMode: tokenMode, toolApproval: toolApproval,
 		topicID: topicID, title: title,
 		runtimeEpoch: protocol.RuntimeEpoch("runtime_" + randomHex(12)),
@@ -735,7 +765,7 @@ func (s *Server) create(ctx context.Context, p protocol.SessionCreateParams) (pr
 			delete(s.sessions, id)
 		}
 		s.mu.Unlock()
-		ctrl.Close()
+		closeRuntimeSession(sess)
 		return protocol.SessionCreateResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{})
 	}
 	return protocol.SessionCreateResult{
@@ -811,7 +841,7 @@ func (s *Server) closeSession(p protocol.SessionCloseParams) (protocol.SessionCl
 		s.mu.Unlock()
 		return protocol.SessionCloseResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{})
 	}
-	sess.ctrl.Close()
+	closeRuntimeSession(sess)
 	return protocol.SessionCloseResult{Disposition: protocol.SessionReleased}, nil
 }
 
@@ -1051,6 +1081,9 @@ func (s *Server) newSession(p protocol.SessionNewParams) (protocol.SessionNewRes
 	if err := controller.NewSession(); err != nil {
 		return protocol.SessionNewResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
+	if err := sess.rebindSessionLease(sess.ctrl.SessionPath()); err != nil {
+		return protocol.SessionNewResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
+	}
 	epoch := s.commitSessionRotation(sess)
 	if err := s.persistSessionRegistry(); err != nil {
 		// NewSession already rotated the controller and cannot be rolled back
@@ -1071,6 +1104,9 @@ func (s *Server) clearSession(p protocol.SessionClearParams) (protocol.SessionCl
 		return protocol.SessionClearResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
 	}
 	if err := controller.ClearSession(); err != nil {
+		return protocol.SessionClearResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
+	}
+	if err := sess.rebindSessionLease(sess.ctrl.SessionPath()); err != nil {
 		return protocol.SessionClearResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
 	epoch := s.commitSessionRotation(sess)
@@ -1771,17 +1807,17 @@ func (s *Server) snapshotAndClose() {
 			s.logRegistryError("persist before shutdown", err)
 		}
 		s.mu.Lock()
-		controllers := make([]SessionController, 0, len(s.sessions))
+		sessions := make([]*session, 0, len(s.sessions))
 		for _, sess := range s.sessions {
-			if sess.ctrl != nil {
-				controllers = append(controllers, sess.ctrl)
+			if sess != nil {
+				sessions = append(sessions, sess)
 			}
 		}
 		s.sessions = make(map[protocol.SessionID]*session)
 		s.subs = make(map[protocol.SubscriptionID]*subscription)
 		s.mu.Unlock()
-		for _, ctrl := range controllers {
-			ctrl.Close()
+		for _, sess := range sessions {
+			closeRuntimeSession(sess)
 		}
 	})
 }

@@ -305,7 +305,10 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sink.Emit(event.Event{Kind: event.Notice, Text: "Selected model is missing its API key.", Detail: fmt.Sprintf("model %q is selected but its API key %s is not set — requests will fail until you set it", modelName, entry.APIKeyEnv)})
 	}
 	var workspaceLease *workspacelease.Owner
-	jobOptions := []jobs.Option{jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds()) * time.Second)}
+	jobOptions := []jobs.Option{
+		jobs.WithStalledWarningAfter(time.Duration(cfg.BackgroundJobStalledWarningSeconds()) * time.Second),
+		jobs.WithSessionOwnershipProbe(agent.SessionLeaseHeldByCurrentRuntime),
+	}
 	if tokenDelivery {
 		workspaceLease, err = workspacelease.New(root, config.WorkspaceLeaseDir(), func() {
 			sink.Emit(event.Event{

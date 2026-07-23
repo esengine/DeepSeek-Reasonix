@@ -350,6 +350,25 @@ func TestSessionLeaseHeldByOtherRuntime(t *testing.T) {
 	})
 }
 
+func TestSessionLeaseHeldByCurrentRuntime(t *testing.T) {
+	userPath, _ := leaseTestPath(t)
+	if SessionLeaseHeldByCurrentRuntime(userPath) {
+		t.Fatal("unheld session reported as owned by the current runtime")
+	}
+	lease, err := TryAcquireSessionLease(userPath)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	if !SessionLeaseHeldByCurrentRuntime(userPath) {
+		lease.Release()
+		t.Fatal("held session was not reported as owned by the current runtime")
+	}
+	lease.Release()
+	if SessionLeaseHeldByCurrentRuntime(userPath) {
+		t.Fatal("released session remained owned by the current runtime")
+	}
+}
+
 func TestSessionLeaseReleaseRetiresLockSidecars(t *testing.T) {
 	userPath, key := leaseTestPath(t)
 	lease, err := TryAcquireSessionLease(userPath)

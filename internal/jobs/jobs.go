@@ -155,6 +155,10 @@ type Manager struct {
 	onJobStart func(done <-chan struct{})
 	ownerID    string
 	ownerDone  sync.Once
+	// sessionOwnershipProbe authorizes destructive repair of persisted running
+	// artifacts. A nil probe is conservative: an observer that cannot prove it
+	// owns the transcript must never publish an interrupted tombstone.
+	sessionOwnershipProbe func(path string) bool
 
 	mu           sync.Mutex
 	seq          int
@@ -205,6 +209,13 @@ func WithTeardownGrace(d time.Duration) Option {
 // the job is truly terminal. The callback must return quickly.
 func WithJobStartObserver(observer func(done <-chan struct{})) Option {
 	return func(m *Manager) { m.onJobStart = observer }
+}
+
+// WithSessionOwnershipProbe supplies the runtime ownership check used when
+// loading persisted Running artifacts. The probe must return true only when the
+// current runtime owns the session transcript for writing.
+func WithSessionOwnershipProbe(probe func(path string) bool) Option {
+	return func(m *Manager) { m.sessionOwnershipProbe = probe }
 }
 
 // TeardownGrace reports the manager's configured close/destroy wait window.
@@ -1136,7 +1147,7 @@ func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 		}
 	}
 	if !loaded {
-		m.loadSessionArtifacts(parentSession, newDir)
+		m.loadSessionArtifacts(parentSession, sessionPath, newDir)
 	}
 }
 
@@ -1368,7 +1379,7 @@ func copyArtifactFile(src, dst string) error {
 	return nil
 }
 
-func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
+func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		m.mu.Lock()
@@ -1392,14 +1403,17 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 		if seq := maxJobSeq(id); seq > maxSeq {
 			maxSeq = seq
 		}
-		// A persisted Running record belongs to a process that no longer owns
-		// this newly loaded manager only when its owner is no longer live in this
-		// process. Runtime rebuilds can construct another manager before the old
-		// controller is retired; never let that observer interrupt or publish a
-		// fake tombstone for the still-running job. Leave the session reloadable so
-		// a later bind can adopt the terminal artifact after the owner finishes.
+		// A persisted Running record may belong to another manager in this
+		// process or to another Reasonix process entirely. Only the runtime that
+		// owns the session lease may repair an abandoned record as Interrupted.
+		// Observers without proof of ownership defer the artifact and leave the
+		// session reloadable for a later owned bind.
 		if meta.Status == Running {
 			if managerOwnerIsLive(meta.OwnerID) {
+				deferredLiveOwner = true
+				continue
+			}
+			if m.sessionOwnershipProbe == nil || !m.sessionOwnershipProbe(sessionPath) {
 				deferredLiveOwner = true
 				continue
 			}

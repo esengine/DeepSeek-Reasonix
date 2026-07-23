@@ -199,7 +199,9 @@ func TestRestoreRunningArtifactAsInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := NewManager(event.Discard)
+	m := NewManager(event.Discard, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
 	defer m.Close()
 	m.SetActiveSessionPath("session", sessionPath)
 
@@ -240,12 +242,54 @@ func TestRestoreRunningArtifactFromClosedOwnerAsInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored := NewManager(event.Discard)
+	restored := NewManager(event.Discard, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
 	defer restored.Close()
 	restored.SetActiveSessionPath("session", sessionPath)
 	result := restored.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
 	if len(result) != 1 || result[0].Status != Interrupted {
 		t.Fatalf("restored result = %+v, want interrupted after the original owner closed", result)
+	}
+}
+
+func TestRestoreRunningArtifactWithoutSessionOwnershipDefersRepair(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	metaPath := filepath.Join(ArtifactDir(sessionPath), "task-1"+jobMetaExt)
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:        "task-1",
+		Kind:      "task",
+		Status:    Running,
+		StartedAt: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	observer := NewManager(event.Discard)
+	observer.SetActiveSessionPath("session", sessionPath)
+	if result := observer.WaitForSession(context.Background(), "session", []string{"task-1"}, 1); len(result) != 0 {
+		observer.Close()
+		t.Fatalf("unowned observer published a running artifact: %+v", result)
+	}
+	meta, err := readMeta(metaPath)
+	if err != nil {
+		observer.Close()
+		t.Fatal(err)
+	}
+	if meta.Status != Running || meta.FinishedAt != 0 {
+		observer.Close()
+		t.Fatalf("unowned observer rewrote running metadata: %+v", meta)
+	}
+	observer.Close()
+
+	owner := NewManager(event.Discard, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
+	defer owner.Close()
+	owner.SetActiveSessionPath("session", sessionPath)
+	result := owner.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("owned reload = %+v, want interrupted", result)
 	}
 }
 

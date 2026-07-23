@@ -90,11 +90,17 @@ func (s *Server) forkSession(ctx context.Context, p protocol.SessionForkParams) 
 	if err != nil {
 		return protocol.SessionForkResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(path); err != nil {
+		leases.Release()
+		return protocol.SessionForkResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
+	}
 	forkCommitted := false
 	defer func() {
 		if forkCommitted {
 			return
 		}
+		leases.Release()
 		if cleanupErr := control.RemoveSessionArtifacts(path); cleanupErr != nil {
 			s.logRegistryError("clean failed fork", cleanupErr)
 		}
@@ -114,7 +120,7 @@ func (s *Server) forkSession(ctx context.Context, p protocol.SessionForkParams) 
 	applyControllerProfile(childCtrl, sess.collaboration, sess.toolApproval)
 	now := time.Now().UnixMilli()
 	child := &session{
-		id: childID, ctrl: childCtrl, model: childCtrl.ModelRef(), effort: sess.effort,
+		id: childID, ctrl: childCtrl, leases: leases, model: childCtrl.ModelRef(), effort: sess.effort,
 		collaboration: sess.collaboration, tokenMode: sess.tokenMode, toolApproval: sess.toolApproval,
 		topicID: protocol.TopicID("topic_" + randomHex(10)), title: strings.TrimSpace(p.Name),
 		runtimeEpoch: protocol.RuntimeEpoch("runtime_" + randomHex(12)), createdAt: now, updatedAt: now, sink: sink,
@@ -125,7 +131,7 @@ func (s *Server) forkSession(ctx context.Context, p protocol.SessionForkParams) 
 	s.mu.Lock()
 	if s.sessions[sess.id] != sess {
 		s.mu.Unlock()
-		childCtrl.Close()
+		closeRuntimeSession(child)
 		return protocol.SessionForkResult{}, protocol.MustRemoteError(protocol.ErrSessionNotFound, protocol.ErrorOptions{})
 	}
 	s.sessions[childID] = child
@@ -136,7 +142,7 @@ func (s *Server) forkSession(ctx context.Context, p protocol.SessionForkParams) 
 			delete(s.sessions, childID)
 		}
 		s.mu.Unlock()
-		childCtrl.Close()
+		closeRuntimeSession(child)
 		return protocol.SessionForkResult{}, protocol.MustRemoteError(protocol.ErrSessionPersistFailed, protocol.ErrorOptions{Target: &p.Target})
 	}
 	forkCommitted = true

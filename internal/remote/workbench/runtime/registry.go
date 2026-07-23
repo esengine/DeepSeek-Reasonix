@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/remote/protocol"
 )
@@ -120,7 +121,7 @@ func (s *Server) ensureSessionsRestored(ctx context.Context) error {
 		}
 		s.mu.Unlock()
 		if duplicate {
-			restored.ctrl.Close()
+			closeRuntimeSession(restored)
 		}
 		delete(s.dormant, id)
 	}
@@ -140,6 +141,12 @@ func (s *Server) restoreSessionRecord(ctx context.Context, record runtimeSession
 	if ctrl == nil {
 		return nil, fmt.Errorf("restore session %s controller: builder returned nil", record.ID)
 	}
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(record.Path); err != nil {
+		ctrl.Close()
+		leases.Release()
+		return nil, fmt.Errorf("restore session %s lease: %w", record.ID, err)
+	}
 	loaded, loadErr := agent.LoadSession(record.Path)
 	switch {
 	case loadErr == nil && loaded != nil:
@@ -148,6 +155,7 @@ func (s *Server) restoreSessionRecord(ctx context.Context, record runtimeSession
 		ctrl.SetSessionPath(record.Path)
 	case loadErr != nil:
 		ctrl.Close()
+		leases.Release()
 		return nil, fmt.Errorf("restore session %s transcript: %w", record.ID, loadErr)
 	default:
 		ctrl.SetSessionPath(record.Path)
@@ -165,7 +173,7 @@ func (s *Server) restoreSessionRecord(ctx context.Context, record runtimeSession
 		title = "New session"
 	}
 	restored := &session{
-		id: record.ID, ctrl: ctrl, model: ctrl.ModelRef(), effort: effort,
+		id: record.ID, ctrl: ctrl, leases: leases, model: ctrl.ModelRef(), effort: effort,
 		collaboration: normalizedCollaboration(record.Collaboration), tokenMode: normalizedTokenMode(record.TokenMode),
 		toolApproval: normalizedToolApproval(record.ToolApproval), topicID: record.TopicID, title: title,
 		runtimeEpoch: protocol.RuntimeEpoch("runtime_" + randomHex(12)), createdAt: createdAt, updatedAt: updatedAt, sink: sink,

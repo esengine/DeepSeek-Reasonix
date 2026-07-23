@@ -194,6 +194,18 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 	return true
 }
 
+// SessionLeaseHeldByCurrentRuntime reports whether this process currently owns
+// path's session lease. It is intentionally a registry-only query: callers use
+// it to authorize ownership-sensitive repairs without probing or disturbing the
+// cross-process lock.
+func SessionLeaseHeldByCurrentRuntime(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	_, ok := sessionLeaseOwners.Load(canonicalSessionSavePath(path))
+	return ok
+}
+
 func (l *SessionLease) Path() string {
 	if l == nil {
 		return ""
