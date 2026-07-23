@@ -170,6 +170,7 @@ func credentialEnvNamesFromConfig(cfg *Config) []string {
 	add(cfg.Bot.QQ.AppSecretEnv)
 	add(cfg.Bot.Feishu.AppSecretEnv)
 	add(cfg.Bot.Weixin.TokenEnv)
+	add(cfg.Bot.Telegram.TokenEnv)
 	for _, conn := range cfg.Bot.Connections {
 		add(conn.Credential.AppSecretEnv)
 		add(conn.Credential.TokenEnv)

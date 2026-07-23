@@ -567,6 +567,7 @@ type BotConfig struct {
 	QQ                 QQBotConfig           `toml:"qq"`
 	Feishu             FeishuBotConfig       `toml:"feishu"`
 	Weixin             WeixinBotConfig       `toml:"weixin"`
+	Telegram           TelegramBotConfig     `toml:"telegram"`
 	Routes             []BotRouteConfig      `toml:"routes"`
 	Connections        []BotConnectionConfig `toml:"connections"`
 	// DesktopWatchers persists /desktop watch subscriptions so god-view
@@ -586,9 +587,10 @@ type BotDesktopWatcherConfig struct {
 }
 
 type BotSelfUserIDs struct {
-	QQ     []string `toml:"qq"`
-	Feishu []string `toml:"feishu"`
-	Weixin []string `toml:"weixin"`
+	QQ       []string `toml:"qq"`
+	Feishu   []string `toml:"feishu"`
+	Weixin   []string `toml:"weixin"`
+	Telegram []string `toml:"telegram"`
 }
 
 type BotControlConfig struct {
@@ -611,20 +613,24 @@ type BotRouteConfig struct {
 
 // BotAllowlist 控制哪些用户可以使用 bot。
 type BotAllowlist struct {
-	Enabled         bool     `toml:"enabled"`
-	AllowAll        bool     `toml:"allow_all"`
-	QQUsers         []string `toml:"qq_users"`
-	FeishuUsers     []string `toml:"feishu_users"`
-	WeixinUsers     []string `toml:"weixin_users"`
-	QQApprovers     []string `toml:"qq_approvers"`
-	FeishuApprovers []string `toml:"feishu_approvers"`
-	WeixinApprovers []string `toml:"weixin_approvers"`
-	QQAdmins        []string `toml:"qq_admins"`
-	FeishuAdmins    []string `toml:"feishu_admins"`
-	WeixinAdmins    []string `toml:"weixin_admins"`
-	QQGroups        []string `toml:"qq_groups"`
-	FeishuGroups    []string `toml:"feishu_groups"`
-	WeixinGroups    []string `toml:"weixin_groups"`
+	Enabled           bool     `toml:"enabled"`
+	AllowAll          bool     `toml:"allow_all"`
+	QQUsers           []string `toml:"qq_users"`
+	FeishuUsers       []string `toml:"feishu_users"`
+	WeixinUsers       []string `toml:"weixin_users"`
+	TelegramUsers     []string `toml:"telegram_users"`
+	QQApprovers       []string `toml:"qq_approvers"`
+	FeishuApprovers   []string `toml:"feishu_approvers"`
+	WeixinApprovers   []string `toml:"weixin_approvers"`
+	TelegramApprovers []string `toml:"telegram_approvers"`
+	QQAdmins          []string `toml:"qq_admins"`
+	FeishuAdmins      []string `toml:"feishu_admins"`
+	WeixinAdmins      []string `toml:"weixin_admins"`
+	TelegramAdmins    []string `toml:"telegram_admins"`
+	QQGroups          []string `toml:"qq_groups"`
+	FeishuGroups      []string `toml:"feishu_groups"`
+	WeixinGroups      []string `toml:"weixin_groups"`
+	TelegramGroups    []string `toml:"telegram_groups"`
 }
 
 type BotPairingConfig struct {
@@ -681,14 +687,20 @@ type WeixinBotConfig struct {
 	APIBase   string `toml:"api_base"`  // iLink API base URL
 }
 
+type TelegramBotConfig struct {
+	Enabled  bool   `toml:"enabled"`
+	TokenEnv string `toml:"token_env"`
+	APIBase  string `toml:"api_base"`
+}
+
 // BotConnectionConfig is the desktop-friendly connection record for IM bot
 // channels. It keeps install/runtime state separate from legacy per-provider
 // knobs so the UI can expose a simple "connect first" flow while old configs
 // keep working.
 type BotConnectionConfig struct {
 	ID               string                        `toml:"id"`
-	Provider         string                        `toml:"provider"` // qq|feishu|weixin
-	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq
+	Provider         string                        `toml:"provider"` // qq|feishu|weixin|telegram
+	Domain           string                        `toml:"domain"`   // feishu|lark|weixin|qq|telegram
 	Label            string                        `toml:"label"`
 	Enabled          bool                          `toml:"enabled"`
 	Status           string                        `toml:"status"` // disconnected|pending|connected|error
@@ -1639,6 +1651,7 @@ func Default() *Config {
 			QQ:                 QQBotConfig{AppSecretEnv: "QQ_BOT_APP_SECRET"},
 			Feishu:             FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
+			Telegram:           TelegramBotConfig{TokenEnv: "TELEGRAM_BOT_TOKEN", APIBase: "https://api.telegram.org"},
 		},
 		Providers: []ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPrice()},

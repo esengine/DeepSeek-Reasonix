@@ -29,6 +29,7 @@ type renderSink struct {
 	chatType   ChatType
 	userID     string
 	replyTo    string
+	threadID   string
 	logger     *slog.Logger
 	ctrl       botController
 	onApproval func(event.Approval)
@@ -57,7 +58,7 @@ const (
 	renderMaxProgressMessages = 3
 )
 
-func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, logger *slog.Logger, onApproval func(event.Approval), onAsk func(event.Ask)) *renderSink {
+func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID string, chatType ChatType, userID string, replyTo string, threadID string, logger *slog.Logger, onApproval func(event.Approval), onAsk func(event.Ask)) *renderSink {
 	editor, _ := adapter.(messageEditor)
 	return &renderSink{
 		ctx:        ctx,
@@ -69,6 +70,7 @@ func newRenderSink(ctx context.Context, adapter Adapter, connID, domain, chatID 
 		chatType:   chatType,
 		userID:     userID,
 		replyTo:    replyTo,
+		threadID:   threadID,
 		logger:     logger,
 		onApproval: onApproval,
 		onAsk:      onAsk,
@@ -140,6 +142,7 @@ func (s *renderSink) Emit(e event.Event) {
 			ChatType:     s.chatType,
 			Text:         approvalText,
 			ReplyToMsgID: s.replyTo,
+			ThreadID:     s.threadID,
 		}
 		switch s.adapter.Platform() {
 		case PlatformQQ:
@@ -170,6 +173,7 @@ func (s *renderSink) Emit(e event.Event) {
 			ChatType:     s.chatType,
 			Text:         askText,
 			ReplyToMsgID: s.replyTo,
+			ThreadID:     s.threadID,
 		}
 		if s.adapter.Platform() == PlatformFeishu {
 			msg.Card = askCard(e.Ask, askText, s.chatType, s.userID)
@@ -188,6 +192,7 @@ func (s *renderSink) Emit(e event.Event) {
 					ChatType:     s.chatType,
 					Text:         fmt.Sprintf("❌ 执行出错: %v", e.Err),
 					ReplyToMsgID: s.replyTo,
+					ThreadID:     s.threadID,
 				})
 			}
 		}
@@ -201,6 +206,7 @@ func (s *renderSink) Emit(e event.Event) {
 				ChatType:     s.chatType,
 				Text:         fmt.Sprintf("⚠️ %s", e.Text),
 				ReplyToMsgID: s.replyTo,
+				ThreadID:     s.threadID,
 			})
 		}
 
@@ -212,6 +218,7 @@ func (s *renderSink) Emit(e event.Event) {
 			ChatType:     s.chatType,
 			Text:         "🔄 正在压缩上下文...",
 			ReplyToMsgID: s.replyTo,
+			ThreadID:     s.threadID,
 		})
 	}
 }
@@ -377,6 +384,7 @@ func (s *renderSink) textMessage(text string) OutboundMessage {
 		ChatType:     s.chatType,
 		Text:         text,
 		ReplyToMsgID: s.replyTo,
+		ThreadID:     s.threadID,
 	}
 }
 
@@ -399,6 +407,7 @@ func (s *renderSink) sendProgress(text string, force bool) {
 		ChatType:     s.chatType,
 		Text:         text,
 		ReplyToMsgID: s.replyTo,
+		ThreadID:     s.threadID,
 	})
 	s.progressCount++
 	s.lastProgress = now

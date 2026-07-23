@@ -638,6 +638,39 @@ func TestRenderTOMLCreationLayoutStyle(t *testing.T) {
 	}
 }
 
+func TestScopedRenderPreservesTelegramBotConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.SelfUserIDs.Telegram = []string{"99"}
+	cfg.Bot.Allowlist.TelegramUsers = []string{"123"}
+	cfg.Bot.Allowlist.TelegramApprovers = []string{"456"}
+	cfg.Bot.Allowlist.TelegramAdmins = []string{"789"}
+	cfg.Bot.Allowlist.TelegramGroups = []string{"-1001"}
+	cfg.Bot.Telegram = TelegramBotConfig{Enabled: true, TokenEnv: "TELEGRAM_PRIMARY_TOKEN", APIBase: "https://telegram.example"}
+	cfg.Bot.Connections = []BotConnectionConfig{{
+		ID: "telegram-main", Provider: "telegram", Domain: "telegram", Enabled: true,
+		Credential: BotConnectionCredential{TokenEnv: "TELEGRAM_BOT_TOKEN"},
+	}}
+
+	rendered := RenderTOMLForScope(cfg, RenderScopeUser)
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("decode rendered Telegram config: %v\n%s", err, rendered)
+	}
+	if len(got.Bot.SelfUserIDs.Telegram) != 1 || got.Bot.SelfUserIDs.Telegram[0] != "99" || len(got.Bot.Allowlist.TelegramGroups) != 1 {
+		t.Fatalf("Telegram allowlist round trip failed: %+v", got.Bot)
+	}
+	if !got.Bot.Telegram.Enabled || got.Bot.Telegram.TokenEnv != "TELEGRAM_PRIMARY_TOKEN" || got.Bot.Telegram.APIBase != "https://telegram.example" {
+		t.Fatalf("Telegram provider config round trip failed: %+v", got.Bot.Telegram)
+	}
+	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Credential.TokenEnv != "TELEGRAM_BOT_TOKEN" {
+		t.Fatalf("Telegram connection round trip failed: %+v", got.Bot.Connections)
+	}
+	if strings.Contains(rendered, "<token") {
+		t.Fatal("rendered config contains a token value")
+	}
+}
+
 func TestScopedRenderPreservesLSPConfig(t *testing.T) {
 	const src = `
 config_version = 4

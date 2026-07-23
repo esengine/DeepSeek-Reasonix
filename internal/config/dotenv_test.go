@@ -89,6 +89,22 @@ func TestLoadDotEnvReadsGlobalCredentials(t *testing.T) {
 	}
 }
 
+func TestCredentialEnvNamesIncludesTelegramProviderAndConnections(t *testing.T) {
+	cfg := Default()
+	cfg.Bot.Telegram.TokenEnv = "TELEGRAM_PRIMARY_TOKEN"
+	cfg.Bot.Connections = []BotConnectionConfig{{
+		Provider:   "telegram",
+		Credential: BotConnectionCredential{TokenEnv: "TELEGRAM_WORK_TOKEN"},
+	}}
+
+	got := credentialEnvNamesFromConfig(cfg)
+	for _, want := range []string{"TELEGRAM_PRIMARY_TOKEN", "TELEGRAM_WORK_TOKEN"} {
+		if !containsString(got, want) {
+			t.Fatalf("credential env names = %v, missing %s", got, want)
+		}
+	}
+}
+
 func TestCredentialEnvNamesIncludesUnconfiguredStoredKeys(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", filepath.Join(home, "reasonix-home"))

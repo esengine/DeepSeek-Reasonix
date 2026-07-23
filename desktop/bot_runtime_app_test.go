@@ -35,6 +35,62 @@ func TestDesktopBotRuntimePlanStartsSavedConnections(t *testing.T) {
 	}
 }
 
+func TestDesktopBotRuntimePlanStartsTelegramSingleton(t *testing.T) {
+	t.Setenv("TELEGRAM_TEST_TOKEN", "secret")
+	cfg := config.Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.Telegram.Enabled = true
+	cfg.Bot.Telegram.TokenEnv = "TELEGRAM_TEST_TOKEN"
+
+	plan := desktopBotRuntimePlan(cfg)
+	if !plan.Start || !plan.Enabled[bot.PlatformTelegram] {
+		t.Fatalf("plan = %+v, want bot.telegram enabled", plan)
+	}
+}
+
+func TestDesktopBotRuntimePlanRejectsMissingTelegramSingletonToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.Telegram.Enabled = true
+	cfg.Bot.Telegram.TokenEnv = "MISSING_TELEGRAM_TOKEN"
+
+	plan := desktopBotRuntimePlan(cfg)
+	if plan.Start || plan.Status != "error" || !strings.Contains(plan.Message, "MISSING_TELEGRAM_TOKEN") {
+		t.Fatalf("plan = %+v, want missing bot.telegram token error", plan)
+	}
+}
+
+func TestDesktopBotRuntimePlanStartsTelegramConnection(t *testing.T) {
+	t.Setenv("TELEGRAM_TEST_TOKEN", "secret")
+	cfg := config.Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "telegram-main", Provider: "telegram", Domain: "telegram", Enabled: true,
+		Credential: config.BotConnectionCredential{TokenEnv: "TELEGRAM_TEST_TOKEN"},
+		Access:     config.BotAccessConfig{Enabled: true, PairingEnabled: true},
+	}}
+
+	plan := desktopBotRuntimePlan(cfg)
+	if !plan.Start || !plan.Enabled[bot.PlatformTelegram] {
+		t.Fatalf("plan = %+v, want Telegram enabled", plan)
+	}
+}
+
+func TestDesktopBotRuntimePlanRejectsMissingTelegramToken(t *testing.T) {
+	cfg := config.Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "telegram-main", Provider: "telegram", Domain: "telegram", Enabled: true,
+		Credential: config.BotConnectionCredential{TokenEnv: "MISSING_TELEGRAM_TOKEN"},
+		Access:     config.BotAccessConfig{Enabled: true, PairingEnabled: true},
+	}}
+
+	plan := desktopBotRuntimePlan(cfg)
+	if plan.Start || plan.Status != "error" || !strings.Contains(plan.Message, "MISSING_TELEGRAM_TOKEN") {
+		t.Fatalf("plan = %+v, want missing Telegram token error", plan)
+	}
+}
+
 func TestDesktopBotRuntimePlanBlocksWithoutAllowlist(t *testing.T) {
 	cfg := config.Default()
 	cfg.Bot.Enabled = true

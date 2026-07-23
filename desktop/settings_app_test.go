@@ -1390,6 +1390,36 @@ func TestLoadDesktopUserConfigForRootDoesNotFollowActiveTab(t *testing.T) {
 	}
 }
 
+func TestSetBotSettingsPreservesTelegramProviderAndConnections(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.Default()
+	cfg.Bot.Telegram = config.TelegramBotConfig{Enabled: true, TokenEnv: "TELEGRAM_PRIMARY_TOKEN", APIBase: "https://telegram.example/"}
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "telegram-work", Provider: "telegram", Domain: "telegram", Enabled: true,
+		Credential: config.BotConnectionCredential{TokenEnv: "TELEGRAM_WORK_TOKEN"},
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
+
+	app := NewApp()
+	view := botSettingsView(cfg.Bot)
+	if !view.Telegram.Enabled || view.Telegram.TokenEnv != "TELEGRAM_PRIMARY_TOKEN" {
+		t.Fatalf("Telegram view = %+v", view.Telegram)
+	}
+	if err := app.SetBotSettings(view); err != nil {
+		t.Fatalf("SetBotSettings: %v", err)
+	}
+
+	got := config.LoadForEditWithoutCredentials(config.UserConfigPath())
+	if !got.Bot.Telegram.Enabled || got.Bot.Telegram.TokenEnv != "TELEGRAM_PRIMARY_TOKEN" || got.Bot.Telegram.APIBase != "https://telegram.example" {
+		t.Fatalf("Telegram config = %+v", got.Bot.Telegram)
+	}
+	if len(got.Bot.Connections) != 1 || got.Bot.Connections[0].Credential.TokenEnv != "TELEGRAM_WORK_TOKEN" {
+		t.Fatalf("Telegram connections = %+v", got.Bot.Connections)
+	}
+}
+
 func TestSetBotSettingsPreservesFeishuOutboundMediaRoots(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	root := t.TempDir()

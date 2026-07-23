@@ -55,13 +55,15 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 	if got := app.Settings(); got.Providers == nil || got.OfficialProviders == nil || got.ProviderPresets == nil || got.ProviderKinds == nil ||
 		got.Permissions.Allow == nil || got.Permissions.Ask == nil || got.Permissions.Deny == nil ||
 		got.Sandbox.AllowWrite == nil || got.Sandbox.EffectiveWriteRoots == nil ||
-		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil ||
-		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil {
+		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil || got.Bot.Allowlist.TelegramUsers == nil ||
+		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil || got.Bot.Allowlist.TelegramGroups == nil ||
+		got.Bot.SelfUserIDs.Telegram == nil {
 		t.Fatalf("Settings() contains nil array fields: %+v", got)
 	}
 	if got := app.DesktopStartupSettings(); got.StatusBarItems == nil ||
-		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil ||
-		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil {
+		got.Bot.Allowlist.QQUsers == nil || got.Bot.Allowlist.FeishuUsers == nil || got.Bot.Allowlist.WeixinUsers == nil || got.Bot.Allowlist.TelegramUsers == nil ||
+		got.Bot.Allowlist.QQGroups == nil || got.Bot.Allowlist.FeishuGroups == nil || got.Bot.Allowlist.WeixinGroups == nil || got.Bot.Allowlist.TelegramGroups == nil ||
+		got.Bot.SelfUserIDs.Telegram == nil {
 		t.Fatalf("DesktopStartupSettings() contains nil array fields: %+v", got)
 	}
 

@@ -135,6 +135,54 @@ func TestRememberBotInboundStoresGroupAllowlist(t *testing.T) {
 	}
 }
 
+func TestBotDoctorReportsTelegramSingleton(t *testing.T) {
+	isolateBotUserConfig(t)
+	t.Setenv("TELEGRAM_PRIMARY_TOKEN", "secret")
+	cfg := config.Default()
+	cfg.Bot.Enabled = true
+	cfg.Bot.Telegram = config.TelegramBotConfig{Enabled: true, TokenEnv: "TELEGRAM_PRIMARY_TOKEN", APIBase: "https://api.telegram.org"}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := botDoctor([]string{"--json"}); rc != 0 {
+			t.Fatalf("botDoctor rc = %d, want 0", rc)
+		}
+	})
+	for _, want := range []string{
+		`"name":"bot.telegram.enabled","status":"ok"`,
+		`"name":"bot.telegram.token","status":"ok","detail":"TELEGRAM_PRIMARY_TOKEN is set"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bot doctor output missing %s:\n%s", want, out)
+		}
+	}
+}
+
+func TestBotDoctorTelegramConnectionFallsBackToProviderTokenEnv(t *testing.T) {
+	isolateBotUserConfig(t)
+	t.Setenv("TELEGRAM_PRIMARY_TOKEN", "secret")
+	cfg := config.Default()
+	cfg.Bot.Telegram.TokenEnv = "TELEGRAM_PRIMARY_TOKEN"
+	cfg.Bot.Connections = []config.BotConnectionConfig{{
+		ID: "telegram-work", Provider: "telegram", Domain: "telegram", Enabled: true,
+	}}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := botDoctor([]string{"--json"}); rc != 0 {
+			t.Fatalf("botDoctor rc = %d, want 0", rc)
+		}
+	})
+	want := `"name":"bot.connection.telegram-work.telegram_token","status":"ok","detail":"TELEGRAM_PRIMARY_TOKEN is set"`
+	if !strings.Contains(out, want) {
+		t.Fatalf("bot doctor output missing %s:\n%s", want, out)
+	}
+}
+
 func TestBotDoctorReportsSessionMappingCounts(t *testing.T) {
 	isolateBotUserConfig(t)
 	cfg := config.Default()

@@ -96,7 +96,15 @@ func BuildSessionKey(src SessionSource) string {
 	case ChatDM:
 		scope = fmt.Sprintf("%s:dm:%s", source, src.ChatID)
 	case ChatGroup:
-		scope = fmt.Sprintf("%s:group:%s:%s", source, src.ChatID, src.UserID)
+		if src.Platform == PlatformTelegram {
+			if src.ThreadID != "" {
+				scope = fmt.Sprintf("%s:group:%s:thread:%s", source, src.ChatID, src.ThreadID)
+			} else {
+				scope = fmt.Sprintf("%s:group:%s", source, src.ChatID)
+			}
+		} else {
+			scope = fmt.Sprintf("%s:group:%s:%s", source, src.ChatID, src.UserID)
+		}
 	case ChatGuild:
 		scope = fmt.Sprintf("%s:guild:%s:%s", source, src.ChatID, src.UserID)
 	case ChatDirect:

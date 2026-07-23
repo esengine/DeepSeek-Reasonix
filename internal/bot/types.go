@@ -11,9 +11,10 @@ import (
 type Platform string
 
 const (
-	PlatformQQ     Platform = "qq"
-	PlatformFeishu Platform = "feishu"
-	PlatformWeixin Platform = "weixin"
+	PlatformQQ       Platform = "qq"
+	PlatformFeishu   Platform = "feishu"
+	PlatformWeixin   Platform = "weixin"
+	PlatformTelegram Platform = "telegram"
 )
 
 // ChatType 标识会话类型。
@@ -93,6 +94,7 @@ type OutboundMessage struct {
 	Text         string           `json:"text,omitempty"`
 	MediaURLs    []string         `json:"media_urls,omitempty"`
 	ReplyToMsgID string           `json:"reply_to_msg_id,omitempty"`
+	ThreadID     string           `json:"thread_id,omitempty"`
 	Keyboard     *InlineKeyboard  `json:"keyboard,omitempty"`
 	Card         *InteractiveCard `json:"card,omitempty"`
 }
