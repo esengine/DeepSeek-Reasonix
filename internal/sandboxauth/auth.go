@@ -481,6 +481,16 @@ func buildPrompt(req Request, id identity, identityErr error) Prompt {
 	p := Prompt{Review: req.Review, Workspace: id.workspace, CanonicalExecutable: id.executable, Argv: append([]string(nil), id.argv...), GrantPrefix: append([]string(nil), id.prefix...), Background: req.Background, PreserveBackgroundProcesses: req.PreserveBackgroundProcesses, Reusable: identityErr == nil}
 	p.SuspectedSecret = suspectedSecret(id.argv)
 	if identityErr != nil {
+		// When command identity cannot be resolved (shell wrapper, pipeline,
+		// etc.), populate executable/argv from the raw command string so the
+		// frontend can still display what was requested.
+		if id.executable == "" && req.Command != "" {
+			parts := strings.Fields(req.Command)
+			if len(parts) > 0 {
+				p.CanonicalExecutable = parts[0]
+				p.Argv = parts
+			}
+		}
 		p.Warnings = append(p.Warnings, identityErr.Error())
 	}
 	if p.SuspectedSecret {
