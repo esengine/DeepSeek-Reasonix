@@ -323,12 +323,21 @@ func subsequenceMatch(target, query string) bool {
 
 // activeAtToken finds the @-reference token ending at the cursor (assumed at the
 // input's end). The '@' must start the line or follow whitespace, so emails
-// like "a@b" don't trigger it. Returns the '@' offset and the text after it.
+// like "a@b" don't trigger it. A backslash-escaped space or tab is part of the
+// token (the form EscapeRefPath inserts for paths with spaces), so completion
+// can descend through such directories. Returns the '@' offset and the text
+// after it.
 func activeAtToken(val string) (int, string, bool) {
 	for i := len(val) - 1; i >= 0; i-- {
 		switch val[i] {
-		case ' ', '\t', '\n':
+		case ' ', '\t':
+			if i > 0 && val[i-1] == '\\' {
+				i-- // escaped whitespace stays inside the token
+				continue
+			}
 			return 0, "", false // hit whitespace before an '@' → no active token
+		case '\n':
+			return 0, "", false
 		case '@':
 			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' || val[i-1] == '\n' {
 				return i, val[i+1:], true
@@ -356,11 +365,15 @@ func (m *chatTUI) atItems(token string) []compItem {
 // unless frag starts with '.'. Top-level tokens also surface MCP resources.
 func (m *chatTUI) fileItems(token string) []compItem {
 	dir, frag := splitPathToken(token)
+	// The typed token may carry backslash-escaped spaces (the form completion
+	// itself inserts); filesystem lookups need the real path while inserts keep
+	// the escaped grammar.
+	fsFrag := control.UnescapeRefPath(frag)
 	workspaceRoot := ""
 	if m.ctrl != nil {
 		workspaceRoot = m.ctrl.WorkspaceRoot()
 	}
-	readDir := dir
+	readDir := control.UnescapeRefPath(dir)
 	if workspaceRoot != "" {
 		if readDir == "" {
 			readDir = workspaceRoot
@@ -379,20 +392,20 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		return entries[i].IsDir() && !entries[j].IsDir()
 	})
 
-	showHidden := strings.HasPrefix(frag, ".")
+	showHidden := strings.HasPrefix(fsFrag, ".")
 	var items []compItem
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, frag) {
+		if !strings.HasPrefix(name, fsFrag) {
 			continue
 		}
 		if !showHidden && strings.HasPrefix(name, ".") {
 			continue
 		}
 		if e.IsDir() {
-			items = append(items, compItem{label: name + "/", insert: "@" + dir + name + "/", hint: "dir", descend: true})
+			items = append(items, compItem{label: name + "/", insert: "@" + dir + control.EscapeRefPath(name) + "/", hint: "dir", descend: true})
 		} else {
-			items = append(items, compItem{label: name, insert: "@" + dir + name})
+			items = append(items, compItem{label: name, insert: "@" + dir + control.EscapeRefPath(name)})
 		}
 		if len(items) >= maxCompItems {
 			break
@@ -410,15 +423,16 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		if remaining > maxFileSearchItems {
 			remaining = maxFileSearchItems
 		}
-		results := m.searchFileRefs(frag)
+		results := m.searchFileRefs(fsFrag)
 		if len(results) > remaining {
 			results = results[:remaining]
 		}
 		for _, path := range results {
-			if seen[path] {
+			escaped := control.EscapeRefPath(path)
+			if seen[escaped] {
 				continue
 			}
-			items = append(items, compItem{label: path, insert: "@" + path, hint: "file"})
+			items = append(items, compItem{label: path, insert: "@" + escaped, hint: "file"})
 			if len(items) >= maxCompItems {
 				break
 			}

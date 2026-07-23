@@ -107,7 +107,7 @@ func TestBuildReviewSubagentRegistryConfinesReaders(t *testing.T) {
 
 // TestBuildReviewSubagentRegistryEnforcesReadOnlySkill pins the CLI path of the
 // review read-only contract: `reasonix review` runs the same builtin skill as
-// the in-session review tool, so its bash must enforce the plan-mode safe
+// the in-session review tool, so its bash must enforce the read-only
 // policy instead of trusting the prompt's "stay read-only" promise.
 func TestBuildReviewSubagentRegistryEnforcesReadOnlySkill(t *testing.T) {
 	reg := buildReviewSubagentRegistry(skill.Skill{

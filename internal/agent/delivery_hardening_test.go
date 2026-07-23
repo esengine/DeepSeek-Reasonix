@@ -149,13 +149,10 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	}
 }
 
-// TestPlanModeCapabilityGateHonorsLoopGuardPass covers the case where a
-// required capability is itself blocked by plan mode (for example a writer
-// skill): the capability gate keeps applying in plan mode, but once a loop
-// guard fires with no host-observable progress since, readiness must stand
-// down so the model can report the blocker instead of ending in readiness
-// exhaustion.
-func TestPlanModeCapabilityGateHonorsLoopGuardPass(t *testing.T) {
+// TestPlanModeDefersCapabilityRequirementsUntilExecution ensures Delivery does
+// not force a required writer capability while the model is drafting a plan.
+// The same requirement becomes active immediately after Plan is disabled.
+func TestPlanModeDefersCapabilityRequirementsUntilExecution(t *testing.T) {
 	reg := tool.NewRegistry()
 	a := New(&scriptedProvider{name: "p"}, reg, NewSession("sys"),
 		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger()}, event.Discard)
@@ -164,70 +161,14 @@ func TestPlanModeCapabilityGateHonorsLoopGuardPass(t *testing.T) {
 		{Entry: capability.Entry{ID: "skill:deploy"}, Policy: capability.AutoUseRequire},
 	}})
 
-	if got := a.finalReadinessCheck(); !strings.Contains(got.reason, "required capabilities") {
-		t.Fatalf("expected require miss to apply in plan mode, reason=%q", got.reason)
+	if got := a.finalReadinessCheck(); got.applies || got.reason != "" {
+		t.Fatalf("Plan proposal was forced through delivery capability gates: %+v", got)
 	}
 
-	a.armLoopGuardPass(a.evidence.Len())
-
+	a.SetPlanMode(false)
 	got := a.finalReadinessCheck()
-	if !got.applies {
-		t.Fatal("finalReadinessCheck() applies = false, want true audit after loop guard")
-	}
-	if got.reason != "" {
-		t.Fatalf("finalReadinessCheck() reason = %q, want loop guard to allow final blocker report in plan mode", got.reason)
-	}
-}
-
-// fakeMCPDeployTool is a write-capable tool with an MCP-style name, so a call
-// maps to the mcp-tool:srv/deploy capability and plan mode blocks it.
-type fakeMCPDeployTool struct{}
-
-func (fakeMCPDeployTool) Name() string            { return "mcp__srv__deploy" }
-func (fakeMCPDeployTool) Description() string     { return "fake deploy" }
-func (fakeMCPDeployTool) ReadOnly() bool          { return false }
-func (fakeMCPDeployTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
-func (fakeMCPDeployTool) Execute(context.Context, json.RawMessage) (string, error) {
-	return "deployed", nil
-}
-
-// TestPlanModeBlockedRequiredCapabilityRecoversViaLoopGuard drives the full
-// failure loop from the review finding through Run(): a required write-capable
-// capability is attempted three times, each blocked by plan mode, which arms
-// the loop-guard pass via the storm breaker; the following blocker report must
-// then be accepted instead of exhausting readiness retries.
-func TestPlanModeBlockedRequiredCapabilityRecoversViaLoopGuard(t *testing.T) {
-	reg := tool.NewRegistry()
-	reg.Add(fakeReadFileTool{})
-	reg.Add(fakeMCPDeployTool{})
-	blocker := "The required deploy capability is blocked while plan mode is active; it needs approval before execution."
-	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		{toolCallChunk("1", "mcp__srv__deploy", `{"target":"prod"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("2", "mcp__srv__deploy", `{"target":"staging"}`), {Type: provider.ChunkDone}},
-		{toolCallChunk("3", "mcp__srv__deploy", `{"target":"prod","force":true}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: blocker}, {Type: provider.ChunkDone}},
-	}}
-	a := New(prov, reg, NewSession("sys"),
-		Options{DeliveryProfile: true, CapabilityLedger: capability.NewLedger()}, event.Discard)
-	a.SetPlanMode(true)
-	a.SeedCapabilityRoute(capability.RouteDecision{Candidates: []capability.RouteCandidate{
-		{Entry: capability.Entry{ID: "mcp-tool:srv/deploy"}, Policy: capability.AutoUseRequire},
-	}})
-
-	if err := a.Run(context.Background(), "deploy the parser fix"); err != nil {
-		t.Fatalf("plan-blocked required capability ended in readiness exhaustion: %v", err)
-	}
-	if !a.loopGuardArmed {
-		t.Fatal("three plan-mode blocks should arm the final-readiness loop-guard pass")
-	}
-	if got := lastToolResult(a.Session(), "mcp__srv__deploy"); !strings.Contains(got, "[loop guard]") {
-		t.Fatalf("third blocked attempt should carry the loop-guard directive, got: %q", got)
-	}
-	if prov.call != 4 {
-		t.Fatalf("provider calls = %d, want 4 (three blocked attempts + one blocker report)", prov.call)
-	}
-	if got := lastAssistantContent(a.Session()); got != blocker {
-		t.Fatalf("last assistant text = %q, want blocker report %q", got, blocker)
+	if !got.applies || !strings.Contains(got.reason, "required capabilities") {
+		t.Fatalf("execution did not restore required capability gate: %+v", got)
 	}
 }
 
@@ -365,15 +306,12 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 		t.Fatalf("stalled attempts = %d, want %d", readinessErr.Attempts, maxFinalReadinessBlocks)
 	}
 
-	// Converging: the model earns a receipt between blocks every time, so the
-	// budget extends to the hard cap instead of failing at 3.
+	// Repeating the same read does not change any missing requirement. Different
+	// call IDs must not turn that duplicate receipt into six paid retries.
 	converging := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
 		finalText,                // block 1
 		readCall("1"), finalText, // progress → block 2
-		readCall("2"), finalText, // progress → block 3 (old code failed here)
-		readCall("3"), finalText, // progress → block 4
-		readCall("4"), finalText, // progress → block 5
-		readCall("5"), finalText, // progress → block 6 → hard cap
+		readCall("2"), finalText, // duplicate → block 3 → base cap
 	}}
 	a2 := New(converging, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
 	err2 := a2.Run(context.Background(), "fix the crash in a.go")
@@ -381,8 +319,70 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 	if !errors.As(err2, &readinessErr2) {
 		t.Fatalf("expected FinalReadinessError, got %v", err2)
 	}
-	if readinessErr2.Attempts != maxFinalReadinessBlocksWithProgress {
-		t.Fatalf("converging attempts = %d, want %d", readinessErr2.Attempts, maxFinalReadinessBlocksWithProgress)
+	if readinessErr2.Attempts != maxFinalReadinessBlocks {
+		t.Fatalf("duplicate-receipt attempts = %d, want %d", readinessErr2.Attempts, maxFinalReadinessBlocks)
+	}
+}
+
+func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
+	reg := evidenceRegistry()
+	reg.Add(fakeReadFileTool{})
+	finalText := []provider.Chunk{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}}
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{toolCallChunk("todo", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
+		finalText,
+		finalText,
+		finalText,
+		{toolCallChunk("review", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("verify", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("signoff", "complete_step", `{"step":"Ship main","result":"done","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "delivered"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	var readinessErr *FinalReadinessError
+	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &readinessErr) {
+		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
+	}
+	if !a.PrepareDeliveryRecovery() {
+		t.Fatal("explicit recovery should consume the pending readiness failure")
+	}
+	if a.PrepareDeliveryRecovery() {
+		t.Fatal("delivery recovery authorization must be one-shot")
+	}
+	if err := a.Run(context.Background(), "continue the remaining delivery checks"); err != nil {
+		t.Fatalf("recovery Run: %v", err)
+	}
+	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); !ok {
+		t.Fatal("recovery turn lost the prior mutation receipt")
+	}
+}
+
+func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
+	reg := evidenceRegistry()
+	finalText := []provider.Chunk{{Type: provider.ChunkText, Text: "premature"}, {Type: provider.ChunkDone}}
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{toolCallChunk("todo", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
+		finalText,
+		finalText,
+		finalText,
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	var firstErr *FinalReadinessError
+	if err := a.Run(context.Background(), "implement main"); !errors.As(err, &firstErr) {
+		t.Fatalf("first Run error = %v, want FinalReadinessError", err)
+	}
+	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); !ok {
+		t.Fatal("first failed delivery should retain its mutation until the next turn is classified")
+	}
+
+	var followUpErr *FinalReadinessError
+	if err := a.Run(context.Background(), "fix the unrelated crash in other.go"); !errors.As(err, &followUpErr) {
+		t.Fatalf("ordinary follow-up error = %v, want FinalReadinessError", err)
+	}
+	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+		t.Fatal("ordinary follow-up inherited stale mutation evidence without explicit recovery")
 	}
 }
 

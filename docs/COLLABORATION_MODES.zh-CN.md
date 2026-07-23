@@ -2,7 +2,7 @@
 
 Reasonix 桌面端输入框左下角的菜单包含两条互相独立的轴：
 
-- **计划模式**：先只读分析并产出计划，确认后再执行。
+- **计划模式**：要求模型先产出计划，确认后再切换到实施。
 - **目标模式**：给 Reasonix 一个目标，让它持续推进直到完成、阻塞或停止。
 - **运行模式**：在“轻量”“均衡”“交付优先”三档之间选择成本与交付质量倾向。
 
@@ -10,7 +10,7 @@ Reasonix 桌面端输入框左下角的菜单包含两条互相独立的轴：
 
 ## 计划模式
 
-计划模式适合在动手前先确认方案。开启后，Reasonix 会先读取必要上下文、分析问题并给出计划；在你确认前，不会执行写文件、改代码、提交、删除、发布等有副作用的操作。
+计划模式适合在动手前先确认方案。开启后，Reasonix 会收到“先规划、不要开始实施”的工作流指令，读取必要上下文、分析问题并给出计划。它不是权限边界：规划期间的任何工具调用仍由当前 Ask/Auto/Yolo、权限规则与 Sandbox 决定；`complete_step` 等显式执行阶段工具会等到计划批准后。
 
 ### 怎么开启
 
@@ -23,14 +23,15 @@ Reasonix 桌面端输入框左下角的菜单包含两条互相独立的轴：
 - 你还不确定实现方案，希望先看 Reasonix 的拆解。
 - 改动范围可能跨多个文件、模块或配置。
 - 需要先评估风险、测试面、兼容性或发布影响。
-- 你希望先让 Reasonix 只读代码和文档，再决定是否继续实施。
+- 你希望先让 Reasonix 阅读代码和文档、给出方案，再决定是否继续实施。
 
 ### 注意事项
 
 - 计划模式不是“自动完成任务”。它会先暂停在计划阶段，等待你确认。
-- 计划模式会减少误改风险，但会多一次确认步骤。
+- 计划模式通过模型指令和确认步骤减少误改风险，但不替代 Ask、`deny` 规则或 Sandbox。
 - 如果你已经明确要直接改一个小问题，普通模式通常更快。
 - 计划模式只控制“先规划再执行”的流程，不决定成本或交付倾向；可按任务选择任一运行模式。
+- Ask 不是只读模式：需审批的 writer 在批准后仍可执行。需要技术上严格只读时，应使用显式只读 subagent/权限配置，而不是依赖 Plan 或 Ask。
 
 ## 目标模式
 
@@ -66,8 +67,8 @@ Goal 模式会把这些部分当作任务边界；除非下一步涉及不可逆
 - 如果目标过大或边界不清，Reasonix 可能需要更多探索轮次，也会消耗更多 token。
 - AutoResearch 是 Goal 的自动持久化策略，不是独立的后台 daemon，也不是 Settings 里的全局 skill。
   可以用 `/goal --research <目标>` 强制启用，或用 `/goal --simple <目标>` 强制保持轻量 Goal。
-- 普通聊天里命中非常强的长周期信号时，Reasonix 会自动升级为 Goal + AutoResearch；弱表达
-  如“长期来看”“优化一下”“研究一下”不会触发。
+- 普通聊天不会因为目标文本看起来复杂或长周期而自动切换模式。只有明确选择“目标”或使用
+  `/goal` 后，Reasonix 才会进入 Goal，并在 Goal 内判断是否采用 AutoResearch。
 - 目标模式和计划模式是同一协作轴。切到计划模式时，会退出目标草稿/目标显示状态；运行模式不会因此改变。
 
 ## 运行模式
@@ -76,18 +77,23 @@ Goal 模式会把这些部分当作任务边界；除非下一步涉及不可逆
 
 ### 轻量 · 节省 Token（Economy）
 
-Economy 对应原来的“省 token”模式。它精简初始技能索引和工具 schema，将 Skills、MCP、CodeGraph/LSP、`web_fetch`、安装来源和 subagent 等可选能力放到 `connect_tool_source` 后按需启用。
+Economy 对应原来的“省 token”模式。它不加载初始技能索引，只保留 `read_file`、`bash`、
+`edit_file`、`write_file`、后台 shell 生命周期工具、`ask` 和 `connect_tool_source`。
+专用搜索/文件操作、workflow、session、memory、slash command、Skills、MCP、
+CodeGraph/LSP、`web_fetch`、安装来源和 subagent 等能力都放到
+`connect_tool_source` 后按需启用。
 
 - 适合日常问答、代码解释、小范围阅读和成本敏感任务。
 - 主要降低每轮固定携带的提示词与工具 schema token，不会降低模型本身的推理能力。
 - 首次使用某类可选工具时可能多一个按需启用步骤。
+- 简单阅读和编辑可直接开始；目录查看与搜索默认通过 `bash` 完成。
 
 ### 均衡 · 默认（Balanced）
 
 Balanced 是默认档，对应旧版本持久化值 `full`。它一次性提供完整工具面，不增加额外执行合约，由模型根据任务自主决定探索、实现与验证深度。
 
 - 适合大多数普通开发与聊天任务。
-- `--profile balanced` 和不传 `--profile` 保持旧默认 provider 请求字节不变。
+- `--profile balanced` 和不传 `--profile` 的运行语义不变；精简后的系统提示词会形成一次新的 provider 缓存前缀。
 - 旧 session/tab 中空值或 `full` 都会继续解释为 Balanced。
 
 ### 交付优先 · 完整验证（Delivery）
@@ -101,7 +107,7 @@ Delivery 使用与 Balanced 相同的完整工具面，额外增加稳定的能�
 - 对明确要求实现、修复或修改的任务，如果没有观察到真实变更，宿主会拒绝“已经完成”的纯文本声明；只读分析仍可凭读取/检查证据正常结束。
 - Skill/MCP 的 `require`/`prefer` 路由由宿主门禁强制：`require` 必须成功调用（宿主确认不可用时可带真实 blocker 结束），`prefer` 缺失会提醒一次，之后必须调用或 `use_capability(action="decline")` 提交非空理由。
 - 中/高风险改动会强制运行结构化 `review` / `security_review`（通过审查子 Agent 的 `review_report`）；`task`/`run_skill` 等元工具本身不算 mutation，子 Agent 的真实写入会回传父级证据账本。
-- Delivery 的 system contract 与 `use_capability` Schema 是每个该 Profile 会话固定的 provider 前缀；按需连接 MCP 不会改变主 Registry Schema。Balanced 的提示词和工具 Schema 仍保持字节兼容。从其他 Profile 切换过来会产生一次新的缓存前缀。
+- Delivery 的 system contract 与 `use_capability` Schema 是每个该 Profile 会话固定的 provider 前缀；按需连接 MCP 不会改变主 Registry Schema。Balanced 同样在同版本、同配置下保持提示词与工具 Schema 稳定。升级到本版本或从其他 Profile 切换过来会产生一次新的缓存前缀。
 
 ### 怎么选择
 
@@ -110,7 +116,7 @@ Delivery 使用与 Balanced 相同的完整工具面，额外增加稳定的能�
 - CLI 启动时使用 `reasonix --profile economy|balanced|delivery`，非交互运行使用 `reasonix run --profile ...`。
 - TUI 会话内使用 `/work-mode economy|balanced|delivery` 热切换；不带参数的 `/work-mode` 会列出三档并标记当前项。`/profile` 保留为技术兼容别名，但帮助和补全以 `/work-mode` 为主。
 - 会话内切换会在保留 history、session 路径、审批/Yolo 状态的前提下原子重建 Controller。当前 turn、审批/询问或后台任务仍在运行时不能切换；构建失败时旧运行时继续可用。
-- `/work-mode` 只修改当前会话，不写入全局默认值。跨 Profile 切换会形成一次新的 provider 缓存前缀；同一 Profile 内的 system contract 与工具 Schema 保持稳定。
+- `/work-mode` 只修改当前会话，不写入全局默认值。跨 Profile 切换会形成一次新的 provider 缓存前缀；均衡与交付优先模式内 system contract 与工具 Schema 保持稳定，轻量模式内每次成功连接工具来源都会形成一次新前缀，之后在工具面再次变化前保持稳定。
 
 ## 协作方式与 Profile 如何组合
 
@@ -120,7 +126,7 @@ Delivery 使用与 Balanced 相同的完整工具面，额外增加稳定的能�
 | 计划 + 均衡 | 支持 | 先用完整工具面研究并确认方案，再执行。 |
 | 目标 + 交付优先 | 支持 | 持续推进明确目标，并强调实现与验证闭环。 |
 | 计划 + 目标 | 不建议同时使用 | 两者都是协作方式轴，切换计划会退出目标草稿/目标显示状态。 |
-| 工具权限（询问/自动/Yolo）+ 任一组合 | 支持 | 工具权限只控制是否自动批准工具调用。 |
+| 工具权限（询问/自动/Yolo）+ 任一组合 | 支持 | 工具权限控制工具审批；Sandbox 继续控制文件、进程与网络边界。 |
 
 工具权限的详细区别和使用场景，见 [`TOOL_APPROVAL_MODES.zh-CN.md`](./TOOL_APPROVAL_MODES.zh-CN.md)。
 
@@ -128,6 +134,6 @@ Delivery 使用与 Balanced 相同的完整工具面，额外增加稳定的能�
 
 - **不确定怎么选**：保持均衡和普通模式。
 - **成本敏感或简单问答**：选择轻量。
-- **担心 Reasonix 改错**：开启计划模式，先确认方案。
+- **担心 Reasonix 改错**：开启计划模式先确认方案，并保持 Ask 与合适的 Sandbox 边界。
 - **想让 Reasonix 持续推进一个明确目标**：开启目标模式，目标写清楚成功标准。
 - **编码、修 bug 或复杂实现更看重最终质量**：选择交付优先，可再搭配目标模式。

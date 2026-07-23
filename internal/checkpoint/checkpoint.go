@@ -32,6 +32,14 @@ type FileSnap struct {
 	Encoding *fileenc.Kind `json:"encoding,omitempty"`
 }
 
+// FileState is the earliest pre-edit state recorded for a file in this
+// session. Content == nil means the file did not exist before the session's
+// first tracked edit.
+type FileState struct {
+	Content  *string
+	Encoding *fileenc.Kind
+}
+
 // Checkpoint anchors the pre-edit state of every distinct file touched during one
 // user turn. MsgIndex is len(Session.Messages) at the turn's start — the
 // conversation-rewind boundary — persisted so a resumed session can rewind the
@@ -214,6 +222,35 @@ func (s *Store) List() []Meta {
 		out = append(out, Meta{Turn: c.Turn, Time: c.Time, Prompt: c.Prompt, Paths: paths})
 	}
 	return out
+}
+
+// FileState returns the earliest pre-edit state recorded for p across the
+// session. Paths are compared after resolving them against the workspace root,
+// because older checkpoints may contain absolute paths while newer writers use
+// workspace-relative paths.
+func (s *Store) FileState(p string) (FileState, bool) {
+	want, err := safePath(s.root, p)
+	if err != nil {
+		return FileState{}, false
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.all() {
+		for _, f := range c.Files {
+			got, err := safePath(s.root, f.Path)
+			if err != nil || got != want {
+				continue
+			}
+			state := FileState{Encoding: f.Encoding}
+			if f.Content != nil {
+				content := *f.Content
+				state.Content = &content
+			}
+			return state, true
+		}
+	}
+	return FileState{}, false
 }
 
 // all returns done + cur in turn order. Caller holds the lock.

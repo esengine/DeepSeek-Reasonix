@@ -1,11 +1,79 @@
 package cli
 
 import (
-	"reflect"
+	"errors"
+	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/provider"
 )
+
+func TestAssistantMarkdownHasIdentityAndIndentedBody(t *testing.T) {
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = false
+	configureCLITheme("dark")
+
+	rendered := renderAssistantMarkdown("A concise answer that wraps across the available width.", 32)
+	lines := strings.Split(ansi.Strip(rendered), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("assistant block should contain a header, gap, and wrapped body:\n%s", rendered)
+	}
+	if lines[0] != "  ◆ Reasonix" {
+		t.Fatalf("assistant header = %q, want %q", lines[0], "  ◆ Reasonix")
+	}
+	if lines[1] != "" {
+		t.Fatalf("assistant header/body separator = %q, want blank row", lines[1])
+	}
+	for i, line := range lines[2:] {
+		if line != "" && !strings.HasPrefix(line, assistantTranscriptIndent) {
+			t.Fatalf("assistant body row %d lacks the two-cell gutter: %q", i+2, line)
+		}
+		if width := visibleWidth(line); width > 32 {
+			t.Fatalf("assistant row %d width = %d, want <= 32: %q", i+2, width, line)
+		}
+	}
+}
+
+func TestReplaySectionsKeepAssistantIdentity(t *testing.T) {
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = false
+	configureCLITheme("dark")
+
+	sections := replaySectionsFor([]provider.Message{
+		{Role: provider.RoleUser, Content: "Which version?"},
+		{Role: provider.RoleAssistant, Content: "Version 1.2.3"},
+	}, 48)
+	if len(sections) != 2 {
+		t.Fatalf("replay sections = %d, want user and assistant", len(sections))
+	}
+	if plain := ansi.Strip(sections[1]); !strings.HasPrefix(plain, "  ◆ Reasonix\n\n  Version 1.2.3") {
+		t.Fatalf("replayed assistant answer lost its identity: %q", plain)
+	}
+}
+
+func TestReplaySectionsRestoreInterruptedLocalOutput(t *testing.T) {
+	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	colorEnabled = false
+	configureCLITheme("dark")
+
+	sections := replaySectionsFor([]provider.Message{
+		{Role: provider.RoleUser, Content: "change config"},
+		{
+			Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
+			LocalOnly: true, Content: "partial answer", ReasoningContent: "checking config",
+			ToolCalls:       []provider.ToolCall{{ID: "p1", Name: "write_file"}},
+			InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
+		},
+	}, 64)
+	plain := ansi.Strip(strings.Join(sections, ""))
+	for _, want := range []string{"change config", "checking config", "partial answer", "Write", "bounded recovery summary"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("replayed interrupted history missing %q:\n%s", want, plain)
+		}
+	}
+}
 
 func TestScrollbarThumb(t *testing.T) {
 	if _, size := scrollbarThumb(10, 0, 5); size != 0 {
@@ -70,9 +138,40 @@ func TestSelectedTextMultiLine(t *testing.T) {
 }
 
 func TestCopyToClipboard(t *testing.T) {
-	got := copyToClipboard("hello")()
-	want := tea.SetClipboard("hello")()
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("copyToClipboard returned %#v, want %#v", got, want)
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+
+	var written string
+	writeNativeClipboardText = func(text string) error {
+		written = text
+		return nil
+	}
+	message := copyToClipboard("hello")()
+	got, ok := message.(clipboardCopyMsg)
+	if !ok {
+		t.Fatalf("copyToClipboard returned %T, want clipboardCopyMsg", message)
+	}
+	if written != "hello" || got.text != "hello" || got.err != nil || got.osc52 {
+		t.Fatalf("native clipboard result = %+v, written %q", got, written)
+	}
+
+	wantErr := errors.New("clipboard unavailable")
+	writeNativeClipboardText = func(string) error { return wantErr }
+	got = copyToClipboard("fallback")().(clipboardCopyMsg)
+	if !errors.Is(got.err, wantErr) || got.osc52 {
+		t.Fatalf("failed native clipboard result = %+v", got)
+	}
+
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	writeNativeClipboardText = func(string) error {
+		t.Fatal("SSH copy must not write the remote host's native clipboard")
+		return nil
+	}
+	got = copyToClipboard("remote")().(clipboardCopyMsg)
+	if !got.osc52 || got.text != "remote" {
+		t.Fatalf("SSH clipboard result = %+v, want OSC 52", got)
 	}
 }

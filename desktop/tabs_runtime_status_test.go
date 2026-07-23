@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -132,13 +131,13 @@ func TestProjectTreeSplitsMultipleRuntimeSessionsInSameTopic(t *testing.T) {
 	}
 	statusByPath := map[string]string{}
 	for _, child := range topic.Children {
-		statusByPath[filepath.Clean(child.SessionPath)] = child.Status
+		statusByPath[sessionRuntimeKey(child.SessionPath)] = child.Status
 	}
-	if statusByPath[filepath.Clean(sessionA)] != topicStatusWaitingConfirmation {
-		t.Fatalf("session A status = %q, want waiting; children=%#v", statusByPath[filepath.Clean(sessionA)], topic.Children)
+	if statusByPath[sessionRuntimeKey(sessionA)] != topicStatusWaitingConfirmation {
+		t.Fatalf("session A status = %q, want waiting; children=%#v", statusByPath[sessionRuntimeKey(sessionA)], topic.Children)
 	}
-	if statusByPath[filepath.Clean(sessionB)] != topicStatusThinking {
-		t.Fatalf("session B status = %q, want thinking; children=%#v", statusByPath[filepath.Clean(sessionB)], topic.Children)
+	if statusByPath[sessionRuntimeKey(sessionB)] != topicStatusThinking {
+		t.Fatalf("session B status = %q, want thinking; children=%#v", statusByPath[sessionRuntimeKey(sessionB)], topic.Children)
 	}
 
 	close(runnerA.release)

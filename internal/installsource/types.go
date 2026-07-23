@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"reasonix/internal/config"
+	"reasonix/internal/pluginpkg"
 )
 
 // request mirrors the public schema. Fields stay exported because Execute
@@ -52,6 +53,7 @@ type response struct {
 	PlanID   string    `json:"planId,omitempty"`
 	Actions  []action  `json:"actions"`
 	Warnings []string  `json:"warnings,omitempty"`
+	Error    string    `json:"error,omitempty"`
 	Next     string    `json:"next,omitempty"`
 }
 
@@ -68,40 +70,45 @@ type kindTally struct {
 // dispatcher; RiskLevel/RiskReasons help the calling skill decide whether to
 // ask the user before apply=true.
 type action struct {
-	Kind          string            `json:"kind"`      // "skill" | "mcp" | "plugin"
-	Action        string            `json:"action"`    // copy_skill|link_skill|register_skill_root|install_mcp_server|remove_skill|remove_skill_root|remove_mcp_server
-	Status        string            `json:"status"`    // planned|done|failed
-	RiskLevel     RiskLevel         `json:"riskLevel"` // low|medium|high
-	RiskReasons   []string          `json:"riskReasons,omitempty"`
-	Name          string            `json:"name,omitempty"`
-	Source        string            `json:"source,omitempty"`
-	Target        string            `json:"target,omitempty"`
-	ConfigPath    string            `json:"configPath,omitempty"`
-	Scope         string            `json:"scope,omitempty"`
-	Mode          string            `json:"mode,omitempty"`
-	Transport     string            `json:"transport,omitempty"`
-	URL           string            `json:"url,omitempty"`
-	Command       string            `json:"command,omitempty"`
-	Args          []string          `json:"args,omitempty"`
-	Env           map[string]string `json:"env,omitempty"`
-	Headers       map[string]string `json:"headers,omitempty"`
-	Skills        []string          `json:"skills,omitempty"`
-	SkillCount    int               `json:"skillCount,omitempty"`
-	Commands      []string          `json:"commands,omitempty"`
-	CommandCount  int               `json:"commandCount,omitempty"`
-	Commit        string            `json:"commit,omitempty"`        // resolved git snapshot the plan describes; apply pins to it
-	Layout        string            `json:"layout,omitempty"`        // canonical_dir|flat_compat|registered_root
-	InstallRoot   string            `json:"installRoot,omitempty"`   // skills root or registered custom root
-	CanonicalPath string            `json:"canonicalPath,omitempty"` // <skill-name>/SKILL.md when applicable
-	Discoverable  bool              `json:"discoverable,omitempty"`  // Store.Read can load it after apply/register
-	Indexed       bool              `json:"indexed,omitempty"`       // Store.List includes it for the skills index
-	ToolCount     int               `json:"toolCount,omitempty"`
-	HookCount     int               `json:"hookCount,omitempty"`
-	ManifestKind  string            `json:"manifestKind,omitempty"`
-	Version       string            `json:"version,omitempty"`
-	Warnings      []string          `json:"warnings,omitempty"`
-	Error         string            `json:"error,omitempty"`
-	Next          string            `json:"next,omitempty"`
+	Kind                string                         `json:"kind"`      // "skill" | "mcp" | "plugin"
+	Action              string                         `json:"action"`    // copy_skill|link_skill|register_skill_root|install_mcp_server|remove_skill|remove_skill_root|remove_mcp_server
+	Status              string                         `json:"status"`    // planned|done|failed
+	RiskLevel           RiskLevel                      `json:"riskLevel"` // low|medium|high
+	RiskReasons         []string                       `json:"riskReasons,omitempty"`
+	Name                string                         `json:"name,omitempty"`
+	Source              string                         `json:"source,omitempty"`
+	Target              string                         `json:"target,omitempty"`
+	ConfigPath          string                         `json:"configPath,omitempty"`
+	Scope               string                         `json:"scope,omitempty"`
+	Mode                string                         `json:"mode,omitempty"`
+	Transport           string                         `json:"transport,omitempty"`
+	URL                 string                         `json:"url,omitempty"`
+	Command             string                         `json:"command,omitempty"`
+	Args                []string                       `json:"args,omitempty"`
+	Env                 map[string]string              `json:"env,omitempty"`
+	Headers             map[string]string              `json:"headers,omitempty"`
+	Skills              []string                       `json:"skills,omitempty"`
+	SkillCount          int                            `json:"skillCount,omitempty"`
+	Agents              []string                       `json:"agents,omitempty"`
+	AgentCount          int                            `json:"agentCount,omitempty"`
+	Commands            []string                       `json:"commands,omitempty"`
+	CommandCount        int                            `json:"commandCount,omitempty"`
+	Commit              string                         `json:"commit,omitempty"`        // resolved git snapshot the plan describes; apply pins to it
+	Layout              string                         `json:"layout,omitempty"`        // canonical_dir|flat_compat|registered_root
+	InstallRoot         string                         `json:"installRoot,omitempty"`   // skills root or registered custom root
+	CanonicalPath       string                         `json:"canonicalPath,omitempty"` // <skill-name>/SKILL.md when applicable
+	Discoverable        bool                           `json:"discoverable,omitempty"`  // Store.Read can load it after apply/register
+	Indexed             bool                           `json:"indexed,omitempty"`       // Store.List includes it for the skills index
+	ToolCount           int                            `json:"toolCount,omitempty"`
+	Compatibility       string                         `json:"compatibility,omitempty"`
+	MappedCapabilities  []string                       `json:"mappedCapabilities,omitempty"`
+	SkippedCapabilities []pluginpkg.CompatibilityIssue `json:"skippedCapabilities,omitempty"`
+	HookCount           int                            `json:"hookCount,omitempty"`
+	ManifestKind        string                         `json:"manifestKind,omitempty"`
+	Version             string                         `json:"version,omitempty"`
+	Warnings            []string                       `json:"warnings,omitempty"`
+	Error               string                         `json:"error,omitempty"`
+	Next                string                         `json:"next,omitempty"`
 
 	// Internal state used by apply. Stripped by publicActions before
 	// serializing to JSON.

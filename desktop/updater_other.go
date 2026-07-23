@@ -10,6 +10,6 @@ func installerCommand(name, _ string) *exec.Cmd {
 	return exec.Command(name)
 }
 
-func startWindowsUpdateHandoff(name, dir, _ string) error {
+func startWindowsUpdateHandoff(name, dir, _, _ string) error {
 	return installerCommand(name, dir).Start()
 }

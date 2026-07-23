@@ -69,19 +69,41 @@ type ExternalFolderRefEntry struct {
 	IsDir       bool
 }
 
-// refTokenRe matches an @reference token: '@' then a run of non-space chars.
-var refTokenRe = regexp.MustCompile(`@([^\s]+)`)
 var pathLocationSuffixRe = regexp.MustCompile(`:\d+(?::\d+)?:?$`)
 
 const externalFolderRefPrefix = "__reasonix_external_folder"
 
 // parseRefTokens extracts the deduped, punctuation-trimmed tokens following '@'
-// in a line. Pure: classification (server? file?) happens in classifyRef.
+// in a line. A token is a run of non-whitespace bytes, except that a
+// backslash-escaped space or tab is part of the token with the backslash
+// dropped — that is how a path containing spaces survives the
+// whitespace-delimited grammar (EscapeRefPath produces that form). Any other
+// backslash stays literal so Windows separators keep their meaning. Pure:
+// classification (server? file?) happens in classifyRef.
 func parseRefTokens(line string) []string {
 	var toks []string
 	seen := map[string]bool{}
-	for _, g := range refTokenRe.FindAllStringSubmatch(line, -1) {
-		t := strings.TrimRight(g[1], ".,;!?)]}")
+	for i := 0; i < len(line); i++ {
+		if line[i] != '@' {
+			continue
+		}
+		var b strings.Builder
+		j := i + 1
+		for j < len(line) {
+			ch := line[j]
+			if ch == '\\' && j+1 < len(line) && (line[j+1] == ' ' || line[j+1] == '\t') {
+				b.WriteByte(line[j+1])
+				j += 2
+				continue
+			}
+			if isRefTokenBoundary(ch) {
+				break
+			}
+			b.WriteByte(ch)
+			j++
+		}
+		i = j - 1
+		t := strings.TrimRight(b.String(), ".,;!?)]}")
 		if t == "" || seen[t] {
 			continue
 		}
@@ -89,6 +111,53 @@ func parseRefTokens(line string) []string {
 		toks = append(toks, t)
 	}
 	return toks
+}
+
+// isRefTokenBoundary matches the whitespace class the old `@([^\s]+)` token
+// regexp stopped at.
+func isRefTokenBoundary(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r', '\f':
+		return true
+	default:
+		return false
+	}
+}
+
+// EscapeRefPath returns path with spaces and tabs backslash-escaped so the
+// result survives whitespace-delimited @-token parsing (parseRefTokens
+// reverses it). Every other byte, including backslashes, passes through
+// unchanged so Windows separators keep their meaning.
+func EscapeRefPath(path string) string {
+	if !strings.ContainsAny(path, " \t") {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path) + 8)
+	for i := 0; i < len(path); i++ {
+		if path[i] == ' ' || path[i] == '\t' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
+}
+
+// UnescapeRefPath reverses EscapeRefPath: a backslash before a space or tab is
+// dropped; any other backslash stays literal.
+func UnescapeRefPath(path string) string {
+	if !strings.Contains(path, `\`) {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path))
+	for i := 0; i < len(path); i++ {
+		if path[i] == '\\' && i+1 < len(path) && (path[i+1] == ' ' || path[i+1] == '\t') {
+			continue
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
 }
 
 // classifyRef decides what a token refers to. A "server:uri" token whose server
@@ -642,7 +711,7 @@ func FileRefLine(line string) (string, bool) {
 	if info, err := os.Stat(p); err != nil || info.IsDir() {
 		return "", false
 	}
-	return "@" + p, true
+	return "@" + EscapeRefPath(p), true
 }
 
 // SlashCodeCommentLine reports whether a slash-prefixed line is ordinary source

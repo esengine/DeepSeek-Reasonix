@@ -6,14 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 )
 
 const (
-	createNewConsole       = 0x00000010
 	shgfiIcon              = 0x000000100
 	shgfiLargeIcon         = 0x000000000
 	dibRGBColors           = 0
@@ -76,6 +76,9 @@ func firstWindowsExecutable(names []string, candidates ...string) string {
 		if path, err := exec.LookPath(name); err == nil {
 			return path
 		}
+		if path := windowsAppPathExecutable(name); path != "" {
+			return path
+		}
 	}
 	for _, candidate := range candidates {
 		if candidate == "" {
@@ -90,6 +93,104 @@ func firstWindowsExecutable(names []string, candidates ...string) string {
 		}
 	}
 	return ""
+}
+
+// windowsAppPathExecutable resolves an install registered under
+// HKCU/HKLM ...\App Paths\<name>. Custom VS Code / editor installs often only
+// appear there, not on PATH or under the default Program Files trees.
+func windowsAppPathExecutable(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	subKey := `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\` + name
+	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
+		key, err := registry.OpenKey(root, subKey, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		raw, _, err := key.GetStringValue("")
+		key.Close()
+		if err != nil {
+			continue
+		}
+		path := strings.Trim(strings.TrimSpace(raw), `"`)
+		if path == "" {
+			continue
+		}
+		path = os.ExpandEnv(path)
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
+}
+
+// windowsTerminalIconSource prefers a real Windows Terminal package binary for
+// SHGetFileInfo. Store installs expose wt.exe as an App Execution Alias (often
+// zero bytes under LocalAppData\Microsoft\WindowsApps). The package binary may
+// live under Program Files\WindowsApps, but non-elevated processes frequently
+// cannot enumerate that protected directory — so a renderable console-host
+// fallback must win over a zero-byte alias (see pickWindowsTerminalIconSource).
+func windowsTerminalIconSource(wtPath string) string {
+	var resolved []windowsIconCandidate
+	for _, candidate := range windowsTerminalIconCandidatePaths(
+		wtPath,
+		os.Getenv("LOCALAPPDATA"),
+		os.Getenv("ProgramFiles"),
+	) {
+		matches := []string{candidate}
+		if strings.ContainsAny(candidate, `*?[`) {
+			globbed, err := filepath.Glob(candidate)
+			if err != nil || len(globbed) == 0 {
+				continue
+			}
+			matches = globbed
+		}
+		for _, match := range matches {
+			info, err := os.Stat(match)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			resolved = append(resolved, windowsIconCandidate{Path: match, Size: info.Size()})
+		}
+	}
+	// Prefer a normal console host icon over a zero-byte wt.exe alias so the
+	// menu never ships a blank glyph when WindowsApps is unreadable.
+	renderable := firstWindowsExecutable([]string{"powershell.exe"},
+		joinWindowsInstallPath(os.Getenv("WINDIR"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
+	if picked := pickWindowsTerminalIconSource(resolved, renderable); picked != "" {
+		return picked
+	}
+	return strings.TrimSpace(wtPath)
+}
+
+// shellExecuteOpenFile launches file via ShellExecuteW("open") without cmd.exe.
+// parameters and directory are optional; directory becomes the process CWD.
+func shellExecuteOpenFile(file, parameters, directory string) error {
+	verb, err := windows.UTF16PtrFromString("open")
+	if err != nil {
+		return err
+	}
+	filePtr, err := windows.UTF16PtrFromString(file)
+	if err != nil {
+		return err
+	}
+	var paramsPtr *uint16
+	if parameters != "" {
+		paramsPtr, err = windows.UTF16PtrFromString(parameters)
+		if err != nil {
+			return err
+		}
+	}
+	var dirPtr *uint16
+	if directory != "" {
+		dirPtr, err = windows.UTF16PtrFromString(directory)
+		if err != nil {
+			return err
+		}
+	}
+	return windows.ShellExecute(0, verb, filePtr, paramsPtr, dirPtr, windows.SW_SHOWNORMAL)
 }
 
 func platformExternalOpenerSpecs() []externalOpenerSpec {
@@ -126,7 +227,14 @@ func platformExternalOpenerSpecs() []externalOpenerSpec {
 		joinWindowsInstallPath(programFiles, "Cursor", "Cursor.exe"))
 	add("file-explorer", "File Explorer", externalOpenerFileManager, "shell-open", []string{"explorer.exe"},
 		joinWindowsInstallPath(windowsDir, "explorer.exe"))
-	add("windows-terminal", "Windows Terminal", externalOpenerTerminal, "windows-terminal", []string{"wt.exe"})
+	if wt := firstWindowsExecutable([]string{"wt.exe"}); wt != "" {
+		specs = append(specs, externalOpenerSpec{
+			View:       ExternalOpenerView{ID: "windows-terminal", Name: "Windows Terminal", Kind: externalOpenerTerminal},
+			Target:     wt,
+			LaunchMode: "windows-terminal",
+			IconSource: windowsTerminalIconSource(wt),
+		})
+	}
 	add("powershell", "PowerShell", externalOpenerTerminal, "console", []string{"pwsh.exe", "powershell.exe"},
 		joinWindowsInstallPath(windowsDir, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
 	add("command-prompt", "Command Prompt", externalOpenerTerminal, "console", []string{"cmd.exe"},
@@ -267,11 +375,18 @@ func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {
 	case "path":
 		cmd = exec.Command(spec.Target, path)
 	case "windows-terminal":
+		// exec.Command uses CreateProcess argument escaping, not cmd.exe, so
+		// workspace paths with shell metacharacters stay a single -d argument.
 		cmd = exec.Command(spec.Target, "-d", path)
 	case "console":
-		cmd = exec.Command(spec.Target)
-		cmd.Dir = path
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewConsole}
+		// Never route console openers through cmd.exe / start: working-directory
+		// text would be re-parsed as shell syntax (& | ^ etc.). ShellExecute
+		// opens the binary with lpDirectory set to the workspace path.
+		plan := planWindowsConsoleLaunch(spec.Target, path)
+		if plan.File == "" {
+			return os.ErrNotExist
+		}
+		return shellExecuteOpenFile(plan.File, "", plan.Dir)
 	default:
 		cmd = exec.Command(spec.Target, path)
 	}

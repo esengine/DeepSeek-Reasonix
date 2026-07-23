@@ -68,5 +68,23 @@ eq(
 eq(baseName("C:\\Users\\Abyss\\Desktop\\DS30000.sl2"), "DS30000.sl2", "extracts Windows path basenames");
 eq(baseName("/Users/abyss/Desktop/park.png"), "park.png", "extracts POSIX path basenames");
 
+const escaped = parseAttachmentRefsForDisplay("look at @docs/my\\ report\\ 2026.pdf now");
+eq(escaped.text, "look at now", "removes an escaped workspace ref from message text");
+eq(
+  escaped.attachments.map((a) => ({ path: a.path, name: a.name, kind: a.kind, source: a.source })),
+  [{ path: "docs/my report 2026.pdf", name: "my report 2026.pdf", kind: "file", source: "workspace" }],
+  "escaped workspace ref becomes one full badge with the unescaped path",
+);
+eq(
+  formatAttachmentRefForDisplay({ path: "docs/my report 2026.pdf", name: "my report 2026.pdf", source: "workspace" }),
+  "@docs/my\\ report\\ 2026.pdf",
+  "workspace display refs escape whitespace for lossless edit replay",
+);
+eq(
+  formatAttachmentRefForSubmit({ path: "docs/my report 2026.pdf" }),
+  "@docs/my\\ report\\ 2026.pdf",
+  "workspace submit refs escape whitespace so @-token parsing resolves them",
+);
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

@@ -361,36 +361,6 @@ func shouldUseAutoResearch(goal string, mode GoalResearchMode) bool {
 	return isAutoResearchGoal(goal)
 }
 
-func shouldAutoStartResearchGoal(input string) bool {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "!") {
-		return false
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, ".reasonix/autoresearch/") {
-		return true
-	}
-	for _, phrase := range autoResearchAutoStartPhrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	categories := autoResearchPhaseCount(lower)
-	switch {
-	case strings.Contains(lower, "彻底") && categories >= 3:
-		return true
-	case strings.Contains(lower, "完整") && categories >= 3:
-		return true
-	case strings.Contains(lower, "长期") && categories >= 2 && containsAnyGoalKeyword(lower, []string{"实验", "验证", "修复", "排查", "优化"}):
-		return true
-	case strings.Contains(lower, "thoroughly") && categories >= 3:
-		return true
-	case strings.Contains(lower, "complete") && categories >= 3:
-		return true
-	}
-	return false
-}
-
 func isAutoResearchGoal(goal string) bool {
 	trimmed := strings.TrimSpace(goal)
 	if trimmed == "" {
@@ -416,32 +386,6 @@ func autoResearchPhaseCount(lower string) int {
 		}
 	}
 	return categories
-}
-
-var autoResearchAutoStartPhrases = []string{
-	"直到根因",
-	"根因明确",
-	"多轮排查",
-	"不要原地打转",
-	"别原地打转",
-	"完整做成方案",
-	"完整方案并验证",
-	"跑实验",
-	"反复验证",
-	"系统性研究",
-	"持续研究",
-	"持续排查",
-	"持续推进",
-	"长期跑",
-	"until the root cause",
-	"root cause is clear",
-	"debug until",
-	"do not spin",
-	"don't spin",
-	"keep researching",
-	"long-horizon",
-	"long horizon",
-	"long-running",
 }
 
 var autoResearchStrongKeywords = []string{
@@ -630,7 +574,7 @@ func (c *Controller) RunSkill(input string) (sent string, found bool) {
 	if !ok {
 		return "", false
 	}
-	return skill.Render(sk, task), true
+	return c.skills.render(sk, task), true
 }
 
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional

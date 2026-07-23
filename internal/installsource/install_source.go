@@ -188,6 +188,14 @@ func (t *installSourceTool) Execute(ctx context.Context, raw json.RawMessage) (s
 
 	actions, warnings, err := t.plan(ctx, req)
 	if err != nil {
+		if errors.Is(err, ErrNoCompatibleCapabilities) {
+			return marshalJSON(response{
+				OK: false, Status: "blocked", Op: req.Op, Applied: false,
+				Source: req.Source, Kind: "plugin", Scope: req.Scope, Mode: req.Mode,
+				Warnings: warnings, Error: err.Error(),
+				Next: "Choose a plugin that exports a supported skill, command, agent, hook, or MCP server.",
+			}), nil
+		}
 		return "", err
 	}
 	// Marketplace planning may keep one temporary clone alive so apply can

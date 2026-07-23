@@ -1,5 +1,6 @@
 import { restoreAttachmentRefsForSubmit } from "./attachmentDisplay";
 import { invocationSegmentsFromMessage, serializeInvocationSubmit, type ComposerInvocation } from "./invocationDisplay";
+import { splitSelectedTextContext } from "./selectedTextContext";
 
 export function replaySubmitText(
   originalSubmitText: string | undefined,
@@ -54,4 +55,20 @@ export function replaySubmitText(
     return `${originalSubmit.slice(0, originalSubmit.length - originalFallbackSubmit.length)}${fallbackSubmit}`.trim();
   }
   return fallbackSubmit;
+}
+
+export function replaySubmitTextPreservingSelectedContext(
+  originalSubmitText: string | undefined,
+  originalDisplayText: string,
+  nextDisplayText: string,
+  fallbackSubmitText: string,
+): string {
+  const selected = splitSelectedTextContext(originalSubmitText);
+  const replayed = replaySubmitText(
+    selected.submitText,
+    originalDisplayText,
+    nextDisplayText,
+    fallbackSubmitText,
+  );
+  return [replayed, selected.contextBlock].filter(Boolean).join("\n\n");
 }

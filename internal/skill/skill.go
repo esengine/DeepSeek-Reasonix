@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/frontmatter"
+	"reasonix/internal/tool"
 )
 
 // ErrInvocationUnavailable marks a profile/dependency gate that can become
@@ -67,6 +69,13 @@ type Skill struct {
 	Scope       Scope  // where it came from
 	Path        string // absolute path to the SKILL.md / <name>.md, or "(builtin)"
 	Plugin      string // installed plugin package name; empty for non-plugin skills
+	// runtimeBindingsPrepared is session-local invocation state. It must not be
+	// inferred from untrusted Markdown content or persisted skill metadata.
+	runtimeBindingsPrepared bool
+	// SlashPrefix overrides Plugin only for the user-facing invocation name.
+	// Imported Claude agents use <plugin>:agent so an agent and skill may safely
+	// share the same upstream name.
+	SlashPrefix string
 	// AllowedTools, when non-empty, scopes a subagent skill's tool registry to
 	// these literal tool names (from the `allowed-tools` frontmatter).
 	AllowedTools []string
@@ -74,7 +83,7 @@ type Skill struct {
 	Model        string // optional model override for runAs=subagent (frontmatter `model:`)
 	Effort       string // optional effort for runAs=subagent (frontmatter `effort:`)
 	// ReadOnly, when true, runs a subagent skill against the read-only tool
-	// registry: writer tools are stripped and bash enforces the plan-mode safe
+	// registry: writer tools are stripped and bash enforces the read-only
 	// command policy at execution time (frontmatter `read-only:`). This is a
 	// tool-boundary contract, not a prompt promise.
 	ReadOnly bool
@@ -106,10 +115,14 @@ type Skill struct {
 // SlashName returns the user-facing slash identifier. Plugin skills use a
 // package-qualified name while the internal Name remains stable for run_skill.
 func (s Skill) SlashName() string {
-	if strings.TrimSpace(s.Plugin) == "" {
+	prefix := strings.TrimSpace(s.SlashPrefix)
+	if prefix == "" {
+		prefix = strings.TrimSpace(s.Plugin)
+	}
+	if prefix == "" {
 		return s.Name
 	}
-	return strings.TrimSpace(s.Plugin) + ":" + s.Name
+	return prefix + ":" + s.Name
 }
 
 // IsValidName reports whether name is a usable skill identifier.
@@ -120,15 +133,20 @@ func IsValidName(name string) bool { return config.IsValidSkillName(name) }
 // ReasonixHomeDir overrides the canonical Reasonix home; empty uses
 // config.ReasonixHomeDir(), or HomeDir/.reasonix when HomeDir is explicitly set.
 type Options struct {
-	HomeDir         string
-	ReasonixHomeDir string
-	ProjectRoot     string
-	CustomPaths     []string
-	PluginPaths     map[string][]string // canonical custom root -> installed plugin package names
-	ExcludedPaths   []string
-	DisabledNames   []string
-	MaxDepth        int
-	DisableBuiltins bool // suppress shipped built-ins (test-only knob)
+	HomeDir          string
+	ReasonixHomeDir  string
+	ProjectRoot      string
+	CustomPaths      []string
+	PluginPaths      map[string][]string // canonical custom root -> installed plugin package names
+	PluginAgentPaths map[string][]string // plugin roots whose flat Markdown files are Claude agents
+	ExcludedPaths    []string
+	DisabledNames    []string
+	MaxDepth         int
+	DisableBuiltins  bool // suppress shipped built-ins (test-only knob)
+	// DisableDiscovery returns an empty store without probing project, custom,
+	// global, plugin, or built-in skill sources. Recovery safe mode uses this so
+	// a broken or unreadable skill tree cannot interfere with startup.
+	DisableDiscovery bool
 	// Stderr is the writer for diagnostic warnings. When nil, defaults to
 	// os.Stderr. Set to io.Discard to suppress output (e.g. during model
 	// switch inside a bubbletea session).
@@ -137,18 +155,21 @@ type Options struct {
 
 // Store resolves skills across the configured roots.
 type Store struct {
-	homeDir         string
-	reasonixHomeDir string
-	projectRoot     string
-	customPaths     []string
-	pluginPaths     map[string][]string
-	excludedPaths   map[string]bool
-	disabled        map[string]bool
-	maxDepth        int
-	disableBuiltins bool
-	stderr          io.Writer
-	runtimeProfile  string
-	requiresReady   func([]string) []string
+	homeDir          string
+	reasonixHomeDir  string
+	projectRoot      string
+	customPaths      []string
+	pluginPaths      map[string][]string
+	pluginAgentPaths map[string][]string
+	excludedPaths    map[string]bool
+	disabled         map[string]bool
+	maxDepth         int
+	disableBuiltins  bool
+	disableDiscovery bool
+	stderr           io.Writer
+	runtimeProfile   string
+	requiresReady    func([]string) []string
+	toolBindings     func(Skill) []tool.MCPBinding
 }
 
 // New builds a Store. Relative custom paths and a relative project root are made
@@ -182,6 +203,7 @@ func New(opts Options) *Store {
 	}
 	custom := dedupePaths(resolveCustomPaths(opts.CustomPaths, base, home))
 	pluginPaths := normalizePluginPaths(opts.PluginPaths)
+	pluginAgentPaths := normalizePluginPaths(opts.PluginAgentPaths)
 	excluded := map[string]bool{}
 	for _, p := range dedupePaths(resolveCustomPaths(opts.ExcludedPaths, base, home)) {
 		excluded[config.CanonicalSkillPath(p)] = true
@@ -191,16 +213,18 @@ func New(opts Options) *Store {
 		stderr = os.Stderr
 	}
 	return &Store{
-		homeDir:         home,
-		reasonixHomeDir: reasonixHome,
-		projectRoot:     root,
-		customPaths:     custom,
-		pluginPaths:     pluginPaths,
-		excludedPaths:   excluded,
-		disabled:        disabledNameSet(opts.DisabledNames),
-		maxDepth:        normalizeMaxDepth(opts.MaxDepth),
-		disableBuiltins: opts.DisableBuiltins,
-		stderr:          stderr,
+		homeDir:          home,
+		reasonixHomeDir:  reasonixHome,
+		projectRoot:      root,
+		customPaths:      custom,
+		pluginPaths:      pluginPaths,
+		pluginAgentPaths: pluginAgentPaths,
+		excludedPaths:    excluded,
+		disabled:         disabledNameSet(opts.DisabledNames),
+		maxDepth:         normalizeMaxDepth(opts.MaxDepth),
+		disableBuiltins:  opts.DisableBuiltins,
+		disableDiscovery: opts.DisableDiscovery,
+		stderr:           stderr,
 	}
 }
 
@@ -213,6 +237,123 @@ func (s *Store) ConfigureInvocationPolicy(profile string, requiresReady func([]s
 	}
 	s.runtimeProfile = normalizeRuntimeProfile(profile)
 	s.requiresReady = requiresReady
+}
+
+// ConfigureToolBindings installs a session-local resolver for plugin-owned MCP
+// tools. It affects only an invoked skill body and never the cache-stable index.
+func (s *Store) ConfigureToolBindings(resolve func(Skill) []tool.MCPBinding) {
+	if s == nil {
+		return
+	}
+	s.toolBindings = resolve
+}
+
+// Prepare binds a plugin skill's portable MCP references to this session's
+// exact callable names. Non-plugin skills and sessions without bindings are
+// returned byte-for-byte unchanged.
+func (s *Store) Prepare(sk Skill) Skill {
+	if s == nil || s.toolBindings == nil || strings.TrimSpace(sk.Plugin) == "" || sk.runtimeBindingsPrepared {
+		return sk
+	}
+	bindings := append([]tool.MCPBinding(nil), s.toolBindings(sk)...)
+	if len(bindings) == 0 {
+		return sk
+	}
+	sort.Slice(bindings, func(i, j int) bool { return bindings[i].CallableName < bindings[j].CallableName })
+	seen := map[string]bool{}
+	unique := bindings[:0]
+	for _, binding := range bindings {
+		if binding.CallableName == "" || seen[binding.CallableName] {
+			continue
+		}
+		seen[binding.CallableName] = true
+		unique = append(unique, binding)
+	}
+	bindings = unique
+	if len(bindings) == 0 {
+		return sk
+	}
+	sk.AllowedTools = bindAllowedTools(sk.AllowedTools, bindings)
+	sk.runtimeBindingsPrepared = true
+
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(sk.Body, " \t\r\n"))
+	b.WriteString("\n\n## Runtime MCP tool bindings\n\n")
+	b.WriteString("These host-generated bindings are authoritative for this invocation. Use the exact direct name below; if only `use_capability` is available, use the stable capability ID. Short or Claude-style MCP names in this skill refer to these bindings.\n")
+	for _, binding := range bindings {
+		fmt.Fprintf(&b, "\n- `%s/%s` → `%s` (capability `%s`)", binding.Server, binding.RawName, binding.CallableName, binding.CapabilityID)
+	}
+	sk.Body = b.String()
+	return sk
+}
+
+// Render prepares and renders a skill for a direct slash invocation.
+func (s *Store) Render(sk Skill, args string) string { return Render(s.Prepare(sk), args) }
+
+func bindAllowedTools(refs []string, bindings []tool.MCPBinding) []string {
+	if len(refs) == 0 {
+		return refs
+	}
+	out := make([]string, 0, len(refs))
+	seen := map[string]bool{}
+	appendOne := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	for _, ref := range refs {
+		matches := map[string]tool.MCPBinding{}
+		isPattern := strings.ContainsAny(ref, "*?[")
+		for _, binding := range bindings {
+			aliases := append(tool.MCPBindingAliases(binding), binding.CallableName)
+			for _, alias := range aliases {
+				matched := ref == alias
+				if isPattern {
+					matched, _ = path.Match(ref, alias)
+				}
+				if matched {
+					matches[binding.CallableName] = binding
+					break
+				}
+			}
+		}
+		if isPattern {
+			// Preserve the original pattern so an existing broad allowlist such as
+			// "*" keeps all of its prior tools. Add only canonical MCP names the
+			// upstream/Claude pattern itself cannot match in Reasonix.
+			appendOne(ref)
+			names := make([]string, 0, len(matches))
+			for name := range matches {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				if matched, err := path.Match(ref, name); err != nil || !matched {
+					appendOne(name)
+				}
+				// Capability IDs are host-only allowlist entries consumed when the
+				// session exposes this MCP tool solely through use_capability. Do not
+				// add one when the authored pattern already grants the proxy itself.
+				proxyMatched, _ := path.Match(ref, "use_capability")
+				if !proxyMatched {
+					appendOne(matches[name].CapabilityID)
+				}
+			}
+			continue
+		}
+		if len(matches) == 1 {
+			for name, binding := range matches {
+				appendOne(name)
+				appendOne(binding.CapabilityID)
+			}
+			continue
+		}
+		// Preserve unresolved or ambiguous literals. The child registry will not
+		// gain any broader permission from them.
+		appendOne(ref)
+	}
+	return out
 }
 
 // ValidateInvocation enforces profiles/requires frontmatter at the host tool
@@ -301,6 +442,7 @@ type discoveryRoot struct {
 	Root
 	requireFlatMarker bool
 	plugins           []string
+	forceSubagent     bool
 }
 
 // roots returns the discovery directories, highest priority first: the
@@ -308,6 +450,9 @@ type discoveryRoot struct {
 // under the project root → custom paths → the Reasonix home skills dir → other
 // home-dir convention dirs. A later root never overrides an earlier one.
 func (s *Store) roots() []discoveryRoot {
+	if s == nil || s.disableDiscovery {
+		return nil
+	}
 	type de struct {
 		dir               string
 		scope             Scope
@@ -339,10 +484,12 @@ func (s *Store) roots() []discoveryRoot {
 		if s.excludedPaths[config.CanonicalSkillPath(d.dir)] {
 			continue
 		}
+		key := config.CanonicalSkillPath(d.dir)
 		out = append(out, discoveryRoot{
 			Root:              Root{Dir: d.dir, Scope: d.scope, Priority: len(out), Status: pathStatus(d.dir)},
 			requireFlatMarker: d.requireFlatMarker,
-			plugins:           append([]string(nil), s.pluginPaths[config.CanonicalSkillPath(d.dir)]...),
+			plugins:           append([]string(nil), s.pluginPaths[key]...),
+			forceSubagent:     len(s.pluginAgentPaths[key]) > 0,
 		})
 	}
 	return out
@@ -439,6 +586,9 @@ func pathStatus(dir string) PathStatus {
 }
 
 func (s *Store) discoveredSkills() []Skill {
+	if s == nil || s.disableDiscovery {
+		return nil
+	}
 	var out []Skill
 	for _, r := range s.roots() {
 		if r.Status != StatusOK {
@@ -455,6 +605,9 @@ func (s *Store) discoveredSkills() []Skill {
 			for _, plugin := range r.plugins {
 				owned := sk
 				owned.Plugin = plugin
+				if r.forceSubagent {
+					owned.SlashPrefix = plugin + ":agent"
+				}
 				out = append(out, owned)
 			}
 		}
@@ -581,6 +734,16 @@ func (s *Store) ReadSlash(name string) (Skill, bool) {
 func (s *Store) discoverRoot(r discoveryRoot) []Skill {
 	var out []Skill
 	s.scanDir(r.Dir, r.Scope, r.requireFlatMarker, 1, map[string]bool{}, &out)
+	if r.forceSubagent {
+		for i := range out {
+			out[i].RunAs = RunSubagent
+			out[i].Invocation = "manual"
+			out[i].AllowedTools = mapClaudeAgentTools(out[i].AllowedTools)
+			if isClaudeModelAlias(out[i].Model) {
+				out[i].Model = ""
+			}
+		}
+	}
 	return out
 }
 
@@ -722,7 +885,7 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 		Body:         loadBodyWithScripts(path, loadBodyWithReferences(path, strings.TrimSpace(body))),
 		Scope:        scope,
 		Path:         path,
-		AllowedTools: parseAllowedTools(fm[skillFrontmatterAllowedTools]),
+		AllowedTools: parseAllowedTools(firstNonEmptySkillValue(fm[skillFrontmatterAllowedTools], fm["tools"])),
 		RunAs:        parseRunAs(fm[skillFrontmatterRunAs], fm[skillFrontmatterContext], fm[skillFrontmatterAgent]),
 		Model:        strings.TrimSpace(fm[skillFrontmatterModel]),
 		Effort:       strings.TrimSpace(fm[skillFrontmatterEffort]),
@@ -740,6 +903,45 @@ func (s *Store) parseSkill(path, stem string, scope Scope, requireSkillMarker bo
 	}
 	sk.Profiles, sk.InvalidProfiles = parseProfilesFrontmatter(fm[skillFrontmatterProfiles])
 	return sk, true
+}
+
+func firstNonEmptySkillValue(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func isClaudeModelAlias(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "sonnet", "opus", "haiku", "inherit":
+		return true
+	default:
+		return false
+	}
+}
+
+func mapClaudeAgentTools(in []string) []string {
+	mapping := map[string]string{
+		"read": "read_file", "write": "write_file", "edit": "edit_file",
+		"bash": "bash", "grep": "grep", "glob": "glob", "ls": "ls",
+		"webfetch": "web_fetch", "websearch": "web_search",
+	}
+	out := make([]string, 0, len(in))
+	seen := map[string]bool{}
+	for _, name := range in {
+		mapped := strings.TrimSpace(name)
+		if replacement := mapping[strings.ToLower(mapped)]; replacement != "" {
+			mapped = replacement
+		}
+		if mapped != "" && !seen[mapped] {
+			seen[mapped] = true
+			out = append(out, mapped)
+		}
+	}
+	return out
 }
 
 const (
@@ -1082,12 +1284,16 @@ func parseAllowedTools(raw string) []string {
 // parseCSVFrontmatter splits simple comma-separated frontmatter values. Full
 // YAML lists are intentionally out of scope for the existing frontmatter parser.
 func parseCSVFrontmatter(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
 		return nil
+	}
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		raw = strings.TrimSpace(raw[1 : len(raw)-1])
 	}
 	var out []string
 	for _, p := range strings.Split(raw, ",") {
-		if t := strings.TrimSpace(p); t != "" {
+		if t := strings.Trim(strings.TrimSpace(p), `"'`); t != "" {
 			out = append(out, t)
 		}
 	}

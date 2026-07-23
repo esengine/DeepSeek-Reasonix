@@ -21,6 +21,12 @@ type composerSelection struct {
 	value        string
 }
 
+// composerPromptWidth is reserved by textarea on every visual row. The first
+// row paints "❯ "; continuation rows use the same-width blank gutter.
+const composerPromptWidth = 2
+
+const composerWheelRows = 3
+
 type composerLayoutCache struct {
 	value string
 	width int
@@ -183,6 +189,74 @@ func (m chatTUI) composerRowsForRender() []composerVisualRow {
 	return composerLayout(value, width)
 }
 
+// composerViewOffset is the first visual row currently painted in the input.
+// Normally bubbles/textarea owns it and keeps the insertion cursor visible. A
+// mouse-wheel gesture temporarily detaches the painted viewport while leaving
+// that cursor and the textarea's own offset untouched.
+func (m chatTUI) composerViewOffset() int {
+	rows := m.composerRowsForRender()
+	maximum := max(0, len(rows)-m.input.Height())
+	offset := m.input.ScrollYOffset()
+	if m.composerScrollDetached {
+		offset = m.composerScrollOffset
+	}
+	return min(max(offset, 0), maximum)
+}
+
+func (m *chatTUI) followComposerCursor() {
+	m.composerScrollDetached = false
+	m.composerScrollOffset = m.input.ScrollYOffset()
+}
+
+// scrollComposer moves only the composer's painted viewport. It returns false
+// at an edge so the caller can continue the same wheel gesture in the transcript.
+func (m *chatTUI) scrollComposer(delta int) bool {
+	if delta == 0 || m.hideComposer() || m.input.Height() <= 0 {
+		return false
+	}
+	maximum := max(0, len(m.composerRows())-m.input.Height())
+	if maximum == 0 {
+		return false
+	}
+	current := m.composerViewOffset()
+	next := min(max(current+delta, 0), maximum)
+	if next == current {
+		return false
+	}
+	m.composerScrollOffset = next
+	m.composerScrollDetached = next != m.input.ScrollYOffset()
+	return true
+}
+
+func (m chatTUI) mouseOverComposer(screenX, screenY int) bool {
+	if m.hideComposer() || screenX < 0 || screenX >= max(m.width, 10) {
+		return false
+	}
+	_, contentY, ok := m.composerOrigin()
+	if !ok {
+		return false
+	}
+	// Include both horizontal border rows so a wheel gesture anywhere over the
+	// visible composer card has the same target.
+	return screenY >= contentY-1 && screenY <= contentY+m.input.Height()
+}
+
+// composerCursor maps the textarea's real insertion cursor into the manually
+// scrolled viewport. The cursor is hidden when the user has scrolled it out of
+// view; typing or a cursor key reattaches the viewport and shows it again.
+func (m chatTUI) composerCursor() *tea.Cursor {
+	cur := m.input.Cursor()
+	if cur == nil || !m.composerScrollDetached {
+		return cur
+	}
+	absoluteRow := m.input.ScrollYOffset() + cur.Y
+	cur.Y = absoluteRow - m.composerViewOffset()
+	if cur.Y < 0 || cur.Y >= m.input.Height() {
+		return nil
+	}
+	return cur
+}
+
 func composerClusters(row composerVisualRow) []composerCluster {
 	actual := make([]composerCell, 0, len(row.cells))
 	var text strings.Builder
@@ -274,18 +348,23 @@ func (m chatTUI) selectedComposerText() string {
 }
 
 // composerOrigin returns the terminal cell occupied by textarea content (after
-// the input box's top border and left padding). Deriving it from the two cursor
-// positions keeps hit-testing aligned with every optional panel above the box.
+// the input box's top border, left padding, and prompt gutter). Deriving it from
+// the two cursor positions keeps hit-testing aligned with every optional panel
+// above the box.
 func (m chatTUI) composerOrigin() (x, y int, ok bool) {
 	if m.hideComposer() {
 		return 0, 0, false
 	}
 	local := m.input.Cursor()
-	view := m.View()
+	// Derive the stable layout origin from the normal caret-following frame even
+	// while the manually scrolled frame has hidden the insertion cursor.
+	normal := m
+	normal.composerScrollDetached = false
+	view := normal.View()
 	if local == nil || view.Cursor == nil {
 		return 0, 0, false
 	}
-	return view.Cursor.X - local.X, view.Cursor.Y - local.Y, true
+	return view.Cursor.X - local.X + composerPromptWidth, view.Cursor.Y - local.Y, true
 }
 
 func (m *chatTUI) composerCaretAt(screenX, screenY int, clamp bool) (composerCaret, bool) {
@@ -304,7 +383,7 @@ func (m *chatTUI) composerCaretAt(screenX, screenY int, clamp bool) (composerCar
 		relY = m.input.Height() - 1
 	}
 	rows := m.composerRows()
-	visualRow := m.input.ScrollYOffset() + relY
+	visualRow := m.composerViewOffset() + relY
 	if visualRow < 0 {
 		visualRow = 0
 	}
@@ -315,6 +394,7 @@ func (m *chatTUI) composerCaretAt(screenX, screenY int, clamp bool) (composerCar
 }
 
 func (m *chatTUI) setComposerCursor(offset int) {
+	m.followComposerCursor()
 	rows := m.composerRows()
 	caret := composerCaretForOffset(rows, offset)
 	m.input.MoveToBegin()
@@ -388,21 +468,56 @@ func composerRowSelectionSpan(row composerVisualRow, start, end int) (lo, hi int
 
 func (m chatTUI) renderComposerInput() string {
 	view := m.input.View()
+	visualStart := m.input.ScrollYOffset()
+	if m.composerScrollDetached {
+		view = m.renderDetachedComposerInput()
+		visualStart = m.composerViewOffset()
+	}
 	if !m.validComposerSelection() || m.composerSel.empty() {
 		return view
 	}
 	start, end := m.composerSel.ordered()
 	rows := m.composerRowsForRender()
 	lines := strings.Split(view, "\n")
-	visualStart := m.input.ScrollYOffset()
 	for i := range lines {
 		visualRow := visualStart + i
 		if visualRow >= len(rows) {
 			break
 		}
 		if lo, hi, ok := composerRowSelectionSpan(rows[visualRow], start, end); ok {
-			lines[i] = lipgloss.StyleRanges(lines[i], lipgloss.NewRange(lo, hi, selStyle))
+			lines[i] = lipgloss.StyleRanges(lines[i], lipgloss.NewRange(
+				lo+composerPromptWidth,
+				hi+composerPromptWidth,
+				selStyle,
+			))
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderDetachedComposerInput asks the same textarea implementation to render
+// the manually selected slice. A temporary model preserves exact wrapping,
+// padding, prompt styling, and wide-rune behavior without mutating the real
+// textarea's cursor or viewport.
+func (m chatTUI) renderDetachedComposerInput() string {
+	display := textarea.New()
+	configureChatTextarea(&display)
+	display.SetStyles(m.input.Styles())
+	display.DynamicHeight = false
+	display.SetWidth(m.input.Width() + composerPromptWidth)
+	display.SetHeight(m.input.Height())
+	display.SetValue(m.input.Value())
+	// textarea's public cursor motions scroll its embedded viewport only after
+	// that viewport has content. Seed it once, then position the throwaway cursor
+	// on the last row of the requested slice so caret-following yields the exact
+	// top offset we want to paint.
+	_ = display.View()
+	display.MoveToBegin()
+
+	rows := m.composerRowsForRender()
+	targetRow := min(m.composerViewOffset()+m.input.Height()-1, len(rows)-1)
+	for range max(targetRow, 0) {
+		display.CursorDown()
+	}
+	return display.View()
 }

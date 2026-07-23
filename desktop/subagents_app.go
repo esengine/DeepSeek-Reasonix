@@ -38,6 +38,9 @@ type SubagentProfileInput struct {
 	Model        string   `json:"model"`
 	Effort       string   `json:"effort"`
 	AllowedTools []string `json:"allowedTools"`
+	// ReadOnly, when true, writes frontmatter read-only: true. Omitted/false
+	// keeps the legacy writable default for older profiles.
+	ReadOnly bool `json:"readOnly"`
 	// Scope is "project" or "global" (empty defaults to global on create).
 	Scope string `json:"scope"`
 }
@@ -118,6 +121,7 @@ func (a *App) CreateSubagentProfile(input SubagentProfileInput) (string, error) 
 		Model:        strings.TrimSpace(input.Model),
 		Effort:       strings.TrimSpace(input.Effort),
 		AllowedTools: input.AllowedTools,
+		ReadOnly:     input.ReadOnly,
 		Color:        strings.TrimSpace(input.Color),
 		Invocation:   "manual",
 	})
@@ -196,6 +200,7 @@ func (a *App) UpdateSubagentProfile(name, scope string, input SubagentProfileInp
 		Model:        strings.TrimSpace(input.Model),
 		Effort:       strings.TrimSpace(input.Effort),
 		AllowedTools: input.AllowedTools,
+		ReadOnly:     input.ReadOnly,
 		Color:        strings.TrimSpace(input.Color),
 		Invocation:   "manual",
 	})
@@ -273,7 +278,7 @@ func (a *App) DeleteSubagentProfile(name, scope string) error {
 // A try run is deliberately READ-ONLY regardless of the profile's tool scope:
 // it is a settings-page preview, not a real work session, and it has no UI to
 // answer approval prompts. ReadOnlySubagentToolRegistry strips writer tools
-// and wraps bash in the plan-mode safe command policy; the confined reader/
+// and wraps bash in the permission-classified read-only command policy; the confined reader/
 // search/fetch instances below enforce the same workspace boundaries the real
 // boot path installs (boot.go addBuiltins), and the headless permission gate
 // applies the user's configured deny rules.
@@ -359,7 +364,7 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	// to answer a prompt).
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny)
 
-	result, err := agent.RunSubAgentWithSession(runCtx, prov, reg, agent.NewSession(prompt), task, agent.Options{
+	result, err := agent.RunReadOnlySubAgentWithSession(runCtx, prov, reg, agent.NewSession(prompt), task, agent.Options{
 		MaxSteps:      12,
 		Temperature:   cfg.Agent.Temperature,
 		Pricing:       me.Price,
@@ -394,7 +399,7 @@ func (a *App) CancelTrySubagentProfile() {
 // if the read-only posture is ever relaxed.
 func trySubagentToolRegistry(cfg *config.Config, root string, allowedTools []string) *tool.Registry {
 	writeRoots := cfg.WriteRootsForRoot(root)
-	forbidReadRoots := cfg.ForbidReadRootsForRoot(root)
+	forbidReadRoots := boot.RuntimeForbidReadRoots(cfg, root)
 	bashSpec := sandbox.Spec{
 		Mode:            cfg.BashMode(),
 		WriteRoots:      writeRoots,

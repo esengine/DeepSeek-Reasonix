@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/guardian"
 	"reasonix/internal/hook"
@@ -737,6 +740,11 @@ func TestSnapshotConflictRecoveryTransplantsInFlightTurnMarker(t *testing.T) {
 	if err := agent.MarkSessionInFlightTurn(path, 2, true); err != nil {
 		t.Fatalf("MarkSessionInFlightTurn: %v", err)
 	}
+	markedMeta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok || markedMeta.InFlightTurn == nil {
+		t.Fatalf("LoadBranchMeta marked ok=%v err=%v meta=%+v", ok, err, markedMeta)
+	}
+	markedAt := markedMeta.InFlightTurn.StartedAt
 
 	if err := stale.Snapshot(); err != nil {
 		t.Fatalf("Snapshot stale diverged: %v", err)
@@ -762,6 +770,9 @@ func TestSnapshotConflictRecoveryTransplantsInFlightTurnMarker(t *testing.T) {
 	}
 	if recMeta.InFlightTurn.StartMessageIndex != 2 || !recMeta.InFlightTurn.PreserveUser {
 		t.Fatalf("transplanted marker = %+v, want start index 2 with preserve_user", recMeta.InFlightTurn)
+	}
+	if !recMeta.InFlightTurn.StartedAt.Equal(markedAt) {
+		t.Fatalf("transplanted marker time = %v, want original %v", recMeta.InFlightTurn.StartedAt, markedAt)
 	}
 }
 
@@ -812,11 +823,11 @@ func TestRecoverInterruptedTurnSparesTurnContinuedOnRecoveryBranch(t *testing.T)
 	}
 }
 
-// TestRecoverInterruptedTurnStripsGenuineCrash pins the crash-recovery
+// TestRecoverInterruptedTurnPreservesGenuineCrashDisplay pins the crash-recovery
 // behavior the recovery-child guard must not swallow: with no recovery branch
 // in sight, an in-flight marker means the runtime died mid-turn and the
-// partial tail is stripped (preserving the user prompt).
-func TestRecoverInterruptedTurnStripsGenuineCrash(t *testing.T) {
+// partial tail becomes provider-excluded display history.
+func TestRecoverInterruptedTurnPreservesGenuineCrashDisplay(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
 
@@ -838,8 +849,12 @@ func TestRecoverInterruptedTurnStripsGenuineCrash(t *testing.T) {
 	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
 	c.recoverInterruptedTurn(path)
 
-	if got := c.executor.Session().Len(); got != 2 {
-		t.Fatalf("message count after crash recovery = %d, want 2 (sys + preserved user prompt)", got)
+	if got := c.executor.Session().Len(); got != 3 {
+		t.Fatalf("message count after crash recovery = %d, want system + user + local recovery", got)
+	}
+	recovery := c.executor.Session().Snapshot()[2]
+	if !recovery.LocalOnly || recovery.Content != "partial" || recovery.InterruptedTurn == nil || !recovery.InterruptedTurn.Pending {
+		t.Fatalf("crash display/recovery was not retained safely: %+v", recovery)
 	}
 	meta, ok, err := agent.LoadBranchMeta(path)
 	if err != nil || !ok {
@@ -847,6 +862,76 @@ func TestRecoverInterruptedTurnStripsGenuineCrash(t *testing.T) {
 	}
 	if meta.InFlightTurn != nil {
 		t.Fatal("in-flight marker not cleared after crash recovery")
+	}
+}
+
+func TestRecoverInterruptedTurnAfterCompactionRelocatesVisibleTurn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "compacted-crash.jsonl")
+
+	orig := agent.NewSession("sys")
+	for i := 0; i < 3; i++ {
+		orig.Add(provider.Message{Role: provider.RoleUser, Content: "old task"})
+		orig.Add(provider.Message{Role: provider.RoleAssistant, Content: "old answer"})
+	}
+	staleStart := orig.Len()
+	if err := orig.Save(path); err != nil {
+		t.Fatalf("Save original: %v", err)
+	}
+	if err := agent.MarkSessionInFlightTurn(path, staleStart, true); err != nil {
+		t.Fatalf("MarkSessionInFlightTurn: %v", err)
+	}
+	meta, ok, err := agent.LoadBranchMeta(path)
+	if err != nil || !ok || meta.InFlightTurn == nil {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v meta=%+v", ok, err, meta)
+	}
+
+	compacted := agent.NewSession("sys")
+	compacted.Add(provider.Message{Role: provider.RoleUser, Content: "<compaction-summary>\nold work\n</compaction-summary>"})
+	compacted.Add(provider.Message{Role: provider.RoleUser, Content: "update a.txt", CreatedAt: meta.InFlightTurn.StartedAt.UnixMilli() + 1})
+	compacted.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+		ID: "write-1", Name: "write_file", Arguments: `{"path":"a.txt","content":"ok"}`,
+	}}})
+	compacted.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "write-1", Name: "write_file", Content: "wrote a.txt"})
+	compacted.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial final answer", ReasoningContent: "private partial reasoning"})
+	if compacted.Len() >= staleStart {
+		t.Fatalf("test setup did not stale boundary: compacted=%d start=%d", compacted.Len(), staleStart)
+	}
+	if err := compacted.Save(path); err != nil {
+		t.Fatalf("Save compacted: %v", err)
+	}
+
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	exec := agent.New(nil, nil, loaded, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	c.recoverInterruptedTurn(path)
+
+	msgs := exec.Session().Snapshot()
+	userCount := 0
+	for _, m := range msgs {
+		if m.Role == provider.RoleUser && StripComposePrefixes(m.Content) == "update a.txt" {
+			userCount++
+		}
+	}
+	if userCount != 1 {
+		t.Fatalf("current user occurrences = %d, want 1: %+v", userCount, msgs)
+	}
+	if len(msgs) != 6 || !agent.IsCompactionSummary(msgs[1]) || msgs[3].Role != provider.RoleAssistant || msgs[4].Role != provider.RoleTool || !msgs[5].LocalOnly {
+		t.Fatalf("crash recovery transcript = %+v", msgs)
+	}
+	recovery := msgs[5].InterruptedTurn
+	if recovery == nil || !recovery.Pending || len(recovery.CompletedTools) != 1 || recovery.CompletedTools[0].Name != "write_file" || !recovery.DroppedPartialText || !recovery.DroppedPartialReasoning {
+		t.Fatalf("crash recovery metadata = %+v", recovery)
+	}
+	meta, ok, err = agent.LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta after recovery ok=%v err=%v", ok, err)
+	}
+	if meta.InFlightTurn != nil {
+		t.Fatalf("in-flight marker survived recovery: %+v", meta.InFlightTurn)
 	}
 }
 
@@ -1108,6 +1193,55 @@ func TestConcurrentSnapshotsShareSingleRecoveryHandoff(t *testing.T) {
 	recoveries := recoveryTranscriptPaths(matches)
 	if len(recoveries) != 1 || recoveries[0] != first.recoveryPath {
 		t.Fatalf("recovery branches = %v err=%v, want only %q", matches, err, first.recoveryPath)
+	}
+}
+
+func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	base := agent.NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "persisted"})
+	if err := base.SaveSnapshot(path); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	current, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "shutdown tail"})
+	exec := agent.New(nil, nil, current, agent.Options{}, event.Discard)
+	var handoff SessionRecoveryInfo
+	c := New(Options{
+		Executor:    exec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "shutdown",
+		OnSessionRecovered: func(info SessionRecoveryInfo) error {
+			handoff = info
+			return nil
+		},
+	})
+
+	recoveryPath, err := c.recoverShutdownSnapshot(path, agent.ErrSessionFileLockHeld)
+	if err != nil {
+		t.Fatalf("recoverShutdownSnapshot: %v", err)
+	}
+	if recoveryPath == "" || recoveryPath == path {
+		t.Fatalf("recovery path = %q, want a distinct session", recoveryPath)
+	}
+	if c.SessionPath() != recoveryPath {
+		t.Fatalf("controller session path = %q, want %q", c.SessionPath(), recoveryPath)
+	}
+	if handoff.OriginalPath != path || handoff.RecoveryPath != recoveryPath || handoff.Reason != "shutdown session file lock timeout" {
+		t.Fatalf("shutdown recovery handoff = %+v", handoff)
+	}
+	recovered, err := agent.LoadSession(recoveryPath)
+	if err != nil {
+		t.Fatalf("load shutdown recovery: %v", err)
+	}
+	if got := recovered.Snapshot(); len(got) != 3 || got[2].Content != "shutdown tail" {
+		t.Fatalf("shutdown recovery transcript = %+v", got)
 	}
 }
 
@@ -2251,7 +2385,7 @@ func TestTwoModelShortChoiceReplySkipsPlanner(t *testing.T) {
 	execSess.Add(provider.Message{Role: provider.RoleUser, Content: "先给我两个执行方案"})
 	execSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "两个执行方式可选：\n\n1. Subagent-Driven（推荐）\n2. 当前会话执行\n\n你选哪种？"})
 	exec := agent.New(execProv, tool.NewRegistry(), execSess, agent.Options{}, event.Discard)
-	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, NewPlannerGate(nil))
+	coord := agent.NewCoordinator(planner, agent.NewSession("planner sys"), nil, tool.NewRegistry(), agent.Options{}, exec, 0, event.Discard, NewPlannerGate())
 	c := New(Options{Runner: coord, Executor: exec, SystemPrompt: "exec sys", SessionDir: dir, SessionPath: filepath.Join(dir, "session.jsonl"), Label: "test"})
 
 	if err := c.Run(context.Background(), "1"); err != nil {
@@ -2333,6 +2467,195 @@ func TestDisconnectMCPServerRemovesLazyPlaceholder(t *testing.T) {
 	}
 	if _, found := reg.Get("mcp__mock__connect"); found {
 		t.Fatalf("lazy placeholder still registered after disconnect; names=%v", reg.Names())
+	}
+}
+
+func TestRegisterMCPServerOnDemandDefersConnectionUntilFirstUse(t *testing.T) {
+	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+	var requests atomic.Int32
+	var initializes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			initializes.Add(1)
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "on-demand", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "echo",
+				"description": "Echo a value.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		default:
+			result = map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	}))
+	defer server.Close()
+
+	host := plugin.NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	ctrl := New(Options{Host: host, Registry: reg, PluginCtx: context.Background()})
+	entry := config.PluginEntry{Name: "on-demand", Type: "http", URL: server.URL, Source: config.MCPSourceUserConfig}
+	if _, err := ctrl.RegisterMCPServerOnDemand(entry); err != nil {
+		t.Fatalf("RegisterMCPServerOnDemand: %v", err)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("enable-time HTTP requests = %d, want zero", got)
+	}
+	connect, ok := reg.Get("mcp__on-demand__connect")
+	if !ok {
+		t.Fatalf("cache-miss connect stub missing; names=%v", reg.Names())
+	}
+	if _, err := connect.Execute(context.Background(), json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "initializing on first use") {
+		t.Fatalf("first-use connect result = %v, want initializing guidance", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !host.HasClient("on-demand") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !host.HasClient("on-demand") {
+		t.Fatal("first tool use did not start the MCP connection")
+	}
+	if got := initializes.Load(); got != 1 {
+		t.Fatalf("initialize calls = %d, want exactly one on-demand start", got)
+	}
+}
+
+func TestAddMCPServerAuthorizesExplicitUserAddBeforeConnecting(t *testing.T) {
+	var configured plugin.Spec
+	c := New(Options{
+		WorkspaceRoot:    "/workspace",
+		MCPConfigureSpec: func(spec *plugin.Spec) { configured = *spec },
+	})
+
+	if _, err := c.AddMCPServer(config.PluginEntry{Name: "user-added"}); err == nil {
+		t.Fatal("AddMCPServer without a command unexpectedly succeeded")
+	}
+	if configured.ConfigSource != string(config.MCPSourceUserConfig) ||
+		!configured.Authorized || configured.RequireLaunchApproval || configured.WorkspaceRoot != "/workspace" {
+		t.Fatalf("configured spec = %+v, want user-authorized add-and-use policy", configured)
+	}
+}
+
+func TestConnectMCPServerAppliesConfiguredCallTimeouts(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		var result any
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "timeout-test", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "slow",
+				"description": "Wait until the caller cancels.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		case "tools/call":
+			<-r.Context().Done()
+			return
+		default:
+			result = map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	}))
+	defer server.Close()
+
+	tests := []struct {
+		name           string
+		defaultTimeout time.Duration
+		entry          config.PluginEntry
+	}{
+		{
+			name:           "global default",
+			defaultTimeout: time.Second,
+		},
+		{
+			name:           "server override",
+			defaultTimeout: 10 * time.Second,
+			entry:          config.PluginEntry{CallTimeoutSeconds: 1},
+		},
+		{
+			name:           "tool override",
+			defaultTimeout: 10 * time.Second,
+			entry: config.PluginEntry{
+				CallTimeoutSeconds: 10,
+				ToolTimeoutSeconds: map[string]int{"slow": 1},
+			},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			host := plugin.NewHost()
+			defer host.Close()
+			reg := tool.NewRegistry()
+			ctrl := New(Options{
+				Host:                  host,
+				Registry:              reg,
+				MCPDefaultCallTimeout: tc.defaultTimeout,
+			})
+			entry := tc.entry
+			entry.Name = fmt.Sprintf("timeout%d", i)
+			entry.Type = "http"
+			entry.URL = server.URL
+			if _, err := ctrl.ConnectMCPServer(entry); err != nil {
+				t.Fatalf("ConnectMCPServer: %v", err)
+			}
+			connected, ok := reg.Get("mcp__" + entry.Name + "__slow")
+			if !ok {
+				t.Fatalf("connected tool missing; names=%v", reg.Names())
+			}
+			started := time.Now()
+			_, err := connected.Execute(context.Background(), json.RawMessage(`{}`))
+			elapsed := time.Since(started)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("slow tool error = %v, want deadline exceeded", err)
+			}
+			if elapsed < 750*time.Millisecond || elapsed > 3*time.Second {
+				t.Fatalf("slow tool elapsed = %v, want configured 1s timeout", elapsed)
+			}
+		})
 	}
 }
 
@@ -2524,6 +2847,174 @@ func permissionHookController(t *testing.T, match string) (*Controller, chan str
 	return c, ids, payloads
 }
 
+// claudePermissionHookController wires a Claude-imported PermissionRequest
+// hook (PayloadFormat "claude") whose mock spawner always returns stdout, so
+// tests can assert the hook's decision preempts the approval prompt instead
+// of only notifying — matching Claude's own PermissionRequest contract.
+func claudePermissionHookController(t *testing.T, exitCode int, stdout string) (*Controller, chan string) {
+	t.Helper()
+	ids := make(chan string, 8)
+	spawner := func(_ context.Context, in hook.SpawnInput) hook.SpawnResult {
+		return hook.SpawnResult{ExitCode: exitCode, Stdout: stdout}
+	}
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				ids <- e.Approval.ID
+			}
+		}),
+		Hooks: hook.NewRunner([]hook.ResolvedHook{{
+			HookConfig: hook.HookConfig{Command: "guard", Match: "Bash", PayloadFormat: "claude"},
+			Event:      hook.PermissionRequest,
+			Scope:      hook.ScopeGlobal,
+		}}, "/tmp", spawner, nil),
+	})
+	return c, ids
+}
+
+func TestPermissionRequestClaudeHookAutoDenies(t *testing.T) {
+	c, ids := claudePermissionHookController(t, 2, "")
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", "rm -rf /", json.RawMessage(`{"command":"rm -rf /"}`))
+	if err != nil {
+		t.Fatalf("Approve error = %v", err)
+	}
+	if allow {
+		t.Fatal("a Claude PermissionRequest hook exiting 2 should auto-deny")
+	}
+	select {
+	case id := <-ids:
+		t.Fatalf("auto-deny must preempt the approval prompt, but one was emitted: %s", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestPermissionRequestClaudeHookAutoAllows(t *testing.T) {
+	allowJSON := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+	c, ids := claudePermissionHookController(t, 0, allowJSON)
+	allow, _, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", json.RawMessage(`{"command":"go test ./..."}`))
+	if err != nil {
+		t.Fatalf("Approve error = %v", err)
+	}
+	if !allow {
+		t.Fatal("a Claude PermissionRequest hook returning decision.behavior=allow should auto-allow")
+	}
+	select {
+	case id := <-ids:
+		t.Fatalf("auto-allow must preempt the approval prompt, but one was emitted: %s", id)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+// wildcardClaudePermissionHookController is like claudePermissionHookController
+// but matches every tool, for exercising fresh-human-required tools whose
+// names ("remember", "sandbox_escape", ...) aren't Claude tool names.
+func wildcardClaudePermissionHookController(t *testing.T, exitCode int, stdout string) (*Controller, chan string) {
+	t.Helper()
+	ids := make(chan string, 8)
+	spawner := func(_ context.Context, in hook.SpawnInput) hook.SpawnResult {
+		return hook.SpawnResult{ExitCode: exitCode, Stdout: stdout}
+	}
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				ids <- e.Approval.ID
+			}
+		}),
+		Hooks: hook.NewRunner([]hook.ResolvedHook{{
+			HookConfig: hook.HookConfig{Command: "guard", PayloadFormat: "claude"},
+			Event:      hook.PermissionRequest,
+			Scope:      hook.ScopeGlobal,
+		}}, "/tmp", spawner, nil),
+	})
+	return c, ids
+}
+
+func TestPermissionRequestClaudeHookCannotAutoAllowFreshHumanApproval(t *testing.T) {
+	allowJSON := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+	for _, tool := range []string{memoryRememberTool, memoryForgetTool, SandboxEscapeApprovalTool, ManagedConfigWriteApprovalTool} {
+		t.Run(tool, func(t *testing.T) {
+			c, ids := wildcardClaudePermissionHookController(t, 0, allowJSON)
+			done := make(chan bool, 1)
+			go func() {
+				allow, _, err := gateApprover{c}.Approve(context.Background(), tool, "", json.RawMessage(`{}`))
+				if err != nil {
+					t.Errorf("Approve error = %v", err)
+					return
+				}
+				done <- allow
+			}()
+
+			id := waitApprovalID(t, ids)
+			c.Approve(id, true, false, false)
+			select {
+			case allow := <-done:
+				if !allow {
+					t.Fatal("manual approval should still allow")
+				}
+			case <-time.After(30 * time.Second):
+				t.Fatal("approval stayed blocked")
+			}
+		})
+	}
+}
+
+func TestPermissionRequestClaudeHookAutoDeniesFreshHumanApproval(t *testing.T) {
+	// A deny is always safe to auto-honor, even for fresh-human tools —
+	// refusing something that requires a human's blessing can't leak
+	// unauthorized access the way an auto-allow could.
+	for _, tool := range []string{memoryRememberTool, SandboxEscapeApprovalTool} {
+		t.Run(tool, func(t *testing.T) {
+			c, ids := wildcardClaudePermissionHookController(t, 2, "")
+			allow, _, err := gateApprover{c}.Approve(context.Background(), tool, "", json.RawMessage(`{}`))
+			if err != nil {
+				t.Fatalf("Approve error = %v", err)
+			}
+			if allow {
+				t.Fatal("a Claude PermissionRequest hook exiting 2 should auto-deny even a fresh-human tool")
+			}
+			select {
+			case id := <-ids:
+				t.Fatalf("auto-deny must preempt the approval prompt, but one was emitted: %s", id)
+			case <-time.After(50 * time.Millisecond):
+			}
+		})
+	}
+}
+
+// TestPermissionRequestClaudeHookCannotAutoAllowOptsFreshOnlyDecision covers
+// the fresh-human protection's other branch: a tool that requestFreshApprovalDecision
+// marks fresh (opts.fresh=true) without being one of
+// RequiresFreshHumanApprovalTool's fixed cases. PlanModeReadOnlyCommandApprovalTool
+// is exactly that — the earlier tests only exercised tools protected via
+// requiresFreshApprovalTool(tool), not the opts.fresh flag alone.
+func TestPermissionRequestClaudeHookCannotAutoAllowOptsFreshOnlyDecision(t *testing.T) {
+	if RequiresFreshHumanApprovalTool(agent.PlanModeReadOnlyCommandApprovalTool) {
+		t.Fatal("test assumes this tool is fresh-only via opts.fresh, not RequiresFreshHumanApprovalTool")
+	}
+	allowJSON := `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"}}}`
+	c, ids := wildcardClaudePermissionHookController(t, 0, allowJSON)
+	done := make(chan bool, 1)
+	go func() {
+		reply, err := c.requestFreshApprovalDecision(context.Background(), agent.PlanModeReadOnlyCommandApprovalTool, "ls", nil, "trust this read-only command prefix?")
+		if err != nil {
+			t.Errorf("requestFreshApprovalDecision error = %v", err)
+			return
+		}
+		done <- reply.allow
+	}()
+
+	id := waitApprovalID(t, ids)
+	c.Approve(id, true, false, false)
+	select {
+	case allow := <-done:
+		if !allow {
+			t.Fatal("manual approval should still allow")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("approval stayed blocked — a Claude hook allow should not have preempted this opts.fresh decision")
+	}
+}
+
 func waitApprovalID(t *testing.T, ids <-chan string) string {
 	t.Helper()
 	select {
@@ -2687,6 +3178,38 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 	}
 }
 
+// TestSessionGrantShortCircuitsGuardianReview: a session grant (or YOLO / the
+// approved-plan window) answers an ordinary approval before any guardian review
+// or prompt is attempted. Absorbed from PR #6413 by @myipanta.
+func TestSessionGrantShortCircuitsGuardianReview(t *testing.T) {
+	guardianProv := &recordingProvider{
+		name:    "guardian",
+		streams: [][]provider.Chunk{textTurn(`{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"should never run"}`)},
+	}
+	guardianSess := guardian.NewSession(guardianProv, tool.NewRegistry(), guardian.PolicyPrompt(), "guardian-test", 0, nil, event.Discard)
+	exec := agent.New(&recordingProvider{name: "executor"}, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard)
+	prompts := 0
+	c := New(Options{
+		Executor: exec,
+		Guardian: guardianSess,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				prompts++
+			}
+		}),
+	})
+	subject := approvalDisplaySubject("write_file", "main.go", nil)
+	c.approval.grantSession("write_file", subject)
+
+	allow, remember, _, err := gateApprover{c}.ApproveWithReason(context.Background(), "write_file", "main.go", nil)
+	if err != nil || !allow || remember {
+		t.Fatalf("session-granted approval = (%v,%v,%v), want plain allow", allow, remember, err)
+	}
+	if len(guardianProv.requests) != 0 || prompts != 0 {
+		t.Fatalf("session grant must bypass guardian and prompts, reviews=%d prompts=%d", len(guardianProv.requests), prompts)
+	}
+}
+
 func TestHeadlessGateRefusesFreshHumanApprovalTools(t *testing.T) {
 	gate := NewHeadlessPermissionGate(permission.New("ask", nil, nil, nil))
 
@@ -2795,6 +3318,29 @@ func TestPermissionRequestHookDoesNotFireForSessionGrant(t *testing.T) {
 		t.Fatalf("session-granted approval = (%v,%v), want allowed", allow, err)
 	}
 	assertNoPermissionHook(t, payloads)
+}
+
+// TestSessionAuthorizationsCarryAcrossRebuild pins the fix for a rebuild
+// (model/effort/profile switch) dropping same-session "Allow for this
+// session" tool grants and Plan-mode read-only command trust: only the
+// ask/auto/yolo posture string used to survive a controller swap, so a user
+// who had already granted a tool this session was asked again after any
+// switch.
+func TestSessionAuthorizationsCarryAcrossRebuild(t *testing.T) {
+	old := New(Options{})
+	old.approval.grantSession("bash", "go test ./...")
+	old.approval.grantPlanModeReadOnlyCommand("go test ./...")
+
+	fresh := New(Options{})
+	fresh.RestoreSessionAuthorizations(old.SessionAuthorizations())
+
+	allow, _, err := fresh.requestApproval(context.Background(), "bash", "go test ./...", nil)
+	if err != nil || !allow {
+		t.Fatalf("session-granted approval after restore = (%v,%v), want allowed", allow, err)
+	}
+	if !fresh.approval.planModeReadOnlyCommandTrusted("go test ./...") {
+		t.Fatal("plan-mode read-only command trust did not carry across rebuild")
+	}
 }
 
 func TestPermissionRequestHookDoesNotFireForYolo(t *testing.T) {
@@ -2977,60 +3523,39 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 	}
 }
 
-func TestPlanModeReadOnlyTrustApprovalPersistsMCPTrust(t *testing.T) {
-	ids := make(chan string, 2)
-	var approval event.Approval
-	var notices []string
-	var rememberedServer, rememberedTool string
+func TestApprovalPersistenceFailureKeepsSessionGrant(t *testing.T) {
+	ids := make(chan string, 1)
+	var notices []event.Event
 	prompts := 0
 	c := New(Options{
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.ApprovalRequest {
 				prompts++
-				approval = e.Approval
 				ids <- e.Approval.ID
 			}
 			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
+				notices = append(notices, e)
 			}
 		}),
-		OnRememberMCPReadOnlyTrust: func(serverName, rawToolName string) MCPReadOnlyTrustResult {
-			rememberedServer, rememberedTool = serverName, rawToolName
-			return MCPReadOnlyTrustResult{Server: serverName, Tool: rawToolName, Path: "reasonix.toml", Saved: true}
+		OnRemember: func(rule string) RememberResult {
+			return RememberResult{Rule: rule, Path: "reasonix.toml", Err: errors.New("disk unavailable")}
 		},
 	})
-
 	go func() {
 		c.Approve(<-ids, true, true, true)
 	}()
-	req := agent.PlanModeReadOnlyTrustRequest{
-		ToolName:    "mcp__github__issue_read",
-		ServerName:  "github",
-		RawToolName: "issue/read",
-		Args:        json.RawMessage(`{"issue":1}`),
-	}
-	allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-	if err != nil || !allow || reason != "" {
-		t.Fatalf("CheckPlanModeReadOnlyTrust = (%v,%q,%v), want allow", allow, reason, err)
-	}
-	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") || !strings.Contains(approval.Reason, "read-only") {
-		t.Fatalf("approval = %+v, want MCP read-only trust prompt", approval)
-	}
-	if rememberedServer != "github" || rememberedTool != "issue/read" {
-		t.Fatalf("remembered MCP trust = %s/%s, want github/issue/read", rememberedServer, rememberedTool)
-	}
-	if len(notices) != 1 || !strings.Contains(notices[0], "github/issue/read") {
-		t.Fatalf("notices = %v, want MCP trust saved notice", notices)
-	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	allow, reason, err = planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(ctx, req)
-	if err != nil || !allow || reason != "" {
-		t.Fatalf("second CheckPlanModeReadOnlyTrust = (%v,%q,%v), want session grant", allow, reason, err)
+	for i := 0; i < 2; i++ {
+		allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
+		if err != nil || !allow || remember {
+			t.Fatalf("Approve call %d = (%v,%v,%v), want session-allowed despite persistence failure", i, allow, remember, err)
+		}
 	}
 	if prompts != 1 {
-		t.Fatalf("approval prompts = %d, want 1", prompts)
+		t.Fatalf("approval prompts = %d, want one because failed persistence must retain the session grant", prompts)
+	}
+	if len(notices) != 1 || notices[0].Level != event.LevelWarn || !strings.Contains(notices[0].Text, "disk unavailable") {
+		t.Fatalf("notices = %+v, want one persistence failure warning", notices)
 	}
 }
 
@@ -3159,64 +3684,6 @@ func TestPlanModeReadOnlyTrustApprovalUsesChineseCatalog(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("plan-mode bash trust approval stayed blocked after rejection")
-	}
-}
-
-func TestPlanModeReadOnlyTrustApprovalIgnoresToolAutoApproval(t *testing.T) {
-	approvalRequests := make(chan event.Approval, 1)
-	c := New(Options{
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.ApprovalRequest {
-				approvalRequests <- e.Approval
-			}
-		}),
-	})
-	c.SetAutoApproveTools(true)
-
-	type trustResult struct {
-		allow  bool
-		reason string
-		err    error
-	}
-	done := make(chan trustResult, 1)
-	req := agent.PlanModeReadOnlyTrustRequest{
-		ToolName:    "mcp__github__issue_read",
-		ServerName:  "github",
-		RawToolName: "issue/read",
-	}
-	go func() {
-		allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-		done <- trustResult{allow: allow, reason: reason, err: err}
-	}()
-
-	var approval event.Approval
-	select {
-	case approval = <-approvalRequests:
-	case <-time.After(30 * time.Second):
-		t.Fatal("MCP read-only trust prompt was not emitted under tool auto-approval")
-	}
-	if approval.Tool != "mcp__github__issue_read" || !strings.Contains(approval.Subject, "github/issue/read") {
-		t.Fatalf("approval = %+v, want MCP read-only trust prompt", approval)
-	}
-	select {
-	case got := <-done:
-		t.Fatalf("tool auto-approval must not answer MCP read-only trust, got %+v", got)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	c.Approve(approval.ID, true, true, false)
-	select {
-	case got := <-done:
-		if got.err != nil || !got.allow || got.reason != "" {
-			t.Fatalf("CheckPlanModeReadOnlyTrust after approval = %+v, want allow", got)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("MCP read-only trust prompt stayed blocked after Approve")
-	}
-
-	allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-	if err != nil || !allow || reason != "" {
-		t.Fatalf("session-granted MCP read-only trust under YOLO = (%v,%q,%v), want allow", allow, reason, err)
 	}
 }
 

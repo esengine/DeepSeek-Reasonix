@@ -48,6 +48,11 @@ node_modules/
 !/.reasonix/commands/
 !/.reasonix/commands/review.md
 
+# Stray Reasonix state written under a package dir by a test whose RealPath
+# resolves to CWD (e.g. remote bootstrap EnsureServe). Never commit these.
+internal/**/.reasonix/
+desktop/**/.reasonix/
+
 # CodeGraph per-project index (rebuilt locally; never committed)
 .codegraph/
 
@@ -62,3 +67,7 @@ benchmarks/context-maintenance-e2e/run/
 
 # Local scratch
 temp/
+
+# Official theme art intermediate outputs / caches
+scripts/official-theme-art/out/
+scripts/official-theme-art/__pycache__/

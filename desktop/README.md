@@ -172,16 +172,17 @@ minisign -Vm Reasonix-darwin-arm64.zip \
   -P RWSw66n0RsoSr6Zhh6qt5YO95YkpCayTOCMFVDNUQSjJYwxoYngNVBSq
 ```
 
-## Editor seam (Monaco / CodeMirror)
+## Editor seams and workspace file previews
 
-Code and diff rendering go through two components with stable prop contracts and a
-lazy boundary, so a heavy editor stays out of the initial bundle and dropping one
-in is a one-line change — no consumer touches:
+Code and diff rendering go through two components with stable prop contracts and
+lazy boundaries, so heavier viewers stay out of the initial bundle. `CodeViewer`
+keeps the compact highlighted viewer for chat, Markdown, and tool output, while
+workspace file previews opt into the searchable line-number viewer:
 
 | Component | Props | Default impl | Upgrade |
 |---|---|---|---|
-| `components/CodeViewer.tsx` | `EditorProps` | `editors/PlainCode.tsx` (`<pre>`) | swap the lazy import for `editors/MonacoCode` or `editors/CodeMirrorCode` |
-| `components/DiffView.tsx` | `DiffProps` | `editors/PlainDiff.tsx` (LCS line diff) | swap for `editors/MonacoDiff` or `editors/CodeMirrorMerge` |
+| `components/CodeViewer.tsx` | `EditorProps` | `editors/HljsCode.tsx`; `editors/LineNumberCode.tsx` when `showLineNumbers` is enabled | extend the implementation selection for Monaco or CodeMirror |
+| `components/DiffView.tsx` | `DiffProps` | `editors/HljsDiff.tsx` (highlighted LCS/unified diff) | swap for `editors/MonacoDiff` or `editors/CodeMirrorMerge` |
 
 ```sh
 # Monaco
@@ -191,14 +192,19 @@ pnpm add @uiw/react-codemirror @codemirror/lang-javascript @codemirror/merge
 ```
 
 Then add `editors/MonacoCode.tsx` (default-export a component taking
-`EditorProps`) and point `CodeViewer.tsx`'s `lazy(() => import(...))` at it.
+`EditorProps`) and update the implementation selection in `CodeViewer.tsx`.
 `ToolCard` already routes `edit_file` calls' `old_string`/`new_string` through
 `DiffView`, and `Markdown` routes fenced code blocks through `CodeViewer`, so
 both seams light up everywhere at once.
 
-Markdown itself is currently minimal (fenced code + plain text). Upgrade path:
-`pnpm add react-markdown remark-gfm` and render in `components/Markdown.tsx`,
-keeping fenced code delegated to `CodeViewer`.
+`WorkspacePanel` passes `showLineNumbers` for text-file previews. The resulting
+viewer provides a line-number gutter, viewer-scoped Ctrl/Cmd+F search with case
+and whole-word options, copy support, and virtualized rendering above 100 lines.
+Search marks are applied only to visible rows so query input does not rebuild the
+entire highlighted document. Files above 512 KiB or 20,000 lines keep line
+numbers, search, copy, and virtualization but use escaped plain text instead of
+syntax highlighting. Workspace files are previewed up to 2 MiB; larger files
+display the first 2 MiB with a localized truncation notice.
 
 ## Multi-platform adaptation
 
@@ -223,7 +229,15 @@ handled here, and what to reach for if a target misbehaves:
   setting; the installer embeds the WebView2 bootstrapper. Canary builds disable
   WebView2 GPU acceleration by default to smoke-test blank-window reports; set
   `REASONIX_DESKTOP_DISABLE_WEBVIEW2_GPU=1` or `0` to force the fallback on or
-  off.
+  off. The WebView2 shell always uses a direct connection for embedded assets
+  and loopback remote-workspace pages; provider and other outbound traffic keeps
+  using Reasonix's own proxy configuration. Remote Markdown images are fetched
+  by the Go backend with the same proxy settings and re-served from the local
+  asset origin, so WebView2 never bypasses the configured proxy for them. Image
+  hosts must resolve locally to public addresses; direct, HTTP(S)-proxy, and
+  SOCKS-proxy connections are pinned to those vetted IPs while preserving the
+  original Host and TLS SNI. If the DOM is still not ready after 15 seconds, the
+  hidden startup window is shown with a native recovery prompt.
 - **macOS / WebKit** — inset/hidden title bar (`TitleBarHiddenInset`); the CSS
   marks the top bar as an OS drag region (`--wails-draggable: drag`) and leaves
   room for the traffic lights.
@@ -271,13 +285,3 @@ Settings > Updates > "Share aggregate quality metrics", or by setting
 `metrics = false` under `[desktop]`. These metrics are anonymous signal/bucket
 counts and preference buckets; they never include conversations, prompts, keys,
 paths, base URLs, or file contents.
-
-When Memory v5 is enabled, the same aggregate metrics pipeline may include only
-content-free count/size buckets such as injection on/off, compiled-token bucket,
-IR-overhead bucket, memory-reference count, constraint/risk/step counts, and
-memory-graph size buckets. It never uploads memory text, tool outputs, prompts,
-file paths, IDs, keys, base URLs, or file contents. The Memory v5 runtime itself
-is controlled from Settings > General > "Memory v5" and shares the user/global
-`agent.memory_compiler.enabled` setting with the CLI/TUI and `reasonix serve`;
-CLI users can also run `/memory-v5 off|observe|compact|on|status` in a session
-or `reasonix config memory-v5 off|observe|compact|on|status` from a shell.

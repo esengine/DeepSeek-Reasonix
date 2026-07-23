@@ -373,7 +373,14 @@ func copyDir(src, dst string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		mode := os.FileMode(0o644)
+		if info.Mode().Perm()&0o111 != 0 {
+			// Plugin hook binaries and scripts must remain executable after copy.
+			// Normalize to ordinary executable permissions instead of carrying
+			// special source mode bits such as setuid/setgid into the install.
+			mode = 0o755
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 		if err != nil {
 			return err
 		}

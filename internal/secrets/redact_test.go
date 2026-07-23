@@ -1,7 +1,9 @@
 package secrets
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"reasonix/internal/provider"
@@ -30,6 +32,42 @@ func TestRedactMasksCommonSecretShapes(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("redacted output missing %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestRedactLongConcurrentTranscriptAvoidsRegexpBacktracking(t *testing.T) {
+	const secret = "sk-real-secret-value-1234567890"
+	var transcript strings.Builder
+	for i := 0; i < 2_000; i++ {
+		fmt.Fprintf(&transcript, "message %d payload=%s DEEPSEEK_API_KEY=%s Authorization: Bearer %s\n", i, strings.Repeat("x", i%31), secret, secret)
+	}
+	input := transcript.String()
+
+	const workers = 24
+	const iterations = 20
+	var wg sync.WaitGroup
+	errs := make(chan string, workers)
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < iterations; i++ {
+				got := Redact(input)
+				if strings.Contains(got, secret) {
+					errs <- "long concurrent redaction leaked the test secret"
+					return
+				}
+				if again := Redact(got); again != got {
+					errs <- "long concurrent redaction was not idempotent"
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 
@@ -168,19 +206,18 @@ func TestProcessEnvUnfilteredByDefault(t *testing.T) {
 	}
 }
 
-func TestRedactToolOutputHonorsToggle(t *testing.T) {
-	const in = "DEEPSEEK_API_KEY=sk-real-secret-value-123456"
-	if got := RedactToolOutput(in); strings.Contains(got, "sk-real-secret-value-123456") {
-		t.Fatalf("tool output not redacted by default:\n%s", got)
+func TestProcessEnvAlwaysFiltersRegisteredCredentialKeys(t *testing.T) {
+	const key = "REASONIX_TEST_CUSTOM_PROVIDER_CREDENTIAL"
+	t.Setenv(key, "opaque-provider-value")
+	t.Setenv("REASONIX_TEST_BENIGN_ENV", "visible")
+	RegisterCredentialEnvKeys([]string{key})
+
+	joined := strings.Join(ProcessEnv(), "\n")
+	if strings.Contains(joined, key+"=") || strings.Contains(joined, "opaque-provider-value") {
+		t.Fatalf("registered provider credential survived in subprocess env:\n%s", joined)
 	}
-	SetRedactToolOutput(false)
-	t.Cleanup(func() { SetRedactToolOutput(true) })
-	if got := RedactToolOutput(in); got != in {
-		t.Fatalf("RedactToolOutput altered output with the toggle off:\n%s", got)
-	}
-	// The durable-surface entry point ignores the toggle.
-	if got := Redact(in); strings.Contains(got, "sk-real-secret-value-123456") {
-		t.Fatalf("Redact must stay active regardless of the toggle:\n%s", got)
+	if !strings.Contains(joined, "REASONIX_TEST_BENIGN_ENV=visible") {
+		t.Fatalf("ordinary env was removed with opt-in filtering off:\n%s", joined)
 	}
 }
 

@@ -230,7 +230,7 @@ func (m *chatTUI) scheduleSkillSessionRefresh(reason, notice string) bool {
 			RuntimeProfile:   m.runtimeProfile,
 			ToolApprovalMode: oldCtrl.ToolApprovalMode(),
 			PlanMode:         oldCtrl.PlanMode(),
-		}, carried, prevPath)
+		}, carried, prevPath, oldCtrl)
 		if err != nil {
 			return modelSwitchMsg{ref: ref, err: err}
 		}
@@ -278,14 +278,16 @@ func (m *chatTUI) skillStore() *skill.Store {
 	var custom []string
 	var excluded []string
 	var pluginPaths map[string][]string
+	var pluginAgentPaths map[string][]string
 	maxDepth := 3
 	if cfg, err := config.Load(); err == nil {
 		custom = cfg.SkillCustomPaths()
 		excluded = cfg.SkillExcludedPaths()
 		pluginPaths = cfg.PluginPackageSkillOwners()
+		pluginAgentPaths = cfg.PluginPackageAgentOwners()
 		maxDepth = cfg.SkillMaxDepth()
 	}
-	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, PluginPaths: pluginPaths, ExcludedPaths: excluded, MaxDepth: maxDepth})
+	return skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, PluginPaths: pluginPaths, PluginAgentPaths: pluginAgentPaths, ExcludedPaths: excluded, MaxDepth: maxDepth})
 }
 
 func (m *chatTUI) runHooksSubcommand(input string) {

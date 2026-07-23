@@ -17,6 +17,7 @@ export function PromptShelf({
   barRef,
   role = "dialog",
   decision = false,
+  actionsRole = "listbox",
 }: {
   className?: string;
   cardClassName?: string;
@@ -39,6 +40,9 @@ export function PromptShelf({
   // Decision surfaces keep a vertical full-width option list and a fixed
   // confirm footer; content scrolls within 55vh.
   decision?: boolean;
+  // Select-then-confirm surfaces use listbox. Immediate actions are a group of
+  // buttons so assistive technology does not announce them as pending choices.
+  actionsRole?: "listbox" | "group";
 }) {
   return (
     <div
@@ -71,7 +75,7 @@ export function PromptShelf({
         </div>
         {crumbs}
         {children && <div className="prompt-shelf__body">{children}</div>}
-        {actions && <div className="prompt-shelf__actions" role="listbox">{actions}</div>}
+        {actions && <div className="prompt-shelf__actions" role={actionsRole}>{actions}</div>}
         {note && <div className="prompt-shelf__footnote">{note}</div>}
         {quickActions && <div className="prompt-shelf__quick-actions">{quickActions}</div>}
         {footer && <div className="prompt-shelf__footer">{footer}</div>}

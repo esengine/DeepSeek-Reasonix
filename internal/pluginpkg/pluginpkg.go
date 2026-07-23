@@ -36,16 +36,30 @@ var validName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
 
 // Package is one parsed plugin package rooted on disk.
 type Package struct {
-	Root         string
-	ManifestKind string
-	Manifest     Manifest
+	Root          string
+	ManifestKind  string
+	Manifest      Manifest
+	Compatibility Compatibility
 }
 
 type Inventory struct {
 	Skills     []SkillRef
+	Agents     []AgentRef
 	Commands   []CommandRef
 	Hooks      []HookRef
 	MCPServers []MCPServerRef
+}
+
+type Compatibility struct {
+	Status  string               `json:"status"`
+	Mapped  []string             `json:"mapped,omitempty"`
+	Skipped []CompatibilityIssue `json:"skipped,omitempty"`
+}
+
+type CompatibilityIssue struct {
+	Capability string `json:"capability"`
+	Path       string `json:"path,omitempty"`
+	Reason     string `json:"reason"`
 }
 
 type SkillRef struct {
@@ -54,6 +68,15 @@ type SkillRef struct {
 	Path        string
 	Invocation  string
 	RunAs       string
+}
+
+type AgentRef struct {
+	Name         string
+	Description  string
+	Path         string
+	Invocation   string
+	Model        string
+	AllowedTools []string
 }
 
 // CommandRef is one custom slash command a plugin contributes: a flat <name>.md
@@ -75,10 +98,13 @@ type HookRef struct {
 }
 
 type MCPServerRef struct {
-	Name      string
-	Transport string
-	Command   string
-	URL       string
+	Name        string
+	DisplayName string
+	Description string
+	Transport   string
+	Command     string
+	URL         string
+	AutoStart   bool
 }
 
 // Manifest is the normalized manifest shape used by Reasonix.
@@ -89,6 +115,9 @@ type Manifest struct {
 	Homepage    string
 	Repository  string
 	Skills      []string
+	// Agents are directories of Claude-style flat agent Markdown files. They are
+	// loaded as plugin-owned, manually invoked Reasonix subagent profiles.
+	Agents []string
 	// Commands are directories of flat <name>.md slash-command prompt templates
 	// (rendered with $ARGUMENTS/$1..$N on /<name>). Declared explicitly in a
 	// manifest or adopted from a Claude plugin's conventional commands/ dir.
@@ -98,25 +127,31 @@ type Manifest struct {
 }
 
 type Hook struct {
-	Match        string            `json:"match,omitempty"`
-	Command      string            `json:"command,omitempty"`
-	ContextFile  string            `json:"contextFile,omitempty"`
-	ShellCommand bool              `json:"shellCommand,omitempty"`
-	Description  string            `json:"description,omitempty"`
-	Timeout      int               `json:"timeout,omitempty"`
-	Cwd          string            `json:"cwd,omitempty"`
-	Env          map[string]string `json:"env,omitempty"`
+	Match         string            `json:"match,omitempty"`
+	Command       string            `json:"command,omitempty"`
+	Args          []string          `json:"args,omitempty"`
+	ContextFile   string            `json:"contextFile,omitempty"`
+	ShellCommand  bool              `json:"shellCommand,omitempty"`
+	Async         bool              `json:"async,omitempty"`
+	PayloadFormat string            `json:"payloadFormat,omitempty"`
+	Description   string            `json:"description,omitempty"`
+	Timeout       int               `json:"timeout,omitempty"`
+	Cwd           string            `json:"cwd,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
 }
 
 type MCPServer struct {
-	Type      string            `json:"type,omitempty"`
-	Command   string            `json:"command,omitempty"`
-	Args      []string          `json:"args,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	URL       string            `json:"url,omitempty"`
-	Headers   map[string]string `json:"headers,omitempty"`
-	AutoStart *bool             `json:"auto_start,omitempty"`
-	Tier      string            `json:"tier,omitempty"`
+	Type        string            `json:"type,omitempty"`
+	Command     string            `json:"command,omitempty"`
+	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	URL         string            `json:"url,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	AutoStart   *bool             `json:"auto_start,omitempty"`
+	Tier        string            `json:"tier,omitempty"`
+	DisplayName string            `json:"display_name,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Imported    bool              `json:"imported,omitempty"`
 }
 
 // State is persisted at <Reasonix home>/plugin-packages.json.
@@ -133,6 +168,7 @@ type InstalledPlugin struct {
 	Description  string `json:"description,omitempty"`
 	ManifestKind string `json:"manifestKind,omitempty"`
 	Enabled      bool   `json:"enabled"`
+	Commit       string `json:"commit,omitempty"`
 }
 
 type InstalledPackage struct {
@@ -335,11 +371,13 @@ func parseNative(path, root string) (Package, []string, error) {
 	if err := validateManifest(root, &manifest); err != nil {
 		return Package{}, nil, err
 	}
-	warnings := applyClaudeCompatibility(root, &manifest)
+	warnings, issues := applyClaudeCompatibility(root, &manifest)
 	if err := validateManifest(root, &manifest); err != nil {
 		return Package{}, warnings, err
 	}
-	return Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}, warnings, nil
+	pkg := Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}
+	pkg.Compatibility = compatibilityFor(pkg, issues)
+	return pkg, warnings, nil
 }
 
 func parseCodex(path, root string) (Package, []string, error) {
@@ -393,14 +431,19 @@ func parseCodexLike(path, root, kind string, includeCodexSessionStartHook bool) 
 		}
 	}
 	var warnings []string
+	var issues []CompatibilityIssue
 	if kind == "claude" {
 		warnings = append(warnings, applyClaudeConventionDirs(root, &manifest)...)
 	}
-	warnings = append(warnings, applyClaudeCompatibility(root, &manifest)...)
+	compatWarnings, compatIssues := applyClaudeCompatibility(root, &manifest)
+	warnings = append(warnings, compatWarnings...)
+	issues = append(issues, compatIssues...)
 	if err := validateManifest(root, &manifest); err != nil {
 		return Package{}, warnings, err
 	}
-	return Package{Root: root, ManifestKind: kind, Manifest: manifest}, warnings, nil
+	pkg := Package{Root: root, ManifestKind: kind, Manifest: manifest}
+	pkg.Compatibility = compatibilityFor(pkg, issues)
+	return pkg, warnings, nil
 }
 
 // claudeConventionSkillDirs are the directories a Claude plugin loads skills
@@ -418,11 +461,7 @@ var claudeConventionSkillDirs = []string{"skills", ".claude/skills"}
 // plugin.json never lists commands.
 var claudeConventionCommandDirs = []string{"commands", ".claude/commands"}
 
-// claudeUnmappedCapabilities are the conventional Claude plugin surfaces
-// Reasonix does not map yet. Their presence is worth a warning: silently
-// installing a package while dropping half its capabilities reads as "install
-// succeeded" when it mostly didn't.
-var claudeUnmappedCapabilities = []string{"agents", "hooks/hooks.json", ".mcp.json"}
+var claudeConventionAgentDirs = []string{"agents"}
 
 // applyClaudeConventionDirs fills manifest.Skills from the conventional skill
 // directories when the manifest declares none (the standard Claude plugin
@@ -444,9 +483,10 @@ func applyClaudeConventionDirs(root string, manifest *Manifest) []string {
 			manifest.Commands = append(manifest.Commands, rel)
 		}
 	}
-	for _, rel := range claudeUnmappedCapabilities {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err == nil {
-			warnings = append(warnings, fmt.Sprintf("claude plugin declares %s, which Reasonix does not map yet; that capability will not be installed", rel))
+	for _, rel := range claudeConventionAgentDirs {
+		dir := filepath.Join(root, filepath.FromSlash(rel))
+		if dirContainsAgentMd(dir) && !containsPathEntry(manifest.Agents, rel) {
+			manifest.Agents = append(manifest.Agents, rel)
 		}
 	}
 	return warnings
@@ -508,9 +548,9 @@ func ManifestPaths() []string {
 	return []string{NativeManifest, CodexManifest, ClaudeManifest}
 }
 
-func applyClaudeCompatibility(root string, manifest *Manifest) []string {
+func applyClaudeCompatibility(root string, manifest *Manifest) ([]string, []CompatibilityIssue) {
 	appendRootClaudeInstructions(root, manifest)
-	return appendClaudeSettingsHooks(root, manifest)
+	return appendClaudeCompatibility(root, manifest)
 }
 
 func appendRootClaudeInstructions(root string, manifest *Manifest) {
@@ -527,70 +567,6 @@ func appendRootClaudeInstructions(root string, manifest *Manifest) {
 		Cwd:         ".",
 		Description: "Plugin CLAUDE.md startup context from " + manifest.Name,
 	})
-}
-
-func appendClaudeSettingsHooks(root string, manifest *Manifest) []string {
-	path := filepath.Join(root, claudeSettingsPath)
-	body, err := fileencoding.ReadFileUTF8(path)
-	if err != nil {
-		return nil
-	}
-	var raw struct {
-		Hooks map[string][]struct {
-			Matcher string `json:"matcher"`
-			Match   string `json:"match"`
-			Hooks   []struct {
-				Type        string            `json:"type"`
-				Command     string            `json:"command"`
-				Description string            `json:"description"`
-				Timeout     int               `json:"timeout"`
-				Env         map[string]string `json:"env"`
-			} `json:"hooks"`
-		} `json:"hooks"`
-	}
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return []string{fmt.Sprintf("%s: %v", claudeSettingsPath, err)}
-	}
-	if len(raw.Hooks) == 0 {
-		return nil
-	}
-	if manifest.Hooks == nil {
-		manifest.Hooks = map[string][]Hook{}
-	}
-	var warnings []string
-	for event, blocks := range raw.Hooks {
-		event = strings.TrimSpace(event)
-		if event == "" {
-			continue
-		}
-		for _, block := range blocks {
-			match := strings.TrimSpace(block.Matcher)
-			if match == "" {
-				match = strings.TrimSpace(block.Match)
-			}
-			for _, item := range block.Hooks {
-				typ := strings.TrimSpace(item.Type)
-				command := strings.TrimSpace(item.Command)
-				if typ != "" && typ != "command" {
-					warnings = append(warnings, fmt.Sprintf("%s: skipped unsupported hook type %q for %s", claudeSettingsPath, typ, event))
-					continue
-				}
-				if command == "" {
-					continue
-				}
-				manifest.Hooks[event] = append(manifest.Hooks[event], Hook{
-					Match:        match,
-					Command:      command,
-					ShellCommand: true,
-					Description:  firstNonEmpty(strings.TrimSpace(item.Description), "Claude-compatible hook from "+claudeSettingsPath),
-					Timeout:      claudeTimeoutMillis(item.Timeout),
-					Cwd:          ".",
-					Env:          cloneHookEnv(item.Env),
-				})
-			}
-		}
-	}
-	return warnings
 }
 
 func claudeTimeoutMillis(seconds int) int {
@@ -710,6 +686,11 @@ func validateManifest(root string, m *Manifest) error {
 			return err
 		}
 	}
+	for _, p := range m.Agents {
+		if err := validateRelativePath(p); err != nil {
+			return err
+		}
+	}
 	for event, hooks := range m.Hooks {
 		if strings.TrimSpace(event) == "" {
 			return fmt.Errorf("hook event is required")
@@ -766,6 +747,15 @@ func (p Package) SkillRoots() []string {
 	return out
 }
 
+func (p Package) AgentRoots() []string {
+	var out []string
+	for _, rel := range p.Manifest.Agents {
+		out = append(out, filepath.Join(p.Root, filepath.FromSlash(rel)))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // CommandRoots returns the absolute command directories this package
 // contributes to custom slash-command discovery.
 func (p Package) CommandRoots() []string {
@@ -787,9 +777,12 @@ func (p Package) CapabilityCounts() (skills, commands, hooks, mcp int) {
 	return
 }
 
+func (p Package) AgentCount() int { return len(p.agentRefs()) }
+
 func (p Package) Inventory() Inventory {
 	return Inventory{
 		Skills:     p.skillRefs(),
+		Agents:     p.agentRefs(),
 		Commands:   p.commandRefs(),
 		Hooks:      p.hookRefs(),
 		MCPServers: p.mcpServerRefs(),
@@ -977,10 +970,13 @@ func (p Package) mcpServerRefs() []MCPServerRef {
 	for _, name := range names {
 		server := p.Manifest.MCPServers[name]
 		out = append(out, MCPServerRef{
-			Name:      name,
-			Transport: pluginMCPTransport(server),
-			Command:   strings.TrimSpace(server.Command),
-			URL:       strings.TrimSpace(server.URL),
+			Name:        name,
+			DisplayName: firstNonEmpty(strings.TrimSpace(server.DisplayName), name),
+			Description: strings.TrimSpace(server.Description),
+			Transport:   pluginMCPTransport(server),
+			Command:     strings.TrimSpace(server.Command),
+			URL:         strings.TrimSpace(server.URL),
+			AutoStart:   server.AutoStart == nil || *server.AutoStart,
 		})
 	}
 	return out

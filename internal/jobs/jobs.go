@@ -26,7 +26,6 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
-	"reasonix/internal/secrets"
 )
 
 var renamePath = os.Rename
@@ -137,10 +136,11 @@ type Job struct {
 
 // Manager is the session's background-job table. It is safe for concurrent use.
 type Manager struct {
-	sink   event.Sink
-	root   context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	sink       event.Sink
+	root       context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	onJobStart func(done <-chan struct{})
 
 	mu           sync.Mutex
 	seq          int
@@ -186,6 +186,13 @@ func WithTeardownGrace(d time.Duration) Option {
 	}
 }
 
+// WithJobStartObserver observes every registered background job before its
+// goroutine starts. Delivery uses this to retain a workspace writer lease until
+// the job is truly terminal. The callback must return quickly.
+func WithJobStartObserver(observer func(done <-chan struct{})) Option {
+	return func(m *Manager) { m.onJobStart = observer }
+}
+
 // TeardownGrace reports the manager's configured close/destroy wait window.
 func (m *Manager) TeardownGrace() time.Duration { return m.teardownGrace }
 
@@ -223,13 +230,12 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 type jobWriter struct{ j *Job }
 
 func (w jobWriter) Write(p []byte) (int, error) {
-	redacted := []byte(secrets.Redact(string(p)))
 	w.j.mu.Lock()
 	defer w.j.mu.Unlock()
 	w.j.activityAt = nowMs()
-	w.j.tail = appendTail(w.j.tail, redacted, defaultTailBytes)
+	w.j.tail = appendTail(w.j.tail, p, defaultTailBytes)
 	if w.j.artifactFile != nil {
-		if _, err := w.j.artifactFile.Write(redacted); err != nil {
+		if _, err := w.j.artifactFile.Write(p); err != nil {
 			w.j.artifactErr = err.Error()
 		}
 	}
@@ -249,7 +255,6 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
-	label = secrets.Redact(label)
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
@@ -278,6 +283,9 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	m.jobs[key] = j
 	m.order = append(m.order, key)
 	m.mu.Unlock()
+	if m.onJobStart != nil {
+		m.onJobStart(j.done)
+	}
 
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
@@ -307,7 +315,6 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		}
 		finishedAt := nowMs()
 		if result != "" {
-			result = secrets.Redact(result)
 			j.mu.Lock()
 			if j.artifactFile != nil {
 				if _, writeErr := j.artifactFile.WriteString(result); writeErr != nil {
@@ -377,16 +384,31 @@ func (m *Manager) openArtifactLocked(parentSession, id string) (logPath, metaPat
 	if dir == "" {
 		return "", "", nil, "artifact directory unavailable"
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(dir); err != nil {
 		return filepath.Join(dir, id+jobLogExt), filepath.Join(dir, id+jobMetaExt), nil, err.Error()
 	}
 	logPath = filepath.Join(dir, id+jobLogExt)
 	metaPath = filepath.Join(dir, id+jobMetaExt)
-	f, err := os.Create(logPath)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return logPath, metaPath, nil, err.Error()
 	}
+	// O_TRUNC does not apply the requested mode to an existing artifact. Tighten
+	// it before any raw tool output is written so upgrades cannot append secrets
+	// to a legacy 0644 log.
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return logPath, metaPath, nil, err.Error()
+	}
 	return logPath, metaPath, f, ""
+}
+
+func ensurePrivateArtifactDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll leaves an existing 0755 directory unchanged.
+	return os.Chmod(dir, 0o700)
 }
 
 func (m *Manager) artifactDirLocked(parentSession string) string {
@@ -532,7 +554,7 @@ func (j *Job) moveArtifactToDirLocked(dir string) error {
 	if filepath.Clean(filepath.Dir(j.artifactPath)) == filepath.Clean(dir) {
 		return nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(dir); err != nil {
 		return err
 	}
 	newLogPath := filepath.Join(dir, filepath.Base(j.artifactPath))
@@ -1222,7 +1244,7 @@ func migrateArtifactDirSkipping(src, dst string, skip map[string]bool) error {
 		}
 		return err
 	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(dst); err != nil {
 		return err
 	}
 	for _, entry := range entries {
@@ -1241,6 +1263,11 @@ func migrateArtifactDirSkipping(src, dst string, skip map[string]bool) error {
 }
 
 func moveArtifactFile(src, dst string) error {
+	// A rename preserves the source mode, so tighten legacy artifacts before
+	// either the fast rename or the cross-device copy fallback.
+	if err := os.Chmod(src, 0o600); err != nil {
+		return err
+	}
 	if err := renamePath(src, dst); err == nil {
 		return nil
 	}
@@ -1256,12 +1283,13 @@ func copyArtifactFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	info, err := in.Stat()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
+	if err := out.Chmod(0o600); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
 		return err
 	}
 	_, copyErr := io.Copy(out, in)

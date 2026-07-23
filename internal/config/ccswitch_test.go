@@ -94,6 +94,93 @@ func TestLoadCCSwitchLegacyConfig(t *testing.T) {
 	}
 }
 
+func TestLoadCCSwitchLegacyConfigPrefersReasonixFlag(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body := `{
+		"mcp": {
+			"servers": {
+				"legacy": {
+					"name": "legacy",
+					"server": {"command": "node", "args": ["legacy.js"]},
+					"apps": {"codex": true}
+				},
+				"reasonix-off": {
+					"name": "reasonix-off",
+					"server": {"command": "node", "args": ["off.js"]},
+					"apps": {"codex": true, "reasonix": false}
+				},
+				"reasonix-on": {
+					"name": "reasonix-on",
+					"server": {"command": "node", "args": ["on.js"]},
+					"apps": {"codex": false, "reasonix": true}
+				}
+			}
+		}
+	}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadCCSwitchLegacyConfig(path)
+	if err != nil {
+		t.Fatalf("loadCCSwitchLegacyConfig: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "legacy" || got[1].Name != "reasonix-on" {
+		t.Fatalf("entries = %+v, want legacy fallback and explicit Reasonix enablement", got)
+	}
+}
+
+func TestLoadCCSwitchMCPDBPrefersReasonixColumn(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	dbPath := filepath.Join(t.TempDir(), "cc-switch.db")
+	setup := `CREATE TABLE mcp_servers (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		server_config TEXT NOT NULL,
+		enabled_codex BOOLEAN NOT NULL DEFAULT 0,
+		enabled_reasonix BOOLEAN NOT NULL DEFAULT 0
+	);
+	INSERT INTO mcp_servers VALUES ('codex-only', 'codex-only', '{"command":"node","args":["codex.js"]}', 1, 0);
+	INSERT INTO mcp_servers VALUES ('reasonix-only', 'reasonix-only', '{"command":"node","args":["reasonix.js"]}', 0, 1);`
+	if out, err := exec.Command("sqlite3", dbPath, setup).CombinedOutput(); err != nil {
+		t.Fatalf("create sqlite db: %v\n%s", err, out)
+	}
+	got, err := loadCCSwitchMCPDB(dbPath)
+	if err != nil {
+		t.Fatalf("loadCCSwitchMCPDB: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "reasonix-only" {
+		t.Fatalf("entries = %+v, want only explicit Reasonix enablement", got)
+	}
+}
+
+func TestLoadCCSwitchMCPDBFallsBackToCodexWithoutReasonixColumn(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not available")
+	}
+	dbPath := filepath.Join(t.TempDir(), "cc-switch.db")
+	setup := `CREATE TABLE mcp_servers (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		server_config TEXT NOT NULL,
+		enabled_codex BOOLEAN NOT NULL DEFAULT 0
+	);
+	INSERT INTO mcp_servers VALUES ('codex-on', 'codex-on', '{"command":"node","args":["on.js"]}', 1);
+	INSERT INTO mcp_servers VALUES ('codex-off', 'codex-off', '{"command":"node","args":["off.js"]}', 0);`
+	if out, err := exec.Command("sqlite3", dbPath, setup).CombinedOutput(); err != nil {
+		t.Fatalf("create sqlite db: %v\n%s", err, out)
+	}
+	got, err := loadCCSwitchMCPDB(dbPath)
+	if err != nil {
+		t.Fatalf("loadCCSwitchMCPDB: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "codex-on" {
+		t.Fatalf("entries = %+v, want legacy Codex fallback", got)
+	}
+}
+
 func TestLoadCCSwitchMCPEmptyDBDoesNotReadLegacyBackups(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 not available")

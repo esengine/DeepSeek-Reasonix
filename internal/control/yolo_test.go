@@ -15,11 +15,9 @@ import (
 	"reasonix/internal/tool"
 )
 
-// TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval drives the same
-// complex request that TestAutoPlanGateEndToEnd uses, but with YOLO/full access
-// on. Tool auto-approval skips tool approvals, not collaboration gates: a complex
-// task still drafts a plan and must wait for the user's plan approval.
-func TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval(t *testing.T) {
+// TestAutoApproveToolsStillRequiresExplicitPlanApproval proves that YOLO/full
+// tool access does not bypass the separate Plan Mode collaboration gate.
+func TestAutoApproveToolsStillRequiresExplicitPlanApproval(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("Plan:\n1. Add the config field\n2. Wire it into boot\n3. Add tests"),
 		textTurn("Done — implemented the approved plan."),
@@ -29,7 +27,6 @@ func TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval(t *testing.T) {
 	approvalRequests := make(chan event.Approval, 1)
 	var seeded bool
 	c := New(Options{
-		AutoPlan: "on",
 		Runner:   ag,
 		Executor: ag,
 		Sink: event.FuncSink(func(e event.Event) {
@@ -44,6 +41,7 @@ func TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval(t *testing.T) {
 		}),
 	})
 	c.SetAutoApproveTools(true)
+	c.SetPlanMode(true)
 
 	input := "实现 issue #2395：新增配置项、自动判断复杂任务、补测试和文档"
 	done := make(chan error, 1)
@@ -73,7 +71,7 @@ func TestAutoApproveToolsStillAutoPlansAndRequiresPlanApproval(t *testing.T) {
 		t.Fatal("approved plan did not continue into execution")
 	}
 	if got := agent.StripTransientUserBlocks(firstUserMessage(ag.Session().Messages)); !strings.HasPrefix(got, PlanModeMarker) {
-		t.Fatalf("first model input = %q, want the auto-plan marker prefixed", got)
+		t.Fatalf("first model input = %q, want the plan marker prefixed", got)
 	}
 	if c.PlanMode() {
 		t.Fatal("plan mode should be off after approval")
@@ -586,61 +584,6 @@ func TestSetAutoApproveToolsDoesNotDrainPendingPlanApproval(t *testing.T) {
 	}
 }
 
-func TestSetAutoApproveToolsDoesNotDrainPendingMCPReadOnlyTrust(t *testing.T) {
-	approvalRequests := make(chan event.Approval, 1)
-	c := New(Options{
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.ApprovalRequest {
-				approvalRequests <- e.Approval
-			}
-		}),
-	})
-
-	type trustResult struct {
-		allow  bool
-		reason string
-		err    error
-	}
-	done := make(chan trustResult, 1)
-	req := agent.PlanModeReadOnlyTrustRequest{
-		ToolName:    "mcp__github__issue_read",
-		ServerName:  "github",
-		RawToolName: "issue/read",
-	}
-	go func() {
-		allow, reason, err := planModeReadOnlyTrustApprover{c}.CheckPlanModeReadOnlyTrust(context.Background(), req)
-		done <- trustResult{allow: allow, reason: reason, err: err}
-	}()
-
-	var approval event.Approval
-	select {
-	case approval = <-approvalRequests:
-	case <-time.After(30 * time.Second):
-		t.Fatal("MCP read-only trust approval request was not emitted")
-	}
-
-	c.SetAutoApproveTools(true)
-
-	select {
-	case got := <-done:
-		t.Fatalf("SetAutoApproveTools must not auto-answer MCP read-only trust; got %+v", got)
-	case <-time.After(50 * time.Millisecond):
-	}
-	if !c.AutoApproveTools() {
-		t.Fatal("tool auto-approval should turn on while MCP read-only trust stays pending")
-	}
-
-	c.Approve(approval.ID, true, false, false)
-	select {
-	case got := <-done:
-		if got.err != nil || !got.allow || got.reason != "" {
-			t.Fatalf("manual MCP read-only trust approval = %+v, want allow", got)
-		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("MCP read-only trust approval stayed blocked after Approve")
-	}
-}
-
 func TestSetAutoApproveToolsDoesNotDrainPendingPlanModeReadOnlyCommandTrust(t *testing.T) {
 	approvalRequests := make(chan event.Approval, 1)
 	c := New(Options{
@@ -804,6 +747,104 @@ func TestSetModeAppliesBothGates(t *testing.T) {
 	c.SetMode(false, false)
 	if c.PlanMode() || c.AutoApproveTools() {
 		t.Fatalf("normal mode: plan=%v autoApproveTools=%v, want false/false", c.PlanMode(), c.AutoApproveTools())
+	}
+}
+
+type planModeCountingRunner struct {
+	calls int
+	last  bool
+}
+
+func (*planModeCountingRunner) Run(context.Context, string) error { return nil }
+func (r *planModeCountingRunner) SetPlanMode(v bool) {
+	r.calls++
+	r.last = v
+}
+
+func TestApplyModeUsesRunnerPlanPropagationOnce(t *testing.T) {
+	runner := &planModeCountingRunner{}
+	c := New(Options{Runner: runner})
+	c.ApplyMode(true, true)
+	if runner.calls != 1 || !runner.last {
+		t.Fatalf("runner SetPlanMode calls=%d last=%v, want 1/true", runner.calls, runner.last)
+	}
+	if !c.PlanMode() || c.ToolApprovalMode() != ToolApprovalYolo {
+		t.Fatalf("controller plan=%v approval=%q, want true/yolo", c.PlanMode(), c.ToolApprovalMode())
+	}
+	c.SetPlanMode(false)
+	if runner.calls != 2 || runner.last {
+		t.Fatalf("SetPlanMode runner calls=%d last=%v, want 2/false", runner.calls, runner.last)
+	}
+}
+
+func TestApplyModePlanPropagationRunnerFallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		runner func(*agent.Agent) agent.Runner
+	}{
+		{name: "single agent", runner: func(executor *agent.Agent) agent.Runner { return executor }},
+		{name: "runner without setter", runner: func(*agent.Agent) agent.Runner {
+			return appendingRunner{session: agent.NewSession("runner")}
+		}},
+		{name: "nil runner", runner: func(*agent.Agent) agent.Runner { return nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			phaseCalls := 0
+			reg := tool.NewRegistry()
+			reg.Add(plannerUnsafeReadTool{calls: &phaseCalls})
+			prov := &scriptedTurns{turns: [][]provider.Chunk{
+				toolCallTurn("phase-1", "planner_phase_only", `{}`),
+				textTurn("done"),
+			}}
+			executor := agent.New(prov, reg, agent.NewSession("executor"), agent.Options{}, event.Discard)
+			c := New(Options{Runner: tc.runner(executor), Executor: executor})
+			c.ApplyMode(true, true)
+			if err := executor.Run(context.Background(), "try the execution-phase tool"); err != nil {
+				t.Fatalf("executor Run: %v", err)
+			}
+			if phaseCalls != 0 {
+				t.Fatalf("phase-opted-out tool executed %d times, want 0", phaseCalls)
+			}
+		})
+	}
+}
+
+type plannerUnsafeReadTool struct {
+	calls *int
+}
+
+func (plannerUnsafeReadTool) Name() string            { return "planner_phase_only" }
+func (plannerUnsafeReadTool) Description() string     { return "planner phase test tool" }
+func (plannerUnsafeReadTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (plannerUnsafeReadTool) ReadOnly() bool          { return true }
+func (plannerUnsafeReadTool) PlanModeSafe() bool      { return false }
+func (t plannerUnsafeReadTool) Execute(context.Context, json.RawMessage) (string, error) {
+	(*t.calls)++
+	return "executed", nil
+}
+
+func TestApplyModePropagatesPlanToCoordinatorPlannerAndKeepsYolo(t *testing.T) {
+	plannerCalls := 0
+	plannerTools := tool.NewRegistry()
+	plannerTools.Add(plannerUnsafeReadTool{calls: &plannerCalls})
+	planner := &scriptedTurns{turns: [][]provider.Chunk{
+		toolCallTurn("planner-tool", "planner_phase_only", `{}`),
+		textTurn("1. inspect the current behavior\n2. implement the fix"),
+	}}
+	execProvider := &scriptedTurns{turns: [][]provider.Chunk{textTurn("executor done")}}
+	executor := agent.New(execProvider, tool.NewRegistry(), agent.NewSession("exec"), agent.Options{}, event.Discard)
+	coordinator := agent.NewCoordinator(planner, agent.NewSession("planner"), nil, plannerTools, agent.Options{}, executor, 0, event.Discard, nil)
+	c := New(Options{Runner: coordinator, Executor: executor})
+
+	c.ApplyMode(true, true)
+	if err := c.Run(context.Background(), "prepare the change"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if plannerCalls != 0 {
+		t.Fatalf("planner phase-only tool executed %d times, want 0 while Plan is active", plannerCalls)
+	}
+	if !c.PlanMode() || c.ToolApprovalMode() != ToolApprovalYolo {
+		t.Fatalf("after run plan=%v approval=%q, want true/yolo", c.PlanMode(), c.ToolApprovalMode())
 	}
 }
 
@@ -1132,5 +1173,61 @@ func TestAskSerializesBehindPromptLockEvenWithBypass(t *testing.T) {
 	}
 	if len(answers) != 1 || answers[0].QuestionID != "q1" || len(answers[0].Selected) != 1 || answers[0].Selected[0] != "Alternative" {
 		t.Fatalf("answers = %#v, want Alternative (user's choice, not auto-recommended)", answers)
+	}
+}
+
+// TestApplyToolApprovalModeReportsDrainedIDs pins the drain-report contract
+// the desktop frontend relies on (#6432): a posture switch returns exactly
+// the pending approval ids it auto-allowed, so the UI dismisses those cards
+// and keeps the ones still pending here. Fresh user decisions (plan) never
+// drain, and auto keeps approvals an allow policy would not cover.
+func TestApplyToolApprovalModeReportsDrainedIDs(t *testing.T) {
+	c := New(Options{
+		Policy: permission.New("ask", nil, []string{"bash(git commit*)"}, nil),
+	})
+
+	autoOKID, autoOKReply := c.approval.register("bash", "go test ./...", "")
+	askRuleID, askRuleReply := c.approval.register("bash", "git commit -m x", "")
+	planID, planReply := c.approval.registerDecision(planApprovalTool, "", "", true)
+
+	drained := c.ApplyToolApprovalMode(ToolApprovalAuto)
+	if len(drained) != 1 || drained[0] != autoOKID {
+		t.Fatalf("auto drained = %v, want [%s]", drained, autoOKID)
+	}
+	select {
+	case r := <-autoOKReply:
+		if !r.allow {
+			t.Fatal("auto-drained approval must be auto-allowed")
+		}
+	default:
+		t.Fatal("auto-drained approval reply not signaled")
+	}
+	select {
+	case <-askRuleReply:
+		t.Fatal("explicit ask-rule approval must stay pending under auto")
+	default:
+	}
+
+	drained = c.ApplyToolApprovalMode(ToolApprovalYolo)
+	if len(drained) != 1 || drained[0] != askRuleID {
+		t.Fatalf("yolo drained = %v, want [%s]", drained, askRuleID)
+	}
+	select {
+	case r := <-askRuleReply:
+		if !r.allow {
+			t.Fatal("yolo-drained approval must be auto-allowed")
+		}
+	default:
+		t.Fatal("yolo-drained approval reply not signaled")
+	}
+
+	// The fresh plan decision survives both switches and stays pending.
+	select {
+	case <-planReply:
+		t.Fatal("fresh plan approval must never drain on a posture switch")
+	default:
+	}
+	if !c.approval.hasPending() {
+		t.Fatalf("plan approval %s should still be pending", planID)
 	}
 }

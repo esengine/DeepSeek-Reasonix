@@ -35,17 +35,18 @@ import (
 // the sink forwards to the client over session/request_permission.
 //
 // Cwd roots the session's file tools and bash (built via builtin.Workspace).
-// Model and EffortOverride are optional session-local provider selectors from
-// ACP config options. MCPServers are the MCP servers the client asked the agent
-// to connect for this session. OnSessionRecovered is the service's bookkeeping
-// hook for automatic transcript recovery branches (see sessionRecoveredHandler);
-// factories must wire it into the controller they build.
+// Model, EffortOverride, and RuntimeProfile are optional session-local selectors
+// from ACP config options. MCPServers are the MCP servers the client asked the
+// agent to connect for this session. OnSessionRecovered is the service's
+// bookkeeping hook for automatic transcript recovery branches (see
+// sessionRecoveredHandler); factories must wire it into the controller they build.
 type SessionParams struct {
 	Cwd                string
 	MCPServers         []plugin.Spec
 	Sink               event.Sink
 	Model              string
 	EffortOverride     *string
+	RuntimeProfile     string
 	OnSessionRecovered func(control.SessionRecoveryInfo) error
 	// FileOverlay and Terminal are non-nil when the client advertised the
 	// matching capability at initialize: file tools then see unsaved editor
@@ -66,25 +67,27 @@ type Factory interface {
 }
 
 // SessionConfigStateParams asks the Factory for normalized session config
-// selectors. Empty Model means the Factory should use its configured default.
-// Nil EffortOverride means provider config wins; a non-nil empty string means
+// selectors. Empty Model and RuntimeProfile use configured defaults. Nil
+// EffortOverride means provider config wins; a non-nil empty string means
 // provider default for this session.
 type SessionConfigStateParams struct {
 	Cwd            string
 	Model          string
 	EffortOverride *string
+	RuntimeProfile string
 }
 
 // SessionConfigState is the complete ACP-visible config state for a session.
 type SessionConfigState struct {
 	Model          string
 	EffortOverride *string
+	RuntimeProfile string
 	Models         *SessionModelState
 	ConfigOptions  []SessionConfigOption
 }
 
-// SessionConfigStateProvider lets a Factory expose model and effort selectors
-// without making the ACP transport depend on a concrete config backend.
+// SessionConfigStateProvider lets a Factory expose model, effort, and work-mode
+// selectors without making the ACP transport depend on a concrete config backend.
 type SessionConfigStateProvider interface {
 	SessionConfigState(ctx context.Context, p SessionConfigStateParams) (SessionConfigState, error)
 }
@@ -122,6 +125,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle("session/load", svc.sessionLoad)
 	conn.Handle("session/resume", svc.sessionResume)
 	conn.Handle("session/prompt", svc.sessionPrompt)
+	conn.Handle(sessionSteerMethod, svc.sessionSteer)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
 	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/set_mode", svc.sessionSetMode)
@@ -146,6 +150,22 @@ type service struct {
 	// terminals). Zero until initialize arrives; sessions opened later bind a
 	// clientIO built from it.
 	clientCaps ClientCapabilities
+}
+
+// afterResponse wraps a result with work that must run after the transport has
+// successfully written that result. Session-opening notifications use this so a
+// client can register the returned session before receiving its first update.
+type afterResponse struct {
+	result any
+	after  func()
+}
+
+func (r afterResponse) Response() any { return r.result }
+
+func (r afterResponse) AfterResponse() {
+	if r.after != nil {
+		r.after()
+	}
 }
 
 func (s *service) setClientCapabilities(caps ClientCapabilities) {
@@ -184,11 +204,11 @@ func (s *service) bindClientIO(p *SessionParams, sessionID string) {
 type acpController interface {
 	control.Lifecycle
 	control.TurnControl
+	TrySteer(text string) bool
 	control.Approvals
 	control.Capabilities
 	control.SessionPersistence
-	// Goals is included for the session-mode surface only (PlanMode read-back
-	// after a turn); the goal FSM itself is not driven over ACP.
+	// Goals backs ACP's normal/plan/goal collaboration-mode surface.
 	control.Goals
 }
 
@@ -204,21 +224,33 @@ type acpSession struct {
 	mcpServers []plugin.Spec
 	model      string
 	// nil means use config; non-nil empty string means provider default.
-	effortOverride *string
-	// modeID is the ACP session mode last reported to the client (default |
-	// plan | auto). Guarded by mu; compared after each turn so controller-side
-	// flips (plan mode auto-exit) surface as current_mode_update.
+	effortOverride   *string
+	runtimeProfile   string
+	toolApprovalMode string
+	// modeID is the ACP collaboration mode last reported to the client (normal |
+	// plan | goal). Goal draft mode turns the next user prompt into the goal.
+	// Both are guarded by mu; controller-side completion/plan exit is reconciled
+	// after each turn through current_mode_update.
 	modeID        string
-	pendingConfig *SessionConfigState
+	goalDraftMode bool
+	// pendingConfig queues config deltas requested while a turn or rebuild is
+	// in flight, holding at most one entry per axis: a later request replaces
+	// only its own axis (last-write-wins per axis), so a model change and a
+	// work-mode change queued back to back during one turn both survive to the
+	// drain instead of the second overwriting the first.
+	pendingConfig []sessionConfigDelta
 	title         string
 	createdAt     time.Time
 	updatedAt     time.Time
 
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	done    chan struct{}
-	running bool
-	deleted bool
+	mu sync.Mutex
+	// stateChangeMu serializes controller rebuilds with collaboration/approval
+	// changes so a swap cannot overwrite a newer user selection.
+	stateChangeMu sync.Mutex
+	cancel        context.CancelFunc
+	done          chan struct{}
+	running       bool
+	deleted       bool
 	// lease is the session lease guarding transcript against other runtimes
 	// (a desktop window, the CLI) for the life of this session. Held from
 	// session/new / session/load and released on close/delete/teardown.
@@ -237,7 +269,7 @@ func (s *acpSession) begin(ctx context.Context) (context.Context, context.Cancel
 	// A queued pendingConfig blocks new turns so a prompt never runs on the
 	// outgoing config. The turn or maintenance that queued it applies it from
 	// its defer, so no new turn is needed to drain the queue.
-	if s.running || s.deleted || s.maintenanceDone != nil || s.pendingConfig != nil {
+	if s.running || s.deleted || s.maintenanceDone != nil || len(s.pendingConfig) > 0 {
 		s.mu.Unlock()
 		cancel()
 		return nil, nil, false
@@ -336,9 +368,54 @@ func (s *acpSession) currentModeID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.modeID == "" {
-		return sessionModeDefault
+		return sessionModeNormal
 	}
 	return s.modeID
+}
+
+func (s *acpSession) setGoalDraftMode(on bool) {
+	s.mu.Lock()
+	s.goalDraftMode = on
+	s.mu.Unlock()
+}
+
+func (s *acpSession) takeGoalDraftMode() bool {
+	s.mu.Lock()
+	on := s.goalDraftMode
+	s.goalDraftMode = false
+	s.mu.Unlock()
+	return on
+}
+
+func (s *acpSession) isGoalDraftMode() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.goalDraftMode
+}
+
+func (s *acpSession) setToolApprovalMode(mode string) {
+	s.mu.Lock()
+	s.toolApprovalMode = normalizeACPToolApprovalMode(mode)
+	s.mu.Unlock()
+}
+
+func (s *acpSession) swapToolApprovalMode(mode string) (old string) {
+	mode = normalizeACPToolApprovalMode(mode)
+	s.mu.Lock()
+	old = normalizeACPToolApprovalMode(s.toolApprovalMode)
+	s.toolApprovalMode = mode
+	s.mu.Unlock()
+	return old
+}
+
+func (s *acpSession) saveMetaIfPresent() {
+	s.mu.Lock()
+	path := s.transcript
+	meta := s.metaLocked()
+	s.mu.Unlock()
+	if path != "" && sessionFileExists(path) {
+		_ = saveACPMeta(path, meta)
+	}
 }
 
 // currentCtrl returns the session's controller under mu. rebuildSession swaps
@@ -474,6 +551,11 @@ func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error
 				EmbeddedContext: true,
 			},
 			MCPCapabilities: MCPCapabilities{HTTP: true, SSE: false},
+			Meta: map[string]any{
+				"reasonix.io": ReasonixExtensionCapabilities{
+					SessionSteer: &SessionSteerCapability{Method: sessionSteerMethod},
+				},
+			},
 		},
 		AgentInfo:   Implementation{Name: s.info.Name, Version: s.info.Version},
 		AuthMethods: []AuthMethod{reasonixSetupAuthMethod()},
@@ -524,6 +606,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	if err != nil {
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
 	}
+	cfgState = withToolApprovalConfig(cfgState, control.ToolApprovalAsk)
 
 	id, err := newSessionID()
 	if err != nil {
@@ -538,6 +621,7 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		Sink:               sink,
 		Model:              cfgState.Model,
 		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
+		RuntimeProfile:     cfgState.RuntimeProfile,
 		OnSessionRecovered: s.sessionRecoveredHandler(id),
 	}
 	s.bindClientIO(&sessionParams, id)
@@ -551,16 +635,18 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 
 	now := time.Now().UTC()
 	sess := &acpSession{
-		id:             id,
-		ctrl:           ctrl,
-		sink:           sink,
-		cwd:            cwd,
-		mcpServers:     clonePluginSpecs(mcpServers),
-		model:          cfgState.Model,
-		effortOverride: cloneStringPtr(cfgState.EffortOverride),
-		modeID:         sessionModeDefault,
-		createdAt:      now,
-		updatedAt:      now,
+		id:               id,
+		ctrl:             ctrl,
+		sink:             sink,
+		cwd:              cwd,
+		mcpServers:       clonePluginSpecs(mcpServers),
+		model:            cfgState.Model,
+		effortOverride:   cloneStringPtr(cfgState.EffortOverride),
+		runtimeProfile:   cfgState.RuntimeProfile,
+		toolApprovalMode: control.ToolApprovalAsk,
+		modeID:           sessionModeNormal,
+		createdAt:        now,
+		updatedAt:        now,
 	}
 	// Pin a transcript file keyed by session id when the controller has a session
 	// dir, so every turn auto-saves there, session/prompt can hand the path back,
@@ -575,45 +661,49 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 			return nil, sessionLeaseBindError("session/new", err)
 		}
 		sess.lease = lease
-		ctrl.SetSessionPath(sess.transcript)
+		ctrl.SetFreshSessionPath(sess.transcript)
 	}
 
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
-	s.sendAvailableCommands(sess)
 
-	return SessionNewResult{
-		SessionID:     id,
-		Models:        cfgState.Models,
-		Modes:         sessionModesState(sessionModeDefault),
-		ConfigOptions: cfgState.ConfigOptions,
+	return afterResponse{
+		result: SessionNewResult{
+			SessionID:     id,
+			Models:        cfgState.Models,
+			Modes:         sessionModesState(sessionModeNormal),
+			ConfigOptions: cfgState.ConfigOptions,
+		},
+		after: func() { s.sendAvailableCommands(sess) },
 	}, nil
 }
 
-// Session modes exposed over ACP, mapped onto the controller's approval
-// switches: default asks per write-capable call, plan flips the read-only plan
-// gate, auto approves tool calls without asking.
+// Session modes exposed over ACP describe how the agent advances the task.
+// Tool approval and runtime profile are independent config options. The legacy
+// default/auto ids remain accepted for clients that used the old mixed axis.
 const (
-	sessionModeDefault = "default"
-	sessionModePlan    = "plan"
-	sessionModeAuto    = "auto"
+	sessionModeNormal        = "normal"
+	sessionModePlan          = "plan"
+	sessionModeGoal          = "goal"
+	sessionModeLegacyDefault = "default"
+	sessionModeLegacyAuto    = "auto"
 )
 
 func sessionModesState(current string) *SessionModeState {
 	return &SessionModeState{
 		CurrentModeID: current,
 		AvailableModes: []SessionMode{
-			{ID: sessionModeDefault, Name: "Always Ask", Description: "Ask before write-capable tool calls"},
-			{ID: sessionModePlan, Name: "Plan", Description: "Read-only research and planning; no writes or commands"},
-			{ID: sessionModeAuto, Name: "Auto-Approve", Description: "Run tool calls without asking"},
+			{ID: sessionModeNormal, Name: "Normal", Description: "Work directly and pause when user input is required"},
+			{ID: sessionModePlan, Name: "Plan", Description: "Research and propose a plan before making changes"},
+			{ID: sessionModeGoal, Name: "Goal", Description: "Keep advancing the next prompt as a goal until complete or blocked"},
 		},
 	}
 }
 
 // sessionSetMode switches the session's operating mode and confirms it with a
 // current_mode_update, per the ACP session-mode contract.
-func (s *service) sessionSetMode(_ context.Context, raw json.RawMessage) (any, error) {
+func (s *service) sessionSetMode(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p SessionSetModeParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_mode: " + err.Error()}
@@ -622,20 +712,45 @@ func (s *service) sessionSetMode(_ context.Context, raw json.RawMessage) (any, e
 	if sess == nil {
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_mode: unknown session " + p.SessionID}
 	}
+	sess.stateChangeMu.Lock()
+	defer sess.stateChangeMu.Unlock()
 	ctrl := sess.currentCtrl()
+	nextMode := p.ModeID
+	legacyApproval := ""
 	switch p.ModeID {
-	case sessionModeDefault:
-		ctrl.SetMode(false, false)
+	case sessionModeNormal:
+		ctrl.SetPlanMode(false)
+		ctrl.ClearGoal()
 	case sessionModePlan:
-		ctrl.SetMode(true, false)
-	case sessionModeAuto:
-		ctrl.SetMode(false, true)
+		ctrl.ClearGoal()
+		ctrl.SetPlanMode(true)
+	case sessionModeGoal:
+		ctrl.SetPlanMode(false)
+	case sessionModeLegacyDefault:
+		nextMode = sessionModeNormal
+		legacyApproval = control.ToolApprovalAsk
+		ctrl.SetPlanMode(false)
+		ctrl.ClearGoal()
+	case sessionModeLegacyAuto:
+		nextMode = sessionModeNormal
+		legacyApproval = control.ToolApprovalYolo
+		ctrl.SetPlanMode(false)
+		ctrl.ClearGoal()
 	default:
 		return nil, &RPCError{Code: ErrInvalidParams, Message: "session/set_mode: unknown modeId " + p.ModeID}
 	}
-	if sess.swapModeID(p.ModeID) != p.ModeID {
-		sess.sink.send(currentModeUpdate{SessionUpdate: "current_mode_update", CurrentModeID: p.ModeID})
+	sess.setGoalDraftMode(nextMode == sessionModeGoal && ctrl.GoalStatus() != control.GoalStatusRunning)
+	if legacyApproval != "" {
+		ctrl.SetToolApprovalMode(legacyApproval)
+		sess.setToolApprovalMode(legacyApproval)
+		if cfgState, err := s.configStateForSession(ctx, sess); err == nil {
+			sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+		}
 	}
+	if sess.swapModeID(nextMode) != nextMode {
+		sess.sink.send(currentModeUpdate{SessionUpdate: "current_mode_update", CurrentModeID: nextMode})
+	}
+	sess.saveMetaIfPresent()
 	return SessionSetModeResult{}, nil
 }
 
@@ -643,17 +758,41 @@ func (s *service) sessionSetMode(_ context.Context, raw json.RawMessage) (any, e
 // a plan is approved, a config rebuild resets switches) as current_mode_update
 // so the client's mode picker stays truthful.
 func (s *service) emitModeDrift(sess *acpSession) {
+	// Hold stateChangeMu across the controller read and the session-state swap:
+	// a session/set_mode completing between them (it holds this lock) would
+	// otherwise be read back as drift, roll the session's modeID and metadata
+	// back to the pre-selection value, and make the next rebuild re-apply that
+	// stale mode to the replacement controller.
+	sess.stateChangeMu.Lock()
+	defer sess.stateChangeMu.Unlock()
 	ctrl := sess.currentCtrl()
-	current := sessionModeDefault
+	current := sessionModeNormal
 	switch {
 	case ctrl.PlanMode():
 		current = sessionModePlan
-	case ctrl.AutoApproveTools():
-		current = sessionModeAuto
+	case ctrl.GoalStatus() == control.GoalStatusRunning || sess.isGoalDraftMode():
+		current = sessionModeGoal
 	}
 	if sess.swapModeID(current) != current {
 		sess.sink.send(currentModeUpdate{SessionUpdate: "current_mode_update", CurrentModeID: current})
+		sess.saveMetaIfPresent()
 	}
+}
+
+func (s *service) emitToolApprovalDrift(ctx context.Context, sess *acpSession) {
+	// Same contract as emitModeDrift: serialize with switchSessionToolApproval
+	// and rebuilds so a user selection landing between the controller read and
+	// the swap below is never reverted.
+	sess.stateChangeMu.Lock()
+	defer sess.stateChangeMu.Unlock()
+	current := normalizeACPToolApprovalMode(sess.currentCtrl().ToolApprovalMode())
+	if sess.swapToolApprovalMode(current) == current {
+		return
+	}
+	if cfgState, err := s.configStateForSession(ctx, sess); err == nil {
+		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+	}
+	sess.saveMetaIfPresent()
 }
 
 // sessionLoad resumes a previously-saved session by id: it builds a controller
@@ -670,17 +809,20 @@ func (s *service) sessionLoad(ctx context.Context, raw json.RawMessage) (any, er
 	if err != nil {
 		return nil, err
 	}
-	return SessionLoadResult{Models: cfgState.Models, Modes: s.sessionModesFor(p.SessionID), ConfigOptions: cfgState.ConfigOptions}, nil
+	return afterResponse{
+		result: SessionLoadResult{Models: cfgState.Models, Modes: s.sessionModesFor(p.SessionID), ConfigOptions: cfgState.ConfigOptions},
+		after:  func() { s.sendAvailableCommands(s.session(p.SessionID)) },
+	}, nil
 }
 
-// sessionModesFor reports the modes state for a just-opened session: a session
-// already live in this process keeps whatever mode the user put it in (plan /
-// auto), so load/resume must not tell a reconnecting client "default".
+// sessionModesFor reports the modes state for a just-opened session. A live
+// session keeps its current normal/plan/goal selection, so load/resume must not
+// reset a reconnecting client's mode picker to normal.
 func (s *service) sessionModesFor(id string) *SessionModeState {
 	if sess := s.session(id); sess != nil {
 		return sessionModesState(sess.currentModeID())
 	}
-	return sessionModesState(sessionModeDefault)
+	return sessionModesState(sessionModeNormal)
 }
 
 // sessionResume restores a previously-saved session without replaying its
@@ -694,7 +836,10 @@ func (s *service) sessionResume(ctx context.Context, raw json.RawMessage) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return SessionResumeResult{Models: cfgState.Models, Modes: s.sessionModesFor(p.SessionID), ConfigOptions: cfgState.ConfigOptions}, nil
+	return afterResponse{
+		result: SessionResumeResult{Models: cfgState.Models, Modes: s.sessionModesFor(p.SessionID), ConfigOptions: cfgState.ConfigOptions},
+		after:  func() { s.sendAvailableCommands(s.session(p.SessionID)) },
+	}, nil
 }
 
 func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam string, servers []MCPServerSpec, replay bool) (SessionConfigState, error) {
@@ -744,9 +889,10 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		Cwd:            cwd,
 		Model:          saved.Model,
 		EffortOverride: cloneStringPtr(saved.EffortOverride),
+		RuntimeProfile: saved.RuntimeProfile,
 	}
 	cfgState, err := s.sessionConfigState(ctx, cfgParams)
-	if err != nil && (strings.TrimSpace(saved.Model) != "" || saved.EffortOverride != nil) {
+	if err != nil && (strings.TrimSpace(saved.Model) != "" || saved.EffortOverride != nil || strings.TrimSpace(saved.RuntimeProfile) != "") {
 		cfgState, err = s.sessionConfigState(ctx, SessionConfigStateParams{Cwd: cwd})
 	}
 	if err != nil {
@@ -761,6 +907,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		Sink:               sink,
 		Model:              cfgState.Model,
 		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
+		RuntimeProfile:     cfgState.RuntimeProfile,
 		OnSessionRecovered: s.sessionRecoveredHandler(id),
 	}
 	s.bindClientIO(&sessionParams, id)
@@ -797,24 +944,49 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": unknown session " + id}
 	}
 	ctrl.Resume(loaded, path)
+	toolApprovalMode := normalizeACPToolApprovalMode(saved.ToolApprovalMode)
+	ctrl.SetToolApprovalMode(toolApprovalMode)
+	modeID := normalizeACPCollaborationMode(saved.CollaborationMode)
+	goalDraftMode := false
+	switch modeID {
+	case sessionModePlan:
+		ctrl.SetPlanMode(true)
+	case sessionModeGoal:
+		ctrl.SetPlanMode(false)
+		goalDraftMode = ctrl.GoalStatus() != control.GoalStatusRunning
+	default:
+		if ctrl.GoalStatus() == control.GoalStatusRunning {
+			modeID = sessionModeGoal
+		} else {
+			modeID = sessionModeNormal
+			ctrl.SetPlanMode(false)
+		}
+	}
 
 	meta := metadataForLoadedSession(path, id, cwd, ctrl.History())
 	meta.Model = cfgState.Model
 	meta.EffortOverride = cloneStringPtr(cfgState.EffortOverride)
+	meta.RuntimeProfile = cfgState.RuntimeProfile
+	meta.ToolApprovalMode = toolApprovalMode
+	meta.CollaborationMode = modeID
+	cfgState = withToolApprovalConfig(cfgState, toolApprovalMode)
 	sess := &acpSession{
-		id:             id,
-		ctrl:           ctrl,
-		sink:           sink,
-		transcript:     path,
-		cwd:            meta.Cwd,
-		mcpServers:     clonePluginSpecs(mcpServers),
-		model:          cfgState.Model,
-		effortOverride: cloneStringPtr(cfgState.EffortOverride),
-		modeID:         sessionModeDefault,
-		title:          meta.Title,
-		createdAt:      meta.CreatedAt,
-		updatedAt:      meta.UpdatedAt,
-		lease:          lease,
+		id:               id,
+		ctrl:             ctrl,
+		sink:             sink,
+		transcript:       path,
+		cwd:              meta.Cwd,
+		mcpServers:       clonePluginSpecs(mcpServers),
+		model:            cfgState.Model,
+		effortOverride:   cloneStringPtr(cfgState.EffortOverride),
+		runtimeProfile:   cfgState.RuntimeProfile,
+		toolApprovalMode: toolApprovalMode,
+		modeID:           modeID,
+		goalDraftMode:    goalDraftMode,
+		title:            meta.Title,
+		createdAt:        meta.CreatedAt,
+		updatedAt:        meta.UpdatedAt,
+		lease:            lease,
 	}
 	if err := saveACPMeta(path, sess.meta()); err != nil {
 		sess.releaseSessionLease()
@@ -824,7 +996,6 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	s.mu.Lock()
 	s.sessions[id] = sess
 	s.mu.Unlock()
-	s.sendAvailableCommands(sess)
 
 	if replay {
 		sink.replay(ctrl.History())
@@ -895,11 +1066,13 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, &RPCError{Code: ErrInvalidRequest, Message: "session/prompt: session already has an active prompt"}
 	}
 	sess.sink.setTurnContext(runCtx)
+	if sess.takeGoalDraftMode() {
+		sess.currentCtrl().SetGoal(text)
+		sess.saveMetaIfPresent()
+	}
 	defer func() {
 		sess.sink.clearTurnContext()
-		sess.finish()
-		s.reportPendingSessionConfigError(ctx, sess, s.applyPendingSessionConfig(ctx, sess), "after turn")
-		s.emitModeDrift(sess)
+		s.finishTurn(ctx, sess)
 		cancel()
 	}()
 	runErr := sess.ctrl.RunTurn(runCtx, text)
@@ -923,8 +1096,46 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	return res, nil
 }
 
-// sessionSetConfigOption applies ACP's generic session-level selector. Reasonix
-// currently exposes model and reasoning-effort selectors through this path.
+// sessionSteer injects user guidance into an active turn and acknowledges once
+// the agent has queued it for the next safe loop boundary.
+func (s *service) sessionSteer(_ context.Context, raw json.RawMessage) (any, error) {
+	var p SessionSteerParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": " + err.Error()}
+	}
+	sess := s.session(p.SessionID)
+	if sess == nil {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": unknown session " + p.SessionID}
+	}
+	text := FlattenPrompt(p.Prompt)
+	if text == "" {
+		return nil, &RPCError{Code: ErrInvalidParams, Message: sessionSteerMethod + ": empty prompt"}
+	}
+	if !sess.currentCtrl().TrySteer(text) {
+		return nil, &RPCError{Code: ErrInvalidRequest, Message: sessionSteerMethod + ": session has no active prompt"}
+	}
+	return SessionSteerResult{}, nil
+}
+
+// finishTurn reconciles controller-side drift and drains any config switch
+// queued during the turn. Drift must be reconciled before finish() exposes
+// the session as idle: a concurrent config switch races on sess.running, and
+// if it wins that race while modeID/toolApprovalMode are still stale (a
+// slash command or plan/goal completion changed them inside the turn), it
+// rebuilds the replacement controller from the outgoing state instead of the
+// one this turn actually ended in.
+func (s *service) finishTurn(ctx context.Context, sess *acpSession) {
+	s.emitModeDrift(sess)
+	s.emitToolApprovalDrift(ctx, sess)
+	sess.finish()
+	s.reportPendingSessionConfigError(ctx, sess, s.applyPendingSessionConfig(ctx, sess), "after turn")
+	// Re-check after a rebuild in case the replacement normalized state.
+	s.emitModeDrift(sess)
+	s.emitToolApprovalDrift(ctx, sess)
+}
+
+// sessionSetConfigOption applies ACP's generic session-level selectors for
+// model, reasoning effort, work mode, and tool approval.
 func (s *service) sessionSetConfigOption(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p SetSessionConfigOptionParams
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -952,6 +1163,10 @@ func (s *service) sessionSetConfigOption(ctx context.Context, raw json.RawMessag
 		next, err = s.switchSessionModel(ctx, sess, p.Value)
 	case "thought_level":
 		next, err = s.switchSessionEffort(ctx, sess, p.Value)
+	case "work_mode":
+		next, err = s.switchSessionRuntimeProfile(ctx, sess, p.Value)
+	case "tool_approval":
+		next, err = s.switchSessionToolApproval(ctx, sess, p.Value)
 	default:
 		err = &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: unsupported config option " + option.ID}
 	}
@@ -978,40 +1193,237 @@ func (s *service) sessionSetModel(ctx context.Context, raw json.RawMessage) (any
 	return SetSessionModelResult{}, nil
 }
 
-func (s *service) switchSessionModel(ctx context.Context, sess *acpSession, modelID string) (SessionConfigState, error) {
+// sessionConfigDelta names exactly one config axis a caller asked to change
+// (tool approval never rebuilds the controller, so it has no delta here).
+// rebuildSession queues these — instead of a fully resolved SessionConfigState
+// — while a turn or rebuild is in flight, one queue entry per axis, and
+// applyPendingSessionConfig re-resolves the queued set against the session's
+// live baseline once the session is idle. That way a queued change to one axis
+// can never restore a stale value on another axis that changed in the
+// meantime, whether that axis rebuilt already or is queued alongside.
+type sessionConfigDelta struct {
+	axis           string
+	model          string
+	effortOverride *string
+	runtimeProfile string
+}
+
+func (d sessionConfigDelta) clone() sessionConfigDelta {
+	d.effortOverride = cloneStringPtr(d.effortOverride)
+	return d
+}
+
+// mergePendingConfig queues delta with last-write-wins per axis: it replaces a
+// queued entry for the same axis and appends otherwise, so a change queued for
+// one axis can never drop a change queued for another. Callers hold sess.mu.
+func mergePendingConfig(queue []sessionConfigDelta, delta sessionConfigDelta) []sessionConfigDelta {
+	for i := range queue {
+		if queue[i].axis == delta.axis {
+			queue[i] = delta.clone()
+			return queue
+		}
+	}
+	return append(queue, delta.clone())
+}
+
+// removePendingAxes drops the queue entries whose axis a rebuild is applying,
+// keeping entries other requests queued in the meantime so the post-maintenance
+// drain still applies them. Callers hold sess.mu.
+func removePendingAxes(queue, applied []sessionConfigDelta) []sessionConfigDelta {
+	if len(queue) == 0 {
+		return nil
+	}
+	kept := queue[:0]
+	for _, q := range queue {
+		drop := false
+		for _, d := range applied {
+			if q.axis == d.axis {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			kept = append(kept, q)
+		}
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
+}
+
+func clonePendingConfig(queue []sessionConfigDelta) []sessionConfigDelta {
+	if len(queue) == 0 {
+		return nil
+	}
+	out := make([]sessionConfigDelta, len(queue))
+	for i := range queue {
+		out[i] = queue[i].clone()
+	}
+	return out
+}
+
+func (d sessionConfigDelta) applyTo(p *SessionConfigStateParams) {
+	switch d.axis {
+	case "model":
+		p.Model = d.model
+	case "thought_level":
+		p.EffortOverride = cloneStringPtr(d.effortOverride)
+	case "work_mode":
+		p.RuntimeProfile = d.runtimeProfile
+	}
+}
+
+// resolveSessionConfigDeltas resolves deltas against the session's current
+// config baseline. Calling this fresh at every apply — instead of reusing a
+// snapshot taken when a change was first requested — is what keeps a queued
+// delta for one axis from clobbering another axis that rebuilt in between.
+func (s *service) resolveSessionConfigDeltas(ctx context.Context, sess *acpSession, deltas []sessionConfigDelta) (SessionConfigState, error) {
 	params := sess.configStateParams()
-	params.Model = modelID
+	for _, delta := range deltas {
+		delta.applyTo(&params)
+	}
 	cfgState, err := s.sessionConfigState(ctx, params)
 	if err != nil {
-		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: "session/set_model: " + err.Error()}
-	}
-	if cfgState.Model == "" {
-		return SessionConfigState{}, &RPCError{Code: ErrInvalidRequest, Message: "session/set_model: model switching is unavailable in this session"}
-	}
-	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
 		return SessionConfigState{}, err
 	}
-	return cfgState, nil
+	return withToolApprovalConfig(cfgState, sess.currentToolApprovalMode()), nil
+}
+
+func (s *service) switchSessionModel(ctx context.Context, sess *acpSession, modelID string) (SessionConfigState, error) {
+	deltas := []sessionConfigDelta{{axis: "model", model: modelID}}
+	return s.switchSessionConfig(ctx, sess, deltas)
 }
 
 func (s *service) switchSessionEffort(ctx context.Context, sess *acpSession, effort string) (SessionConfigState, error) {
-	params := sess.configStateParams()
 	level := strings.TrimSpace(effort)
 	if level == "auto" {
 		level = ""
 	}
-	params.EffortOverride = &level
-	cfgState, err := s.sessionConfigState(ctx, params)
-	if err != nil {
-		return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: "session/set_config_option: " + err.Error()}
+	deltas := []sessionConfigDelta{{axis: "thought_level", effortOverride: &level}}
+	return s.switchSessionConfig(ctx, sess, deltas)
+}
+
+func (s *service) switchSessionRuntimeProfile(ctx context.Context, sess *acpSession, profile string) (SessionConfigState, error) {
+	deltas := []sessionConfigDelta{{axis: "work_mode", runtimeProfile: profile}}
+	return s.switchSessionConfig(ctx, sess, deltas)
+}
+
+// switchSessionConfig resolves and applies one explicit config request without
+// letting its full config snapshot roll back another axis. Resolution must be
+// repeated after stateChangeMu is acquired: a different-axis rebuild may finish
+// while this request is resolving or waiting for the lock, making the earlier
+// baseline stale even though this request's own delta is still current.
+func (s *service) switchSessionConfig(ctx context.Context, sess *acpSession, deltas []sessionConfigDelta) (SessionConfigState, error) {
+	resolve := func() (SessionConfigState, error) {
+		cfgState, err := s.resolveSessionConfigDeltas(ctx, sess, deltas)
+		if err != nil {
+			method := "session/set_config_option"
+			if len(deltas) == 1 && deltas[0].axis == "model" {
+				method = "session/set_model"
+			}
+			return SessionConfigState{}, &RPCError{Code: ErrInvalidParams, Message: method + ": " + err.Error()}
+		}
+		if len(deltas) == 1 && deltas[0].axis == "model" && cfgState.Model == "" {
+			return SessionConfigState{}, &RPCError{Code: ErrInvalidRequest, Message: "session/set_model: model switching is unavailable in this session"}
+		}
+		return cfgState, nil
 	}
-	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
+
+	if !sess.stateChangeMu.TryLock() {
+		// Preserve the non-blocking queue contract while a rebuild is already in
+		// maintenance. Resolve once for validation and the immediate client update;
+		// the drain resolves the queued deltas again against live state.
+		cfgState, err := resolve()
+		if err != nil {
+			return SessionConfigState{}, err
+		}
+		sess.mu.Lock()
+		if sess.maintenanceDone != nil && !sess.deleted {
+			for _, delta := range deltas {
+				sess.pendingConfig = mergePendingConfig(sess.pendingConfig, delta)
+			}
+			sess.mu.Unlock()
+			sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+			return cfgState, nil
+		}
+		sess.mu.Unlock()
+		sess.stateChangeMu.Lock()
+	}
+
+	// Always resolve inside the serialization domain. Even a successful TryLock
+	// can follow a concurrent rebuild that completed after this request began.
+	cfgState, err := resolve()
+	if err != nil {
+		sess.stateChangeMu.Unlock()
+		return SessionConfigState{}, err
+	}
+	didMaintenance := false
+	err = s.rebuildSessionLocked(ctx, sess, cfgState, deltas, &didMaintenance)
+	sess.stateChangeMu.Unlock()
+	if didMaintenance {
+		pendingErr := s.applyPendingSessionConfig(ctx, sess)
+		s.reportPendingSessionConfigError(ctx, sess, pendingErr, "after maintenance")
+		// The pending drain completes before this request returns. Refresh the RPC
+		// result so an older response cannot overwrite the newer config_option_update
+		// with the pre-drain full snapshot on the client.
+		if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
+			cfgState = current
+		}
+	}
+	if err != nil {
 		return SessionConfigState{}, err
 	}
 	return cfgState, nil
 }
 
-func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState SessionConfigState) (retErr error) {
+func (s *service) switchSessionToolApproval(ctx context.Context, sess *acpSession, mode string) (SessionConfigState, error) {
+	sess.stateChangeMu.Lock()
+	defer sess.stateChangeMu.Unlock()
+	mode = normalizeACPToolApprovalMode(mode)
+	ctrl := sess.currentCtrl()
+	ctrl.SetToolApprovalMode(mode)
+	sess.setToolApprovalMode(mode)
+	sess.saveMetaIfPresent()
+	cfgState, err := s.configStateForSession(ctx, sess)
+	if err != nil {
+		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: "session/set_config_option: " + err.Error()}
+	}
+	sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+	return cfgState, nil
+}
+
+func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState SessionConfigState, deltas []sessionConfigDelta) error {
+	if !sess.stateChangeMu.TryLock() {
+		// Preserve the existing queue contract: a config change arriving during
+		// a controller build returns immediately and is applied after that
+		// build. The queue keeps one delta per axis (last-write-wins within an
+		// axis), so changes queued for different axes never clobber each other.
+		// Collaboration/approval changes do not use this queue; they wait for
+		// the swap and then update the replacement controller.
+		sess.mu.Lock()
+		if sess.maintenanceDone != nil && !sess.deleted {
+			for _, delta := range deltas {
+				sess.pendingConfig = mergePendingConfig(sess.pendingConfig, delta)
+			}
+			sess.mu.Unlock()
+			sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
+			return nil
+		}
+		sess.mu.Unlock()
+		sess.stateChangeMu.Lock()
+	}
+	didMaintenance := false
+	err := s.rebuildSessionLocked(ctx, sess, cfgState, deltas, &didMaintenance)
+	sess.stateChangeMu.Unlock()
+	if didMaintenance {
+		pendingErr := s.applyPendingSessionConfig(ctx, sess)
+		s.reportPendingSessionConfigError(ctx, sess, pendingErr, "after maintenance")
+	}
+	return err
+}
+
+func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cfgState SessionConfigState, deltas []sessionConfigDelta, didMaintenance *bool) (retErr error) {
 	sess.mu.Lock()
 	if sess.deleted {
 		sess.mu.Unlock()
@@ -1027,28 +1439,35 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		return sessionConfigActiveWorkError("stop background jobs before switching config")
 	}
 	if sess.running || status.Running || sess.maintenanceDone != nil {
-		pending := cloneSessionConfigState(cfgState)
-		sess.pendingConfig = &pending
+		for _, delta := range deltas {
+			sess.pendingConfig = mergePendingConfig(sess.pendingConfig, delta)
+		}
 		sess.mu.Unlock()
 		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: cfgState.ConfigOptions})
 		return nil
 	}
-	// Claim the queue in the same critical section that raises maintenanceDone
-	// below: begin must never observe an idle session between the two.
-	sess.pendingConfig = nil
+	// Claim this rebuild's axes from the queue in the same critical section
+	// that raises maintenanceDone below: begin must never observe an idle
+	// session between the two. Axes queued by other requests stay queued and
+	// are drained by the post-maintenance apply.
+	sess.pendingConfig = removePendingAxes(sess.pendingConfig, deltas)
 
 	cur := sess.ctrl
 	sink := sess.sink
 	mcpServers := clonePluginSpecs(sess.mcpServers)
 	cwd := sess.cwd
+	modeID := normalizeACPCollaborationMode(sess.modeID)
+	goalDraftMode := sess.goalDraftMode
+	toolApprovalMode := normalizeACPToolApprovalMode(sess.toolApprovalMode)
+	if strings.TrimSpace(cfgState.RuntimeProfile) == "" {
+		cfgState.RuntimeProfile = sess.runtimeProfile
+	}
 	maintenanceDone := make(chan struct{})
 	sess.maintenanceDone = maintenanceDone
+	*didMaintenance = true
 	sess.mu.Unlock()
 	defer func() {
 		sess.finishMaintenance(maintenanceDone)
-		if retErr == nil {
-			s.reportPendingSessionConfigError(ctx, sess, s.applyPendingSessionConfig(ctx, sess), "after maintenance")
-		}
 	}()
 
 	if err := cur.Snapshot(); err != nil {
@@ -1064,6 +1483,10 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 	// SessionPath is controller-locked, so reading it off sess.mu is safe.
 	prevPath := cur.SessionPath()
 	carried := cur.History()
+	carriedGoal := ""
+	if cur.GoalStatus() == control.GoalStatusRunning {
+		carriedGoal = cur.Goal()
+	}
 
 	rebuildParams := SessionParams{
 		Cwd:                cwd,
@@ -1071,6 +1494,7 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		Sink:               sink,
 		Model:              cfgState.Model,
 		EffortOverride:     cloneStringPtr(cfgState.EffortOverride),
+		RuntimeProfile:     cfgState.RuntimeProfile,
 		OnSessionRecovered: s.sessionRecoveredHandler(sess.id),
 	}
 	// The rebuilt controller must keep the client-capability wiring (fs
@@ -1081,43 +1505,79 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 		return &RPCError{Code: ErrInternal, Message: "session config: " + err.Error()}
 	}
 	newCtrl.EnableInteractiveApproval()
-	sink.bindApprove(newCtrl.Approve)
-	sink.bindAnswer(newCtrl.AnswerQuestion)
+	// The freshly built controller's own leading system message carries the
+	// target profile's contract (see boot/token_profile.go); AdoptHistory below
+	// replaces the whole history with carried, so splice that message in first
+	// or the model keeps seeing the outgoing profile's contract after every
+	// switch.
+	if fresh := newCtrl.History(); len(fresh) > 0 && fresh[0].Role == provider.RoleSystem {
+		if len(carried) > 0 && carried[0].Role == provider.RoleSystem {
+			carried[0] = fresh[0]
+		} else {
+			carried = append([]provider.Message{fresh[0]}, carried...)
+		}
+	}
 	newCtrl.AdoptHistory(carried, prevPath)
-	// Re-apply the session's ACP mode: a fresh controller boots with default
-	// switches, which would silently drop a user-selected plan/auto mode and
-	// desynchronize the client's mode picker.
-	switch sess.currentModeID() {
+	// Re-apply all three independent session axes. A controller rebuild must not
+	// turn Plan into tool approval, drop a running Goal, or reset Ask/Auto/Yolo.
+	newCtrl.SetToolApprovalMode(toolApprovalMode)
+	switch modeID {
 	case sessionModePlan:
-		newCtrl.SetMode(true, false)
-	case sessionModeAuto:
-		newCtrl.SetMode(false, true)
+		newCtrl.SetPlanMode(true)
+	case sessionModeGoal:
+		newCtrl.SetPlanMode(false)
+		if carriedGoal != "" {
+			newCtrl.SetGoal(carriedGoal)
+		}
+	default:
+		newCtrl.SetPlanMode(false)
 	}
 	// InheritLifecycleFrom wires two concrete controllers' turn/hook state; it's a
 	// construction concern, not part of the driving port. cur is always the
 	// *control.Controller the factory built for this session, so this is safe.
 	if prev, ok := cur.(*control.Controller); ok {
 		newCtrl.InheritLifecycleFrom(prev)
+		// A rebuild must not force the user to re-approve tools already granted
+		// for this session, or re-trust Plan-mode read-only commands already
+		// trusted this session.
+		newCtrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+	}
+	// Persist before publishing the replacement. If this fails, the outgoing
+	// controller and transcript still agree and remain fully usable; publishing
+	// first would report a successful switch whose refreshed profile contract
+	// disappears on restart. AdoptHistory preserves the loaded CAS baseline, so
+	// this compatible leading-system rewrite is safe to snapshot here.
+	if prevPath != "" {
+		if err := newCtrl.Snapshot(); err != nil {
+			newCtrl.ReleaseResources()
+			return &RPCError{Code: ErrInternal, Message: "session config: snapshot after switch: " + err.Error()}
+		}
 	}
 
 	sess.mu.Lock()
 	if sess.deleted {
 		sess.mu.Unlock()
-		newCtrl.Close()
+		newCtrl.ReleaseResources()
 		return &RPCError{Code: ErrInvalidRequest, Message: "session config: session is deleted"}
 	}
 	if sess.ctrl != cur {
 		sess.mu.Unlock()
-		newCtrl.Close()
+		newCtrl.ReleaseResources()
 		return sessionConfigActiveWorkError("session changed while switching config; retry")
 	}
 	sess.ctrl = newCtrl
 	sess.model = cfgState.Model
 	sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
+	sess.runtimeProfile = cfgState.RuntimeProfile
+	sess.toolApprovalMode = toolApprovalMode
+	sess.modeID = modeID
+	sess.goalDraftMode = goalDraftMode
 	if sess.transcript != "" && sessionFileExists(sess.transcript) {
 		_ = saveACPMeta(sess.transcript, sess.metaLocked())
 	}
 	sess.mu.Unlock()
+	sink.bindApprove(newCtrl.Approve)
+	sink.bindAnswer(newCtrl.AnswerQuestion)
 
 	cur.ReleaseResources()
 	s.sendAvailableCommands(sess)
@@ -1126,32 +1586,81 @@ func (s *service) rebuildSession(ctx context.Context, sess *acpSession, cfgState
 }
 
 func (s *service) applyPendingSessionConfig(ctx context.Context, sess *acpSession) error {
-	if s.session(sess.id) != sess {
-		return nil
-	}
-	sess.mu.Lock()
-	if sess.deleted || sess.pendingConfig == nil {
-		sess.mu.Unlock()
-		return nil
-	}
-	cfgState := cloneSessionConfigState(*sess.pendingConfig)
-	// Keep pendingConfig set while rebuilding: begin refuses new turns until
-	// rebuildSession claims it together with raising maintenanceDone, so no
-	// promptable instant is visible in between.
-	sess.mu.Unlock()
-
-	if err := s.rebuildSession(ctx, sess, cfgState); err != nil {
-		// Once this attempt failed nothing in flight is left to retry a parked
-		// config, and begin refuses new turns while one is queued — drop it so
-		// the session stays promptable (the caller reports the failure).
-		sess.mu.Lock()
-		if !sess.deleted && !sess.running && sess.maintenanceDone == nil {
-			sess.pendingConfig = nil
+	var firstErr error
+	for {
+		if s.session(sess.id) != sess {
+			return firstErr
 		}
+		// Claim the queue in the same serialization domain as explicit config
+		// switches. Without this lock, a newer same-axis request can rebuild after
+		// the clone below but before this apply starts, then the stale cloned delta
+		// queues behind it and wins last instead of preserving request order.
+		sess.stateChangeMu.Lock()
+		didMaintenance := false
+		sess.mu.Lock()
+		if sess.deleted || len(sess.pendingConfig) == 0 {
+			sess.mu.Unlock()
+			sess.stateChangeMu.Unlock()
+			return firstErr
+		}
+		deltas := clonePendingConfig(sess.pendingConfig)
+		// Keep pendingConfig set while rebuilding: begin refuses new turns until
+		// rebuildSession claims it together with raising maintenanceDone, so no
+		// promptable instant is visible in between.
 		sess.mu.Unlock()
-		return err
+
+		// Re-resolve against the session's current state rather than reusing
+		// whatever baseline existed when each delta queued: another axis may have
+		// finished rebuilding in the meantime, and replaying its old value here
+		// would silently roll it back. All queued axes resolve into one state so a
+		// single rebuild applies them together.
+		cfgState, err := s.resolveSessionConfigDeltas(ctx, sess, deltas)
+		if err != nil {
+			sess.mu.Lock()
+			if !sess.deleted && !sess.running && sess.maintenanceDone == nil {
+				sess.pendingConfig = removePendingAxes(sess.pendingConfig, deltas)
+			}
+			sess.mu.Unlock()
+			sess.stateChangeMu.Unlock()
+			if firstErr != nil {
+				s.reportPendingSessionConfigError(ctx, sess, err, "after failed maintenance")
+				return firstErr
+			}
+			return err
+		}
+
+		err = s.rebuildSessionLocked(ctx, sess, cfgState, deltas, &didMaintenance)
+		if err != nil && !didMaintenance {
+			// Once this attempt failed nothing in flight is left to retry the
+			// claimed axes, and begin refuses new turns while any are queued — drop
+			// them so the session stays promptable. Once maintenance started, those
+			// axes were already removed; anything queued now is a newer request and
+			// must survive this failure.
+			sess.mu.Lock()
+			if !sess.deleted && !sess.running && sess.maintenanceDone == nil {
+				sess.pendingConfig = removePendingAxes(sess.pendingConfig, deltas)
+			}
+			sess.mu.Unlock()
+		}
+		sess.stateChangeMu.Unlock()
+
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			} else {
+				s.reportPendingSessionConfigError(ctx, sess, err, "after failed maintenance")
+			}
+			if !didMaintenance {
+				return firstErr
+			}
+		}
+		if !didMaintenance {
+			return firstErr
+		}
+		// Requests can queue while NewSession/Snapshot runs. Iterate even when this
+		// rebuild failed so their already-successful RPCs cannot leave the session
+		// blocked. A loop keeps sustained config traffic from growing the call stack.
 	}
-	return nil
 }
 
 func (s *service) reportPendingSessionConfigError(ctx context.Context, sess *acpSession, err error, when string) {
@@ -1159,10 +1668,12 @@ func (s *service) reportPendingSessionConfigError(ctx context.Context, sess *acp
 		return
 	}
 	sess.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "session config switch failed " + when + ": " + err.Error()})
-	if isSessionConfigActiveWorkError(err) {
-		if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
-			sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: current.ConfigOptions})
-		}
+	// A queued request already announced its desired config to the client. Every
+	// apply failure leaves the outgoing controller/config active, so always send
+	// the live state back; otherwise snapshot/build/resolve failures leave the
+	// picker claiming a switch that never happened.
+	if current, stateErr := s.configStateForSession(ctx, sess); stateErr == nil {
+		sess.sink.send(configOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: current.ConfigOptions})
 	}
 }
 
@@ -1178,11 +1689,6 @@ func sessionConfigActiveWorkError(message string) error {
 	return &activeSessionConfigWorkError{
 		RPCError: &RPCError{Code: ErrInvalidRequest, Message: "session config: " + message},
 	}
-}
-
-func isSessionConfigActiveWorkError(err error) bool {
-	var activeErr *activeSessionConfigWorkError
-	return errors.As(err, &activeErr)
 }
 
 // sessionClose releases an active session. Unknown sessions are accepted as a
@@ -1386,7 +1892,11 @@ func (s *service) sessionConfigState(ctx context.Context, p SessionConfigStatePa
 }
 
 func (s *service) configStateForSession(ctx context.Context, sess *acpSession) (SessionConfigState, error) {
-	return s.sessionConfigState(ctx, sess.configStateParams())
+	state, err := s.sessionConfigState(ctx, sess.configStateParams())
+	if err != nil {
+		return SessionConfigState{}, err
+	}
+	return withToolApprovalConfig(state, sess.currentToolApprovalMode()), nil
 }
 
 func (s *acpSession) configStateParams() SessionConfigStateParams {
@@ -1396,7 +1906,60 @@ func (s *acpSession) configStateParams() SessionConfigStateParams {
 		Cwd:            s.cwd,
 		Model:          s.model,
 		EffortOverride: cloneStringPtr(s.effortOverride),
+		RuntimeProfile: s.runtimeProfile,
 	}
+}
+
+func (s *acpSession) currentToolApprovalMode() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return normalizeACPToolApprovalMode(s.toolApprovalMode)
+}
+
+func normalizeACPToolApprovalMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case control.ToolApprovalAuto:
+		return control.ToolApprovalAuto
+	case control.ToolApprovalYolo:
+		return control.ToolApprovalYolo
+	default:
+		return control.ToolApprovalAsk
+	}
+}
+
+func normalizeACPCollaborationMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case sessionModePlan:
+		return sessionModePlan
+	case sessionModeGoal:
+		return sessionModeGoal
+	default:
+		return sessionModeNormal
+	}
+}
+
+func withToolApprovalConfig(state SessionConfigState, mode string) SessionConfigState {
+	mode = normalizeACPToolApprovalMode(mode)
+	option := SessionConfigOption{
+		ID:           "tool_approval",
+		Name:         "Tool Approval",
+		Category:     "tool_approval",
+		Type:         "select",
+		CurrentValue: mode,
+		Options: []SessionConfigSelectOption{
+			{Value: control.ToolApprovalAsk, Name: "Ask", Description: "Ask before permission-gated tool calls"},
+			{Value: control.ToolApprovalAuto, Name: "Auto", Description: "Follow configured permission rules without fallback prompts"},
+			{Value: control.ToolApprovalYolo, Name: "Yolo", Description: "Approve tool calls except protected decisions"},
+		},
+	}
+	for i := range state.ConfigOptions {
+		if normalizeConfigID(state.ConfigOptions[i].ID) == option.ID {
+			state.ConfigOptions[i] = option
+			return state
+		}
+	}
+	state.ConfigOptions = append(state.ConfigOptions, option)
+	return state
 }
 
 func findConfigOption(options []SessionConfigOption, id string) (SessionConfigOption, bool) {
@@ -1415,6 +1978,10 @@ func normalizeConfigID(id string) string {
 		return "model"
 	case "reasoning_effort", "thought_level":
 		return "effort"
+	case "profile", "runtime_profile", "token_mode":
+		return "work_mode"
+	case "approval", "approval_mode", "tool_approval_mode":
+		return "tool_approval"
 	default:
 		return strings.TrimSpace(id)
 	}
@@ -1438,6 +2005,10 @@ func configOptionCategory(option SessionConfigOption) string {
 		return "model"
 	case "effort":
 		return "thought_level"
+	case "work_mode":
+		return "work_mode"
+	case "tool_approval":
+		return "tool_approval"
 	default:
 		return ""
 	}
@@ -1449,21 +2020,6 @@ func cloneStringPtr(p *string) *string {
 	}
 	cp := *p
 	return &cp
-}
-
-func cloneSessionConfigState(in SessionConfigState) SessionConfigState {
-	out := in
-	out.EffortOverride = cloneStringPtr(in.EffortOverride)
-	if in.Models != nil {
-		models := *in.Models
-		models.AvailableModels = append([]ModelInfo(nil), in.Models.AvailableModels...)
-		out.Models = &models
-	}
-	out.ConfigOptions = append([]SessionConfigOption(nil), in.ConfigOptions...)
-	for i := range out.ConfigOptions {
-		out.ConfigOptions[i].Options = append([]SessionConfigSelectOption(nil), out.ConfigOptions[i].Options...)
-	}
-	return out
 }
 
 func clonePluginSpecs(in []plugin.Spec) []plugin.Spec {
@@ -1560,13 +2116,16 @@ func (s *acpSession) meta() acpSessionMeta {
 
 func (s *acpSession) metaLocked() acpSessionMeta {
 	return acpSessionMeta{
-		SessionID:      s.id,
-		Cwd:            s.cwd,
-		Model:          s.model,
-		EffortOverride: cloneStringPtr(s.effortOverride),
-		Title:          s.title,
-		CreatedAt:      s.createdAt,
-		UpdatedAt:      s.updatedAt,
+		SessionID:         s.id,
+		Cwd:               s.cwd,
+		Model:             s.model,
+		EffortOverride:    cloneStringPtr(s.effortOverride),
+		RuntimeProfile:    s.runtimeProfile,
+		ToolApprovalMode:  normalizeACPToolApprovalMode(s.toolApprovalMode),
+		CollaborationMode: normalizeACPCollaborationMode(s.modeID),
+		Title:             s.title,
+		CreatedAt:         s.createdAt,
+		UpdatedAt:         s.updatedAt,
 	}
 }
 
@@ -1689,13 +2248,16 @@ func (s *service) resolveSlashPrompt(ctx context.Context, sess *acpSession, text
 }
 
 type acpSessionMeta struct {
-	SessionID      string    `json:"sessionId"`
-	Cwd            string    `json:"cwd"`
-	Model          string    `json:"model,omitempty"`
-	EffortOverride *string   `json:"effortOverride,omitempty"`
-	Title          string    `json:"title,omitempty"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	SessionID         string    `json:"sessionId"`
+	Cwd               string    `json:"cwd"`
+	Model             string    `json:"model,omitempty"`
+	EffortOverride    *string   `json:"effortOverride,omitempty"`
+	RuntimeProfile    string    `json:"runtimeProfile,omitempty"`
+	ToolApprovalMode  string    `json:"toolApprovalMode,omitempty"`
+	CollaborationMode string    `json:"collaborationMode,omitempty"`
+	Title             string    `json:"title,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 	// ActiveTranscript, when set on the id-keyed sidecar, is the basename of
 	// the transcript this session currently lives in: a snapshot recovery
 	// moved the live session onto a recovery branch and left this redirect
@@ -2016,23 +2578,26 @@ func mcpSpecs(in []MCPServerSpec, cwd string) ([]plugin.Spec, error) {
 			if strings.TrimSpace(m.Command) == "" {
 				return nil, fmt.Errorf("MCP server %q command is required", m.Name)
 			}
-		case "http", "streamable-http", "streamable_http":
+		case "http", "streamable-http", "streamable_http", "sse":
 			if strings.TrimSpace(m.URL) == "" {
 				return nil, fmt.Errorf("MCP server %q url is required", m.Name)
 			}
-			typ = "http"
+			if typ != "sse" {
+				typ = "http"
+			}
 		default:
 			return nil, fmt.Errorf("MCP server %q uses unsupported transport %q", m.Name, m.Type)
 		}
 		out = append(out, plugin.Spec{
-			Name:    strings.TrimSpace(m.Name),
-			Type:    typ,
-			Command: strings.TrimSpace(m.Command),
-			Args:    append([]string(nil), m.Args...),
-			Env:     mapString(m.Env),
-			URL:     strings.TrimSpace(m.URL),
-			Headers: mapString(m.Headers),
-			Dir:     cwd,
+			Name:          strings.TrimSpace(m.Name),
+			Type:          typ,
+			Command:       strings.TrimSpace(m.Command),
+			Args:          append([]string(nil), m.Args...),
+			Env:           mapString(m.Env),
+			URL:           strings.TrimSpace(m.URL),
+			Headers:       mapString(m.Headers),
+			Dir:           cwd,
+			WorkspaceRoot: cwd,
 		})
 	}
 	return out, nil

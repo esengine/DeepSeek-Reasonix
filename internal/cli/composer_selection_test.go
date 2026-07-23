@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 )
 
 func newComposerMouseTestTUI(t *testing.T, width, height int) chatTUI {
@@ -22,6 +25,106 @@ func updateComposerMouseTestTUI(t *testing.T, m chatTUI, msg tea.Msg) chatTUI {
 	t.Helper()
 	next, _ := m.Update(msg)
 	return next.(chatTUI)
+}
+
+func overflowingComposerMouseTestTUI(t *testing.T) chatTUI {
+	t.Helper()
+	m := newComposerMouseTestTUI(t, 50, 18)
+	lines := make([]string, 12)
+	for i := range lines {
+		lines[i] = "composer-line-" + strconv.Itoa(i)
+	}
+	m.input.SetValue(strings.Join(lines, "\n"))
+	return updateComposerMouseTestTUI(t, m, tea.WindowSizeMsg{Width: 50, Height: 18})
+}
+
+func TestComposerWheelScrollsViewWithoutMovingInsertionCursor(t *testing.T) {
+	m := overflowingComposerMouseTestTUI(t)
+	x, y, ok := m.composerOrigin()
+	if !ok {
+		t.Fatal("overflowing composer should expose a mouse origin")
+	}
+	inputOffset := m.input.ScrollYOffset()
+	row, column := m.input.Line(), m.input.Column()
+	transcriptOffset := m.viewport.YOffset()
+
+	m = updateComposerMouseTestTUI(t, m, tea.MouseWheelMsg{
+		X: x, Y: y, Button: tea.MouseWheelUp,
+	})
+
+	if !m.composerScrollDetached {
+		t.Fatal("wheel over overflowing composer should detach its visible viewport")
+	}
+	if got, want := m.composerViewOffset(), max(inputOffset-composerWheelRows, 0); got != want {
+		t.Fatalf("composer view offset = %d, want %d", got, want)
+	}
+	if got := m.input.ScrollYOffset(); got != inputOffset {
+		t.Fatalf("wheel moved textarea-owned offset to %d, want unchanged %d", got, inputOffset)
+	}
+	if m.input.Line() != row || m.input.Column() != column {
+		t.Fatalf("wheel moved insertion cursor to (%d,%d), want (%d,%d)", m.input.Line(), m.input.Column(), row, column)
+	}
+	if got := m.viewport.YOffset(); got != transcriptOffset {
+		t.Fatalf("composer wheel also moved transcript to %d, want %d", got, transcriptOffset)
+	}
+	firstVisible := strings.TrimSpace(strings.Split(ansi.Strip(m.renderComposerInput()), "\n")[0])
+	wantFirst := "composer-line-" + strconv.Itoa(m.composerViewOffset())
+	if firstVisible != wantFirst {
+		t.Fatalf("first visible composer row = %q, want %q", firstVisible, wantFirst)
+	}
+	if cur := m.composerCursor(); cur != nil {
+		t.Fatalf("cursor scrolled outside the composer should be hidden, got %+v", cur)
+	}
+}
+
+func TestComposerTypingRestoresCaretFollowingAfterWheel(t *testing.T) {
+	m := overflowingComposerMouseTestTUI(t)
+	x, y, _ := m.composerOrigin()
+	m = updateComposerMouseTestTUI(t, m, tea.MouseWheelMsg{
+		X: x, Y: y, Button: tea.MouseWheelUp,
+	})
+	if !m.composerScrollDetached {
+		t.Fatal("test setup should detach the composer viewport")
+	}
+
+	m = updateComposerMouseTestTUI(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+	if m.composerScrollDetached {
+		t.Fatal("typing should restore caret-following composer viewport")
+	}
+	if got, want := m.composerViewOffset(), m.input.ScrollYOffset(); got != want {
+		t.Fatalf("reattached composer offset = %d, want textarea offset %d", got, want)
+	}
+	if !strings.HasSuffix(m.input.Value(), "x") {
+		t.Fatalf("typing after wheel did not edit at insertion cursor: %q", m.input.Value())
+	}
+	if cur := m.composerCursor(); cur == nil {
+		t.Fatal("caret-following should make the real cursor visible again")
+	}
+}
+
+func TestComposerWheelChainsToTranscriptAtInternalBoundary(t *testing.T) {
+	m := overflowingComposerMouseTestTUI(t)
+	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
+	for range 40 {
+		m = updateComposerMouseTestTUI(t, m, notice)
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatal("test transcript should start at bottom")
+	}
+	x, y, _ := m.composerOrigin()
+	wheelUp := tea.MouseWheelMsg{X: x, Y: y, Button: tea.MouseWheelUp}
+	for m.composerViewOffset() > 0 {
+		m = updateComposerMouseTestTUI(t, m, wheelUp)
+	}
+	bottom := m.viewport.YOffset()
+	if !m.viewport.AtBottom() {
+		t.Fatal("scrolling within composer should not move transcript before the boundary")
+	}
+
+	m = updateComposerMouseTestTUI(t, m, wheelUp)
+	if got, want := m.viewport.YOffset(), bottom-composerWheelRows; got != want {
+		t.Fatalf("wheel at composer top chained transcript to %d, want %d", got, want)
+	}
 }
 
 func TestComposerMouseClickMovesCursorAcrossWideRunes(t *testing.T) {
@@ -65,7 +168,7 @@ func TestComposerMouseLayoutRoundTripsTextareaCursor(t *testing.T) {
 			if !ok || local == nil {
 				t.Fatalf("value %q offset %d has no composer cursor", tc.value, offset)
 			}
-			caret, ok := m.composerCaretAt(x+local.X, y+local.Y, false)
+			caret, ok := m.composerCaretAt(x+local.X-composerPromptWidth, y+local.Y, false)
 			if !ok || caret.offset != offset {
 				t.Fatalf("value %q offset %d round-tripped to %+v (ok=%v)", tc.value, offset, caret, ok)
 			}
@@ -183,6 +286,56 @@ func TestComposerSelectionPasteAndCopyTakePrecedence(t *testing.T) {
 	}
 }
 
+func TestComposerDragReleaseAutoCopies(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 40, 12)
+	m.input.SetValue("alpha beta")
+	x, y, _ := m.composerOrigin()
+	m = updateComposerMouseTestTUI(t, m, tea.MouseClickMsg{X: x + 6, Y: y, Button: tea.MouseLeft})
+	m = updateComposerMouseTestTUI(t, m, tea.MouseMotionMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "beta" {
+			t.Fatalf("composer drag copied %q, want beta", text)
+		}
+		return nil
+	}
+
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
+	m = next.(chatTUI)
+	if cmd == nil {
+		t.Fatal("composer drag release should copy the selected text")
+	}
+	if got := m.selectedComposerText(); got != "beta" {
+		t.Fatalf("composer selection after drag copy = %q, want beta", got)
+	}
+
+	result := clipboardCopyResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if m.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Fatalf("composer drag copy notice = %q, want %q", m.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+func TestComposerPlainClickReleaseDoesNotCopy(t *testing.T) {
+	m := newComposerMouseTestTUI(t, 40, 12)
+	m.input.SetValue("alpha beta")
+	x, y, _ := m.composerOrigin()
+	m = updateComposerMouseTestTUI(t, m, tea.MouseClickMsg{X: x + 3, Y: y, Button: tea.MouseLeft})
+
+	next, cmd := m.Update(tea.MouseReleaseMsg{X: x + 3, Y: y, Button: tea.MouseLeft})
+	m = next.(chatTUI)
+	if cmd != nil {
+		t.Fatal("plain composer click must not copy an empty selection")
+	}
+	if m.validComposerSelection() {
+		t.Fatal("plain composer click should clear its empty selection")
+	}
+}
+
 func TestComposerSelectionDoesNotTurnCommandShortcutIntoText(t *testing.T) {
 	m := newComposerMouseTestTUI(t, 40, 12)
 	m.input.SetValue("keep this")
@@ -198,7 +351,7 @@ func TestComposerSelectionDoesNotTurnCommandShortcutIntoText(t *testing.T) {
 	}
 }
 
-func TestComposerCtrlVKeepsSelectionUntilClipboardArrives(t *testing.T) {
+func TestComposerImagePasteShortcutKeepsSelectionUntilImageArrives(t *testing.T) {
 	m := newComposerMouseTestTUI(t, 40, 12)
 	m.input.SetValue("alpha beta")
 	x, y, _ := m.composerOrigin()
@@ -206,23 +359,57 @@ func TestComposerCtrlVKeepsSelectionUntilClipboardArrives(t *testing.T) {
 	m = updateComposerMouseTestTUI(t, m, tea.MouseMotionMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
 	m = updateComposerMouseTestTUI(t, m, tea.MouseReleaseMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
 
-	// The shortcut resolves the clipboard asynchronously, so the selection
-	// must survive the key press for the result to replace it.
-	next, cmd := m.Update(tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl})
+	shortcut := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
+	shortcutName := "Ctrl+V"
+	if runtime.GOOS == "windows" {
+		shortcut.Mod = tea.ModAlt
+		shortcutName = "Alt+V"
+	}
+	// The platform image-only shortcut must preserve the selection until the
+	// asynchronous attachment result can replace it.
+	next, cmd := m.Update(shortcut)
 	m = next.(chatTUI)
 	if cmd == nil {
-		t.Fatal("Ctrl+V should issue an async clipboard read")
+		t.Fatalf("%s should issue an async image clipboard read", shortcutName)
+	}
+	if !m.clipboardImagePending {
+		t.Fatalf("%s should show the image paste as pending", shortcutName)
 	}
 	if got := m.selectedComposerText(); got != "beta" {
-		t.Fatalf("Ctrl+V should keep the selection until the clipboard arrives, got %q", got)
+		t.Fatalf("%s should keep the selection until the clipboard arrives, got %q", shortcutName, got)
 	}
 
-	m = updateComposerMouseTestTUI(t, m, clipboardPasteMsg{text: "gamma"})
-	if got := m.input.Value(); got != "alpha gamma" {
-		t.Fatalf("clipboard paste over selection produced %q, want %q", got, "alpha gamma")
+	m = updateComposerMouseTestTUI(t, m, clipboardImageMsg{path: ".reasonix/attachments/test.png"})
+	if got := m.input.Value(); got != "alpha [image #1] " {
+		t.Fatalf("image paste over selection produced %q, want %q", got, "alpha [image #1] ")
 	}
 	if m.validComposerSelection() && !m.composerSel.empty() {
-		t.Fatal("clipboard paste should consume the selection")
+		t.Fatal("image paste should consume the selection")
+	}
+	if m.clipboardImagePending {
+		t.Fatal("image result should clear the pending state")
+	}
+}
+
+func TestImagePasteShortcutIsDistinctFromTerminalTextPaste(t *testing.T) {
+	tests := []struct {
+		key  string
+		goos string
+		want bool
+	}{
+		{key: "ctrl+v", goos: "darwin", want: true},
+		{key: "ctrl+v", goos: "linux", want: true},
+		{key: "ctrl+v", goos: "windows", want: false},
+		{key: "alt+v", goos: "windows", want: true},
+		{key: "alt+v", goos: "darwin", want: false},
+		{key: "ctrl+shift+v", goos: "linux", want: false},
+		{key: "super+v", goos: "darwin", want: false},
+		{key: "meta+v", goos: "darwin", want: false},
+	}
+	for _, tt := range tests {
+		if got := imagePasteShortcut(tt.key, tt.goos); got != tt.want {
+			t.Errorf("imagePasteShortcut(%q, %q) = %v, want %v", tt.key, tt.goos, got, tt.want)
+		}
 	}
 }
 
@@ -305,7 +492,7 @@ func TestClipboardPasteOverWideSelectionRequestsClearScreen(t *testing.T) {
 	m = updateComposerMouseTestTUI(t, m, tea.MouseMotionMsg{X: x + 4, Y: y, Button: tea.MouseLeft})
 	m = updateComposerMouseTestTUI(t, m, tea.MouseReleaseMsg{X: x + 4, Y: y, Button: tea.MouseLeft})
 
-	next, cmd := m.Update(clipboardPasteMsg{text: "hi"})
+	next, cmd := m.Update(tea.PasteMsg{Content: "hi"})
 	m = next.(chatTUI)
 	if got := m.input.Value(); got != "hiabc" {
 		t.Fatalf("clipboard paste over wide selection produced %q, want %q", got, "hiabc")

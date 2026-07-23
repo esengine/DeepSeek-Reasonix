@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro';
+import SiteHeader from '../components/SiteHeader.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const R2_LATEST = 'https://dl.reasonix.io/latest';
@@ -22,25 +23,9 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
   title="Docs — Reasonix"
   titleEn="Docs — Reasonix"
   titleZh="文档 — Reasonix"
-  description="Install Reasonix, start your first session, configure providers and credentials, and understand prefix cache, permissions, sandboxing, MCP plugins, memory, rewind, desktop and bot workflows.">
+  description="Install Reasonix, start your first session, connect ACP-compatible editors, configure providers and credentials, and understand prefix cache, permissions, sandboxing, MCP plugins, memory, rewind, desktop and bot workflows.">
 
-  <header class="nav scrolled">
-    <div class="nav-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
-      <nav class="nav-links">
-        <a href={`${base}/#features`}><span class="l-en">Features</span><span class="l-zh">特性</span></a>
-        <a href={`${base}/#how`}><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
-        <a href={`${base}/#community`}><span class="l-en">Community</span><span class="l-zh">社区</span></a>
-        <a href={`${base}/docs/`} class="here"><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
-        <a href={`${base}/#start`}><span class="l-en">Get started</span><span class="l-zh">快速开始</span></a>
-      </nav>
-      <div class="lang-switch" role="group" aria-label="Language">
-        <button type="button" data-lang="en" class="active">EN</button>
-        <button type="button" data-lang="zh">中文</button>
-      </div>
-      <a class="btn btn-dark" href={`${base}/#start`}><span class="l-en">Install</span><span class="l-zh">安装</span></a>
-    </div>
-  </header>
+  <SiteHeader active="docs" scrolled />
 
   <main class="docs-layout">
     <aside class="docs-side" aria-label="Documentation navigation">
@@ -57,6 +42,7 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
           <a href="#cli"><strong><span class="l-en">Commands</span><span class="l-zh">命令与快捷键</span></strong><small><span class="l-en">Slash commands, mouse, Goal</span><span class="l-zh">斜杠命令、鼠标、Goal</span></small></a>
           <a href="#permissions"><strong><span class="l-en">Approvals</span><span class="l-zh">审批与沙箱</span></strong><small><span class="l-en">Ask, Auto, YOLO, sandbox</span><span class="l-zh">Ask、Auto、YOLO、沙箱</span></small></a>
           <a href="#mcp"><strong><span class="l-en">Plugins</span><span class="l-zh">插件 MCP</span></strong><small><span class="l-en">Tools, prompts, resources</span><span class="l-zh">工具、提示词、资源</span></small></a>
+          <a href="#acp"><strong><span class="l-en">Editor integration</span><span class="l-zh">编辑器接入</span></strong><small><span class="l-en">ACP sessions and steering</span><span class="l-zh">ACP 会话与回合中引导</span></small></a>
           <a href="#surfaces"><strong><span class="l-en">Desktop &amp; bots</span><span class="l-zh">桌面端与 Bot</span></strong><small><span class="l-en">Use Reasonix from IM</span><span class="l-zh">从 IM 使用 Reasonix</span></small></a>
         </div>
         <div class="side-group">
@@ -69,6 +55,8 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
       <div class="docs-side-links">
         <span class="side-card-kicker"><span class="l-en">Source docs</span><span class="l-zh">完整文档</span></span>
         <a href={`${repo}/blob/main-v2/docs/GUIDE.md`}><span class="l-en">Guide</span><span class="l-zh">使用指南</span></a>
+        <a class="l-en" href={`${repo}/blob/main-v2/docs/ACP.md`}>ACP editor integration</a>
+        <a class="l-zh" href={`${repo}/blob/main-v2/docs/ACP.zh-CN.md`}>ACP 编辑器接入</a>
         <a href={`${repo}/blob/main-v2/docs/CAPABILITY_DIAGNOSTICS.md`}><span class="l-en">Capability diagnostics</span><span class="l-zh">能力诊断</span></a>
         <a href={`${repo}/blob/main-v2/docs/SPEC.md`}><span class="l-en">Engineering spec</span><span class="l-zh">工程规范</span></a>
         <a href={`${repo}/blob/main-v2/docs/CONFIG_PATHS.md`}><span class="l-en">Config paths</span><span class="l-zh">配置路径</span></a>
@@ -121,8 +109,8 @@ brew install esengine/reasonix/reasonix</div>
         <span class="desktop-kicker"><span class="l-en">Terminal-first workflow</span><span class="l-zh">终端优先工作流</span></span>
         <ul class="desktop-feature-list">
           <li><span class="l-en">Interactive TUI with Plan, Ask, Auto, YOLO, transcript scrolling, and tool approval prompts.</span><span class="l-zh">交互式 TUI 支持 Plan、Ask、Auto、YOLO、对话滚动与工具审批提示。</span></li>
-          <li><span class="l-en">Drag-select transcript text to copy it automatically, or run <code>/mouse</code> to use your terminal's native selection and right-click menu.</span><span class="l-zh">拖拽选中对话文本会自动复制；也可用 <code>/mouse</code> 切回终端原生选中和右键菜单。</span></li>
-          <li><span class="l-en">Keyboard-native coding: slash commands, <code>@</code> file references, image paste, prompt history, and <code>/rewind</code>.</span><span class="l-zh">键盘原生编码体验：斜杠命令、<code>@</code> 文件引用、图片粘贴、提示历史和 <code>/rewind</code>。</span></li>
+          <li><span class="l-en">Drag-select transcript text to copy through the verified local system clipboard; SSH uses a clearly labelled OSC 52 fallback. Run <code>/mouse</code> to use your terminal's native selection instead.</span><span class="l-zh">拖选对话文本会通过可验证的本地系统剪贴板复制；SSH 使用明确标记的 OSC 52 回退。也可用 <code>/mouse</code> 切回终端原生选择。</span></li>
+          <li><span class="l-en">Text paste stays terminal-native. Image paste is explicit: <code>Ctrl+V</code> on macOS/Linux, <code>Alt+V</code> on Windows, or <code>/paste-image</code>, with a live <code>Pasting image…</code> footer state.</span><span class="l-zh">文本粘贴保持终端原生；图片粘贴使用独立入口：macOS/Linux 按 <code>Ctrl+V</code>，Windows 按 <code>Alt+V</code>，或运行 <code>/paste-image</code>，读取时底栏显示“正在粘贴图片…”。</span></li>
           <li><span class="l-en">Scriptable runs through <code>reasonix run</code>, including piped input and explicit model selection.</span><span class="l-zh">可脚本化的 <code>reasonix run</code>,支持管道输入和显式模型选择。</span></li>
         </ul>
       </div>
@@ -230,7 +218,7 @@ DEEPSEEK_API_KEY=sk-...</div>
       <p><span class="l-en">Reasonix serializes context deterministically and only ever appends. The practical effect: hours-long sessions where 90%+ of every request replays from cache, and input-token cost collapses to ~1/5. See the <a href={`${base}/#how`}>animated walkthrough</a> on the home page.</span><span class="l-zh">Reasonix 以确定性方式序列化上下文,并且永远只追加。实际效果:数小时的会话中每次请求 90% 以上从缓存重放,输入 token 成本降到约 1/5。可在首页查看<a href={`${base}/#how`}>动态演示</a>。</span></p>
 
       <h2 id="permissions"><span class="l-en">Permissions &amp; sandbox</span><span class="l-zh">权限与沙箱</span></h2>
-      <p><span class="l-en">Permissions gate each tool call: <code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; fallback. Read-only tools generally pass; writers fall back to <code>[permissions] mode</code>. <code>reasonix</code> prompts before fallback writers; <code>reasonix run</code> stays autonomous but still honours <code>deny</code>.</span><span class="l-zh">权限逐个把关工具调用:<code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; 兜底。只读工具通常放行；写工具回退到 <code>[permissions] mode</code>。<code>reasonix</code> 会在 fallback 写操作前询问；<code>reasonix run</code> 自主运行,但仍遵守 <code>deny</code>。</span></p>
+      <p><span class="l-en">Permissions gate each tool call: <code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; fallback. Read-only tools generally pass; writers fall back to <code>[permissions] mode</code>. Ask is not read-only: an approved writer can still run. The sandbox is the enforced capability boundary. <code>reasonix run</code> stays autonomous but still honours <code>deny</code>.</span><span class="l-zh">权限逐个把关工具调用:<code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; 兜底。只读工具通常放行；写工具回退到 <code>[permissions] mode</code>。Ask 不是只读：writer 获得批准后仍会执行；沙箱才是强制能力边界。<code>reasonix run</code> 自主运行,但仍遵守 <code>deny</code>。</span></p>
       <p><span class="l-en">The sandbox is enforcement: file-writers refuse any path outside <code>[sandbox] workspace_root</code> (default: the current dir), resolving symlinks and <code>..</code> so a link cannot tunnel out. <code>bash = "enforce"</code> jails shell commands when an OS sandbox backend is available (Seatbelt on macOS, bubblewrap on Linux); without one, bash is refused instead of running unconfined. Install the backend or set <code>bash = "off"</code> to explicitly restore the pre-1.16 unconfined behavior.</span><span class="l-zh">沙箱负责强制执行:写文件工具拒绝 <code>[sandbox] workspace_root</code>(默认当前目录)之外的任何路径,并解析符号链接与 <code>..</code>,防止借链接逃逸。<code>bash = "enforce"</code> 会在存在 OS 沙箱后端时隔离 shell 命令（macOS Seatbelt、Linux bubblewrap）；没有后端时会拒绝执行 bash，而不是非隔离运行。安装对应后端，或显式设置 <code>bash = "off"</code> 来恢复 1.16 之前的非隔离行为。</span></p>
 
       <h2 id="mcp"><span class="l-en">Plugins (MCP)</span><span class="l-zh">插件(MCP)</span></h2>
@@ -239,20 +227,35 @@ DEEPSEEK_API_KEY=sk-...</div>
 [[plugins]]                       <span class="c"># local stdio server</span>
 name    = "example"
 command = "reasonix-plugin-example"
-trusted_read_only_tools = ["echo", "wordcount"]
 
 [[plugins]]                       <span class="c"># remote server over Streamable HTTP</span>
 name    = "stripe"
 type    = "http"
 url     = "https://mcp.stripe.com"
 headers = &#123; Authorization = "Bearer $&#123;STRIPE_KEY&#125;" &#125;</div>
-      <p><span class="l-en">Planner and read-only research confirm third-party MCP <code>readOnlyHint</code> before relying on it. Interactive sessions ask once when a tool is needed; Auto/YOLO tool approval does not answer this trust prompt. Choose the session or persistent option to avoid repeat prompts for the same tool, with persistent trust remembering the raw name in <code>trusted_read_only_tools</code>. The desktop MCP panel keeps advanced controls for pre-approval: expand a configured server, open its tools list, use <strong>Pre-trust read-only</strong> or per-tool <strong>Pre-trust</strong>, and <strong>Untrust</strong> to remove one. The panel writes to the owning config source, including <code>.mcp.json</code> via <code>mcpServers.&lt;server&gt;.trusted_read_only_tools</code>.</span><span class="l-zh">Planner 与只读 research 会先确认第三方 MCP <code>readOnlyHint</code>。交互式会话在工具首次需要时询问一次；Auto/YOLO 工具审批不会代答这个信任提示。选择本会话或持久允许可避免同一工具重复弹窗，持久允许会把 raw name 记到 <code>trusted_read_only_tools</code>。桌面端 MCP 面板保留高级预批准入口：展开已配置服务器并打开工具列表；使用 <strong>预先信任只读</strong> 或单工具 <strong>预先信任</strong>，并用 <strong>取消信任</strong> 移除。面板会写入拥有该服务器的配置源，包括 <code>.mcp.json</code> 中的 <code>mcpServers.&lt;server&gt;.trusted_read_only_tools</code>。</span></p>
+      <p><span class="l-en">Installing an MCP server is the authorization decision, so its tools are directly usable without server-level, per-tool, writer, or destructive approval settings. Repository-declared servers require one exact identity confirmation before startup and ask again only when that identity changes. Explicit global deny rules still win. <code>readOnlyHint</code> and <code>destructiveHint</code> remain internal facts for parallel dispatch, Plan restrictions, strict read-only children, and cached-to-live safety reclassification; schema-only changes refresh the next-session cache without interrupting an authorized call. Plan hard-blocks MCP writer/destructive targets and unauthorized readers; <code>read_only_task</code> / <code>read_only_skill</code> never expose writers.</span><span class="l-zh">安装 MCP server 本身就是授权决定，安装后工具直接可用，不再需要 server、逐工具、writer 或 destructive 审批设置。仓库声明的 server 只在启动前确认一次精确身份，身份变化时才重新确认；显式全局 deny 仍然优先。<code>readOnlyHint</code> 与 <code>destructiveHint</code> 只作为并行调度、Plan 限制、严格只读子会话和缓存到实时安全分类复核的内部事实；仅 schema 变化会刷新下一会话缓存，不再中断已授权调用。Plan 会硬阻断 MCP writer/destructive 目标和未授权 reader；<code>read_only_task</code> / <code>read_only_skill</code> 完全不暴露 writer。</span></p>
       <p><span class="l-en">MCP prompts also become slash commands such as <code>/mcp__server__prompt</code>, and MCP resources can be referenced with <code>@server:uri</code>. Enabled servers connect in the background after a session starts; use <code>/mcp</code> or the desktop MCP panel to inspect, refresh, reconnect, or disable servers. Already have an <code>.mcp.json</code>? Put it in the project root; Reasonix reads the Claude Code <code>mcpServers</code> schema as-is and lets <code>reasonix.toml</code> win on name collisions.</span><span class="l-zh">MCP prompts 也会变成 <code>/mcp__server__prompt</code> 这样的斜杠命令,MCP resources 可通过 <code>@server:uri</code> 引用。启用的 server 会在会话开始后后台连接；用 <code>/mcp</code> 或桌面端 MCP 面板查看、刷新、重连或临时禁用。已有 <code>.mcp.json</code>?放到项目根目录即可；Reasonix 会原样读取 Claude Code 的 <code>mcpServers</code> schema,同名时 <code>reasonix.toml</code> 优先。</span></p>
+
+      <h2 id="acp"><span class="l-en">Editor integration (ACP)</span><span class="l-zh">编辑器接入（ACP）</span></h2>
+      <p><span class="l-en">Reasonix implements Agent Client Protocol (ACP) v1 as an NDJSON JSON-RPC 2.0 agent over stdio. An ACP-compatible editor or host starts <code>reasonix acp</code>, opens workspace-scoped sessions, and receives streamed messages, tool activity, plans, permission requests, and configuration updates.</span><span class="l-zh">Reasonix 实现了 Agent Client Protocol（ACP）v1，通过 stdio 提供 NDJSON JSON-RPC 2.0 agent。兼容 ACP 的编辑器或 host 启动 <code>reasonix acp</code>、打开工作区会话，并接收流式消息、工具活动、计划、权限请求和配置更新。</span></p>
+      <div class="codeblock"><button data-copy="reasonix acp">Copy</button>reasonix acp                    <span class="c"># use the configured default model</span>
+reasonix acp --model &lt;name&gt;     <span class="c"># choose the startup model</span>
+reasonix acp --profile delivery <span class="c"># economy | balanced | delivery</span></div>
+      <div class="doc-choice-grid">
+        <div>
+          <strong><span class="l-en">Independent sessions</span><span class="l-zh">独立会话</span></strong>
+          <p><span class="l-en">Each session owns its workspace, history, model, reasoning effort, work mode, collaboration mode, approval posture, and host-supplied MCP servers.</span><span class="l-zh">每个会话独立持有工作区、历史、模型、推理强度、工作模式、协作模式、审批策略和 host 提供的 MCP server。</span></p>
+        </div>
+        <div>
+          <strong><span class="l-en">Editor-owned capabilities</span><span class="l-zh">编辑器持有的能力</span></strong>
+          <p><span class="l-en">When advertised by the client, file operations use unsaved editor buffers and foreground commands run in a client-owned terminal.</span><span class="l-zh">客户端声明相关能力后，文件操作会经过编辑器未保存的 buffer，前台命令则在客户端持有的 terminal 中运行。</span></p>
+        </div>
+      </div>
+      <p><span class="l-en">Reasonix also advertises the vendor method <code>_reasonix.io/session/steer</code> through <code>agentCapabilities._meta</code>. A host may call it while <code>session/prompt</code> is active to queue user guidance for the next safe model boundary without cancelling the turn. Clients must discover the method first and treat <code>InvalidRequest</code> as not queued.</span><span class="l-zh">Reasonix 还会通过 <code>agentCapabilities._meta</code> 声明厂商方法 <code>_reasonix.io/session/steer</code>。Host 可在 <code>session/prompt</code> 活动期间调用它，把用户引导排入下一个安全模型边界，而无需取消当前回合。客户端必须先发现该方法，并把 <code>InvalidRequest</code> 视为“未入队”。</span></p>
+      <div class="callout"><span class="ico">i</span><span><span class="l-en">ACP steering is a namespaced ACP v1 extension, not a core <code>session/steer</code> method and not the unreleased ACP v2 <code>session/inject</code> proposal. See the <a href={`${repo}/blob/main-v2/docs/ACP.md`}>complete ACP integration guide</a> for lifecycle methods, capability negotiation, MCP transport shapes, compatibility, errors, and a client checklist.</span><span class="l-zh">ACP 回合中引导是带命名空间的 ACP v1 扩展，不是核心 <code>session/steer</code> 方法，也不是尚未发布的 ACP v2 <code>session/inject</code> 提案。生命周期方法、能力协商、MCP transport 结构、兼容性、错误处理和客户端检查清单见<a href={`${repo}/blob/main-v2/docs/ACP.zh-CN.md`}>完整 ACP 接入文档</a>。</span></span></div>
 
       <h2 id="memory"><span class="l-en">Memory &amp; rewind</span><span class="l-zh">记忆与回退</span></h2>
       <p><span class="l-en">Reasonix keeps project memory in <code>REASONIX.md</code> or <code>AGENTS.md</code>, and stores approved auto-memory facts under Reasonix home. During turns, read-only <code>history</code> and <code>memory</code> tools retrieve prior sessions, compacted archives, and saved facts on demand instead of injecting noisy dynamic state into the stable prompt prefix.</span><span class="l-zh">Reasonix 将项目记忆放在 <code>REASONIX.md</code> 或 <code>AGENTS.md</code>,并把经过批准的 auto-memory fact 存在 Reasonix home 下。运行时,只读 <code>history</code> 与 <code>memory</code> 工具按需检索历史会话、压缩归档和已保存事实,而不是把易变状态塞进稳定 prompt 前缀。</span></p>
-      <p><span class="l-en">Memory v5 is enabled by default across the CLI/TUI, <code>reasonix serve</code>, and the desktop app because they share the same local controller. The default mode is <code>observe</code>: Reasonix learns locally and records content-free metrics, but does not inject a provider-visible memory contract. Use <code>compact</code> when you explicitly want compact execution constraints added to future turns.</span><span class="l-zh">Memory v5 在 CLI/TUI、<code>reasonix serve</code> 和桌面端默认开启，因为这些入口共用同一套本地 controller。默认模式是 <code>observe</code>：只在本地学习并记录无内容指标，不向 provider-visible 轮次注入 memory contract。需要把精简执行约束加入后续轮次时，再切到 <code>compact</code>。</span></p>
-      <p><span class="l-en">Toggle future turns with <code>/memory-v5 off|observe|compact|on|status</code>, <code>reasonix config memory-v5 off|observe|compact|on|status</code>, or desktop Settings -&gt; General -&gt; Memory v5. Project <code>reasonix.toml</code> cannot override this user-level setting. Memory v5 never bypasses memory approvals and never mutates the cache-stable system prompt, provider prefix, or tool schemas.</span><span class="l-zh">可用 <code>/memory-v5 off|observe|compact|on|status</code>、<code>reasonix config memory-v5 off|observe|compact|on|status</code>，或桌面端 Settings -&gt; General -&gt; Memory v5 控制后续轮次。项目 <code>reasonix.toml</code> 不能覆盖这个用户级设置。Memory v5 不会绕过 memory 审批，也不会修改 cache-stable system prompt、Provider 前缀或工具 schema。</span></p>
       <p><span class="l-en">Agent-initiated <code>remember</code> and <code>forget</code> always ask for fresh approval, even in YOLO. <code>/memory</code> shows active and archived facts; <code>/forget</code> archives rather than permanently erasing a fact from traceability.</span><span class="l-zh">模型主动调用 <code>remember</code> 与 <code>forget</code> 时,即使在 YOLO 下也会重新请求批准。<code>/memory</code> 可查看 active 与 archived facts；<code>/forget</code> 会归档而不是永久抹掉可追溯记录。</span></p>
       <p><span class="l-en">Rewind is snapshot-based, not git-based. Press double <code>Esc</code> in the CLI, use <code>/rewind</code>, or use the desktop hover control to restore code, conversation, or both from an earlier turn without touching <code>.git</code>.</span><span class="l-zh">回退基于文件快照,不是 git。CLI 中双击 <code>Esc</code>、使用 <code>/rewind</code>,或在桌面端用户消息上使用 hover 控件,即可从较早 turn 恢复代码、对话或两者,不会触碰 <code>.git</code>。</span></p>
 
@@ -265,12 +268,16 @@ reasonix bot doctor       <span class="c"># check saved IM bot connections</span
       <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
       <div class="codeblock">/compact   /new      /clear    /rewind   /tree
 /branch    /switch   /todo     /model    /mouse   /mcp
-/skills    /hooks    /memory   /memory-v5 /sandbox
-/language  /goal     /auto-plan /reasoning-language /output-style /help</div>
+/skills    /hooks    /memory   /sandbox
+/language  /theme    /work-mode /paste-image /goal
+/reasoning-language /output-style /help</div>
+      <p><span class="l-en"><code>Shift+Tab</code> cycles Ask → Auto → Plan, while <code>Ctrl+Y</code> toggles YOLO independently. Use <code>/theme auto|light|dark</code> for the terminal background mode or choose a named accent from bare <code>/theme</code>. Long drafts grow and then scroll inside the composer; wheel events over the transcript continue to scroll the conversation.</span><span class="l-zh"><code>Shift+Tab</code> 按 Ask → Auto → Plan 循环，<code>Ctrl+Y</code> 独立切换 YOLO。用 <code>/theme auto|light|dark</code> 选择终端背景模式，也可从不带参数的 <code>/theme</code> 中选择命名强调色。长草稿会先增长，超过上限后在输入框内滚动；鼠标位于 transcript 时仍滚动对话。</span></p>
+      <p><span class="l-en">The responsive footer shows the active permission posture and interaction state first. Wide terminals keep model, effort, and work mode together on the right, with available Git, cache, context, compaction, job, and balance telemetry below. <code>ready</code> means the composer is idle; pickers, approvals, image paste, shell mode, and other interactions replace it. Narrow terminals move or compact complete groups, and visible labels follow <code>/language</code>.</span><span class="l-zh">响应式底栏优先显示当前权限姿态和交互状态；终端较宽时，模型、推理强度和工作模式在右侧成组显示，下方按可用性显示 Git、缓存、上下文、压缩余量、任务和余额。“就绪”表示输入框空闲；选择器、审批、图片粘贴、shell 模式等活动会替换它。窄终端会移动或压缩完整信息组，可见标签跟随 <code>/language</code>。</span></p>
       <p><span class="l-en">Mouse capture is on by default so Reasonix can handle transcript selection, wheel scroll, and the scrollbar. Turn it off with <code>/mouse</code>, or start with <code>REASONIX_DISABLE_MOUSE=1</code>, when you prefer the terminal's own selection behavior.</span><span class="l-zh">默认会开启鼠标接管，用于对话选中、滚轮滚动和滚动条。需要终端自己的选中行为时，用 <code>/mouse</code> 关闭；也可以用 <code>REASONIX_DISABLE_MOUSE=1</code> 默认关闭。</span></p>
+      <p><span class="l-en">In a local session, releasing an in-app text selection copies through the native system clipboard and shows success only after the write completes. SSH falls back to a clearly labelled OSC 52 request. Text paste remains your terminal's bracketed-paste shortcut, such as <code>Cmd+V</code> on macOS. Image paste is separate: use <code>Ctrl+V</code> on macOS/Linux, <code>Alt+V</code> on Windows, or <code>/paste-image</code>; the footer shows <code>Pasting image…</code> while the attachment is prepared.</span><span class="l-zh">本地会话中，应用内文本选区会写入系统剪贴板，只有写入完成后才提示成功；SSH 会回退到明确标记的 OSC 52 请求。文本继续使用终端原生 bracketed-paste 快捷键，例如 macOS 的 <code>Cmd+V</code>。图片粘贴使用独立入口：macOS/Linux 按 <code>Ctrl+V</code>，Windows 按 <code>Alt+V</code>，或运行 <code>/paste-image</code>；附件准备期间底栏显示“正在粘贴图片…”。</span></p>
       <p><span class="l-en"><code>/branch [name]</code> forks the current conversation tip, <code>/switch &lt;id|name&gt;</code> loads another branch, and <code>/clear</code> confirms before discarding unsaved context. Custom commands are Markdown files under <code>.reasonix/commands/</code> or <code>~/.reasonix/commands/</code>.</span><span class="l-zh"><code>/branch [name]</code> 从当前会话尖端分叉,<code>/switch &lt;id|name&gt;</code> 加载另一条分支,<code>/clear</code> 会确认后丢弃未保存上下文。自定义命令是 <code>.reasonix/commands/</code> 或 <code>~/.reasonix/commands/</code> 下的 Markdown 文件。</span></p>
-      <p><span class="l-en"><code>/goal</code> is for long-running objectives. Normal goals stay lightweight; clearly long-horizon work can use the AutoResearch strategy, which keeps state under <code>.reasonix/autoresearch/...</code>, tracks evidence, and forces a new direction when progress stalls. Use <code>/goal --research &lt;objective&gt;</code> to force it or <code>/goal --simple &lt;objective&gt;</code> to keep the lightweight path. AutoResearch is a Goal strategy, not a separate app-start daemon or standalone built-in skill.</span><span class="l-zh"><code>/goal</code> 用于长目标。普通 goal 保持轻量；明显长周期的任务可以启用 AutoResearch 策略，在 <code>.reasonix/autoresearch/...</code> 下保存状态、记录证据，并在进展停滞时强制换方向。用 <code>/goal --research &lt;目标&gt;</code> 强制启用，或用 <code>/goal --simple &lt;目标&gt;</code> 保持轻量路径。AutoResearch 是 Goal 的策略，不是 App 启动即运行的 daemon，也不是独立内置 skill。</span></p>
-      <p><span class="l-en">Use <code>@path</code> to inject files or directories, and <code>@server:uri</code> for MCP resources. <code>reasonix config auto-plan off|on</code>, <code>reasonix config memory-v5 off|observe|compact|on|status</code>, and <code>reasonix config reasoning-language auto|zh|en</code> update user defaults from scripts; auto-plan and Memory v5 are user-level only, while <code>--local</code> remains available for settings that support project-local overrides such as reasoning language.</span><span class="l-zh">用 <code>@path</code> 注入文件或目录,用 <code>@server:uri</code> 引入 MCP resource。脚本中可用 <code>reasonix config auto-plan off|on</code>、<code>reasonix config memory-v5 off|observe|compact|on|status</code> 与 <code>reasonix config reasoning-language auto|zh|en</code> 更新用户级默认值；auto-plan 和 Memory v5 只认用户级设置，<code>--local</code> 仍可用于 reasoning language 等支持项目级覆盖的设置。</span></p>
+      <p><span class="l-en"><code>/goal</code> is for long-running objectives. Ordinary chat never changes mode automatically. Normal goals stay lightweight; clearly long-horizon work can use the AutoResearch strategy, which keeps state under <code>.reasonix/autoresearch/...</code>, tracks evidence, and forces a new direction when progress stalls. Use <code>/goal --research &lt;objective&gt;</code> to force it or <code>/goal --simple &lt;objective&gt;</code> to keep the lightweight path. AutoResearch is a Goal strategy, not a separate app-start daemon or standalone built-in skill.</span><span class="l-zh"><code>/goal</code> 用于长目标。普通聊天不会自动切换模式。普通 goal 保持轻量；明显长周期的任务可以启用 AutoResearch 策略，在 <code>.reasonix/autoresearch/...</code> 下保存状态、记录证据，并在进展停滞时强制换方向。用 <code>/goal --research &lt;目标&gt;</code> 强制启用，或用 <code>/goal --simple &lt;目标&gt;</code> 保持轻量路径。AutoResearch 是 Goal 的策略，不是 App 启动即运行的 daemon，也不是独立内置 skill。</span></p>
+      <p><span class="l-en">Use <code>@path</code> to inject files or directories, and <code>@server:uri</code> for MCP resources. Plan Mode is an explicit user choice: select it in the desktop collaboration control or cycle to it with <code>Shift+Tab</code> in the CLI. <code>reasonix config reasoning-language auto|zh|en</code> updates the user default from scripts; <code>--local</code> remains available for settings that support project-local overrides.</span><span class="l-zh">用 <code>@path</code> 注入文件或目录,用 <code>@server:uri</code> 引入 MCP resource。计划模式始终由用户显式选择：桌面端在协作方式中选择，CLI 用 <code>Shift+Tab</code> 切换。脚本中可用 <code>reasonix config reasoning-language auto|zh|en</code> 更新用户级默认值；<code>--local</code> 仍可用于支持项目级覆盖的设置。</span></p>
 
       <h2 id="configfile"><span class="l-en">Config file</span><span class="l-zh">配置文件</span></h2>
       <p><span class="l-en">Resolution order: flags &gt; <code>./reasonix.toml</code> &gt; global <code>config.toml</code> under Reasonix home &gt; compatible legacy config &gt; built-in defaults. Starting with v1.8.1, Reasonix home is <code>~/.reasonix</code> on macOS/Linux and <code>%APPDATA%\reasonix</code> on Windows; set <code>REASONIX_HOME</code> only for tests, CI, or portable installs.</span><span class="l-zh">解析顺序:flags &gt; <code>./reasonix.toml</code> &gt; Reasonix home 下的全局 <code>config.toml</code> &gt; 兼容 legacy config &gt; 内置默认值。从 v1.8.1 起,Reasonix home 在 macOS/Linux 为 <code>~/.reasonix</code>,Windows 为 <code>%APPDATA%\reasonix</code>；只有测试、CI 或便携安装才需要设置 <code>REASONIX_HOME</code>。</span></p>
@@ -281,12 +288,8 @@ default_model = "deepseek-flash"
 shortcut_layout = "desktop"        <span class="c"># optional compatibility setting</span>
 
 [agent]
-max_steps = 0                      <span class="c"># user/global only; 0 = no limit</span>
-planner_max_steps = 0              <span class="c"># user/global only; 0 = no limit</span>
-auto_plan = "off"                  <span class="c"># user-level only; off|on</span>
 reasoning_language = "auto"        <span class="c"># auto|zh|en</span>
 planner_model = "deepseek-pro"     <span class="c"># optional read-only planner</span>
-memory_compiler = &#123; enabled = true, verbosity = "observe" &#125;
 
 [[providers]]
 name        = "deepseek-flash"
@@ -317,8 +320,7 @@ behind_proxy = false                         <span class="c"># true only behind 
 [[plugins]]
 name    = "example"
 command = "reasonix-plugin-example"
-call_timeout_seconds = 600
-trusted_read_only_tools = ["echo", "wordcount"]</div>
+call_timeout_seconds = 600</div>
       <p><span class="l-en">Legacy config, credentials, memory, and sessions are migrated non-destructively when v1.8.1+ starts. If Reasonix was opened before old paths were available, run <code>/migrate</code> from the CLI TUI or desktop composer. For the full schema and every field's contract, see <a href={`${repo}/blob/main-v2/docs/SPEC.md`}>SPEC.md §5</a>.</span><span class="l-zh">v1.8.1+ 启动时会非破坏性迁移 legacy config、credentials、memory 与 sessions。如果旧路径尚不可用时已经打开过 Reasonix,可在 CLI TUI 或桌面端 composer 中运行 <code>/migrate</code>。完整 schema 与每个字段的契约见 <a href={`${repo}/blob/main-v2/docs/SPEC.md`}>SPEC.md §5</a>。</span></p>
 
       <h2 id="surfaces"><span class="l-en">Desktop &amp; bots</span><span class="l-zh">桌面端与 Bot</span></h2>

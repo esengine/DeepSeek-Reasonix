@@ -16,7 +16,7 @@ func (c *Controller) EnsureSessionPath() {
 	if c.SessionPath() != "" || c.SessionDir() == "" {
 		return
 	}
-	c.SetSessionPath(agent.NewSessionPath(c.SessionDir(), c.Label()))
+	c.SetFreshSessionPath(agent.NewSessionPath(c.SessionDir(), c.Label()))
 }
 
 // AdoptHistory makes a freshly built controller continue an existing

@@ -91,7 +91,7 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);
-  const calls = { cancel: 0, tokenModes: [] as TokenMode[] };
+  const calls = { cancel: 0, tokenModes: [] as TokenMode[], approvalModes: [] as ToolApprovalMode[] };
   let currentProps: Parameters<typeof Composer>[0] = {
     running: false,
     collaborationMode: "normal" as CollaborationMode,
@@ -108,7 +108,9 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
     onCycleMode: () => {},
     onSetMode: () => {},
     onSetCollaborationMode: () => {},
-    onSetToolApprovalMode: () => {},
+    onSetToolApprovalMode: (mode) => {
+      calls.approvalModes.push(mode);
+    },
     onToggleYoloApprovalMode: () => {},
     onClearGoal: () => {},
     onSwitchModel: () => {},
@@ -141,12 +143,19 @@ console.log("\ncomposer run strip");
 // Idle: no strip, no stop button, plain send arrow.
 {
   const dom = installDom();
-  const { root } = await renderComposer();
+  const { root, calls } = await renderComposer();
 
   eq(document.querySelector(".composer-run-strip"), null, "idle composer renders no run strip");
   eq(document.querySelector(".composer__btn--stop"), null, "idle composer renders no stop button");
   ok(document.querySelector(".composer__btn--send") !== null, "idle composer keeps the send button");
   eq(document.querySelector(".composer-toolbar--status-only"), null, "floating status pill is gone");
+  const yolo = document.querySelector<HTMLButtonElement>(".composer-modebar__item--yolo");
+  ok(yolo !== null, "approval bar always exposes Yolo alongside Ask and Auto");
+  await act(async () => {
+    yolo?.click();
+    await flushTimers();
+  });
+  eq(calls.approvalModes.at(-1), "yolo", "the visible Yolo option selects Yolo approval");
 
   await act(async () => {
     root.unmount();
@@ -202,6 +211,26 @@ console.log("\ncomposer run strip");
   });
   eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu no longer owns work mode");
   eq(document.querySelectorAll('.composer-intent-menu [role="menuitemradio"]').length, 3, "task method menu exposes direct, plan, and goal");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// Runtime controller transitions disable every mode axis and submit together,
+// so rapid Goal + Delivery + approval-mode clicks cannot mutate a half-rebuilt runtime.
+{
+  const dom = installDom();
+  const { root } = await renderComposer({ disabled: true, goal: "ship it", collaborationMode: "goal" });
+  const profile = document.querySelector<HTMLButtonElement>(".composer-profile-trigger");
+  const task = document.querySelector<HTMLButtonElement>(".composer-task-mode-trigger");
+  const approvals = Array.from(document.querySelectorAll<HTMLButtonElement>(".composer-modebar--approval button"));
+  const send = document.querySelector<HTMLButtonElement>(".composer__btn--send");
+  ok(Boolean(profile?.disabled), "runtime transition disables Delivery profile changes");
+  ok(Boolean(task?.disabled), "runtime transition disables Goal mode changes");
+  ok(approvals.length === 3 && approvals.every((button) => button.disabled), "runtime transition disables Ask/Auto/Yolo changes");
+  ok(Boolean(send?.disabled), "runtime transition disables submit");
 
   await act(async () => {
     root.unmount();

@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -20,7 +22,9 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/secrets"
 	"reasonix/internal/skill"
+	"reasonix/internal/testenv"
 )
 
 type blockingTurnRunner struct{ started chan struct{} }
@@ -32,9 +36,38 @@ type stubbornTurnRunner struct {
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
+const (
+	middleClickPasteHelperFlag = "GO_WANT_REASONIX_MIDDLE_CLICK_PASTE_HELPER"
+	middleClickPasteHelperMode = "REASONIX_MIDDLE_CLICK_PASTE_HELPER_MODE"
+	middleClickPasteTestValue  = "REASONIX_MIDDLE_CLICK_TEST_VALUE"
+)
+
+func TestMiddleClickPasteCommandHelper(t *testing.T) {
+	if os.Getenv(middleClickPasteHelperFlag) != "1" {
+		return
+	}
+	switch os.Getenv(middleClickPasteHelperMode) {
+	case "credential":
+		if value := os.Getenv(middleClickPasteTestValue); value != "" {
+			_, _ = fmt.Fprint(os.Stdout, value)
+		} else {
+			_, _ = fmt.Fprint(os.Stdout, "filtered")
+		}
+	case "newlines":
+		_, _ = fmt.Fprint(os.Stdout, "line\n\n")
+	default:
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
 func TestMain(m *testing.M) {
 	old := detectTermuxTerminal
 	detectTermuxTerminal = func() bool { return false }
+	cleanupUserState, err := testenv.IsolateUserState()
+	if err != nil {
+		panic(err)
+	}
 
 	// Pin the UI language for the whole cli test binary. Production code
 	// (cli.Run) calls i18n.DetectLanguage("") which resolves the host locale from
@@ -54,6 +87,7 @@ func TestMain(m *testing.M) {
 
 	code := m.Run()
 	detectTermuxTerminal = old
+	cleanupUserState()
 	os.Exit(code)
 }
 
@@ -70,19 +104,11 @@ func (r *stubbornTurnRunner) Run(ctx context.Context, _ string) error {
 }
 
 type recordingTurnRunner struct {
-	inputs               []string
-	memoryCompilerInputs []string
+	inputs []string
 }
 
 func (r *recordingTurnRunner) Run(ctx context.Context, input string) error {
 	r.inputs = append(r.inputs, input)
-	// The memory compiler's source_event is set by the orchestrator from the
-	// controller's `raw` value. Capture it so we can prove the CLI passes the
-	// EXPANDED paste (not the folded label) — the label would starve the model
-	// of the pasted content once the compiler's contract replaces the user turn.
-	if source, ok := agent.MemoryCompilerSourceInputFromContext(ctx); ok {
-		r.memoryCompilerInputs = append(r.memoryCompilerInputs, source)
-	}
 	return nil
 }
 
@@ -269,8 +295,9 @@ func TestCompletionMenuPadsWithNonBreakingSpaces(t *testing.T) {
 }
 
 // TestTranscriptViewportSizing proves the viewport tracks the terminal size and
-// gets the rows left over after the pinned bottom region (input box + 2 status
-// rows = 5 with an empty 1-line composer), and is fed the committed transcript.
+// gets the rows left over after the pinned bottom region (input box + the one
+// available information row = 4 with an empty 1-line composer and no Git or
+// telemetry), and is fed the committed transcript.
 func TestTranscriptViewportSizing(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
@@ -278,14 +305,14 @@ func TestTranscriptViewportSizing(t *testing.T) {
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = m0.(chatTUI)
 
-	if got := m.bottomRows(); got != 5 {
-		t.Fatalf("bottomRows with an empty composer = %d, want 5 (input 1 + border 2 + status 2)", got)
+	if got := m.bottomRows(); got != 4 {
+		t.Fatalf("bottomRows with an empty composer = %d, want 4 (input 1 + border 2 + status 1)", got)
 	}
 	if m.viewport.Width() != 79 {
 		t.Errorf("viewport content width = %d, want 79 (terminal 80 - 1 scrollbar column)", m.viewport.Width())
 	}
-	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 19 {
-		t.Errorf("viewport height = %d, transcriptHeight = %d, want 19 (24-5)", m.viewport.Height(), want)
+	if want := m.transcriptHeight(); m.viewport.Height() != want || want != 20 {
+		t.Errorf("viewport height = %d, transcriptHeight = %d, want 20 (24-4)", m.viewport.Height(), want)
 	}
 	if m.viewport.TotalLineCount() == 0 {
 		t.Errorf("viewport should hold the committed banner after the first resize")
@@ -416,6 +443,18 @@ func TestManualNewlineGrowsComposerWithoutHidingFirstLine(t *testing.T) {
 	}
 }
 
+func TestEmptyComposerShowsOnlyPrompt(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 60)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 16})
+	m = m0.(chatTUI)
+
+	firstLine := strings.Split(ansi.Strip(m.renderComposerInput()), "\n")[0]
+	if strings.TrimSpace(firstLine) != "❯" {
+		t.Fatalf("empty composer = %q, want only the prompt", firstLine)
+	}
+}
+
 func TestManualNewlineCanExceedVisibleComposerRows(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
@@ -423,6 +462,10 @@ func TestManualNewlineCanExceedVisibleComposerRows(t *testing.T) {
 	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
 	m = m0.(chatTUI)
 	m.input.SetValue("first line")
+	visibleCap := m.input.MaxHeight
+	if visibleCap >= maxInputRows {
+		t.Fatalf("short terminal input cap = %d, want less than comfort cap %d", visibleCap, maxInputRows)
+	}
 
 	for range maxInputRows + 1 {
 		m0, _ = m.Update(tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
@@ -432,8 +475,124 @@ func TestManualNewlineCanExceedVisibleComposerRows(t *testing.T) {
 	if got, want := strings.Count(m.input.Value(), "\n"), maxInputRows+1; got != want {
 		t.Fatalf("manual newlines preserved = %d, want %d", got, want)
 	}
+	if got := m.input.Height(); got != visibleCap {
+		t.Fatalf("visible input height = %d, want terminal-aware cap %d", got, visibleCap)
+	}
+	if got := m.input.ScrollYOffset(); got == 0 {
+		t.Fatal("overflowing composer should scroll internally to keep the caret visible")
+	}
+	if got := m.transcriptHeight(); got < minTranscriptRows {
+		t.Fatalf("transcript height = %d, want at least %d rows", got, minTranscriptRows)
+	}
+}
+
+func TestComposerHeightReflowsWhenTerminalShrinksAndGrows(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = m0.(chatTUI)
+	m.input.SetValue(strings.Repeat("line\n", maxInputRows+2))
+	// SetValue recalculates the dynamic textarea before the outer model gets a
+	// chance to resize the transcript, so send a harmless resize through Update.
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = m0.(chatTUI)
 	if got := m.input.Height(); got != maxInputRows {
-		t.Fatalf("visible input height = %d, want capped at %d", got, maxInputRows)
+		t.Fatalf("tall terminal input height = %d, want comfort cap %d", got, maxInputRows)
+	}
+
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = m0.(chatTUI)
+	shortCap := m.input.MaxHeight
+	if got := m.input.Height(); got != shortCap {
+		t.Fatalf("shrunk terminal input height = %d, want cap %d", got, shortCap)
+	}
+	if shortCap >= maxInputRows {
+		t.Fatalf("shrunk terminal cap = %d, want less than %d", shortCap, maxInputRows)
+	}
+	if got := strings.Count(m.input.Value(), "\n"); got != maxInputRows+2 {
+		t.Fatalf("resize changed composer content: newline count = %d, want %d", got, maxInputRows+2)
+	}
+	if got := m.transcriptHeight(); got < minTranscriptRows {
+		t.Fatalf("shrunk transcript height = %d, want at least %d", got, minTranscriptRows)
+	}
+
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	m = m0.(chatTUI)
+	if got := m.input.Height(); got != maxInputRows {
+		t.Fatalf("regrown terminal input height = %d, want restored cap %d", got, maxInputRows)
+	}
+}
+
+func TestTranscriptResizeRerendersCommittedMarkdownAtNewWidth(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 14})
+	m = m0.(chatTUI)
+
+	raw := "A committed answer with a thematic break.\n\n---\n\n" +
+		strings.Repeat("reflow words across the old terminal width ", 4)
+	m.pending.WriteString(raw)
+	m.commitPending()
+	answer := len(m.transcript) - 1
+	oldRendered := ansi.Strip(m.transcript[answer])
+	oldLines := strings.Count(oldRendered, "\n") + 1
+
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
+	m = m0.(chatTUI)
+	newRendered := ansi.Strip(m.transcript[answer])
+	newLines := strings.Count(newRendered, "\n") + 1
+
+	ruleWidth := 0
+	for _, line := range strings.Split(newRendered, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && strings.Trim(trimmed, "─") == "" {
+			ruleWidth = visibleWidth(trimmed)
+			break
+		}
+	}
+	if got, want := ruleWidth, transcriptContentWidth(80, false)-visibleWidth(assistantTranscriptIndent); got != want {
+		t.Fatalf("resized thematic rule width = %d, want indented assistant body width %d", got, want)
+	}
+	if newLines >= oldLines {
+		t.Fatalf("wider transcript kept old hard wrapping: old lines=%d new lines=%d\n%s", oldLines, newLines, newRendered)
+	}
+	if got := m.transcriptSources[answer]; got.kind != transcriptSourceMarkdown || got.raw != raw {
+		t.Fatalf("committed answer lost markdown source: %+v", got)
+	}
+}
+
+func TestTranscriptResizeKeepsScrolledReaderOnSameBlock(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = m0.(chatTUI)
+	m.clearTranscriptDisplay()
+
+	for i := range 8 {
+		m.commitTranscriptSource(transcriptSource{
+			kind: transcriptSourceMarkdown,
+			raw:  fmt.Sprintf("ANCHOR-%d\n\n%s", i, strings.Repeat("content that wraps at the narrow width ", 4)),
+		})
+	}
+	m.transcriptDirty = true
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = m0.(chatTUI)
+
+	contentWidth := transcriptContentWidth(m.width, false)
+	secondBlockStart := transcriptBlockLineCount(m.transcript[0], contentWidth)
+	m.viewport.SetYOffset(secondBlockStart)
+	if m.viewport.AtBottom() {
+		t.Fatal("test reader anchor must be above the transcript bottom")
+	}
+
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = m0.(chatTUI)
+	newContentWidth := transcriptContentWidth(m.width, false)
+	newSecondBlockStart := transcriptBlockLineCount(m.transcript[0], newContentWidth)
+	newThirdBlockStart := newSecondBlockStart + transcriptBlockLineCount(m.transcript[1], newContentWidth)
+	if offset := m.viewport.YOffset(); offset < newSecondBlockStart || offset >= newThirdBlockStart {
+		t.Fatalf("resize moved reader outside ANCHOR-1 block: offset=%d block=[%d,%d)", offset, newSecondBlockStart, newThirdBlockStart)
 	}
 }
 
@@ -453,6 +612,51 @@ func TestSoftWrappedInputGrowsComposerAndShrinksTranscript(t *testing.T) {
 	}
 	if got := m.viewport.Height(); got >= initialViewportHeight {
 		t.Fatalf("viewport height after composer growth = %d, want less than initial %d", got, initialViewportHeight)
+	}
+}
+
+func TestComposerPromptReservesWidthAndOffsetsCJKCursor(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 40)
+
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = m0.(chatTUI)
+	m.input.SetValue("你好")
+
+	firstLine := strings.Split(ansi.Strip(m.input.View()), "\n")[0]
+	if !strings.HasPrefix(firstLine, "❯ 你好") {
+		t.Fatalf("composer first line = %q, want prompt before CJK input", firstLine)
+	}
+	if got, want := m.input.Width(), 40-4-composerPromptWidth; got != want {
+		t.Fatalf("textarea content width = %d, want %d after prompt gutter", got, want)
+	}
+	cursor := m.input.Cursor()
+	if cursor == nil {
+		t.Fatal("focused composer should expose the real terminal cursor")
+	}
+	if got, want := cursor.X, composerPromptWidth+4; got != want {
+		t.Fatalf("cursor X after two CJK runes = %d, want %d", got, want)
+	}
+}
+
+func TestComposerPromptDoesNotRepeatOnWrappedRows(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 16)
+
+	// Give this prompt-gutter test enough vertical space for the responsive
+	// footer; terminal-height prioritization is covered separately.
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 16, Height: 18})
+	m = m0.(chatTUI)
+	m.input.SetValue(strings.Repeat("x", m.input.Width()+1))
+	lines := strings.Split(ansi.Strip(m.input.View()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("wrapped composer lines = %d, want at least 2", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "❯ ") {
+		t.Fatalf("first composer row missing prompt: %q", lines[0])
+	}
+	if strings.HasPrefix(lines[1], "❯ ") || !strings.HasPrefix(lines[1], "  ") {
+		t.Fatalf("continuation row should keep a blank prompt gutter: %q", lines[1])
 	}
 }
 
@@ -637,7 +841,7 @@ func TestMarkdownDividerFitsTranscriptContentWidth(t *testing.T) {
 	if m.viewport.Width() != wantW {
 		t.Fatalf("viewport width = %d, want transcript content width %d", m.viewport.Width(), wantW)
 	}
-	rule := strings.TrimRight(m.renderer.Render("---"), "\n")
+	rule := strings.TrimRight(newMarkdownRenderer(wantW).Render("---"), "\n")
 	lines := strings.Split(wrapTranscript(rule, m.viewport.Width()), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("markdown divider wrapped into %d lines at width %d: %q", len(lines), m.viewport.Width(), lines)
@@ -774,6 +978,78 @@ func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 			}
 		})
 	}
+
+	grantable := approvalChoices(&event.Approval{
+		Kind: "recovery", Recovery: &event.RecoveryApproval{CanGrantTask: true},
+	})
+	wantGrantable := []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
+	if len(grantable) != len(wantGrantable) {
+		t.Fatalf("grantable recovery choices = %d, want %d", len(grantable), len(wantGrantable))
+	}
+	for i := range grantable {
+		grantable[i].label = ""
+		if grantable[i] != wantGrantable[i] {
+			t.Fatalf("grantable recovery choice %d = %+v, want %+v", i, grantable[i], wantGrantable[i])
+		}
+	}
+	labels := approvalChoiceLabels(&event.Approval{Kind: "recovery", Recovery: &event.RecoveryApproval{
+		CanGrantTask: true, TaskGrantScope: "git push origin → feature",
+	}})
+	if len(labels) != 3 || !strings.Contains(labels[1], "git push origin → feature") {
+		t.Fatalf("grantable recovery labels = %v", labels)
+	}
+	planLabels := approvalChoiceLabels(&event.Approval{Kind: "recovery", Recovery: &event.RecoveryApproval{
+		ChangeKind: "strategy",
+	}})
+	if len(planLabels) != 2 || planLabels[0] != "Adopt the new plan and continue" || planLabels[1] != "Do not adopt; let Auto adjust" {
+		t.Fatalf("plan-change recovery labels = %v", planLabels)
+	}
+}
+
+func TestPlanChangeApprovalBannerUsesNeutralCopyAndShowsPlans(t *testing.T) {
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{
+		ID: "plan-change", Tool: "todo_write", Reason: "choose the public API direction", Kind: "recovery",
+		Recovery: &event.RecoveryApproval{
+			ChangeKind: "scope", PlanBefore: "1. Keep API [in_progress]", PlanAfter: "1. Replace API [in_progress]",
+		},
+	}
+	banner := ansi.Strip(m.renderApprovalBanner())
+	for _, want := range []string{"The execution plan needs your decision", "Previous plan: 1. Keep API", "Proposed plan: 1. Replace API"} {
+		if !strings.Contains(banner, want) {
+			t.Fatalf("plan-change banner missing %q:\n%s", want, banner)
+		}
+	}
+}
+
+func TestPlanChangeApprovalStartsWithoutSelection(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{
+		Kind: event.ApprovalRequest,
+		Approval: event.Approval{
+			ID: "plan-change", Tool: "todo_write", Kind: "recovery",
+			Recovery: &event.RecoveryApproval{ChangeKind: "strategy"},
+		},
+	})
+	if m.approvalSelection != -1 {
+		t.Fatalf("plan approval selection = %d, want no default", m.approvalSelection)
+	}
+	banner := ansi.Strip(m.renderApprovalBanner())
+	if strings.Contains(banner, "❯ 1.") || strings.Contains(banner, "❯ 2.") {
+		t.Fatalf("plan approval banner preselected a choice:\n%s", banner)
+	}
+
+	next, _ := m.handleApprovalKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = next.(chatTUI)
+	if m.pendingApproval == nil {
+		t.Fatal("Enter without a selection resolved the plan decision")
+	}
+	next, _ = m.handleApprovalKey(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = next.(chatTUI)
+	if m.approvalSelection != 0 {
+		t.Fatalf("first navigation selected %d, want first choice", m.approvalSelection)
+	}
 }
 
 func TestApprovalArrowKeysMoveVisibleSelection(t *testing.T) {
@@ -826,7 +1102,7 @@ func TestCompletionMenuCtrlPNMovesSelection(t *testing.T) {
 	}
 }
 
-func TestStatusCommandShowsDetailsRemovedFromFooter(t *testing.T) {
+func TestStatusCommandShowsRuntimeDetails(t *testing.T) {
 	m := newTestChatTUI()
 	m.modelRef = "provider/model"
 	m.effortLevel = "max"
@@ -921,7 +1197,7 @@ func TestIngestEventRoutesByKind(t *testing.T) {
 	}{
 		{"dispatch", event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "read_file", Args: `{"path":"x"}`}}, "● Read(x)"},
 		{"blocked", event.Event{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}}, "● Bash ⊘ blocked by permission policy"},
-		{"usage", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100}}, "  · 1200 tok"},
+		{"usage", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100}}, "TURN  1.2K tok"},
 		{"usage-diagnostics", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}, CacheDiagnostics: &event.CacheDiagnostics{PrefixChanged: true, PrefixChangeReasons: []string{"tools"}}}, "cache prefix changed: tools"},
 		{"notice-info", event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compacted 8 messages → summary"}, "  · compacted 8 messages → summary"},
 		{"notice-warn", event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "response truncated: hit max output tokens"}, "  ! response truncated: hit max output tokens"},
@@ -930,7 +1206,12 @@ func TestIngestEventRoutesByKind(t *testing.T) {
 		m := newTestChatTUI()
 		m.ingestEvent(tc.ev)
 		got := *m.pendingCommit
-		if len(got) != 1 || !strings.Contains(got[0], tc.want) {
+		normalized := ""
+		if len(got) == 1 {
+			normalized = strings.Join(strings.Fields(ansi.Strip(got[0])), " ")
+		}
+		want := strings.Join(strings.Fields(tc.want), " ")
+		if len(got) != 1 || !strings.Contains(normalized, want) {
 			t.Errorf("%s: committed=%v, want a single line containing %q", tc.name, got, tc.want)
 		}
 	}
@@ -1228,12 +1509,352 @@ func TestTranscriptScrollbarClickAndDrag(t *testing.T) {
 	}
 }
 
+func clipboardCopyResultFromCmd(t *testing.T, cmd tea.Cmd) clipboardCopyMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected clipboard command")
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case clipboardCopyMsg:
+		return msg
+	case tea.BatchMsg:
+		for _, child := range msg {
+			if child == nil {
+				continue
+			}
+			childMsg := child()
+			if result, ok := childMsg.(clipboardCopyMsg); ok {
+				return result
+			}
+		}
+	}
+	t.Fatalf("clipboard command returned %T, want clipboardCopyMsg", msg)
+	return clipboardCopyMsg{}
+}
+
+func clipboardTextPasteResultFromCmd(t *testing.T, cmd tea.Cmd) clipboardTextPasteMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected clipboard paste command")
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case clipboardTextPasteMsg:
+		return msg
+	case tea.BatchMsg:
+		for _, child := range msg {
+			if child == nil {
+				continue
+			}
+			childMsg := child()
+			if result, ok := childMsg.(clipboardTextPasteMsg); ok {
+				return result
+			}
+		}
+	}
+	t.Fatalf("clipboard paste command returned %T, want clipboardTextPasteMsg", msg)
+	return clipboardTextPasteMsg{}
+}
+
+func middleClickPasteResultFromCmd(t *testing.T, cmd tea.Cmd) tea.PasteMsg {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("expected middle-click paste command")
+	}
+	msg := cmd()
+	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		return msg
+	case tea.BatchMsg:
+		for _, child := range msg {
+			if child == nil {
+				continue
+			}
+			if result, ok := child().(tea.PasteMsg); ok {
+				return result
+			}
+		}
+	}
+	t.Fatalf("middle-click command returned %T, want tea.PasteMsg", msg)
+	return tea.PasteMsg{}
+}
+
+func setLocalClipboardSession(t *testing.T) {
+	t.Helper()
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+}
+
+func TestMouseRightClickWithoutSelectionPastesClipboardText(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) { return "pasted text", nil }
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "before pasted text" {
+		t.Fatalf("right-click paste produced %q, want %q", got, "before pasted text")
+	}
+}
+
+func TestMouseRightClickPasteOverSSHDoesNotReadRemoteClipboard(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) {
+		t.Fatal("SSH right-click paste must not read the remote host clipboard")
+		return "", nil
+	}
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	if !result.remote {
+		t.Fatalf("SSH right-click paste result = %+v, want remote hint", result)
+	}
+
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "before " {
+		t.Fatalf("SSH right-click paste changed composer to %q", got)
+	}
+	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, i18n.M.ClipboardTextPasteRemoteHint) {
+		t.Fatalf("SSH right-click paste notice = %q, want %q", got, i18n.M.ClipboardTextPasteRemoteHint)
+	}
+}
+
+func TestMouseRightClickPasteUsesCanonicalFoldedPastePath(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	pasted := "one\ntwo\nthree\nfour\nfive"
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) { return pasted, nil }
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseRight})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "[Pasted text #1 · 5 lines] " {
+		t.Fatalf("right-click folded paste display = %q", got)
+	}
+	if len(m.pastedBlocks) != 1 || m.pastedBlocks[0].text != pasted {
+		t.Fatalf("right-click folded paste block = %+v", m.pastedBlocks)
+	}
+}
+
+func TestMiddleClickUsesTmuxPasteBufferInsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	previousTmux := readTmuxPasteBuffer
+	previousPrimary := readPrimaryPasteSelection
+	t.Cleanup(func() {
+		readTmuxPasteBuffer = previousTmux
+		readPrimaryPasteSelection = previousPrimary
+	})
+	readTmuxPasteBuffer = func() (string, error) { return "tmux buffer", nil }
+	readPrimaryPasteSelection = func() (string, error) {
+		t.Fatal("middle-click inside tmux must not read the desktop PRIMARY selection")
+		return "", nil
+	}
+
+	msg := pasteMiddleClick()()
+	paste, ok := msg.(tea.PasteMsg)
+	if !ok || paste.Content != "tmux buffer" {
+		t.Fatalf("middle-click result = %#v, want tmux-buffer PasteMsg", msg)
+	}
+}
+
+func TestMouseMiddleClickPastesPrimarySelectionThroughCanonicalPath(t *testing.T) {
+	setLocalClipboardSession(t)
+	t.Setenv("TMUX", "")
+	previous := readPrimaryPasteSelection
+	t.Cleanup(func() { readPrimaryPasteSelection = previous })
+	readPrimaryPasteSelection = func() (string, error) { return "primary selection", nil }
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseMiddle})
+	m = next.(chatTUI)
+	paste := middleClickPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(paste)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "before primary selection" {
+		t.Fatalf("middle-click paste produced %q, want %q", got, "before primary selection")
+	}
+}
+
+func TestMouseMiddleClickDoesNotMutateHiddenComposer(t *testing.T) {
+	setLocalClipboardSession(t)
+	t.Setenv("TMUX", "")
+	previous := readPrimaryPasteSelection
+	t.Cleanup(func() { readPrimaryPasteSelection = previous })
+	readPrimaryPasteSelection = func() (string, error) {
+		t.Fatal("middle-click with a hidden composer must not read PRIMARY")
+		return "", nil
+	}
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before")
+	m.pendingApproval = &event.Approval{ID: "approval", Tool: "bash", Subject: "echo hi"}
+	if !m.hideComposer() {
+		t.Fatal("test setup did not hide composer")
+	}
+
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseMiddle})
+	m = next.(chatTUI)
+	if cmd != nil {
+		t.Fatalf("hidden-composer middle-click returned command with message %#v", cmd())
+	}
+	if got := m.input.Value(); got != "before" {
+		t.Fatalf("hidden composer changed to %q", got)
+	}
+}
+
+func TestMouseMiddleClickPasteOverSSHDoesNotReadRemotePrimary(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("TMUX", "")
+	previous := readPrimaryPasteSelection
+	t.Cleanup(func() { readPrimaryPasteSelection = previous })
+	readPrimaryPasteSelection = func() (string, error) {
+		t.Fatal("SSH middle-click must not read PRIMARY on the remote host")
+		return "", nil
+	}
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	next, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseMiddle})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	if !result.remote {
+		t.Fatalf("SSH middle-click paste result = %+v, want remote hint", result)
+	}
+
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, i18n.M.ClipboardTextPasteRemoteHint) {
+		t.Fatalf("SSH middle-click paste notice = %q, want %q", got, i18n.M.ClipboardTextPasteRemoteHint)
+	}
+}
+
+func TestMiddleClickUsesPrimarySelectionOutsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "")
+	previousTmux := readTmuxPasteBuffer
+	previousPrimary := readPrimaryPasteSelection
+	t.Cleanup(func() {
+		readTmuxPasteBuffer = previousTmux
+		readPrimaryPasteSelection = previousPrimary
+	})
+	readTmuxPasteBuffer = func() (string, error) {
+		t.Fatal("middle-click outside tmux must not read a tmux buffer")
+		return "", nil
+	}
+	readPrimaryPasteSelection = func() (string, error) { return "primary selection", nil }
+
+	msg := pasteMiddleClick()()
+	paste, ok := msg.(tea.PasteMsg)
+	if !ok || paste.Content != "primary selection" {
+		t.Fatalf("middle-click result = %#v, want PRIMARY-selection PasteMsg", msg)
+	}
+}
+
+func TestMiddleClickTmuxReadFailureIsSilent(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+	previous := readTmuxPasteBuffer
+	t.Cleanup(func() { readTmuxPasteBuffer = previous })
+	readTmuxPasteBuffer = func() (string, error) { return "", errors.New("no buffers") }
+
+	if msg := pasteMiddleClick()(); msg != nil {
+		t.Fatalf("failed tmux-buffer read returned %#v, want silent no-op", msg)
+	}
+}
+
+func TestMiddleClickPasteCommandsFilterRegisteredCredentials(t *testing.T) {
+	t.Setenv(middleClickPasteHelperFlag, "1")
+	t.Setenv(middleClickPasteHelperMode, "credential")
+	t.Setenv(middleClickPasteTestValue, "credential-leaked")
+	secrets.RegisterCredentialEnvKeys([]string{middleClickPasteTestValue})
+
+	previous := newPasteCommand
+	t.Cleanup(func() { newPasteCommand = previous })
+	newPasteCommand = func(_ string, _ ...string) *exec.Cmd {
+		return exec.Command(os.Args[0], "-test.run=^TestMiddleClickPasteCommandHelper$")
+	}
+
+	for name, read := range map[string]func() (string, error){
+		"tmux":    readTmuxBuffer,
+		"primary": readPrimarySelection,
+	} {
+		t.Run(name, func(t *testing.T) {
+			text, err := read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if text != "filtered" {
+				t.Fatalf("paste helper inherited registered credential: %q", text)
+			}
+		})
+	}
+}
+
+func TestReadPrimarySelectionRequestsTextAndPreservesNewlines(t *testing.T) {
+	t.Setenv(middleClickPasteHelperFlag, "1")
+	t.Setenv(middleClickPasteHelperMode, "newlines")
+
+	previous := newPasteCommand
+	t.Cleanup(func() { newPasteCommand = previous })
+	called := false
+	newPasteCommand = func(name string, args ...string) *exec.Cmd {
+		called = true
+		if name != "wl-paste" {
+			t.Fatalf("first PRIMARY helper = %q, want wl-paste", name)
+		}
+		want := []string{"--primary", "--type", "text", "--no-newline"}
+		if !reflect.DeepEqual(args, want) {
+			t.Fatalf("wl-paste args = %q, want %q", args, want)
+		}
+		return exec.Command(os.Args[0], "-test.run=^TestMiddleClickPasteCommandHelper$")
+	}
+
+	text, err := readPrimarySelection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("PRIMARY helper was not invoked")
+	}
+	if text != "line\n\n" {
+		t.Fatalf("PRIMARY selection = %q, want trailing newlines preserved", text)
+	}
+}
+
 // TestMouseDragReleaseAutoCopies verifies that releasing the mouse after a
 // left-drag over the transcript copies the selection to the clipboard
 // automatically (native terminal convention), keeps the selection highlighted
 // so a follow-up right-click can still re-copy it, and arms the transient
 // "copied to clipboard" status-line notice.
 func TestMouseDragReleaseAutoCopies(t *testing.T) {
+	setLocalClipboardSession(t)
 	m := newTestChatTUI()
 	m.transcript = []string{"hello world"}
 	m.wrappedLines = []string{"hello world"}
@@ -1251,8 +1872,23 @@ func TestMouseDragReleaseAutoCopies(t *testing.T) {
 	if !m2.sel.active {
 		t.Error("selection should stay highlighted after auto-copy so right-click can re-copy it")
 	}
-	if m2.copyNoticeText == "" {
-		t.Error("release after a real drag should arm the copied-to-clipboard notice")
+	if m2.copyNoticeText != "" {
+		t.Error("copy must not claim success before the native clipboard write completes")
+	}
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "hello" {
+			t.Fatalf("native clipboard text = %q, want hello", text)
+		}
+		return nil
+	}
+	result := clipboardCopyResultFromCmd(t, cmd)
+	out, _ = m2.Update(result)
+	m3 := out.(chatTUI)
+	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
 	}
 }
 
@@ -1300,6 +1936,37 @@ func TestCopyNoticeExpires(t *testing.T) {
 	m3 := out.(chatTUI)
 	if m3.copyNoticeText != "" {
 		t.Fatal("the matching expiry tick should clear the notice")
+	}
+}
+
+func TestClipboardCopyFallbackDoesNotClaimNativeSuccess(t *testing.T) {
+	m := newTestChatTUI()
+	m.copyNoticeSeq = 7
+
+	out, cmd := m.Update(clipboardCopyMsg{
+		text:       "selected text",
+		err:        errors.New("pbcopy unavailable"),
+		statusHint: true,
+		seq:        7,
+	})
+	m = out.(chatTUI)
+	if got := m.copyNoticeText; got != i18n.M.ClipboardCopyFallbackHint {
+		t.Fatalf("fallback copy notice = %q, want %q", got, i18n.M.ClipboardCopyFallbackHint)
+	}
+	if cmd == nil {
+		t.Fatal("fallback copy should emit an OSC 52 clipboard command")
+	}
+}
+
+func TestImagePastePendingAppearsInFooter(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 14})
+	m = next.(chatTUI)
+	m.clipboardImagePending = true
+	view := ansi.Strip(m.View().Content)
+	if !strings.Contains(view, i18n.M.ClipboardImagePastingHint) {
+		t.Fatalf("pending image paste missing from footer:\n%s", view)
 	}
 }
 
@@ -1387,7 +2054,7 @@ func TestEffortCommandWritesCurrentDeepSeekProvider(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
@@ -1412,7 +2079,7 @@ func TestEffortCommandRejectsUnsupportedProvider(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "mimo-pro"})
 	m.modelRef = "mimo-pro/mimo-v2.5-pro"
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		return control.New(control.Options{Label: "mimo-pro"}), nil
 	}
 
@@ -1430,7 +2097,7 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{Label: "deepseek-flash"})
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
 
@@ -1450,65 +2117,6 @@ func TestEffortCommandAutoClearsProviderEffort(t *testing.T) {
 	section := providerSection(string(body), "deepseek-flash")
 	if strings.Contains(section, `effort      = "`) {
 		t.Fatalf("auto should clear saved deepseek-flash effort:\n%s", section)
-	}
-}
-
-func TestAutoPlanCommandPersistsAndUpdatesController(t *testing.T) {
-	isolateUserConfig(t)
-
-	runner := &recordingTurnRunner{}
-	events := make(chan event.Event, 4)
-	ctrl := control.New(control.Options{
-		AutoPlan: "off",
-		Runner:   runner,
-		Sink: event.FuncSink(func(e event.Event) {
-			events <- e
-		}),
-	})
-	m := newTestChatTUI()
-	m.ctrl = ctrl
-
-	m.runAutoPlanCommand("/auto-plan on")
-
-	body, err := os.ReadFile(config.UserConfigPath())
-	if err != nil {
-		t.Fatalf("read saved config: %v", err)
-	}
-	if !strings.Contains(string(body), `auto_plan   = "on"`) {
-		t.Fatalf("saved config missing auto_plan=on:\n%s", body)
-	}
-	input := "实现 GitHub issue #2395：\n- 新增配置项\n- 自动判断复杂任务\n- 补测试和文档"
-	ctrl.Send(input)
-	waitForCLIEvent(t, events, event.TurnDone)
-	if len(runner.inputs) != 1 || !strings.HasPrefix(agent.StripTransientUserBlocks(runner.inputs[0]), control.PlanModeMarker) {
-		t.Fatalf("/auto-plan on should affect current controller, inputs=%q", runner.inputs)
-	}
-}
-
-func TestAutoPlanCommandWritesUserConfigNotProjectConfig(t *testing.T) {
-	isolateUserConfig(t)
-	projectPath := filepath.Join(mustGetwd(t), "reasonix.toml")
-	if err := os.WriteFile(projectPath, []byte("[agent]\nauto_plan = \"off\"\n"), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{AutoPlan: "off"})
-	m.runAutoPlanCommand("/auto-plan on")
-
-	userBody, err := os.ReadFile(config.UserConfigPath())
-	if err != nil {
-		t.Fatalf("read user config: %v", err)
-	}
-	if !strings.Contains(string(userBody), `auto_plan   = "on"`) {
-		t.Fatalf("user config missing auto_plan=on:\n%s", userBody)
-	}
-	projectBody, err := os.ReadFile(projectPath)
-	if err != nil {
-		t.Fatalf("read project config: %v", err)
-	}
-	if string(projectBody) != "[agent]\nauto_plan = \"off\"\n" {
-		t.Fatalf("/auto-plan should not rewrite project config:\n%s", projectBody)
 	}
 }
 
@@ -1561,33 +2169,6 @@ func TestReasoningLanguageCommandWritesUserConfigNotProjectConfig(t *testing.T) 
 	}
 }
 
-func TestMemoryV5CommandWritesUserConfigNotProjectConfig(t *testing.T) {
-	isolateUserConfig(t)
-	projectPath := filepath.Join(mustGetwd(t), "reasonix.toml")
-	if err := os.WriteFile(projectPath, []byte("[agent]\nmemory_compiler = { enabled = true }\n"), 0o644); err != nil {
-		t.Fatalf("write project config: %v", err)
-	}
-
-	m := newTestChatTUI()
-	m.ctrl = control.New(control.Options{})
-	m.runMemoryV5Command("/memory-v5 off")
-
-	userBody, err := os.ReadFile(config.UserConfigPath())
-	if err != nil {
-		t.Fatalf("read user config: %v", err)
-	}
-	if !strings.Contains(string(userBody), `memory_compiler = { enabled = false, verbosity = "observe" }`) {
-		t.Fatalf("user config missing memory_compiler off:\n%s", userBody)
-	}
-	projectBody, err := os.ReadFile(projectPath)
-	if err != nil {
-		t.Fatalf("read project config: %v", err)
-	}
-	if string(projectBody) != "[agent]\nmemory_compiler = { enabled = true }\n" {
-		t.Fatalf("/memory-v5 should not rewrite project config:\n%s", projectBody)
-	}
-}
-
 func TestLanguageCommandSwitchesImmediatelyAndPersists(t *testing.T) {
 	isolateUserConfig(t)
 	i18n.DetectLanguage("en")
@@ -1598,6 +2179,9 @@ func TestLanguageCommandSwitchesImmediatelyAndPersists(t *testing.T) {
 
 	if i18n.M.ChatStatusIdle != "就绪" {
 		t.Fatalf("/language zh did not switch active catalogue, idle=%q", i18n.M.ChatStatusIdle)
+	}
+	if got := m.input.Placeholder; got != "" {
+		t.Fatalf("/language zh introduced an idle composer placeholder: %q", got)
 	}
 	body, err := os.ReadFile(config.UserConfigPath())
 	if err != nil {
@@ -2401,21 +2985,32 @@ func TestPasteFoldExpandOnSubmit(t *testing.T) {
 	if !strings.Contains(sentToRunner, "--- End [Pasted text #1") {
 		t.Fatalf("missing End marker in runner input.\nGot: %q", sentToRunner)
 	}
+}
 
-	// The memory compiler (enabled by default) replaces the user turn with an
-	// execution contract whose source_event is the controller's `raw` value.
-	// If `raw` were the folded label, the model would only ever see
-	// "[Pasted text #1 · N lines]" and never the pasted content. Assert the
-	// source_event carries the EXPANDED content.
-	if len(r.memoryCompilerInputs) == 0 {
-		t.Fatal("memory compiler source input was not set on the context")
+func TestStrongResearchPromptStaysInOrdinaryMode(t *testing.T) {
+	r := &recordingTurnRunner{}
+	events := make(chan event.Event, 8)
+	ctrl := control.New(control.Options{
+		Runner: r,
+		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	input := "持续排查这个线上卡顿直到根因明确，并验证修复"
+	m.input.SetValue(input)
+
+	model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = model.(chatTUI)
+	waitForCLIEvent(t, events, event.TurnDone)
+
+	if len(r.inputs) != 1 || !strings.HasSuffix(r.inputs[0], input) {
+		t.Fatalf("ordinary prompt was not sent unchanged at the user boundary: %q", r.inputs)
 	}
-	mcSource := r.memoryCompilerInputs[0]
-	if strings.Contains(mcSource, "[Pasted text #1") && !strings.Contains(mcSource, "line of pasted content") {
-		t.Fatalf("memory compiler source_event has the folded label but not the expanded content:\n%q", mcSource)
+	if strings.Contains(r.inputs[0], "<active-goal>") || strings.Contains(r.inputs[0], "AutoResearch protocol") {
+		t.Fatalf("ordinary TUI prompt should not enter Goal or AutoResearch:\n%s", r.inputs[0])
 	}
-	if !strings.Contains(mcSource, "line of pasted content") {
-		t.Fatalf("memory compiler source_event must contain the expanded paste content, got:\n%q", mcSource)
+	if ctrl.GoalStatus() != control.GoalStatusStopped {
+		t.Fatalf("GoalStatus() = %q, want stopped", ctrl.GoalStatus())
 	}
 }
 
@@ -2428,9 +3023,8 @@ func TestSlashCodeCommentSubmitStartsTurn(t *testing.T) {
 			r := &recordingTurnRunner{}
 			events := make(chan event.Event, 8)
 			ctrl := control.New(control.Options{
-				AutoPlan: "off",
-				Runner:   r,
-				Sink:     event.FuncSink(func(e event.Event) { events <- e }),
+				Runner: r,
+				Sink:   event.FuncSink(func(e event.Event) { events <- e }),
 			})
 			m := newTestChatTUI()
 			m.ctrl = ctrl
@@ -2450,9 +3044,8 @@ func TestSlashCodeCommentSubmitStartsTurn(t *testing.T) {
 func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
 	r := &recordingTurnRunner{}
 	ctrl := control.New(control.Options{
-		AutoPlan: "off",
-		Runner:   r,
-		Sink:     event.FuncSink(func(event.Event) {}),
+		Runner: r,
+		Sink:   event.FuncSink(func(event.Event) {}),
 	})
 	m := newTestChatTUI()
 	m.ctrl = ctrl
@@ -2565,6 +3158,25 @@ func TestFreshApprovalBannerUsesConventionalDenyChoice(t *testing.T) {
 	}
 	if strings.Contains(banner, "4. 拒绝") {
 		t.Fatalf("approval banner = %q, must not show non-consecutive deny choice", banner)
+	}
+}
+
+func TestDynamicMCPFreshApprovalHidesRememberedChoices(t *testing.T) {
+	i18n.DetectLanguage("en")
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{
+		ID:      "approval-mcp-1",
+		Tool:    "mcp__srv__wipe",
+		Subject: "MCP srv/wipe declares destructive side effects",
+		Fresh:   true,
+	}
+	banner := m.renderApprovalBanner()
+	if !strings.Contains(banner, "1. Allow once") || !strings.Contains(banner, "2. Deny") {
+		t.Fatalf("approval banner = %q, want fresh two-choice prompt", banner)
+	}
+	if strings.Contains(banner, "for this session") || strings.Contains(banner, "Always allow") {
+		t.Fatalf("approval banner offers remembered grant for destructive MCP: %q", banner)
 	}
 }
 
@@ -2975,12 +3587,6 @@ func TestCtrlCCopyBeatsClearInput(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("expected clipboard cmd")
 	}
-	if batch, ok := cmd().(tea.BatchMsg); ok {
-		for _, c := range batch {
-			c()
-		}
-	}
-
 	// Second Ctrl+C (no selection, non-empty composer) clears the draft.
 	out2, _ := m2.Update(ctrlC)
 	m3 := out2.(chatTUI)

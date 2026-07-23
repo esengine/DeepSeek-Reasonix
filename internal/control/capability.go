@@ -62,7 +62,7 @@ func (c *Controller) routeCapabilities(routeInput string) capability.RouteDecisi
 	// auto_start=false servers contribute concrete mcp-tool candidates to
 	// deterministic and semantic routing before any connection exists.
 	opts.CachedTools = c.capCachedTools
-	opts.CacheHashOK = c.capCacheHashOK
+	opts.CacheKeyOK = c.capCacheKeyOK
 	opts.ProxyTools = proxyTools
 	if h := c.Host(); h != nil {
 		opts.Connected = map[string]bool{}
@@ -119,7 +119,7 @@ func (c *Controller) WireCapabilityRouting(plugins []config.PluginEntry, specs [
 		return
 	}
 	c.pluginCfg = append([]config.PluginEntry(nil), plugins...)
-	c.capCachedTools, c.capCacheHashOK = capability.LoadCachedToolsForSpecs(specs)
+	c.capCachedTools, c.capCacheKeyOK = capability.LoadCachedToolsForSpecs(specs)
 	c.semanticRouter = router
 	c.capabilityAudit = audit
 }

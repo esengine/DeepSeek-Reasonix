@@ -13,9 +13,12 @@ import {
   __setMermaidRenderAdapterForTest,
   isOpenableMermaidHref,
   isSafeMermaidHref,
+  safelyRunPanZoom,
+  safelySyncPanZoom,
   sanitizeMermaidSvg,
 } from "../components/MermaidDiagram";
 import { LocaleProvider } from "../lib/i18n";
+import { REMOTE_MARKDOWN_IMAGE_PATH } from "../lib/markdownImage";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
@@ -76,6 +79,10 @@ function installDom() {
   globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  Object.defineProperty(dom.window.HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ x: 0, y: 0, width: 640, height: 360, top: 0, right: 640, bottom: 360, left: 0, toJSON: () => ({}) }),
+  });
   Object.defineProperty(dom.window, "matchMedia", {
     configurable: true,
     value: (query: string) => ({
@@ -98,6 +105,27 @@ function installDom() {
   return dom;
 }
 
+{
+  const dom = installDom();
+  const container = document.createElement("div");
+  const throwing = {
+    destroy: () => {},
+    resize: () => { throw new DOMException("matrix is not invertible", "InvalidStateError"); },
+    fit: () => { throw new DOMException("matrix is not invertible", "InvalidStateError"); },
+    center: () => {},
+    zoomIn: () => { throw new DOMException("matrix is not invertible", "InvalidStateError"); },
+    zoomOut: () => {},
+    reset: () => {},
+  };
+  eq(safelySyncPanZoom(throwing, container), false, "matrix failures are contained during pan/zoom layout sync");
+  eq(safelyRunPanZoom(throwing, () => throwing.zoomIn()), false, "matrix failures are contained during toolbar actions");
+  Object.defineProperty(container, "getBoundingClientRect", {
+    value: () => ({ x: 0, y: 0, width: 0, height: 0, top: 0, right: 0, bottom: 0, left: 0, toJSON: () => ({}) }),
+  });
+  eq(safelySyncPanZoom(throwing, container), false, "zero-sized layouts are deferred before SVG matrix work");
+  dom.window.close();
+}
+
 function parseSvg(svg: string): Document {
   return new DOMParser().parseFromString(svg, "image/svg+xml");
 }
@@ -117,12 +145,15 @@ console.log("\nmermaid rendering");
 
 {
   const dom = installDom();
+  Object.defineProperty(dom.window, "runtime", { configurable: true, value: {} });
   const dirtySvg = `
     <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" onload="steal()">
       <script>alert(1)</script>
       <a id="safe" href="https://example.com/diagram"><text>safe</text></a>
       <a id="unsafe" href="javascript:alert(1)"><text>bad</text></a>
       <a id="unsafe-xlink" xlink:href="data:text/html,boom"><text>bad</text></a>
+      <image id="remote-image" href="https://images.example.com/diagram.png" />
+      <use id="external-use" href="https://images.example.com/icons.svg#node" />
       <g onclick="steal()"><text>node</text></g>
     </svg>`;
   const sanitized = sanitizeMermaidSvg(dirtySvg);
@@ -133,6 +164,11 @@ console.log("\nmermaid rendering");
   ok(doc.querySelector("#safe")?.getAttribute("href") === "https://example.com/diagram", "sanitizer keeps safe external links");
   ok(!doc.querySelector("#unsafe")?.hasAttribute("href"), "sanitizer removes javascript links");
   ok(!doc.querySelector("#unsafe-xlink")?.hasAttribute("xlink:href"), "sanitizer removes data xlink links");
+  ok(
+    doc.querySelector("#remote-image")?.getAttribute("href")?.startsWith(`${REMOTE_MARKDOWN_IMAGE_PATH}?url=`) === true,
+    "sanitizer routes Mermaid image resources through the backend proxy",
+  );
+  ok(!doc.querySelector("#external-use")?.hasAttribute("href"), "sanitizer removes external SVG use resources");
   ok(!doc.querySelector("g")?.hasAttribute("onclick"), "sanitizer strips event attributes from child nodes");
   ok(isSafeMermaidHref("https://example.com/a"), "https Mermaid links are safe");
   ok(isSafeMermaidHref("mailto:hello@example.com"), "mailto Mermaid links are safe");

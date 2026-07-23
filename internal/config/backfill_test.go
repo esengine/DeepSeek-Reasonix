@@ -1,8 +1,10 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/BurntSushi/toml"
@@ -189,6 +191,121 @@ func TestLoadForEditPersistsLegacyStepFunBaseURLMigration(t *testing.T) {
 	}
 	if got, _ := disk.Provider("stepfun-anthropic"); got == nil || got.BaseURL != officialStepFunAnthropicBaseURL {
 		t.Fatalf("persisted stepfun-anthropic = %+v, want official base URL", got)
+	}
+}
+
+func TestNormalizeLegacyLongCatContextWindowsMigratesOnlyUntouchedOfficialPresets(t *testing.T) {
+	c := &Config{Providers: []ProviderEntry{
+		{
+			Name:          "longcat-openai",
+			Kind:          "openai",
+			BaseURL:       longCatOpenAIBaseURL,
+			Models:        []string{"LongCat-2.0"},
+			Default:       "LongCat-2.0",
+			PresetID:      "longcat-openai",
+			ContextWindow: legacyLongCat20ContextWindow,
+		},
+		{
+			Name:          "longcat-anthropic",
+			Kind:          "anthropic",
+			BaseURL:       longCatAnthropicBaseURL + "/",
+			Models:        []string{"LongCat-2.0"},
+			Default:       "LongCat-2.0",
+			PresetID:      "longcat-anthropic",
+			ContextWindow: legacyLongCat20ContextWindow,
+		},
+		{
+			Name:          "custom-longcat",
+			Kind:          "openai",
+			BaseURL:       longCatOpenAIBaseURL,
+			Models:        []string{"LongCat-2.0"},
+			Default:       "LongCat-2.0",
+			ContextWindow: legacyLongCat20ContextWindow,
+		},
+		{
+			Name:          "longcat-custom-window",
+			Kind:          "openai",
+			BaseURL:       longCatOpenAIBaseURL,
+			Models:        []string{"LongCat-2.0"},
+			Default:       "LongCat-2.0",
+			PresetID:      "longcat-openai",
+			ContextWindow: 262_144,
+		},
+		{
+			Name:          "longcat-custom-models",
+			Kind:          "openai",
+			BaseURL:       longCatOpenAIBaseURL,
+			Models:        []string{"LongCat-2.0", "LongCat-Future"},
+			Default:       "LongCat-2.0",
+			PresetID:      "longcat-openai",
+			ContextWindow: legacyLongCat20ContextWindow,
+		},
+		{
+			Name:          "longcat-custom-endpoint",
+			Kind:          "openai",
+			BaseURL:       "https://api.longcat.chat/custom/v1",
+			Models:        []string{"LongCat-2.0"},
+			Default:       "LongCat-2.0",
+			PresetID:      "longcat-openai",
+			ContextWindow: legacyLongCat20ContextWindow,
+		},
+		{
+			Name:          "longcat-custom-default",
+			Kind:          "openai",
+			BaseURL:       longCatOpenAIBaseURL,
+			Models:        []string{"LongCat-2.0"},
+			PresetID:      "longcat-openai",
+			ContextWindow: legacyLongCat20ContextWindow,
+		},
+	}}
+
+	if !normalizeLegacyLongCatContextWindows(c) {
+		t.Fatal("legacy LongCat context-window migration did not report a change")
+	}
+	if got := c.Providers[0].ContextWindow; got != longCat20ContextWindow {
+		t.Fatalf("longcat-openai context_window = %d, want %d", got, longCat20ContextWindow)
+	}
+	if got := c.Providers[1].ContextWindow; got != longCat20ContextWindow {
+		t.Fatalf("longcat-anthropic context_window = %d, want %d", got, longCat20ContextWindow)
+	}
+	if got := c.Providers[2].ContextWindow; got != legacyLongCat20ContextWindow {
+		t.Fatalf("custom LongCat context_window = %d, want unchanged %d", got, legacyLongCat20ContextWindow)
+	}
+	if got := c.Providers[3].ContextWindow; got != 262_144 {
+		t.Fatalf("customized preset context_window = %d, want unchanged 262144", got)
+	}
+	if got := c.Providers[4].ContextWindow; got != legacyLongCat20ContextWindow {
+		t.Fatalf("customized model catalog context_window = %d, want unchanged %d", got, legacyLongCat20ContextWindow)
+	}
+	if got := c.Providers[5].ContextWindow; got != legacyLongCat20ContextWindow {
+		t.Fatalf("customized endpoint context_window = %d, want unchanged %d", got, legacyLongCat20ContextWindow)
+	}
+	if got := c.Providers[6].ContextWindow; got != legacyLongCat20ContextWindow {
+		t.Fatalf("customized default model context_window = %d, want unchanged %d", got, legacyLongCat20ContextWindow)
+	}
+}
+
+func TestLoadForEditAppliesLegacyLongCatContextWindowMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := Default()
+	for _, id := range []string{"longcat-openai", "longcat-anthropic"} {
+		preset, ok := CuratedProviderPreset(id)
+		if !ok || len(preset.Entries) != 1 {
+			t.Fatalf("missing %s preset", id)
+		}
+		entry := preset.Entries[0]
+		entry.ContextWindow = legacyLongCat20ContextWindow
+		cfg.Providers = append(cfg.Providers, entry)
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+
+	loaded := LoadForEdit(path)
+	for _, id := range []string{"longcat-openai", "longcat-anthropic"} {
+		if got, _ := loaded.Provider(id); got == nil || got.ContextWindow != longCat20ContextWindow {
+			t.Fatalf("loaded %s = %+v, want context_window %d", id, got, longCat20ContextWindow)
+		}
 	}
 }
 
@@ -595,7 +712,7 @@ func TestResetOfficialProviderPricingOnUpgradeRunsOnce(t *testing.T) {
 	}
 }
 
-func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsNoop(t *testing.T) {
+func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV5(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	setRuntimeGOOS(t, "darwin")
 
@@ -619,15 +736,15 @@ func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ApplyUserConfigUpgradesOnStartup: %v", err)
 	}
-	if changed {
-		t.Fatal("v3 non-Windows config should not be rewritten by the Windows bash sandbox migration")
+	if !changed {
+		t.Fatal("v3 config should advance through the retired Auto Plan migration")
 	}
 	var got Config
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("decode migrated config: %v", err)
 	}
-	if got.ConfigVersion != 3 {
-		t.Fatalf("config_version = %d, want 3", got.ConfigVersion)
+	if got.ConfigVersion != 5 {
+		t.Fatalf("config_version = %d, want 5", got.ConfigVersion)
 	}
 	deepseek, _ := got.Provider("deepseek")
 	if p := deepseek.Prices["deepseek-v4-flash"]; p == nil || p.Output != 4 || p.Currency != "$" {
@@ -705,6 +822,52 @@ func TestApplyUserConfigUpgradesOnStartupWindowsBashOffOnlyMarksVersion(t *testi
 	}
 	if got.Sandbox.Bash != "off" || got.BashMode() != "off" {
 		t.Fatalf("Windows bash mode after marker migration = raw %q effective %q, want off/off", got.Sandbox.Bash, got.BashMode())
+	}
+}
+
+func TestApplyUserConfigUpgradesOnStartupRetiresAutoPlan(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	setRuntimeGOOS(t, "darwin")
+	original := `config_version = 4
+default_model = "deepseek-flash"
+
+[agent]
+auto_plan = "on"
+auto_plan_classifier = "deepseek-flash"
+temperature = 0.4
+`
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := ApplyUserConfigUpgradesOnStartup(path)
+	if err != nil {
+		t.Fatalf("ApplyUserConfigUpgradesOnStartup: %v", err)
+	}
+	if !changed {
+		t.Fatal("v4 auto-plan config should migrate to the manual-only experience")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "auto_plan") {
+		t.Fatalf("retired auto-plan keys remain after migration:\n%s", raw)
+	}
+	got := LoadForEdit(path)
+	if got.ConfigVersion != Default().ConfigVersion || got.Agent.AutoPlan != "off" || got.Agent.AutoPlanClassifier != "" {
+		t.Fatalf("migrated config = version:%d auto:%q classifier:%q", got.ConfigVersion, got.Agent.AutoPlan, got.Agent.AutoPlanClassifier)
+	}
+	if got.Agent.Temperature != 0.4 {
+		t.Fatalf("unrelated agent temperature = %v, want 0.4", got.Agent.Temperature)
+	}
+
+	again, err := ApplyUserConfigUpgradesOnStartup(path)
+	if err != nil {
+		t.Fatalf("second ApplyUserConfigUpgradesOnStartup: %v", err)
+	}
+	if again {
+		t.Fatal("v5 config should not migrate again")
 	}
 }
 

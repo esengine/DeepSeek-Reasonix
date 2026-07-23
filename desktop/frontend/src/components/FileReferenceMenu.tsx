@@ -3,6 +3,7 @@ import { FileText, Folder } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { app } from "../lib/bridge";
+import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToken";
 import type { DirEntry } from "../lib/types";
 import { VirtualMenu } from "./VirtualMenu";
 
@@ -13,8 +14,11 @@ type FileRefSearchCacheEntry = {
   cachedAt: number;
 };
 
+// dirEntrySubmitPath returns the real filesystem path for a picked entry. The
+// typed atDir may carry backslash-escaped spaces (the @token grammar), so it
+// is unescaped before joining with the entry name.
 export function dirEntrySubmitPath(entry: DirEntry, atDir: string): string {
-  return entry.path || atDir + entry.name;
+  return entry.path || unescapeRefPath(atDir) + entry.name;
 }
 
 export function dirEntryMenuLabel(entry: DirEntry): string {
@@ -23,23 +27,26 @@ export function dirEntryMenuLabel(entry: DirEntry): string {
 
 export function activeFileReferenceToken(text: string): { raw: string; dir: string; frag: string } | null {
   const queryText = text.replace(/[\r\n]+$/u, "");
-  const match = /(?:^|\s)@([^\s]*)$/.exec(queryText);
+  const match = activeRefTokenRe.exec(queryText);
   if (!match) return null;
   const raw = match[1];
   const slash = raw.lastIndexOf("/");
   return {
     raw,
     dir: slash >= 0 ? raw.slice(0, slash + 1) : "",
-    frag: (slash >= 0 ? raw.slice(slash + 1) : raw).toLowerCase(),
+    frag: unescapeRefPath(slash >= 0 ? raw.slice(slash + 1) : raw).toLowerCase(),
   };
 }
 
+// pickInlineFileReference replaces the typed token with an inline @reference.
+// Whitespace in the path is escaped so the ref survives @-token parsing on
+// submit (the control layer unescapes it back to the real path).
 export function pickInlineFileReference(text: string, atRaw: string | null, atDir: string, entry: DirEntry): string {
   const queryText = text.replace(/[\r\n]+$/u, "");
   const atPos = queryText.length - (atRaw?.length ?? 0) - 1;
   const prefix = queryText.slice(0, Math.max(0, atPos));
   const refPath = dirEntrySubmitPath(entry, atDir);
-  return prefix + "@" + refPath + (entry.isDir ? "/" : " ");
+  return prefix + "@" + escapeRefPath(refPath) + (entry.isDir ? "/" : " ");
 }
 
 export function insertTextAtSelection(
@@ -98,7 +105,7 @@ export function useFileReferenceMenu(text: string, cwd?: string, tabId?: string,
     }
     let live = true;
     app
-      .ListDirForTab(fileRefTabId, atDir)
+      .ListDirForTab(fileRefTabId, unescapeRefPath(atDir))
       .then((next) => {
         const list = asArray(next);
         if (!live) return;

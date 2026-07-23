@@ -652,8 +652,8 @@ func TestTaskToolFailedForegroundContinuationPersistsAndRejectsReuse(t *testing.
 		t.Fatalf("LoadSession: %v", err)
 	}
 	msgs := loaded.Snapshot()
-	if len(msgs) != 4 || !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(msgs[3].Content, "second task") {
-		t.Fatalf("failed continuation transcript = %+v, want first task/answer plus second task", msgs)
+	if len(msgs) != 5 || !strings.HasSuffix(msgs[1].Content, "first task") || msgs[2].Content != "first answer" || !strings.HasSuffix(msgs[3].Content, "second task") || !msgs[4].LocalOnly {
+		t.Fatalf("failed continuation transcript = %+v, want tasks plus provider-excluded failure recovery", msgs)
 	}
 	if _, err := task.Execute(testTaskContext(), []byte(`{"prompt":"third task","continue_from":"`+ref+`"}`)); err == nil || !strings.Contains(err.Error(), "failed and cannot be continued") {
 		t.Fatalf("reuse error = %v, want failed ref rejection", err)

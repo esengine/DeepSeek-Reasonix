@@ -1,4 +1,4 @@
-import { useEffect, type DependencyList } from "react";
+import { useEffect, useState, type DependencyList } from "react";
 import type { DictKey } from "./i18n";
 
 export type ShortcutPlatform = "darwin" | "windows" | "linux";
@@ -6,6 +6,9 @@ export type ShortcutPlatform = "darwin" | "windows" | "linux";
 export type ShortcutAction =
   | "app.newSession"
   | "commandPalette.open"
+  | "composer.newline"
+  | "composer.send"
+  | "selection.addToChat"
   | "settings.open"
   | "tab.close"
   | "shell.toggle"
@@ -48,6 +51,7 @@ export type ShortcutDefinition = {
   preventDefault?: boolean;
   allowInEditable?: boolean;
   configurable?: boolean;
+  allowedKeys?: readonly string[];
 };
 
 const SHORTCUTS_STORAGE_KEY = "reasonix.customShortcuts";
@@ -86,6 +90,38 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     descriptionKey: "shortcuts.desc.closeTab",
     defaults: modCombo("w"),
     preventDefault: true,
+  },
+  // composer.send / composer.newline are handled inside the composer's own
+  // keydown path (see composerKeyboard.ts), not via useGlobalShortcut. That
+  // path also owns backward compatibility for the default send behavior.
+  {
+    action: "composer.send",
+    section: "session",
+    labelKey: "shortcuts.action.composerSend",
+    descriptionKey: "shortcuts.desc.composerSend",
+    defaults: allPlatforms({ key: "Enter" }),
+    allowInEditable: true,
+    allowedKeys: ["Enter"],
+  },
+  {
+    action: "composer.newline",
+    section: "session",
+    labelKey: "shortcuts.action.composerNewline",
+    descriptionKey: "shortcuts.desc.composerNewline",
+    defaults: allPlatforms({ key: "Enter", shift: true }),
+    allowInEditable: true,
+    allowedKeys: ["Enter"],
+  },
+  {
+    action: "selection.addToChat",
+    section: "session",
+    labelKey: "shortcuts.action.addSelectionToChat",
+    descriptionKey: "shortcuts.desc.addSelectionToChat",
+    defaults: modCombo("l"),
+    preventDefault: true,
+    // The handler only arms while the transcript selection action is visible,
+    // so firing from an editable target (composer focus) is safe and expected.
+    allowInEditable: true,
   },
   {
     action: "shell.toggle",
@@ -403,6 +439,13 @@ export function shortcutConflict(
   }) ?? null;
 }
 
+export function shortcutAcceptsCombo(action: ShortcutAction, combo: ShortcutCombo): boolean {
+  const allowedKeys = shortcutDefinition(action).allowedKeys;
+  if (!allowedKeys || allowedKeys.length === 0) return true;
+  const key = normalizeCombo(combo).key;
+  return allowedKeys.some((allowedKey) => normalizeKey(allowedKey) === key);
+}
+
 export function useGlobalShortcut(
   action: ShortcutAction,
   handler: (event: globalThis.KeyboardEvent) => void,
@@ -424,6 +467,16 @@ export function useGlobalShortcut(
     return () => document.removeEventListener("keydown", onKey, { capture: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [action, enabled, handler, ...deps]);
+}
+
+// useShortcutComboLabel resolves an action's current combo as display text
+// (e.g. "Enter", "⌃Enter") and re-renders when the user rebinds shortcuts, so
+// tooltips and hints never show a stale key.
+export function useShortcutComboLabel(action: ShortcutAction): string {
+  const [, setRevision] = useState(0);
+  useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+  const platform = detectShortcutPlatform();
+  return formatShortcutCombo(resolvedShortcutCombo(action, platform), platform);
 }
 
 export function isCloseTabShortcut(event: KeyboardShortcutEvent, platform: ShortcutPlatform): boolean {

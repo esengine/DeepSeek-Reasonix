@@ -24,4 +24,5 @@ type ReadinessAudit struct {
 	MissingSignoff            int
 	MissingActionEvidence     int
 	MissingMutation           int
+	MissingCapabilities       int
 }

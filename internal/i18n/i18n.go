@@ -48,11 +48,12 @@ type Messages struct {
 	HelpFooter     string // dim footer linking to reasonix help
 
 	// chat REPL
-	ChatTip           string // tip line under the chat banner
-	TurnCancelled     string // shown when Ctrl-C aborts the in-flight turn but the chat keeps running
-	NoSessionToResume string // shown when --continue / --resume finds nothing
-	ResumeRequiresTTY string // shown when --resume runs piped instead of on a terminal
-	PickSessionLabel  string // header on the --resume picker
+	ChatTip             string // tip line under the chat banner
+	TurnCancelled       string // shown when Ctrl-C aborts the in-flight turn but the chat keeps running
+	InterruptedRecovery string // replay notice for a durable interrupted turn
+	NoSessionToResume   string // shown when --continue / --resume finds nothing
+	ResumeRequiresTTY   string // shown when --resume runs piped instead of on a terminal
+	PickSessionLabel    string // header on the --resume picker
 
 	// in-chat /resume command
 	ResumeListHeader    string // header above the /resume session list
@@ -77,6 +78,16 @@ type Messages struct {
 	ChatStatusIdle                         string // shortcuts hint when idle
 	ChatStatusYoloIdle                     string // shortcuts hint when idle in YOLO/bypass mode
 	ChatStatusCycleHint                    string // plan-toggle shortcut hint shown when no modal prompt owns the status row
+	ChatStatusCycleHintCompact             string // readable shortcut hint used by the persistent footer
+	ChatTurnReceiptLabel                   string // compact per-turn usage receipt attached to the completed assistant response
+	ChatStatusModelLabel                   string
+	ChatStatusEffortLabel                  string
+	ChatStatusWorkLabel                    string
+	ChatStatusCacheLabel                   string
+	ChatStatusContextLabel                 string
+	ChatStatusCompactLabel                 string
+	ChatStatusJobsLabel                    string
+	ChatStatusBalanceLabel                 string
 	ChatStatusCacheNowFmt                  string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt                  string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval                 string // shortcuts hint while a plan is pending
@@ -87,7 +98,13 @@ type Messages struct {
 	BashPrefixChoices                      string // approval choice list when a bash prefix can be granted
 	PlanModeReadOnlyCommandChoices         string // approval choice list for plan-mode read-only command trust
 	FreshHumanApprovalChoices              string // approval choice list for prompts that cannot be remembered
-	SandboxEscapeApprovalChoices           string // approval choice list for Windows sandbox escape prompts
+	RecoveryApprovalChoices                string // one-shot Auto Guard decision list
+	RecoveryPlanChangeChoices              string // material Auto plan transition decision list
+	RecoveryPlanDecisionPrompt             string // neutral title for a material Auto plan transition
+	RecoveryPlanBeforeFmt                  string // compact previous-plan line, one %s
+	RecoveryPlanAfterFmt                   string // compact proposed-plan line, one %s
+	RecoveryTaskGrantChoices               string // Auto Guard list with a current-task semantic grant
+	SandboxEscapeApprovalChoices           string // approval choice list for OS sandbox escape prompts
 	ApprovalNeededFmt                      string // notification text for a pending approval, tool only
 	ApprovalNeededWithSubjectFmt           string // notification text for a pending approval with subject
 	ToolApprovalSourceFmt                  string // "Source: %s" / "来源: %s"
@@ -102,22 +119,18 @@ type Messages struct {
 	ApprovalToolLabelRunSkill              string // user-facing label for run_skill approvals
 	ApprovalToolLabelRemember              string // user-facing label for remember approvals
 	ApprovalToolLabelForget                string // user-facing label for forget approvals
-	ApprovalToolLabelSandboxEscape         string // user-facing label for Windows sandbox escape approvals
+	ApprovalToolLabelSandboxEscape         string // user-facing label for OS sandbox escape approvals
 	ApprovalToolLabelPlanModeReadOnly      string // user-facing label for plan-mode read-only command trust approvals
 	MemoryApprovalSaveUpdate               string // subject prefix for remember approval
 	MemoryApprovalBodyLabel                string // label before the body excerpt in remember approval
 	MemoryApprovalArchiveFmt               string // subject for forget approval, %q = memory name
-	PlanModeMCPTrustMetadataMissing        string // denial when MCP trust metadata is incomplete
-	PlanModeMCPTrustSubjectFmt             string // subject for MCP read-only trust approval, server/tool
-	PlanModeMCPTrustReason                 string // reason for MCP read-only trust approval
-	PlanModeMCPTrustDeclined               string // model-facing denial after MCP read-only trust rejection
 	PlanModeBashTrustSubjectFmt            string // subject for bash read-only prefix trust approval, prefix + command
 	PlanModeBashTrustReason                string // reason for bash read-only prefix trust approval
 	PlanModeBashTrustDeclined              string // model-facing denial after bash read-only prefix rejection
-	SandboxEscapeSubjectFallback           string // fallback subject for one-shot unconfined Windows sandbox escape approval
+	SandboxEscapeSubjectFallback           string // fallback subject for a one-shot unconfined sandbox escape approval
 	SandboxEscapeSubjectPrefix             string // subject prefix before the shell command for one-shot unconfined escape approval
-	SandboxEscapeWrapReason                string // reason when the Windows sandbox cannot wrap the command
-	SandboxEscapeRuntimeReason             string // reason when the Windows sandbox helper fails while starting the command
+	SandboxEscapeWrapReason                string // reason when no OS sandbox can wrap the command
+	SandboxEscapeRuntimeReason             string // fallback reason when an OS sandbox cannot start the command
 	SandboxEscapeDeclined                  string // model-facing denial when the user declines a one-shot unconfined retry
 	ApprovalToolLabelConfigWrite           string // user-facing label for Reasonix-managed config write approvals
 	ConfigWriteSubjectPrefix               string // subject prefix before the config file path for managed config write approval
@@ -127,9 +140,6 @@ type Messages struct {
 	PermissionSavedFmt                     string // permission rule saved notice: path, rule
 	PermissionAlreadyAllowedFmt            string // permission rule already covered notice: path, rule
 	PermissionSaveFailedFmt                string // permission rule save failure notice: rule, error
-	MCPReadOnlyTrustSavedFmt               string // MCP trusted read-only saved notice: path, server, tool
-	MCPReadOnlyTrustAlreadyFmt             string // MCP trusted read-only already covered notice: path, server, tool
-	MCPReadOnlyTrustFailedFmt              string // MCP trusted read-only save failure notice: server, tool, error
 	PlanModeReadOnlyCommandTrustSavedFmt   string // plan-mode bash read-only prefix saved notice: path, prefix
 	PlanModeReadOnlyCommandTrustAlreadyFmt string // plan-mode bash read-only prefix already covered notice: path, prefix
 	PlanModeReadOnlyCommandTrustFailedFmt  string // plan-mode bash read-only prefix save failure notice: prefix, error
@@ -167,27 +177,33 @@ type Messages struct {
 	CompactionManual  string // trigger label: user ran /compact
 
 	// chat TUI slash commands.
-	SlashCompactDone    string // "/compact" succeeded
-	SlashCompactFailed  string // "/compact" errored, prefixed before the underlying error
-	SlashNewDone        string // "/new" succeeded
-	SlashNewFailed      string // "/new" errored
-	SlashClearPrompt    string // "/clear" destructive confirmation prompt
-	SlashClearDone      string // "/clear" succeeded
-	SlashClearFailed    string // "/clear" errored
-	SlashClsDone        string // "/cls" succeeded
-	SlashTodoCleared    string // "/todo" dismissed the pinned task list
-	SlashUnavailable    string // the command is configured off (no callback wired)
-	SlashUnknown        string // shown when the user types an unrecognised "/cmd"
-	SlashHelp           string // listed commands
-	SlashPromptEmpty    string // an MCP prompt returned no text to send
-	SlashMCPNone        string // /mcp when no MCP servers are connected
-	CtrlCQuitHint       string // shown on first Ctrl+C while idle; second press exits
-	CompHintSlash       string // key hint footer under the slash-command menu
-	CompHintFile        string // key hint footer under the @ file/resource menu
-	MouseCopiedHint     string // transient status-line hint after a mouse/Ctrl+C selection copy
-	MouseCaptureOnHint  string // "/mouse" turned in-app mouse handling back on
-	MouseCaptureOffHint string // "/mouse" released mouse capture to the terminal
-	MouseCaptureTag     string // persistent status-line marker while mouse capture is off
+	SlashCompactDone             string // "/compact" succeeded
+	SlashCompactFailed           string // "/compact" errored, prefixed before the underlying error
+	SlashNewDone                 string // "/new" succeeded
+	SlashNewFailed               string // "/new" errored
+	SlashClearPrompt             string // "/clear" destructive confirmation prompt
+	SlashClearDone               string // "/clear" succeeded
+	SlashClearFailed             string // "/clear" errored
+	SlashClsDone                 string // "/cls" succeeded
+	SlashTodoCleared             string // "/todo" dismissed the pinned task list
+	SlashUnavailable             string // the command is configured off (no callback wired)
+	SlashUnknown                 string // shown when the user types an unrecognised "/cmd"
+	SlashHelp                    string // listed commands
+	SlashPromptEmpty             string // an MCP prompt returned no text to send
+	SlashMCPNone                 string // /mcp when no MCP servers are connected
+	CtrlCQuitHint                string // shown on first Ctrl+C while idle; second press exits
+	CompHintSlash                string // key hint footer under the slash-command menu
+	CompHintFile                 string // key hint footer under the @ file/resource menu
+	MouseCopiedHint              string // transient status-line hint after a mouse/Ctrl+C selection copy
+	ClipboardCopyOSC52Hint       string // copy was sent through OSC 52 because the session is remote
+	ClipboardCopyFallbackHint    string // native clipboard failed and copy fell back to OSC 52
+	ClipboardTextPasteRemoteHint string // mouse paste cannot read the user's local clipboard/PRIMARY selection over SSH
+	ClipboardTextPasteFailedFmt  string // text clipboard read failed, one %v
+	ClipboardImagePastingHint    string // shown while an image is being read from the system clipboard
+	ClipboardImagePasteFailedFmt string // image clipboard read failed, one %v
+	MouseCaptureOnHint           string // "/mouse" turned in-app mouse handling back on
+	MouseCaptureOffHint          string // "/mouse" released mouse capture to the terminal
+	MouseCaptureTag              string // persistent status-line marker while mouse capture is off
 
 	// shell execution (! prefix).
 	ShellExecEmpty      string // bare "!" with no command
@@ -216,6 +232,7 @@ type Messages struct {
 	CmdRemember         string // /remember
 	CmdForget           string // /forget
 	CmdMcp              string // /mcp
+	CmdRemote           string // /remote
 	CmdHooks            string // /hooks
 	CmdPlugins          string // /plugins
 	CmdPasteImage       string // /paste-image
@@ -229,9 +246,7 @@ type Messages struct {
 	CmdSandbox          string // /sandbox
 	CmdEffort           string // /effort
 	CmdMouse            string // /mouse
-	CmdAutoPlan         string // /auto-plan
 	CmdReasonLang       string // /reasoning-language
-	CmdMemoryV5         string // /memory-v5
 	CmdHelp             string // /help
 	CmdTodo             string // /todo
 	CmdQuit             string // /quit (also accepts /exit as hidden alias)
@@ -302,6 +317,9 @@ type Messages struct {
 	WorkModeStatusFmt         string
 	WorkModeListHeaderFmt     string
 	WorkModeListHint          string
+	WorkModeEconomyLabel      string
+	WorkModeBalancedLabel     string
+	WorkModeDeliveryLabel     string
 	WorkModeEconomyDesc       string
 	WorkModeBalancedDesc      string
 	WorkModeDeliveryDesc      string
@@ -460,6 +478,19 @@ type Messages struct {
 	AnthropicFetchModelsFailedFmt  string // "Failed to fetch models for %s: %v"
 	AnthropicSelectModelsLabel     string // "Select models to enable for %s"
 
+	// remote SSH module
+	RemoteConnectingFmt       string // "connecting to %s…"
+	RemoteConnectedFmt        string // "connected to %s"
+	RemoteReconnectingFmt     string // "reconnecting to %s (attempt %d)…"
+	RemoteDegradedFmt         string // "connected to %s but some forwards are down"
+	RemoteDisconnected        string // "disconnected"
+	RemoteServeReadyFmt       string // "remote serve ready: %s"
+	RemoteHostKeyPromptFmt    string // "host %s key (%s): %s"
+	RemotePassphrasePromptFmt string // "passphrase for %s:"
+	RemotePasswordPromptFmt   string // "password for %s:"
+	RemoteBootstrapStepFmt    string // "remote serve: %s %s"
+	RemoteNoHostsHint         string // "no remote hosts configured; add one with `reasonix remote add`"
+
 	// top-level / runAgent
 	UnknownCommandFmt         string // "unknown command %q"
 	UsageRunHint              string // "usage: reasonix run [--model NAME] <task>"
@@ -474,6 +505,8 @@ type Messages struct {
 	ProviderErrAuthRejected        string // 401 — a key was sent but the server rejected it
 	ProviderErrInsufficientBalance string // 402
 	ProviderErrUnprocessable       string // 422
+	ProviderErrInputSensitive      string // MiniMax 1026
+	ProviderErrOutputSensitive     string // MiniMax 1027
 	ProviderErrRateLimited         string // 429
 	ProviderErrServer              string // 500
 	ProviderErrServerBusy          string // 503

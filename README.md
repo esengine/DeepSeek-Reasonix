@@ -9,17 +9,14 @@
   &nbsp;·&nbsp;
   <a href="./docs/GUIDE.md">Guide</a>
   &nbsp;·&nbsp;
+  <a href="./docs/ACP.md">ACP</a>
+  &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
   &nbsp;·&nbsp;
   <strong><a href="https://discord.gg/XF78rEME2D">Discord</a></strong>
 </p>
-
-> [!IMPORTANT]
-> **Reasonix 1.0 is a ground-up rewrite in Go** — this branch (`main-v2`) is the new default and where development happens now.
-> The earlier `0.x` TypeScript releases are **legacy**, living on the [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) branch (maintenance only).
-> See the **[migration guide](./docs/MIGRATING.md)**. `npm i -g reasonix` stays the install command — `1.0.0`+ delivers the Go binary, `0.x` is the legacy TS build.
 
 <p align="center">
   <a href="https://www.npmjs.com/package/reasonix"><img src="https://img.shields.io/npm/v/reasonix.svg?style=flat-square&color=cb3837&labelColor=161b22&logo=npm&logoColor=white" alt="npm version"/></a>
@@ -62,6 +59,14 @@
 
 ## Install
 
+Choose the path that matches how you want to use Reasonix. The CLI/TUI,
+desktop app, and VS Code extension all use the same local Reasonix engine.
+
+### Path A: CLI / TUI
+
+Install the native binary through npm on any supported platform, or use
+Homebrew on macOS:
+
 ```sh
 npm i -g reasonix                  # any OS; pulls the prebuilt native binary
 brew install esengine/reasonix/reasonix   # macOS
@@ -70,108 +75,86 @@ brew install esengine/reasonix/reasonix   # macOS
 Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
 every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
-### Code signing
+### Path B: Desktop app
 
-Windows builds are code-signed with a free certificate provided by the
-[SignPath Foundation](https://signpath.org/), with signing through
-[SignPath.io](https://signpath.io/).
+Use the [official download page](https://reasonix.io/?download=desktop#start)
+for the latest desktop build.
 
-### Build from source
+| Platform | Package | Architecture |
+| --- | --- | --- |
+| macOS | Universal `.dmg` or `.zip` | Apple Silicon / Intel |
+| Windows | Installer `.exe` or portable `.zip` | x64 / ARM64 |
+| Linux | `.deb` or `.tar.gz` | x64 |
+
+Windows installers are code-signed through [SignPath.io](https://signpath.io/)
+with a free certificate provided by the [SignPath Foundation](https://signpath.org/).
+
+### Path C: VS Code extension
+
+Complete Path A first. The extension does not bundle the CLI; it starts your
+local `reasonix acp` backend and adds native chat, editor context, tool-call
+approvals, model selection, and workspace sessions.
+
+- **VS Code:** [install from Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent)
+- **VSCodium / Eclipse Theia:** [install from Open VSX Registry](https://open-vsx.org/extension/SivanLiu/reasonix-agent)
+- **Extension ID:** `SivanLiu.reasonix-agent` · [source and usage guide](https://github.com/SivanCola/reasonix-vscode)
+
+### Path D: Build from source
 
 ```sh
+git clone https://github.com/esengine/DeepSeek-Reasonix.git
+cd DeepSeek-Reasonix
 make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
 
 ## Quick start
 
+### CLI / TUI
+
+These commands are for the CLI/TUI installed through Path A:
+
 ```sh
-reasonix setup                      # manage providers in the user config
-reasonix setup --local              # optional: manage ./reasonix.toml
-export DEEPSEEK_API_KEY=sk-...      # or let setup save it to Reasonix home .env
-reasonix                            # then run /init to generate AGENTS.md (project memory)
+reasonix setup                      # configure a provider and model
+reasonix                            # start an interactive session
 reasonix run "implement the TODOs in main.go"
-reasonix run --model deepseek-pro "add unit tests for this function"
-echo "explain this code" | reasonix run
 ```
 
-## Configuration
+In an interactive session, run `/init` when you want Reasonix to create project
+instructions.
 
-A minimal `reasonix.toml` — one provider and a default model — is enough to start:
+### Desktop app
 
-```toml
-default_model = "deepseek-flash"
+Download the installer for your platform from the
+[official download page](https://reasonix.io/?download=desktop#start), install
+and launch Reasonix, then configure a provider and model in the app. The CLI
+commands above are not required for the desktop app.
 
-[[providers]]
-name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
-model       = "deepseek-v4-flash"
-api_key_env = "DEEPSEEK_API_KEY"
-```
-
-Resolution order is **flag > `./reasonix.toml` > the user config file >
-built-in defaults**; starting with **Reasonix v1.8.1**, the user file lives at
-`~/.reasonix/config.toml` on macOS/Linux and
-`%AppData%\reasonix\config.toml` on Windows. See
-**[Configuration paths](./docs/CONFIG_PATHS.md)** for migration details and the
-full `config.toml` / `.env` structure. Provider entries name secrets with
-`api_key_env`; the secret values themselves live in Reasonix's global
-`<Reasonix home>/.env`, shared by CLI and desktop. Project `.env` files are not
-provider-key runtime fallbacks, but still feed workspace-scoped, non-provider
-`${VAR}` expansion for MCP/plugin settings without importing Reasonix control
-variables. Permissions, the sandbox, plugins (MCP), slash
-commands, `@` references, and two-model setup are all in the
-**[Guide](./docs/GUIDE.md)**.
+For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.md)**,
+**[Guide](./docs/GUIDE.md)**, and
+**[configuration paths](./docs/CONFIG_PATHS.md)**.
 
 ## Documentation
 
-- **[CLI reference](./docs/CLI.md)** — interactive and one-shot commands,
-  structured output, resume, permission modes, and searchable pickers.
-- **[Guide](./docs/GUIDE.md)** — configuration, permissions & sandbox, plugins
-  (MCP), slash commands, `@` references, two-model collaboration.
-- **[Subagent profiles](./docs/SUBAGENT_PROFILES.md)** — create, share, preview,
-  run, edit, and safely delete isolated agent profiles from desktop or CLI.
-- **[Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md)** —
-  `reasonix doctor capabilities`, desktop Settings → Diagnostics, and the
-  `/reasonix-guide` skill for skills/hooks/MCP/plugin troubleshooting.
-- **[Bot guide](./docs/BOT_GUIDE.md)** — connect Feishu, Lark, and WeChat bots
-  from the desktop app, then use approvals, YOLO, and commands from IM.
-- **[Spec](./docs/SPEC.md)** — engineering contract: architecture, registries,
-  data types, and roadmap.
-- **[Task contracts & pause policy](./docs/TASK_CONTRACT.md)** — structure
-  complex requests with context, output boundaries, constraints, and when to ask.
-- **[Tool contract](./docs/TOOL_CONTRACT.md)** — provider-visible built-in tool
-  names, read-only flags, and schema snapshot guard.
-- **[Migrating from 0.x](./docs/MIGRATING.md)** — moving from the legacy
-  TypeScript releases to the 1.0 Go rewrite.
-- **[Checkpoints & rewind](./docs/CHECKPOINTS.md)** — the snapshot-based edit
-  safety net (Esc-Esc / `/rewind`).
-
-<br/>
+- **Getting started:** [Guide](./docs/GUIDE.md) · [CLI reference](./docs/CLI.md) ·
+  [Configuration paths](./docs/CONFIG_PATHS.md) · [ACP editor integration](./docs/ACP.md)
+- **Features & troubleshooting:** [Subagent profiles](./docs/SUBAGENT_PROFILES.md) ·
+  [Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md) ·
+  [Recovery and Safe Mode](./docs/RECOVERY.md) · [Bot guide](./docs/BOT_GUIDE.md) ·
+  [Checkpoints & rewind](./docs/CHECKPOINTS.md)
+- **Engineering & migration:** [Spec](./docs/SPEC.md) ·
+  [Task contracts & pause policy](./docs/TASK_CONTRACT.md) ·
+  [Tool contract](./docs/TOOL_CONTRACT.md) · [Migrating from 0.x](./docs/MIGRATING.md)
 
 ## Star History
 
 <a href="https://www.star-history.com/?repos=esengine%2FDeepSeek-Reasonix&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=esengine/DeepSeek-Reasonix&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/star-history/assets/star-history/star-history-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/star-history/assets/star-history/star-history-light.svg" />
+   <img alt="Star History Chart" src="https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/star-history/assets/star-history/star-history-light.svg" />
  </picture>
 </a>
-
-<br/>
-
-## Support
-
-If Reasonix has been useful and you'd like to say thanks, you can. It stays a coffee, not a contract — donations don't buy feature priority or change how issues get triaged.
-
-- **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
-- **国内** — 微信支付（扫码）
-
-<p align="center">
-  <img src=".github/sponsor/wechat-pay.jpg" alt="WeChat Pay QR code" width="240"/>
-</p>
 
 <br/>
 
@@ -209,4 +192,19 @@ for designing the project logo, and to
   <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
   <br/>
   <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
+</p>
+
+---
+
+<p align="center"><sub><strong>Support this project</strong></sub></p>
+
+If Reasonix has been useful and you'd like to say thanks, you can. It stays a
+coffee, not a contract — donations don't buy feature priority or change how
+issues get triaged.
+
+- **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
+- **国内** — 微信支付（扫码）
+
+<p align="center">
+  <img src=".github/sponsor/wechat-pay.jpg" alt="WeChat Pay QR code" width="180"/>
 </p>

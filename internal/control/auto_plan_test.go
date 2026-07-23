@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"errors"
 	"testing"
 )
 
@@ -81,89 +80,15 @@ func TestTaskWarrantsPlanner(t *testing.T) {
 	}
 }
 
-func TestAutoPlanScoreSkipsSyntheticMessages(t *testing.T) {
-	syntheticInputs := []string{
-		"Plan approved — plan mode is off",
-		"Host final-answer readiness check failed. Before giving a final answer, address the missing host-observable receipts: missing evidence.",
-		"You are already in the executor phase. The planner's read-only limitations do not apply to you.",
-		"The previous assistant response was interrupted while a tool call was streaming. Continue the same task now.",
-		"The previous assistant response was interrupted during streaming. Continue the same task from immediately after the partial assistant message above.",
-		"The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now.",
-		"The previous assistant response finished without any visible answer text. Continue the same task now and provide a concise visible answer.",
-		goalContinueTurn,
-		goalSelfCheckTurn,
-		"No tool calls in recent turns. Either make progress with tools or signal [goal:blocked:<reason>].",
-		"Goal signaled complete but issues remain:\n- the following tasks are still incomplete:\n  - Fix login (in_progress)\nFix or use todo_write/complete_step to mark done, then [goal:complete] again.",
-	}
-	for _, input := range syntheticInputs {
-		if got := autoPlanScore(input); got != 0 {
-			t.Errorf("autoPlanScore(%q) = %d, want 0", input, got)
-		}
-	}
-}
-
-type mockAutoPlanClassifier struct {
-	needsPlan bool
-	err       error
-}
-
-func (m *mockAutoPlanClassifier) NeedsPlan(context.Context, string, int) (bool, string, error) {
-	if m.err != nil {
-		return false, "", m.err
-	}
-	return m.needsPlan, "mock", nil
-}
-
-func TestNewPlannerGateNilClassifierFallback(t *testing.T) {
-	gate := NewPlannerGate(nil)
+func TestNewPlannerGateUsesDeterministicTaskPolicy(t *testing.T) {
+	gate := NewPlannerGate()
 	if gate == nil {
-		t.Fatal("NewPlannerGate(nil) returned nil")
+		t.Fatal("NewPlannerGate returned nil")
 	}
 	if got := gate(context.Background(), "what is this?"); got {
-		t.Error("nil classifier gate should skip low-risk questions")
+		t.Error("planner gate should skip low-risk questions")
 	}
 	if got := gate(context.Background(), "fix the bug"); !got {
-		t.Error("nil classifier gate should plan work requests")
-	}
-}
-
-func TestNewPlannerGateWithClassifier(t *testing.T) {
-	gate := NewPlannerGate(&mockAutoPlanClassifier{needsPlan: false})
-	if got := gate(context.Background(), "fix the bug"); got {
-		t.Error("classifier said no plan, gate should return false")
-	}
-
-	gate = NewPlannerGate(&mockAutoPlanClassifier{needsPlan: true})
-	if got := gate(context.Background(), "fix the bug"); !got {
-		t.Error("classifier said plan, gate should return true")
-	}
-}
-
-func TestNewPlannerGateClassifierFailureFallsBackToPlanning(t *testing.T) {
-	gate := NewPlannerGate(&mockAutoPlanClassifier{err: errors.New("bad json")})
-	if got := gate(context.Background(), "fix the bug"); !got {
-		t.Error("classifier failure should fall back to planning for work requests")
-	}
-}
-
-type ctxCapturingClassifier struct{ sawTurnValue bool }
-
-func (c *ctxCapturingClassifier) NeedsPlan(ctx context.Context, _ string, _ int) (bool, string, error) {
-	c.sawTurnValue = ctx.Value(plannerGateTestCtxKey{}) != nil
-	return false, "", nil
-}
-
-type plannerGateTestCtxKey struct{}
-
-// TestNewPlannerGateThreadsTurnContextIntoClassifier pins that the borderline
-// classifier call derives from the turn context (so user cancellation stops it)
-// rather than from context.Background().
-func TestNewPlannerGateThreadsTurnContextIntoClassifier(t *testing.T) {
-	cls := &ctxCapturingClassifier{}
-	gate := NewPlannerGate(cls)
-	ctx := context.WithValue(context.Background(), plannerGateTestCtxKey{}, "turn")
-	gate(ctx, "fix the bug")
-	if !cls.sawTurnValue {
-		t.Fatal("classifier context does not derive from the turn context")
+		t.Error("planner gate should plan work requests")
 	}
 }

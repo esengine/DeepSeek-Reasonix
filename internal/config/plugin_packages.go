@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -32,32 +33,33 @@ func mergeInstalledPluginPackages(cfg *Config, root string) []string {
 			warnings = append(warnings, fmt.Sprintf("%s: %s", item.Installed.Name, warning))
 		}
 		for _, skillRoot := range pkg.SkillRoots() {
-			if !stringSliceContainsPath(cfg.Skills.Paths, skillRoot) {
-				cfg.Skills.Paths = append(cfg.Skills.Paths, skillRoot)
-			}
-			if cfg.pluginPackageSkillOwners == nil {
-				cfg.pluginPackageSkillOwners = map[string][]string{}
-			}
-			key := CanonicalSkillPath(skillRoot)
-			if !containsString(cfg.pluginPackageSkillOwners[key], item.Installed.Name) {
-				cfg.pluginPackageSkillOwners[key] = append(cfg.pluginPackageSkillOwners[key], item.Installed.Name)
-			}
+			cfg.addPluginSkillRoot(skillRoot, item.Installed.Name, false)
+		}
+		for _, agentRoot := range pkg.AgentRoots() {
+			cfg.addPluginSkillRoot(agentRoot, item.Installed.Name, true)
 		}
 		for name, srv := range pkg.Manifest.MCPServers {
-			if pluginNameExists(cfg.Plugins, name) {
-				warnings = append(warnings, fmt.Sprintf("%s: plugin MCP server %q skipped because config already defines that name", item.Installed.Name, name))
-				continue
-			}
 			entry := PluginEntry{
 				Name:      name,
 				Type:      srv.Type,
-				Command:   pluginPackageCommand(pkg.Root, srv.Command),
-				Args:      append([]string(nil), srv.Args...),
-				Env:       pluginPackageEnv(item.Installed, pkg.Root, srv.Env),
-				URL:       strings.TrimSpace(srv.URL),
-				Headers:   cloneStringMap(srv.Headers),
+				Command:   pluginPackageCommand(pkg.Root, pluginPackageWorkspaceValue(pkg.Root, root, srv.Command)),
+				Args:      pluginPackageWorkspaceValues(pkg.Root, root, srv.Args),
+				Env:       pluginPackageEnv(item.Installed, pkg.Root, root, srv.Env),
+				URL:       pluginPackageWorkspaceValue(pkg.Root, root, strings.TrimSpace(srv.URL)),
+				Headers:   pluginPackageWorkspaceMap(pkg.Root, root, srv.Headers),
 				AutoStart: srv.AutoStart,
 				Tier:      srv.Tier,
+				Source:    MCPSourcePluginPackage,
+			}
+			if existing, ok := pluginEntryByName(cfg.Plugins, name); ok {
+				if owner, packageOwned := cfg.pluginPackageOwners[name]; packageOwned && pluginPackageEntriesEqual(existing, entry) {
+					continue
+				} else if packageOwned {
+					warnings = append(warnings, fmt.Sprintf("%s: plugin MCP server %q conflicts with package %s and was skipped", item.Installed.Name, name, owner))
+				} else {
+					warnings = append(warnings, fmt.Sprintf("%s: plugin MCP server %q skipped because config already defines that name", item.Installed.Name, name))
+				}
+				continue
 			}
 			cfg.Plugins = append(cfg.Plugins, entry)
 			if cfg.pluginPackageOwners == nil {
@@ -69,6 +71,28 @@ func mergeInstalledPluginPackages(cfg *Config, root string) []string {
 	return warnings
 }
 
+func (c *Config) addPluginSkillRoot(root, plugin string, agent bool) {
+	if !stringSliceContainsPath(c.Skills.Paths, root) {
+		c.Skills.Paths = append(c.Skills.Paths, root)
+	}
+	if c.pluginPackageSkillOwners == nil {
+		c.pluginPackageSkillOwners = map[string][]string{}
+	}
+	key := CanonicalSkillPath(root)
+	if !containsString(c.pluginPackageSkillOwners[key], plugin) {
+		c.pluginPackageSkillOwners[key] = append(c.pluginPackageSkillOwners[key], plugin)
+	}
+	if !agent {
+		return
+	}
+	if c.pluginPackageAgentOwners == nil {
+		c.pluginPackageAgentOwners = map[string][]string{}
+	}
+	if !containsString(c.pluginPackageAgentOwners[key], plugin) {
+		c.pluginPackageAgentOwners[key] = append(c.pluginPackageAgentOwners[key], plugin)
+	}
+}
+
 // PluginPackageSkillOwners returns installed plugin package names keyed by
 // canonical skill-root path. Multiple linked installs may intentionally point
 // at the same root under different package names.
@@ -78,6 +102,19 @@ func (c *Config) PluginPackageSkillOwners() map[string][]string {
 	}
 	out := make(map[string][]string, len(c.pluginPackageSkillOwners))
 	for path, owners := range c.pluginPackageSkillOwners {
+		out[path] = append([]string(nil), owners...)
+	}
+	return out
+}
+
+// PluginPackageAgentOwners identifies Claude agents/ roots that must be loaded
+// as manually invoked subagent profiles rather than ordinary inline skills.
+func (c *Config) PluginPackageAgentOwners() map[string][]string {
+	if c == nil || len(c.pluginPackageAgentOwners) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(c.pluginPackageAgentOwners))
+	for path, owners := range c.pluginPackageAgentOwners {
 		out[path] = append([]string(nil), owners...)
 	}
 	return out
@@ -115,33 +152,113 @@ func (c *Config) PluginPackageOwner(name string) (string, bool) {
 }
 
 func pluginPackageCommand(root, command string) string {
-	command = strings.TrimSpace(command)
+	command = pluginPackageValue(root, strings.TrimSpace(command))
 	if command == "" || filepath.IsAbs(command) {
 		return command
 	}
 	return filepath.Join(root, filepath.FromSlash(command))
 }
 
-func pluginPackageEnv(installed pluginpkg.InstalledPlugin, root string, env map[string]string) map[string]string {
-	out := cloneStringMap(env)
+func pluginPackageEnv(installed pluginpkg.InstalledPlugin, root, workspaceRoot string, env map[string]string) map[string]string {
+	out := pluginPackageWorkspaceMap(root, workspaceRoot, env)
 	if out == nil {
 		out = map[string]string{}
 	}
 	out["REASONIX_PLUGIN_ROOT"] = root
 	out["REASONIX_PLUGIN_NAME"] = installed.Name
+	out["CLAUDE_PLUGIN_ROOT"] = root
+	out["CLAUDE_PROJECT_DIR"] = workspaceRoot
+	out["REASONIX_WORKSPACE_ROOT"] = workspaceRoot
 	if installed.Version != "" {
 		out["REASONIX_PLUGIN_VERSION"] = installed.Version
 	}
 	return out
 }
 
-func pluginNameExists(entries []PluginEntry, name string) bool {
-	for _, p := range entries {
-		if p.Name == name {
-			return true
+func pluginPackageWorkspaceValue(root, workspaceRoot, value string) string {
+	value = pluginPackageValue(root, value)
+	value = expandPluginPathVar(value, "${CLAUDE_PROJECT_DIR}", workspaceRoot)
+	return expandPluginPathVar(value, "$CLAUDE_PROJECT_DIR", workspaceRoot)
+}
+
+func pluginPackageWorkspaceValues(root, workspaceRoot string, values []string) []string {
+	if values == nil {
+		return nil
+	}
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = pluginPackageWorkspaceValue(root, workspaceRoot, value)
+	}
+	return out
+}
+
+func pluginPackageWorkspaceMap(root, workspaceRoot string, values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = pluginPackageWorkspaceValue(root, workspaceRoot, value)
+	}
+	return out
+}
+
+func pluginPackageValue(root, value string) string {
+	value = expandPluginPathVar(value, "${CLAUDE_PLUGIN_ROOT}", root)
+	return expandPluginPathVar(value, "$CLAUDE_PLUGIN_ROOT", root)
+}
+
+// expandPluginPathVar replaces every occurrence of placeholder with root and
+// normalizes the path suffix that follows each occurrence (up to the next
+// "$" or the end of the string) to the host separator. Claude manifests
+// always author that suffix with "/" regardless of host OS (e.g.
+// "${CLAUDE_PLUGIN_ROOT}/bin/server"); root is already OS-native, so a plain
+// string replace leaves a mixed "C:\...\pkg/bin/server" value on Windows that
+// no longer round-trips through filepath.Join comparisons.
+func expandPluginPathVar(value, placeholder, root string) string {
+	var b strings.Builder
+	rest := value
+	for {
+		idx := strings.Index(rest, placeholder)
+		if idx < 0 {
+			b.WriteString(rest)
+			return b.String()
+		}
+		b.WriteString(rest[:idx])
+		b.WriteString(root)
+		rest = rest[idx+len(placeholder):]
+		end := strings.IndexByte(rest, '$')
+		suffix := rest
+		if end >= 0 {
+			suffix = rest[:end]
+		}
+		b.WriteString(filepath.FromSlash(suffix))
+		if end < 0 {
+			return b.String()
+		}
+		rest = rest[end:]
+	}
+}
+
+func pluginEntryByName(entries []PluginEntry, name string) (PluginEntry, bool) {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry, true
 		}
 	}
-	return false
+	return PluginEntry{}, false
+}
+
+func pluginPackageEntriesEqual(a, b PluginEntry) bool {
+	a.Env = cloneStringMap(a.Env)
+	b.Env = cloneStringMap(b.Env)
+	for _, env := range []map[string]string{a.Env, b.Env} {
+		delete(env, "REASONIX_PLUGIN_ROOT")
+		delete(env, "REASONIX_PLUGIN_NAME")
+		delete(env, "REASONIX_PLUGIN_VERSION")
+		delete(env, "CLAUDE_PLUGIN_ROOT")
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func stringSliceContainsPath(paths []string, path string) bool {

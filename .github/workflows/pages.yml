@@ -3,7 +3,7 @@ name: Deploy site
 on:
   push:
     branches: [main-v2]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'release-notes/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:

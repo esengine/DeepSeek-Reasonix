@@ -1,6 +1,18 @@
 package config
 
-import "sync"
+import (
+	"context"
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"reasonix/internal/filelock"
+)
 
 // userEditMu serializes in-process read-modify-write cycles on the user config
 // file. LoadForEdit+SaveTo is not atomic: two concurrent editors each load,
@@ -24,4 +36,49 @@ var userEditMu sync.Mutex
 func LockUserConfigEdits() func() {
 	userEditMu.Lock()
 	return userEditMu.Unlock
+}
+
+// LockConfigFileEdits serializes a configuration read-modify-write transaction
+// with both other goroutines and other Reasonix processes. The cross-process
+// lock lives in the cache rather than beside path, so project repositories do
+// not accumulate lock files.
+func LockConfigFileEdits(path string) (func(), error) {
+	path = filepath.Clean(path)
+	if path == "." || path == "" {
+		return nil, fmt.Errorf("lock config edits: empty config path")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("lock config edits: resolve path: %w", err)
+	}
+	cacheDir := CacheDir()
+	if cacheDir == "" {
+		return nil, fmt.Errorf("lock config edits: cache directory unavailable")
+	}
+	lockDir := filepath.Join(cacheDir, "config-locks")
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
+		return nil, fmt.Errorf("lock config edits: create lock directory: %w", err)
+	}
+	lockKey := filepath.Clean(abs)
+	if runtime.GOOS == "windows" {
+		lockKey = strings.ToLower(filepath.ToSlash(lockKey))
+	}
+	digest := sha256.Sum256([]byte(lockKey))
+	lockPath := filepath.Join(lockDir, fmt.Sprintf("%x.lock", digest))
+
+	unlockLocal := LockUserConfigEdits()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	unlockFile, err := filelock.Acquire(ctx, lockPath)
+	if err != nil {
+		unlockLocal()
+		return nil, fmt.Errorf("lock config edits: %w", err)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			unlockFile()
+			unlockLocal()
+		})
+	}, nil
 }

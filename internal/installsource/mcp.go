@@ -16,6 +16,15 @@ import (
 // SaveTo + connectMCP.
 func (t *installSourceTool) mcpEntryAction(req request, e config.PluginEntry, source string) action {
 	scope := t.installScope(req, "mcp", source)
+	// install_source is an explicit user action. Preserve that provenance for
+	// the live connector so a newly installed server is usable immediately,
+	// while still identifying project-scoped persistence accurately enough for
+	// the host to record the exact durable launch grant used on the next boot.
+	if scope == "project" {
+		e.Source = config.MCPSourceProjectConfig
+	} else {
+		e.Source = config.MCPSourceUserConfig
+	}
 	var normalizedCommand bool
 	e, normalizedCommand = config.NormalizePluginCommandLine(e)
 	// Tier comes from the call (req.Tier) or the entry; either way we
@@ -165,14 +174,16 @@ func readMCPJSON(path string) ([]config.PluginEntry, []string, error) {
 func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 	var raw struct {
 		MCPServers map[string]struct {
-			Type      string            `json:"type"`
-			Command   string            `json:"command"`
-			Args      []string          `json:"args"`
-			Env       map[string]string `json:"env"`
-			URL       string            `json:"url"`
-			Headers   map[string]string `json:"headers"`
-			AutoStart *bool             `json:"auto_start"`
-			Tier      string            `json:"tier"`
+			Type               string            `json:"type"`
+			Command            string            `json:"command"`
+			Args               []string          `json:"args"`
+			Env                map[string]string `json:"env"`
+			URL                string            `json:"url"`
+			Headers            map[string]string `json:"headers"`
+			AutoStart          *bool             `json:"auto_start"`
+			CallTimeoutSeconds int               `json:"call_timeout_seconds"`
+			ToolTimeoutSeconds map[string]int    `json:"tool_timeout_seconds"`
+			Tier               string            `json:"tier"`
 		} `json:"mcpServers"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
@@ -209,15 +220,17 @@ func parseMCPJSON(b []byte) ([]config.PluginEntry, []string, error) {
 			warnings = append(warnings, fmt.Sprintf("%s: tier %q is unknown; treating as background", name, s.Tier))
 		}
 		e := config.PluginEntry{
-			Name:      name,
-			Type:      typ,
-			Command:   strings.TrimSpace(s.Command),
-			Args:      append([]string(nil), s.Args...),
-			Env:       cleanMap(s.Env),
-			URL:       strings.TrimSpace(s.URL),
-			Headers:   cleanMap(s.Headers),
-			AutoStart: s.AutoStart,
-			Tier:      tier,
+			Name:               name,
+			Type:               typ,
+			Command:            strings.TrimSpace(s.Command),
+			Args:               append([]string(nil), s.Args...),
+			Env:                cleanMap(s.Env),
+			URL:                strings.TrimSpace(s.URL),
+			Headers:            cleanMap(s.Headers),
+			AutoStart:          s.AutoStart,
+			CallTimeoutSeconds: s.CallTimeoutSeconds,
+			ToolTimeoutSeconds: s.ToolTimeoutSeconds,
+			Tier:               tier,
 		}
 		// An empty Type is the canonical "stdio" form; keep it that way so
 		// the rest of the config layer (UpsertPlugin / ShouldAutoStart)

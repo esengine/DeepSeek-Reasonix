@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-fortune-forge",
+  "name": "Fortune Forge",
+  "author": "Reasonix Contributors",
+  "description": "Warm ivory workshop with vermilion, gold and jade around an original lucky programmer.",
+  "license": "MIT",
+  "baseStyle": "amber",
+  "tokens": {
+    "light": {
+      "bg": "#FFF8E8",
+      "bgSoft": "#F9EFD5",
+      "bgElev": "#FFFDF6",
+      "panel": "#FFFDF6",
+      "sidebar": "#F8EDD3",
+      "chat": "#FFFBF1",
+      "workspace": "#FFFDF6",
+      "workspaceFiles": "#FAF1DC",
+      "border": "#D6B87E",
+      "borderSoft": "#F2E7CD",
+      "fg": "#382116",
+      "fgDim": "#6E4E35",
+      "fgFaint": "#A98A68",
+      "accent": "#A92D22",
+      "accentFg": "#FFF8E8"
+    },
+    "dark": {
+      "bg": "#1D140D",
+      "bgSoft": "#271C12",
+      "bgElev": "#302417",
+      "panel": "#291E13",
+      "sidebar": "#251B11",
+      "chat": "#231A11",
+      "workspace": "#302417",
+      "workspaceFiles": "#271D13",
+      "border": "#4D3A22",
+      "borderSoft": "#3B2C1A",
+      "fg": "#FFF2D1",
+      "fgDim": "#DDC49C",
+      "fgFaint": "#A9926B",
+      "accent": "#E8AD38",
+      "accentFg": "#241606"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.74,
+    "focusY": 0.44,
+    "safeArea": "left",
+    "homeOpacity": 1.0,
+    "taskOpacity": 0.2,
+    "overlayStrength": 0.7,
+    "paneOpacity": 0.5
+  }
+}

@@ -13,15 +13,24 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func lockSessionFile(path string) (func(), error) {
+// tryLockSessionFile attempts the compatibility save lock once without
+// blocking. The shared wrapper in save.go supplies the bounded retry window.
+func tryLockSessionFile(path string) (func(), error) {
 	f, err := os.OpenFile(store.SessionLockFile(path), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
+		if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			return nil, ErrSessionFileLockHeld
+		}
 		return nil, err
 	}
 	handle := windows.Handle(f.Fd())
 	var overlapped windows.Overlapped
-	if err := windows.LockFileEx(handle, windows.LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &overlapped); err != nil {
+	flags := uint32(windows.LOCKFILE_EXCLUSIVE_LOCK | windows.LOCKFILE_FAIL_IMMEDIATELY)
+	if err := windows.LockFileEx(handle, flags, 0, 1, 0, &overlapped); err != nil {
 		_ = f.Close()
+		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) || errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
+			return nil, ErrSessionFileLockHeld
+		}
 		return nil, err
 	}
 	return func() {
@@ -44,7 +53,7 @@ type sessionLockFile struct {
 var sessionLockDispositionFallbacks atomic.Int64
 
 // tryTakeSessionLockFile opens lockPath and takes its exclusive LockFileEx
-// region without blocking. A live holder surfaces as errSessionFileLockHeld.
+// region without blocking. A live holder surfaces as ErrSessionFileLockHeld.
 //
 // The handle asks for DELETE access up front: FileDispositionInfo requires it,
 // and requesting it at open time keeps RemoveAndUnlock's deletion on the very
@@ -62,7 +71,7 @@ func tryTakeSessionLockFile(lockPath string) (*sessionLockFile, error) {
 		nil, windows.OPEN_ALWAYS, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
 		if errors.Is(err, windows.ERROR_SHARING_VIOLATION) {
-			return nil, errSessionFileLockHeld
+			return nil, ErrSessionFileLockHeld
 		}
 		return nil, err
 	}
@@ -71,7 +80,7 @@ func tryTakeSessionLockFile(lockPath string) (*sessionLockFile, error) {
 	if err := windows.LockFileEx(handle, flags, 0, 1, 0, &l.overlapped); err != nil {
 		_ = windows.CloseHandle(handle)
 		if errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
-			return nil, errSessionFileLockHeld
+			return nil, ErrSessionFileLockHeld
 		}
 		return nil, err
 	}

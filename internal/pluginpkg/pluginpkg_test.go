@@ -316,30 +316,288 @@ func TestParseClaudePluginIgnoresEmptyConventionDirAndExplicitSkillsWin(t *testi
 	}
 }
 
-func TestParseClaudePluginWarnsOnUnmappedCapabilities(t *testing.T) {
+func TestParseClaudeHooksKeepsDistinctEnvTimeoutAsyncCwd(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "hook-pack"}`)
+	// Same event/matcher/command/args, but each block differs in exactly one
+	// of env, timeout, async, cwd — none should be dropped as a duplicate of
+	// another.
+	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {"PreToolUse": [
+    {"matcher": "bash", "hooks": [{"type":"command","command":"bin/guard","env":{"MODE":"a"}}]},
+    {"matcher": "bash", "hooks": [{"type":"command","command":"bin/guard","env":{"MODE":"b"}}]},
+    {"matcher": "bash", "hooks": [{"type":"command","command":"bin/guard","env":{"MODE":"b"},"timeout":5}]},
+    {"matcher": "bash", "hooks": [{"type":"command","command":"bin/guard","env":{"MODE":"b"},"timeout":5,"async":true}]},
+    {"matcher": "bash", "hooks": [{"type":"command","command":"bin/guard","env":{"MODE":"b"},"timeout":5,"async":true}]}
+  ]}
+}`)
+
+	pkg, _, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	hooks := pkg.Manifest.Hooks["PreToolUse"]
+	// Four distinct configurations; the fifth block is an exact duplicate of
+	// the fourth (same env, timeout, and async) and must still be dropped.
+	if len(hooks) != 4 {
+		t.Fatalf("hooks = %#v, want 4 distinct configurations (dedup must not collapse different env/timeout/async)", hooks)
+	}
+}
+
+func TestParseClaudeHooksWarnOnUnsupportedSemantics(t *testing.T) {
+	cases := []struct {
+		name      string
+		hooksJSON string
+		wantSub   string
+	}{
+		{
+			name:      "conditional-if-runs-unconditionally",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"bin/guard","if":"Bash(git *)"}]}]}}`,
+			wantSub:   `does not evaluate`,
+		},
+		{
+			name:      "asyncRewake-not-supported",
+			hooksJSON: `{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"bin/watch","asyncRewake":true}]}]}}`,
+			wantSub:   `asyncRewake`,
+		},
+		{
+			name:      "stop-cannot-block",
+			hooksJSON: `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"bin/gate"}]}]}}`,
+			wantSub:   `cannot block the turn`,
+		},
+		{
+			name:      "subagentstop-cannot-block",
+			hooksJSON: `{"hooks":{"SubagentStop":[{"hooks":[{"type":"command","command":"bin/gate"}]}]}}`,
+			wantSub:   `cannot block the turn`,
+		},
+		{
+			name:      "matcher-names-unsupported-tool",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"WebSearch","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `will never fire`,
+		},
+		{
+			name:      "matcher-alternation-all-unsupported",
+			hooksJSON: `{"hooks":{"PermissionRequest":[{"matcher":"ExitPlanMode|EnterPlanMode","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `will never fire`,
+		},
+		{
+			name:      "webfetch-required-prompt-is-unavailable",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"WebFetch","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `required "prompt"`,
+		},
+		{
+			name:      "mixed-matcher-includes-webfetch",
+			hooksJSON: `{"hooks":{"PostToolUse":[{"matcher":"Bash|WebFetch","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `required "prompt"`,
+		},
+		{
+			name:      "wildcard-matcher-includes-webfetch",
+			hooksJSON: `{"hooks":{"PermissionRequest":[{"matcher":"*","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `required "prompt"`,
+		},
+		{
+			name:      "empty-matcher-includes-webfetch",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `required "prompt"`,
+		},
+		{
+			name:      "regex-matcher-includes-webfetch",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"Web(Fetch|Search)","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `required "prompt"`,
+		},
+		{
+			name:      "notebook-cell-number-has-no-claude-equivalent",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"NotebookEdit","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+			wantSub:   `cell_number`,
+		},
+		{
+			name:      "task-output-may-cover-multiple-jobs",
+			hooksJSON: `{"hooks":{"PostToolUse":[{"matcher":"TaskOutput","hooks":[{"type":"command","command":"bin/watch"}]}]}}`,
+			wantSub:   `multiple or all background jobs`,
+		},
+		{
+			name:      "legacy-bash-output-may-cover-multiple-jobs",
+			hooksJSON: `{"hooks":{"PostToolUse":[{"matcher":"BashOutput","hooks":[{"type":"command","command":"bin/watch"}]}]}}`,
+			wantSub:   `multiple or all background jobs`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "hook-pack"}`)
+			writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), c.hooksJSON)
+
+			pkg, warnings, err := ParseDir(root)
+			if err != nil {
+				t.Fatalf("ParseDir: %v", err)
+			}
+			if pkg.Compatibility.Status != "partial" {
+				t.Fatalf("compatibility status = %q, want partial (unsupported semantics must not claim full compatibility)", pkg.Compatibility.Status)
+			}
+			found := false
+			for _, w := range warnings {
+				if strings.Contains(w, c.wantSub) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("warnings = %v, want one containing %q", warnings, c.wantSub)
+			}
+			// The hook is still imported best-effort — dropping it entirely
+			// could remove a plugin's only safety hook.
+			if pkg.Manifest.Hooks == nil {
+				t.Fatal("hook should still be imported despite the unsupported semantics")
+			}
+		})
+	}
+}
+
+// TestParseClaudeHooksReportsStructuralGapsOncePerFile pins the noise bound:
+// a plugin with several wildcard hooks reports each structural input gap
+// (WebFetch prompt, NotebookEdit cell_number, TaskOutput multi-job) once per
+// hooks file, not once per hook item.
+func TestParseClaudeHooksReportsStructuralGapsOncePerFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "hook-pack"}`)
+	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{"hooks":{
+  "PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"bin/a"},{"type":"command","command":"bin/b"}]}],
+  "PostToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"bin/c"}]}]
+}}`)
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if pkg.Compatibility.Status != "partial" {
+		t.Fatalf("compatibility status = %q, want partial", pkg.Compatibility.Status)
+	}
+	gapSubs := []string{`required "prompt"`, "cell_number", "multiple or all background jobs"}
+	for _, sub := range gapSubs {
+		warned := 0
+		for _, w := range warnings {
+			if strings.Contains(w, sub) {
+				warned++
+			}
+		}
+		if warned != 1 {
+			t.Errorf("warnings mentioning %q = %d, want exactly 1 per hooks file (got %v)", sub, warned, warnings)
+		}
+		skipped := 0
+		for _, issue := range pkg.Compatibility.Skipped {
+			if strings.Contains(issue.Reason, sub) {
+				skipped++
+			}
+		}
+		if skipped != 1 {
+			t.Errorf("compatibility issues mentioning %q = %d, want exactly 1 per hooks file", sub, skipped)
+		}
+	}
+}
+
+func TestParseClaudeHooksDoesNotWarnOnMatchersThatCanFire(t *testing.T) {
+	cases := []struct {
+		name      string
+		hooksJSON string
+	}{
+		{
+			name:      "supported-tool-name",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+		},
+		{
+			// A partly-unsupported alternation can still fire for Bash calls,
+			// so it must not be flagged as dead.
+			name:      "mixed-alternation-still-fires",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"Bash|WebSearch","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+		},
+		{
+			// A regex beyond a plain "|" alternation isn't evaluated, to
+			// avoid guessing wrong and producing a false positive.
+			name:      "complex-regex-not-evaluated",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"WebSearch.*","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+		},
+		{
+			// A previously-unmapped Reasonix tool the fix now supports.
+			name:      "run-skill-now-mapped",
+			hooksJSON: `{"hooks":{"PreToolUse":[{"matcher":"Skill","hooks":[{"type":"command","command":"bin/guard"}]}]}}`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "hook-pack"}`)
+			writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), c.hooksJSON)
+
+			pkg, warnings, err := ParseDir(root)
+			if err != nil {
+				t.Fatalf("ParseDir: %v", err)
+			}
+			for _, w := range warnings {
+				if strings.Contains(w, "will never fire") {
+					t.Fatalf("warnings = %v, want no dead-matcher warning", warnings)
+				}
+			}
+			if pkg.Compatibility.Status != "full" {
+				t.Fatalf("compatibility status = %q, want full", pkg.Compatibility.Status)
+			}
+		})
+	}
+}
+
+func TestParseClaudePluginMapsConventionCapabilities(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "big-pack"}`)
 	writeTestFile(t, filepath.Join(root, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nbody")
 	writeTestFile(t, filepath.Join(root, "commands", "deploy.md"), "run deploy")
-	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{}`)
-	writeTestFile(t, filepath.Join(root, ".mcp.json"), `{}`)
+	writeTestFile(t, filepath.Join(root, "agents", "reviewer.md"), "---\nname: reviewer\ndescription: review changes\nmodel: sonnet\ntools: [Read, Grep]\n---\nReview carefully.")
+	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {"SessionStart": [{"hooks": [{"type":"command","command":"bin/start","args":["--hook"],"async":true}]}]}
+}`)
+	writeTestFile(t, filepath.Join(root, ".mcp.json"), `{
+  "mcpServers": {"Google Drive": {"type":"local","command":"uvx","args":["drive-mcp"],"title":"Drive"}}
+}`)
 
-	_, warnings, err := ParseDir(root)
+	pkg, warnings, err := ParseDir(root)
 	if err != nil {
 		t.Fatalf("ParseDir: %v", err)
 	}
-	joined := strings.Join(warnings, "\n")
-	for _, want := range []string{"hooks/hooks.json", ".mcp.json"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("warnings = %v, want mention of %s", warnings, want)
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want fully mapped package", warnings)
+	}
+	if pkg.Compatibility.Status != "full" || pkg.AgentCount() != 1 {
+		t.Fatalf("compatibility = %+v agents=%d", pkg.Compatibility, pkg.AgentCount())
+	}
+	agent := pkg.Inventory().Agents[0]
+	if agent.Name != "reviewer" || agent.Model != "sonnet" || strings.Join(agent.AllowedTools, ",") != "Read,Grep" {
+		t.Fatalf("agent = %+v", agent)
+	}
+	hook := pkg.Manifest.Hooks["SessionStart"][0]
+	if !hook.Async || hook.PayloadFormat != "claude" || strings.Join(hook.Args, ",") != "--hook" {
+		t.Fatalf("hook = %+v", hook)
+	}
+	if len(pkg.Manifest.MCPServers) != 1 {
+		t.Fatalf("MCP servers = %+v", pkg.Manifest.MCPServers)
+	}
+	for name, server := range pkg.Manifest.MCPServers {
+		if !IsValidName(name) || server.Type != "stdio" || server.DisplayName != "Drive" || server.AutoStart == nil || *server.AutoStart {
+			t.Fatalf("MCP %q = %+v", name, server)
 		}
 	}
-	// commands map to custom slash commands now — they must not warn.
-	if strings.Contains(joined, "commands") {
-		t.Fatalf("warnings = %v, must not warn about the mapped commands dir", warnings)
+}
+
+func TestClaudeMCPServerIDUsesConnectionIdentityAndPreservesValidNames(t *testing.T) {
+	identity := claudeMCPIdentity{Type: "http", URL: "https://open.feishu.cn/mcp"}
+	if got := claudeMCPServerID("yuandian", identity); got != "yuandian" {
+		t.Fatalf("valid MCP ID changed to %q", got)
 	}
-	if strings.Contains(joined, "agents") {
-		t.Fatalf("warnings = %v, must not mention absent agents dir", warnings)
+	first := claudeMCPServerID("飞书", identity)
+	second := claudeMCPServerID("飞书", identity)
+	if first != second || !IsValidName(first) {
+		t.Fatalf("stable MCP IDs = %q / %q", first, second)
+	}
+	different := claudeMCPServerID("飞书", claudeMCPIdentity{Type: "http", URL: "https://example.com/other"})
+	if different == first {
+		t.Fatalf("different endpoints shared MCP ID %q", first)
 	}
 }
 

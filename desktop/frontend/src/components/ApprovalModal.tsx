@@ -74,7 +74,6 @@ export function approvalToolLabel(tool: string, t: Translator): string {
 const sandboxEscapeEnglishSubjectFallback = "run shell command unconfined once";
 const sandboxEscapeEnglishSubjectPrefix = "run unconfined once: ";
 const configWriteEnglishSubjectPrefix = "write Reasonix config: ";
-const planModeMcpEnglishSubject = /^MCP (.+) as read-only for planning and research$/;
 const planModeBashEnglishSubject = /^Trust (.+) as a read-only command prefix while planning\r?\nCommand: ([\s\S]+)$/;
 
 function localizeApprovalSubject(tool: string, subject: string, t: Translator): string {
@@ -100,10 +99,6 @@ function localizeApprovalSubject(tool: string, subject: string, t: Translator): 
   if (tool === "forget" && trimmed.startsWith("Archive memory ")) {
     return `${t("approval.memoryArchivePrefix")}${trimmed.slice("Archive memory ".length)}`;
   }
-  const mcpTrust = trimmed.match(planModeMcpEnglishSubject);
-  if (mcpTrust) {
-    return t("approval.planModeMcpTrustSubject", { target: mcpTrust[1] ?? "" });
-  }
   const bashTrust = trimmed.match(planModeBashEnglishSubject);
   if (bashTrust) {
     return t("approval.planModeBashTrustSubject", { prefix: bashTrust[1] ?? "", command: bashTrust[2] ?? "" });
@@ -118,8 +113,14 @@ function localizeApprovalReason(tool: string, reason: string | undefined, t: Tra
     return trimmed;
   }
   if (tool !== "sandbox_escape") return trimmed;
-  if (trimmed.includes("could not wrap this command")) return t("approval.sandboxEscapeWrapReason");
-  if (trimmed.includes("failed while starting this command") || trimmed.includes("Run this command unconfined once?")) {
+  if (trimmed.includes("could not wrap this command") || trimmed.includes("does not provide an OS-level Bash sandbox")) {
+    return t("approval.sandboxEscapeWrapReason");
+  }
+  if (
+    trimmed.includes("failed while starting this command") ||
+    trimmed.includes("could not start this command") ||
+    trimmed.includes("Run this command unconfined once?")
+  ) {
     return t("approval.sandboxEscapeRuntimeReason");
   }
   return trimmed || t("approval.sandboxEscapeRuntimeReason");
@@ -129,9 +130,6 @@ function localizePlanModeApprovalReason(tool: string, reason: string, t: Transla
   if (tool === "plan_mode_read_only_command" && reason.includes("built-in read-only set")) {
     return t("approval.planModeBashTrustReason");
   }
-  if (reason.includes("external read-only hints need your confirmation")) {
-    return t("approval.planModeMcpTrustReason");
-  }
   return reason;
 }
 
@@ -140,16 +138,91 @@ type DecisionAction = {
   label: string;
   desc: string;
   tone?: "default" | "danger";
-  // Plan revision toggles the inline editor instead of submitting.
-  kind: "submit" | "toggle-revision";
+  primary?: boolean;
+  // Plan revision and plan guidance open inline editors instead of submitting.
+  // Other recovery actions use direct-click submit (no select-then-confirm).
+  kind: "submit" | "toggle-revision" | "toggle-guidance" | "direct";
   run?: () => void;
 };
+
+const RECOVERY_FEEDBACK_MAX = 1000;
+
+function recoveryReasonText(
+  changeKind: string | undefined,
+  fallback: string | undefined,
+  t: Translator,
+): string {
+  switch ((changeKind ?? "").toLowerCase()) {
+    case "risk":
+      return t("approval.recoveryReasonRisk");
+    case "scope":
+      return t("approval.recoveryReasonScope");
+    case "strategy":
+      return t("approval.recoveryReasonStrategy");
+    case "uncertain":
+    case "same_strategy":
+      return t("approval.recoveryReasonUncertain");
+    default:
+      return fallback?.trim() || t("approval.recoveryReasonUncertain");
+  }
+}
+
+type PlanLine = { key: string; text: string };
+type PlanDelta = { removed: string[]; added: string[] };
+
+function planLines(raw: string | undefined): PlanLine[] {
+  return (raw ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.replace(/\s+\[[^\]\r\n]+\]\s*$/, "").trimEnd())
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const match = line.match(/^(\s*)(?:\d+\.\s*)?(.*)$/);
+      const nested = (match?.[1].length ?? 0) > 0;
+      const body = (match?.[2] ?? line).replace(/\s+/g, " ").trim();
+      return { key: `${nested ? 1 : 0}:${body}`, text: `${nested ? "  " : ""}${body}` };
+    });
+}
+
+// LCS keeps unchanged steps out of the card and turns additions, removals, and
+// reordering into a compact plan-level delta. Status suffixes are ignored.
+function planDelta(beforeRaw: string | undefined, afterRaw: string | undefined): PlanDelta | null {
+  const before = planLines(beforeRaw);
+  const after = planLines(afterRaw);
+  if (before.length === 0 || after.length === 0) return null;
+  const dp = Array.from({ length: before.length + 1 }, () => Array<number>(after.length + 1).fill(0));
+  for (let i = before.length - 1; i >= 0; i -= 1) {
+    for (let j = after.length - 1; j >= 0; j -= 1) {
+      dp[i][j] = before[i].key === after[j].key
+        ? dp[i + 1][j + 1] + 1
+        : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const removed: string[] = [];
+  const added: string[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < before.length && j < after.length) {
+    if (before[i].key === after[j].key) {
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      removed.push(before[i].text);
+      i += 1;
+    } else {
+      added.push(after[j].text);
+      j += 1;
+    }
+  }
+  while (i < before.length) removed.push(before[i++].text);
+  while (j < after.length) added.push(after[j++].text);
+  return removed.length > 0 || added.length > 0 ? { removed, added } : null;
+}
 
 export function ApprovalModal({
   approval,
   onAnswer,
+  onResolveRecovery,
   onRevisePlan,
-  onExitPlan,
   onStop,
   cwd,
   tabId,
@@ -160,6 +233,7 @@ export function ApprovalModal({
 }: {
   approval: WireApproval;
   onAnswer: (allow: boolean, session: boolean, persist: boolean) => void;
+  onResolveRecovery?: (action: "continue" | "continue_task" | "revise", feedback?: string) => void;
   onRevisePlan?: (text: string) => void;
   onExitPlan?: () => void;
   onStop: () => void;
@@ -172,8 +246,14 @@ export function ApprovalModal({
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
+  const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
+  const recovery = approval.recovery;
+  const recoveryChangeKind = (recovery?.change_kind ?? "").toLowerCase();
+  const isRecoveryPlanChange =
+    isRecoveryApproval && (recoveryChangeKind === "strategy" || recoveryChangeKind === "scope");
+  const taskGrantScope = recovery?.task_grant_scope?.trim() ?? "";
   const toolLabel = approvalToolLabel(approval.tool, t);
-  const isFreshHumanApproval = requiresFreshHumanApproval(approval.tool);
+  const isFreshHumanApproval = approval.fresh === true || requiresFreshHumanApproval(approval.tool) || isRecoveryApproval;
   const hasFreshSessionGrant = approval.tool === "sandbox_escape" || approval.tool === "config_write";
   // Switching the approval segmented control to a more permissive mode does not
   // resolve an already-pending request; say so on the card instead of leaving
@@ -192,15 +272,24 @@ export function ApprovalModal({
   const toolMeta = isPlanApproval ? t("approval.planReadyHint") : (subjectSummary || reason || approval.tool);
   const hasToolDetails = Boolean(reason || subject);
   // Subject (command) is visible by default; long reason can collapse.
-  const [reasonOpen, setReasonOpen] = useState(() => Boolean(reason) && reason.length <= 160);
-  // Default: allow once (tool) or start execution (plan index 1).
-  const [selectedIndex, setSelectedIndex] = useState(() => (isPlanApproval ? 1 : 0));
+  const [reasonOpen, setReasonOpen] = useState(() => {
+    if (isRecoveryApproval) return false; // recovery details stay collapsed
+    return Boolean(reason) && reason.length <= 160;
+  });
+  // Immediate Plan/Auto decisions have no hidden selection. Ordinary tool
+  // approvals retain select-then-confirm and default to Allow once.
+  const [selectedIndex, setSelectedIndex] = useState(() => (isPlanApproval || isRecoveryApproval ? -1 : 0));
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionText, setRevisionText] = useState("");
+  const [recoveryGuidanceOpen, setRecoveryGuidanceOpen] = useState(false);
+  const [recoveryGuidanceText, setRecoveryGuidanceText] = useState("");
+  const [grantSimilarForTask, setGrantSimilarForTask] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const recoveryGuidanceRef = useRef<HTMLTextAreaElement | null>(null);
+  const recoveryGuidanceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const consumedInsertIdRef = useRef(0);
   // When consecutive approvals arrive, animate the old card out before
   // the new one slides in.  GSAP fromTo on the shelf wrapper avoids the
@@ -226,28 +315,72 @@ export function ApprovalModal({
     }
   };
 
-  const toolActions: DecisionAction[] = isPlanApproval
+  const resolveRecovery = useCallback(
+    (action: "continue" | "continue_task" | "revise", feedback?: string) => {
+      const resolve = onResolveRecovery ?? ((a: "continue" | "continue_task" | "revise") => onAnswer(a !== "revise", false, false));
+      if (action === "revise") {
+        const text = feedback?.trim().slice(0, RECOVERY_FEEDBACK_MAX) ?? "";
+        resolve("revise", text || undefined);
+        return;
+      }
+      resolve(action);
+    },
+    [onResolveRecovery, onAnswer],
+  );
+
+  const toolActions: DecisionAction[] = isRecoveryPlanChange
     ? [
         {
           key: "1",
-          label: t("approval.revisePlan"),
-          desc: t("approval.revisePlanDesc"),
-          kind: "toggle-revision",
+          label: t("approval.recoveryAdoptPlan"),
+          desc: t("approval.recoveryAdoptPlanDesc"),
+          kind: "direct",
+          run: () => resolveRecovery("continue"),
         },
         {
           key: "2",
+          label: t("approval.recoveryAdjustPlan"),
+          desc: t("approval.recoveryAdjustPlanDesc"),
+          kind: "toggle-guidance",
+        },
+      ]
+    : isRecoveryApproval
+    ? [
+        {
+          key: "1",
+          label: t("approval.recoveryRevise"),
+          desc: t("approval.recoveryReviseDesc"),
+          primary: true,
+          kind: "direct",
+          run: () => resolveRecovery("revise"),
+        },
+        {
+          key: "2",
+          label: grantSimilarForTask
+            ? t("approval.recoveryContinueTask")
+            : t("approval.recoveryContinue"),
+          desc: grantSimilarForTask
+            ? t("approval.recoveryContinueTaskDesc")
+            : t("approval.recoveryContinueDesc"),
+          kind: "direct",
+          run: () => resolveRecovery(grantSimilarForTask && recovery?.can_grant_task ? "continue_task" : "continue"),
+        },
+      ]
+    : isPlanApproval
+    ? [
+        {
+          key: "1",
           label: t("approval.startExecution"),
           desc: t("approval.startExecutionDesc"),
-          kind: "submit",
+          primary: true,
+          kind: "direct",
           run: () => onAnswer(true, false, false),
         },
         {
-          key: "3",
-          label: t("approval.exitPlan"),
-          desc: t("approval.exitPlanDesc"),
-          tone: "danger",
-          kind: "submit",
-          run: () => (onExitPlan ?? (() => onAnswer(false, false, false)))(),
+          key: "2",
+          label: t("approval.revisePlan"),
+          desc: t("approval.revisePlanDesc"),
+          kind: "toggle-revision",
         },
       ]
     : [
@@ -322,43 +455,107 @@ export function ApprovalModal({
     cardRef.current?.focus();
     setRevisionOpen(false);
     setRevisionText("");
-    setReasonOpen(Boolean(reason) && reason.length <= 160);
-    setSelectedIndex(isPlanApproval ? 1 : 0);
+    setRecoveryGuidanceOpen(false);
+    setRecoveryGuidanceText("");
+    setGrantSimilarForTask(false);
+    setReasonOpen(isRecoveryApproval ? false : Boolean(reason) && reason.length <= 160);
+    setSelectedIndex(isPlanApproval || isRecoveryApproval ? -1 : 0);
     setSubmitting(false);
     closingRef.current = false;
-  }, [approval.id, isPlanApproval, reason]);
+  }, [approval.id, isPlanApproval, isRecoveryApproval, reason]);
 
   const confirmSelected = useCallback(() => {
     if (submitting || closingRef.current) return;
+    if (isPlanApproval || isRecoveryApproval) return;
     const action = toolActions[selectedIndexRef.current];
     if (!action) return;
     if (action.kind === "toggle-revision") {
       setRevisionOpen((open) => !open);
       return;
     }
+    if (action.kind === "toggle-guidance") {
+      setGrantSimilarForTask(false);
+      setRecoveryGuidanceOpen(true);
+      return;
+    }
     if (action.run) answerWithExit(action.run);
-  }, [submitting, toolActions]);
+  }, [submitting, toolActions, isPlanApproval, isRecoveryApproval]);
+
+  const activateAction = useCallback((action: DecisionAction, index: number) => {
+    if (submitting) return;
+    if (action.kind === "direct" && action.run) {
+      answerWithExit(action.run);
+      return;
+    }
+    if (action.kind === "toggle-revision") {
+      setRevisionOpen((open) => !open);
+      return;
+    }
+    if (action.kind === "toggle-guidance") {
+      setGrantSimilarForTask(false);
+      setRecoveryGuidanceOpen(true);
+      return;
+    }
+    setSelectedIndex(index);
+  }, [submitting]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (submitting) return;
+      if (isRecoveryApproval && recoveryGuidanceOpen && event.key === "Escape") {
+        event.preventDefault();
+        setRecoveryGuidanceOpen(false);
+        setRecoveryGuidanceText("");
+        requestAnimationFrame(() => {
+          if (isRecoveryPlanChange) cardRef.current?.focus();
+          else recoveryGuidanceTriggerRef.current?.focus();
+        });
+        return;
+      }
       const target = event.target instanceof Element ? event.target : null;
       const tag = target?.tagName.toLowerCase();
       // Editing revision / file menu owns arrows and digits while focused.
+      // Custom recovery guidance owns all decision shortcuts while expanded.
+      const editing =
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        (target instanceof HTMLElement && target.isContentEditable) ||
+        (isRecoveryApproval && recoveryGuidanceOpen);
+      if (editing && (event.key === "1" || event.key === "2" || event.key === "3" || event.key === "4")) {
+        return;
+      }
       if (tag === "input" || tag === "textarea" || tag === "select" || (target instanceof HTMLElement && target.isContentEditable)) return;
+      const immediateDecision = isPlanApproval || isRecoveryApproval;
+      if (immediateDecision && (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key === "Enter")) {
+        return;
+      }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setSelectedIndex((i) => (i - 1 + actionCount) % actionCount);
+        setSelectedIndex((i) => {
+          const base = i < 0 ? 0 : i;
+          return (base - 1 + actionCount) % actionCount;
+        });
       } else if (event.key === "ArrowDown") {
         event.preventDefault();
-        setSelectedIndex((i) => (i + 1) % actionCount);
+        setSelectedIndex((i) => {
+          const base = i < 0 ? -1 : i;
+          return (base + 1) % actionCount;
+        });
       } else if (event.key === "Enter") {
+        if (isRecoveryApproval && selectedIndexRef.current < 0) return;
         event.preventDefault();
         confirmSelected();
       } else if (event.key === "1" || event.key === "2" || event.key === "3" || event.key === "4") {
+        if (isRecoveryApproval && recoveryGuidanceOpen) return;
         const index = Number(event.key) - 1;
         if (index < 0 || index >= actionCount) return;
         event.preventDefault();
+        if (immediateDecision) {
+          const action = toolActions[index];
+          if (action) activateAction(action, index);
+          return;
+        }
         setSelectedIndex(index);
       } else if (event.key === "Escape") {
         event.preventDefault();
@@ -367,7 +564,7 @@ export function ApprovalModal({
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [actionCount, confirmSelected, onStop, submitting]);
+  }, [actionCount, activateAction, confirmSelected, onStop, submitting, isPlanApproval, isRecoveryApproval, isRecoveryPlanChange, recoveryGuidanceOpen, toolActions]);
 
   useEffect(() => {
     if (revisionOpen) {
@@ -449,6 +646,63 @@ export function ApprovalModal({
     answerWithExit(() => onRevisePlan?.(text));
   };
 
+  const closeRecoveryGuidance = () => {
+    setRecoveryGuidanceOpen(false);
+    setRecoveryGuidanceText("");
+    requestAnimationFrame(() => {
+      if (isRecoveryPlanChange) cardRef.current?.focus();
+      else recoveryGuidanceTriggerRef.current?.focus();
+    });
+  };
+
+  const submitRecoveryGuidance = () => {
+    const text = recoveryGuidanceText.trim();
+    if (!text) {
+      recoveryGuidanceRef.current?.focus();
+      return;
+    }
+    answerWithExit(() => resolveRecovery("revise", text));
+  };
+
+  const onRecoveryGuidanceKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      submitRecoveryGuidance();
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeRecoveryGuidance();
+      return;
+    }
+    event.stopPropagation();
+  };
+
+  const recoveryReason = isRecoveryApproval
+    ? recoveryReasonText(
+        recovery?.change_kind,
+        recovery?.change_rationale || recovery?.review_rationale || reason,
+        t,
+      )
+    : "";
+  const recoveryActionSummary =
+    recovery?.next_action ||
+    recovery?.next_tool ||
+    subjectSummary ||
+    approval.tool;
+  const recoveryPlanDelta = isRecoveryPlanChange
+    ? planDelta(recovery?.plan_before, recovery?.plan_after)
+    : null;
+  const hasRecoveryDetails = Boolean(
+    recovery?.failed_summary ||
+    recovery?.diagnosis ||
+    recovery?.change_rationale ||
+    recovery?.review_rationale ||
+    recovery?.source_agent,
+  );
+
   const confirmIsDanger = selectedAction?.tone === "danger";
   const confirmLabel =
     selectedAction?.kind === "toggle-revision"
@@ -461,75 +715,246 @@ export function ApprovalModal({
     <div ref={shelfRef}>
       <PromptShelf
         decision
-        className={isPlanApproval ? "prompt-shelf--plan-approval" : "prompt-shelf--tool-approval"}
+        actionsRole={isPlanApproval || isRecoveryApproval ? "group" : "listbox"}
+        className={isPlanApproval ? "prompt-shelf--plan-approval" : isRecoveryApproval ? "prompt-shelf--recovery-approval" : "prompt-shelf--tool-approval"}
         barRef={cardRef}
-        titleId={isPlanApproval ? "plan-approval-title" : "tool-approval-title"}
-        title={isPlanApproval ? t("approval.planReady") : t("approval.toolPending")}
+        titleId={isPlanApproval ? "plan-approval-title" : isRecoveryApproval ? "recovery-approval-title" : "tool-approval-title"}
+        title={
+          isPlanApproval
+            ? t("approval.planReady")
+            : isRecoveryPlanChange
+              ? t("approval.recoveryPlanChangePending")
+              : isRecoveryApproval
+                ? t("approval.recoveryPending")
+                : t("approval.toolPending")
+        }
         badges={
           <>
-            {!isPlanApproval && <PromptBadge tone="amber">{toolLabel}</PromptBadge>}
+            {!isPlanApproval && !isRecoveryApproval && <PromptBadge tone="amber">{toolLabel}</PromptBadge>}
             {isPlanApproval && revisionOpen && <PromptBadge>{t("approval.revisePlan")}</PromptBadge>}
+            {isRecoveryPlanChange && (
+              <PromptBadge>
+                {t(recoveryChangeKind === "strategy" ? "approval.recoveryDecisionStrategy" : "approval.recoveryDecisionScope")}
+              </PromptBadge>
+            )}
           </>
         }
-        meta={toolMeta}
+        meta={isRecoveryApproval ? undefined : toolMeta}
         headerActions={
           <>
-            {!isPlanApproval && hasToolDetails && reason && (
+            {isRecoveryApproval && hasRecoveryDetails && (
+              <PromptHeaderAction onClick={() => setReasonOpen((open) => !open)} disabled={submitting}>
+                {t(reasonOpen ? "approval.recoveryHideTechnicalDetails" : "approval.recoveryTechnicalDetails")}
+              </PromptHeaderAction>
+            )}
+            {!isPlanApproval && !isRecoveryApproval && hasToolDetails && reason && (
               <PromptHeaderAction onClick={() => setReasonOpen((open) => !open)} disabled={submitting}>
                 {t(reasonOpen ? "approval.hideDetails" : "approval.details")}
               </PromptHeaderAction>
             )}
-            <PromptHeaderAction
-              onClick={() => answerWithExit(onStop)}
-              ariaLabel={t("decision.stopTask")}
-              disabled={submitting}
-            >
-              {t("decision.stopTask")}
-            </PromptHeaderAction>
+            {!isPlanApproval && !isRecoveryApproval && (
+              <PromptHeaderAction
+                onClick={() => answerWithExit(onStop)}
+                ariaLabel={t("decision.stopTask")}
+                disabled={submitting}
+              >
+                {t("decision.stopTask")}
+              </PromptHeaderAction>
+            )}
           </>
         }
         actions={
           <>
-            {toolActions.map((action, index) => (
-              <PromptAction
-                key={action.key}
-                keyLabel={action.key}
-                label={action.label}
-                description={action.desc}
-                onClick={() => {
-                  if (submitting) return;
-                  setSelectedIndex(index);
-                  if (action.kind === "toggle-revision") {
-                    // Selecting revise opens the editor but still needs confirm
-                    // only when the user hits Enter / Confirm (toggle on confirm).
-                    // Click selects; confirm toggles. Also open on first select
-                    // for discoverability when confirming revise.
-                  }
-                }}
-                selected={selectedIndex === index}
-                tone={action.tone}
-                disabled={submitting}
-                title={action.desc}
-              />
-            ))}
+            {toolActions.map((action, index) => {
+              const actionNode = (
+                <PromptAction
+                  key={action.key}
+                  keyLabel={action.key}
+                  label={action.label}
+                  description={action.desc}
+                  onClick={() => {
+                    activateAction(action, index);
+                  }}
+                  primary={action.primary}
+                  selected={selectedIndex === index}
+                  tone={action.tone}
+                  role={isPlanApproval || isRecoveryApproval ? "button" : "option"}
+                  disabled={submitting}
+                  title={action.desc}
+                />
+              );
+              if (isRecoveryApproval && !isRecoveryPlanChange && index === 1 && recovery?.can_grant_task) {
+                return (
+                  <div
+                    key={action.key}
+                    className={[
+                      "recovery-continue-option",
+                      grantSimilarForTask ? "recovery-continue-option--granted" : "",
+                    ].filter(Boolean).join(" ")}
+                  >
+                    {actionNode}
+                    {!recoveryGuidanceOpen && (
+                      <label className="recovery-task-grant">
+                        <input
+                          type="checkbox"
+                          checked={grantSimilarForTask}
+                          onChange={(event) => setGrantSimilarForTask(event.target.checked)}
+                          disabled={submitting}
+                        />
+                        <span>
+                          <strong>{t("approval.recoveryTaskGrant")}</strong>
+                          <small>
+                            {taskGrantScope ? (
+                              <>
+                                {t("approval.recoveryTaskGrantScope")} <code>{taskGrantScope}</code>
+                              </>
+                            ) : t("approval.recoveryTaskGrantDesc")}
+                          </small>
+                        </span>
+                      </label>
+                    )}
+                  </div>
+                );
+              }
+              return actionNode;
+            })}
           </>
         }
+        note={
+          isRecoveryApproval ? (
+            recoveryGuidanceOpen ? (
+              <div className="recovery-guidance">
+                <textarea
+                  ref={recoveryGuidanceRef}
+                  className="plan-revision__input recovery-guidance__input"
+                  value={recoveryGuidanceText}
+                  rows={3}
+                  maxLength={RECOVERY_FEEDBACK_MAX}
+                  aria-label={t("approval.recoveryGuidanceLabel")}
+                  placeholder={t("approval.recoveryGuidancePlaceholder")}
+                  onChange={(event) => setRecoveryGuidanceText(event.target.value.slice(0, RECOVERY_FEEDBACK_MAX))}
+                  onKeyDown={onRecoveryGuidanceKeyDown}
+                  disabled={submitting}
+                  autoFocus
+                />
+                <div className="recovery-guidance__actions">
+                  <button className="btn" type="button" onClick={closeRecoveryGuidance} disabled={submitting}>
+                    {t("common.cancel")}
+                  </button>
+                  <button
+                    className="btn btn--primary"
+                    type="button"
+                    onClick={submitRecoveryGuidance}
+                    disabled={submitting || !recoveryGuidanceText.trim()}
+                  >
+                    {t(isRecoveryPlanChange ? "approval.recoveryPlanGuidanceSubmit" : "approval.recoveryGuidanceSubmit")}
+                  </button>
+                </div>
+              </div>
+            ) : isRecoveryPlanChange ? undefined : (
+              <button
+                ref={recoveryGuidanceTriggerRef}
+                type="button"
+                className="recovery-guidance-trigger"
+                aria-expanded="false"
+                onClick={() => {
+                  // Guidance rejects the pending action; a task-scoped grant
+                  // belongs only to Continue and would be misleading here.
+                  setGrantSimilarForTask(false);
+                  setRecoveryGuidanceOpen(true);
+                }}
+                disabled={submitting}
+              >
+                {t("approval.recoveryGuidanceTrigger")}
+              </button>
+            )
+          ) : undefined
+        }
         footer={
-          <DecisionConfirmBar
-            hint={t("decision.selectHint")}
-            confirmLabel={confirmLabel}
-            onConfirm={confirmSelected}
-            disabled={submitting}
-            danger={confirmIsDanger}
-          />
+          isRecoveryApproval || isPlanApproval ? undefined : (
+            <DecisionConfirmBar
+              hint={t("decision.selectHint")}
+              confirmLabel={confirmLabel}
+              onConfirm={confirmSelected}
+              disabled={submitting}
+              danger={confirmIsDanger}
+            />
+          )
         }
       >
-        {(approvalModeRelaxed || (!isPlanApproval && (subject || (reasonOpen && reason))) || (isPlanApproval && revisionOpen)) && (
+        {(approvalModeRelaxed ||
+          isRecoveryApproval ||
+          (!isPlanApproval && !isRecoveryApproval && (subject || (reasonOpen && reason))) ||
+          (isPlanApproval && revisionOpen)) && (
           <>
-            {approvalModeRelaxed && (
+            {approvalModeRelaxed && !isRecoveryApproval && (
               <div className="approval-mode-hint">{t("approval.modeSwitchPendingHint")}</div>
             )}
-            {!isPlanApproval && subject && (
+            {isRecoveryApproval && (
+              <section className="recovery-summary" aria-label={t("approval.recoverySummaryLabel")}>
+                <p className="recovery-summary__reason">{recoveryReason}</p>
+                {!isRecoveryPlanChange && recoveryActionSummary && (
+                  <p className="recovery-summary__action">
+                    <span>{t("approval.recoveryNextLabel")}</span>
+                    <code>{recoveryActionSummary}</code>
+                  </p>
+                )}
+              </section>
+            )}
+            {isRecoveryPlanChange && recoveryPlanDelta && (
+              <section className="plan-change-delta" aria-label={t("approval.recoveryPlanDeltaLabel")}>
+                <div className="plan-change-delta__title">{t("approval.recoveryPlanDeltaLabel")}</div>
+                {recoveryPlanDelta.removed.length > 0 && (
+                  <div className="plan-change-delta__group plan-change-delta__group--removed">
+                    <div className="plan-change-delta__label">{t("approval.recoveryPlanRemoved")}</div>
+                    {recoveryPlanDelta.removed.map((line, index) => (
+                      <div className="plan-change-delta__line" key={`removed-${index}-${line}`}><span>−</span>{line}</div>
+                    ))}
+                  </div>
+                )}
+                {recoveryPlanDelta.added.length > 0 && (
+                  <div className="plan-change-delta__group plan-change-delta__group--added">
+                    <div className="plan-change-delta__label">{t("approval.recoveryPlanAdded")}</div>
+                    {recoveryPlanDelta.added.map((line, index) => (
+                      <div className="plan-change-delta__line" key={`added-${index}-${line}`}><span>+</span>{line}</div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+            {isRecoveryApproval && reasonOpen && (
+              <dl className="approval-details recovery-details">
+                {recovery?.failed_summary && (
+                  <div className="recovery-detail-row">
+                    <dt>{t("approval.recoveryFailedLabel")}</dt>
+                    <dd>
+                      {recovery.failed_tool && <code>{recovery.failed_tool}</code>}
+                      {recovery.failed_tool && " · "}
+                      {recovery.failed_summary}
+                    </dd>
+                  </div>
+                )}
+                {recovery?.diagnosis && (
+                  <div className="recovery-detail-row">
+                    <dt>{t("approval.recoveryDiagnosisLabel")}</dt>
+                    <dd>{recovery.diagnosis}</dd>
+                  </div>
+                )}
+                {(recovery?.change_rationale || recovery?.review_rationale) && (
+                  <div className="recovery-detail-row">
+                    <dt>{t("approval.recoveryWhyLabel")}</dt>
+                    <dd>{recovery.change_rationale || recovery.review_rationale}</dd>
+                  </div>
+                )}
+                {recovery?.source_agent && (
+                  <div className="recovery-detail-row">
+                    <dt>{t("approval.recoverySourceLabel")}</dt>
+                    <dd><code>{recovery.source_agent}</code></dd>
+                  </div>
+                )}
+              </dl>
+            )}
+            {!isPlanApproval && !isRecoveryApproval && subject && (
               <div className="approval-details">
                 <pre className="approval-subject">{subject}</pre>
                 {reasonOpen && reason && <div className="approval-reason">{reason}</div>}

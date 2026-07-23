@@ -2,7 +2,9 @@ package evidence
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -23,6 +25,298 @@ type TodoItem struct {
 	Status     string `json:"status"`
 	ActiveForm string `json:"activeForm,omitempty"`
 	Level      int    `json:"level,omitempty"`
+}
+
+// ValidateSerialTodos enforces the task-list state machine promised by
+// todo_write: at most one item in the whole list is in_progress, completed
+// work forms a serial prefix, and pending work follows the current item. The
+// rule is segment-aware for two-level lists: a level-0 phase owns the level-1
+// sub-steps after it, sub-steps complete in order while their phase stays
+// pending, and the phase becomes the single in_progress item only after every
+// sub-step has completed — the phase signs off last. A fully completed or
+// empty list is also valid.
+func ValidateSerialTodos(todos []TodoItem) error {
+	ipSeen := false
+	for i, todo := range todos {
+		switch todoStatus(todo.Status) {
+		case "completed", "pending":
+		case "in_progress":
+			if ipSeen {
+				return fmt.Errorf("todo %d %q is a second in_progress item; serial task lists allow exactly one current item", i+1, todo.Content)
+			}
+			ipSeen = true
+		default:
+			return fmt.Errorf("todo %d %q has invalid status %q", i+1, todo.Content, todo.Status)
+		}
+	}
+	if len(todos) > 0 && todos[0].Level == 1 {
+		return fmt.Errorf("todo 1 %q is a level-1 sub-step with no phase above it; add a level-0 phase header or use level 0", todos[0].Content)
+	}
+	seenCurrent := false
+	seenPending := false
+	for _, seg := range serialTodoSegments(todos) {
+		state, err := validateSerialSegment(todos, seg)
+		if err != nil {
+			return err
+		}
+		switch state {
+		case "completed":
+			if seenCurrent || seenPending {
+				return fmt.Errorf("todo %d %q is completed after unfinished work; serial task lists require completed items to form a prefix", seg.head+1, todos[seg.head].Content)
+			}
+		case "in_progress":
+			if seenPending {
+				ip := seg.head
+				for i := seg.head; i < seg.end; i++ {
+					if todoStatus(todos[i].Status) == "in_progress" {
+						ip = i
+						break
+					}
+				}
+				return fmt.Errorf("todo %d %q is in_progress after pending work; the current item must be the first unfinished item", ip+1, todos[ip].Content)
+			}
+			seenCurrent = true
+		case "pending":
+			seenPending = true
+		default: // stale: partially completed with no current item
+			if seenCurrent {
+				first := seg.head
+				for i := seg.head; i < seg.end; i++ {
+					if todoStatus(todos[i].Status) == "completed" {
+						first = i
+						break
+					}
+				}
+				return fmt.Errorf("todo %d %q is completed after unfinished work; serial task lists require completed items to form a prefix", first+1, todos[first].Content)
+			}
+			seenPending = true
+		}
+	}
+	if len(todos) > 0 && seenPending && !seenCurrent {
+		return fmt.Errorf("serial task list has pending work but no in_progress item")
+	}
+	return nil
+}
+
+// todoSegment is one serial unit of a task list: a level-0 phase header plus
+// its level-1 sub-steps, or a single plain step. end is exclusive.
+type todoSegment struct {
+	head int
+	end  int
+}
+
+// serialTodoSegments splits a task list into serial units. A level-0 item
+// directly followed by level-1 items owns them as one phase segment; every
+// other item — including a level-1 item with no preceding phase — is its own
+// single-step segment.
+func serialTodoSegments(todos []TodoItem) []todoSegment {
+	var segs []todoSegment
+	for i := 0; i < len(todos); {
+		end := i + 1
+		if todos[i].Level == 0 {
+			for end < len(todos) && todos[end].Level == 1 {
+				end++
+			}
+		}
+		segs = append(segs, todoSegment{head: i, end: end})
+		i = end
+	}
+	return segs
+}
+
+// validateSerialSegment checks one segment's internal shape and returns its
+// serial state: "completed" (every item completed), "in_progress" (the
+// segment holds the current item), "pending" (untouched), or "stale"
+// (partially completed with no current item). Item statuses and the global
+// single-in_progress rule are already validated by the caller.
+func validateSerialSegment(todos []TodoItem, seg todoSegment) (string, error) {
+	head := todos[seg.head]
+	headStatus := todoStatus(head.Status)
+	if seg.end == seg.head+1 {
+		return headStatus, nil
+	}
+	seenSubCurrent := false
+	seenSubPending := false
+	completedSubs := 0
+	unfinished := -1
+	for i := seg.head + 1; i < seg.end; i++ {
+		sub := todos[i]
+		switch todoStatus(sub.Status) {
+		case "completed":
+			if seenSubCurrent || seenSubPending {
+				return "", fmt.Errorf("todo %d %q is completed after unfinished work; serial task lists require completed items to form a prefix", i+1, sub.Content)
+			}
+			completedSubs++
+		case "in_progress":
+			if seenSubPending {
+				return "", fmt.Errorf("todo %d %q is in_progress after pending work; the current item must be the first unfinished item", i+1, sub.Content)
+			}
+			seenSubCurrent = true
+			if unfinished < 0 {
+				unfinished = i
+			}
+		default: // pending
+			seenSubPending = true
+			if unfinished < 0 {
+				unfinished = i
+			}
+		}
+	}
+	switch headStatus {
+	case "completed":
+		if unfinished >= 0 {
+			return "", fmt.Errorf("phase %d %q is completed but sub-step %d %q is unfinished; complete every sub-step, then sign the phase off with complete_step", seg.head+1, head.Content, unfinished+1, todos[unfinished].Content)
+		}
+		return "completed", nil
+	case "in_progress":
+		if unfinished >= 0 {
+			return "", fmt.Errorf("phase %d %q cannot be in_progress while sub-step %d %q is unfinished; keep the phase pending, finish its sub-steps in order, then mark the phase in_progress to sign it off", seg.head+1, head.Content, unfinished+1, todos[unfinished].Content)
+		}
+		return "in_progress", nil
+	default: // pending head: its sub-steps carry the segment's progress
+		if seenSubCurrent {
+			return "in_progress", nil
+		}
+		if completedSubs == 0 {
+			return "pending", nil
+		}
+		return "stale", nil
+	}
+}
+
+// NormalizeSerialTodos repairs legacy host state that predates
+// ValidateSerialTodos. It preserves the leading run of fully completed
+// segments and makes the first unfinished segment current: its completed
+// sub-step prefix is kept and its first unfinished sub-step becomes the
+// single in_progress item — or the phase itself when every sub-step is
+// already completed. Every later segment returns to pending.
+func NormalizeSerialTodos(todos []TodoItem) []TodoItem {
+	out := append([]TodoItem(nil), todos...)
+	unfinished := false
+	for _, seg := range serialTodoSegments(out) {
+		if !unfinished && serialSegmentCompleted(out, seg) {
+			continue
+		}
+		if unfinished {
+			for i := seg.head; i < seg.end; i++ {
+				out[i].Status = "pending"
+			}
+			continue
+		}
+		unfinished = true
+		if seg.end == seg.head+1 {
+			out[seg.head].Status = "in_progress"
+			continue
+		}
+		subUnfinished := false
+		for i := seg.head + 1; i < seg.end; i++ {
+			if !subUnfinished && todoStatus(out[i].Status) == "completed" {
+				continue
+			}
+			if !subUnfinished {
+				out[i].Status = "in_progress"
+				subUnfinished = true
+				continue
+			}
+			out[i].Status = "pending"
+		}
+		if subUnfinished {
+			out[seg.head].Status = "pending"
+		} else {
+			out[seg.head].Status = "in_progress"
+		}
+	}
+	return out
+}
+
+func serialSegmentCompleted(todos []TodoItem, seg todoSegment) bool {
+	for i := seg.head; i < seg.end; i++ {
+		if todoStatus(todos[i].Status) != "completed" {
+			return false
+		}
+	}
+	return true
+}
+
+// FirstUnfinishedSubStep reports whether todos[index] is a level-0 phase with
+// level-1 sub-steps, and if so the 0-based index of its first sub-step that is
+// not yet completed. ok is false when index is not a phase header; a phase
+// whose sub-steps are all completed returns (-1, true).
+func FirstUnfinishedSubStep(todos []TodoItem, index int) (int, bool) {
+	if index < 0 || index >= len(todos) || todos[index].Level != 0 {
+		return -1, false
+	}
+	if index+1 >= len(todos) || todos[index+1].Level != 1 {
+		return -1, false
+	}
+	for i := index + 1; i < len(todos) && todos[i].Level == 1; i++ {
+		if todoStatus(todos[i].Status) != "completed" {
+			return i, true
+		}
+	}
+	return -1, true
+}
+
+// AdvanceSerialTodo completes the in_progress item at index (0-based) as a
+// signed-off step and promotes the next serial item so exactly one item stays
+// current. A phase with unfinished sub-steps does not complete. Completing a
+// sub-step promotes its next pending sibling, or returns its phase to
+// in_progress for sign-off once every sibling is completed. Completing a
+// phase or plain step promotes the next pending unit — a phase's first
+// pending sub-step (the phase itself stays pending until its sub-steps
+// finish), or the plain step itself. A level-1 item with no phase above it
+// advances as a standalone step. It reports whether the item was completed.
+func AdvanceSerialTodo(todos []TodoItem, index int) bool {
+	if index < 0 || index >= len(todos) {
+		return false
+	}
+	if todoStatus(todos[index].Status) != "in_progress" {
+		return false
+	}
+	if unfinished, ok := FirstUnfinishedSubStep(todos, index); ok && unfinished >= 0 {
+		return false
+	}
+	todos[index].Status = "completed"
+	if todos[index].Level == 1 {
+		for i := index + 1; i < len(todos) && todos[i].Level == 1; i++ {
+			if todoStatus(todos[i].Status) == "pending" {
+				todos[i].Status = "in_progress"
+				return true
+			}
+		}
+		head := index - 1
+		for head >= 0 && todos[head].Level == 1 {
+			head--
+		}
+		if head >= 0 {
+			if todoStatus(todos[head].Status) != "completed" {
+				todos[head].Status = "in_progress"
+			}
+			return true
+		}
+		// No phase above: an orphan sub-step falls through and promotes the
+		// next pending unit like a plain step, so the list keeps one current
+		// item.
+	}
+	for i := range todos {
+		if todoStatus(todos[i].Status) == "in_progress" {
+			return true
+		}
+	}
+	for i := range todos {
+		if todoStatus(todos[i].Status) != "pending" {
+			continue
+		}
+		if sub, ok := FirstUnfinishedSubStep(todos, i); ok && sub >= 0 {
+			if todoStatus(todos[sub].Status) == "pending" {
+				todos[sub].Status = "in_progress"
+			}
+			return true
+		}
+		todos[i].Status = "in_progress"
+		return true
+	}
+	return true
 }
 
 // TodoStepMatch is the result of matching complete_step.step against the latest
@@ -65,6 +359,18 @@ type BackgroundLease struct {
 	JobID   string
 }
 
+// DeliveryCheckpoint is the compact, persistence-safe state carried across
+// runs of one host-owned Goal. It intentionally stores no raw tool arguments or
+// output. PendingMutation means a previously observed change still needs fresh
+// verification, review, and sign-off before the Goal can finalize.
+type DeliveryCheckpoint struct {
+	ScopeID             string `json:"scopeID,omitempty"`
+	CriteriaEstablished bool   `json:"criteriaEstablished,omitempty"`
+	WorkObserved        bool   `json:"workObserved,omitempty"`
+	MutationObserved    bool   `json:"mutationObserved,omitempty"`
+	PendingMutation     bool   `json:"pendingMutation,omitempty"`
+}
+
 // Ledger stores the receipts available to complete_step for the current turn.
 type Ledger struct {
 	mu               sync.Mutex
@@ -83,6 +389,18 @@ func (l *Ledger) Reset() {
 	defer l.mu.Unlock()
 	l.receipts = nil
 	l.backgroundLeases = nil
+}
+
+// ResetBackgroundLeases starts a new run inside the same delivery scope. The
+// durable receipts remain available, while per-run job leases must be collected
+// and committed independently.
+func (l *Ledger) ResetBackgroundLeases() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.backgroundLeases = nil
+	l.mu.Unlock()
 }
 
 // NoteBackgroundLease records that a background job's evidence was merged into
@@ -177,6 +495,54 @@ func (l *Ledger) HasWriteOrCommandSince(index int) bool {
 		}
 	}
 	return false
+}
+
+// SuccessfulProgressSignaturesSince returns stable identities for successful
+// host-observed work recorded at or after index. Callers can keep a per-turn set
+// of these signatures so a new read, command, or mutation renews an execution
+// lease while exact repeats do not masquerade as progress.
+func (l *Ledger) SuccessfulProgressSignaturesSince(index int) []string {
+	if l == nil {
+		return nil
+	}
+	if index < 0 {
+		index = 0
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []string
+	for i := index; i < len(l.receipts); i++ {
+		if sig, ok := progressReceiptSignature(l.receipts[i]); ok {
+			out = append(out, sig)
+		}
+	}
+	return out
+}
+
+func progressReceiptSignature(r Receipt) (string, bool) {
+	if !r.Success {
+		return "", false
+	}
+	kind := ""
+	switch {
+	case r.Mutation || r.Write:
+		kind = "mutation"
+	case r.Command != "":
+		kind = "command"
+	case r.Read && r.OutputBytes > 0:
+		kind = "read"
+	default:
+		return "", false
+	}
+	payload := strings.TrimSpace(string(r.Args))
+	var decoded any
+	if json.Unmarshal(r.Args, &decoded) == nil {
+		if canonical, err := json.Marshal(decoded); err == nil {
+			payload = string(canonical)
+		}
+	}
+	sum := sha256.Sum256([]byte(kind + "\x00" + r.ToolName + "\x00" + payload))
+	return fmt.Sprintf("%x", sum), true
 }
 
 func (l *Ledger) HasSuccessfulCommand(command string) bool {
@@ -369,7 +735,9 @@ func (l *Ledger) HasSuccessfulDeliverySignoffAfter(after int) bool {
 // HasSuccessfulReviewAfter reports whether the changed result was inspected
 // after the latest mutation. A read of a touched path is sufficient; git/diff
 // inspection commands cover shell-driven or delegated mutations whose paths are
-// not knowable to the host.
+// not knowable to the host. A negative index is the restored-checkpoint
+// baseline: the mutation predates this ledger (controller rebuild or cold
+// resume), so any successful review-shaped receipt counts.
 func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
 	if l == nil {
 		return false
@@ -382,17 +750,23 @@ func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
 	l.mu.Unlock()
-	if after < 0 || after >= len(receipts) {
+	if after >= len(receipts) {
 		return false
 	}
 	return receiptsReviewChanges(receipts, start, len(receipts), after)
 }
 
 func receiptsReviewChanges(receipts []Receipt, start, end, mutationIndex int) bool {
-	if mutationIndex < 0 || mutationIndex >= len(receipts) {
+	if mutationIndex >= len(receipts) {
 		return false
 	}
-	wanted := pathSet(receipts[mutationIndex].Paths)
+	// A negative mutationIndex is the restored-checkpoint baseline: the
+	// mutation's receipt is not in this ledger, so its touched paths are
+	// unknowable and any successful review-shaped receipt counts.
+	var wanted map[string]bool
+	if mutationIndex >= 0 {
+		wanted = pathSet(receipts[mutationIndex].Paths)
+	}
 	for i := start; i < end && i < len(receipts); i++ {
 		r := receipts[i]
 		if !r.Success {
@@ -508,6 +882,52 @@ func IncompleteTodos(todos []TodoItem) []TodoStepMatch {
 func MatchStep(step string, todos []TodoItem) (TodoStepMatch, bool) {
 	m := matchTodoStep(step, todos)
 	return m, m.Found
+}
+
+// MatchTodoIdentity resolves an existing todo against an updated list without
+// interpreting numeric content as a 1-based step citation.
+func MatchTodoIdentity(todo TodoItem, todos []TodoItem) (TodoStepMatch, bool) {
+	for i, candidate := range todos {
+		if sameTodoIdentity(todo, candidate) {
+			return TodoStepMatch{Found: true, Index: i + 1, Content: candidate.Content, Status: candidate.Status, ActiveForm: candidate.ActiveForm}, true
+		}
+	}
+	found := -1
+	for i, candidate := range todos {
+		match := TodoStepMatch{Content: candidate.Content, ActiveForm: candidate.ActiveForm}
+		if !todoContentRelates(todo, match) {
+			continue
+		}
+		if found >= 0 && found != i {
+			return TodoStepMatch{}, false
+		}
+		found = i
+	}
+	if found < 0 {
+		return TodoStepMatch{}, false
+	}
+	candidate := todos[found]
+	return TodoStepMatch{Found: true, Index: found + 1, Content: candidate.Content, Status: candidate.Status, ActiveForm: candidate.ActiveForm}, true
+}
+
+// PreservesCompletedTodoPositions reports whether every previously completed
+// item remains completed at the same index in the replacement list. Completed
+// sub-steps can sit behind a pending phase header, so this checks every item
+// rather than assuming the literal list begins with completed statuses.
+func PreservesCompletedTodoPositions(previous, next []TodoItem) bool {
+	for i, todo := range previous {
+		if todoStatus(todo.Status) != "completed" {
+			continue
+		}
+		if i >= len(next) || todoStatus(next[i].Status) != "completed" {
+			return false
+		}
+		match, found := MatchTodoIdentity(todo, next)
+		if !found || match.Index != i+1 {
+			return false
+		}
+	}
+	return true
 }
 
 // HasAnySuccessfulReceipt reports whether any tool succeeded this turn — the
@@ -837,6 +1257,7 @@ func (l *Ledger) hasSuccessfulPaths(paths []string, accept func(Receipt) bool) b
 type contextKey struct{}
 type sessionMessagesKey struct{}
 type deliveryProfileKey struct{}
+type todoStateKey struct{}
 
 func WithLedger(ctx context.Context, ledger *Ledger) context.Context {
 	if ledger == nil {
@@ -876,6 +1297,19 @@ func WithSessionMessages(ctx context.Context, msgs []provider.Message) context.C
 func SessionMessagesFromContext(ctx context.Context) ([]provider.Message, bool) {
 	msgs, ok := ctx.Value(sessionMessagesKey{}).([]provider.Message)
 	return msgs, ok
+}
+
+// WithTodoState attaches the host's canonical task list to a tool call. The
+// per-turn ledger resets between user messages, while unfinished tasks remain
+// active across those turns.
+func WithTodoState(ctx context.Context, todos []TodoItem) context.Context {
+	return context.WithValue(ctx, todoStateKey{}, append([]TodoItem(nil), todos...))
+}
+
+// TodoStateFromContext returns a copy of the host's canonical task list.
+func TodoStateFromContext(ctx context.Context) ([]TodoItem, bool) {
+	todos, ok := ctx.Value(todoStateKey{}).([]TodoItem)
+	return append([]TodoItem(nil), todos...), ok
 }
 
 // PathsProvenInSession reports whether every path is covered by a successful
@@ -998,6 +1432,128 @@ func ToolCallRequiresDeliveryCriteria(toolName string, args json.RawMessage, rea
 		return true
 	}
 	return bashCommandIsVerification(stringField(fields, "command"))
+}
+
+// BashToolCallMixesMutationAndVerification reports whether a bash call combines
+// a host-recognized verifier with another segment the host cannot prove is
+// read-only. Delivery mode blocks this shape before execution. Besides avoiding
+// accidental workspace changes during a check, this keeps scratch-file setup
+// (for example, writing /tmp/check.js before node --check) from becoming the
+// latest opaque mutation and invalidating otherwise valid delivery evidence.
+func BashToolCallMixesMutationAndVerification(args json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return false
+	}
+	command := stringField(fields, "command")
+	return bashContainsVerificationSegment(command) && bashMayMutate(command)
+}
+
+// BashToolCallMasksVerificationExit reports the common `check; echo $?` shape.
+// The trailing reporter makes the shell call itself succeed even when the
+// verifier failed, so a successful tool receipt cannot prove the check passed.
+// It is separated from the broader mixed-command classifier so the agent can
+// give a precise recovery instruction instead of inviting repeated rewrites.
+func BashToolCallMasksVerificationExit(args json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return false
+	}
+	command := strings.TrimSpace(stringField(fields, "command"))
+	if command == "" || !bashContainsVerificationSegment(command) {
+		return false
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok {
+		return false
+	}
+	seenVerifier := false
+	for _, segment := range segments {
+		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		argv, malformed := shellparse.StaticFields(normalized)
+		if malformed == "" && bashSegmentIsVerification(argv) {
+			seenVerifier = true
+			continue
+		}
+		if !seenVerifier || !strings.Contains(segment, "$?") {
+			continue
+		}
+		lower := strings.ToLower(strings.TrimSpace(segment))
+		if strings.HasPrefix(lower, "echo ") || strings.HasPrefix(lower, "printf ") {
+			return true
+		}
+	}
+	return false
+}
+
+// BashToolCallUsesOpaqueInlineInterpreter reports whether a bash call executes
+// source supplied directly on an interpreter's command line. Delivery mode
+// cannot prove whether snippets such as node -e or python -c only inspect state
+// or also write files. Letting them run and then treating them as opaque
+// mutations invalidates otherwise valid review/verification receipts, while
+// treating them as read-only would create a delivery bypass. The agent blocks
+// this shape before execution and directs callers to auditable file tools,
+// script files, or conventional verifier commands instead.
+func BashToolCallUsesOpaqueInlineInterpreter(args json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return false
+	}
+	command := strings.TrimSpace(stringField(fields, "command"))
+	if command == "" {
+		return false
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok {
+		return false
+	}
+	for _, segment := range segments {
+		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		argv, malformed := shellparse.StaticFields(normalized)
+		if malformed != "" || len(argv) == 0 {
+			continue
+		}
+		base := strings.ToLower(filepath.Base(argv[0]))
+		args := argv[1:]
+		switch base {
+		case "node", "bun":
+			if hasCommandArg(args, "-e", "--eval", "-p", "--print") {
+				return true
+			}
+		case "python", "python3", "ruby", "perl":
+			if hasCommandArg(args, "-c", "-e") {
+				return true
+			}
+		case "php":
+			if hasCommandArg(args, "-r") {
+				return true
+			}
+		case "deno":
+			if len(args) > 0 && strings.EqualFold(args[0], "eval") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func bashContainsVerificationSegment(command string) bool {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return false
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok {
+		return false
+	}
+	for _, segment := range segments {
+		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+		fields, malformed := shellparse.StaticFields(normalized)
+		if malformed == "" && bashSegmentIsVerification(fields) {
+			return true
+		}
+	}
+	return false
 }
 
 func bashMayMutate(command string) bool {

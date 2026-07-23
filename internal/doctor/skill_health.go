@@ -128,6 +128,7 @@ func isBuiltinOrMetaTool(name string) bool {
 	switch name {
 	case "bash", "read_file", "write_file", "edit_file", "grep", "glob", "ls",
 		"todo_write", "complete_step", "ask", "task", "read_only_task",
+		"parallel_tasks", "fleet",
 		"run_skill", "read_skill", "read_only_skill", "explore", "research",
 		"review", "security_review", "web_fetch", "multi_edit", "move_file",
 		"code_index", "wait", "bash_output", "kill_shell":

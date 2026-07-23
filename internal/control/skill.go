@@ -56,6 +56,20 @@ func (s *skillSet) bySlashName(name string) (skill.Skill, bool) {
 	return skill.ResolveSlashSkill(s.enabled, name)
 }
 
+func (s *skillSet) prepare(sk skill.Skill) skill.Skill {
+	if s.store != nil {
+		return s.store.Prepare(sk)
+	}
+	return sk
+}
+
+func (s *skillSet) render(sk skill.Skill, args string) string {
+	if s.store != nil {
+		return s.store.Render(sk, args)
+	}
+	return skill.Render(sk, args)
+}
+
 // discovered returns the construction-time enabled snapshot (not the live store),
 // for the /skills listing which reflects what was discovered at boot.
 func (s *skillSet) discovered() []skill.Skill {

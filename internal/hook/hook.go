@@ -37,11 +37,13 @@ import (
 type Event string
 
 const (
-	PreToolUse        Event = "PreToolUse"
-	PostToolUse       Event = "PostToolUse"
-	PermissionRequest Event = "PermissionRequest"
-	UserPromptSubmit  Event = "UserPromptSubmit"
-	Stop              Event = "Stop"
+	PreToolUse         Event = "PreToolUse"
+	PostToolUse        Event = "PostToolUse"
+	PostToolUseFailure Event = "PostToolUseFailure"
+	PermissionRequest  Event = "PermissionRequest"
+	UserPromptSubmit   Event = "UserPromptSubmit"
+	Stop               Event = "Stop"
+	StopFailure        Event = "StopFailure"
 	// PostLLMCall fires after every model turn completes (streaming finishes) but
 	// before the reasoning_content is stored in the session. The hook receives the
 	// raw reasoning text in the payload; its stdout, if non-empty on exit 0,
@@ -62,15 +64,27 @@ const (
 
 // Events is every event, in a stable order — drives loading and `/hooks`.
 var Events = []Event{
-	PreToolUse, PostToolUse, PermissionRequest, UserPromptSubmit, Stop,
+	PreToolUse, PostToolUse, PostToolUseFailure, PermissionRequest, UserPromptSubmit, Stop, StopFailure,
 	PostLLMCall,
 	SessionStart, SessionEnd, SubagentStop, Notification, PreCompact,
 }
 
 // IsBlocking reports whether a non-zero/exit-2 (or timed-out) hook on this event
 // can block the loop. Only the gating events qualify. (PreCompact does not block;
-// it only contributes guidance via stdout.)
+// it only contributes guidance via stdout.) This governs native Reasonix hooks;
+// see claudePermissionBlocking for the Claude-imported PermissionRequest case.
 func IsBlocking(e Event) bool { return e == PreToolUse || e == UserPromptSubmit }
+
+// claudePermissionBlocking reports whether exit code 2 (or a timeout) on h
+// aborts the action even though PermissionRequest is not one of Reasonix's own
+// blocking events (docs/DESKTOP_HOOKS.md: "只有 PreToolUse 和 UserPromptSubmit
+// 是阻塞型事件"). Claude's own PermissionRequest contract denies the permission
+// on exit 2 the same way PreToolUse does (https://code.claude.com/docs/en/hooks),
+// so an imported Claude hook (PayloadFormat "claude") honors that instead of
+// silently downgrading to a notification.
+func claudePermissionBlocking(h ResolvedHook) bool {
+	return h.Event == PermissionRequest && h.PayloadFormat == "claude"
+}
 
 // defaultTimeout is the per-event timeout when a hook sets none. Tool/prompt
 // hooks gate progress, so they're tight; post/stop hooks get more room.
@@ -101,6 +115,9 @@ type HookConfig struct {
 	Match string `json:"match,omitempty"`
 	// Command is the shell command to run (spawned through the platform shell).
 	Command string `json:"command"`
+	// Argv bypasses the shell and is used by imported Claude hooks whose
+	// command and args are separate manifest fields.
+	Argv []string `json:"-"`
 	// ContextFile is an internal plugin-package helper: when set, the hook reads
 	// this file and treats it as stdout instead of spawning a shell command.
 	ContextFile string `json:"contextFile,omitempty"`
@@ -112,6 +129,10 @@ type HookConfig struct {
 	Cwd string `json:"cwd,omitempty"`
 	// Env adds environment variables for this hook invocation.
 	Env map[string]string `json:"env,omitempty"`
+	// Async and PayloadFormat are internal compatibility metadata populated for
+	// imported Claude hooks. Native Reasonix settings keep their old behavior.
+	Async         bool   `json:"-"`
+	PayloadFormat string `json:"-"`
 }
 
 // Settings is the shape of a settings.json (only hooks for now).
@@ -255,39 +276,63 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 				continue
 			}
 			for _, h := range pkg.Manifest.Hooks[eventName] {
-				command := h.Command
+				command := expandPluginRoot(h.Command, pkg.Root)
 				if command != "" && !h.ShellCommand && !filepath.IsAbs(command) {
 					command = filepath.Join(pkg.Root, filepath.FromSlash(command))
 				}
 				command = NormalizeCommand(command)
-				contextFile := h.ContextFile
-				if contextFile != "" && !filepath.IsAbs(contextFile) {
-					contextFile = filepath.Join(pkg.Root, filepath.FromSlash(contextFile))
+				var argv []string
+				if len(h.Args) > 0 {
+					argv = make([]string, 0, len(h.Args))
 				}
-				cwd := h.Cwd
+				for _, arg := range h.Args {
+					argv = append(argv, expandPluginRoot(arg, pkg.Root))
+				}
+				contextFile := expandPluginRoot(h.ContextFile, pkg.Root)
+				if contextFile != "" {
+					contextFile = filepath.FromSlash(contextFile)
+					if !filepath.IsAbs(contextFile) {
+						contextFile = filepath.Join(pkg.Root, contextFile)
+					} else {
+						contextFile = filepath.Clean(contextFile)
+					}
+				}
+				cwd := expandPluginRoot(h.Cwd, pkg.Root)
 				if cwd == "" {
 					cwd = pkg.Root
-				} else if !filepath.IsAbs(cwd) {
-					cwd = filepath.Join(pkg.Root, filepath.FromSlash(cwd))
+				} else {
+					cwd = filepath.FromSlash(cwd)
+					if !filepath.IsAbs(cwd) {
+						cwd = filepath.Join(pkg.Root, cwd)
+					} else {
+						cwd = filepath.Clean(cwd)
+					}
 				}
 				env := cloneEnv(h.Env)
+				for key, value := range env {
+					env[key] = expandPluginRoot(value, pkg.Root)
+				}
 				env["REASONIX_PLUGIN_ROOT"] = pkg.Root
 				env["REASONIX_PLUGIN_NAME"] = item.Installed.Name
 				env["REASONIX_HOME"] = reasonixHomeDir
 				env["REASONIX_WORKSPACE_ROOT"] = projectRoot
 				env["CLAUDE_PROJECT_DIR"] = projectRoot
+				env["CLAUDE_PLUGIN_ROOT"] = pkg.Root
 				if item.Installed.Version != "" {
 					env["REASONIX_PLUGIN_VERSION"] = item.Installed.Version
 				}
 				*out = append(*out, ResolvedHook{
 					HookConfig: HookConfig{
-						Match:       h.Match,
-						Command:     command,
-						ContextFile: contextFile,
-						Description: h.Description,
-						Timeout:     h.Timeout,
-						Cwd:         cwd,
-						Env:         env,
+						Match:         h.Match,
+						Command:       command,
+						Argv:          argv,
+						ContextFile:   contextFile,
+						Description:   h.Description,
+						Timeout:       h.Timeout,
+						Cwd:           cwd,
+						Env:           env,
+						Async:         h.Async,
+						PayloadFormat: h.PayloadFormat,
 					},
 					Event:  event,
 					Scope:  ScopePlugin,
@@ -296,6 +341,64 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 			}
 		}
 	}
+}
+
+func expandPluginRoot(value, root string) string {
+	// Plugin hook manifests are host configuration, not platform-native shell
+	// scripts. Scan the manifest value once so text inside the resolved root is
+	// never mistaken for another placeholder and expanded recursively.
+	lastWrite := 0
+	replaced := false
+	var out strings.Builder
+	for i := 0; i < len(value); {
+		tokenLen := pluginRootTokenLen(value[i:])
+		if tokenLen == 0 {
+			i++
+			continue
+		}
+		if !replaced {
+			out.Grow(len(value) - tokenLen + len(root))
+			replaced = true
+		}
+		out.WriteString(value[lastWrite:i])
+		out.WriteString(root)
+		i += tokenLen
+		lastWrite = i
+	}
+	if !replaced {
+		return value
+	}
+	out.WriteString(value[lastWrite:])
+	return out.String()
+}
+
+var pluginRootTokens = [...]struct {
+	value         string
+	needsBoundary bool
+}{
+	{value: "${CLAUDE_PLUGIN_ROOT}"},
+	{value: "$CLAUDE_PLUGIN_ROOT", needsBoundary: true},
+	{value: "%CLAUDE_PLUGIN_ROOT%"},
+	{value: "${REASONIX_PLUGIN_ROOT}"},
+	{value: "$REASONIX_PLUGIN_ROOT", needsBoundary: true},
+	{value: "%REASONIX_PLUGIN_ROOT%"},
+}
+
+func pluginRootTokenLen(value string) int {
+	for _, token := range pluginRootTokens {
+		if !strings.HasPrefix(value, token.value) {
+			continue
+		}
+		if token.needsBoundary && len(value) > len(token.value) && isShellVariableNameByte(value[len(token.value)]) {
+			continue
+		}
+		return len(token.value)
+	}
+	return 0
+}
+
+func isShellVariableNameByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
 func validEvent(event Event) bool {
@@ -321,7 +424,7 @@ func cloneEnv(in map[string]string) map[string]string {
 // anchored regex; non-tool events always match. A malformed regex never fires
 // (safer than firing on everything).
 func MatchesTool(h ResolvedHook, toolName string) bool {
-	if h.Event != PreToolUse && h.Event != PostToolUse && h.Event != PermissionRequest {
+	if h.Event != PreToolUse && h.Event != PostToolUse && h.Event != PostToolUseFailure && h.Event != PermissionRequest {
 		return true
 	}
 	m := h.Match
@@ -332,23 +435,404 @@ func MatchesTool(h ResolvedHook, toolName string) bool {
 	if err != nil {
 		return false
 	}
-	return re.MatchString(toolName)
+	if h.PayloadFormat != "claude" {
+		return re.MatchString(toolName)
+	}
+	for _, candidate := range claudeMatchNames(toolName) {
+		if re.MatchString(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// claudeAgentSpawningTools are every Reasonix tool that spawns a subagent and
+// so corresponds to Claude's single "Agent" tool: the general task delegator
+// (task/read_only_task/parallel_tasks) and the dedicated named wrappers
+// around a runAs=subagent skill (BuiltinSubagentTools in
+// internal/skill/tools.go — each is a distinct, directly-callable tool, not
+// routed through run_skill). A Claude "Agent" safety matcher must see all of
+// them, or a hook scoped to it silently misses whichever entry point wasn't
+// mapped.
+var claudeAgentSpawningTools = []string{
+	"task", "read_only_task", "parallel_tasks",
+	"explore", "research", "review", "security_review",
+}
+
+// claudeAgentDefaultDescriptions fill Claude Agent's required description
+// field when the corresponding Reasonix tool does not expose one or the model
+// omitted Reasonix's optional description. These are stable operation labels;
+// the complete task remains in prompt for hook policy decisions.
+var claudeAgentDefaultDescriptions = map[string]string{
+	"task":            "Run delegated subagent task",
+	"read_only_task":  "Run read-only research task",
+	"parallel_tasks":  "Run parallel subagent tasks",
+	"explore":         "Explore the codebase",
+	"research":        "Research external references",
+	"review":          "Review the current changes",
+	"security_review": "Review security risks",
+}
+
+// claudeToolNames maps Reasonix's own tool names to the *current* Claude Code
+// built-in tool name (https://code.claude.com/docs/en/tools-reference) — what
+// an imported hook's emitted tool_name payload field shows, and a script's own
+// tool_name check is written against. MCP tool names already share the
+// mcp__<server>__<tool> convention in both systems.
+var claudeToolNames = buildClaudeToolNames()
+
+func buildClaudeToolNames() map[string]string {
+	out := map[string]string{
+		"bash":            "Bash",
+		"read_file":       "Read",
+		"write_file":      "Write",
+		"edit_file":       "Edit",
+		"multi_edit":      "MultiEdit",
+		"glob":            "Glob",
+		"grep":            "Grep",
+		"web_fetch":       "WebFetch",
+		"ask":             "AskUserQuestion",
+		"run_skill":       "Skill",
+		"read_only_skill": "Skill",
+		"todo_write":      "TodoWrite",
+		"notebook_edit":   "NotebookEdit",
+		"bash_output":     "TaskOutput",
+		"wait":            "TaskOutput",
+		"kill_shell":      "TaskStop",
+	}
+	for _, name := range claudeAgentSpawningTools {
+		out[name] = "Agent"
+	}
+	return out
+}
+
+// claudeToolMatchAliases lists every tool name — current and legacy — an
+// imported hook's matcher may have been authored against for a Reasonix
+// tool, so a matcher written against an older Claude Code tool name keeps
+// firing after Claude renames the tool (Task became Agent; BashOutput/KillShell
+// became TaskOutput/TaskStop). claudeFacingToolName (the emitted tool_name
+// payload) always reports the current name; only matcher evaluation considers
+// aliases.
+var claudeToolMatchAliases = buildClaudeToolMatchAliases()
+
+func buildClaudeToolMatchAliases() map[string][]string {
+	out := map[string][]string{}
+	for _, name := range claudeAgentSpawningTools {
+		out[name] = []string{"Agent", "Task"}
+	}
+	out["bash_output"] = []string{"TaskOutput", "BashOutput"}
+	out["wait"] = []string{"TaskOutput", "BashOutput"}
+	out["kill_shell"] = []string{"TaskStop", "KillShell"}
+	return out
+}
+
+// claudeMatchNames returns every name an imported hook's matcher should be
+// tried against for a Reasonix tool call.
+func claudeMatchNames(name string) []string {
+	if aliases, ok := claudeToolMatchAliases[name]; ok {
+		return aliases
+	}
+	return []string{claudeFacingToolName(name)}
+}
+
+// claudeFacingToolName returns the current Claude tool name a Claude-imported
+// hook's tool_name payload field should see for a Reasonix tool call.
+// Reasonix-only tools (wait, code_index, move_file, ...) have no Claude
+// equivalent and pass through unchanged — an imported hook can't have been
+// authored against a name Claude never had.
+func claudeFacingToolName(name string) string {
+	if mapped, ok := claudeToolNames[name]; ok {
+		return mapped
+	}
+	return name
+}
+
+// claudeToolInputKeyRenames maps, per Reasonix tool name, JSON keys in its
+// tool-call arguments that must be renamed to Claude's own tool_input field
+// name — Reasonix's file tools use "path", Claude's use "file_path" — so a
+// hook script reading e.g. ".tool_input.file_path" sees the value instead of
+// failing open on an empty field. Only tools whose Reasonix schema differs
+// from Claude's by a plain key rename are listed: Bash's "command",
+// Glob/Grep's "pattern"/"path", web_fetch's "url", ask's "questions",
+// todo_write's "todos", and task/read_only_task's "prompt"/"description"
+// already use Claude's field names. Agent description can still be absent and
+// is filled separately below. NotebookEdit's cell_number (a
+// 0-based index) has no Claude field — Claude targets cells only by the
+// opaque cell_id, which Reasonix also accepts — so it passes through as an
+// extra key. parallel_tasks is a structural mismatch handled separately in
+// claudeFacingToolInput.
+var claudeToolInputKeyRenames = map[string]map[string]string{
+	"read_file":       {"path": "file_path"},
+	"write_file":      {"path": "file_path"},
+	"edit_file":       {"path": "file_path"},
+	"multi_edit":      {"path": "file_path"},
+	"notebook_edit":   {"path": "notebook_path"},
+	"run_skill":       {"name": "skill", "arguments": "args"},
+	"read_only_skill": {"name": "skill", "arguments": "args"},
+	"bash_output":     {"job_id": "task_id"},
+	"kill_shell":      {"job_id": "task_id"},
+	// The dedicated subagent wrappers take their task text as "task";
+	// Claude's Agent tool calls the same thing "prompt".
+	"explore":         {"task": "prompt"},
+	"research":        {"task": "prompt"},
+	"review":          {"task": "prompt"},
+	"security_review": {"task": "prompt"},
+}
+
+// claudeAbsolutePathInputKeys are the translated tool_input keys whose Claude
+// schema demands an absolute path ("must be absolute, not relative" on
+// Read/Write/Edit/NotebookEdit). Reasonix's file tools accept relative paths
+// and resolve them against the workspace root (resolveIn in
+// internal/tool/builtin/workspace.go); the payload resolves against
+// payload.Cwd — the same root — so a prefix-matching guard inspects the path
+// the tool actually accesses, not a relative spelling it never compares.
+var claudeAbsolutePathInputKeys = []string{"file_path", "notebook_path"}
+
+// claudeFacingToolInput adapts tool-call arguments to the tool_input a
+// Claude-authored hook script was written against: keys are renamed per
+// claudeToolInputKeyRenames, file paths are made absolute, current TaskOutput
+// fields and required Agent/AskUserQuestion/TodoWrite fields are supplied, and
+// parallel_tasks synthesizes Agent's "prompt". Args needing no translation, or
+// that aren't a JSON object, pass through unchanged.
+func claudeFacingToolInput(toolName string, args json.RawMessage, cwd string) json.RawMessage {
+	renames := claudeToolInputKeyRenames[toolName]
+	defaultAgentDescription, isAgent := claudeAgentDefaultDescriptions[toolName]
+	if len(renames) == 0 && !isAgent && toolName != "ask" && toolName != "todo_write" && toolName != "wait" {
+		return args
+	}
+	if len(args) == 0 {
+		return args
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(args, &obj); err != nil {
+		return args
+	}
+	changed := false
+	for from, to := range renames {
+		if v, exists := obj[from]; exists {
+			obj[to] = v
+			delete(obj, from)
+			changed = true
+		}
+	}
+	if toolName == "notebook_edit" {
+		if _, exists := obj["new_source"]; !exists {
+			for _, alias := range []string{"content", "source", "new_string"} {
+				var value string
+				if err := json.Unmarshal(obj[alias], &value); err == nil && value != "" {
+					obj["new_source"] = obj[alias]
+					break
+				}
+			}
+			if _, exists := obj["new_source"]; !exists {
+				obj["new_source"] = json.RawMessage(`""`)
+			}
+			changed = true
+		}
+	}
+	if toolName == "bash_output" {
+		obj["block"] = json.RawMessage("false")
+		obj["timeout"] = json.RawMessage("0")
+		changed = true
+	}
+	if toolName == "wait" {
+		obj["block"] = json.RawMessage("true")
+		var jobIDs []string
+		if err := json.Unmarshal(obj["job_ids"], &jobIDs); err == nil && len(jobIDs) == 1 {
+			if body, err := json.Marshal(jobIDs[0]); err == nil {
+				obj["task_id"] = body
+			}
+		}
+		// An unbounded Reasonix wait omits TaskOutput's optional timeout
+		// entirely: in Claude's schema timeout is the maximum wait in ms, so
+		// claiming 0 would read as "don't wait" — the opposite of the call.
+		var timeoutSeconds int64
+		if err := json.Unmarshal(obj["timeout_seconds"], &timeoutSeconds); err == nil && timeoutSeconds > 0 && timeoutSeconds <= (1<<63-1)/1000 {
+			if body, err := json.Marshal(timeoutSeconds * 1000); err == nil {
+				obj["timeout"] = body
+			}
+		}
+		changed = true
+	}
+	if toolName == "ask" && fillClaudeAskDefaults(obj) {
+		changed = true
+	}
+	if toolName == "todo_write" && fillClaudeTodoDefaults(obj) {
+		changed = true
+	}
+	// parallel_tasks maps to Claude's Agent tool but carries an array of
+	// sub-tasks where Agent has a single prompt — a structural difference no
+	// key rename bridges. Synthesize "prompt" from every sub-task's prompt
+	// (the original "tasks" array stays alongside) so an Agent-scoped guard
+	// reading .tool_input.prompt inspects all dispatched work instead of
+	// failing open on a missing field.
+	if toolName == "parallel_tasks" {
+		if prompt := joinedParallelTaskPrompts(obj["tasks"]); prompt != "" {
+			if v, err := json.Marshal(prompt); err == nil {
+				obj["prompt"] = v
+				changed = true
+			}
+		}
+	}
+	if isAgent {
+		var prompt string
+		_ = json.Unmarshal(obj["prompt"], &prompt)
+		if strings.TrimSpace(prompt) != "" {
+			var description string
+			_ = json.Unmarshal(obj["description"], &description)
+			if strings.TrimSpace(description) == "" {
+				if v, err := json.Marshal(defaultAgentDescription); err == nil {
+					obj["description"] = v
+					changed = true
+				}
+			}
+		}
+	}
+	for _, key := range claudeAbsolutePathInputKeys {
+		v, exists := obj[key]
+		if !exists || cwd == "" {
+			continue
+		}
+		var p string
+		if err := json.Unmarshal(v, &p); err != nil || p == "" || filepath.IsAbs(p) {
+			continue
+		}
+		if abs, err := json.Marshal(filepath.Join(cwd, p)); err == nil {
+			obj[key] = abs
+			changed = true
+		}
+	}
+	if !changed {
+		return args
+	}
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return args
+	}
+	return out
+}
+
+// fillClaudeAskDefaults supplies fields Claude requires but Reasonix treats as
+// optional. Empty option descriptions are honest (Reasonix has no explanation
+// to add), and omitted multiSelect has the same false default in both systems.
+func fillClaudeAskDefaults(obj map[string]json.RawMessage) bool {
+	var questions []map[string]json.RawMessage
+	if err := json.Unmarshal(obj["questions"], &questions); err != nil {
+		return false
+	}
+	changed := false
+	for _, question := range questions {
+		if _, exists := question["multiSelect"]; !exists {
+			question["multiSelect"] = json.RawMessage("false")
+			changed = true
+		}
+		var options []map[string]json.RawMessage
+		if err := json.Unmarshal(question["options"], &options); err != nil {
+			continue
+		}
+		optionsChanged := false
+		for _, option := range options {
+			if _, exists := option["description"]; !exists {
+				option["description"] = json.RawMessage(`""`)
+				optionsChanged = true
+				changed = true
+			}
+		}
+		if optionsChanged {
+			body, err := json.Marshal(options)
+			if err != nil {
+				return false
+			}
+			question["options"] = body
+		}
+	}
+	if !changed {
+		return false
+	}
+	body, err := json.Marshal(questions)
+	if err != nil {
+		return false
+	}
+	obj["questions"] = body
+	return true
+}
+
+// fillClaudeTodoDefaults supplies Claude's required activeForm label from the
+// Reasonix task content when the caller omitted it.
+func fillClaudeTodoDefaults(obj map[string]json.RawMessage) bool {
+	var todos []map[string]json.RawMessage
+	if err := json.Unmarshal(obj["todos"], &todos); err != nil {
+		return false
+	}
+	changed := false
+	for _, todo := range todos {
+		var activeForm string
+		_ = json.Unmarshal(todo["activeForm"], &activeForm)
+		if strings.TrimSpace(activeForm) != "" {
+			continue
+		}
+		var content string
+		if err := json.Unmarshal(todo["content"], &content); err != nil || strings.TrimSpace(content) == "" {
+			continue
+		}
+		body, err := json.Marshal(content)
+		if err != nil {
+			return false
+		}
+		todo["activeForm"] = body
+		changed = true
+	}
+	if !changed {
+		return false
+	}
+	body, err := json.Marshal(todos)
+	if err != nil {
+		return false
+	}
+	obj["todos"] = body
+	return true
+}
+
+// joinedParallelTaskPrompts flattens a parallel_tasks "tasks" array into one
+// prompt string, blank-line separated. Malformed or empty input yields "".
+func joinedParallelTaskPrompts(tasks json.RawMessage) string {
+	if len(tasks) == 0 {
+		return ""
+	}
+	var items []struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.Unmarshal(tasks, &items); err != nil {
+		return ""
+	}
+	var prompts []string
+	for _, item := range items {
+		if s := strings.TrimSpace(item.Prompt); s != "" {
+			prompts = append(prompts, s)
+		}
+	}
+	return strings.Join(prompts, "\n\n")
 }
 
 // Payload is the JSON envelope written to a hook's stdin.
 type Payload struct {
-	Event         Event           `json:"event"`
-	Cwd           string          `json:"cwd"`
-	ToolName      string          `json:"toolName,omitempty"`
-	ToolArgs      json.RawMessage `json:"toolArgs,omitempty"`
-	Subject       string          `json:"subject,omitempty"`
-	ToolResult    string          `json:"toolResult,omitempty"`
-	Prompt        string          `json:"prompt,omitempty"`
-	LastAssistant string          `json:"lastAssistantText,omitempty"`
-	Turn          int             `json:"turn,omitempty"`
-	Message       string          `json:"message,omitempty"`   // Notification: what needs attention
-	Trigger       string          `json:"trigger,omitempty"`   // PreCompact: "auto" | "manual"
-	Reasoning     string          `json:"reasoning,omitempty"` // PostLLMCall: the model's raw reasoning text
+	Event            Event           `json:"event"`
+	SessionID        string          `json:"sessionId,omitempty"`
+	Cwd              string          `json:"cwd"`
+	ToolName         string          `json:"toolName,omitempty"`
+	ToolArgs         json.RawMessage `json:"toolArgs,omitempty"`
+	Subject          string          `json:"subject,omitempty"`
+	ToolResult       string          `json:"toolResult,omitempty"`
+	Prompt           string          `json:"prompt,omitempty"`
+	LastAssistant    string          `json:"lastAssistantText,omitempty"`
+	Turn             int             `json:"turn,omitempty"`
+	Message          string          `json:"message,omitempty"`   // Notification: what needs attention
+	Trigger          string          `json:"trigger,omitempty"`   // PreCompact: "auto" | "manual"
+	Reasoning        string          `json:"reasoning,omitempty"` // PostLLMCall: the model's raw reasoning text
+	Error            string          `json:"error,omitempty"`
+	Source           string          `json:"source,omitempty"`
+	Reason           string          `json:"reason,omitempty"`
+	NotificationType string          `json:"notificationType,omitempty"`
+	IsInterrupt      bool            `json:"isInterrupt,omitempty"`
 }
 
 // Decision is a single hook invocation's verdict.
@@ -378,17 +862,42 @@ type Report struct {
 	Event    Event
 	Outcomes []Outcome
 	Blocked  bool // at least one outcome blocked (only meaningful on gating events)
+	// Allowed is set when a Claude-imported PermissionRequest hook returned an
+	// explicit JSON "allow" decision on exit 0 (see claudeJSONAllow) — the
+	// caller should treat this as an auto-approval instead of prompting.
+	Allowed bool
 }
 
 // HookOutput is the parsed, model-facing part of a successful hook stdout.
 type HookOutput struct {
 	AdditionalContext string
+	// Deny and DenyReason carry a Claude-style JSON deny decision returned on
+	// exit 0: hookSpecificOutput.permissionDecision for PreToolUse,
+	// hookSpecificOutput.decision.behavior for PermissionRequest, or a
+	// top-level decision:"block" for UserPromptSubmit. Claude hooks commonly
+	// deny this way instead of exiting 2; see
+	// https://code.claude.com/docs/en/hooks.
+	Deny       bool
+	DenyReason string
+	// Allow carries a Claude PermissionRequest "allow" decision
+	// (hookSpecificOutput.decision.behavior == "allow"): the hook answers the
+	// permission dialog on the user's behalf instead of only observing it.
+	Allow bool
 }
 
 type hookJSONOutput struct {
+	// Decision and Reason are UserPromptSubmit's (and Stop/SubagentStop's)
+	// top-level deny shape: {"decision":"block","reason":"..."}.
+	Decision           string `json:"decision"`
+	Reason             string `json:"reason"`
 	HookSpecificOutput struct {
-		HookEventName     Event  `json:"hookEventName"`
-		AdditionalContext string `json:"additionalContext"`
+		HookEventName            Event  `json:"hookEventName"`
+		AdditionalContext        string `json:"additionalContext"`
+		PermissionDecision       string `json:"permissionDecision"`
+		PermissionDecisionReason string `json:"permissionDecisionReason"`
+		Decision                 struct {
+			Behavior string `json:"behavior"`
+		} `json:"decision"`
 	} `json:"hookSpecificOutput"`
 }
 
@@ -410,37 +919,79 @@ func ParseOutput(event Event, stdout string) (HookOutput, []string) {
 		return HookOutput{}, []string{fmt.Sprintf("hook %s returned invalid JSON stdout: %v", event, err)}
 	}
 	spec := parsed.HookSpecificOutput
-	if spec.HookEventName == "" && strings.TrimSpace(spec.AdditionalContext) == "" {
+	topLevelDeny := event == UserPromptSubmit && strings.EqualFold(parsed.Decision, "block")
+	deny := strings.EqualFold(spec.PermissionDecision, "deny") || strings.EqualFold(spec.Decision.Behavior, "deny") || topLevelDeny
+	allow := event == PermissionRequest && strings.EqualFold(spec.Decision.Behavior, "allow")
+	if spec.HookEventName == "" && strings.TrimSpace(spec.AdditionalContext) == "" && !deny && !allow {
 		return HookOutput{}, nil
 	}
-	if spec.HookEventName != event {
+	if spec.HookEventName != "" && spec.HookEventName != event {
 		return HookOutput{}, []string{fmt.Sprintf("hook output event %q does not match current event %q", spec.HookEventName, event)}
 	}
-	return HookOutput{AdditionalContext: strings.TrimSpace(spec.AdditionalContext)}, nil
+	out := HookOutput{AdditionalContext: strings.TrimSpace(spec.AdditionalContext)}
+	if deny {
+		out.Deny = true
+		reason := spec.PermissionDecisionReason
+		if topLevelDeny {
+			reason = parsed.Reason
+		}
+		out.DenyReason = strings.TrimSpace(reason)
+	}
+	out.Allow = allow
+	return out, nil
 }
 
-// decideOutcome maps a spawn result to a verdict.
-func decideOutcome(event Event, r SpawnResult) Decision {
+// decideOutcome maps a spawn result to a verdict for hook h.
+func decideOutcome(h ResolvedHook, r SpawnResult) Decision {
+	blocking := IsBlocking(h.Event) || claudePermissionBlocking(h)
 	switch {
 	case r.SpawnErr != nil:
 		return DecisionError
 	case r.TimedOut:
-		if IsBlocking(event) {
+		if blocking {
 			return DecisionBlock
 		}
 		return DecisionWarn
 	case r.ExitCode == 0:
 		return DecisionPass
-	case r.ExitCode == 2 && IsBlocking(event):
+	case r.ExitCode == 2 && blocking:
 		return DecisionBlock
 	default:
 		return DecisionWarn
 	}
 }
 
+// claudeJSONDeny reports whether a Claude-format hook's exit-0 stdout still
+// carries a JSON deny decision (see HookOutput.Deny). Reasonix must honor it
+// for the events it claims Claude hook compatibility for, or a plugin's
+// "block this dangerous command" hook silently no-ops whenever the script
+// signals deny via JSON instead of exit code 2. UserPromptSubmit uses a
+// top-level decision:"block" instead of PreToolUse/PermissionRequest's
+// hookSpecificOutput shape; ParseOutput handles both.
+func claudeJSONDeny(event Event, stdout string) (bool, string) {
+	if event != PreToolUse && event != PermissionRequest && event != UserPromptSubmit {
+		return false, ""
+	}
+	out, _ := ParseOutput(event, stdout)
+	return out.Deny, out.DenyReason
+}
+
+// claudeJSONAllow reports whether a Claude-format PermissionRequest hook's
+// exit-0 stdout carries an explicit "allow" decision
+// (hookSpecificOutput.decision.behavior == "allow"): the hook answers the
+// permission dialog on the user's behalf, same as an exit-2 deny preempts it.
+func claudeJSONAllow(event Event, stdout string) bool {
+	if event != PermissionRequest {
+		return false
+	}
+	out, _ := ParseOutput(event, stdout)
+	return out.Allow
+}
+
 // SpawnInput / SpawnResult / Spawner are the test seam around the real spawn.
 type SpawnInput struct {
 	Command string
+	Args    []string
 	Cwd     string
 	Env     map[string]string
 	Stdin   string
@@ -470,9 +1021,6 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 		spawner = DefaultSpawner
 	}
 	event := payload.Event
-	stdinBytes, _ := json.Marshal(payload)
-	stdin := string(stdinBytes) + "\n"
-
 	report := Report{Event: event}
 	for _, h := range hooks {
 		if h.Event != event || !MatchesTool(h, payload.ToolName) {
@@ -483,9 +1031,27 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 			cwd = payload.Cwd
 		}
 		timeout := h.timeout()
+		stdin := marshalPayload(payload, h.PayloadFormat)
+		input := SpawnInput{Command: h.Command, Args: h.Argv, Cwd: cwd, Env: h.Env, Stdin: stdin, Timeout: timeout}
+		if h.Async {
+			asyncCtx := context.WithoutCancel(ctx)
+			go runResolvedHook(asyncCtx, h, input, spawner)
+			report.Outcomes = append(report.Outcomes, Outcome{Hook: h, Decision: DecisionPass})
+			continue
+		}
 		start := time.Now()
-		r := runResolvedHook(ctx, h, SpawnInput{Command: h.Command, Cwd: cwd, Env: h.Env, Stdin: stdin, Timeout: timeout}, spawner)
-		decision := decideOutcome(event, r)
+		r := runResolvedHook(ctx, h, input, spawner)
+		decision := decideOutcome(h, r)
+		if decision == DecisionPass && h.PayloadFormat == "claude" {
+			if deny, reason := claudeJSONDeny(event, r.Stdout); deny {
+				decision = DecisionBlock
+				if reason != "" {
+					r.Stdout = reason
+				}
+			} else if claudeJSONAllow(event, r.Stdout) {
+				report.Allowed = true
+			}
+		}
 		report.Outcomes = append(report.Outcomes, Outcome{
 			Hook:      h,
 			Decision:  decision,
@@ -502,6 +1068,56 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 		}
 	}
 	return report
+}
+
+func marshalPayload(payload Payload, format string) string {
+	var body []byte
+	if format == "claude" {
+		claude := map[string]any{
+			"hook_event_name":        payload.Event,
+			"session_id":             payload.SessionID,
+			"cwd":                    payload.Cwd,
+			"tool_name":              claudeFacingToolName(payload.ToolName),
+			"tool_input":             claudeFacingToolInput(payload.ToolName, payload.ToolArgs, payload.Cwd),
+			"tool_response":          claudeToolResponse(payload),
+			"prompt":                 payload.Prompt,
+			"last_assistant_message": payload.LastAssistant,
+			"source":                 payload.Source,
+			"reason":                 payload.Reason,
+			"notification_type":      payload.NotificationType,
+			"message":                payload.Message,
+			"trigger":                payload.Trigger,
+			"error":                  payload.Error,
+			"is_interrupt":           payload.IsInterrupt,
+		}
+		body, _ = json.Marshal(claude)
+	} else {
+		body, _ = json.Marshal(payload)
+	}
+	return string(body) + "\n"
+}
+
+// claudeToolResponse adapts a Reasonix tool result to the tool_response a
+// Claude-authored PostToolUse hook reads. Claude's Bash response is an object
+// — {stdout, stderr, interrupted}, the fields the official security-guidance
+// plugin's commit/push checks read (a non-object response is treated as empty
+// and the check silently passes) — while Reasonix's bash returns one combined
+// output string, so it is wrapped with the failure error as stderr. Other
+// tools' results pass through as before: raw JSON when the result is a JSON
+// document, else the plain string.
+func claudeToolResponse(p Payload) any {
+	if (p.Event == PostToolUse || p.Event == PostToolUseFailure) && claudeFacingToolName(p.ToolName) == "Bash" {
+		return map[string]any{
+			"stdout":      p.ToolResult,
+			"stderr":      p.Error,
+			"interrupted": p.IsInterrupt,
+		}
+	}
+	trimmed := strings.TrimSpace(p.ToolResult)
+	if trimmed == "" || !json.Valid([]byte(trimmed)) {
+		return p.ToolResult
+	}
+	return json.RawMessage(trimmed)
 }
 
 func runResolvedHook(ctx context.Context, h ResolvedHook, in SpawnInput, spawner Spawner) SpawnResult {
@@ -546,7 +1162,10 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 	cctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
 
-	cmd := spawnCommand(cctx, in.Command)
+	cmd, spawnErr := spawnCommand(cctx, in.Command, in.Args)
+	if spawnErr != nil {
+		return SpawnResult{ExitCode: -1, SpawnErr: spawnErr}
+	}
 	proc.HideWindow(cmd)
 	cmd.Dir = in.Cwd
 	env := secrets.ProcessEnv()
@@ -572,8 +1191,8 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 	err := cmd.Run()
 	res := SpawnResult{
 		ExitCode:  -1,
-		Stdout:    strings.TrimSpace(outBuf.String()),
-		Stderr:    strings.TrimSpace(errBuf.String()),
+		Stdout:    decodeHookOutput(outBuf.Bytes(), outBuf.truncated),
+		Stderr:    decodeHookOutput(errBuf.Bytes(), errBuf.truncated),
 		Truncated: outBuf.truncated || errBuf.truncated,
 	}
 	switch {
@@ -603,24 +1222,49 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 //   - on Windows, a recognized node -e stdin-hook command: `cmd /c` mangles
 //     quoted JS (&, %, nested quotes), which is the breakage this repair
 //     exists for, and cmd performs no POSIX-style $ expansion to preserve.
+//   - on Windows, an explicit `sh -c` / `bash -c` command: Git Bash is often
+//     installed outside cmd.exe's PATH, and direct exec preserves its quoting.
 //
 // POSIX commands that were already well-formed keep their shell semantics
 // verbatim — normalizeStaticNodeEval's rendering escapes $ and backticks, so
 // even repaired commands re-entering here behave identically under sh -c.
-func spawnCommand(ctx context.Context, command string) *exec.Cmd {
+func spawnCommand(ctx context.Context, command string, argv ...[]string) (*exec.Cmd, error) {
+	if len(argv) > 0 && argv[0] != nil {
+		if runtime.GOOS == "windows" {
+			if cmd, matched := windowsBatchArgvCommand(ctx, command, argv[0]); matched {
+				return cmd, nil
+			}
+			if shell, args, matched, err := windowsPOSIXShellArgvInvocation(command, argv[0]); matched {
+				if err != nil {
+					return nil, err
+				}
+				return exec.CommandContext(ctx, shell, args...), nil
+			}
+		}
+		return exec.CommandContext(ctx, command, argv[0]...), nil
+	}
 	if node, flag, script, ok := repairableNodeEvalArgs(command); ok {
-		return exec.CommandContext(ctx, node, flag, script)
+		return exec.CommandContext(ctx, node, flag, script), nil
 	}
 	if powershell, args, ok := repairablePowerShellFileArgs(command); ok {
-		return exec.CommandContext(ctx, powershell, args...)
+		return exec.CommandContext(ctx, powershell, args...), nil
 	}
 	if runtime.GOOS == "windows" {
+		if cmd, matched := windowsBatchCommand(ctx, command); matched {
+			return cmd, nil
+		}
+		if shell, args, matched, err := windowsPOSIXShellInvocation(command); matched {
+			if err != nil {
+				return nil, err
+			}
+			return exec.CommandContext(ctx, shell, args...), nil
+		}
 		if node, flag, script, ok := directNodeEvalArgs(command); ok {
-			return exec.CommandContext(ctx, node, flag, script)
+			return exec.CommandContext(ctx, node, flag, script), nil
 		}
 	}
 	name, args := shellInvocation(command)
-	return exec.CommandContext(ctx, name, args...)
+	return exec.CommandContext(ctx, name, args...), nil
 }
 
 func shellInvocation(command string) (string, []string) {
@@ -653,6 +1297,7 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (c *cappedBuffer) Bytes() []byte  { return c.buf.Bytes() }
 func (c *cappedBuffer) String() string { return c.buf.String() }
 
 func reasonixHome(override string) string {

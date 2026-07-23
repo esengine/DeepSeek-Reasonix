@@ -148,6 +148,22 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 	return p.DecideSubjects(toolName, readOnly, Subjects(args))
 }
 
+// ExplicitlyDenies reports only configured deny-rule matches. It deliberately
+// excludes the fallback Mode so installing or explicitly authorizing an MCP
+// server remains the final allow decision.
+func (p Policy) ExplicitlyDenies(toolName string, args json.RawMessage) bool {
+	subjects := Subjects(args)
+	if len(subjects) == 0 {
+		subjects = []string{""}
+	}
+	for _, subject := range subjects {
+		if matchAny(p.Deny, toolName, subject) {
+			return true
+		}
+	}
+	return false
+}
+
 // DecideSubject evaluates a tool call when the caller already extracted the
 // stable approval subject from args.
 func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) Decision {
@@ -447,8 +463,7 @@ func NewGate(p Policy, a Approver) *Gate { return &Gate{Policy: p, Approver: a} 
 // reason the agent feeds back to the model.
 func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (bool, string, error) {
 	if toolName == "bash" && !readOnly {
-		subject := Subject(args)
-		if isReadOnlyBashSubject(subject) {
+		if BashCommandIsReadOnly(args) {
 			readOnly = true
 		}
 	}
@@ -489,6 +504,13 @@ func (g *Gate) Check(ctx context.Context, toolName string, args json.RawMessage,
 	default:
 		return true, "", nil
 	}
+}
+
+// ExplicitlyDenies reports whether an explicit deny rule matches. Authorized
+// MCP servers use this narrow view so install-time authorization is not
+// followed by redundant per-call approval prompts.
+func (g *Gate) ExplicitlyDenies(toolName string, args json.RawMessage) bool {
+	return g.Policy.ExplicitlyDenies(toolName, args)
 }
 
 func (g *Gate) approve(ctx context.Context, toolName, subject string, args json.RawMessage) (bool, bool, string, error) {

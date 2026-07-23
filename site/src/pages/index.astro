@@ -1,10 +1,14 @@
 ---
 import Base from '../layouts/Base.astro';
+import SiteHeader from '../components/SiteHeader.astro';
 import community from '../data/community.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const R2_LATEST = 'https://dl.reasonix.io/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const vscodeMarketplace = 'https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent';
+const openVsx = 'https://open-vsx.org/extension/SivanLiu/reasonix-agent';
+const vscodeExtensionRepo = 'https://github.com/SivanCola/reasonix-vscode';
 
 let desktopVersion = 'v1.1.0';
 let goVer = '1.1.0';
@@ -25,7 +29,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open-source AI coding agent for your terminal and browser, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop · web UI. MIT.";
+const desc = "Open-source AI coding agent for your terminal, browser, and ACP-compatible editor, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop · web UI. MIT.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -48,25 +52,7 @@ const ld = {
 
   <script type="application/ld+json" set:html={JSON.stringify(ld)} slot="head" is:inline />
 
-  <header class="nav">
-    <div class="nav-inner">
-      <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="Reasonix logo" /><span>Reasonix</span></a>
-      <nav class="nav-links">
-        <a href="#features"><span class="l-en">Features</span><span class="l-zh">特性</span></a>
-        <a href="#how"><span class="l-en">How it works</span><span class="l-zh">工作原理</span></a>
-        <a href={`${base}/skills/`}><span class="l-en">Skills</span><span class="l-zh">技能市场</span></a>
-        <a href="#community"><span class="l-en">Community</span><span class="l-zh">社区</span></a>
-        <a href={`${base}/docs/`}><span class="l-en">Docs</span><span class="l-zh">文档</span></a>
-        <a href="#start"><span class="l-en">Get started</span><span class="l-zh">快速开始</span></a>
-      </nav>
-      <div class="lang-switch" role="group" aria-label="Language">
-        <button type="button" data-lang="en" class="active">EN</button>
-        <button type="button" data-lang="zh">中文</button>
-      </div>
-      <a class="btn btn-ghost" href={`${base}/login/`}><span class="l-en">Sign in</span><span class="l-zh">登录</span></a>
-      <a class="btn btn-dark" href="#start"><span class="l-en">Install</span><span class="l-zh">安装</span></a>
-    </div>
-  </header>
+  <SiteHeader />
 
   <main>
   <section class="hero">
@@ -74,12 +60,12 @@ const ld = {
     <div class="wrap">
       <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">DeepSeek-native · built for your terminal · MIT</span><span class="l-zh">DeepSeek 原生 · 为终端而生 · MIT</span></div>
       <h1 class="reveal" style="--d:0.06s">
-        <span class="l-en">A <span class="grad">DeepSeek</span>-native agent<br />for your terminal.</span>
-        <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 Agent。</span>
+        <span class="l-en">A <span class="grad">DeepSeek</span>-native agent<br />for your <span class="tt">terminal</span>.</span>
+        <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 <span class="tt">Agent</span>。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, or local browser UI.</span>
-        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。CLI/TUI、桌面端和本地浏览器 UI 共用同一引擎。</span>
+        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, local browser UI, or an ACP-compatible editor.</span>
+        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。CLI/TUI、桌面端、本地浏览器 UI 和兼容 ACP 的编辑器共用同一引擎。</span>
       </p>
       <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
         <div class="install-option install-option--desktop">
@@ -93,7 +79,32 @@ const ld = {
           <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
         </div>
       </div>
-      <div class="also reveal" style="--d:0.22s"><span class="l-en">Prefer package managers? Use <a href="#start" data-goto="brew">Homebrew</a>. Need a local browser UI? Run <code>reasonix serve</code>.</span><span class="l-zh">偏好包管理器? 可用 <a href="#start" data-goto="brew">Homebrew</a>。需要本地浏览器 UI? 运行 <code>reasonix serve</code>。</span></div>
+      <nav class="also reveal" style="--d:0.22s" aria-label="More ways to use Reasonix / 更多使用方式">
+        <span class="l-en also-row">
+          <strong class="also-label">More ways to use Reasonix:</strong>
+          <span class="also-links">
+            <a href="?download=vscode#start" data-goto="vscode">Editor extension</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href="#start" data-goto="brew">Homebrew</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <span>Local Web UI: <code>reasonix serve</code></span>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href={`${base}/docs/#acp`}>ACP editor integration</a>
+          </span>
+        </span>
+        <span class="l-zh also-row">
+          <strong class="also-label">更多使用方式：</strong>
+          <span class="also-links">
+            <a href="?download=vscode#start" data-goto="vscode">编辑器扩展</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href="#start" data-goto="brew">Homebrew</a>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <span>本地 Web UI：<code>reasonix serve</code></span>
+            <span class="also-sep" aria-hidden="true">·</span>
+            <a href={`${base}/docs/#acp`}>ACP 编辑器接入</a>
+          </span>
+        </span>
+      </nav>
 
       <div class="term-stage reveal" style="--d:0.26s">
         <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
@@ -133,8 +144,8 @@ const ld = {
         <div class="feat reveal" style="--d:0.1s">
           <span class="tag">04 / plan + sandbox</span>
           <h3><span class="l-en">Plan mode &amp; sandbox</span><span class="l-zh">计划模式 + 沙箱</span></h3>
-          <p><span class="l-en">Writers are jailed to the workspace; <code>/plan</code> gates the session read-only until you approve.</span><span class="l-zh">写工具被关进工作区;<code>/plan</code> 进只读门,批准前不写盘。</span></p>
-          <code class="feat-chip">$ /plan → read-only until approved</code>
+          <p><span class="l-en"><code>/plan</code> asks the model to plan first; Permissions and the workspace sandbox still govern every tool call.</span><span class="l-zh"><code>/plan</code> 要求模型先规划；每次工具调用仍由权限与工作区沙箱控制。</span></p>
+          <code class="feat-chip">$ /plan → plan first · permissions still apply</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
           <span class="tag">05 / subagents</span>
@@ -142,10 +153,10 @@ const ld = {
           <p><span class="l-en">explore / research / review / security-review agents, plus Markdown skill scripts with isolated tools.</span><span class="l-zh">explore / research / review / security-review 子智能体,加 Markdown 技能脚本与隔离工具。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
-          <span class="tag">06 / cli + web</span>
-          <h3><span class="l-en">Terminal or browser</span><span class="l-zh">终端或浏览器</span></h3>
-          <p><span class="l-en">Use <code>reasonix</code> in the terminal, or run <code>reasonix serve</code> for a local browser UI with approvals, Goal, todos, and balance.</span><span class="l-zh">在终端使用 <code>reasonix</code>,或运行 <code>reasonix serve</code> 打开本地浏览器 UI,包含审批、Goal、Todo 与余额。</span></p>
-          <code class="feat-chip">$ reasonix serve --auth token</code>
+          <span class="tag">06 / cli + web + acp</span>
+          <h3><span class="l-en">Terminal, browser, or editor</span><span class="l-zh">终端、浏览器或编辑器</span></h3>
+          <p><span class="l-en">Use the full-screen TUI, run <code>reasonix serve</code> for a local browser UI, <a href="?download=vscode#start" data-goto="vscode">install the Reasonix VS Code extension</a>, or connect another ACP-compatible editor through <code>reasonix acp</code>. Every surface uses the same local engine.</span><span class="l-zh">使用全屏 TUI、通过 <code>reasonix serve</code> 打开本地浏览器 UI、<a href="?download=vscode#start" data-goto="vscode">安装 Reasonix VS Code 扩展</a>，或通过 <code>reasonix acp</code> 连接其他兼容 ACP 的编辑器；所有入口都使用同一套本地引擎。</span></p>
+          <code class="feat-chip">$ reasonix acp</code>
         </div>
       </div>
     </div>
@@ -266,34 +277,13 @@ const ld = {
 
     <div class="dl reveal" style="--d:0.14s">
       <div class="dl-tabs" role="tablist">
-        <button class="dl-tab active" type="button" data-pane="npm" role="tab">npm</button>
+        <button class="dl-tab active" type="button" data-pane="desktop" role="tab"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
+        <button class="dl-tab" type="button" data-pane="npm" role="tab">npm</button>
         <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
-        <button class="dl-tab" type="button" data-pane="desktop" role="tab"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
+        <button class="dl-tab" type="button" data-pane="vscode" role="tab"><span class="l-en">Editor extension</span><span class="l-zh">编辑器扩展</span></button>
       </div>
 
-      <div class="dl-pane active" data-pane="npm">
-        <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
-        <div class="chan">
-          <div class="chan-row rec">
-            <code>npm i -g reasonix</code><span class="v">v<span class="rxv">{goVer}</span></span>
-            <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
-            <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
-          </div>
-          <div class="chan-row">
-            <code>npm i -g reasonix@0.53.2</code><span class="v">v0.53.2</span>
-            <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
-            <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
-          </div>
-        </div>
-        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${repo}/releases/tag/v${goVer}`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
-      </div>
-
-      <div class="dl-pane" data-pane="brew">
-        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
-        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
-      </div>
-
-      <div class="dl-pane" data-pane="desktop">
+      <div class="dl-pane active" data-pane="desktop">
         <div class="os-grid">
           <div class="os-card" data-os="mac">
             <h4>macOS</h4>
@@ -331,6 +321,45 @@ const ld = {
           <button type="button" data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button>
           <a href={`${base}/docs/#macos-quarantine`}><span class="l-en">When to use this →</span><span class="l-zh">查看适用场景 →</span></a>
         </div>
+      </div>
+
+      <div class="dl-pane" data-pane="vscode">
+        <div class="os-grid editor-grid">
+          <div class="os-card editor-card editor-card--primary">
+            <span class="os-chip"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
+            <h4>Visual Studio Marketplace</h4>
+            <span class="meta"><span class="l-en">For Microsoft Visual Studio Code</span><span class="l-zh">适用于微软 Visual Studio Code</span></span>
+            <a class="btn btn-dark" href={vscodeMarketplace} target="_blank" rel="noreferrer"><span class="l-en">Install extension</span><span class="l-zh">安装扩展</span></a>
+          </div>
+          <div class="os-card editor-card">
+            <h4>Open VSX Registry</h4>
+            <span class="meta"><span class="l-en">For VSCodium, Eclipse Theia, and compatible editors</span><span class="l-zh">适用于 VSCodium、Eclipse Theia 及兼容编辑器</span></span>
+            <a class="btn btn-light" href={openVsx} target="_blank" rel="noreferrer"><span class="l-en">Install from Open VSX</span><span class="l-zh">从 Open VSX 安装</span></a>
+          </div>
+        </div>
+        <div class="dl-note editor-note"><span class="l-en">Extension ID <code>SivanLiu.reasonix-agent</code> · requires Reasonix 1.0+ installed and configured locally · the extension connects to <code>reasonix acp</code> and does not bundle the CLI · <a href={vscodeExtensionRepo}>source code →</a></span><span class="l-zh">扩展 ID <code>SivanLiu.reasonix-agent</code> · 需要先在本机安装并配置 Reasonix 1.0+ · 扩展连接 <code>reasonix acp</code>，不内置 CLI · <a href={vscodeExtensionRepo}>查看源码 →</a></span></div>
+      </div>
+
+      <div class="dl-pane" data-pane="npm">
+        <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
+        <div class="chan">
+          <div class="chan-row rec">
+            <code>npm i -g reasonix</code><span class="v">v<span class="rxv">{goVer}</span></span>
+            <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
+            <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
+          </div>
+          <div class="chan-row">
+            <code>npm i -g reasonix@0.53.2</code><span class="v">v0.53.2</span>
+            <span class="s"><span class="l-en">deprecated 0.x line · no longer maintained</span><span class="l-zh">已废弃的 0.x 线 · 不再维护</span></span>
+            <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
+          </div>
+        </div>
+        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
+      </div>
+
+      <div class="dl-pane" data-pane="brew">
+        <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
+        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
       </div>
     </div>
   </section>

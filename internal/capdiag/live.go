@@ -77,7 +77,7 @@ func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home string, timeout
 		connected[s.Name] = true
 		tools := make([]MCPToolInfo, 0, len(s.ToolList))
 		for _, t := range s.ToolList {
-			tools = append(tools, MCPToolInfo{Name: t.Name, ReadOnlyHint: t.ReadOnlyHint})
+			tools = append(tools, MCPToolInfo{Name: t.Name, ReadOnlyHint: t.ReadOnlyHint, DestructiveHint: t.DestructiveHint})
 		}
 		if i, ok := byName[s.Name]; ok {
 			rep.Servers[i].RuntimeStatus = "probed"

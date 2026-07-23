@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,15 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 )
+
+type runtimeStatusSessionController struct {
+	control.SessionAPI
+	status control.RuntimeStatus
+}
+
+func (c *runtimeStatusSessionController) RuntimeStatus() control.RuntimeStatus {
+	return c.status
+}
 
 func waitForTabReady(t *testing.T, app *App, tabID string) *WorkspaceTab {
 	t.Helper()
@@ -354,6 +364,282 @@ func TestDeleteTopicClearsPinnedTopic(t *testing.T) {
 	}
 	if got := projects[0].PinnedTopics; len(got) != 0 {
 		t.Fatalf("pinned topics after delete = %v, want empty", got)
+	}
+}
+
+func assertTopicFullyDeleted(t *testing.T, projectRoot, topicID string) {
+	t.Helper()
+	if got := loadTopicTitle(projectRoot, topicID); got != "" {
+		t.Fatalf("topic title = %q, want deleted", got)
+	}
+	if got := loadTopicTitleSources(projectRoot); got[topicID] != "" {
+		t.Fatalf("title source = %q, want deleted (all sources: %v)", got[topicID], got)
+	}
+	if got := loadTopicCreatedAts(projectRoot); got[topicID] != 0 {
+		t.Fatalf("created-at = %d, want deleted (all created: %v)", got[topicID], got)
+	}
+	if got := loadTopicAutoTitleMeta(projectRoot); got != nil {
+		if meta, ok := got[topicID]; ok {
+			t.Fatalf("auto-title meta = %+v, want deleted (all auto-title meta: %v)", meta, got)
+		}
+	}
+	f := loadProjectsFile()
+	i := projectIndexByRoot(f.Projects, projectRoot)
+	if i < 0 {
+		t.Fatalf("projects = %#v, want entry for %q", f.Projects, projectRoot)
+	}
+	if containsDesktopString(f.Projects[i].Topics, topicID) {
+		t.Fatalf("project topics = %#v, %q should be removed", f.Projects[i].Topics, topicID)
+	}
+	if !containsDesktopString(f.DeletedTopics, topicID) {
+		t.Fatalf("deletedTopics = %#v, want tombstone for %q", f.DeletedTopics, topicID)
+	}
+}
+
+func TestDeleteTopicRetryAfterPartialFailureCompletesCleanup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_partial_delete"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Doomed"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := setTopicCreatedAt(projectRoot, topicID, 4242); err != nil {
+		t.Fatalf("set created-at: %v", err)
+	}
+	if err := prependTopicInProjectsFile(projectRoot, topicID, false); err != nil {
+		t.Fatalf("index topic: %v", err)
+	}
+
+	// Inject a failure before title removal: swapping the title-sources file
+	// for a directory makes its load fail while the title locator is intact.
+	sourcesPath := topicTitleSourcesPath(projectRoot)
+	backupPath := sourcesPath + ".bak"
+	if err := os.Rename(sourcesPath, backupPath); err != nil {
+		t.Fatalf("stash title sources: %v", err)
+	}
+	if err := os.Mkdir(sourcesPath, 0o755); err != nil {
+		t.Fatalf("block title sources: %v", err)
+	}
+
+	app := NewApp()
+	if err := app.DeleteTopic(topicID); err == nil {
+		t.Fatalf("delete with failing title-sources load should report an error")
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "Doomed" {
+		t.Fatalf("failed attempt must keep the title as the root locator, got %q", got)
+	}
+
+	// Heal the fault and retry: the retry must finish the remaining cleanup
+	// instead of treating a partially-deleted topic as an already-finished
+	// deletion.
+	if err := os.Remove(sourcesPath); err != nil {
+		t.Fatalf("unblock title sources: %v", err)
+	}
+	if err := os.Rename(backupPath, sourcesPath); err != nil {
+		t.Fatalf("restore title sources: %v", err)
+	}
+	if err := app.DeleteTopic(topicID); err != nil {
+		t.Fatalf("retry delete: %v", err)
+	}
+	assertTopicFullyDeleted(t, projectRoot, topicID)
+}
+
+func TestDeleteTopicWithoutTitleEntryStillRemovesIndexAndTombstones(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_leftover_delete"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Doomed"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := setTopicCreatedAt(projectRoot, topicID, 4242); err != nil {
+		t.Fatalf("set created-at: %v", err)
+	}
+	if err := prependTopicInProjectsFile(projectRoot, topicID, false); err != nil {
+		t.Fatalf("index topic: %v", err)
+	}
+	// Strip just the title entry to mimic an interrupted earlier deletion:
+	// sources, created-at, and the sidebar index survived it.
+	titles, err := loadTopicTitlesForUpdate(projectRoot)
+	if err != nil {
+		t.Fatalf("load titles: %v", err)
+	}
+	delete(titles, topicID)
+	if err := saveTopicTitles(projectRoot, titles); err != nil {
+		t.Fatalf("save titles: %v", err)
+	}
+
+	if err := NewApp().DeleteTopic(topicID); err != nil {
+		t.Fatalf("delete topic: %v", err)
+	}
+	assertTopicFullyDeleted(t, projectRoot, topicID)
+}
+
+func TestDeleteTopicTitleOnlyRetryAfterSourceFailureCompletesCleanup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_title_only_delete"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	// No prependTopicInProjectsFile: the topic renders purely through the
+	// orderedTopicIDs title-map fallback, so the title entry is the only
+	// locator a retry can use.
+	if err := setTopicTitle(projectRoot, topicID, "Doomed"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := setTopicCreatedAt(projectRoot, topicID, 4242); err != nil {
+		t.Fatalf("set created-at: %v", err)
+	}
+
+	sourcesPath := topicTitleSourcesPath(projectRoot)
+	backupPath := sourcesPath + ".bak"
+	if err := os.Rename(sourcesPath, backupPath); err != nil {
+		t.Fatalf("stash title sources: %v", err)
+	}
+	if err := os.Mkdir(sourcesPath, 0o755); err != nil {
+		t.Fatalf("block title sources: %v", err)
+	}
+
+	app := NewApp()
+	if err := app.DeleteTopic(topicID); err == nil {
+		t.Fatalf("delete with failing title-sources load should report an error")
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "Doomed" {
+		t.Fatalf("failed attempt must keep the title as the root locator, got %q", got)
+	}
+
+	if err := os.Remove(sourcesPath); err != nil {
+		t.Fatalf("unblock title sources: %v", err)
+	}
+	if err := os.Rename(backupPath, sourcesPath); err != nil {
+		t.Fatalf("restore title sources: %v", err)
+	}
+	if err := app.DeleteTopic(topicID); err != nil {
+		t.Fatalf("retry delete: %v", err)
+	}
+	assertTopicFullyDeleted(t, projectRoot, topicID)
+}
+
+func TestDeleteTopicTitleOnlyRetryAfterSecondaryMetadataFailureCompletesCleanup(t *testing.T) {
+	tests := []struct {
+		name string
+		path func(string) string
+	}{
+		{name: "created-at", path: topicCreatedAtsPath},
+		{name: "auto-title-meta", path: topicAutoTitleMetaPath},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateDesktopUserDirs(t)
+
+			projectRoot := t.TempDir()
+			topicID := "topic_title_only_" + strings.ReplaceAll(tt.name, "-", "_")
+			if err := addProject(projectRoot, ""); err != nil {
+				t.Fatalf("add project: %v", err)
+			}
+			if err := setTopicTitle(projectRoot, topicID, "Doomed"); err != nil {
+				t.Fatalf("set topic title: %v", err)
+			}
+			if err := setTopicCreatedAt(projectRoot, topicID, 4242); err != nil {
+				t.Fatalf("set created-at: %v", err)
+			}
+			if err := recordTopicAutoTitleMeta(projectRoot, topicID, autoTopicTitleProposal{
+				Stage: 1, UserTurns: 1, BasisHash: "review-basis",
+			}); err != nil {
+				t.Fatalf("record auto-title meta: %v", err)
+			}
+
+			blockedPath := tt.path(projectRoot)
+			backupPath := blockedPath + ".bak"
+			if err := os.Rename(blockedPath, backupPath); err != nil {
+				t.Fatalf("stash %s: %v", tt.name, err)
+			}
+			if err := os.Mkdir(blockedPath, 0o755); err != nil {
+				t.Fatalf("block %s: %v", tt.name, err)
+			}
+
+			app := NewApp()
+			if err := app.DeleteTopic(topicID); err == nil {
+				t.Fatalf("delete with failing %s cleanup should report an error", tt.name)
+			}
+			if got := loadTopicTitle(projectRoot, topicID); got != "Doomed" {
+				t.Fatalf("failed attempt must keep the title as the root locator, got %q", got)
+			}
+
+			if err := os.Remove(blockedPath); err != nil {
+				t.Fatalf("unblock %s: %v", tt.name, err)
+			}
+			if err := os.Rename(backupPath, blockedPath); err != nil {
+				t.Fatalf("restore %s: %v", tt.name, err)
+			}
+			if err := app.DeleteTopic(topicID); err != nil {
+				t.Fatalf("retry delete after %s failure: %v", tt.name, err)
+			}
+			assertTopicFullyDeleted(t, projectRoot, topicID)
+		})
+	}
+}
+
+func TestDeleteTopicIgnoresUnrelatedProjectMetadataDamage(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	// The broken project is added first so the cleanup sweep meets it before
+	// reaching the target root.
+	brokenRoot := t.TempDir()
+	targetRoot := t.TempDir()
+	topicID := "topic_target_delete"
+	if err := addProject(brokenRoot, ""); err != nil {
+		t.Fatalf("add broken project: %v", err)
+	}
+	if err := addProject(targetRoot, ""); err != nil {
+		t.Fatalf("add target project: %v", err)
+	}
+	if err := setTopicTitle(brokenRoot, "topic_unrelated", "Unrelated"); err != nil {
+		t.Fatalf("set unrelated topic title: %v", err)
+	}
+	if err := setTopicTitle(targetRoot, topicID, "Doomed"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	if err := setTopicCreatedAt(targetRoot, topicID, 4242); err != nil {
+		t.Fatalf("set created-at: %v", err)
+	}
+	if err := prependTopicInProjectsFile(targetRoot, topicID, false); err != nil {
+		t.Fatalf("index topic: %v", err)
+	}
+
+	// Make the unrelated project's title metadata unreadable: deleting the
+	// target topic must skip over it instead of aborting half-way.
+	for _, path := range []string{topicTitlesPath(brokenRoot), topicTitleSourcesPath(brokenRoot)} {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("remove %s: %v", path, err)
+		}
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatalf("block %s: %v", path, err)
+		}
+	}
+
+	if err := NewApp().DeleteTopic(topicID); err != nil {
+		t.Fatalf("delete topic with unrelated broken project: %v", err)
+	}
+	assertTopicFullyDeleted(t, targetRoot, topicID)
+
+	// The broken project's own sidebar index must be untouched.
+	f := loadProjectsFile()
+	if i := projectIndexByRoot(f.Projects, brokenRoot); i < 0 {
+		t.Fatalf("projects = %#v, want entry for broken root", f.Projects)
+	}
+	if containsDesktopString(f.DeletedTopics, "topic_unrelated") {
+		t.Fatalf("deletedTopics = %#v, unrelated topic must not be tombstoned", f.DeletedTopics)
 	}
 }
 
@@ -2580,7 +2866,7 @@ func TestTrashTopicMovesOpenSessionToTrash(t *testing.T) {
 	}
 }
 
-func TestTrashTopicCancelsRunningSessionRuntime(t *testing.T) {
+func TestTrashTopicRejectsRunningSessionRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
@@ -2627,22 +2913,237 @@ func TestTrashTopicCancelsRunningSessionRuntime(t *testing.T) {
 
 	ctrl.Submit("long turn")
 	<-runner.started
-	if err := app.TrashTopic(topicID); err != nil {
-		t.Fatalf("trash topic: %v", err)
+	defer close(runner.release)
+	if err := app.TrashTopic(topicID); !errors.Is(err, errTopicHasActiveWork) {
+		t.Fatalf("trash running topic error = %v, want %v", err, errTopicHasActiveWork)
 	}
-	waitNotRunning(t, ctrl)
-	if _, ok := app.tabs["running"]; ok {
-		t.Fatalf("running topic runtime should be removed")
+	if !ctrl.Running() {
+		t.Fatal("rejected archive should leave the controller running")
 	}
-	if got := app.activeTabID; got != "keep" {
-		t.Fatalf("active tab = %q, want keep", got)
+	if _, ok := app.tabs["running"]; !ok {
+		t.Fatal("rejected archive should keep the running topic tab")
 	}
-	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
-		t.Fatalf("running topic session should be moved out of active history, stat err = %v", err)
+	if got := app.activeTabID; got != "running" {
+		t.Fatalf("active tab = %q, want running", got)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("rejected archive should preserve the live session: %v", err)
 	}
 	trashPath := filepath.Join(dir, sessionTrashDir, "running-trash.jsonl", "running-trash.jsonl")
-	if _, err := os.Stat(trashPath); err != nil {
-		t.Fatalf("running topic session should be moved to trash: %v", err)
+	if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
+		t.Fatalf("rejected archive created a trash entry, stat err = %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "Running trash" {
+		t.Fatalf("rejected archive topic title = %q, want Running trash", got)
+	}
+}
+
+func TestTrashTopicRejectsRunningDetachedRuntime(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_detached_running_trash"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Detached running trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSession(t, dir, "detached-running-trash.jsonl", topicID, "Detached running trash", projectRoot)
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: sessionPath, Label: "test", WorkspaceRoot: projectRoot})
+	defer ctrl.Close()
+	defer close(runner.release)
+	detachedKey := sessionRuntimeKey(sessionPath)
+	detached := &WorkspaceTab{
+		ID:            detachedRuntimeTabID(detachedKey),
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topicID,
+		TopicTitle:    "Detached running trash",
+		SessionPath:   sessionPath,
+		Ctrl:          ctrl,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{detachedKey: detached},
+	}
+
+	ctrl.Submit("long detached turn")
+	<-runner.started
+	if err := app.TrashTopic(topicID); !errors.Is(err, errTopicHasActiveWork) {
+		t.Fatalf("trash detached running topic error = %v, want %v", err, errTopicHasActiveWork)
+	}
+	if !ctrl.Running() {
+		t.Fatal("rejected archive should leave the detached controller running")
+	}
+	if got := app.detachedSessions[detachedKey]; got != detached {
+		t.Fatalf("rejected archive detached runtime = %p, want %p", got, detached)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("rejected archive should preserve the detached session: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "detached-running-trash.jsonl", "detached-running-trash.jsonl")
+	if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
+		t.Fatalf("rejected archive created a trash entry, stat err = %v", err)
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "Detached running trash" {
+		t.Fatalf("rejected archive topic title = %q, want Detached running trash", got)
+	}
+}
+
+func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	topicID := "topic_concurrent_turn_trash"
+	if err := setTopicTitle("", topicID, "Concurrent turn trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessionPath := writeTopicSessionWithPrompt(
+		t, dir, "concurrent-turn-trash.jsonl", topicID, "Concurrent turn trash", "", "existing turn", time.Now(),
+	)
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: sessionPath, Label: "test"})
+	defer ctrl.Close()
+	defer close(runner.release)
+	tab := &WorkspaceTab{
+		ID:            "concurrent",
+		Scope:         "global",
+		WorkspaceRoot: globalTabWorkspaceRoot(),
+		TopicID:       topicID,
+		TopicTitle:    "Concurrent turn trash",
+		SessionPath:   sessionPath,
+		Ctrl:          ctrl,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{
+		tabs:        map[string]*WorkspaceTab{tab.ID: tab},
+		tabOrder:    []string{tab.ID},
+		activeTabID: tab.ID,
+	}
+
+	// Hold the per-tab gate so SubmitToTab owns the shared admission lock but
+	// cannot make the controller observably busy yet.
+	tab.turnStartMu.Lock()
+	turnGateHeld := true
+	defer func() {
+		if turnGateHeld {
+			tab.turnStartMu.Unlock()
+		}
+	}()
+	submitDone := make(chan error, 1)
+	go func() { submitDone <- app.SubmitToTab(tab.ID, "concurrent turn") }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for app.runtimeAdmissionMu.TryLock() {
+		app.runtimeAdmissionMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("concurrent turn never acquired the runtime admission read lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	trashEntered := make(chan struct{})
+	var trashEnteredOnce sync.Once
+	app.runtimeMutationBeforeLockHook = func(operation string) {
+		if operation == "trash-topic" {
+			trashEnteredOnce.Do(func() { close(trashEntered) })
+		}
+	}
+	trashDone := make(chan error, 1)
+	go func() { trashDone <- app.TrashTopic(topicID) }()
+	select {
+	case <-trashEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("TrashTopic did not reach the runtime mutation barrier")
+	}
+
+	// Wait until TrashTopic owns runtimeRebuildMu and is queued on the admission
+	// writer. Releasing the turn gate now must let SubmitToTab publish Running
+	// before TrashTopic can re-check active work.
+	deadline = time.Now().Add(5 * time.Second)
+	for app.runtimeRebuildMu.TryLock() {
+		app.runtimeRebuildMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("TrashTopic never acquired the runtime rebuild lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	tab.turnStartMu.Unlock()
+	turnGateHeld = false
+
+	if err := <-submitDone; err != nil {
+		t.Fatalf("SubmitToTab: %v", err)
+	}
+	<-runner.started
+	if err := <-trashDone; !errors.Is(err, errTopicHasActiveWork) {
+		t.Fatalf("concurrent TrashTopic error = %v, want %v", err, errTopicHasActiveWork)
+	}
+	if !ctrl.Running() {
+		t.Fatal("rejected archive should leave the concurrently admitted turn running")
+	}
+	if got := app.tabs[tab.ID]; got != tab {
+		t.Fatalf("rejected archive tab = %p, want %p", got, tab)
+	}
+	if _, err := os.Stat(sessionPath); err != nil {
+		t.Fatalf("rejected archive should preserve the concurrently active session: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "concurrent-turn-trash.jsonl", "concurrent-turn-trash.jsonl")
+	if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
+		t.Fatalf("rejected archive created a trash entry, stat err = %v", err)
+	}
+	if got := loadTopicTitle("", topicID); got != "Concurrent turn trash" {
+		t.Fatalf("rejected archive topic title = %q, want Concurrent turn trash", got)
+	}
+}
+
+func TestTrashTopicRejectsPendingPrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	topicID := "topic_pending_trash"
+	if err := addProject(projectRoot, ""); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	if err := setTopicTitle(projectRoot, topicID, "Pending trash"); err != nil {
+		t.Fatalf("set topic title: %v", err)
+	}
+	app := &App{
+		tabs: map[string]*WorkspaceTab{
+			"pending": {
+				ID:            "pending",
+				Scope:         "project",
+				WorkspaceRoot: projectRoot,
+				TopicID:       topicID,
+				TopicTitle:    "Pending trash",
+				Ctrl:          &runtimeStatusSessionController{status: control.RuntimeStatus{PendingPrompt: true}},
+				Ready:         true,
+				disabledMCP:   map[string]ServerView{},
+			},
+		},
+		tabOrder:    []string{"pending"},
+		activeTabID: "pending",
+	}
+
+	if err := app.TrashTopic(topicID); !errors.Is(err, errTopicHasActiveWork) {
+		t.Fatalf("trash pending topic error = %v, want %v", err, errTopicHasActiveWork)
+	}
+	if _, ok := app.tabs["pending"]; !ok {
+		t.Fatal("rejected archive should keep the pending topic tab")
+	}
+	if got := loadTopicTitle(projectRoot, topicID); got != "Pending trash" {
+		t.Fatalf("rejected archive topic title = %q, want Pending trash", got)
 	}
 }
 
@@ -2941,7 +3442,7 @@ func TestCloseTabKeepsIndexedBlankSession(t *testing.T) {
 	}
 }
 
-func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
+func TestTrashTopicTrashConflictAllowsIdleRuntime(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	projectRoot := t.TempDir()
@@ -2960,13 +3461,12 @@ func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dir, sessionTrashDir, filepath.Base(sessionPath)), 0o755); err != nil {
 		t.Fatalf("create trash conflict: %v", err)
 	}
-	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
-	ctrl := control.New(control.Options{Runner: runner, SessionDir: dir, SessionPath: sessionPath, Label: "test", WorkspaceRoot: projectRoot})
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: sessionPath, Label: "test", WorkspaceRoot: projectRoot})
 	defer ctrl.Close()
 	app := &App{
 		tabs: map[string]*WorkspaceTab{
-			"running": {
-				ID:            "running",
+			"idle": {
+				ID:            "idle",
 				Scope:         "project",
 				WorkspaceRoot: projectRoot,
 				TopicID:       topicID,
@@ -2976,12 +3476,10 @@ func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
 				disabledMCP:   map[string]ServerView{},
 			},
 		},
-		tabOrder:    []string{"running"},
-		activeTabID: "running",
+		tabOrder:    []string{"idle"},
+		activeTabID: "idle",
 	}
 
-	ctrl.Submit("long turn")
-	<-runner.started
 	err := app.TrashTopic(topicID)
 	if err != nil {
 		t.Fatalf("TrashTopic should succeed after cleaning empty trash dir: %v", err)
@@ -2989,9 +3487,6 @@ func TestTrashTopicTrashConflictKeepsRunningRuntime(t *testing.T) {
 	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
 		t.Fatalf("session file should be moved to trash, stat err = %v", err)
 	}
-
-	close(runner.release)
-	waitNotRunning(t, ctrl)
 }
 
 func TestTrashTopicValidTrashRemovesEmptyLiveStub(t *testing.T) {

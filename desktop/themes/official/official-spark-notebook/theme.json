@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-spark-notebook",
+  "name": "Spark Notebook",
+  "author": "Reasonix Contributors",
+  "description": "Off-white notebook grid with teal, yellow and coral stationery around an original anime adult.",
+  "license": "MIT",
+  "baseStyle": "aurora",
+  "tokens": {
+    "light": {
+      "bg": "#FFF9ED",
+      "bgSoft": "#F9F1DE",
+      "bgElev": "#FFFDF7",
+      "panel": "#FFFDF7",
+      "sidebar": "#F8F0DC",
+      "chat": "#FFFCF4",
+      "workspace": "#FFFDF7",
+      "workspaceFiles": "#FAF3E2",
+      "border": "#D2BC8E",
+      "borderSoft": "#F2E9D4",
+      "fg": "#2B2F35",
+      "fgDim": "#565D66",
+      "fgFaint": "#848D98",
+      "accent": "#007B78",
+      "accentFg": "#F3FBFA"
+    },
+    "dark": {
+      "bg": "#14171A",
+      "bgSoft": "#1B1F23",
+      "bgElev": "#23282D",
+      "panel": "#1D2226",
+      "sidebar": "#1A1E22",
+      "chat": "#191D21",
+      "workspace": "#23282D",
+      "workspaceFiles": "#1B2024",
+      "border": "#38404A",
+      "borderSoft": "#2A3138",
+      "fg": "#F8F5E9",
+      "fgDim": "#C9CCBF",
+      "fgFaint": "#8B918A",
+      "accent": "#42D1C6",
+      "accentFg": "#08201E"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "round"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.74,
+    "focusY": 0.46,
+    "safeArea": "left",
+    "homeOpacity": 0.98,
+    "taskOpacity": 0.2,
+    "overlayStrength": 0.68,
+    "paneOpacity": 0.5
+  }
+}

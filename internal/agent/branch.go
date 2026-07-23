@@ -270,6 +270,19 @@ func TouchBranchMeta(sessionPath string) error {
 }
 
 func MarkSessionInFlightTurn(sessionPath string, startMessageIndex int, preserveUser bool) error {
+	return SetSessionInFlightTurn(sessionPath, InFlightTurnMeta{
+		StartMessageIndex: startMessageIndex,
+		PreserveUser:      preserveUser,
+		StartedAt:         time.Now().UTC(),
+	})
+}
+
+// SetSessionInFlightTurn writes an existing in-flight marker verbatim. It is
+// used when a running turn moves to a recovery branch: preserving StartedAt is
+// what lets crash recovery relocate the turn after an in-turn compaction has
+// rewritten its original message index.
+func SetSessionInFlightTurn(sessionPath string, marker InFlightTurnMeta) error {
+	startMessageIndex := marker.StartMessageIndex
 	if startMessageIndex < 0 {
 		startMessageIndex = 0
 	}
@@ -282,11 +295,11 @@ func MarkSessionInFlightTurn(sessionPath string, startMessageIndex int, preserve
 	if err != nil {
 		return err
 	}
-	m.InFlightTurn = &InFlightTurnMeta{
-		StartMessageIndex: startMessageIndex,
-		PreserveUser:      preserveUser,
-		StartedAt:         time.Now().UTC(),
+	marker.StartMessageIndex = startMessageIndex
+	if marker.StartedAt.IsZero() {
+		marker.StartedAt = time.Now().UTC()
 	}
+	m.InFlightTurn = &marker
 	return SaveBranchMetaPreserveUpdated(sessionPath, m)
 }
 

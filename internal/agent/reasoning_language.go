@@ -55,7 +55,11 @@ func ResponseLanguageBlock(lang string) string {
 func ReasoningLanguageBlock(lang string) string {
 	switch NormalizeReasoningLanguage(lang) {
 	case "zh":
-		return "<reasoning-language>\n可见推理/思考文本偏好：当模型服务暴露可见推理或思考文本时，请使用简体中文。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。此偏好不会覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
+		// Imperative wording measured against soft "偏好……请使用" phrasing:
+		// the soft form loses the first reasoning segment on Chinese prompts
+		// that embed English logs/code, and the first segment anchors the
+		// whole turn once providers round-trip prior reasoning.
+		return "<reasoning-language>\n必须使用简体中文书写全部可见思考/推理文本：从第一个字开始就用中文，并在整轮内保持中文，即使系统提示词、工具说明、工具输出或引用的代码是英文。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。此要求只约束可见思考文本，不覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
 	case "en":
 		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
 	default:

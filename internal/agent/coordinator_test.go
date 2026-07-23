@@ -487,7 +487,7 @@ func TestCoordinatorSetReasoningLanguageClearsPlannerAgent(t *testing.T) {
 	}
 }
 
-func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
+func TestCoordinatorPlannerMaxStepsUsesExplicitRuntimeKey(t *testing.T) {
 	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
 		{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"REASONIX.md"}`}},
 		{Type: provider.ChunkDone},
@@ -502,7 +502,7 @@ func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(parentReg), Options{
 		MaxSteps:    2,
-		MaxStepsKey: "agent.planner_max_steps",
+		MaxStepsKey: "planner max_steps",
 	}, executor, 0, event.Discard, nil)
 
 	err := coord.Run(context.Background(), "plan a change")
@@ -510,11 +510,11 @@ func TestCoordinatorPlannerMaxStepsUsesPlannerConfigKey(t *testing.T) {
 		t.Fatal("Run should pause when the planner reaches its configured step limit")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "planner: paused after 2 tool-call rounds (agent.planner_max_steps)") {
-		t.Fatalf("pause error = %q, want planner_max_steps message", msg)
+	if !strings.Contains(msg, "planner: paused after 2 tool-call rounds (planner max_steps)") {
+		t.Fatalf("pause error = %q, want explicit planner max_steps message", msg)
 	}
-	if strings.Contains(msg, "agent.max_steps") {
-		t.Fatalf("planner pause should not point at agent.max_steps: %q", msg)
+	if strings.Contains(msg, "[agent]") {
+		t.Fatalf("planner pause should not point at retired agent config: %q", msg)
 	}
 	if got := len(planner.requests); got != 3 {
 		t.Fatalf("planner requests = %d, want exactly the configured 2 rounds", got)
@@ -549,7 +549,7 @@ func TestCoordinatorPlannerMaxStepsZeroIsUnlimited(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, PlannerToolRegistry(parentReg), Options{
 		MaxSteps:    0,
-		MaxStepsKey: "agent.planner_max_steps",
+		MaxStepsKey: "planner max_steps",
 	}, executor, 0, event.Discard, nil)
 
 	if err := coord.Run(context.Background(), "plan a change"); err != nil {

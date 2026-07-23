@@ -46,6 +46,26 @@ printf '%s\n' '检查任务，只报告可执行的问题。' | \
 这会真正启动隔离子智能体，并非把提示词文本注入父智能体。父会话只保留任务和子智能体的
 最终答案，不保留子智能体的完整工作上下文。
 
+父模型也可以在调用时选择 Profile，且不会把 Profile 名称列表写进工具 schema（保持
+prompt-cache 稳定）：
+
+```text
+task(profile="doc-rewriter", prompt="重写 docs/01.md", write_paths=["docs/01.md"])
+fleet(tasks=[
+  {profile="doc-rewriter", prompt="重写 docs/01.md", write_paths=["docs/01.md"]},
+  {profile="doc-rewriter", prompt="重写 docs/02.md", write_paths=["docs/02.md"]}
+])
+```
+
+- `task` / `fleet` 项上的 `profile` 按名称解析 `runAs: subagent` Skill（显式名称可调用
+  `invocation: manual` Profile）。
+- Profile 正文成为子智能体的**完整**系统提示词，不再隐式叠加 concise 默认提示。
+- `write_paths` 声明互不重叠的写入目标，使多个写入子智能体可共享同一工作区并行。
+  写入任务若省略 `write_paths`，则声明整个工作区（与其他写入 claim 互斥）。
+  在 `fleet` 中，多个整工作区 claim 或任何路径重叠会在预检阶段整批失败，不会启动任何任务。
+- 会话默认：`agent.max_subagent_concurrency = 6`、`agent.max_parallel_writers = 3`
+  （均可配置为 1–32，且写入上限不得超过总上限）。
+
 脚本和其他 Headless 场景应使用显式命令：
 
 ```bash
@@ -103,13 +123,15 @@ invocation: manual
 runAs: subagent
 model: deepseek-pro
 effort: high
+read-only: true
 allowed-tools: [read_file, grep, bash]
 ---
 你是专注的代码评审员。检查指定改动，只返回可执行的问题，并按严重程度排序。
 ```
 
 `invocation: manual` 表示模型不会从固定 Skill 索引中自动发现该 Profile，但用户仍可显式
-调用。`allowed-tools` 是 Profile 级工具白名单，不能绕过权限系统。
+调用。`allowed-tools` 是 Profile 级工具白名单，不能绕过权限系统。`read-only: true`
+强制使用只读工具 registry（剥离写入工具）；省略/`false` 保持旧版默认可写。
 
 也可以手写更丰富的 `runAs: subagent` Skill，例如使用自定义 Skill path 或额外 frontmatter。
 这些 Profile 可以被列出和调用，但 Profile 编辑器会拒绝编辑或删除以下内容：
@@ -126,9 +148,10 @@ allowed-tools: [read_file, grep, bash]
 有效模型和推理强度按以下优先级选择：
 
 1. `agent.subagent_models` 和 `agent.subagent_efforts` 中按 Profile 设置的覆盖；
-2. Profile frontmatter 中的 `model` 和 `effort`；
-3. `agent.subagent_model` 和 `agent.subagent_effort` 默认值；
-4. 已配置的 executor/默认模型及其默认推理强度。
+2. 本次 `task` / `fleet` 调用参数中的 `model` / `effort`；
+3. Profile frontmatter 中的 `model` 和 `effort`；
+4. `agent.subagent_model` 和 `agent.subagent_effort` 默认值；
+5. 已配置的 executor/默认模型及其默认推理强度。
 
 例如：
 

@@ -47,7 +47,7 @@ func Available() bool {
 func seatbeltProfile(spec Spec) string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write*\n")
-	for _, p := range writeAllowDirs(spec.WriteRoots) {
+	for _, p := range writeAllowDirsForSpec(spec) {
 		fmt.Fprintf(&b, "    (subpath %s)\n", sbplString(p))
 	}
 	b.WriteString(")\n")
@@ -68,12 +68,22 @@ func seatbeltProfile(spec Spec) string {
 // common toolchain caches under $HOME. Symlinks are resolved because macOS's
 // /tmp and $TMPDIR live under /private, which is the path Seatbelt matches.
 func writeAllowDirs(roots []string) []string {
+	return writeAllowDirsForSpec(Spec{WriteRoots: roots})
+}
+
+func writeAllowDirsForSpec(spec Spec) []string {
+	roots := spec.WriteRoots
 	dirs := append([]string{}, roots...)
-	dirs = append(dirs, "/dev", "/tmp", "/private/tmp", "/private/var/folders", os.TempDir())
-	if home, err := os.UserHomeDir(); err == nil {
-		// go build/test → Library/Caches + go; pip/etc → .cache; npm/cargo too.
-		for _, sub := range []string{"Library/Caches", ".cache", ".npm", ".cargo", "go"} {
-			dirs = append(dirs, filepath.Join(home, sub))
+	dirs = append(dirs, "/dev")
+	if !spec.MinimalWrites {
+		dirs = append(dirs, "/tmp", "/private/tmp", "/private/var/folders", os.TempDir())
+	}
+	if !spec.MinimalWrites {
+		if home, err := os.UserHomeDir(); err == nil {
+			// go build/test → Library/Caches + go; pip/etc → .cache; npm/cargo too.
+			for _, sub := range []string{"Library/Caches", ".cache", ".npm", ".cargo", "go"} {
+				dirs = append(dirs, filepath.Join(home, sub))
+			}
 		}
 	}
 	seen := map[string]bool{}

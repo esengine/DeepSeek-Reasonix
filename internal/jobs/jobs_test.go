@@ -79,6 +79,39 @@ func TestStartForSessionStampsJobContext(t *testing.T) {
 	}
 }
 
+func TestJobStartObserverSeesLifetimeUntilTerminal(t *testing.T) {
+	observed := make(chan (<-chan struct{}), 1)
+	release := make(chan struct{})
+	m := NewManager(event.Discard, WithJobStartObserver(func(done <-chan struct{}) {
+		observed <- done
+	}))
+	t.Cleanup(m.Close)
+	job := m.StartForSession("session-a", "bash", "lifetime", func(context.Context, io.Writer) (string, error) {
+		<-release
+		return "", nil
+	})
+	var lifetime <-chan struct{}
+	select {
+	case lifetime = <-observed:
+	case <-time.After(time.Second):
+		t.Fatal("job start observer was not called")
+	}
+	select {
+	case <-lifetime:
+		t.Fatal("job lifetime closed before run completed")
+	default:
+	}
+	close(release)
+	if results := m.WaitForSession(context.Background(), "session-a", []string{job.ID}, 2); len(results) != 1 || results[0].Status != Done {
+		t.Fatalf("wait results = %+v", results)
+	}
+	select {
+	case <-lifetime:
+	case <-time.After(time.Second):
+		t.Fatal("job lifetime did not close at terminal status")
+	}
+}
+
 func TestReserveStartForSessionIsAtomic(t *testing.T) {
 	m := NewManager(event.Discard)
 	defer m.Close()

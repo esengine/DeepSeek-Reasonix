@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"reasonix/internal/config"
@@ -27,6 +28,7 @@ func TestNormalizeSkillPathDirectoryLayout(t *testing.T) {
 func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -65,6 +67,7 @@ func TestSkillRootsViewCountsProjectSkills(t *testing.T) {
 func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -111,10 +114,11 @@ func TestSkillRootsViewMarksEnvConfiguredCustomRoot(t *testing.T) {
 func TestSkillRootsViewDedupesConfiguredConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
-	root := filepath.Join(home, ".reasonix", "skills")
+	root := filepath.Join(config.ReasonixHomeDir(), "skills")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +129,7 @@ func TestSkillRootsViewDedupesConfiguredConventionRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\"~/.reasonix/skills\"]\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = ["+strconv.Quote(root)+"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	wd, err := os.Getwd()
@@ -156,6 +160,7 @@ func TestSkillRootsViewDedupesConfiguredConventionRoot(t *testing.T) {
 func TestSkillRootsViewDedupesConfiguredProjectConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -183,7 +188,7 @@ func TestSkillRootsViewDedupesConfiguredProjectConventionRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = [\""+root+"\"]\n"), 0o644); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("[skills]\npaths = ["+strconv.Quote(root)+"]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -209,6 +214,7 @@ func TestSkillRootsViewDedupesConfiguredProjectConventionRoot(t *testing.T) {
 func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()
@@ -247,6 +253,7 @@ func TestSkillRootsViewOmitsExcludedConventionRoot(t *testing.T) {
 func TestRemoveSkillPathPseudoDeletesConventionRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	path := filepath.Join(home, ".agents", "skills")
@@ -264,6 +271,7 @@ func TestRemoveSkillPathPseudoDeletesConventionRoot(t *testing.T) {
 func TestAddSkillPathRestoresConventionRootWithoutCustomPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	path := filepath.Join(home, ".agents", "skills")
@@ -302,6 +310,7 @@ func TestCapabilitiesIncludesDisabledSkills(t *testing.T) {
 	defer a.activeCtrl().Close()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	cfgPath := config.UserConfigPath()
@@ -371,6 +380,7 @@ func TestAvailableSubagentToolsExcludesAlwaysHiddenTools(t *testing.T) {
 func TestSkillsSettingsRefreshInvalidatesSkillRootsCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	project := t.TempDir()

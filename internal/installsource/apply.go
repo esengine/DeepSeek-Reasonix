@@ -211,6 +211,11 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 	for _, existing := range cfg.Plugins {
 		if existing.Name == act.entry.Name {
 			previous = existing
+			if act.Scope == "project" {
+				previous.Source = config.MCPSourceProjectConfig
+			} else {
+				previous.Source = config.MCPSourceUserConfig
+			}
 			hadPrevious = true
 			break
 		}

@@ -587,6 +587,7 @@ function SubagentProfileForm({
   const [selectedTools, setSelectedTools] = useState<Set<string>>(() => new Set(editingSkill?.allowedTools ?? []));
   const hasUsedCustomMode = useRef(Boolean(editingSkill?.allowedTools?.length));
   const [systemPrompt, setSystemPrompt] = useState(editingSkill?.body ?? "");
+  const [readOnly, setReadOnly] = useState(Boolean(editingSkill?.readOnly));
   const [scope, setScope] = useState<"global" | "project">(editingSkill?.scope === "project" ? "project" : "global");
   const [tryTask, setTryTask] = useState("");
   const [tryRunning, setTryRunning] = useState(false);
@@ -614,6 +615,7 @@ function SubagentProfileForm({
     model,
     effort,
     allowedTools: toolMode === "custom" ? Array.from(selectedTools) : [],
+    readOnly,
     scope,
   });
 
@@ -705,6 +707,27 @@ function SubagentProfileForm({
       </div>
       {toolMode === "custom" && <ToolMultiSelect tools={tools} selected={selectedTools} onChange={setSelectedTools} />}
       {toolMode === "custom" && !toolsReady && <div className="subagents-field-error">{t("subagents.selectAtLeastOneTool")}</div>}
+
+      <label className="set-label">{t("subagents.readOnly")}</label>
+      <div className="set-seg" role="group" aria-label={t("subagents.readOnly")}>
+        <button
+          type="button"
+          className={`set-seg__btn${!readOnly ? " set-seg__btn--on" : ""}`}
+          disabled={busy}
+          onClick={() => setReadOnly(false)}
+        >
+          {t("subagents.readOnlyOff")}
+        </button>
+        <button
+          type="button"
+          className={`set-seg__btn${readOnly ? " set-seg__btn--on" : ""}`}
+          disabled={busy}
+          onClick={() => setReadOnly(true)}
+        >
+          {t("subagents.readOnlyOn")}
+        </button>
+      </div>
+      <div className="set-hint">{t("subagents.readOnlyHint")}</div>
 
       <label className="set-label">{t("subagents.systemPrompt")}</label>
       <textarea

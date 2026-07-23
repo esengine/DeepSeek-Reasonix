@@ -673,7 +673,7 @@ const __T = {
     'session_tool': 'Tool for session',
     'deny': 'Deny',
     'auto_mode': 'Auto mode (auto-approve fallback approvals)',
-    'plan_mode': 'Plan mode (read-only)',
+    'plan_mode': 'Plan first; permissions and sandbox still apply',
     'yolo_mode': 'YOLO mode (auto-approve tool approvals; ask and plan still wait)',
     'goal_mode_desc': 'Goal mode — type a task for the agent to pursue autonomously',
     'goal_mode': 'Goal mode',
@@ -807,7 +807,7 @@ const __T = {
     'session_tool': '本会话允许此工具',
     'deny': '拒绝',
     'auto_mode': '自动模式（自动批准兜底审批）',
-    'plan_mode': '计划模式（只读）',
+    'plan_mode': '先规划；权限与沙箱仍然生效',
     'yolo_mode': 'YOLO 模式（自动批准工具权限；ask 和计划仍会等待）',
     'goal_mode_desc': '目标模式 — 输入任务让代理自主执行',
     'goal_mode': '目标模式',
@@ -1087,15 +1087,30 @@ function copyText(text) {
   return Promise.resolve(false);
 }
 function renderToolDispatch(tool) {
+
+  // Partial, full, and post-write preview-refresh dispatches share one ID.
+  // Update the existing card in place so a refreshed dependent writer never
+  // appears as a duplicate operation in the timeline.
+  if(!tool.id)return;
+  const existing=toolCards[tool.id];
+  if(existing){
+    const summary=toolArgsSummary(tool.args);
+    const title=existing.querySelector('.card-title');
+    if(title)title.innerHTML='<span class="name">'+escHtml(tool.name)+'</span>'+(summary?'<span class="subject">'+escHtml(summary)+'</span>':'');
+    existing.dataset.toolArgs=String(tool.args||existing.dataset.toolArgs||'');
+    updateToolMeta(existing,__('tool_args')+' '+fmtTok(existing.dataset.toolArgs.length));
+    scrollDown(); return;
+  }
   hideWelcome(); const card=el('div','card'); card.id='tool-'+tool.id; card.dataset.open='false'; card.dataset.tone='accent';
   card.dataset.startedAt=String(Date.now());
+  card.dataset.toolArgs=String(tool.args||'');
   const head=el('div','card-head');
   const summary=toolArgsSummary(tool.args);
   head.innerHTML='<span class="ico spin">'+toolIcon('accent')+'</span><div class="card-main"><div class="card-title"><span class="name">'+escHtml(tool.name)+'</span>'+(summary?'<span class="subject">'+escHtml(summary)+'</span>':'')+'</div><div class="card-meta">'+escHtml(__('tool_args'))+' '+fmtTok(String(tool.args||'').length)+'</div></div><span class="card-badge">'+escHtml(__('tool_running'))+'</span><div class="card-actions"><button type="button" class="card-action card-copy" title="'+escAttr(__('tool_copy'))+'" aria-label="'+escAttr(__('tool_copy'))+'"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button><span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg></span></div>';
   const body=el('div','card-body'); body.style.display='none';
   head.onclick=e=>{if(e.target.closest('button'))return;const open=card.dataset.open==='true';card.dataset.open=open?'false':'true';body.style.display=open?'none':'';};
   const copy=head.querySelector('.card-copy');
-  if(copy)copy.onclick=async e=>{e.stopPropagation();const ok=await copyText(body.textContent||tool.args||'');copy.title=ok?__('tool_copied'):__('tool_copy');setTimeout(()=>{copy.title=__('tool_copy');},1200);};
+  if(copy)copy.onclick=async e=>{e.stopPropagation();const ok=await copyText(body.textContent||card.dataset.toolArgs||'');copy.title=ok?__('tool_copied'):__('tool_copy');setTimeout(()=>{copy.title=__('tool_copy');},1200);};
   card.appendChild(head);card.appendChild(body);log.appendChild(card);toolCards[tool.id]=card;scrollDown();
 }
 function renderToolResult(tool) {

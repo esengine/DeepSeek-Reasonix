@@ -1,0 +1,10 @@
+---
+import ChangelogPage from '../../components/ChangelogPage.astro';
+import { latestRelease, releases, releasePath } from '../../data/releases';
+
+/* /changelog/ renders the latest release but canonicalizes to its version URL
+   to avoid duplicate content with /changelog/vX.Y.Z/. */
+const canonical = new URL(releasePath(latestRelease.version), Astro.site).href;
+---
+
+<ChangelogPage release={latestRelease} releases={releases} canonical={canonical} />

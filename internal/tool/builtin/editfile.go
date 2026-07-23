@@ -71,8 +71,9 @@ func (e editFile) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if err := writeFileEncoded(p.Path, applied.updated, enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
+	summary := fmt.Sprintf("edited %s", p.Path)
 	if applied.fuzzy {
-		return fmt.Sprintf("edited %s (fuzzy match)", p.Path), nil
+		summary += " (fuzzy match)"
 	}
-	return fmt.Sprintf("edited %s", p.Path), nil
+	return withActualPostWriteReceipts(summary, []editReplacementReceipt{applied.receipt}), nil
 }

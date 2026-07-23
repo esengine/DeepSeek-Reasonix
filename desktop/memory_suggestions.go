@@ -83,10 +83,9 @@ func (a *App) MemorySuggestions() MemorySuggestionsView {
 // MemorySuggestionsForTab scans recent local history for the selected tab's
 // session directory and workspace, instead of whichever tab is currently active.
 func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
-	view := MemorySuggestionsView{
-		Memories:    []MemorySuggestion{},
-		Skills:      []SkillSuggestion{},
-		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	view := emptyMemorySuggestionsView()
+	if a.activeWorkbenchTargetIsRemote() {
+		return view
 	}
 
 	a.mu.RLock()
@@ -117,11 +116,16 @@ func (a *App) MemorySuggestionsForTab(tabID string) MemorySuggestionsView {
 
 	sessions := loadSuggestionSessions(sessionDir, suggestionSessionLimit)
 	view.Memories = suggestMemories(set, sessions)
-	// Stable Memory v5 execution learnings join the same candidate list and
-	// the same explicit-confirmation flow as history-derived suggestions.
-	view.Memories = append(view.Memories, suggestCompilerMemories(workspaceRoot, set, view.Memories)...)
 	view.Skills = suggestSkills(workspaceRoot, ctrl.AllSkills(), sessions)
 	return view
+}
+
+func emptyMemorySuggestionsView() MemorySuggestionsView {
+	return MemorySuggestionsView{
+		Memories:    []MemorySuggestion{},
+		Skills:      []SkillSuggestion{},
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+	}
 }
 
 // AcceptMemorySuggestion persists a previously previewed memory candidate.
@@ -132,6 +136,9 @@ func (a *App) AcceptMemorySuggestion(in MemorySuggestion) (string, error) {
 // AcceptMemorySuggestionForTab persists a memory candidate into the selected
 // tab's memory store, matching the tab used to generate suggestions.
 func (a *App) AcceptMemorySuggestionForTab(tabID string, in MemorySuggestion) (string, error) {
+	if a.activeWorkbenchTargetIsRemote() {
+		return "", remoteMemoryUnavailableErr()
+	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return "", nil
@@ -161,6 +168,9 @@ func (a *App) AcceptSkillSuggestion(in SkillSuggestion) (string, error) {
 // AcceptSkillSuggestionForTab writes a skill candidate into the selected tab's
 // workspace/global skill store, matching the tab used to generate suggestions.
 func (a *App) AcceptSkillSuggestionForTab(tabID string, in SkillSuggestion) (string, error) {
+	if a.activeWorkbenchTargetIsRemote() {
+		return "", remoteMemoryUnavailableErr()
+	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	workspaceRoot := ""
@@ -482,19 +492,22 @@ func skillStoreForWorkspace(workspaceRoot string) *skill.Store {
 	cfg, err := config.LoadForRoot(workspaceRoot)
 	var custom, excluded []string
 	var pluginPaths map[string][]string
+	var pluginAgentPaths map[string][]string
 	maxDepth := 3
 	if err == nil && cfg != nil {
 		custom = cfg.SkillCustomPaths()
 		excluded = cfg.SkillExcludedPaths()
 		pluginPaths = cfg.PluginPackageSkillOwners()
+		pluginAgentPaths = cfg.PluginPackageAgentOwners()
 		maxDepth = cfg.SkillMaxDepth()
 	}
 	return skill.New(skill.Options{
-		ProjectRoot:   strings.TrimSpace(workspaceRoot),
-		CustomPaths:   custom,
-		PluginPaths:   pluginPaths,
-		ExcludedPaths: excluded,
-		MaxDepth:      maxDepth,
+		ProjectRoot:      strings.TrimSpace(workspaceRoot),
+		CustomPaths:      custom,
+		PluginPaths:      pluginPaths,
+		PluginAgentPaths: pluginAgentPaths,
+		ExcludedPaths:    excluded,
+		MaxDepth:         maxDepth,
 	})
 }
 

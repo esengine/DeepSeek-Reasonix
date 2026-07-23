@@ -7,12 +7,15 @@ import {
   formatLongTaskAttribution,
   formatPerformanceContext,
   globalCrashReportReason,
+  isOpaqueScriptErrorEvent,
   installPerformancePressureMonitor,
   normalizeCrashError,
+  opaqueScriptFingerprintHint,
   parseReportedPerf,
   performanceLabelForReason,
   serializeReportedPerf,
   shouldPromptForLongTasks,
+  shouldPromptForEventLoopLag,
   shouldRecordEventLoopLagSample,
   shouldPromptForPerformanceLabel,
   shouldReportGlobalCrashEvent,
@@ -22,6 +25,10 @@ import {
   type ProfilerTrace,
 } from "../lib/crash";
 import { writeClipboardText } from "../lib/clipboard";
+import { installObjectHasOwnPolyfill } from "../lib/compat";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 let passed = 0;
 let failed = 0;
@@ -37,6 +44,28 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\ncrash reporting");
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+const mainSource = readFileSync(resolve(testDir, "../main.tsx"), "utf8");
+eq(mainSource.startsWith('import "./lib/compat";'), true, "installs WebKit compatibility before application imports");
+const legacyObject = function LegacyObject() {} as unknown as ObjectConstructor & {
+  hasOwn?: (value: object, property: PropertyKey) => boolean;
+};
+installObjectHasOwnPolyfill(legacyObject);
+eq(legacyObject.hasOwn?.({ own: true }, "own"), true, "Object.hasOwn polyfill accepts own properties");
+eq(legacyObject.hasOwn?.(Object.create({ inherited: true }), "inherited"), false, "Object.hasOwn polyfill rejects inherited properties");
+for (const file of ["../components/VirtualMenu.tsx", "../components/WorkspacePanel.tsx", "../components/editors/HljsDiff.tsx"]) {
+  const source = readFileSync(resolve(testDir, file), "utf8");
+  const fileParts = file.split("/");
+  const label = fileParts[fileParts.length - 1];
+  eq(
+    source.includes("directDomUpdates: true") &&
+      source.includes("ref={virtualizer.containerRef}") &&
+      !source.includes("transform: `translateY(${row.start}px)`"),
+    true,
+    `${label} avoids measurement-triggered React update loops`,
+  );
+}
 
 const err = new TypeError("invalid argument");
 err.stack = "TypeError: invalid argument\n    at submit (src/App.tsx:12:3)";
@@ -57,6 +86,11 @@ eq(
   "ignores Chromium ResizeObserver loop limit notices",
 );
 eq(
+  shouldReportGlobalCrashEvent({ defaultPrevented: false, message: "Minified React error #520; recovered synchronously" }),
+  false,
+  "suppresses React's recoverable concurrent-render diagnostic",
+);
+eq(
   shouldReportGlobalCrashEvent({
     defaultPrevented: false,
     message: "ResizeObserver loop completed with undelivered notifications.",
@@ -64,6 +98,19 @@ eq(
   false,
   "ignores Chromium ResizeObserver undelivered notification notices",
 );
+eq(isOpaqueScriptErrorEvent({ defaultPrevented: false, message: "Script error." }), true, "identifies locationless opaque script errors");
+eq(
+  isOpaqueScriptErrorEvent({ defaultPrevented: false, message: "Script error.", filename: "wails://wails/assets/index.js" }),
+  false,
+  "keeps located script errors out of opaque grouping",
+);
+const opaqueHint = opaqueScriptFingerprintHint(
+  "wails://wails.localhost/tabs/123456789?token=private#abcdef123456",
+  [{ t: 1, cat: "tab hydration", msg: "private path /Users/alice/project" }],
+  "0123456789abcdefdeadbeef",
+);
+eq(opaqueHint, "build:0123456789abcdef|view:wails://wails.localhost/tabs/_|cats:tab_hydration", "opaque grouping uses stable safe context");
+eq(opaqueHint.includes("alice"), false, "opaque grouping never includes breadcrumb messages");
 eq(
   shouldReportGlobalCrashEvent({ defaultPrevented: false, error: new Error("ResizeObserver loop limit exceeded") }),
   false,
@@ -154,6 +201,18 @@ eq(
 );
 eq(shouldPromptForLongTasks({ count: 16, totalMs: 3_100, maxMs: 237 }), true, "prompts past the 3s cumulative budget");
 eq(shouldPromptForLongTasks({ count: 2, totalMs: 3_100, maxMs: 790 }), false, "cumulative path needs at least 3 tasks");
+eq(shouldPromptForEventLoopLag([6_007]), false, "ignores an isolated lag spike without long-task evidence");
+eq(shouldPromptForEventLoopLag([1_350, 1_420]), true, "prompts on consecutive lag samples");
+eq(
+  shouldPromptForEventLoopLag([1_350], { count: 1, totalMs: 900, maxMs: 900 }),
+  true,
+  "prompts on a lag spike corroborated by a blocking long task",
+);
+eq(
+  shouldPromptForEventLoopLag([1_350], { count: 2, totalMs: 300, maxMs: 180 }),
+  false,
+  "does not treat unrelated short long tasks as lag corroboration",
+);
 
 eq(formatLongTaskAttribution("self", [{ containerType: "window" }]), "", "hides the no-signal self/window attribution");
 eq(formatLongTaskAttribution("unknown", undefined), "", "hides unknown attribution");
@@ -332,8 +391,8 @@ eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false, false), false, "ne
   now = 66_600;
   interval?.(); // both grace windows over, steady samples resume
 
-  // A severe main-thread freeze while visible, focused, and settled must still
-  // produce a report — there is deliberately no absolute duration cap.
+  // A single delayed callback can still be a timer discontinuity. It is held
+  // until the next delayed sample (or a long-task entry) corroborates the freeze.
   let promptAttempted = false;
   (globalThis as any).document.getElementById = () => {
     promptAttempted = true;
@@ -341,11 +400,18 @@ eq(shouldPromptForPerformanceLabel(false, 11 * 60_000, false, false), false, "ne
   };
   now = 112_600;
   try {
-    interval?.(); // 45s late with no visibility or focus transition: a real freeze
+    interval?.(); // isolated 45s delay: not enough evidence by itself
   } catch {
     // paint intentionally stopped at getElementById
   }
-  eq(promptAttempted, true, "a severe settled-state freeze still prompts (no absolute suspension cap)");
+  eq(promptAttempted, false, "an isolated settled-state timer discontinuity does not prompt");
+  now = 115_100;
+  try {
+    interval?.(); // a second consecutive 1.5s delay corroborates sustained lag
+  } catch {
+    // paint intentionally stopped at getElementById
+  }
+  eq(promptAttempted, true, "consecutive settled-state lag still prompts");
   (globalThis as any).window = previousWindow;
   (globalThis as any).document = previousDocument;
   (globalThis as any).performance = previousPerformance;

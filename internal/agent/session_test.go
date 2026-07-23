@@ -396,6 +396,27 @@ func TestNewSessionPathSanitizesSlashes(t *testing.T) {
 	}
 }
 
+func TestNewSessionPathSanitizesWindowsReservedPunctuation(t *testing.T) {
+	dir := t.TempDir()
+	path := NewSessionPath(dir, `nemotron-3-nano:30b<>"|?*`)
+	base := filepath.Base(path)
+	if strings.ContainsAny(base, `:<>"|?*`) {
+		t.Fatalf("filename contains Windows-reserved punctuation: %s", base)
+	}
+	if !strings.Contains(base, "nemotron-3-nano-30b") {
+		t.Fatalf("colon should be replaced without hiding the model hint: %s", base)
+	}
+
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save session with sanitized model filename: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat saved session: %v", err)
+	}
+}
+
 func TestNewSessionPathEmptyModel(t *testing.T) {
 	path := NewSessionPath("/dir", "")
 	if !strings.Contains(path, "session") {
@@ -445,6 +466,48 @@ func TestNeedsRewriteSaveFollowsSaves(t *testing.T) {
 	s.markPersisted(path, digest, 1, 1, 0)
 	if s.NeedsRewriteSave() {
 		t.Fatal("stale capture rolled the rewrite baseline backwards")
+	}
+}
+
+func TestUpdateToolCallPreviewPersistsAfterMidTurnSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "edit twice"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+		{ID: "c1", Name: "edit_file", Arguments: `{}`},
+		{ID: "c2", Name: "edit_file", Arguments: `{}`},
+	}})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn snapshot: %v", err)
+	}
+
+	refreshed := provider.ToolCall{ID: "c2", Diff: "@@ -1 +1 @@\n-ready\n+done\n", Added: 1, Removed: 1}
+	if !s.UpdateToolCallPreview(refreshed) {
+		t.Fatal("matching tool call was not updated")
+	}
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c1", Name: "edit_file", Content: "ready"})
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c2", Name: "edit_file", Content: "done"})
+	if !s.NeedsRewriteSave() {
+		t.Fatal("mutating a snapshotted assistant message must require rewrite save")
+	}
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("rewrite refreshed preview: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var got provider.ToolCall
+	for _, msg := range loaded.Messages {
+		for _, call := range msg.ToolCalls {
+			if call.ID == "c2" {
+				got = call
+			}
+		}
+	}
+	if got.Diff != refreshed.Diff || got.Added != 1 || got.Removed != 1 {
+		t.Fatalf("persisted preview = %+v, want %+v", got, refreshed)
 	}
 }
 

@@ -61,6 +61,71 @@ func TestLoadMergesInstalledPluginSkillRootsAndMCP(t *testing.T) {
 	}
 }
 
+func TestClaudePackageMCPExpandsRootAndDoesNotAutoStart(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	root := filepath.Join(home, "plugins", "claude-mcp")
+	writeConfigTestFile(t, filepath.Join(root, pluginpkg.ClaudeManifest), `{"name":"claude-mcp"}`)
+	writeConfigTestFile(t, filepath.Join(root, ".mcp.json"), `{
+  "mcpServers": {
+    "Local Search": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/server",
+      "args": ["--root", "${CLAUDE_PLUGIN_ROOT}/data", "--workspace", "${CLAUDE_PROJECT_DIR}"],
+      "env": {"DATA_DIR": "${CLAUDE_PLUGIN_ROOT}/data"}
+    }
+  }
+}`)
+	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{Name: "claude-mcp", Root: "plugins/claude-mcp", ManifestKind: "claude", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	cfg, err := LoadForRoot(workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 {
+		t.Fatalf("plugins = %#v", cfg.Plugins)
+	}
+	got := cfg.Plugins[0]
+	if got.Command != filepath.Join(root, "bin", "server") || got.Args[1] != filepath.Join(root, "data") || got.Env["DATA_DIR"] != filepath.Join(root, "data") {
+		t.Fatalf("Claude root was not expanded: %#v", got)
+	}
+	if got.Env["CLAUDE_PLUGIN_ROOT"] != root {
+		t.Fatalf("CLAUDE_PLUGIN_ROOT = %q", got.Env["CLAUDE_PLUGIN_ROOT"])
+	}
+	if got.Args[3] != workspace || got.Env["CLAUDE_PROJECT_DIR"] != workspace {
+		t.Fatalf("workspace expansion = %#v", got)
+	}
+	if got.ShouldAutoStart() {
+		t.Fatal("imported Claude MCP must require an explicit connection")
+	}
+	if len(cfg.AutoStartPlugins()) != 0 {
+		t.Fatalf("auto-start plugins = %#v", cfg.AutoStartPlugins())
+	}
+}
+
+func TestClaudePackageMCPDeduplicatesSameConnectionAcrossPackages(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	for i, name := range []string{"legal-one", "legal-two"} {
+		root := filepath.Join(home, "plugins", name)
+		writeConfigTestFile(t, filepath.Join(root, pluginpkg.ClaudeManifest), `{"name":"`+name+`"}`)
+		writeConfigTestFile(t, filepath.Join(root, ".mcp.json"), `{
+  "mcpServers":{"飞书":{"type":"http","url":"https://open.feishu.cn/mcp","description":"package `+string(rune('A'+i))+` description"}}
+}`)
+		if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{Name: name, Root: "plugins/" + name, ManifestKind: "claude", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, err := LoadForRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Plugins) != 1 || cfg.Plugins[0].URL != "https://open.feishu.cn/mcp" {
+		t.Fatalf("deduplicated plugins = %#v", cfg.Plugins)
+	}
+}
+
 func writeConfigTestFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

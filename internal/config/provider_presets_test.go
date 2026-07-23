@@ -204,6 +204,9 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if longcat.BaseURL != "https://api.longcat.chat/openai/v1" || longcat.ModelsURL != "https://api.longcat.chat/openai/v1/models" || longcat.APIKeyEnv != "LONGCAT_API_KEY" {
 		t.Fatalf("longcat-openai endpoint/key mismatch: %+v", longcat)
 	}
+	if longcat.ContextWindow != longCat20ContextWindow {
+		t.Fatalf("longcat-openai context_window = %d, want %d", longcat.ContextWindow, longCat20ContextWindow)
+	}
 	if cap := EffortCapabilityForEntry(longcat); !cap.Supported || cap.Default != "enabled" || !containsString(cap.Levels, "disabled") {
 		t.Fatalf("longcat-openai effort capability = %+v, want enabled/disabled", cap)
 	}
@@ -216,6 +219,9 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if longcatAnthropic.Kind != "anthropic" || longcatAnthropic.BaseURL != "https://api.longcat.chat/anthropic" || longcatAnthropic.ModelsURL != "https://api.longcat.chat/anthropic/v1/models" || !longcatAnthropic.AuthHeader || longcatAnthropic.Thinking != "enabled" {
 		t.Fatalf("longcat-anthropic capability mismatch: %+v", longcatAnthropic)
+	}
+	if longcatAnthropic.ContextWindow != longCat20ContextWindow {
+		t.Fatalf("longcat-anthropic context_window = %d, want %d", longcatAnthropic.ContextWindow, longCat20ContextWindow)
 	}
 
 	mimo, ok := cfg.Provider("mimo-api")

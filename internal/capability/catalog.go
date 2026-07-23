@@ -39,7 +39,7 @@ type CatalogOptions struct {
 	Failed      map[string]string
 	Disabled    map[string]bool
 	CachedTools map[string][]plugin.CachedTool // server → tools
-	CacheHashOK map[string]bool                // server → fingerprint match
+	CacheKeyOK  map[string]bool                // server → schema-cache key match
 	// ProxyTools carries host-observed live tools of servers connected through
 	// the Delivery proxy: they are absent from Tools (never registered) yet
 	// must stay routable after the server turns ready.
@@ -47,27 +47,27 @@ type CatalogOptions struct {
 }
 
 // LoadCachedToolsForSpecs loads the persisted MCP schema caches for the given
-// boot-converted specs, keyed by server name, plus the per-server fingerprint
-// match state. Fingerprint-mismatched caches are still returned (with
-// CacheHashOK=false) so MCPServerEntries can mark them stale instead of
+// boot-converted specs, keyed by server name, plus the per-server cache-key
+// match state. Mismatched caches are still returned (with
+// CacheKeyOK=false) so MCPServerEntries can mark them stale instead of
 // hiding them; servers without a usable cache are simply absent. Call once at
 // session start and reuse — the cache lives on disk.
 func LoadCachedToolsForSpecs(specs []plugin.Spec) (map[string][]plugin.CachedTool, map[string]bool) {
 	cached := map[string][]plugin.CachedTool{}
-	hashOK := map[string]bool{}
+	keyOK := map[string]bool{}
 	for _, s := range specs {
 		name := strings.TrimSpace(s.Name)
 		if name == "" {
 			continue
 		}
-		cs, ok, match := plugin.LoadCachedSchemaAny(name, plugin.SpecFingerprint(s))
+		cs, ok, match := plugin.LoadCachedSchemaAny(name, plugin.SchemaCacheKey(s))
 		if !ok || len(cs.Tools) == 0 {
 			continue
 		}
 		cached[name] = cs.Tools
-		hashOK[name] = match
+		keyOK[name] = match
 	}
-	return cached, hashOK
+	return cached, keyOK
 }
 
 // BuildCatalog assembles the unified capability directory.
@@ -142,7 +142,7 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 			status = StatusFailed
 		} else if opts.Connected != nil && opts.Connected[name] {
 			status = StatusReady
-		} else if opts.CacheHashOK != nil && !opts.CacheHashOK[name] && opts.CachedTools != nil && len(opts.CachedTools[name]) > 0 {
+		} else if opts.CacheKeyOK != nil && !opts.CacheKeyOK[name] && opts.CachedTools != nil && len(opts.CachedTools[name]) > 0 {
 			status = StatusStale
 		}
 		e := Entry{
@@ -180,7 +180,7 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 			toolStatus = StatusReady
 		case status != StatusReady:
 			toolSrc = opts.CachedTools[name]
-			// A fingerprint-mismatched cache marked the server stale; its
+			// A schema-cache-key mismatch marked the server stale; its
 			// tools carry the same staleness so routing prompts expose it.
 			if status == StatusStale {
 				toolStatus = StatusStale
@@ -199,6 +199,7 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 				Source:        name,
 				Status:        toolStatus,
 				ReadOnly:      ct.ReadOnly,
+				Destructive:   ct.Destructive,
 				ToolName:      plugin.ModelToolName(name, raw),
 				ConnectSource: "mcp",
 				ConnectName:   name,

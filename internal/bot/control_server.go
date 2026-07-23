@@ -79,11 +79,14 @@ func (gw *BotGateway) startControlServer(parent context.Context) error {
 	gw.controlServer = control
 	gw.mu.Unlock()
 
+	gw.gatewayWG.Add(2)
 	go func() {
+		defer gw.gatewayWG.Done()
 		<-parent.Done()
 		gw.stopControlServer()
 	}()
 	go func() {
+		defer gw.gatewayWG.Done()
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			gw.logger.Warn("bot control server stopped with error", "addr", control.addr, "err", err)
 		}

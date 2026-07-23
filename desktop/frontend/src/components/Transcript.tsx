@@ -266,6 +266,7 @@ export function Transcript({
   tabId,
   footerHeight = 0,
   onPrompt,
+  onDeliveryContinue,
   onEditPrompt,
   onRewind,
   checkpoints = [],
@@ -291,6 +292,7 @@ export function Transcript({
   tabId?: string;
   footerHeight?: number;
   onPrompt: (text: string) => void;
+  onDeliveryContinue?: () => void;
   onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
@@ -817,7 +819,7 @@ export function Transcript({
                 key={item.id}
                 item={item}
                 actionDisabled={running}
-                onAction={item.action === "continue_delivery" ? () => onPrompt(t("notice.deliveryIncompleteContinuePrompt")) : undefined}
+                onAction={item.action === "continue_delivery" ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt")))) : undefined}
               />,
             );
           } else {
@@ -922,6 +924,7 @@ export function Transcript({
               warmSetOpenAction={setOpenAction}
               warmOnEdit={onEditPrompt}
               warmOnPrompt={onPrompt}
+              warmOnDeliveryContinue={onDeliveryContinue}
               warmRunning={running}
               tabId={tabId}
               creationMode={creationMode}
@@ -996,6 +999,7 @@ const WarmZone = memo(function WarmZone({
   warmSetOpenAction,
   warmOnEdit,
   warmOnPrompt,
+  warmOnDeliveryContinue,
   warmRunning,
   tabId,
   creationMode,
@@ -1022,6 +1026,7 @@ const WarmZone = memo(function WarmZone({
   warmSetOpenAction: (action: OpenTurnAction | null) => void;
   warmOnEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   warmOnPrompt: (text: string) => void;
+  warmOnDeliveryContinue?: () => void;
   warmRunning: boolean;
   tabId?: string;
   creationMode?: boolean;
@@ -1080,6 +1085,7 @@ const WarmZone = memo(function WarmZone({
               setOpenAction={warmSetOpenAction}
               onEdit={warmOnEdit}
               onPrompt={warmOnPrompt}
+              onDeliveryContinue={warmOnDeliveryContinue}
               running={warmRunning}
               tabId={tabId}
               creationMode={creationMode}
@@ -1131,6 +1137,7 @@ function WarmTurnItems({
   setOpenAction,
   onEdit,
   onPrompt,
+  onDeliveryContinue,
   running,
   tabId,
   creationMode = false,
@@ -1151,6 +1158,7 @@ function WarmTurnItems({
   setOpenAction: (action: OpenTurnAction | null) => void;
   onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onPrompt: (text: string) => void;
+  onDeliveryContinue?: () => void;
   running: boolean;
   tabId?: string;
   creationMode?: boolean;
@@ -1210,7 +1218,7 @@ function WarmTurnItems({
             key={item.id}
             item={item}
             actionDisabled={running}
-            onAction={item.action === "continue_delivery" ? () => onPrompt(t("notice.deliveryIncompleteContinuePrompt")) : undefined}
+            onAction={item.action === "continue_delivery" ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt")))) : undefined}
           />,
         );
       } else {

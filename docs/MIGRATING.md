@@ -98,38 +98,47 @@ and DeepSeek prefix-cache–oriented design.
   search + tree-sitter symbol index is not bundled in v2 yet, and CodeGraph is no
   longer shipped as an internal MCP server.
 - **Plan mode** + `complete_step` (evidence-backed step sign-off).
-- **Plan-mode tool overrides are narrower, and plan mode is fail-closed for
-  external tools**: `[agent].plan_mode_allowed_tools` now only declares extra
-  read-only custom/external tools. It no longer unlocks known blocked plan-mode
-  tools such as `bash`, `task`, writers, installers, or memory mutation tools, and
-  unsafe bash commands still remain blocked. To migrate old
-  `plan_mode_allowed_tools = ["bash", ...]` configs, move concrete read-only
-  shell prefixes such as `gh issue view` or internal query CLIs to
-  `[agent].plan_mode_read_only_commands`; do not declare shell interpreters or
-  writer-capable commands there. Interactive plan-mode runs can also ask you to
-  trust a concrete unknown query prefix once, and the persistent choice writes
-  the same `plan_mode_read_only_commands` entry. Auto/YOLO tool approval does
-  not answer this bash trust prompt. Use `read_only_task` / `read_only_skill`
-  instead of trying to unlock `task` / `run_skill` while planning. An MCP/plugin tool
-  whose read-only status comes from the server's untrusted `readOnlyHint` is
-  confirmed the first time an interactive plan-mode run needs it; choose the
-  persistent option to write the plugin-level `trusted_read_only_tools` raw-name
-  list. Auto/YOLO tool approval does not answer this trust prompt, although a
-  session or persistent trust choice prevents repeat prompts for the same MCP
-  tool. Non-interactive runs still fail closed, so pre-seed
-  `trusted_read_only_tools` or declare a concrete `mcp__<server>__<tool>` when no
-  user can approve. In the desktop MCP
-  panel, expand a server and use **Pre-trust read-only** for currently listed
-  `readOnlyHint` tools, per-tool **Pre-trust** for audited readers, or
-  **Untrust** to remove a tool; those actions write the same
-  `trusted_read_only_tools` list. First-party `ReadOnlyToolNames` overrides and
-  built-ins stay trusted.
+- **MCP project identity and schema-cache URLs are credential-aware**: userinfo
+  and credential query values (token, api_key, password, ...) do not enter the
+  project launch identity digest or schema cache key, so credential rotation
+  keeps an unchanged project launch authorization. User-installed servers do
+  not compute a project identity digest. Legacy per-tool reader receipts are
+  ignored and removed on the next authorization-state write.
+- **MCP setup is now add-and-use.** Servers added by the user (Desktop, user
+  config, legacy user import, or a user-installed plugin package) connect
+  immediately and permit all calls. Repository `reasonix.toml` / `.mcp.json`
+  servers instead require one pre-launch confirmation for their exact stable
+  identity, before a subprocess or network request exists. Host sandbox,
+  read-root, and write-root policy changes do not invalidate server identity.
+- **stdio MCP connections are persistent.** This fixes stateful servers that
+  lost browser/session state when writer calls received a fresh process.
+- **Plan mode and permission policy are now independent**: Plan directs the
+  model to plan first. Ordinary built-in and Bash calls still use the active
+  Ask/Auto/YOLO rules and Sandbox, while installed MCP and proxy-resolved MCP
+  writer/destructive targets plus readers from unauthorized servers stay hard-blocked for the
+  whole planning phase. Explicit execution-phase tools such as `complete_step` also
+  remain unavailable until plan approval. `plan_mode_read_only_commands` is
+  still parsed and round-tripped for old configs, but it no longer controls
+  main Plan availability. Installed or explicitly authorized servers contribute their
+  non-destructive `readOnlyHint` tools to planner/read-only registries
+  automatically. Use `read_only_task` /
+  `read_only_skill` when a child must be technically restricted to read-only;
+  ordinary `task` / `run_skill` calls remain writer-capable and permission-gated
+  in Plan. Installed MCP tools use the server's `readOnlyHint` for ordinary
+  dispatch. Tools without the hint remain writer-classified. The retired
+  `default_tools_approval_mode`, `tools.<raw>.approval_mode`, and
+  `approvals_reviewer` fields are ignored and removed on the next save; installing
+  or explicitly authorizing a server now makes all of its tools directly usable.
 - **Read-only subagent research**: use `read_only_task` for generic isolated
   research in plan mode, or `read_only_skill` when the work should follow an
   existing skill. Both expose only read-only tools and safe foreground bash, do
   not write resumable transcripts, and keep writer-capable `task` / `run_skill`
-  blocked until after plan approval.
-- **No web dashboard** — the v2 line is terminal + desktop (Wails), by design.
+  out of those explicitly read-only child registries. Ordinary writer-capable
+  delegation in Plan uses Permissions/Sandbox.
+- **Web dashboard remains available; desktop is recommended**: run
+  `reasonix serve` when a local browser UI is useful. For the primary visual
+  experience, prefer the Wails desktop app; CLI/TUI remains the terminal-native
+  path.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops
   go through `bash`); a few v1 tools are not yet ported (tracked on Discussions).
 

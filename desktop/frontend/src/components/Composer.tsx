@@ -5,10 +5,10 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
-import { canUsePromptHistory, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
+import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n } from "../lib/i18n";
-import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut } from "../lib/keyboardShortcuts";
+import { detectShortcutPlatform, formatShortcutCombo, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
   commandUsesStructuredInvocation,
@@ -36,6 +36,8 @@ import { EffortSwitcher } from "./EffortSwitcher";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { Tooltip } from "./Tooltip";
 import { ComposerContextCard } from "./ComposerContextCard";
+import { Markdown } from "./Markdown";
+import { CodeViewer } from "./CodeViewer";
 import { ContextWindowRing } from "./ContextWindowRing";
 import { ImageViewer } from "./ImageViewer";
 import {
@@ -46,7 +48,17 @@ import {
 } from "./RichComposerInput";
 import { VirtualMenu } from "./VirtualMenu";
 import { activeFileReferenceToken, dirEntryMenuLabel, dirEntrySubmitPath } from "./FileReferenceMenu";
+import { activeRefTokenRe, escapeRefPath, unescapeRefPath } from "../lib/refToken";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
+import {
+  formatSelectedTextContext,
+  formatSelectionLabel,
+  languageFor,
+  normalizeSelectedText,
+  selectedTextSnippet,
+  type SelectedTextInsertRequest,
+  type SelectedTextReference,
+} from "../lib/selectedTextContext";
 interface Attachment {
   path: string;
   previewUrl?: string;
@@ -105,6 +117,7 @@ type ComposerDraft = {
   pastedBlocks: PastedBlock[];
   openPastedLabels: string[];
   sessionRefs: SessionReference[];
+  selectedTextRefs: SelectedTextReference[];
   attachmentDedupKeys: Record<string, AttachmentDedupKey>;
   nextPasteId: number;
   historyIndex: number;
@@ -198,7 +211,8 @@ export function composerPickFileEntry(
   if (entry.path || entry.displayPath) {
     return { text: prefix, workspaceRef: { path: refPath, isDir: entry.isDir, displayPath: entry.displayPath } };
   }
-  return { text: prefix + "@" + refPath + (entry.isDir ? "/" : " ") };
+  // Inline fallback: escape whitespace so the ref survives @-token parsing.
+  return { text: prefix + "@" + escapeRefPath(refPath) + (entry.isDir ? "/" : " ") };
 }
 
 function emptyComposerDraft(): ComposerDraft {
@@ -210,6 +224,7 @@ function emptyComposerDraft(): ComposerDraft {
     pastedBlocks: [],
     openPastedLabels: [],
     sessionRefs: [],
+    selectedTextRefs: [],
     attachmentDedupKeys: {},
     nextPasteId: 1,
     historyIndex: -1,
@@ -241,6 +256,7 @@ function cloneComposerDraft(draft: ComposerDraft): ComposerDraft {
     pastedBlocks: [...draft.pastedBlocks],
     openPastedLabels: [...draft.openPastedLabels],
     sessionRefs: [...draft.sessionRefs],
+    selectedTextRefs: draft.selectedTextRefs.map((reference) => ({ ...reference })),
     attachmentDedupKeys: { ...draft.attachmentDedupKeys },
     nextPasteId: draft.nextPasteId,
     historyIndex: draft.historyIndex,
@@ -505,6 +521,7 @@ export function Composer({
   onSetEffort,
   onSetTokenMode,
   insertRequest,
+  selectedTextRequest,
   disabled,
   submitDisabled = false,
   readOnly = false,
@@ -560,6 +577,7 @@ export function Composer({
   onSetEffort: (level: string) => void;
   onSetTokenMode: (mode: TokenMode) => void;
   insertRequest?: ComposerInsertRequest | null;
+  selectedTextRequest?: SelectedTextInsertRequest | null;
   disabled?: boolean;
   submitDisabled?: boolean;
   readOnly?: boolean;
@@ -605,6 +623,7 @@ export function Composer({
   const { t, locale } = useI18n();
   const { showToast } = useToast();
   const shortcutPlatform = useMemo(() => detectShortcutPlatform(), []);
+  const sendComboLabel = useShortcutComboLabel("composer.send");
   const draftKey = sessionKey || tabId || DEFAULT_COMPOSER_DRAFT_KEY;
   const now = useTick(running);
   const [text, setText] = useState("");
@@ -648,6 +667,7 @@ export function Composer({
   const [pastChats, setPastChats] = useState<SessionMeta[]>([]);
   const [pastChatQuery, setPastChatQuery] = useState("");
   const [sessionRefs, setSessionRefs] = useState<SessionReference[]>([]);
+  const [selectedTextRefs, setSelectedTextRefs] = useState<SelectedTextReference[]>([]);
   const [pendingGuidance, setPendingGuidance] = useState<PendingGuidance[]>([]);
   const [guidanceExpanded, setGuidanceExpanded] = useState(false);
   const [guidanceSendingId, setGuidanceSendingId] = useState<number | null>(null);
@@ -687,6 +707,7 @@ export function Composer({
   const lastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdByDraftRef = useRef<Record<string, number>>({});
+  const consumedSelectedTextIdByDraftRef = useRef<Record<string, number>>({});
   const lastTransientDismissSignal = useRef(transientDismissSignal);
   const lastGuidanceConsumedKeyByDraftRef = useRef<Record<string, string | undefined>>(
     guidanceConsumedKey ? { [draftKey]: guidanceConsumedKey } : {},
@@ -709,6 +730,7 @@ export function Composer({
   const workspaceRefsRef = useRef(workspaceRefs);
   const openPastedLabelsRef = useRef(openPastedLabels);
   const sessionRefsRef = useRef(sessionRefs);
+  const selectedTextRefsRef = useRef(selectedTextRefs);
   textRef.current = text;
   invocationsRef.current = invocations;
   attachmentsRef.current = attachments;
@@ -716,6 +738,7 @@ export function Composer({
   pastedBlocksRef.current = pastedBlocks;
   openPastedLabelsRef.current = openPastedLabels;
   sessionRefsRef.current = sessionRefs;
+  selectedTextRefsRef.current = selectedTextRefs;
   pendingGuidanceRef.current = pendingGuidance;
   guidanceExpandedRef.current = guidanceExpanded;
   guidanceSendingIdRef.current = guidanceSendingId;
@@ -730,6 +753,7 @@ export function Composer({
     pastedBlocks: [...pastedBlocksRef.current],
     openPastedLabels: [...openPastedLabelsRef.current],
     sessionRefs: [...sessionRefsRef.current],
+    selectedTextRefs: selectedTextRefsRef.current.map((reference) => ({ ...reference })),
     attachmentDedupKeys: { ...attachmentDedupKeysRef.current },
     nextPasteId: nextPasteId.current,
     historyIndex: historyIndexRef.current,
@@ -749,6 +773,7 @@ export function Composer({
     workspaceRefsRef.current = next.workspaceRefs;
     openPastedLabelsRef.current = next.openPastedLabels;
     sessionRefsRef.current = next.sessionRefs;
+    selectedTextRefsRef.current = next.selectedTextRefs;
     setText(next.text);
     setInvocations(next.invocations);
     setRichSlashQuery(null);
@@ -758,6 +783,7 @@ export function Composer({
     setPastedBlocks(next.pastedBlocks);
     setOpenPastedLabels(next.openPastedLabels);
     setSessionRefs(next.sessionRefs);
+    setSelectedTextRefs(next.selectedTextRefs);
     attachmentDedupKeysRef.current = next.attachmentDedupKeys;
     attachmentDedupRef.current = attachmentDedupFromKeys(next.attachmentDedupKeys);
     nextPasteId.current = next.nextPasteId;
@@ -1058,7 +1084,7 @@ export function Composer({
     }
     let live = true;
     app
-      .ListDirForTab(fileRefTabId, atDir)
+      .ListDirForTab(fileRefTabId, unescapeRefPath(atDir))
       .then((es) => {
         const list = asArray(es);
         if (!live) return;
@@ -1304,6 +1330,16 @@ export function Composer({
     lastSelectionRef.current = { start: ta.selectionStart ?? text.length, end: ta.selectionEnd ?? text.length };
   };
 
+  const insertNewlineAtCaret = () => {
+    const selection = getComposerSelection();
+    const updated = insertComposerNewline(textRef.current, invocationsRef.current, selection);
+    textRef.current = updated.text;
+    invocationsRef.current = updated.invocations;
+    setText(updated.text);
+    setInvocations(updated.invocations);
+    setComposerSelection(selection.start + 1);
+  };
+
   const insertTextAtCaret = (snippet: string) => {
     const selection = getComposerSelection();
     const start = selection.start;
@@ -1327,6 +1363,8 @@ export function Composer({
     clearAttachments();
     setWorkspaceRefs([]);
     setSessionRefs([]);
+    selectedTextRefsRef.current = [];
+    setSelectedTextRefs([]);
     pastedBlocksRef.current = [];
     setPastedBlocks([]);
     setOpenPastedLabels([]);
@@ -1364,6 +1402,31 @@ export function Composer({
     }
     insertTextAtCaret(insertRequest.text);
   }, [draftKey, insertRequest]);
+
+  useEffect(() => {
+    if (!selectedTextRequest || selectedTextRequest.id === consumedSelectedTextIdByDraftRef.current[draftKey]) return;
+    consumedSelectedTextIdByDraftRef.current[draftKey] = selectedTextRequest.id;
+    const normalized = normalizeSelectedText(selectedTextRequest.text);
+    if (!normalized.text) return;
+    if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
+    const path = selectedTextRequest.path;
+    const duplicate = selectedTextRefsRef.current.some(
+      (reference) => reference.text === normalized.text && (reference.path ?? "") === (path ?? ""),
+    );
+    if (!duplicate) {
+      const next = [
+        ...selectedTextRefsRef.current,
+        {
+          id: `${path ? "code" : "chat"}-selection-${selectedTextRequest.id}`,
+          text: normalized.text,
+          ...(path ? { path } : {}),
+        },
+      ];
+      selectedTextRefsRef.current = next;
+      setSelectedTextRefs(next);
+    }
+    requestAnimationFrame(focusComposerInput);
+  }, [draftKey, selectedTextRequest, showToast, t]);
 
   const expandPastedBlocks = (displayText: string, blocks = pastedBlocksRef.current): string => {
     let expanded = displayText;
@@ -1450,6 +1513,8 @@ export function Composer({
       setWorkspaceRefs([]);
       sessionRefsRef.current = [];
       setSessionRefs([]);
+      selectedTextRefsRef.current = [];
+      setSelectedTextRefs([]);
       pastedBlocksRef.current = [];
       setPastedBlocks([]);
       openPastedLabelsRef.current = [];
@@ -1465,6 +1530,7 @@ export function Composer({
     draft.pastedBlocks = [];
     draft.openPastedLabels = [];
     draft.sessionRefs = [];
+    draft.selectedTextRefs = [];
     draft.attachmentDedupKeys = {};
     draft.historyIndex = -1;
     draft.savedText = "";
@@ -1615,6 +1681,7 @@ export function Composer({
       const displayRefs = [
         ...currentWorkspaceRefs.map((ref) => formatWorkspaceReference(ref.displayPath || ref.path, ref.isDir)),
         ...orderedAttachments.map(formatAttachmentDisplayReference),
+        ...selectedTextRefsRef.current.map(formatSelectionLabel),
       ].join(" ");
       const displayText = [trimmedText, displayRefs].filter(Boolean).join(trimmedText && displayRefs ? " " : "");
       // PR-B: when past:chats refs are attached, prepend their formatted transcript
@@ -1622,15 +1689,18 @@ export function Composer({
       // original prompt in the input preview). With no refs we keep the original
       // submitText verbatim — no header, no rewording, byte-identical to pre-PR-B.
       const currentSessionRefs = sessionRefsRef.current;
+      const currentSelectedTextRefs = selectedTextRefsRef.current;
       const currentPastedBlocks = [...pastedBlocksRef.current];
       const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs);
+      const selectedTextContext = formatSelectedTextContext(currentSelectedTextRefs);
       const invocationText = serializeInvocationSubmit(trimmedText, trimmedDraft.invocations);
       const baseSubmitText = [expandPastedBlocks(invocationText, currentPastedBlocks), refs].filter(Boolean).join(" ");
-      const submitText = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
+      const submitBase = sessionContext ? `${sessionContext}${baseSubmitText}` : baseSubmitText;
+      const submitText = [submitBase, selectedTextContext].filter(Boolean).join("\n\n");
       const structuredInput = [expandPastedBlocks(trimmedText, currentPastedBlocks), refs].filter(Boolean).join(" ");
       const structured = trimmedDraft.invocations.length > 0 ? {
         display: [invocationText, displayRefs].filter(Boolean).join(invocationText && displayRefs ? " " : ""),
-        input: sessionContext ? `${sessionContext}${structuredInput}` : structuredInput,
+        input: [sessionContext ? `${sessionContext}${structuredInput}` : structuredInput, selectedTextContext].filter(Boolean).join("\n\n"),
         invocations: invocationRequests(trimmedDraft.invocations),
       } satisfies StructuredInvocationSubmit : undefined;
       if (running) {
@@ -2458,7 +2528,7 @@ export function Composer({
 
 
   const removeAtToken = (value: string) => {
-    return value.replace(/[\r\n]+$/u, "").replace(/(?:^|\s)@[^\s]*$/, "").trimEnd();
+    return value.replace(/[\r\n]+$/u, "").replace(activeRefTokenRe, "").trimEnd();
   };
 
   const pickSession = (session: SessionMeta) => {
@@ -2672,10 +2742,27 @@ export function Composer({
       }
     }
 
-    // Enter sends; Shift+Enter newline. `composing` guards IME confirms.
-    if (e.key === "Enter" && !e.shiftKey && !composing) {
-      e.preventDefault();
-      submit();
+    // The send chord (default Enter) sends and the newline chord (default
+    // Shift+Enter) breaks the line — both configurable in Settings →
+    // Shortcuts. The default send layout retains legacy modified-Enter send
+    // aliases; explicit custom bindings are exact. `composing` guards IME confirms.
+    if (e.key === "Enter" && !composing) {
+      const enterAction = composerEnterAction(e.nativeEvent, shortcutPlatform);
+      if (enterAction === "newline-insert") {
+        e.preventDefault();
+        insertNewlineAtCaret();
+        return;
+      }
+      if (enterAction === "send") {
+        e.preventDefault();
+        submit();
+        return;
+      }
+      if (enterAction !== "newline-native") {
+        e.preventDefault();
+        return;
+      }
+      // "newline-native" falls through so the input inserts the break itself.
     }
     // Esc interrupts the in-flight turn (matches the Stop button's hint), and
     // restores the text if the server hadn't replied yet.
@@ -2876,13 +2963,15 @@ export function Composer({
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0 &&
     !invocations.some((invocation) => invocation.command.kind === "skill");
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
-  const submitTooltip = running ? t("composer.queueGuidance") : t("composer.send");
+  const submitTooltip = running
+    ? t("composer.queueGuidance", { combo: sendComboLabel })
+    : t("composer.send", { combo: sendComboLabel });
   const composerPlaceholder = readOnly
     ? t("composer.readOnlyChannel")
     : disabled
       ? t("common.loading")
       : running
-        ? t("composer.steerPlaceholder")
+        ? t("composer.steerPlaceholder", { combo: sendComboLabel })
         : goalModeOn && !activeGoal
           ? t("composer.goalInputPlaceholder")
           : t("composer.placeholder");
@@ -3338,7 +3427,7 @@ export function Composer({
           </div>
         </div>
       )}
-      {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0) && (
+      {(attachments.length > 0 || workspaceRefs.length > 0 || sessionRefs.length > 0 || selectedTextRefs.length > 0) && (
         <div className="composer-context" aria-label={t("composer.contextItems")}>
           {sortComposerAttachments(attachments).map((a) => {
             const imageOnly = Boolean(a.previewUrl) && attachments.every((item) => item.previewUrl) && workspaceRefs.length === 0 && sessionRefs.length === 0;
@@ -3391,6 +3480,25 @@ export function Composer({
                 </button>
               </Tooltip>
             </div>
+          ))}
+          {selectedTextRefs.map((reference) => (
+            <ComposerContextCard
+              key={reference.id}
+              variant="selection"
+              tooltipLabel={reference.path
+                ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
+                : <Markdown text={reference.text} />}
+              removeLabel={t("composer.removeSelectedText")}
+              onRemove={() => {
+                const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
+                selectedTextRefsRef.current = next;
+                setSelectedTextRefs(next);
+                requestAnimationFrame(focusComposerInput);
+              }}
+              name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
+              meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
+              icon={reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
+            />
           ))}
         </div>
       )}

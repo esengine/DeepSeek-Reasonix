@@ -60,6 +60,38 @@ func find(skills []Skill, name string) (Skill, bool) {
 	return Skill{}, false
 }
 
+func TestDisableDiscoveryReturnsEmptyStore(t *testing.T) {
+	home := t.TempDir()
+	project := t.TempDir()
+	custom := t.TempDir()
+	writeSkill(t, home, ".reasonix/skills/global.md", "---\ndescription: global\n---\nbody")
+	writeSkill(t, project, ".reasonix/skills/project.md", "---\ndescription: project\n---\nbody")
+	writeSkill(t, custom, "custom.md", "---\ndescription: custom\n---\nbody")
+
+	store := New(Options{
+		HomeDir:          home,
+		ProjectRoot:      project,
+		CustomPaths:      []string{custom},
+		DisableDiscovery: true,
+	})
+
+	if roots := store.Roots(); len(roots) != 0 {
+		t.Fatalf("disabled store roots = %+v, want none", roots)
+	}
+	if skills := store.List(); len(skills) != 0 {
+		t.Fatalf("disabled store skills = %+v, want none", skills)
+	}
+	if skills := store.SlashList(); len(skills) != 0 {
+		t.Fatalf("disabled store slash skills = %+v, want none", skills)
+	}
+	if inspection := store.Inspect(); len(inspection.Roots) != 0 || len(inspection.Candidates) != 0 {
+		t.Fatalf("disabled store inspection = %+v, want empty", inspection)
+	}
+	if _, ok := store.Read("project"); ok {
+		t.Fatal("disabled store read discovered a skill")
+	}
+}
+
 func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 	home := t.TempDir()
 	proj := t.TempDir()
@@ -79,6 +111,52 @@ func TestListPrecedenceProjectOverGlobal(t *testing.T) {
 	}
 	if _, ok := find(list, "onlyglobal"); !ok {
 		t.Fatal("global-only skill should be discovered")
+	}
+}
+
+func TestPluginClaudeAgentLoadsAsManualSubagent(t *testing.T) {
+	home := t.TempDir()
+	agentRoot := filepath.Join(t.TempDir(), "agents")
+	writeSkill(t, agentRoot, "reviewer.md", "---\ndescription: Review changes\nmodel: sonnet\ntools: [Read, Grep, \"mcp__*__search\"]\n---\nReview carefully.")
+	key := config.CanonicalSkillPath(agentRoot)
+	st := New(Options{HomeDir: home, CustomPaths: []string{agentRoot}, PluginPaths: map[string][]string{key: {"legal"}}, PluginAgentPaths: map[string][]string{key: {"legal"}}, DisableBuiltins: true})
+	sk, ok := st.Read("reviewer")
+	if !ok {
+		t.Fatal("Claude agent was not discoverable")
+	}
+	if sk.RunAs != RunSubagent || sk.Invocation != "manual" || sk.Model != "" {
+		t.Fatalf("agent profile = %+v", sk)
+	}
+	if sk.SlashName() != "legal:agent:reviewer" {
+		t.Fatalf("agent slash name = %q", sk.SlashName())
+	}
+	want := []string{"read_file", "grep", "mcp__*__search"}
+	if !slices.Equal(sk.AllowedTools, want) {
+		t.Fatalf("allowed tools = %v, want %v", sk.AllowedTools, want)
+	}
+}
+
+func TestPluginAgentAndSkillWithSameNameHaveDistinctQualifiedInvocations(t *testing.T) {
+	home := t.TempDir()
+	skillRoot := filepath.Join(t.TempDir(), "skills")
+	agentRoot := filepath.Join(t.TempDir(), "agents")
+	writeSkill(t, skillRoot, "leave-tracker/SKILL.md", "---\ndescription: Track leave\n---\nSkill body")
+	writeSkill(t, agentRoot, "leave-tracker.md", "---\ndescription: Monitor leave\n---\nAgent body")
+	skillKey := config.CanonicalSkillPath(skillRoot)
+	agentKey := config.CanonicalSkillPath(agentRoot)
+	st := New(Options{
+		HomeDir: home, CustomPaths: []string{skillRoot, agentRoot},
+		PluginPaths:      map[string][]string{skillKey: {"employment-legal"}, agentKey: {"employment-legal"}},
+		PluginAgentPaths: map[string][]string{agentKey: {"employment-legal"}}, DisableBuiltins: true,
+	})
+
+	inline, ok := st.ReadSlash("employment-legal:leave-tracker")
+	if !ok || inline.RunAs != RunInline {
+		t.Fatalf("inline skill = %+v, found=%v", inline, ok)
+	}
+	agent, ok := st.ReadSlash("employment-legal:agent:leave-tracker")
+	if !ok || agent.RunAs != RunSubagent || agent.Invocation != "manual" {
+		t.Fatalf("agent profile = %+v, found=%v", agent, ok)
 	}
 }
 

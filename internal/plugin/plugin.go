@@ -19,15 +19,43 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/mcplaunch"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/tool"
 )
 
 // protocolVersion is the MCP revision Reasonix advertises during initialize.
 const protocolVersion = "2024-11-05"
+
+// MCPProcessMode selects how a local stdio MCP process is launched.
+// It is an internal runtime field, not a user-facing config knob.
+type MCPProcessMode string
+
+const (
+	// MCPProcessHost runs authorized stdio MCP as a trusted host process that
+	// does not inherit the agent Bash command sandbox. This is the product
+	// default so servers such as chrome-devtools-mcp can reach the real browser,
+	// Keychain, LaunchServices, and local app services.
+	MCPProcessHost MCPProcessMode = "host"
+	// MCPProcessConfined wraps the process with sandbox.CommandArgs. Reserved for
+	// internal managed deployments and tests; never auto-selected for user installs.
+	MCPProcessConfined MCPProcessMode = "confined"
+)
+
+// ResolvedProcessMode returns the effective process mode. Empty means host.
+func (s Spec) ResolvedProcessMode() MCPProcessMode {
+	switch s.ProcessMode {
+	case MCPProcessConfined:
+		return MCPProcessConfined
+	default:
+		return MCPProcessHost
+	}
+}
 
 // defaultCallTimeout is the MCP JSON-RPC call deadline applied when neither the
 // caller context nor config provides one. It is intentionally finite so a slow
@@ -38,7 +66,10 @@ const defaultCallTimeout = 300 * time.Second
 // (default) runs Command/Args/Env as a subprocess; "http" / "streamable-http"
 // and "sse" connect to URL with optional static Headers.
 type Spec struct {
-	Name    string
+	Name string
+	// Package is the installed plugin package that contributed this server.
+	// It is host-only provenance and intentionally excluded from fingerprints.
+	Package string
 	Type    string
 	Command string
 	Args    []string
@@ -60,20 +91,47 @@ type Spec struct {
 	// for cwd-aware servers like CodeGraph, which detect the project from the
 	// directory they are launched in — they must be pinned to the project root.
 	Dir string
+	// WorkspaceRoot is the project root exposed through the MCP roots capability.
+	// It is runtime-only and intentionally separate from Dir: user-installed
+	// stdio servers keep inheriting Reasonix's cwd while still receiving the
+	// explicit workspace root when they ask for roots/list.
+	WorkspaceRoot string
 	// Stderr optionally mirrors plugin subprocess stderr output. Stderr is always
 	// captured in a bounded buffer for failure diagnostics; nil keeps it out of
 	// the terminal so child logs cannot corrupt interactive UIs.
 	Stderr io.Writer
-	// ReadOnlyToolNames marks trusted raw MCP tool names as read-only even when
-	// the server omits annotations.readOnlyHint. It is for known compatibility
-	// overrides or user-audited plugin config where the tool semantics are
-	// stable; other user-configured plugins should rely on MCP metadata.
-	ReadOnlyToolNames map[string]bool
-	// ReadOnlyModelToolNames marks trusted model-visible MCP tool names
-	// ("mcp__<server>__<tool>") as read-only. This supports user-level
-	// declarations such as agent.plan_mode_allowed_tools without reverse-parsing
-	// normalized MCP tool names back into raw server-local names.
-	ReadOnlyModelToolNames map[string]bool
+	// LaunchManager owns exact project launch grants and mutable launcher locks.
+	// It never contributes to SchemaCacheKey or provider-visible tool schemas.
+	LaunchManager *mcplaunch.Manager
+	// ConfigSource disambiguates otherwise identical server names coming from
+	// workspace config, a host transport, or a user-installed plugin package.
+	ConfigSource string
+	// Authorized is the single runtime authorization result for this server.
+	// User-installed and explicit host-session servers set it directly; project
+	// servers set it only after an exact launch grant is resolved.
+	Authorized            bool
+	RequireLaunchApproval bool
+	// LaunchArgs and launcher metadata are host-local immutable resolutions for
+	// mutable package launchers. LauncherIdentityArgs is the same exact package
+	// resolution without an automatically injected offline/no-install flag: that
+	// enforcement-only flag changes process invocation but not the server identity
+	// the user approved. These fields never contribute to SchemaCacheKey or the
+	// provider-visible tool surface; Args remains the user's stable config.
+	LaunchArgs              []string
+	LauncherIdentityArgs    []string
+	LauncherLocator         string
+	LauncherResolvedVersion string
+	LauncherDigest          string
+	// ProcessMode selects how an authorized stdio MCP process is launched.
+	// Empty defaults to host (trusted host process, no command sandbox).
+	// confined is reserved for internal managed deployments and tests; it is
+	// never exposed in common settings and never used as an automatic fallback.
+	ProcessMode MCPProcessMode
+	// Sandbox is only applied when ProcessMode is confined. Host-mode servers
+	// keep private state/cache/temp dirs without wrapping the process in the
+	// agent command sandbox.
+	Sandbox  sandbox.Spec
+	StateDir string
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
 	// raw name before namespacing. For example, StripRawPrefix="server_" turns
 	// "server_search" into "search", yielding "mcp__search__search" instead of
@@ -87,9 +145,9 @@ type Spec struct {
 
 // transport carries JSON-RPC messages to and from one MCP server. call sends a
 // request and returns its result (correlating by id internally); notify sends a
-// fire-and-forget notification; close releases resources. Server-initiated
-// messages (notifications, requests like roots/list) are ignored — Reasonix is a
-// tools/prompts/resources consumer, not a sampling/roots provider (see SPEC §9).
+// fire-and-forget notification; close releases resources. Transports route MCP
+// progress notifications to the active tool call and answer the client
+// capabilities Reasonix advertises (currently ping and roots/list).
 type transport interface {
 	call(ctx context.Context, method string, params any) (json.RawMessage, error)
 	notify(ctx context.Context, method string, params any) error
@@ -114,8 +172,9 @@ type Host struct {
 	// Close cancels those startup contexts and waits for their goroutines before
 	// taking the client snapshot, so a just-connected stdio child cannot escape
 	// teardown and keep a Windows workspace directory locked.
-	deferredCancels []context.CancelFunc
-	deferredWG      sync.WaitGroup
+	deferredCancels     map[string][]context.CancelFunc
+	deferredGenerations map[string]uint64
+	deferredWG          sync.WaitGroup
 
 	// spawningMu + spawning prevent concurrent spawns of the same server from
 	// multiple callers (e.g. several controller tabs sharing one Host). The
@@ -355,7 +414,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 					defer h.bgWrites.Done()
 					_ = RecordStartup(spec.Name, phaseADur)
 					_ = SaveCachedSchema(spec.Name, CachedSchema{
-						SpecHash: SpecFingerprint(spec),
+						CacheKey: SchemaCacheKey(spec),
 						Capabilities: map[string]bool{
 							"tools":     c.hasTools,
 							"prompts":   c.hasPrompts,
@@ -413,7 +472,11 @@ func (h *Host) Close() {
 		return
 	}
 	h.closed = true
-	cancels := append([]context.CancelFunc(nil), h.deferredCancels...)
+	var cancels []context.CancelFunc
+	for _, serverCancels := range h.deferredCancels {
+		cancels = append(cancels, serverCancels...)
+	}
+	h.deferredCancels = nil
 	h.mu.Unlock()
 
 	for _, cancel := range cancels {
@@ -428,6 +491,17 @@ func (h *Host) Close() {
 		c.close()
 	}
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
+}
+
+// queueBackgroundWrite keeps detached persistence inside the Host lifecycle.
+// Callers must enqueue before their Close-drained startup owner completes, so
+// Close cannot begin waiting before the WaitGroup increment is visible.
+func (h *Host) queueBackgroundWrite(write func()) {
+	h.bgWrites.Add(1)
+	go func() {
+		defer h.bgWrites.Done()
+		write()
+	}()
 }
 
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
@@ -538,6 +612,7 @@ type Client struct {
 	// MCP servers just to rebuild identical schemas.
 	toolsListed  bool
 	toolAdapters []tool.Tool
+	progressID   atomic.Uint64
 }
 
 func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context, context.CancelFunc, error) {
@@ -552,10 +627,11 @@ func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context,
 
 // ToolInfo is the human-facing metadata returned by MCP tools/list for one tool.
 type ToolInfo struct {
-	Name         string
-	Description  string
-	ReadOnlyHint bool
-	SchemaError  string
+	Name            string
+	Description     string
+	ReadOnlyHint    bool
+	DestructiveHint bool
+	SchemaError     string
 }
 
 // ServerStatus summarises one connected server for the /mcp command.
@@ -569,11 +645,81 @@ type ServerStatus struct {
 	ToolList  []ToolInfo
 }
 
+// AuthorizeSpecLaunch records durable consent for an explicitly user-installed
+// project MCP without starting it a second time. The normal project discovery
+// path still requires a user action; install_source calls this only while
+// applying a plan the user already requested. Reuse an existing launcher lock
+// when one exists, but do not add a second network/version-resolution step to an
+// explicit install: the durable grant follows the exact configured command or
+// endpoint and future changes still invalidate it.
+func AuthorizeSpecLaunch(ctx context.Context, spec Spec) error {
+	return authorizeSpecLaunch(ctx, spec, false)
+}
+
+// AuthorizeProjectSpecLaunch records the one durable launch confirmation used
+// for repository-discovered MCP configuration. Mutable package launchers are
+// resolved and locked, but the MCP server itself is not started: the caller can
+// connect it exactly once after this function returns.
+func AuthorizeProjectSpecLaunch(ctx context.Context, spec Spec) error {
+	return authorizeSpecLaunch(ctx, spec, true)
+}
+
+func authorizeSpecLaunch(ctx context.Context, spec Spec, lockMutableLauncher bool) error {
+	if !spec.RequireLaunchApproval {
+		return nil
+	}
+	manager := spec.LaunchManager
+	if manager == nil {
+		return fmt.Errorf("MCP launch authorization store is unavailable")
+	}
+	var prepared Spec
+	var launcherLock *mcplaunch.LauncherLock
+	var err error
+	if lockMutableLauncher {
+		prepared, launcherLock, err = preparePersistentLauncher(ctx, spec)
+	} else {
+		prepared, err = applyStoredLauncherLock(spec)
+	}
+	if err != nil {
+		return err
+	}
+	identityDigest, err := projectLaunchIdentityDigest(ctx, prepared)
+	if err != nil {
+		return err
+	}
+	if launcherLock != nil {
+		// Store the resolution before the grant so a failed state write cannot
+		// leave an authorization whose exact launcher identity is unavailable.
+		if err := manager.PutLauncherLock(*launcherLock); err != nil {
+			return err
+		}
+	}
+	return manager.Authorize(prepared.Name, launchConfigSource(prepared), identityDigest)
+}
+
 // Failure records one MCP server that was configured but could not connect.
 type Failure struct {
-	Name      string
-	Transport string
-	Error     string
+	Name                   string
+	Transport              string
+	Error                  string
+	RequiresLaunchApproval bool
+}
+
+type launchApprovalError struct {
+	server  string
+	changed bool
+}
+
+func (e *launchApprovalError) Error() string {
+	if e.changed {
+		return fmt.Sprintf("project-provided MCP server %q changed; blocked before process or network startup and requires explicit re-authorization", e.server)
+	}
+	return fmt.Sprintf("project-provided MCP server %q is blocked before process or network startup until the user authorizes it", e.server)
+}
+
+func requiresLaunchApproval(err error) bool {
+	var launchTarget *launchApprovalError
+	return errors.As(err, &launchTarget)
 }
 
 // Servers returns a status summary per connected server, in connection order.
@@ -637,7 +783,10 @@ func (h *Host) RecordFailure(s Spec, err error) {
 	if tt == "" {
 		tt = "stdio"
 	}
-	f := Failure{Name: s.Name, Transport: tt, Error: summarizeFailureError(err)}
+	f := Failure{
+		Name: s.Name, Transport: tt, Error: summarizeFailureError(err),
+		RequiresLaunchApproval: requiresLaunchApproval(err),
+	}
 	for i := range h.failures {
 		if h.failures[i].Name == s.Name {
 			h.failures[i] = f
@@ -645,6 +794,13 @@ func (h *Host) RecordFailure(s Spec, err error) {
 		}
 	}
 	h.failures = append(h.failures, f)
+}
+
+// RecordLaunchApprovalRequired keeps an intentionally disconnected project MCP
+// visible as awaiting authorization. This is used after an explicit launch
+// revocation, where no failed connection attempt exists to create the status.
+func (h *Host) RecordLaunchApprovalRequired(s Spec) {
+	h.RecordFailure(s, &launchApprovalError{server: s.Name})
 }
 
 // ClearFailure drops a recorded startup/connection failure for status UIs.
@@ -671,14 +827,26 @@ func (h *Host) clearFailure(name string) {
 // command), which keeps the controller's host pointer stable for the session.
 func NewHost() *Host { return &Host{} }
 
-func (h *Host) registerDeferredCancel(cancel context.CancelFunc) {
+func (h *Host) registerDeferredCancel(name string, cancel context.CancelFunc) uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.closed {
 		cancel()
-		return
+		return 0
 	}
-	h.deferredCancels = append(h.deferredCancels, cancel)
+	if h.deferredCancels == nil {
+		h.deferredCancels = make(map[string][]context.CancelFunc)
+	}
+	if h.deferredGenerations == nil {
+		h.deferredGenerations = make(map[string]uint64)
+	}
+	generation := h.deferredGenerations[name]
+	if generation == 0 {
+		generation = 1
+		h.deferredGenerations[name] = generation
+	}
+	h.deferredCancels[name] = append(h.deferredCancels[name], cancel)
+	return generation
 }
 
 func (h *Host) beginDeferredSpawn() bool {
@@ -794,31 +962,31 @@ func (h *Host) client(name string) *Client {
 // stdio child's lifetime, so pass the session-scoped context — not a per-turn one
 // — or the subprocess dies when that turn ends. Errors if the name is taken.
 func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
-	if h.has(s.Name) {
-		return nil, serverAlreadyConnectedError(s.Name)
+	return h.addWithLifecycle(ctx, ctx, s, 0)
+}
+
+// EnsureConnected returns tools for an already-connected server, or starts the
+// shared single-flight handshake and waits for it. Concurrent callers for the
+// same server share one initialize/tools-list; cancelling a waiter only cancels
+// that wait and never kills a process still used by other runtimes.
+func (h *Host) EnsureConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
+	return h.EnsureConnectedWithLifecycle(ctx, ctx, s, 0)
+}
+
+// EnsureConnectedWithLifecycle is EnsureConnected with separate subprocess
+// lifetime (lifeCtx) and startup/call (callCtx) contexts, plus an optional
+// deferred generation for lazy registration.
+func (h *Host) EnsureConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferredGeneration uint64) ([]tool.Tool, error) {
+	if deferredGeneration != 0 && !h.deferredGenerationCurrent(s.Name, deferredGeneration) {
+		return nil, ErrDeferredSpawnCancelled
 	}
-	attempt, owner := h.beginSpawn(s.Name)
-	if !owner {
-		select {
-		case <-attempt.done:
-			if attempt.err != nil {
-				return nil, attempt.err
-			}
-			return append([]tool.Tool(nil), attempt.tools...), nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+	if tools, err := h.ToolsFor(callCtx, s.Name); err == nil {
+		return tools, nil
 	}
-	var tools []tool.Tool
-	var err error
-	defer func() { h.endSpawn(s.Name, tools, err) }()
-	// Double-check after acquiring the spawn token: another caller may have
-	// connected the server between our h.has check and beginSpawn.
-	if h.has(s.Name) {
-		err = serverAlreadyConnectedError(s.Name)
-		return nil, err
+	tools, err := h.addWithLifecycle(lifeCtx, callCtx, s, deferredGeneration)
+	if IsServerAlreadyConnected(err) {
+		return h.ToolsFor(callCtx, s.Name)
 	}
-	tools, err = h.addConnected(ctx, s)
 	return tools, err
 }
 
@@ -826,10 +994,21 @@ func (h *Host) Add(ctx context.Context, s Spec) ([]tool.Tool, error) {
 // contexts for the subprocess lifecycle (lifeCtx, session-scoped) and the startup
 // handshake/list calls (callCtx, turn-scoped/timeout-bound).
 func (h *Host) AddWithLifecycle(lifeCtx, callCtx context.Context, s Spec) ([]tool.Tool, error) {
+	return h.addWithLifecycle(lifeCtx, callCtx, s, 0)
+}
+
+func (h *Host) addWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferredGeneration uint64) ([]tool.Tool, error) {
+	if deferredGeneration != 0 && !h.deferredGenerationCurrent(s.Name, deferredGeneration) {
+		return nil, ErrDeferredSpawnCancelled
+	}
 	if h.has(s.Name) {
 		return nil, serverAlreadyConnectedError(s.Name)
 	}
-	attempt, owner := h.beginSpawn(s.Name)
+	spawnKey := s.Name
+	if deferredGeneration != 0 {
+		spawnKey = fmt.Sprintf("%s#%d", s.Name, deferredGeneration)
+	}
+	attempt, owner := h.beginSpawn(spawnKey)
 	if !owner {
 		select {
 		case <-attempt.done:
@@ -845,22 +1024,22 @@ func (h *Host) AddWithLifecycle(lifeCtx, callCtx context.Context, s Spec) ([]too
 	}
 	var tools []tool.Tool
 	var err error
-	defer func() { h.endSpawn(s.Name, tools, err) }()
+	defer func() { h.endSpawn(spawnKey, tools, err) }()
 	// Double-check after acquiring the spawn token: another caller may have
 	// connected the server between our h.has check and beginSpawn.
 	if h.has(s.Name) {
 		err = serverAlreadyConnectedError(s.Name)
 		return nil, err
 	}
-	tools, err = h.addConnectedWithLifecycle(lifeCtx, callCtx, s)
+	tools, err = h.addConnectedWithLifecycle(lifeCtx, callCtx, s, deferredGeneration)
 	return tools, err
 }
 
 func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
-	return h.addConnectedWithLifecycle(ctx, ctx, s)
+	return h.addConnectedWithLifecycle(ctx, ctx, s, 0)
 }
 
-func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec) ([]tool.Tool, error) {
+func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferredGeneration uint64) ([]tool.Tool, error) {
 	h.mu.RLock()
 	if h.closed {
 		h.mu.RUnlock()
@@ -883,6 +1062,11 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 		h.mu.Unlock()
 		c.close()
 		return nil, fmt.Errorf("plugin host is closed")
+	}
+	if deferredGeneration != 0 && h.deferredGenerations[s.Name] != deferredGeneration {
+		h.mu.Unlock()
+		c.close()
+		return nil, ErrDeferredSpawnCancelled
 	}
 	if h.hasLocked(s.Name) {
 		h.mu.Unlock()
@@ -910,6 +1094,15 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 // the tool registry, and whether the server was connected.
 func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 	h.mu.Lock()
+	cancels := append([]context.CancelFunc(nil), h.deferredCancels[name]...)
+	delete(h.deferredCancels, name)
+	if h.deferredGenerations == nil {
+		h.deferredGenerations = make(map[string]uint64)
+	}
+	h.deferredGenerations[name]++
+	if h.deferredGenerations[name] == 0 {
+		h.deferredGenerations[name] = 1
+	}
 	idx := -1
 	for i, c := range h.clients {
 		if c.name == name {
@@ -919,7 +1112,13 @@ func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 	}
 	if idx < 0 {
 		h.mu.Unlock()
-		return "", false
+		for _, cancel := range cancels {
+			cancel()
+		}
+		if len(cancels) == 0 {
+			return "", false
+		}
+		return ToolPrefix(name), true
 	}
 	removed := h.clients[idx]
 	h.clients = append(h.clients[:idx], h.clients[idx+1:]...)
@@ -942,10 +1141,23 @@ func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 	h.clearFailure(name)
 	h.mu.Unlock()
 
+	for _, cancel := range cancels {
+		cancel()
+	}
 	removed.close() // kills the subprocess: outside the lock
 
 	return "mcp__" + normalizeName(name) + "__", true
 }
+
+func (h *Host) deferredGenerationCurrent(name string, generation uint64) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return !h.closed && generation != 0 && h.deferredGenerations[name] == generation
+}
+
+// ErrDeferredSpawnCancelled marks a lazy generation invalidated by remove or
+// host shutdown before it could publish a client.
+var ErrDeferredSpawnCancelled = errors.New("deferred MCP spawn cancelled")
 
 // start opens the transport on lifeCtx (whose cancellation later closes the
 // subprocess) and uses callCtx for the initialize round-trip (whose cancellation
@@ -955,6 +1167,15 @@ func (h *Host) Remove(name string) (toolPrefix string, found bool) {
 // (prompts + resources) can still call it later. Callers that don't care pass
 // the same ctx for both.
 func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
+	var err error
+	s, err = applyStoredLauncherLock(s)
+	if err != nil {
+		return nil, err
+	}
+	s, err = resolveProjectLaunchAuthorization(callCtx, s)
+	if err != nil {
+		return nil, err
+	}
 	t, err := newTransport(lifeCtx, s)
 	if err != nil {
 		return nil, err
@@ -971,6 +1192,70 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	return c, nil
 }
 
+// resolveProjectLaunchAuthorization deliberately skips identity resolution for
+// installed and host-session servers. Their explicit installation is already
+// the authorization decision; only repository-declared servers need an exact
+// executable or endpoint digest before startup.
+func resolveProjectLaunchAuthorization(ctx context.Context, s Spec) (Spec, error) {
+	if !s.RequireLaunchApproval {
+		return s, nil
+	}
+	identityDigest, err := projectLaunchIdentityDigest(ctx, s)
+	if err != nil {
+		return s, err
+	}
+	return applyEstablishedLaunchGrant(s, identityDigest)
+}
+
+func applyEstablishedLaunchGrant(s Spec, identityDigest string) (Spec, error) {
+	if !s.RequireLaunchApproval {
+		return s, nil
+	}
+	if s.LaunchManager == nil {
+		return s, fmt.Errorf("MCP launch authorization store is unavailable")
+	}
+	authorized, changed, err := s.LaunchManager.LaunchAuthorized(s.Name, launchConfigSource(s), identityDigest)
+	if err != nil {
+		return s, err
+	}
+	if !authorized {
+		return s, &launchApprovalError{server: s.Name, changed: changed}
+	}
+	// A matching exact-identity launch grant is the user's authorization for
+	// this project server. Calls proceed like an explicit install, while global
+	// deny rules and execution safety boundaries remain authoritative.
+	s.Authorized = true
+	return s, nil
+}
+
+// ResolveStoredAuthorization applies an existing exact project grant without
+// starting a process or opening a network connection. Cached lazy/on-demand
+// tools use it before strict read-only filtering so every execution path sees
+// the same server-level authorization. Errors fail closed by returning the
+// original unauthorized Spec; a parent connection surfaces the detailed error.
+func ResolveStoredAuthorization(ctx context.Context, s Spec) Spec {
+	if !s.RequireLaunchApproval {
+		return s
+	}
+	locked, err := applyStoredLauncherLock(s)
+	if err != nil {
+		return s
+	}
+	authorized, err := resolveProjectLaunchAuthorization(ctx, locked)
+	if err != nil {
+		return s
+	}
+	return authorized
+}
+
+// ServerAuthorized is the single MCP authorization source. Tools do not carry
+// an independent trust bit: installation or an exact project launch grant
+// authorizes the server, while read-only/destructive classification remains a
+// live per-tool safety fact.
+func (s Spec) ServerAuthorized() bool {
+	return s.Authorized
+}
+
 // newTransport builds the transport for a spec's declared type. Empty / unknown
 // defaults to stdio.
 func newTransport(ctx context.Context, s Spec) (transport, error) {
@@ -980,17 +1265,16 @@ func newTransport(ctx context.Context, s Spec) (transport, error) {
 	case "http", "streamable-http", "streamable_http":
 		return newHTTPTransport(s)
 	case "sse":
-		// The legacy 2024-11-05 HTTP+SSE transport needs a persistent GET stream
-		// with a background dispatcher — deprecated upstream ("avoid for new
-		// work"). Use type="http" (Streamable HTTP), which most remote servers
-		// now speak. Tracked for later (SPEC §9).
-		return nil, fmt.Errorf("plugin %q: legacy sse transport not yet supported — use type=\"http\" (Streamable HTTP)", s.Name)
+		return newSSETransport(ctx, s)
 	default:
 		return nil, fmt.Errorf("unknown transport type %q (want stdio|http|sse)", s.Type)
 	}
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	params, unregisterProgress := c.withProgress(ctx, method, params)
+	defer unregisterProgress()
+
 	callCtx, cancel, timeout := c.contextWithCallTimeout(ctx, method, params)
 	if cancel != nil {
 		defer cancel()
@@ -1003,6 +1287,40 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 		return nil, c.timeoutError(method, params, timeout)
 	}
 	return res, err
+}
+
+func (c *Client) withProgress(ctx context.Context, method string, params any) (any, func()) {
+	if method != "tools/call" {
+		return params, func() {}
+	}
+	sink, ok := tool.ProgressFrom(ctx)
+	if !ok {
+		return params, func() {}
+	}
+	router, ok := c.t.(progressTransport)
+	if !ok {
+		return params, func() {}
+	}
+	callParams, ok := params.(map[string]any)
+	if !ok {
+		return params, func() {}
+	}
+
+	token := fmt.Sprintf("reasonix-%d", c.progressID.Add(1))
+	copyParams := make(map[string]any, len(callParams))
+	for key, value := range callParams {
+		copyParams[key] = value
+	}
+	meta := map[string]any{}
+	if existing, ok := callParams["_meta"].(map[string]any); ok {
+		for key, value := range existing {
+			meta[key] = value
+		}
+	}
+	meta["progressToken"] = token
+	copyParams["_meta"] = meta
+	unregister := router.registerProgress(token, sink)
+	return copyParams, unregister
 }
 
 func (c *Client) callTransport(ctx context.Context, method string, params any) (json.RawMessage, error) {
@@ -1088,9 +1406,13 @@ func (c *Client) initialize(ctx context.Context) error {
 }
 
 func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool) error {
+	capabilities := map[string]any{}
+	if len(mcpRoots(c.spec.WorkspaceRoot)) > 0 {
+		capabilities["roots"] = map[string]any{"listChanged": false}
+	}
 	res, err := c.call(ctx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
-		"capabilities":    map[string]any{},
+		"capabilities":    capabilities,
 		"clientInfo":      map[string]any{"name": "reasonix", "version": "dev"},
 	})
 	if err != nil {
@@ -1116,24 +1438,17 @@ func (c *Client) initializeSession(ctx context.Context, recordCapabilities bool)
 }
 
 type mcpTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"inputSchema"`
-	// Annotations carries MCP's optional tool hints. We read readOnlyHint: a
-	// plugin that declares a tool read-only opts it into Reasonix's parallel-dispatch
-	// path and the permission layer's "readers default to allow". Absent
-	// annotations stay false — opaque by default, never trusted implicitly.
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	InputSchema  json.RawMessage `json:"inputSchema"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	// Annotations carries MCP's optional tool hints. readOnlyHint controls reader
+	// classification; destructiveHint remains destructive even when another hint
+	// claims the tool is read-only. Approval policy is applied separately.
 	Annotations *struct {
-		ReadOnlyHint bool `json:"readOnlyHint"`
+		ReadOnlyHint    bool `json:"readOnlyHint"`
+		DestructiveHint bool `json:"destructiveHint"`
 	} `json:"annotations"`
-}
-
-func (s Spec) toolReadOnly(rawName, visibleName string, hinted bool) bool {
-	return hinted || s.toolReadOnlyTrusted(rawName, visibleName)
-}
-
-func (s Spec) toolReadOnlyTrusted(rawName, visibleName string) bool {
-	return s.ReadOnlyToolNames[rawName] || s.ReadOnlyModelToolNames[toolName(s.Name, visibleName)]
 }
 
 func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
@@ -1143,38 +1458,33 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 		return append([]tool.Tool(nil), c.toolAdapters...), nil
 	}
 
-	out, err := c.listToolsRaw(ctx)
+	out, err := c.listToolsRawSettled(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	// Some MCP servers start accepting requests before dynamically registered
-	// tools have been added. If the server advertised the tools capability, a
-	// first empty list may be a startup race; give it a small bounded window to
-	// settle before freezing the provider-visible tool surface for this client.
-	if c.hasTools && len(out) == 0 {
-		for _, delay := range advertisedToolsEmptyListRetryDelays {
-			if err := sleepContext(ctx, delay); err != nil {
-				return nil, err
-			}
-			out, err = c.listToolsRaw(ctx)
-			if err != nil {
-				return nil, err
-			}
-			if len(out) > 0 {
-				break
-			}
-		}
+	if err := validateMCPToolNames(out); err != nil {
+		return nil, fmt.Errorf("plugin %q: %w", c.name, err)
 	}
 
 	toolInfos := make([]ToolInfo, 0, len(out))
 	tools := make([]tool.Tool, 0, len(out))
+	normalizedSchemas := make(map[string]json.RawMessage, len(out))
 	for _, t := range out {
-		hinted := t.Annotations != nil && t.Annotations.ReadOnlyHint
-		info := ToolInfo{Name: t.Name, Description: t.Description, ReadOnlyHint: hinted}
 		schema, err := normalizeAndValidateToolSchema(t.InputSchema)
 		if err != nil {
-			info.SchemaError = schemaValidationError(err)
+			continue
+		}
+		normalizedSchemas[t.Name] = schema
+	}
+	for _, t := range out {
+		readOnlyHint := t.Annotations != nil && t.Annotations.ReadOnlyHint
+		destructiveHint := t.Annotations != nil && t.Annotations.DestructiveHint
+		info := ToolInfo{Name: t.Name, Description: t.Description, ReadOnlyHint: readOnlyHint, DestructiveHint: destructiveHint}
+		schema, ok := normalizedSchemas[t.Name]
+		if !ok {
+			if _, err := normalizeAndValidateToolSchema(t.InputSchema); err != nil {
+				info.SchemaError = schemaValidationError(err)
+			}
 			toolInfos = append(toolInfos, info)
 			continue
 		}
@@ -1182,16 +1492,19 @@ func (c *Client) listTools(ctx context.Context) ([]tool.Tool, error) {
 		if c.spec.StripRawPrefix != "" {
 			visibleName = strings.TrimPrefix(visibleName, c.spec.StripRawPrefix)
 		}
+		readOnly := readOnlyHint
 		toolInfos = append(toolInfos, info)
-		trusted := c.spec.toolReadOnlyTrusted(t.Name, visibleName)
 		tools = append(tools, &remoteTool{
-			client:          c,
-			name:            toolName(c.name, visibleName),
-			rawName:         t.Name,
-			desc:            t.Description,
-			schema:          schema,
-			readOnly:        c.spec.toolReadOnly(t.Name, visibleName, hinted),
-			readOnlyTrusted: trusted,
+			client:           c,
+			name:             toolName(c.name, visibleName),
+			rawName:          t.Name,
+			visibleName:      visibleName,
+			desc:             t.Description,
+			schema:           schema,
+			outputSchema:     t.OutputSchema,
+			declaredReadOnly: readOnlyHint,
+			readOnly:         readOnly,
+			destructive:      destructiveHint,
 		})
 	}
 	sort.SliceStable(toolInfos, func(i, j int) bool { return toolInfos[i].Name < toolInfos[j].Name })
@@ -1234,6 +1547,40 @@ func (c *Client) listToolsRaw(ctx context.Context) ([]mcpTool, error) {
 	return out.Tools, nil
 }
 
+// listToolsRawSettled gives dynamically registering servers a bounded startup
+// window before their initial tool catalog is considered complete.
+func (c *Client) listToolsRawSettled(ctx context.Context) ([]mcpTool, error) {
+	out, err := c.listToolsRaw(ctx)
+	if err != nil || !c.hasTools || len(out) > 0 {
+		return out, err
+	}
+	for _, delay := range advertisedToolsEmptyListRetryDelays {
+		if err := sleepContext(ctx, delay); err != nil {
+			return nil, err
+		}
+		out, err = c.listToolsRaw(ctx)
+		if err != nil || len(out) > 0 {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func validateMCPToolNames(tools []mcpTool) error {
+	seen := make(map[string]bool, len(tools))
+	for _, candidate := range tools {
+		name := strings.TrimSpace(candidate.Name)
+		if name == "" {
+			return fmt.Errorf("tools/list returned an empty tool name")
+		}
+		if seen[candidate.Name] {
+			return fmt.Errorf("tools/list returned duplicate tool name %q", candidate.Name)
+		}
+		seen[candidate.Name] = true
+	}
+	return nil
+}
+
 func sleepContext(ctx context.Context, delay time.Duration) error {
 	if delay <= 0 {
 		return nil
@@ -1257,9 +1604,9 @@ func (c *Client) cachedTools() ([]tool.Tool, bool) {
 	return append([]tool.Tool(nil), c.toolAdapters...), true
 }
 
-// toolName builds the model-visible namespaced name "mcp__<server>__<tool>",
-// matching Claude Code. Spaces in either part are normalised to underscores so
-// the name is a clean identifier the model can call.
+// toolName builds Reasonix's canonical model-visible name
+// "mcp__<server>__<tool>". The registry separately resolves unique portable
+// and Claude plugin-qualified references without exposing duplicate schemas.
 func toolName(server, raw string) string {
 	return ToolPrefix(server) + normalizeName(raw)
 }
@@ -1341,16 +1688,18 @@ func (e *rpcError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Cod
 // --- remote tool adapter ---
 
 type remoteTool struct {
-	client   *Client
-	name     string // namespaced "mcp__<server>__<tool>"
-	rawName  string // original name for tools/call
-	desc     string
-	schema   json.RawMessage
-	readOnly bool // from MCP readOnlyHint or trusted first-party Spec override
-	// readOnlyTrusted is true only when readOnly came from a first-party
-	// Spec.ReadOnlyToolNames override, not the server's readOnlyHint. Plan mode
-	// uses it to decide whether to trust ReadOnly() at face value.
-	readOnlyTrusted bool
+	client           *Client
+	name             string // namespaced "mcp__<server>__<tool>"
+	rawName          string // original name for tools/call
+	visibleName      string // raw name after configured prefix stripping
+	desc             string
+	schema           json.RawMessage
+	outputSchema     json.RawMessage
+	declaredReadOnly bool // server hint, independent of server authorization
+	readOnly         bool // effective reader classification for this live snapshot
+	// destructive is the MCP destructiveHint. It takes precedence over a
+	// conflicting readOnlyHint in Plan and strict read-only execution.
+	destructive bool
 }
 
 func (t *remoteTool) Name() string        { return t.name }
@@ -1361,19 +1710,39 @@ func (t *remoteTool) MCPServerName() string {
 	}
 	return t.client.name
 }
-func (t *remoteTool) MCPRawToolName() string { return t.rawName }
+func (t *remoteTool) MCPRawToolName() string     { return t.rawName }
+func (t *remoteTool) MCPVisibleToolName() string { return t.visibleName }
+func (t *remoteTool) MCPPackageName() string {
+	if t.client == nil {
+		return ""
+	}
+	return t.client.spec.Package
+}
 
-// ReadOnly reflects MCP readOnlyHint, plus trusted first-party Spec overrides.
-// It defaults to false: opaque third-party tools must declare readOnlyHint
-// before joining reader-default permission handling or plan-mode execution.
-func (t *remoteTool) ReadOnly() bool { return t.readOnly }
+func (t *remoteTool) MCPServerAuthorized() bool {
+	return t.client != nil && t.client.spec.ServerAuthorized()
+}
 
-// PlanModeUntrustedReadOnly reports true when ReadOnly() is true only because the
-// MCP server self-reported readOnlyHint. A first-party ReadOnlyToolNames override
-// is trusted, so it returns false. Plan mode treats an untrusted read-only tool
-// like a writer unless it is declared in plan_mode_allowed_tools.
-func (t *remoteTool) PlanModeUntrustedReadOnly() bool {
-	return t.readOnly && !t.readOnlyTrusted
+// ReadOnly reflects MCP readOnlyHint plus backward-compatible Spec overrides.
+// It defaults to false, so opaque tools remain write-capable unless the server
+// or local configuration explicitly classifies them as read-only.
+func (t *remoteTool) securitySnapshot() (declaredReadOnly, readOnly, destructive bool) {
+	if t.client == nil {
+		return t.declaredReadOnly, t.readOnly, t.destructive
+	}
+	t.client.toolsMu.Lock()
+	defer t.client.toolsMu.Unlock()
+	return t.declaredReadOnly, t.readOnly, t.destructive
+}
+
+func (t *remoteTool) ReadOnly() bool {
+	_, readOnly, _ := t.securitySnapshot()
+	return readOnly
+}
+
+func (t *remoteTool) MCPDestructiveHint() bool {
+	_, _, destructive := t.securitySnapshot()
+	return destructive
 }
 
 func (t *remoteTool) Schema() json.RawMessage {
@@ -1396,6 +1765,18 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &argMap); err != nil {
 			return "", nil, fmt.Errorf("invalid args: %w", err)
+		}
+	}
+	_, readOnly, destructive := t.securitySnapshot()
+	if tool.HasReaderExecutionIntent(ctx) {
+		// Final, linearizable check for a reader-authorized call: the snapshot
+		// above and every live security reconciliation serialize on the owning
+		// client's toolsMu. A call approved as a non-destructive reader must never
+		// execute after authorization or safety metadata changed — state drift
+		// here returns an actionable error instead of
+		// dispatching.
+		if !t.MCPServerAuthorized() || !readOnly || destructive {
+			return "", nil, fmt.Errorf("MCP server %q changed the authorization or security metadata for tool %q; the call was blocked before dispatch — refresh the server from a parent session before retrying", t.client.name, t.rawName)
 		}
 	}
 	res, err := t.client.call(ctx, "tools/call", map[string]any{

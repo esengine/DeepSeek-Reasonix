@@ -24,16 +24,15 @@ const mcpJSONFile = ".mcp.json"
 // stdio server; type/url/headers describe a remote one. Reasonix also accepts
 // timeout fields as MCP call policy extensions.
 type mcpServerSpec struct {
-	Type                 string            `json:"type"`
-	Command              string            `json:"command"`
-	Args                 []string          `json:"args"`
-	Env                  map[string]string `json:"env"`
-	URL                  string            `json:"url"`
-	Headers              map[string]string `json:"headers"`
-	CallTimeoutSeconds   int               `json:"call_timeout_seconds"`
-	ToolTimeoutSeconds   map[string]int    `json:"tool_timeout_seconds"`
-	TrustedReadOnlyTools []string          `json:"trusted_read_only_tools"`
-	AutoStart            *bool             `json:"auto_start"`
+	Type               string            `json:"type"`
+	Command            string            `json:"command"`
+	Args               []string          `json:"args"`
+	Env                map[string]string `json:"env"`
+	URL                string            `json:"url"`
+	Headers            map[string]string `json:"headers"`
+	CallTimeoutSeconds int               `json:"call_timeout_seconds"`
+	ToolTimeoutSeconds map[string]int    `json:"tool_timeout_seconds"`
+	AutoStart          *bool             `json:"auto_start"`
 }
 
 // loadMCPJSON reads path (Claude Code's .mcp.json) and returns its servers as
@@ -84,7 +83,9 @@ func specsToEntries(specs map[string]mcpServerSpec, skip map[string]bool) []Plug
 	sort.Strings(names)
 	entries := make([]PluginEntry, 0, len(names))
 	for _, name := range names {
-		entries = append(entries, pluginEntryFromMCPSpec(name, specs[name]))
+		entry := pluginEntryFromMCPSpec(name, specs[name])
+		entry.Source = MCPSourceProjectMCPJSON
+		entries = append(entries, entry)
 	}
 	return entries
 }
@@ -152,6 +153,9 @@ func loadLegacyMCP(path string) []PluginEntry {
 		pe, _ = NormalizePluginCommandLine(pe)
 		entries = append(entries, pe)
 	}
+	for i := range entries {
+		entries[i].Source = MCPSourceLegacyUser
+	}
 	return entries
 }
 
@@ -194,17 +198,16 @@ func anonymousMCPName(i int) string {
 
 func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 	e := PluginEntry{
-		Name:                 name,
-		Type:                 s.Type,
-		Command:              s.Command,
-		Args:                 s.Args,
-		Env:                  s.Env,
-		URL:                  s.URL,
-		Headers:              s.Headers,
-		CallTimeoutSeconds:   s.CallTimeoutSeconds,
-		ToolTimeoutSeconds:   s.ToolTimeoutSeconds,
-		TrustedReadOnlyTools: s.TrustedReadOnlyTools,
-		AutoStart:            s.AutoStart,
+		Name:               name,
+		Type:               s.Type,
+		Command:            s.Command,
+		Args:               s.Args,
+		Env:                s.Env,
+		URL:                s.URL,
+		Headers:            s.Headers,
+		CallTimeoutSeconds: s.CallTimeoutSeconds,
+		ToolTimeoutSeconds: s.ToolTimeoutSeconds,
+		AutoStart:          s.AutoStart,
 	}
 	e, _ = NormalizePluginCommandLine(e)
 	return e
@@ -246,7 +249,9 @@ func UpsertMCPJSONPlugin(path string, entry PluginEntry) (bool, error) {
 			return false, fmt.Errorf("mcp config %s: server %q is not an object", path, entry.Name)
 		}
 	}
-	applyPluginEntryToMCPJSONServer(server, entry)
+	if err := applyPluginEntryToMCPJSONServer(server, entry); err != nil {
+		return false, fmt.Errorf("mcp config %s: server %q: %w", path, entry.Name, err)
+	}
 	updatedRaw, err := json.Marshal(server)
 	if err != nil {
 		return false, fmt.Errorf("mcp config %s: server %q: %w", path, entry.Name, err)
@@ -278,28 +283,6 @@ func RemoveMCPJSONPlugin(path, name string) (bool, error) {
 	return true, nil
 }
 
-func trustMCPJSONReadOnlyTool(path, name, toolName string) (PluginEntry, bool, error) {
-	entry, found, err := LoadMCPJSONPlugin(path, name)
-	if err != nil {
-		return PluginEntry{}, false, err
-	}
-	if !found {
-		return PluginEntry{}, false, fmt.Errorf("trust plugin read-only tool: no plugin %q", name)
-	}
-	cfg := &Config{Plugins: []PluginEntry{entry}}
-	updated, changed, err := cfg.TrustPluginReadOnlyTool(name, toolName)
-	if err != nil {
-		return PluginEntry{}, false, err
-	}
-	if !changed {
-		return updated, false, nil
-	}
-	if _, err := UpsertMCPJSONPlugin(path, updated); err != nil {
-		return PluginEntry{}, false, err
-	}
-	return updated, true, nil
-}
-
 func readMCPJSONRaw(path string) (map[string]json.RawMessage, map[string]json.RawMessage, error) {
 	root := map[string]json.RawMessage{}
 	servers := map[string]json.RawMessage{}
@@ -323,7 +306,7 @@ func readMCPJSONRaw(path string) (map[string]json.RawMessage, map[string]json.Ra
 	return root, servers, nil
 }
 
-func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry PluginEntry) {
+func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry PluginEntry) error {
 	transport := strings.ToLower(strings.TrimSpace(entry.Type))
 	if transport == "" {
 		transport = "stdio"
@@ -345,8 +328,57 @@ func applyPluginEntryToMCPJSONServer(server map[string]json.RawMessage, entry Pl
 	}
 	setMCPJSONInt(server, "call_timeout_seconds", entry.CallTimeoutSeconds)
 	setMCPJSONIntMap(server, "tool_timeout_seconds", entry.ToolTimeoutSeconds)
-	setMCPJSONStringArray(server, "trusted_read_only_tools", entry.TrustedReadOnlyTools)
+	// The removed per-tool reader list is accepted on load for compatibility but
+	// never persisted. Explicitly delete it when updating an existing shared
+	// .mcp.json entry so the obsolete setting disappears naturally.
+	delete(server, "trusted_read_only_tools")
+	delete(server, "default_tools_approval_mode")
+	delete(server, "approvals_reviewer")
 	setMCPJSONBool(server, "auto_start", entry.AutoStart)
+	if err := removeMCPJSONApprovalModes(server); err != nil {
+		return err
+	}
+	return nil
+}
+
+func removeMCPJSONApprovalModes(server map[string]json.RawMessage) error {
+	const key = "tools"
+	tools := map[string]json.RawMessage{}
+	if raw, ok := server[key]; ok && len(raw) > 0 && strings.TrimSpace(string(raw)) != "null" {
+		if err := json.Unmarshal(raw, &tools); err != nil || tools == nil {
+			return fmt.Errorf("%s must be an object", key)
+		}
+	}
+
+	// Remove Reasonix's retired approval_mode while preserving tool fields owned
+	// by other MCP clients.
+	for name, raw := range tools {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+			continue
+		}
+		delete(fields, "approval_mode")
+		if len(fields) == 0 {
+			delete(tools, name)
+			continue
+		}
+		updated, err := json.Marshal(fields)
+		if err != nil {
+			return fmt.Errorf("%s[%q]: %w", key, name, err)
+		}
+		tools[name] = updated
+	}
+
+	if len(tools) == 0 {
+		delete(server, key)
+		return nil
+	}
+	raw, err := json.Marshal(tools)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	server[key] = raw
+	return nil
 }
 
 func writeMCPJSONServers(path string, root map[string]json.RawMessage, servers map[string]json.RawMessage) error {

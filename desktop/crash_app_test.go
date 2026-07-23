@@ -100,20 +100,21 @@ func TestCrashReportFromStructuredDetail(t *testing.T) {
 	secretHex := "abcdefabcdefabcdefabcdefabcdef12"
 	buildCommit := "0123456789abcdef0123456789abcdef01234567"
 	payload := frontendCrashPayload{
-		SchemaVersion: 2,
-		Kind:          "exception",
-		Source:        "frontend",
-		Label:         "unhandledrejection",
-		Message:       "[unhandledrejection]\n\ninvalid argument at C:\\Users\\alice\\app.ts:1 from alice@example.com",
-		ErrorType:     "TypeError",
-		ErrorMessage:  "invalid argument at /Users/alice/project/app.ts api_key=" + apiKey,
-		Stack:         "TypeError: invalid argument\n    at run (/Users/alice/project/app.ts:12:3)\nsecret=" + secretHex,
-		TopFrame:      "at run (/Users/alice/project/app.ts:12:3)",
-		BuildCommit:   buildCommit,
-		Channel:       "canary",
-		Language:      "zh-CN",
-		View:          "wails://wails.localhost/index.html?token=" + secretHex,
-		Breadcrumbs:   []crashBreadcrumb{{T: 1, Cat: "bridge", Msg: "turn SubmitToTab token=" + apiKey}},
+		SchemaVersion:   2,
+		Kind:            "exception",
+		Source:          "frontend",
+		Label:           "unhandledrejection",
+		Message:         "[unhandledrejection]\n\ninvalid argument at C:\\Users\\alice\\app.ts:1 from alice@example.com",
+		ErrorType:       "TypeError",
+		ErrorMessage:    "invalid argument at /Users/alice/project/app.ts api_key=" + apiKey,
+		Stack:           "TypeError: invalid argument\n    at run (/Users/alice/project/app.ts:12:3)\nsecret=" + secretHex,
+		TopFrame:        "at run (/Users/alice/project/app.ts:12:3)",
+		FingerprintHint: "build:01234567|view:app://reasonix/|cats:startup>tabs",
+		BuildCommit:     buildCommit,
+		Channel:         "canary",
+		Language:        "zh-CN",
+		View:            "wails://wails.localhost/index.html?token=" + secretHex,
+		Breadcrumbs:     []crashBreadcrumb{{T: 1, Cat: "bridge", Msg: "turn SubmitToTab token=" + apiKey}},
 	}
 	detail, err := json.Marshal(payload)
 	if err != nil {
@@ -129,7 +130,7 @@ func TestCrashReportFromStructuredDetail(t *testing.T) {
 	if strings.Contains(r.Message, "alice") || strings.Contains(r.ErrorMessage, "alice") || strings.Contains(r.Stack, "alice") {
 		t.Fatalf("user path was not scrubbed: %+v", r)
 	}
-	if r.TopFrame == "" || r.BuildCommit != buildCommit || r.Channel != "canary" || len(r.Breadcrumbs) != 1 {
+	if r.TopFrame == "" || r.FingerprintHint != payload.FingerprintHint || r.BuildCommit != buildCommit || r.Channel != "canary" || len(r.Breadcrumbs) != 1 {
 		t.Fatalf("metadata missing: %+v", r)
 	}
 	freeText := strings.Join([]string{

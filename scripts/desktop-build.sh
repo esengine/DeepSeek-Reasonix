@@ -9,7 +9,7 @@
 #            Reasonix-darwin-universal.dmg               (drag-to-install; human download)
 #   Windows: Reasonix-windows-<arch>-installer.exe       (NSIS per-user installer; updater channel)
 #            Reasonix-windows-<arch>.zip                 (portable human download)
-#   Linux:   Reasonix-linux-<arch>.tar.gz                (bare binary; updater channel)
+#   Linux:   Reasonix-linux-<arch>.tar.gz                (desktop + guard + CLI; updater channel)
 #            Reasonix-linux-<arch>.deb                   (Debian/Ubuntu package; human download)
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
@@ -27,8 +27,72 @@ arch="${PLATFORM#*/}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APPNAME="Reasonix"            # wails.json productName -> Reasonix.app
 BINNAME="reasonix-desktop"    # wails.json outputfilename -> linux binary name
+CLINAME="reasonix"            # bundled CLI sidecar used for remote serve upload
+WINDOWS_CLINAME="reasonix-cli" # Windows cannot store Reasonix.exe and reasonix.exe separately
+GUARDNAME="reasonix-guard"
+LAUNCHERNAME="reasonix-launcher"
+windows_resource_tool_dir=""
+
+# desktop/ is a nested Go module, so the Go toolchain cannot discover the
+# repository VCS revision for the Wails binary. Link the same source identity
+# into both Desktop and its CLI sidecar before this script mutates packaging
+# metadata such as wails.json.
+SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
+if ! git -C "$ROOT" diff-index --quiet HEAD --; then
+	SOURCE_REVISION="$SOURCE_REVISION+dirty"
+fi
+source_revision_ldflag="-X reasonix/internal/remote/protocol.linkedSourceRevision=$SOURCE_REVISION"
+
+cleanup() {
+	if [ -n "$windows_resource_tool_dir" ]; then
+		rm -rf "$windows_resource_tool_dir"
+	fi
+}
+trap cleanup EXIT
 
 cd "$ROOT/desktop"
+
+build_guard() {
+	echo "==> go build Reasonix Guard"
+	mkdir -p "$(dirname "$guard_out")"
+	if [ "$arch" = universal ]; then
+		guard_tmp=$(mktemp -d)
+		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_tmp/amd64" ./cmd/reasonix-guard)
+		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_tmp/arm64" ./cmd/reasonix-guard)
+		lipo -create "$guard_tmp/amd64" "$guard_tmp/arm64" -output "$guard_out"
+		rm -rf "$guard_tmp"
+	else
+		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_out" ./cmd/reasonix-guard)
+	fi
+}
+
+build_cli() {
+	echo "==> go build Reasonix CLI sidecar"
+	mkdir -p "$(dirname "$cli_out")"
+	if [ "$arch" = universal ]; then
+		cli_tmp=$(mktemp -d)
+		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $source_revision_ldflag" -o "$cli_tmp/amd64" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $source_revision_ldflag" -o "$cli_tmp/arm64" ./cmd/reasonix)
+		lipo -create "$cli_tmp/amd64" "$cli_tmp/arm64" -output "$cli_out"
+		rm -rf "$cli_tmp"
+	else
+		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $source_revision_ldflag" -o "$cli_out" ./cmd/reasonix)
+	fi
+}
+
+stamp_windows_executable() {
+	local target="$1"
+	local description="$2"
+	local internal_name="$3"
+	local original_filename="$4"
+	"$windows_resource_tool" \
+		-exe "$target" \
+		-icon "$ROOT/desktop/build/windows/icon.ico" \
+		-version "$numver" \
+		-description "$description" \
+		-internal-name "$internal_name" \
+		-original-filename "$original_filename"
+}
 
 # Stamp the version resource (Windows file properties, macOS CFBundleVersion) from
 # the tag. Wails feeds info.productVersion into goversioninfo and NSIS's
@@ -39,13 +103,29 @@ numver="${VERSION#v}"; numver="${numver%%-*}"
 node -e 'const fs=require("fs"),f="wails.json",j=JSON.parse(fs.readFileSync(f,"utf8"));j.info.productVersion=process.argv[1];fs.writeFileSync(f,JSON.stringify(j,null,2)+"\n")' "$numver"
 
 # NSIS installer is Windows-only (Wails requires a single windows target for -nsis).
-ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL"
+ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $source_revision_ldflag"
 [ "$os" = "darwin" ] && [ "${HAS_APPLE_CERT:-}" = "true" ] && ldflags="$ldflags -X main.macSelfUpdate=true"
 UPDATE_HELPER="reasonix-update-helper.exe"
 if [ "$os" = windows ]; then
+	windows_resource_tool_dir=$(mktemp -d)
+	windows_resource_tool="$windows_resource_tool_dir/reasonix-windows-resource.exe"
+	echo "==> build Windows resource stamper"
+	go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource
+	guard_out="$ROOT/desktop/build/windows/installer/$GUARDNAME.exe"
+	build_guard
+	stamp_windows_executable "$guard_out" "Reasonix Guard" "$GUARDNAME" "$GUARDNAME.exe"
+	launcher_out="$ROOT/desktop/build/windows/installer/$LAUNCHERNAME.exe"
+	echo "==> go build Windows GUI launcher"
+	(cd "$ROOT" && GOOS=windows GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+		-ldflags="-s -w -H windowsgui -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-guard)
+	stamp_windows_executable "$launcher_out" "Reasonix Launcher" "$LAUNCHERNAME" "$LAUNCHERNAME.exe"
 	echo "==> go build Windows update helper"
 	GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
 		-o "build/windows/installer/$UPDATE_HELPER" ./cmd/update-helper
+	stamp_windows_executable "build/windows/installer/$UPDATE_HELPER" "Reasonix Update Helper" "reasonix-update-helper" "$UPDATE_HELPER"
+	cli_out="$ROOT/desktop/build/windows/installer/$WINDOWS_CLINAME.exe"
+	build_cli
+	stamp_windows_executable "$cli_out" "Reasonix CLI" "$WINDOWS_CLINAME" "$WINDOWS_CLINAME.exe"
 fi
 build_args=()
 [ "${DESKTOP_BUILD_CLEAN:-1}" != "0" ] && build_args+=(-clean)
@@ -57,6 +137,12 @@ build_args+=(-platform "$PLATFORM" -ldflags "$ldflags")
 
 echo "==> wails build ${build_args[*]}"
 wails build "${build_args[@]}"
+if [ "$os" != windows ]; then
+	guard_out="$ROOT/desktop/build/bin/$GUARDNAME"
+	build_guard
+	cli_out="$ROOT/desktop/build/bin/$CLINAME"
+	build_cli
+fi
 
 mkdir -p "$ROOT/dist"
 
@@ -67,6 +153,20 @@ darwin)
 	staging=$(mktemp -d)
 	app="$staging/${APPNAME}.app"
 	cp -R "build/bin/reasonix-desktop.app" "$app"
+	cp "$guard_out" "$app/Contents/MacOS/$GUARDNAME"
+	cp "$cli_out" "$app/Contents/MacOS/$CLINAME"
+	bundle_executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
+	# LaunchServices must own the Wails/AppKit process directly. Making Guard the
+	# bundle executable leaves the Dock attached to a non-UI parent process, so
+	# clicking the icon cannot reliably reactivate the desktop window. Guard and
+	# the CLI remain bundled as independent recovery sidecars.
+	[ "$bundle_executable" = "$BINNAME" ] || { echo "macOS bundle executable is $bundle_executable, want $BINNAME" >&2; exit 1; }
+	bundle_icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
+	case "$bundle_icon" in
+	*.icns) ;;
+	*) bundle_icon="$bundle_icon.icns" ;;
+	esac
+	[ -s "$app/Contents/Resources/$bundle_icon" ] || { echo "macOS bundle icon is missing: $bundle_icon" >&2; exit 1; }
 
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization
@@ -146,18 +246,29 @@ windows)
 	portable=$(find build/bin -maxdepth 1 -type f -name "*.exe" ! -name "*installer*.exe" | head -n1 || true)
 	[ -n "$portable" ] || { echo "no portable Windows exe found in build/bin" >&2; exit 1; }
 	staging=$(mktemp -d)
-	cp "$portable" "$staging/${APPNAME}.exe"
+	cp "$portable" "$staging/$BINNAME.exe"
 	helper="build/windows/installer/$UPDATE_HELPER"
 	if [ -f "$helper" ]; then
 		cp "$helper" "$staging/$UPDATE_HELPER"
 	fi
-	src_win=$(cygpath -w "$staging/${APPNAME}.exe")
+	cp "$launcher_out" "$staging/${APPNAME}.exe"
+	cp "$launcher_out" "$staging/$LAUNCHERNAME.exe"
+	cp "$guard_out" "$staging/$GUARDNAME.exe"
+	cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$staging/$WINDOWS_CLINAME.exe"
+	"$ROOT/scripts/verify-windows-portable.sh" "$staging"
+	staging_win=$(cygpath -w "$staging")
 	zip_win=$(cygpath -w "$ROOT/dist/${APPNAME}-windows-${arch}.zip")
-	powershell.exe -NoProfile -Command "Compress-Archive -Force -LiteralPath '$src_win' -DestinationPath '$zip_win'"
+	powershell.exe -NoProfile -Command "Compress-Archive -Force -Path '$staging_win\\*' -DestinationPath '$zip_win'"
 	rm -rf "$staging"
 	;;
 linux)
-	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin "$BINNAME"
+	for desktop_contract in \
+		'Exec=reasonix-guard launch --detach' \
+		'Icon=reasonix-desktop' \
+		'StartupWMClass=reasonix-desktop'; do
+		grep -F -x -q "$desktop_contract" build/linux/reasonix.desktop || { echo "Linux desktop entry missing: $desktop_contract" >&2; exit 1; }
+	done
+	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin "$BINNAME" "$GUARDNAME" "$CLINAME"
 	# Also build a .deb for Debian/Ubuntu users (goreleaser/nfpm; see
 	# desktop/build/linux/nfpm.yaml). Human-download only: the Linux updater channel
 	# stays the tarball and cmd/sign's manifest skips .deb files. nfpm reads

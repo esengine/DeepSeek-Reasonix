@@ -79,9 +79,23 @@ ok(
 );
 
 ok(
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar", "--wails-draggable") === "drag" &&
+    finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .tabbar", "--wails-draggable") === "drag",
+  "classic tabbar whitespace drags the window on macOS and frameless Windows",
+);
+
+ok(
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar *", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar *", "--wails-draggable") === "no-drag",
+  "classic tabbar controls and tab gaps remain interactive no-drag regions",
+);
+
+ok(
   /const WORKSPACE_PANEL_DEFAULT_OPEN = true;/.test(layoutStoreSource) &&
-    /workspacePanelOpen:\s*WORKSPACE_PANEL_DEFAULT_OPEN/.test(layoutStoreSource),
-  "right dock starts expanded on launch",
+    /workspacePanelOpen:\s*loadWorkspacePanelOpen\(\)/.test(layoutStoreSource) &&
+    /export function saveWorkspacePanelOpen\(open: boolean\)/.test(layoutStoreSource) &&
+    /reasonix\.workspacePanel\.open/.test(layoutStoreSource),
+  "right dock open state is restored from localStorage with expanded first-launch default",
 );
 
 ok(
@@ -231,7 +245,7 @@ ok(
 );
 
 ok(
-  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
+  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending && !runtimeTransitioning;/.test(appSource) &&
     /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
@@ -394,6 +408,13 @@ ok(
     finalDeclaration(".app--windows .sidebar", "--wails-draggable") === "no-drag" &&
     finalDeclaration(".sidebar-resizer", "--wails-draggable") === "no-drag",
   "Windows sidebar avoids native window drag without changing other platforms",
+);
+
+ok(
+  finalDeclaration(".app--windows.app--creation .topicbar", "position") === "relative" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "z-index") === "var(--z-app-chrome)" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "transform") === "translateY(-4px) !important",
+  "Windows Creation topic bar lifts its menus above conversation content without changing titlebar alignment",
 );
 
 for (const selector of [

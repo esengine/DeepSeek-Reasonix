@@ -55,8 +55,8 @@ capability); and medium/high-risk mutations force structured `review` /
 `reviewed_paths` must be backed by host-observed read/diff receipts.
 
 `use_capability` resolution is side-effect free: `action=call` on a
-not-yet-connected server resolves to a deferred target, plan mode re-checks
-the real target's read-only classification, and the server process starts only
+not-yet-connected server resolves to a deferred target, Plan re-checks only an
+explicit phase opt-out on the real target, and the server process starts only
 after the permission gate and PreToolUse hooks approve the call. On-demand
 children share the session lifetime (they outlive the starting call and exit
 with the session); `action=inspect` lists live tools for connected servers and
@@ -68,7 +68,7 @@ dedicated `mcp_connect__<server>` identity, so an exact rule such as
 approval and returns the live tool directory. MCP tool rules remain exact;
 `mcp__github__*` is not a tool-name glob.
 
-`ask`, `explore`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
@@ -82,12 +82,22 @@ flags and canonical schemas.
 
 ## Token Economy Boot Surface
 
-In token economy mode, Reasonix starts with the core coding/session/memory tools
-and the connector used to enable optional sources on demand:
+In token economy mode, Reasonix starts with nine tools: four direct coding tools,
+the three background-shell lifecycle tools, `ask`, and the connector used to
+enable optional sources on demand:
 
-`ask`, `connect_tool_source`, `forget`, `history`, `list_sessions`, `memory`,
-`read_session`, `remember`, `slash_command`.
+`ask`, `bash`, `bash_output`, `connect_tool_source`, `edit_file`, `kill_shell`,
+`read_file`, `wait`, `write_file`.
 
-Core built-in tools such as `bash`, `read_file`, `grep`, file writers, job tools,
-and `todo_write` remain available in economy mode and are listed in the built-in
-table above.
+Everything else is explicit and on demand. `connect_tool_source` supports
+`search` (`code_index`, `glob`, `grep`, `ls`), `files` (specialized move,
+multi-edit, delete, and notebook tools), `workflow` (`todo_write`,
+`complete_step`), `sessions` (`history`, `list_sessions`, `read_session`),
+`memory` (`memory`, `remember`, `forget`), `commands` (`slash_command`),
+`skills`, `read_only_skill`, `mcp`, `lsp`, `web_fetch`, `install_source`,
+`task`, and `read_only_task`. Every source may be connected in Plan; subsequent
+reader and writer calls use the same Permissions/Sandbox path as Standard mode.
+`workflow` is the phase-specific exception: while planning it installs only
+`todo_write`; `complete_step` joins on a fresh `workflow` connect after plan
+approval. Use `bash` for listing and search until the dedicated `search` source
+is needed.

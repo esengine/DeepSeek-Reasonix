@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -53,7 +54,7 @@ func TestModelSwitchCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	m.ctrl = divergedSessionController(t, dir, originalPath)
 	m.modelRef = "old/old-model"
 	var gotResumePath string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string, _ control.SessionAPI) (*control.Controller, error) {
 		gotResumePath = resumePath
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
@@ -83,7 +84,7 @@ func TestEffortSwitchCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	m.ctrl = divergedSessionController(t, dir, originalPath)
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
 	var gotResumePath string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string, _ control.SessionAPI) (*control.Controller, error) {
 		gotResumePath = resumePath
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
@@ -112,7 +113,7 @@ func TestSkillRefreshCarriesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	m.ctrl = divergedSessionController(t, dir, originalPath)
 	m.modelRef = "deepseek-flash/deepseek-v4-flash"
 	var gotResumePath string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string, _ control.SessionAPI) (*control.Controller, error) {
 		gotResumePath = resumePath
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
@@ -144,7 +145,7 @@ func TestWorkModeSwitchCarriesRecoveryPathAndMovesLeaseBeforeRebuild(t *testing.
 		t.Fatalf("seed active lease: %v", err)
 	}
 	var gotResumePath, heldAtBuild string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, resumePath string, _ control.SessionAPI) (*control.Controller, error) {
 		gotResumePath = resumePath
 		heldAtBuild = m.leases.HeldPath()
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
@@ -337,7 +338,7 @@ func TestModelSwitchFailureKeepsLeaseOnRecoveryPathAfterSnapshotConflict(t *test
 	m := newTestChatTUI()
 	m.ctrl = divergedSessionController(t, dir, active)
 	m.modelRef = "old/old-model"
-	m.buildController = func(controllerBuildSpec, []provider.Message, string) (*control.Controller, error) {
+	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
 		return nil, fmt.Errorf("build failed")
 	}
 	m.leases = control.NewSessionLeaseKeeper()
@@ -380,7 +381,7 @@ func TestModelSwitchMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
 		t.Fatalf("seed active lease: %v", err)
 	}
 	var heldAtBuild string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		heldAtBuild = m.leases.HeldPath()
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
@@ -410,7 +411,7 @@ func TestEffortSwitchMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
 		t.Fatalf("seed active lease: %v", err)
 	}
 	var heldAtBuild string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		heldAtBuild = m.leases.HeldPath()
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
@@ -439,7 +440,7 @@ func TestSkillRefreshMovesLeaseToRecoveryPathBeforeRebuild(t *testing.T) {
 		t.Fatalf("seed active lease: %v", err)
 	}
 	var heldAtBuild string
-	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string) (*control.Controller, error) {
+	m.buildController = func(_ controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
 		heldAtBuild = m.leases.HeldPath()
 		return control.New(control.Options{Label: "deepseek-flash"}), nil
 	}
@@ -475,4 +476,128 @@ func resumeIndexForPath(t *testing.T, dir, path string) int {
 	}
 	t.Fatalf("session %q not found in recent sessions", path)
 	return 0
+}
+
+// TestAdoptCarriedHistoryRefreshesLeadingSystemPrompt pins the fix for the
+// bug where /model, /effort, /work-mode, and skill-toggle rebuilds carried
+// the outgoing profile's system prompt forward: the freshly built controller
+// already has its own leading system message for the target profile, but
+// AdoptHistory replaces the whole history (including that message) with the
+// carried one unless the caller splices it in first.
+func TestAdoptCarriedHistoryRefreshesLeadingSystemPrompt(t *testing.T) {
+	fresh := control.New(control.Options{
+		Executor: agent.New(nil, nil, agent.NewSession("system prompt for profile delivery"), agent.Options{}, event.Discard),
+	})
+	carry := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system prompt for profile balanced"},
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "hi"},
+	}
+
+	if err := adoptCarriedHistoryPreservingProfileAndGrants(fresh, carry, "", nil); err != nil {
+		t.Fatalf("adoptCarriedHistoryPreservingProfileAndGrants: %v", err)
+	}
+
+	history := fresh.History()
+	if len(history) != 3 || history[0].Role != provider.RoleSystem {
+		t.Fatalf("history = %+v, want 3 messages with a leading system message", history)
+	}
+	if got, want := history[0].Content, "system prompt for profile delivery"; got != want {
+		t.Fatalf("leading system message = %q, want %q (stale outgoing profile carried forward)", got, want)
+	}
+	if history[1].Content != "hello" || history[2].Content != "hi" {
+		t.Fatalf("history = %+v, want carried user/assistant turns preserved", history)
+	}
+}
+
+// TestAdoptCarriedHistoryRestoresSessionAuthorizations pins the fix for a
+// rebuild dropping same-session "Allow for this session" tool grants and
+// Plan-mode read-only command trust, forcing the user to re-approve
+// something already granted this session after every /model, /effort, or
+// /work-mode switch.
+func TestAdoptCarriedHistoryRestoresSessionAuthorizations(t *testing.T) {
+	old := control.New(control.Options{})
+	old.RestoreSessionAuthorizations(control.SessionAuthorizations{
+		Grants:                   []string{"bash|go test ./..."},
+		PlanModeReadOnlyCommands: []string{"go test ./..."},
+	})
+
+	fresh := control.New(control.Options{
+		Executor: agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard),
+	})
+
+	if err := adoptCarriedHistoryPreservingProfileAndGrants(fresh, nil, "", old); err != nil {
+		t.Fatalf("adoptCarriedHistoryPreservingProfileAndGrants: %v", err)
+	}
+
+	got := fresh.SessionAuthorizations()
+	if len(got.Grants) != 1 || got.Grants[0] != "bash|go test ./..." {
+		t.Fatalf("restored grants = %+v, want [\"bash|go test ./...\"]", got.Grants)
+	}
+	if len(got.PlanModeReadOnlyCommands) != 1 || got.PlanModeReadOnlyCommands[0] != "go test ./..." {
+		t.Fatalf("restored plan-mode read-only commands = %+v, want [\"go test ./...\"]", got.PlanModeReadOnlyCommands)
+	}
+}
+
+// TestAdoptCarriedHistoryPersistsRefreshedSystemPromptToDisk pins the disk
+// half of the splice in adoptCarriedHistoryPreservingProfileAndGrants: the
+// refreshed leading system message must be persisted at switch time, because
+// nothing saves again until the next turn ends — quitting right after a
+// /model, /effort, or /work-mode switch and resuming would otherwise revive
+// the outgoing profile's contract from disk.
+func TestAdoptCarriedHistoryPersistsRefreshedSystemPromptToDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "adopt-persist.jsonl")
+
+	oldSession := agent.NewSession("system prompt for profile balanced")
+	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	oldSession.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
+	if err := oldSession.Save(path); err != nil {
+		t.Fatalf("save base session: %v", err)
+	}
+
+	fresh := control.New(control.Options{
+		Executor:   agent.New(nil, nil, agent.NewSession("system prompt for profile delivery"), agent.Options{}, event.Discard),
+		SessionDir: dir,
+	})
+	carry := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system prompt for profile balanced"},
+		{Role: provider.RoleUser, Content: "hello"},
+		{Role: provider.RoleAssistant, Content: "hi"},
+	}
+
+	if err := adoptCarriedHistoryPreservingProfileAndGrants(fresh, carry, path, nil); err != nil {
+		t.Fatalf("adoptCarriedHistoryPreservingProfileAndGrants: %v", err)
+	}
+
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("load transcript after adopt: %v", err)
+	}
+	msgs := loaded.Snapshot()
+	if len(msgs) != 3 || msgs[0].Role != provider.RoleSystem {
+		t.Fatalf("on-disk history after adopt = %+v, want 3 messages with a leading system message", msgs)
+	}
+	if got, want := msgs[0].Content, "system prompt for profile delivery"; got != want {
+		t.Fatalf("on-disk leading system message = %q, want %q (quit + resume would revive the outgoing contract)", got, want)
+	}
+}
+
+func TestAdoptCarriedHistoryReportsSnapshotFailure(t *testing.T) {
+	invalidPath := filepath.Join(t.TempDir(), "transcript-is-a-directory")
+	if err := os.Mkdir(invalidPath, 0o755); err != nil {
+		t.Fatalf("mkdir invalid transcript path: %v", err)
+	}
+	fresh := control.New(control.Options{
+		Executor: agent.New(nil, nil, agent.NewSession("system prompt for profile delivery"), agent.Options{}, event.Discard),
+	})
+	carry := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system prompt for profile balanced"},
+		{Role: provider.RoleUser, Content: "hello"},
+	}
+
+	err := adoptCarriedHistoryPreservingProfileAndGrants(fresh, carry, invalidPath, nil)
+	if err == nil || !strings.Contains(err.Error(), "snapshot after runtime switch") {
+		t.Fatalf("adopt error = %v, want snapshot failure", err)
+	}
 }

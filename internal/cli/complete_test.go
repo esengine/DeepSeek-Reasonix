@@ -122,12 +122,41 @@ func TestActiveAtToken(t *testing.T) {
 		{"a@b.com", "", false, 0},  // '@' not whitespace-preceded → not a ref
 		{"@foo bar", "", false, 0}, // cursor token after the space isn't an @ref
 		{"plain text", "", false, 0},
+		{`@docs/my\ file.md`, `docs/my\ file.md`, true, 0}, // escaped space stays in the token
+		{`see @my\ dir/`, `my\ dir/`, true, 4},
 	}
 	for _, c := range cases {
 		at, tok, ok := activeAtToken(c.val)
 		if ok != c.wantOK || (ok && (tok != c.wantTok || at != c.wantAt)) {
 			t.Errorf("activeAtToken(%q) = (%d,%q,%v), want (%d,%q,%v)", c.val, at, tok, ok, c.wantAt, c.wantTok, c.wantOK)
 		}
+	}
+}
+
+// TestFileItemsEscapedSpaces verifies names with spaces complete as
+// escaped @tokens and that completion can descend through such a directory:
+// the escaped token is unescaped for filesystem reads.
+func TestFileItemsEscapedSpaces(t *testing.T) {
+	dir := t.TempDir()
+	writeAt(t, dir, "my file.md", "x")
+	writeAt(t, dir, "my dir/inner.md", "y")
+
+	m := newTestChatTUI()
+	items := m.fileItems(dir + "/")
+	wantFile := "@" + dir + `/my\ file.md`
+	wantDir := "@" + dir + `/my\ dir/`
+	var gotFile, gotDir bool
+	for _, it := range items {
+		gotFile = gotFile || it.insert == wantFile
+		gotDir = gotDir || it.insert == wantDir
+	}
+	if !gotFile || !gotDir {
+		t.Fatalf("inserts should escape spaces, want %q and %q in %v", wantFile, wantDir, labels(items))
+	}
+
+	deeper := m.fileItems(dir + `/my\ dir/`)
+	if !hasLabel(deeper, "inner.md") {
+		t.Fatalf("descending through an escaped dir should list its entries, got %v", labels(deeper))
 	}
 }
 
@@ -460,23 +489,6 @@ func TestSlashArgCompletionLanguage(t *testing.T) {
 	}
 }
 
-func TestSlashArgCompletionAutoPlan(t *testing.T) {
-	m := newTestChatTUI()
-	m.input.SetValue("/auto-plan ")
-	m.updateCompletion()
-	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("/auto-plan should open arg completion: %+v", m.completion)
-	}
-	for _, want := range []string{"off", "on"} {
-		if !hasLabel(m.completion.items, want) {
-			t.Fatalf("/auto-plan completion missing %q: %v", want, labels(m.completion.items))
-		}
-	}
-	if hasLabel(m.completion.items, "ask") {
-		t.Fatalf("/auto-plan completion should not include legacy ask: %v", labels(m.completion.items))
-	}
-}
-
 func TestSlashArgCompletionReasoningLanguage(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/reasoning-language ")
@@ -491,20 +503,6 @@ func TestSlashArgCompletionReasoningLanguage(t *testing.T) {
 	}
 	if hasLabel(m.completion.items, "中文") {
 		t.Fatalf("/reasoning-language completion should expose only auto|zh|en: %v", labels(m.completion.items))
-	}
-}
-
-func TestSlashArgCompletionMemoryV5(t *testing.T) {
-	m := newTestChatTUI()
-	m.input.SetValue("/memory-v5 ")
-	m.updateCompletion()
-	if !m.completion.active || m.completion.kind != compSlashArg {
-		t.Fatalf("/memory-v5 should open arg completion: %+v", m.completion)
-	}
-	for _, want := range []string{"status", "off", "observe", "compact", "on", "learnings"} {
-		if !hasLabel(m.completion.items, want) {
-			t.Fatalf("/memory-v5 completion missing %q: %v", want, labels(m.completion.items))
-		}
 	}
 }
 

@@ -314,8 +314,8 @@ func TestE2ESessionModes(t *testing.T) {
 	if err := json.Unmarshal(resp.Result, &nr); err != nil {
 		t.Fatalf("session/new result: %v", err)
 	}
-	if nr.Modes == nil || nr.Modes.CurrentModeID != sessionModeDefault || len(nr.Modes.AvailableModes) != 3 {
-		t.Fatalf("session/new modes = %+v, want default current with 3 available", nr.Modes)
+	if nr.Modes == nil || nr.Modes.CurrentModeID != sessionModeNormal || len(nr.Modes.AvailableModes) != 3 {
+		t.Fatalf("session/new modes = %+v, want normal current with 3 available", nr.Modes)
 	}
 
 	setResp := client.call(t, "session/set_mode", SessionSetModeParams{SessionID: nr.SessionID, ModeID: sessionModePlan})
@@ -367,7 +367,7 @@ unknownMode:
 // TestRebuildSessionKeepsClientIOAndMode pins two rebuild invariants: a
 // model/effort switch must rebuild the controller with the same client
 // capability wiring (fs overlay, host terminal) the original had, and must
-// re-apply the session's ACP mode — a fresh controller boots with default
+// re-apply the session's ACP mode — a fresh controller boots with normal
 // switches, which would silently drop a user-selected plan mode.
 func TestRebuildSessionKeepsClientIOAndMode(t *testing.T) {
 	dir := t.TempDir()
@@ -411,7 +411,7 @@ func TestRebuildSessionKeepsClientIOAndMode(t *testing.T) {
 	})
 	sess.ctrl = oldCtrl
 
-	if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: "pro"}); err != nil {
+	if err := svc.rebuildSession(context.Background(), sess, SessionConfigState{Model: "pro"}, []sessionConfigDelta{{axis: "model", model: "pro"}}); err != nil {
 		t.Fatalf("rebuildSession: %v", err)
 	}
 	if sess.ctrl == oldCtrl {

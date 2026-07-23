@@ -3,8 +3,10 @@ package hook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // Runner binds a set of resolved hooks to a session: a working directory, the
@@ -13,10 +15,30 @@ import (
 // (prompt/stop events) fire hooks through, so neither has to know how hooks load
 // or run. A nil *Runner is a valid no-op (no hooks configured).
 type Runner struct {
-	hooks   []ResolvedHook
-	cwd     string
-	spawner Spawner
-	notify  func(string) // surface a non-blocking (warn/error) hook message; may be nil
+	hooks     []ResolvedHook
+	cwd       string
+	spawner   Spawner
+	notify    func(string) // surface a non-blocking (warn/error) hook message; may be nil
+	mu        sync.RWMutex
+	sessionID string
+}
+
+// SetSessionID updates the Claude-compatible session identifier used in hook
+// payloads. It is safe to call when a controller rotates sessions.
+func (r *Runner) SetSessionID(id string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.sessionID = id
+	r.mu.Unlock()
+}
+
+func (r *Runner) payload(event Event) Payload {
+	r.mu.RLock()
+	id := r.sessionID
+	r.mu.RUnlock()
+	return Payload{Event: event, Cwd: r.cwd, SessionID: id}
 }
 
 // NewRunner builds a Runner. spawner nil uses DefaultSpawner; notify nil drops
@@ -61,7 +83,9 @@ func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessa
 	if !r.Enabled() {
 		return false, ""
 	}
-	rep := Run(ctx, Payload{Event: PreToolUse, Cwd: r.cwd, ToolName: name, ToolArgs: args}, r.hooks, r.spawner)
+	p := r.payload(PreToolUse)
+	p.ToolName, p.ToolArgs = name, args
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	return r.handle(rep)
 }
 
@@ -71,18 +95,58 @@ func (r *Runner) PostToolUse(ctx context.Context, name string, args json.RawMess
 	if !r.Enabled() {
 		return
 	}
-	rep := Run(ctx, Payload{Event: PostToolUse, Cwd: r.cwd, ToolName: name, ToolArgs: args, ToolResult: result}, r.hooks, r.spawner)
+	p := r.payload(PostToolUse)
+	p.ToolName, p.ToolArgs, p.ToolResult = name, args, result
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	r.handle(rep)
 }
 
-// PermissionRequest fires before a tool approval prompt is shown. It can't
-// block; non-pass outcomes are surfaced to the user via notify.
-func (r *Runner) PermissionRequest(ctx context.Context, name, subject string, args json.RawMessage) {
+// PostToolUseFailure fires when a tool invocation returns an error.
+func (r *Runner) PostToolUseFailure(ctx context.Context, name string, args json.RawMessage, result string, err error) {
 	if !r.Enabled() {
 		return
 	}
-	rep := Run(ctx, Payload{Event: PermissionRequest, Cwd: r.cwd, ToolName: name, ToolArgs: args, Subject: subject}, r.hooks, r.spawner)
-	r.handle(rep)
+	p := r.payload(PostToolUseFailure)
+	p.ToolName, p.ToolArgs, p.ToolResult = name, args, result
+	if err != nil {
+		p.Error = err.Error()
+		p.IsInterrupt = errors.Is(err, context.Canceled)
+	}
+	r.handle(Run(ctx, p, r.hooks, r.spawner))
+	// Native Reasonix PostToolUse historically observed both success and
+	// failure. Preserve that contract while Claude hooks use the distinct event.
+	legacy := r.nativeHooks(PostToolUse)
+	if len(legacy) > 0 {
+		p.Event = PostToolUse
+		r.handle(Run(ctx, p, legacy, r.spawner))
+	}
+}
+
+// PermissionRequest fires before a tool approval prompt is shown. A native
+// Reasonix hook here can't answer the dialog (non-pass outcomes are surfaced
+// via notify only); a Claude-imported hook (PayloadFormat "claude") can
+// answer it on the user's behalf via exit 2 or a JSON decision, matching
+// Claude's own contract. decision == nil means "no opinion, show the prompt
+// normally"; a non-nil decision means the caller should skip the prompt and
+// treat it as denied (false) or auto-approved (true).
+func (r *Runner) PermissionRequest(ctx context.Context, name, subject string, args json.RawMessage) (decision *bool, message string) {
+	if !r.Enabled() {
+		return nil, ""
+	}
+	p := r.payload(PermissionRequest)
+	p.ToolName, p.ToolArgs, p.Subject = name, args, subject
+	rep := Run(ctx, p, r.hooks, r.spawner)
+	block, msg := r.handle(rep)
+	switch {
+	case block:
+		deny := false
+		return &deny, msg
+	case rep.Allowed:
+		allow := true
+		return &allow, msg
+	default:
+		return nil, msg
+	}
 }
 
 // PromptSubmit fires before a turn starts. block=true aborts the turn; message
@@ -91,7 +155,9 @@ func (r *Runner) PromptSubmit(ctx context.Context, prompt string, turn int) (blo
 	if !r.Enabled() {
 		return false, ""
 	}
-	rep := Run(ctx, Payload{Event: UserPromptSubmit, Cwd: r.cwd, Prompt: prompt, Turn: turn}, r.hooks, r.spawner)
+	p := r.payload(UserPromptSubmit)
+	p.Prompt, p.Turn = prompt, turn
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	return r.handle(rep)
 }
 
@@ -100,27 +166,69 @@ func (r *Runner) Stop(ctx context.Context, lastAssistant string, turn int) {
 	if !r.Enabled() {
 		return
 	}
-	rep := Run(ctx, Payload{Event: Stop, Cwd: r.cwd, LastAssistant: lastAssistant, Turn: turn}, r.hooks, r.spawner)
+	p := r.payload(Stop)
+	p.LastAssistant, p.Turn = lastAssistant, turn
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	r.handle(rep)
+}
+
+// StopResult emits Stop on success and StopFailure when the turn failed.
+func (r *Runner) StopResult(ctx context.Context, lastAssistant string, turn int, err error) {
+	if err == nil {
+		r.Stop(ctx, lastAssistant, turn)
+		return
+	}
+	if !r.Enabled() {
+		return
+	}
+	p := r.payload(StopFailure)
+	p.LastAssistant, p.Turn, p.Error = lastAssistant, turn, err.Error()
+	p.IsInterrupt = errors.Is(err, context.Canceled)
+	r.handle(Run(ctx, p, r.hooks, r.spawner))
+	legacy := r.nativeHooks(Stop)
+	if len(legacy) > 0 {
+		p.Event = Stop
+		r.handle(Run(ctx, p, legacy, r.spawner))
+	}
+}
+
+func (r *Runner) nativeHooks(event Event) []ResolvedHook {
+	var out []ResolvedHook
+	for _, h := range r.hooks {
+		if h.Event == event && h.PayloadFormat != "claude" {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // SessionStart fires when a session becomes active. It can't block; successful
 // stdout may contribute one-shot context for the next model request.
-func (r *Runner) SessionStart(ctx context.Context) []string {
+func (r *Runner) SessionStart(ctx context.Context, source ...string) []string {
 	if !r.Enabled() {
 		return nil
 	}
-	rep := Run(ctx, Payload{Event: SessionStart, Cwd: r.cwd}, r.hooks, r.spawner)
+	p := r.payload(SessionStart)
+	p.Source = "startup"
+	if len(source) > 0 && strings.TrimSpace(source[0]) != "" {
+		p.Source = strings.TrimSpace(source[0])
+	}
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	r.handle(rep)
 	return r.additionalContexts(rep)
 }
 
 // SessionEnd fires when a session is closed or rotated (/new). It can't block.
-func (r *Runner) SessionEnd(ctx context.Context) {
+func (r *Runner) SessionEnd(ctx context.Context, reason ...string) {
 	if !r.Enabled() {
 		return
 	}
-	r.handle(Run(ctx, Payload{Event: SessionEnd, Cwd: r.cwd}, r.hooks, r.spawner))
+	p := r.payload(SessionEnd)
+	p.Reason = "other"
+	if len(reason) > 0 && strings.TrimSpace(reason[0]) != "" {
+		p.Reason = strings.TrimSpace(reason[0])
+	}
+	r.handle(Run(ctx, p, r.hooks, r.spawner))
 }
 
 // SubagentStop fires when a `task` sub-agent finishes. It can't block; last is
@@ -129,16 +237,23 @@ func (r *Runner) SubagentStop(ctx context.Context, last string) {
 	if !r.Enabled() {
 		return
 	}
-	r.handle(Run(ctx, Payload{Event: SubagentStop, Cwd: r.cwd, LastAssistant: last}, r.hooks, r.spawner))
+	p := r.payload(SubagentStop)
+	p.LastAssistant = last
+	r.handle(Run(ctx, p, r.hooks, r.spawner))
 }
 
 // Notification fires when the agent needs the user's attention (e.g. a pending
 // approval). It can't block; message describes what's waiting.
-func (r *Runner) Notification(ctx context.Context, message string) {
+func (r *Runner) Notification(ctx context.Context, message string, notificationType ...string) {
 	if !r.Enabled() {
 		return
 	}
-	r.handle(Run(ctx, Payload{Event: Notification, Cwd: r.cwd, Message: message}, r.hooks, r.spawner))
+	p := r.payload(Notification)
+	p.Message = message
+	if len(notificationType) > 0 {
+		p.NotificationType = strings.TrimSpace(notificationType[0])
+	}
+	r.handle(Run(ctx, p, r.hooks, r.spawner))
 }
 
 // PostLLMCall fires after every model turn completes but before the
@@ -150,7 +265,9 @@ func (r *Runner) PostLLMCall(ctx context.Context, reasoning string, turn int) st
 	if !r.Has(PostLLMCall) {
 		return reasoning
 	}
-	rep := Run(ctx, Payload{Event: PostLLMCall, Cwd: r.cwd, Reasoning: reasoning, Turn: turn}, r.hooks, r.spawner)
+	p := r.payload(PostLLMCall)
+	p.Reasoning, p.Turn = reasoning, turn
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	r.handle(rep)
 	for _, o := range rep.Outcomes {
 		if o.Decision == DecisionPass {
@@ -169,7 +286,9 @@ func (r *Runner) PreCompact(ctx context.Context, trigger string) string {
 	if !r.Enabled() {
 		return ""
 	}
-	rep := Run(ctx, Payload{Event: PreCompact, Cwd: r.cwd, Trigger: trigger}, r.hooks, r.spawner)
+	p := r.payload(PreCompact)
+	p.Trigger = trigger
+	rep := Run(ctx, p, r.hooks, r.spawner)
 	r.handle(rep)
 	var b strings.Builder
 	for _, o := range rep.Outcomes {

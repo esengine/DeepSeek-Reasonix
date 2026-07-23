@@ -3,9 +3,34 @@ package boot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	"reasonix/internal/agent"
+	"reasonix/internal/event"
 )
+
+func TestConnectToolSourcePlanModeLoadsOptionalSources(t *testing.T) {
+	tsc := &toolSourceConnector{
+		sessions: func(context.Context) (string, error) { return "enabled sessions.", nil },
+		commands: func(context.Context) (string, error) { return "enabled commands.", nil },
+		search:   func(context.Context) (string, error) { return "enabled search.", nil },
+		workflow: func(context.Context) (string, error) { return "enabled todo_write.", nil },
+		memory:   func(context.Context) (string, error) { return "enabled memory.", nil },
+	}
+	ctx := agent.WithToolCallContext(context.Background(), "call", event.Discard, nil, true)
+	for _, source := range []string{"sessions", "commands", "search", "workflow", "memory"} {
+		out, err := tsc.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"source":%q}`, source)))
+		if err != nil {
+			t.Fatalf("source %s: %v", source, err)
+		}
+		if strings.Contains(out, "blocked:") {
+			t.Fatalf("source %s should load in Plan before permissioned tool use: %s", source, out)
+		}
+	}
+}
 
 // A slow MCP connect (spawning the server subprocess) must run outside
 // t.mu: the callback probes the lock and fails if Execute still holds it.

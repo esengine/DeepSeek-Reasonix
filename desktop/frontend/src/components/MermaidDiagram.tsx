@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertCircle, Code2, Maximize2, Minimize2, Play, RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
 import { CopyButton } from "./CopyButton";
 import { openExternal } from "../lib/bridge";
+import { markdownImageSource } from "../lib/markdownImage";
 
 interface MermaidDiagramProps {
   definition: string;
@@ -264,8 +265,18 @@ export function sanitizeMermaidSvg(svg: string): string {
         element.removeAttribute(attrName);
         continue;
       }
-      if (localName === "href" && !isSafeMermaidHref(attr.value)) {
-        element.removeAttribute(attrName);
+      if (localName === "href") {
+        if (!isSafeMermaidHref(attr.value)) {
+          element.removeAttribute(attrName);
+          continue;
+        }
+        if (name === "image" || name === "feimage") {
+          attr.value = markdownImageSource(attr.value);
+        } else if (name === "use" && !attr.value.trim().startsWith("#")) {
+          // External <use> references can load arbitrary SVG documents. Mermaid
+          // only needs local fragment references, so keep those and drop the rest.
+          element.removeAttribute(attrName);
+        }
       }
     }
   }
@@ -308,6 +319,33 @@ function destroyPanZoom(instance: PanZoomInstance | null): void {
   } catch {
     /* svg-pan-zoom cleanup is best-effort across browser and test DOMs. */
   }
+}
+
+function panZoomLayoutReady(container: HTMLElement): boolean {
+  const rect = container.getBoundingClientRect();
+  return Number.isFinite(rect.width) && Number.isFinite(rect.height) && rect.width > 0 && rect.height > 0;
+}
+
+export function safelyRunPanZoom(instance: PanZoomInstance | null, action: () => void): boolean {
+  if (!instance) return false;
+  try {
+    action();
+    return true;
+  } catch {
+    // svg-pan-zoom asks SVGMatrix.inverse() to invert the current transform.
+    // Hidden/zero-sized layouts can produce a singular matrix in WebKit and
+    // Chromium; keep that library detail out of the global crash surface.
+    return false;
+  }
+}
+
+export function safelySyncPanZoom(instance: PanZoomInstance | null, container: HTMLElement | null): boolean {
+  if (!instance || !container || !panZoomLayoutReady(container)) return false;
+  return safelyRunPanZoom(instance, () => {
+    instance.resize();
+    instance.fit();
+    instance.center();
+  });
 }
 
 const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagramProps) {
@@ -359,7 +397,23 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
 
     let cancelled = false;
     let raf = 0;
+    let syncRaf = 0;
+    let resizeObserver: ResizeObserver | null = null;
     let instance: PanZoomInstance | null = null;
+
+    const queueSync = () => {
+      if (syncRaf) window.cancelAnimationFrame(syncRaf);
+      let attempts = 0;
+      const sync = () => {
+        syncRaf = 0;
+        if (cancelled || panZoomRef.current !== instance) return;
+        attempts += 1;
+        if (!safelySyncPanZoom(instance, container) && attempts < 4) {
+          syncRaf = window.requestAnimationFrame(sync);
+        }
+      };
+      syncRaf = window.requestAnimationFrame(sync);
+    };
 
     void ensurePanZoomFactory().then((factory) => {
       if (cancelled || !factory) return;
@@ -379,19 +433,20 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
             panEnabled: true,
             controlIconsEnabled: false,
             dblClickZoomEnabled: true,
-            fit: true,
-            center: true,
+            // Fitting inside the constructor can run before the portal/layout has
+            // dimensions, which is the matrix-inverse crash seen in diagnostics.
+            fit: false,
+            center: false,
             minZoom: MIN_ZOOM,
             maxZoom: MAX_ZOOM,
             zoomScaleSensitivity: 0.3,
           });
           panZoomRef.current = instance;
-          window.requestAnimationFrame(() => {
-            if (panZoomRef.current !== instance) return;
-            instance?.resize();
-            instance?.fit();
-            instance?.center();
-          });
+          queueSync();
+          if (typeof ResizeObserver !== "undefined") {
+            resizeObserver = new ResizeObserver(queueSync);
+            resizeObserver.observe(container);
+          }
         } catch {
           instance = null;
           panZoomRef.current = null;
@@ -402,6 +457,8 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
     return () => {
       cancelled = true;
       if (raf) window.cancelAnimationFrame(raf);
+      if (syncRaf) window.cancelAnimationFrame(syncRaf);
+      resizeObserver?.disconnect();
       if (panZoomRef.current === instance) panZoomRef.current = null;
       destroyPanZoom(instance);
     };
@@ -421,9 +478,10 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
 
   useEffect(() => {
     if (!fullscreen || !panZoomRef.current) return;
-    panZoomRef.current.resize();
-    panZoomRef.current.fit();
-    panZoomRef.current.center();
+    const raf = window.requestAnimationFrame(() => {
+      safelySyncPanZoom(panZoomRef.current, previewRef.current);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [fullscreen]);
 
   const toggleFullscreen = useCallback(() => {
@@ -435,19 +493,20 @@ const MermaidDiagram = memo(function MermaidDiagram({ definition }: MermaidDiagr
   }, []);
 
   const zoomIn = useCallback(() => {
-    panZoomRef.current?.zoomIn();
+    const instance = panZoomRef.current;
+    safelyRunPanZoom(instance, () => instance?.zoomIn());
   }, []);
 
   const zoomOut = useCallback(() => {
-    panZoomRef.current?.zoomOut();
+    const instance = panZoomRef.current;
+    safelyRunPanZoom(instance, () => instance?.zoomOut());
   }, []);
 
   const resetZoom = useCallback(() => {
     const instance = panZoomRef.current;
     if (!instance) return;
-    instance.reset();
-    instance.fit();
-    instance.center();
+    safelyRunPanZoom(instance, () => instance.reset());
+    safelySyncPanZoom(instance, previewRef.current);
   }, []);
 
   const body = (

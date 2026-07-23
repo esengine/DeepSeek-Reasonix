@@ -62,6 +62,43 @@ func (s *Session) Add(m provider.Message) {
 	s.version++
 }
 
+// UpdateToolCallPreview replaces the preview fields of the newest matching
+// assistant tool call. A dependent writer can only be previewed after an
+// earlier writer in the same model batch succeeds; updating under the session
+// lock keeps live History/Snapshot readers race-free and ensures the refreshed
+// preview is what a resumed session archives.
+func (s *Session) UpdateToolCallPreview(call provider.ToolCall) bool {
+	if call.ID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		if s.Messages[i].Role != provider.RoleAssistant {
+			continue
+		}
+		calls := s.Messages[i].ToolCalls
+		for j := range calls {
+			if calls[j].ID != call.ID {
+				continue
+			}
+			cloned := append([]provider.ToolCall(nil), calls...)
+			cloned[j].Diff = call.Diff
+			cloned[j].Added = call.Added
+			cloned[j].Removed = call.Removed
+			s.Messages[i].ToolCalls = cloned
+			// A snapshot may have persisted the original assistant message while
+			// its tools were still running. Mark this as a rewrite so a later
+			// autosave replaces that message instead of misclassifying the tool
+			// results as an append-only suffix.
+			s.rewriteVersion++
+			s.version++
+			return true
+		}
+	}
+	return false
+}
+
 // Replace swaps the whole message log — used by compaction, which rewrites the
 // middle of the history.
 func (s *Session) Replace(msgs []provider.Message) {

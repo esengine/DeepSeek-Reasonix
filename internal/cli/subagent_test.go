@@ -10,6 +10,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/pluginpkg"
 	"reasonix/internal/skill"
 )
 
@@ -85,6 +86,43 @@ func TestSubagentProfileCLIManageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSubagentListIncludesQualifiedPluginAgents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	project := t.TempDir()
+	t.Chdir(project)
+	root := filepath.Join(home, "plugins", "commercial-legal")
+	writePluginTestFile(t, filepath.Join(root, pluginpkg.ClaudeManifest), `{"name":"commercial-legal"}`)
+	writePluginTestFile(t, filepath.Join(root, "agents", "deal-debrief.md"), `---
+description: Debrief a completed deal
+model: sonnet
+tools: ["Read", "Write", "mcp__*__search"]
+---
+Debrief the deal.`)
+	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{
+		Name: "commercial-legal", Root: "plugins/commercial-legal", ManifestKind: "claude", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	store := newCLISubagentStore()
+	sk, ok := store.ReadSlash("commercial-legal:agent:deal-debrief")
+	if !ok || sk.RunAs != skill.RunSubagent || sk.Invocation != "manual" || sk.Model != "" {
+		t.Fatalf("plugin agent = %+v, found=%v", sk, ok)
+	}
+	if got := strings.Join(sk.AllowedTools, ","); got != "read_file,write_file,mcp__*__search" {
+		t.Fatalf("allowed tools = %q", got)
+	}
+	out := captureStdout(t, func() {
+		if rc := subagentCommand([]string{"list"}); rc != 0 {
+			t.Fatalf("list rc = %d", rc)
+		}
+	})
+	if !strings.Contains(out, "commercial-legal:agent:deal-debrief") || !strings.Contains(out, "custom, manual") {
+		t.Fatalf("list output = %q", out)
+	}
+}
+
 func TestSubagentProfileCLIRejectsBuiltinCollisionAndRichSkillEdit(t *testing.T) {
 	isolateCLIConfigHome(t)
 	project := t.TempDir()
@@ -107,7 +145,9 @@ func TestSubagentProfileCLIRejectsBuiltinCollisionAndRichSkillEdit(t *testing.T)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("---\ndescription: rich\nrunAs: subagent\ninvocation: manual\nread-only: true\n---\nbody"), 0o644); err != nil {
+	// read-only is now a managed profile field; use a still-unmanaged key so
+	// the editor refuse path remains covered.
+	if err := os.WriteFile(path, []byte("---\ndescription: rich\nrunAs: subagent\ninvocation: manual\ntriggers: [deploy]\n---\nbody"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	errOut = captureStderr(t, func() {
@@ -117,6 +157,27 @@ func TestSubagentProfileCLIRejectsBuiltinCollisionAndRichSkillEdit(t *testing.T)
 	})
 	if !strings.Contains(errOut, "does not manage") {
 		t.Fatalf("rich edit output = %q", errOut)
+	}
+	// Positive: managed read-only frontmatter is editable and round-trips.
+	roPath := filepath.Join(project, ".reasonix", "skills", "readonly-agent", skill.SkillFile)
+	if err := os.MkdirAll(filepath.Dir(roPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(roPath, []byte("---\ndescription: ro\nrunAs: subagent\ninvocation: manual\nread-only: true\n---\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rc := subagentCommand([]string{"edit", "readonly-agent", "--description", "read only agent"}); rc != 0 {
+		t.Fatalf("managed read-only edit rc = %d", rc)
+	}
+	raw, err := os.ReadFile(roPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "read-only: true") {
+		t.Fatalf("edit must preserve read-only frontmatter, got:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "read only agent") {
+		t.Fatalf("edit must update description, got:\n%s", raw)
 	}
 }
 

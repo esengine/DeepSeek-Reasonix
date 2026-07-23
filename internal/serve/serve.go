@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -198,7 +199,34 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	// Keep the carried conversation in its existing file so the switch doesn't
 	// orphan a duplicate (#2807).
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
+	// The freshly built controller's own leading system message carries the
+	// target profile's contract; AdoptHistory below replaces the whole
+	// history with carried, so splice that message in first or the model
+	// keeps seeing the outgoing profile's contract after every switch.
+	if fresh := newCtrl.History(); len(fresh) > 0 && fresh[0].Role == provider.RoleSystem {
+		if len(carried) > 0 && carried[0].Role == provider.RoleSystem {
+			carried[0] = fresh[0]
+		} else {
+			carried = append([]provider.Message{fresh[0]}, carried...)
+		}
+	}
 	newCtrl.AdoptHistory(carried, newPath)
+	// A rebuild must not force the user to re-approve tools already granted
+	// this session, or re-trust Plan-mode read-only commands already trusted
+	// this session.
+	if prev, ok := cur.(*control.Controller); ok {
+		newCtrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+	}
+	// Persist before publishing the replacement. A failed write leaves cur and
+	// the on-disk transcript coherent and lets the caller retry; publishing first
+	// would report a successful switch whose refreshed system contract disappears
+	// on restart. AdoptHistory retained the loaded CAS baseline for this rewrite.
+	if newPath != "" {
+		if err := newCtrl.Snapshot(); err != nil {
+			newCtrl.Close()
+			return fmt.Errorf("switch model: snapshot adopted history: %w", err)
+		}
+	}
 
 	// Publish the swap under a short write lock. bindMu already serializes
 	// switches — today the only writer of s.ctrl — so the identity re-check is
@@ -387,19 +415,32 @@ func (s *Server) Run(addr string) error {
 // the provided context and drains active connections for up to 10 seconds
 // before returning.
 func (s *Server) RunGraceful(ctx context.Context, addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.RunGracefulListener(ctx, ln)
+}
+
+// RunGracefulListener is RunGraceful over a caller-supplied listener. Callers
+// that need the real bound address (e.g. --addr 127.0.0.1:0 with --port-file)
+// listen first, record ln.Addr(), then hand the listener here.
+func (s *Server) RunGracefulListener(ctx context.Context, ln net.Listener) error {
 	s.ctl().EnableInteractiveApproval()
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- srv.ListenAndServe()
+		errCh <- srv.Serve(ln)
 	}()
 	select {
 	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
 		return err
 	case <-ctx.Done():
 		slog.Info("serve: shutting down gracefully")
@@ -408,7 +449,11 @@ func (s *Server) RunGraceful(ctx context.Context, addr string) error {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Warn("serve: graceful shutdown failed", "err", err)
 		}
-		return <-errCh
+		err := <-errCh
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
 }
 
@@ -825,7 +870,7 @@ func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 }
 
 // toolApprovalMode selects ask, auto, or yolo approval behavior for interactive
-// frontends. Plan remains a separate read-only gate.
+// frontends. Plan remains a separate workflow governed by the selected mode.
 func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Mode string `json:"mode"`

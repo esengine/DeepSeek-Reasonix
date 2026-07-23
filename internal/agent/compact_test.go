@@ -784,6 +784,129 @@ func TestRenderTranscriptRedactsToolCallArgs(t *testing.T) {
 	}
 }
 
+func TestInterruptedDisplayStaysVerbatimAndOutOfCompactionPrompt(t *testing.T) {
+	local := provider.Message{
+		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
+		LocalOnly: true, Content: "partial visible answer", ReasoningContent: "private partial reasoning",
+		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
+	}
+	a := &Agent{}
+	kept, fold := a.partitionFold([]provider.Message{local})
+	if len(kept) != 1 || !kept[0].LocalOnly || len(fold) != 0 {
+		t.Fatalf("compaction partition kept=%+v fold=%+v, want local display kept verbatim", kept, fold)
+	}
+	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
+		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)
+	}
+}
+
+func TestCompactKeepsActiveTurnVerbatim(t *testing.T) {
+	const currentCreatedAt int64 = 123456
+	call := provider.Message{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{
+			ID: "write-1", Name: "write_file", Arguments: `{"path":"a.txt","content":"ok"}`,
+		}},
+	}
+	result := provider.Message{Role: provider.RoleTool, ToolCallID: "write-1", Name: "write_file", Content: "wrote a.txt"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("old request ", 200)},
+		{Role: provider.RoleAssistant, Content: strings.Repeat("old answer ", 200)},
+		{Role: provider.RoleUser, Content: "update a.txt", CreatedAt: currentCreatedAt},
+		call,
+		result,
+	}}
+	a := New(&fakeProvider{reply: "old work summary"}, tool.NewRegistry(), sess, Options{
+		ContextWindow: 100, RecentKeep: 1, ArchiveDir: t.TempDir(),
+	}, event.Discard)
+	a.activeTurnCreatedAt.Store(currentCreatedAt)
+
+	if err := a.compact(context.Background(), "auto", "", true); err != nil {
+		t.Fatalf("compact: %v", err)
+	}
+	start := a.activeTurnStart(sess.Messages)
+	if start < 0 || len(sess.Messages)-start != 3 {
+		t.Fatalf("active turn boundary = %d in %+v, want three-message verbatim tail", start, sess.Messages)
+	}
+	if sess.Messages[start].Content != "update a.txt" || sess.Messages[start+1].ToolCalls[0].Arguments != call.ToolCalls[0].Arguments || sess.Messages[start+2].Content != result.Content {
+		t.Fatalf("active turn changed during compaction: %+v", sess.Messages[start:])
+	}
+}
+
+func TestSummarizeFromPreservesLocalOnlyOutsideModelAndArchive(t *testing.T) {
+	archiveDir := t.TempDir()
+	local := provider.Message{
+		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
+		LocalOnly: true, Content: "visible interrupted output", ReasoningContent: "private interrupted reasoning",
+		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"bash"}},
+	}
+	prov := &fakeProvider{reply: "later summary"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "task"},
+		local,
+		{Role: provider.RoleAssistant, Content: "safe answer"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{ArchiveDir: archiveDir}, event.Discard)
+
+	if err := a.SummarizeFrom(context.Background(), 1); err != nil {
+		t.Fatalf("SummarizeFrom: %v", err)
+	}
+	if len(sess.Messages) != 3 || !sess.Messages[2].LocalOnly || sess.Messages[2].Content != local.Content || sess.Messages[2].ReasoningContent != local.ReasoningContent || sess.Messages[2].InterruptedTurn == nil || !sess.Messages[2].InterruptedTurn.Pending {
+		t.Fatalf("local-only message was not preserved verbatim: %+v", sess.Messages)
+	}
+	assertLocalOnlyAbsentFromSummaryAndArchive(t, prov, archiveDir, local)
+}
+
+func TestSummarizeUpToPreservesLocalOnlyOutsideModelAndArchive(t *testing.T) {
+	archiveDir := t.TempDir()
+	local := provider.Message{
+		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
+		LocalOnly: true, Content: "visible earlier interruption", ReasoningContent: "private earlier reasoning",
+		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"read_file"}},
+	}
+	prov := &fakeProvider{reply: "earlier summary"}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "old task"},
+		local,
+		{Role: provider.RoleAssistant, Content: "old answer"},
+		{Role: provider.RoleUser, Content: "new task"},
+		{Role: provider.RoleAssistant, Content: "new answer"},
+	}}
+	a := New(prov, tool.NewRegistry(), sess, Options{ArchiveDir: archiveDir}, event.Discard)
+
+	if err := a.SummarizeUpTo(context.Background(), 4); err != nil {
+		t.Fatalf("SummarizeUpTo: %v", err)
+	}
+	if len(sess.Messages) != 5 || !sess.Messages[2].LocalOnly || sess.Messages[2].Content != local.Content || sess.Messages[2].ReasoningContent != local.ReasoningContent || sess.Messages[3].Content != "new task" {
+		t.Fatalf("local-only message/tail ordering was not preserved: %+v", sess.Messages)
+	}
+	assertLocalOnlyAbsentFromSummaryAndArchive(t, prov, archiveDir, local)
+}
+
+func assertLocalOnlyAbsentFromSummaryAndArchive(t *testing.T, prov *fakeProvider, archiveDir string, local provider.Message) {
+	t.Helper()
+	if len(prov.got) < 2 || strings.Contains(prov.got[1].Content, local.Content) || strings.Contains(prov.got[1].Content, local.ReasoningContent) {
+		t.Fatalf("local-only output leaked into summarizer prompt: %+v", prov.got)
+	}
+	entries, err := os.ReadDir(archiveDir)
+	if err != nil {
+		t.Fatalf("ReadDir archive: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("archive entries = %d, want 1", len(entries))
+	}
+	b, err := os.ReadFile(filepath.Join(archiveDir, entries[0].Name()))
+	if err != nil {
+		t.Fatalf("ReadFile archive: %v", err)
+	}
+	if strings.Contains(string(b), local.Content) || strings.Contains(string(b), local.ReasoningContent) {
+		t.Fatalf("local-only output leaked into archive: %s", b)
+	}
+}
+
 func TestSummarizeToolArgs(t *testing.T) {
 	tests := []struct {
 		name    string

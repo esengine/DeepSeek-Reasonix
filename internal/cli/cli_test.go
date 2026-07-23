@@ -200,12 +200,31 @@ func isolateCLIConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Keep tests on the default-path code path while preventing a caller's
+	// higher-priority REASONIX_HOME from escaping this temporary home.
+	t.Setenv("REASONIX_HOME", "")
+	if err := os.Unsetenv("REASONIX_HOME"); err != nil {
+		t.Fatalf("unset REASONIX_HOME: %v", err)
+	}
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(t.TempDir())
 	return home
+}
+
+func TestIsolateCLIConfigHomeOverridesExistingReasonixHome(t *testing.T) {
+	externalHome := t.TempDir()
+	t.Setenv("REASONIX_HOME", externalHome)
+
+	home := isolateCLIConfigHome(t)
+
+	got := config.UserConfigPath()
+	rel, err := filepath.Rel(home, got)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("UserConfigPath() = %q, outside isolated home %q", got, home)
+	}
 }
 
 func TestMCPMigrationWaitsForCLIWorkspace(t *testing.T) {
@@ -473,7 +492,7 @@ command = "legacy-bin"
 	if err != nil {
 		t.Fatalf("read migrated user config: %v", err)
 	}
-	for _, want := range []string{`config_version = 4`, `[desktop]`, `name    = "legacy-cli"`} {
+	for _, want := range []string{`config_version = 5`, `[desktop]`, `name    = "legacy-cli"`} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("migrated config missing %q:\n%s", want, body)
 		}
@@ -500,7 +519,7 @@ func TestRunAppliesUserConfigUpgradesOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read upgraded user config: %v", err)
 	}
-	if !strings.Contains(string(body), "config_version = 4") {
+	if !strings.Contains(string(body), "config_version = 5") {
 		t.Fatalf("CLI startup should apply user config upgrades:\n%s", body)
 	}
 }
@@ -528,128 +547,9 @@ func TestRunMetadataCommandsDoNotMigrateLegacyConfig(t *testing.T) {
 	}
 }
 
-func TestConfigAutoPlanCommandWritesUserConfig(t *testing.T) {
+func TestConfigLoadIgnoresRetiredAutoPlan(t *testing.T) {
 	isolateCLIConfigHome(t)
-
-	out := captureStdout(t, func() {
-		if rc := Run([]string{"config", "auto-plan", "on"}, "test-version"); rc != 0 {
-			t.Fatalf("config auto-plan rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, `auto_plan = "on"`) {
-		t.Fatalf("config auto-plan output = %q", out)
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.Agent.AutoPlan != "on" {
-		t.Fatalf("saved auto_plan = %q, want on", cfg.Agent.AutoPlan)
-	}
-}
-
-func TestConfigAutoPlanLocalIsRejected(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	userCfg := config.Default()
-	userCfg.DefaultModel = "mimo-pro"
-	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
-		t.Fatalf("write user config: %v", err)
-	}
-
-	errOut := captureStderr(t, func() {
-		if rc := Run([]string{"config", "auto-plan", "--local", "on"}, "test-version"); rc != 2 {
-			t.Fatalf("config auto-plan --local rc = %d, want 2", rc)
-		}
-	})
-	if !strings.Contains(errOut, "--local is not supported") {
-		t.Fatalf("config auto-plan --local stderr = %q", errOut)
-	}
-	if _, err := os.Stat("reasonix.toml"); !os.IsNotExist(err) {
-		t.Fatalf("reasonix.toml should not be written, stat err=%v", err)
-	}
-
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("load merged config: %v", err)
-	}
-	if cfg.DefaultModel != "mimo-pro" {
-		t.Fatalf("default_model = %q, want global mimo-pro", cfg.DefaultModel)
-	}
-	if cfg.Agent.AutoPlan != "off" {
-		t.Fatalf("auto_plan = %q, want global off", cfg.Agent.AutoPlan)
-	}
-}
-
-func TestConfigMemoryV5CommandWritesUserConfig(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	out := captureStdout(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "off"}, "test-version"); rc != 0 {
-			t.Fatalf("config memory-v5 rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, "memory_compiler.enabled = false") {
-		t.Fatalf("config memory-v5 output = %q", out)
-	}
-	if !strings.Contains(out, `memory_compiler.verbosity = "observe"`) {
-		t.Fatalf("config memory-v5 output missing verbosity = %q", out)
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.MemoryCompilerEnabled() {
-		t.Fatalf("saved memory_compiler.enabled = true, want false")
-	}
-	if got := cfg.MemoryCompilerVerbosity(); got != config.MemoryCompilerVerbosityObserve {
-		t.Fatalf("saved memory_compiler.verbosity = %q, want observe", got)
-	}
-
-	out = captureStdout(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "status"}, "test-version"); rc != 0 {
-			t.Fatalf("config memory-v5 status rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, "memory_compiler.enabled = false") {
-		t.Fatalf("config memory-v5 status output = %q", out)
-	}
-	if !strings.Contains(out, `memory_compiler.verbosity = "observe"`) {
-		t.Fatalf("config memory-v5 status output = %q", out)
-	}
-
-	out = captureStdout(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "compact"}, "test-version"); rc != 0 {
-			t.Fatalf("config memory-v5 compact rc = %d, want 0", rc)
-		}
-	})
-	if !strings.Contains(out, "memory_compiler.enabled = true") ||
-		!strings.Contains(out, `memory_compiler.verbosity = "compact"`) {
-		t.Fatalf("config memory-v5 compact output = %q", out)
-	}
-}
-
-func TestConfigMemoryV5LocalIsRejected(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	errOut := captureStderr(t, func() {
-		if rc := Run([]string{"config", "memory-v5", "--local", "off"}, "test-version"); rc != 2 {
-			t.Fatalf("config memory-v5 --local rc = %d, want 2", rc)
-		}
-	})
-	if !strings.Contains(errOut, "--local is not supported") {
-		t.Fatalf("config memory-v5 --local stderr = %q", errOut)
-	}
-	if _, err := os.Stat("reasonix.toml"); !os.IsNotExist(err) {
-		t.Fatalf("reasonix.toml should not be written, stat err=%v", err)
-	}
-}
-
-func TestConfigAutoPlanIgnoresProjectConfig(t *testing.T) {
-	isolateCLIConfigHome(t)
-
-	userCfg := config.Default()
-	if err := userCfg.SetAutoPlan("off"); err != nil {
-		t.Fatal(err)
-	}
-	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
-		t.Fatalf("write user config: %v", err)
-	}
-	if err := os.WriteFile("reasonix.toml", []byte("[agent]\nauto_plan = \"on\"\n"), 0o644); err != nil {
+	if err := os.WriteFile("reasonix.toml", []byte("[agent]\nauto_plan = \"on\"\nauto_plan_classifier = \"deepseek-flash\"\n"), 0o644); err != nil {
 		t.Fatalf("write project config: %v", err)
 	}
 
@@ -657,25 +557,60 @@ func TestConfigAutoPlanIgnoresProjectConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if cfg.Agent.AutoPlan != "off" {
-		t.Fatalf("auto_plan = %q, want user-level off despite project on", cfg.Agent.AutoPlan)
+	if cfg.Agent.AutoPlan != "off" || cfg.Agent.AutoPlanClassifier != "" {
+		t.Fatalf("retired auto-plan config = (%q, %q), want off/empty", cfg.Agent.AutoPlan, cfg.Agent.AutoPlanClassifier)
+	}
+}
+
+func TestConfigAutoPlanCompatibilityCommandKeepsOffAsNoOp(t *testing.T) {
+	isolateCLIConfigHome(t)
+	path := config.UserConfigPath()
+	cfg := config.Default()
+	cfg.Agent.Temperature = 0.4
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read user config before command: %v", err)
 	}
 
-	if err := userCfg.SetAutoPlan("on"); err != nil {
-		t.Fatal(err)
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "auto-plan", "off"}, "test-version"); rc != 0 {
+			t.Fatalf("config auto-plan off rc = %d, want 0", rc)
+		}
+	})
+	if out != "auto_plan = \"off\"\n" {
+		t.Fatalf("config auto-plan off output = %q", out)
 	}
-	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
-		t.Fatalf("rewrite user config: %v", err)
-	}
-	if err := os.WriteFile("reasonix.toml", []byte("[agent]\nauto_plan = \"off\"\n"), 0o644); err != nil {
-		t.Fatalf("rewrite project config: %v", err)
-	}
-	cfg, err = config.Load()
+	after, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("reload config: %v", err)
+		t.Fatalf("read user config after command: %v", err)
 	}
-	if cfg.Agent.AutoPlan != "on" {
-		t.Fatalf("auto_plan = %q, want user-level on despite project off", cfg.Agent.AutoPlan)
+	if !bytes.Equal(after, before) {
+		t.Fatalf("config auto-plan off must not rewrite user config\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	out = captureStdout(t, func() {
+		if rc := Run([]string{"config", "auto-plan"}, "test-version"); rc != 0 {
+			t.Fatalf("config auto-plan query rc = %d, want 0", rc)
+		}
+	})
+	if out != "auto_plan = \"off\"\n" {
+		t.Fatalf("config auto-plan query output = %q", out)
+	}
+}
+
+func TestConfigAutoPlanCompatibilityCommandRejectsEnable(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"config", "auto-plan", "on"}, "test-version"); rc != 2 {
+			t.Fatalf("config auto-plan on rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "automatic plan mode has been retired") {
+		t.Fatalf("config auto-plan on stderr = %q", errOut)
 	}
 }
 
@@ -785,35 +720,12 @@ func TestProvidersWithMissingKeysIncludesReferencedSecondaryModels(t *testing.T)
 	cfg.Agent.SubagentModels = map[string]string{
 		"review": "mimo-pro/mimo-v2.5-pro",
 	}
-	cfg.Agent.AutoPlanClassifier = "mimo-flash/mimo-v2.5"
 	t.Setenv("DEEPSEEK_API_KEY", "test-key")
 	t.Setenv("MIMO_API_KEY", "")
 
 	missing := providersWithMissingKeys(cfg)
 	if len(missing) != 1 {
 		t.Fatalf("missing providers = %+v, want MiMo once", missing)
-	}
-	if missing[0].APIKeyEnv != "MIMO_API_KEY" {
-		t.Fatalf("missing key env = %q, want MIMO_API_KEY", missing[0].APIKeyEnv)
-	}
-}
-
-func TestProvidersWithMissingKeysSkipsDisabledAutoPlanClassifier(t *testing.T) {
-	cfg := config.Default()
-	cfg.Providers = append(cfg.Providers, config.ProviderEntry{Name: "mimo-flash", Kind: "openai", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1", Model: "mimo-v2.5", APIKeyEnv: "MIMO_API_KEY"})
-	cfg.Agent.AutoPlan = "off"
-	cfg.Agent.AutoPlanClassifier = "mimo-flash/mimo-v2.5"
-	t.Setenv("DEEPSEEK_API_KEY", "test-key")
-	t.Setenv("MIMO_API_KEY", "")
-
-	if missing := providersWithMissingKeys(cfg); len(missing) != 0 {
-		t.Fatalf("missing providers = %+v, want none when auto-plan classifier is disabled", missing)
-	}
-
-	cfg.Agent.AutoPlan = "on"
-	missing := providersWithMissingKeys(cfg)
-	if len(missing) != 1 {
-		t.Fatalf("missing providers = %+v, want enabled auto-plan classifier provider", missing)
 	}
 	if missing[0].APIKeyEnv != "MIMO_API_KEY" {
 		t.Fatalf("missing key env = %q, want MIMO_API_KEY", missing[0].APIKeyEnv)
@@ -1300,6 +1212,7 @@ func TestAPIKeyEnvFromProviderName(t *testing.T) {
 		{"custom host slug", "custom-token-sensenova-cn", "CUSTOM_TOKEN_SENSENOVA_CN_API_KEY"},
 		{"localhost slug with port", "custom-localhost-11434", "CUSTOM_LOCALHOST_11434_API_KEY"},
 		{"desktop-style custom name", "Local Gateway", "LOCAL_GATEWAY_API_KEY"},
+		{"digit-leading provider name", "9router", "CUSTOM_9ROUTER_API_KEY"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
@@ -33,7 +34,6 @@ import (
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
-	"reasonix/internal/sandbox"
 	"reasonix/internal/serve"
 
 	tea "charm.land/bubbletea/v2"
@@ -48,12 +48,6 @@ var (
 
 // Run is the CLI entry point; it returns a process exit code.
 func Run(args []string, version string) int {
-	// This binary routes the hidden Windows sandbox helper subcommand below;
-	// registering that fact is what lets sandbox.Available() report true.
-	sandbox.RegisterHelperDispatch()
-	if len(args) > 0 && args[0] == sandbox.WindowsHelperCommand {
-		return sandbox.RunWindowsSandboxHelper(args[1:], os.Stdin, os.Stdout, os.Stderr)
-	}
 	// Pick the UI language up front so even pre-config paths (the first-run
 	// welcome banner) come through localized. Env-only first; if a config
 	// exists and pins a language, that wins.
@@ -76,12 +70,15 @@ func Run(args []string, version string) int {
 	if len(args) > 0 && isDefaultInteractiveFlag(cmd) {
 		cmd = ""
 	}
-	if shouldMigrateLegacyConfigForCLI(cmd) {
+	doctorRepair := isDoctorRepairCommand(args)
+	if shouldMigrateLegacyConfigForCLI(cmd) && !doctorRepair {
 		migrateLegacyConfigForCLI()
 	}
-	if cfg, err := config.Load(); err == nil {
-		if cfg.Language != "" {
-			i18n.DetectLanguage(cfg.Language)
+	if !doctorRepair {
+		if cfg, err := config.Load(); err == nil {
+			if cfg.Language != "" {
+				i18n.DetectLanguage(cfg.Language)
+			}
 		}
 	}
 
@@ -123,6 +120,9 @@ func Run(args []string, version string) int {
 	case "mcp":
 		configureCLIThemeFromConfigNoProbe()
 		return mcpCommand(rest)
+	case "remote":
+		configureCLIThemeFromConfigNoProbe()
+		return remoteCommand(rest, version)
 	case "plugin":
 		configureCLIThemeFromConfigNoProbe()
 		return pluginCommand(rest)
@@ -130,7 +130,9 @@ func Run(args []string, version string) int {
 		configureCLIThemeFromConfigForTTYOutput()
 		return subagentCommand(rest)
 	case "doctor":
-		configureCLIThemeFromConfigNoProbe()
+		if !doctorRepair {
+			configureCLIThemeFromConfigNoProbe()
+		}
 		return doctorCommand(rest, version)
 	case "review":
 		configureCLIThemeFromConfigNoProbe()
@@ -154,6 +156,10 @@ func Run(args []string, version string) int {
 	}
 }
 
+func isDoctorRepairCommand(args []string) bool {
+	return len(args) > 1 && args[0] == "doctor" && args[1] == "repair"
+}
+
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
 	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools":
@@ -167,7 +173,7 @@ func isDefaultInteractiveFlag(arg string) bool {
 
 func shouldMigrateLegacyConfigForCLI(cmd string) bool {
 	switch cmd {
-	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
+	case "", "run", "chat", "code", "serve", "setup", "config", "init", "acp", "mcp", "remote", "plugin", "subagent", "doctor", "bot", "upgrade", "update":
 		return true
 	default:
 		return false
@@ -197,7 +203,7 @@ func configureCLIThemeFromConfig() {
 		cliCursorShape = cfg.UICursorShape()
 	} else {
 		configureCLITheme("auto")
-		cliCursorShape = "underline"
+		cliCursorShape = "bar"
 	}
 }
 
@@ -240,6 +246,7 @@ func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOv
 	return boot.Build(ctx, boot.Options{
 		Model:                modelName,
 		MaxSteps:             maxStepsOverride,
+		MaxStepsKey:          "--max-steps",
 		RequireKey:           requireKey,
 		Sink:                 sink,
 		TokenMode:            profile,
@@ -310,6 +317,7 @@ func setupQuietProfile(ctx context.Context, modelName string, maxStepsOverride i
 	return boot.Build(ctx, boot.Options{
 		Model:           modelName,
 		MaxSteps:        maxStepsOverride,
+		MaxStepsKey:     "--max-steps",
 		RequireKey:      requireKey,
 		Sink:            sink,
 		Stderr:          io.Discard,
@@ -405,7 +413,7 @@ func runAgent(args []string) int {
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
-	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
+	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
@@ -599,7 +607,7 @@ func runAgent(args []string) int {
 		ctrl.Resume(resumeSession, resumePath)
 	}
 	if ctrl.SessionPath() == "" && ctrl.SessionDir() != "" {
-		ctrl.SetSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
+		ctrl.SetFreshSessionPath(agent.NewSessionPath(ctrl.SessionDir(), ctrl.Label()))
 	}
 	// Fresh sessions take the lease too (defensive: the path is brand new); a
 	// resumed path is already held, making this a no-op.
@@ -655,7 +663,7 @@ func runServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
-	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
+	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
 	resume := fs.String("resume", "", "resume a saved session file")
 	auth := fs.String("auth", "", "auth mode: none, token, or password (default: none)")
@@ -663,6 +671,9 @@ func runServe(args []string) int {
 	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
 	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
 	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
+	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
+	tokenFile := fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)")
+	pidFile := fs.String("pid-file", "", "write the server process id to this file")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -698,6 +709,14 @@ func runServe(args []string) int {
 	}
 	if *token != "" {
 		serveCfg.Token = *token
+	}
+	if *tokenFile != "" {
+		tok, err := readServeTokenFile(*tokenFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		serveCfg.Token = tok
 	}
 	if *behindProxy {
 		serveCfg.BehindProxy = true
@@ -777,14 +796,55 @@ func runServe(args []string) int {
 
 	srv := serve.New(ctrl, bc, serveCfg)
 	srv.SetSessionLeases(leases)
-	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), *addr)
+
+	// With --port-file the supervisor needs the real bound port (--addr may be
+	// 127.0.0.1:0), so listen first, record the address, then serve on the
+	// existing listener.
+	var ln net.Listener
+	displayAddr := *addr
+	if *portFile != "" {
+		var lerr error
+		ln, lerr = net.Listen("tcp", *addr)
+		if lerr != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, lerr)
+			return 1
+		}
+		displayAddr = ln.Addr().String()
+		if err := writeServeAddrFile(*portFile, displayAddr); err != nil {
+			_ = ln.Close()
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		defer os.Remove(*portFile)
+	}
+	if *pidFile != "" {
+		if err := writeServePidFile(*pidFile); err != nil {
+			if ln != nil {
+				_ = ln.Close()
+			}
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		defer os.Remove(*pidFile)
+	}
+
+	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), displayAddr)
 	if srv.AuthMode() == "token" {
 		fmt.Printf("  auth: token\n")
-		fmt.Printf("  share: http://%s/?token=%s\n", *addr, srv.AuthToken())
+		// Under --port-file the process is supervised (e.g. remote bootstrap):
+		// stdout is redirected to a log, so printing the token here would leak it
+		// into a file readable by other same-machine users. The supervisor
+		// already holds the token (it wrote --token-file), so suppress the share
+		// URL and print only the token-file reference.
+		if *portFile != "" && *tokenFile != "" {
+			fmt.Printf("  share: http://%s/ (token in %s)\n", displayAddr, *tokenFile)
+		} else {
+			fmt.Printf("  share: http://%s/?token=%s\n", displayAddr, srv.AuthToken())
+		}
 	} else if srv.AuthMode() == "password" {
-		fmt.Printf("  auth: password (login at http://%s/login)\n", *addr)
+		fmt.Printf("  auth: password (login at http://%s/login)\n", displayAddr)
 	}
-	if warning := serve.PlainHTTPAuthWarning(serveCfg, *addr); warning != "" {
+	if warning := serve.PlainHTTPAuthWarning(serveCfg, displayAddr); warning != "" {
 		fmt.Fprintf(os.Stderr, "  %s\n", warning)
 	}
 	// Diagnostic: check whether balance endpoint is reachable
@@ -799,6 +859,13 @@ func runServe(args []string) int {
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if ln != nil {
+		if err := srv.RunGracefulListener(ctx, ln); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		return 0
+	}
 	if err := srv.RunGraceful(ctx, *addr); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
@@ -814,7 +881,7 @@ func chatREPL(args []string) int {
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
 	profileFlag := fs.String("profile", "balanced", "runtime profile: economy | balanced | delivery")
-	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds (0 = use config/default)")
+	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
 	resume := fs.StringP("resume", "r", "", "resume by session ID/query, or open the picker when no value is given")
@@ -1002,8 +1069,8 @@ func chatREPL(args []string) int {
 	// task tool) keep their headless gate from setup — no UI to prompt through.
 	ctrl.EnableInteractiveApproval()
 	applyPermissionMode(ctrl, permissions)
-	// YOLO: skip every tool approval request for the session (deny rules still
-	// apply; ask questions and plan approvals still wait for the user).
+	// YOLO: skip ordinary tool approval requests for the session (deny rules and
+	// fresh reviews still apply; ask questions and plan approvals still wait).
 	if *yolo {
 		ctrl.SetAutoApproveTools(true)
 	}
@@ -1022,7 +1089,7 @@ func chatREPL(args []string) int {
 	// model (carrying the conversation). It must NOT touch the running model —
 	// runModelSubcommand performs the swap on the live copy. The same stable sink
 	// feeds the new controller, so events keep flowing to this TUI.
-	m.buildController = func(spec controllerBuildSpec, carry []provider.Message, resumePath string) (*control.Controller, error) {
+	m.buildController = func(spec controllerBuildSpec, carry []provider.Message, resumePath string, oldCtrl control.SessionAPI) (*control.Controller, error) {
 		effectiveOverrides := overrides
 		if spec.EffortOverride != nil {
 			effectiveOverrides.Effort = spec.EffortOverride
@@ -1037,7 +1104,10 @@ func chatREPL(args []string) int {
 		// Keep the carried conversation in its existing file so the switch doesn't
 		// orphan a duplicate (#2807).
 		path := agent.ContinueSessionPath(resumePath, c.SessionDir(), c.Label())
-		c.AdoptHistory(carry, path)
+		if err := adoptCarriedHistoryPreservingProfileAndGrants(c, carry, path, oldCtrl); err != nil {
+			c.Close()
+			return nil, err
+		}
 		c.EnableInteractiveApproval()
 		c.SetPlanMode(spec.PlanMode)
 		if spec.ToolApprovalMode != "" {
@@ -1104,6 +1174,39 @@ func chatREPL(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// adoptCarriedHistoryPreservingProfileAndGrants resumes c on the carried
+// conversation the way buildController's callers expect: the freshly built
+// c already has its own leading system message for the target profile (see
+// boot/token_profile.go), but AdoptHistory below would otherwise replace the
+// whole history — including that message — with carry's outgoing one, so the
+// switch splices the new leading message in first. It also carries forward
+// oldCtrl's same-session "Allow for this session" tool grants and Plan-mode
+// read-only command trust, which a rebuild would otherwise silently drop,
+// forcing the user to re-approve things already granted this session.
+func adoptCarriedHistoryPreservingProfileAndGrants(c *control.Controller, carry []provider.Message, path string, oldCtrl control.SessionAPI) error {
+	if fresh := c.History(); len(fresh) > 0 && fresh[0].Role == provider.RoleSystem {
+		if len(carry) > 0 && carry[0].Role == provider.RoleSystem {
+			carry[0] = fresh[0]
+		} else {
+			carry = append([]provider.Message{fresh[0]}, carry...)
+		}
+	}
+	c.AdoptHistory(carry, path)
+	if prev, ok := oldCtrl.(*control.Controller); ok {
+		c.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+	}
+	// Persist the adopted history now: the splice above only refreshed the new
+	// controller's memory and nothing saves again until the next turn ends, so
+	// quitting right after the switch and resuming would otherwise revive the
+	// outgoing profile's contract from disk.
+	if path != "" {
+		if err := c.Snapshot(); err != nil {
+			return fmt.Errorf("snapshot after runtime switch: %w", err)
+		}
+	}
+	return nil
 }
 
 func prepareNativeScrollback(w io.Writer, rows int) {
@@ -1527,6 +1630,9 @@ func apiKeyEnvFromProviderName(name string) string {
 	if stem == "" {
 		return "CUSTOM_" + fnv1a32Hex(name) + "_API_KEY"
 	}
+	if stem[0] >= '0' && stem[0] <= '9' {
+		stem = "CUSTOM_" + stem
+	}
 	return stem + "_API_KEY"
 }
 
@@ -1862,9 +1968,6 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 		cfg.Agent.PlannerModel,
 		cfg.Agent.SubagentModel,
 	}
-	if !strings.EqualFold(strings.TrimSpace(cfg.Agent.AutoPlan), "off") {
-		refs = append(refs, cfg.Agent.AutoPlanClassifier)
-	}
 	if len(cfg.Agent.SubagentModels) > 0 {
 		keys := make([]string, 0, len(cfg.Agent.SubagentModels))
 		for key := range cfg.Agent.SubagentModels {
@@ -2033,9 +2136,7 @@ func configCommand(args []string) int {
 	}
 	switch args[0] {
 	case "auto-plan":
-		return configAutoPlanCommand(args[1:])
-	case "memory-v5":
-		return configMemoryV5Command(args[1:])
+		return configAutoPlanCompatibilityCommand(args[1:])
 	case "reasoning-language":
 		return configReasoningLanguageCommand(args[1:])
 	default:
@@ -2044,9 +2145,12 @@ func configCommand(args []string) int {
 	}
 }
 
-func configAutoPlanCommand(args []string) int {
+// configAutoPlanCompatibilityCommand preserves the released shell interface
+// without restoring Automatic Plan Mode. Reading and writing "off" are safe
+// no-ops; every attempt to enable the retired feature is rejected.
+func configAutoPlanCompatibilityCommand(args []string) int {
 	fs := flag.NewFlagSet("config auto-plan", flag.ContinueOnError)
-	local := fs.Bool("local", false, "unsupported; auto-plan is user-level only")
+	local := fs.Bool("local", false, "unsupported; automatic plan mode is retired")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -2056,98 +2160,19 @@ func configAutoPlanCommand(args []string) int {
 	}
 	rest := fs.Args()
 	if len(rest) > 1 {
-		configAutoPlanUsage()
+		configAutoPlanCompatibilityUsage()
 		return 2
 	}
 	if len(rest) == 0 {
-		cfg, err := config.Load()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		mode := cfg.Agent.AutoPlan
-		mode = cliAutoPlanMode(mode)
-		fmt.Printf("auto_plan = %q\n", mode)
+		fmt.Println(`auto_plan = "off"`)
 		return 0
 	}
-	path := config.UserConfigPath()
-	if path == "" {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
-		return 1
-	}
-	// Serialize the load-modify-save against other in-process user-config
-	// editors so concurrent writers don't drop each other's fields.
-	unlock := config.LockUserConfigEdits()
-	defer unlock()
-	cfg := config.LoadForEdit(path)
+	cfg := config.Default()
 	if err := cfg.SetAutoPlan(rest[0]); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	if err := cfg.SaveTo(path); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 1
-	}
-	fmt.Printf("auto_plan = %q (%s)\n", cfg.Agent.AutoPlan, displayPath(path))
-	return 0
-}
-
-func configMemoryV5Command(args []string) int {
-	fs := flag.NewFlagSet("config memory-v5", flag.ContinueOnError)
-	local := fs.Bool("local", false, "unsupported; Memory v5 is user-level only")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	if *local {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "memory-v5 is user-level only; --local is not supported")
-		return 2
-	}
-	rest := fs.Args()
-	if len(rest) > 1 {
-		configMemoryV5Usage()
-		return 2
-	}
-	if len(rest) == 0 || strings.EqualFold(rest[0], "status") {
-		cfg, err := config.Load()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
-		fmt.Printf("memory_compiler.enabled = %v\n", cfg.MemoryCompilerEnabled())
-		fmt.Printf("memory_compiler.verbosity = %q\n", cfg.MemoryCompilerVerbosity())
-		return 0
-	}
-	setting, err := parseCLIMemoryV5Setting(rest[0])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 2
-	}
-	path := config.UserConfigPath()
-	if path == "" {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
-		return 1
-	}
-	// Serialize the load-modify-save against other in-process user-config
-	// editors so concurrent writers don't drop each other's fields.
-	unlock := config.LockUserConfigEdits()
-	defer unlock()
-	cfg := config.LoadForEdit(path)
-	if err := cfg.SetMemoryCompilerEnabled(setting.enabled); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 2
-	}
-	if setting.setVerbosity {
-		if err := cfg.SetMemoryCompilerVerbosity(setting.verbosity); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 2
-		}
-	}
-	if err := cfg.SaveTo(path); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 1
-	}
-	fmt.Printf("memory_compiler.enabled = %v\n", cfg.MemoryCompilerEnabled())
-	fmt.Printf("memory_compiler.verbosity = %q (%s)\n", cfg.MemoryCompilerVerbosity(), displayPath(path))
+	fmt.Println(`auto_plan = "off"`)
 	return 0
 }
 
@@ -2220,21 +2245,13 @@ func configReasoningLanguageCommand(args []string) int {
 
 func configUsage() {
 	fmt.Print(`Usage:
-  reasonix config auto-plan [off|on]
-  reasonix config memory-v5 [off|observe|compact|on|status]
   reasonix config reasoning-language [--local] [auto|zh|en]
 `)
 }
 
-func configAutoPlanUsage() {
+func configAutoPlanCompatibilityUsage() {
 	fmt.Print(`Usage:
-  reasonix config auto-plan [off|on]
-`)
-}
-
-func configMemoryV5Usage() {
-	fmt.Print(`Usage:
-  reasonix config memory-v5 [off|observe|compact|on|status]
+  reasonix config auto-plan [off]
 `)
 }
 

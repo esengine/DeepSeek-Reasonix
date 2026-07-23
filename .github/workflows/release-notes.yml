@@ -1,0 +1,26 @@
+name: Release notes
+
+on:
+  pull_request:
+    paths:
+      - "release-notes/**"
+      - "scripts/release-notes*.mjs"
+      - "site/src/pages/changelog/**"
+      - "site/src/components/ChangelogPage.astro"
+      - "desktop/frontend/src/App.tsx"
+      - "desktop/frontend/src/components/SettingsPanel.tsx"
+      - "desktop/frontend/src/components/UpdateBanner.tsx"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - run: node scripts/release-notes.mjs validate
+      - run: node --test scripts/release-notes.test.mjs

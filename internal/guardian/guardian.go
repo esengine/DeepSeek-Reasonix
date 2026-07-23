@@ -107,13 +107,32 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, policyPrompt
 // It reads the parent agent session to build a transcript, constructs a review
 // prompt, asks the guardian model (which may use read-only tools to investigate),
 // and returns allow/deny with a structured reason.
-// A non-nil error means the review could not complete (fail-closed: deny).
+//
+// Review keeps the legacy contract: an unavailable or unparseable review is
+// folded into a high-risk deny verdict (err is always nil), which downstream
+// surfaces as a reasoned human prompt. Callers that must tell an authentic
+// verdict apart from a failed review use ReviewVerdict.
 //
 // The mutex serialises access to the guardian agent.session so concurrent
 // reviews cannot interleave their messages (guardian reuses one session for
 // prefix-cache warmth). Event emission is deferred to outside the lock so a
 // slow sink does not stall the next review.
 func (gs *Session) Review(ctx context.Context, toolName string, args json.RawMessage, parentSession *agent.Session) (allow bool, reason string, err error) {
+	allow, reason, _ = gs.review(ctx, toolName, args, parentSession)
+	return allow, reason, nil
+}
+
+// ReviewVerdict is Review for callers that must distinguish an authentic
+// verdict from an unavailable or indeterminate review. Transport errors,
+// timeouts, and unparseable assessments return a non-nil error (alongside the
+// same circuit-breaker bookkeeping); authentic allow/deny verdicts return a
+// nil error. auto_review uses this so a failed review degrades to a fresh
+// human decision instead of masquerading as a reviewer deny.
+func (gs *Session) ReviewVerdict(ctx context.Context, toolName string, args json.RawMessage, parentSession *agent.Session) (allow bool, reason string, err error) {
+	return gs.review(ctx, toolName, args, parentSession)
+}
+
+func (gs *Session) review(ctx context.Context, toolName string, args json.RawMessage, parentSession *agent.Session) (allow bool, reason string, failure error) {
 	reviewCtx, cancel := context.WithTimeout(ctx, reviewTimeout)
 	defer cancel()
 
@@ -175,6 +194,7 @@ func (gs *Session) Review(ctx context.Context, toolName string, args json.RawMes
 	var assessment Assessment
 	if agentErr != nil {
 		gs.rollbackReview(before, rewriteBefore)
+		failure = fmt.Errorf("guardian review failed: %w", agentErr)
 		assessment = Assessment{
 			RiskLevel:         "high",
 			UserAuthorization: "unknown",
@@ -186,6 +206,7 @@ func (gs *Session) Review(ctx context.Context, toolName string, args json.RawMes
 		var parseErr error
 		assessment, parseErr = ParseAssessment(last)
 		if parseErr != nil {
+			failure = fmt.Errorf("guardian verdict unparseable: %w", parseErr)
 			assessment = Assessment{
 				RiskLevel:         "high",
 				UserAuthorization: "unknown",
@@ -217,7 +238,7 @@ func (gs *Session) Review(ctx context.Context, toolName string, args json.RawMes
 	gs.emitTo(sink, assessment, toolName, subject(args), dur, reviewUsage)
 
 	if assessment.Outcome == "deny" {
-		return false, reason, nil
+		return false, reason, failure
 	}
 	return true, "", nil
 }
