@@ -208,6 +208,7 @@ func (s *updateSink) replay(msgs []provider.Message) {
 			if steer, ok := agent.SteerText(text); ok {
 				text = steer
 			}
+			text = agent.StripTransientUserBlocks(text)
 			if text != "" {
 				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
 			}
