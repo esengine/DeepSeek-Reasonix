@@ -250,7 +250,7 @@ func isKnownDeepSeekOfficialPricing(model string, price *provider.Pricing) bool 
 	if model == "" || price == nil {
 		return false
 	}
-	for _, prices := range []map[string]*provider.Pricing{deepSeekV4Prices(), deepSeekV4PricesUSD()} {
+	for _, prices := range []map[string]*provider.Pricing{deepSeekV4Prices()} {
 		if samePricing(price, prices[model]) {
 			return true
 		}
