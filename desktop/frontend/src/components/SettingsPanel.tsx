@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
+import { lazy, memo, Fragment, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
@@ -6666,11 +6666,36 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
   );
 }
 
+function GrantDetailView({ grant }: { grant: CapabilityGrantView }) {
+  const t = useT();
+  const detail: { label: string; items: string[] }[] = [];
+  if (grant.network) detail.push({ label: t("grant.network"), items: ["🌐"] });
+  if (grant.reads?.length) detail.push({ label: t("grant.reads"), items: grant.reads.map((r) => `${r.path} (${r.kind}, ${r.identity})`) });
+  if (grant.writes?.length) detail.push({ label: t("grant.writes"), items: grant.writes.map((w) => `${w.path} (${w.kind}, ${w.identity})`) });
+  if (grant.devices?.length) detail.push({ label: t("grant.devices"), items: grant.devices.map((d) => `${d.path} (${d.kind}, ${d.major}:${d.minor})`) });
+  if (grant.background) detail.push({ label: t("grant.background"), items: ["⏎"] });
+  if (grant.preserveBackgroundProcesses) detail.push({ label: t("grant.preserveBackground"), items: ["⏎+"] });
+  if (detail.length === 0) return <div className="grant-detail__empty">—</div>;
+  return (
+    <div className="grant-detail">
+      {detail.map((section, i) => (
+        <div className="grant-detail__section" key={i}>
+          <div className="grant-detail__label">{section.label}</div>
+          <ul className="grant-detail__items">
+            {section.items.map((item, j) => <li key={j}>{item}</li>)}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: SectionProps) {
   const t = useT();
   const [busy, setBusy] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
   const grants = s.sandbox.capabilityGrants ?? [];
 
   const handleSave = useCallback(async (grant: Omit<CapabilityGrantView, "index" | "source">, source: string) => {
@@ -6729,6 +6754,7 @@ function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: Section
           <table className="grant-table">
             <thead>
               <tr>
+                <th></th>
                 <th>{t("grant.executable")}</th>
                 <th>{t("grant.prefix")}</th>
                 <th>{t("grant.capabilities")}</th>
@@ -6737,18 +6763,32 @@ function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: Section
               </tr>
             </thead>
             <tbody>
-              {grants.map((g) => (
-                <tr key={`${g.source}-${g.index}`}>
-                  <td className="grant-table__exec">{g.canonicalExecutable}</td>
-                  <td className="grant-table__prefix"><code>{g.argvPrefix?.join(" ") || "—"}</code></td>
-                  <td className="grant-table__caps">{capabilitySummary(g)}</td>
-                  <td className="grant-table__source">{g.source === "project" ? t("grant.sourceProject") : t("grant.sourceUser")}</td>
-                  <td className="grant-table__actions">
-                    <button className="btn btn--small btn--danger" disabled={busy || parentBusy} onClick={() => void handleDelete(g)}>
-                      {t("common.delete")}
-                    </button>
-                  </td>
-                </tr>
+              {grants.map((g, idx) => (
+                <Fragment key={`${g.source}-${g.index}`}>
+                  <tr>
+                    <td className="grant-table__expand">
+                      <button className="btn btn--small btn--ghost" onClick={() => setExpanded(expanded === idx ? null : idx)}>
+                        {expanded === idx ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                    </td>
+                    <td className="grant-table__exec">{g.canonicalExecutable}</td>
+                    <td className="grant-table__prefix"><code>{g.argvPrefix?.join(" ") || "—"}</code></td>
+                    <td className="grant-table__caps">{capabilitySummary(g)}</td>
+                    <td className="grant-table__source">{g.source === "project" ? t("grant.sourceProject") : t("grant.sourceUser")}</td>
+                    <td className="grant-table__actions">
+                      <button className="btn btn--small btn--danger" disabled={busy || parentBusy} onClick={() => void handleDelete(g)}>
+                        {t("common.delete")}
+                      </button>
+                    </td>
+                  </tr>
+                  {expanded === idx && (
+                    <tr className="grant-table__detail-row">
+                      <td colSpan={6}>
+                        <GrantDetailView grant={g} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>
