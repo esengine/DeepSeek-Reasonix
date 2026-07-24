@@ -194,6 +194,182 @@ func PersistProjectCapabilityGrant(workspace string, grant sandboxauth.Grant) er
 	return nil
 }
 
+// userConfigPathForGrants returns the path and root for user-level grant operations.
+func userConfigPathForGrants() (path, root string) {
+	path = UserConfigPath()
+	if path == "" {
+		return "", ""
+	}
+	userHome, _ := os.UserHomeDir()
+	root = userHome
+	if root == "" {
+		root = "/"
+	}
+	return path, root
+}
+
+// PersistUserCapabilityGrant appends a grant to the user-level config file.
+func PersistUserCapabilityGrant(grant sandboxauth.Grant) error {
+	path, root := userConfigPathForGrants()
+	if path == "" {
+		return fmt.Errorf("persist user capability grant: cannot resolve user config path")
+	}
+	unlock := LockUserConfigEdits()
+	defer unlock()
+	entry, canonical, err := capabilityGrantForPersistence(root, grant)
+	if err != nil {
+		return fmt.Errorf("persist user capability grant: %w", err)
+	}
+	existing, _ := LoadUserCapabilityGrants()
+	for _, current := range existing {
+		if canonicalGrantEqual(current, canonical) {
+			return nil
+		}
+	}
+	raw, err := fileencoding.ReadFileUTF8(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("persist user capability grant: read config: %w", err)
+	}
+	body := strings.TrimRight(string(raw), "\n")
+	if body != "" {
+		body += "\n\n"
+	}
+	if !tomlBodyHasSection(body, "sandbox") {
+		body += "[sandbox]\n\n"
+	}
+	body += renderCapabilityGrantEntry(entry)
+	if _, err := toml.Decode(body, &map[string]any{}); err != nil {
+		return fmt.Errorf("persist user capability grant: validate: %w", err)
+	}
+	return writeConfigFile(path, body)
+}
+
+// DeleteProjectCapabilityGrant removes the first grant matching `match` from
+// the project-level config file, comparing by canonical equality.
+func DeleteProjectCapabilityGrant(workspace string, match sandboxauth.Grant) error {
+	root, err := canonicalCapabilityWorkspace(workspace)
+	if err != nil {
+		return fmt.Errorf("delete project capability grant: %w", err)
+	}
+	path := capabilityConfigPath(root)
+	unlock, err := LockConfigFileEdits(path)
+	if err != nil {
+		return fmt.Errorf("delete project capability grant: lock: %w", err)
+	}
+	defer unlock()
+	return deleteGrantFromFile(path, root, match)
+}
+
+// DeleteUserCapabilityGrant removes the first grant matching `match` from the
+// user-level config file, comparing by canonical equality.
+func DeleteUserCapabilityGrant(match sandboxauth.Grant) error {
+	path, root := userConfigPathForGrants()
+	if path == "" {
+		return fmt.Errorf("delete user capability grant: cannot resolve user config path")
+	}
+	unlock := LockUserConfigEdits()
+	defer unlock()
+	return deleteGrantFromFile(path, root, match)
+}
+
+// deleteGrantFromFile removes the first grant matching `match` from the file at
+// path and rewrites the file. Callers must hold the appropriate lock.
+func deleteGrantFromFile(path, root string, match sandboxauth.Grant) error {
+	grants, _ := loadCapabilityGrantsFrom(path, root)
+	index := -1
+	for i, g := range grants {
+		if canonicalGrantEqual(g, match) {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		return nil // nothing to delete
+	}
+	grants = append(grants[:index], grants[index+1:]...)
+	raw, err := fileencoding.ReadFileUTF8(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("delete grant: read: %w", err)
+	}
+	body := string(raw)
+	marker := "\n[[sandbox.capability_grants]]"
+	split := strings.Index(body, marker)
+	if split < 0 {
+		return nil // no grants section found
+	}
+	header := body[:split]
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(header, "\n"))
+	for _, g := range grants {
+		entry, _, err := capabilityGrantForPersistence(root, g)
+		if err != nil {
+			return fmt.Errorf("delete grant: normalize: %w", err)
+		}
+		b.WriteString("\n")
+		b.WriteString(renderCapabilityGrantEntry(entry))
+	}
+	return writeConfigFile(path, b.String())
+}
+
+// CapabilityGrantEntryForDesktop is the desktop-settings-panel representation of a
+// capability grant entry, used to validate and persist user-created grants.
+type CapabilityGrantEntryForDesktop struct {
+	CanonicalExecutable         string
+	ArgvPrefix                  []string
+	Network                     bool
+	Background                  bool
+	PreserveBackgroundProcesses bool
+	Reads                       []struct {
+		Identity string
+		Path     string
+		Kind     string
+	}
+	Writes []struct {
+		Identity string
+		Path     string
+		Kind     string
+	}
+	Devices []struct {
+		Path  string
+		Kind  string
+		Major uint32
+		Minor uint32
+	}
+}
+
+// ValidateGrantView validates a CapabilityGrantEntryForDesktop against the given
+// root and returns a canonical sandboxauth.Grant. When root is empty, defaults to
+// user home directory.
+func ValidateGrantView(entry CapabilityGrantEntryForDesktop, root string) (sandboxauth.Grant, error) {
+	if root == "" {
+		userHome, _ := os.UserHomeDir()
+		root = userHome
+		if root == "" {
+			root = "/"
+		}
+	}
+	toEntry := capabilityGrantEntry{
+		CanonicalExecutable:         entry.CanonicalExecutable,
+		ArgvPrefix:                  entry.ArgvPrefix,
+		Network:                     entry.Network,
+		Background:                  entry.Background,
+		PreserveBackgroundProcesses: entry.PreserveBackgroundProcesses,
+	}
+	for _, r := range entry.Reads {
+		toEntry.Reads = append(toEntry.Reads, capabilityPathEntry{Identity: r.Identity, Path: r.Path, Kind: r.Kind})
+	}
+	for _, w := range entry.Writes {
+		toEntry.Writes = append(toEntry.Writes, capabilityPathEntry{Identity: w.Identity, Path: w.Path, Kind: w.Kind})
+	}
+	for _, d := range entry.Devices {
+		toEntry.Devices = append(toEntry.Devices, capabilityDeviceEntry{Path: d.Path, Kind: d.Kind, Major: d.Major, Minor: d.Minor})
+	}
+	return validateCapabilityGrantEntry(root, toEntry)
+}
+
 func validateCapabilityGrantEntry(root string, entry capabilityGrantEntry) (sandboxauth.Grant, error) {
 	executable := filepath.Clean(strings.TrimSpace(entry.CanonicalExecutable))
 	if executable == "." || !filepath.IsAbs(executable) {

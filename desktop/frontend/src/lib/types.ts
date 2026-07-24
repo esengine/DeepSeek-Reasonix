@@ -1456,6 +1456,32 @@ export interface PermissionsView {
   deny: string[];
 }
 
+export interface DeviceGrantView {
+  path: string;
+  kind: string; // "character" | "block"
+  major: number;
+  minor: number;
+}
+
+export interface PathGrantView {
+  identity: string; // "workspace_relative" | "canonical_absolute"
+  path: string;
+  kind: string; // "directory" | "file"
+}
+
+export interface CapabilityGrantView {
+  index: number;
+  source: string; // "project" | "user"
+  canonicalExecutable: string;
+  argvPrefix: string[];
+  network: boolean;
+  background: boolean;
+  preserveBackgroundProcesses: boolean;
+  reads: PathGrantView[];
+  writes: PathGrantView[];
+  devices: DeviceGrantView[];
+}
+
 export interface SandboxView {
   bash: string; // "enforce" | "off"
   network: boolean;
@@ -1466,6 +1492,7 @@ export interface SandboxView {
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
   effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
   yoloAutoApproveCapabilities: boolean;
+  capabilityGrants: CapabilityGrantView[];
 }
 
 export interface NetworkProxyView {

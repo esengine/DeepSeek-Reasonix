@@ -16,7 +16,7 @@ import { t } from "./i18n";
 import { providerIsConfigured, providerRequiresKey } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
-import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
+import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode, CapabilityGrantView } from "./types";
 
 import type {
   AutoResearchFindingView,
@@ -380,6 +380,8 @@ export interface AppBindings {
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   ReloadSettings(): Promise<void>;
   SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string, yoloAutoApproveCapabilities: boolean): Promise<void>;
+  AddCapabilityGrant(source: string, grant: CapabilityGrantView): Promise<void>;
+  DeleteCapabilityGrant(source: string, grant: CapabilityGrantView): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
   SetBotConnectionToolApprovalMode(connID: string, mode: string): Promise<void>;
@@ -1379,7 +1381,7 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), yoloAutoApproveCapabilities: false },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), yoloAutoApproveCapabilities: false, capabilityGrants: [] },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -3944,7 +3946,7 @@ function makeMockApp(): AppBindings {
         async ReloadSettings() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string, yoloAutoApproveCapabilities: boolean) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell), yoloAutoApproveCapabilities };
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell), yoloAutoApproveCapabilities, capabilityGrants: [] };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;
@@ -4804,6 +4806,8 @@ function makeMockApp(): AppBindings {
     async ReloadSandboxCapabilityYOLO() {
       return { workspace: "", effective: false, yolo: false, interactive: false, acknowledgement: "not_required" };
     },
+    async AddCapabilityGrant(_source: string, _grant: CapabilityGrantView) {},
+    async DeleteCapabilityGrant(_source: string, _grant: CapabilityGrantView) {},
   };
 }
 

@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, u
 import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
+import { GrantDialog } from "./GrantDialog";
 import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
@@ -38,7 +39,7 @@ import {
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, setProcessFoldPreference, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import { normalizeToolApprovalMode } from "../lib/types";
+import { normalizeToolApprovalMode, type CapabilityGrantView } from "../lib/types";
 import {
   comboFromKeyboardEvent,
   detectShortcutPlatform,
@@ -286,7 +287,7 @@ export function SettingsPanel({
                 {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /><CapabilityGrantsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
@@ -6662,6 +6663,99 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
         onRemove={(d) => set({ allowWrite: sb.allowWrite.filter((x) => x !== d) })}
       />
     </SettingsSection>
+  );
+}
+
+function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: SectionProps) {
+  const t = useT();
+  const [busy, setBusy] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const grants = s.sandbox.capabilityGrants ?? [];
+
+  const handleSave = useCallback(async (grant: Omit<CapabilityGrantView, "index" | "source">, source: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await app.AddCapabilityGrant(source, { ...grant, index: 0, source });
+      setShowDialog(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const handleDelete = useCallback(async (g: CapabilityGrantView) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await app.DeleteCapabilityGrant(g.source, g);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const capabilitySummary = (g: CapabilityGrantView): string => {
+    const parts: string[] = [];
+    if (g.network) parts.push("🌐");
+    const readCount = g.reads?.length ?? 0;
+    const writeCount = g.writes?.length ?? 0;
+    const deviceCount = g.devices?.length ?? 0;
+    if (readCount > 0) parts.push(`📄${readCount}`);
+    if (writeCount > 0) parts.push(`🖊️${writeCount}`);
+    if (deviceCount > 0) parts.push(`🔧${deviceCount}`);
+    if (g.background) parts.push("⏎");
+    return parts.join(" ") || "—";
+  };
+
+  return (
+    <>
+      <SettingsSection
+        title={t("settings.capabilityGrantsTitle")}
+        description={t("settings.capabilityGrantsHint")}
+        actions={
+          <button className="btn btn--small" disabled={busy || parentBusy} onClick={() => setShowDialog(true)}>
+            {t("settings.addCapabilityGrant")}
+          </button>
+        }
+      >
+        {error && <div className="settings-error">{error}</div>}
+        {grants.length === 0 ? (
+          <div className="mem-empty">{t("settings.noCapabilityGrants")}</div>
+        ) : (
+          <table className="grant-table">
+            <thead>
+              <tr>
+                <th>{t("grant.executable")}</th>
+                <th>{t("grant.prefix")}</th>
+                <th>{t("grant.capabilities")}</th>
+                <th>{t("grant.source")}</th>
+                <th>{t("grant.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grants.map((g) => (
+                <tr key={`${g.source}-${g.index}`}>
+                  <td className="grant-table__exec">{g.canonicalExecutable}</td>
+                  <td className="grant-table__prefix"><code>{g.argvPrefix?.join(" ") || "—"}</code></td>
+                  <td className="grant-table__caps">{capabilitySummary(g)}</td>
+                  <td className="grant-table__source">{g.source === "project" ? t("grant.sourceProject") : t("grant.sourceUser")}</td>
+                  <td className="grant-table__actions">
+                    <button className="btn btn--small btn--danger" disabled={busy || parentBusy} onClick={() => void handleDelete(g)}>
+                      {t("common.delete")}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </SettingsSection>
+      {showDialog && <GrantDialog onSave={handleSave} onClose={() => setShowDialog(false)} busy={busy || parentBusy} />}
+    </>
   );
 }
 
