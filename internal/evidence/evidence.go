@@ -1736,6 +1736,14 @@ func bashSegmentIsVerification(fields []string) bool {
 			return true
 		}
 		return len(args) > 1 && args[0] == "run" && hasCommandArg(args[1:2], "test", "check", "lint", "typecheck")
+	case "npx":
+		// npx runs packages directly; known test/lint/check tools are verification.
+		if len(args) > 0 && hasCommandArg(args[:1],
+			"vitest", "playwright", "jest", "mocha", "ava", "cypress",
+			"eslint", "prettier", "biome", "tsc") {
+			return !hasWriteOutputFlag(args)
+		}
+		return false
 	case "node":
 		return nodeSegmentIsVerification(args)
 	case "make", "just":

@@ -362,8 +362,12 @@ type Options struct {
 	// RecoveryHeadless blocks mutations that need confirmation instead of
 	// waiting forever when no human decision channel exists.
 	RecoveryHeadless bool
-	Sink             event.Sink
-	Policy           permission.Policy
+	// RecoveryGuardLevel sets the Auto Guard aggressiveness level. Defaults to
+	// recovery.AutoGuardNormal when empty. Set to recovery.AutoGuardGentle for
+	// a less intrusive experience.
+	RecoveryGuardLevel recovery.AutoGuardLevel
+	Sink               event.Sink
+	Policy             permission.Policy
 	// SubagentGate is the shared, mutable gate every headless-only sub-agent
 	// surface (task, writer-capable skill sub-agents, planner) reads from. Nil
 	// disables gating for those surfaces same as before this field existed.
@@ -532,7 +536,7 @@ func New(opts Options) *Controller {
 	}
 	// Auto Guard is built into Auto. Ask and YOLO bypass it through the mode
 	// provider, so no separate enablement state is needed.
-	c.initRecoveryGate(opts.RecoveryReviewer, opts.RecoveryHeadless)
+	c.initRecoveryGate(opts.RecoveryReviewer, opts.RecoveryHeadless, opts.RecoveryGuardLevel)
 	return c
 }
 

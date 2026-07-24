@@ -591,6 +591,11 @@ func commandFieldsKnownSafeMutation(fields []string) bool {
 		return containsAny(args, "install", "add", "remove", "update", "dedupe", "import") && !hasGlobalFlag(args)
 	case "yarn":
 		return containsAny(args, "install", "add", "remove", "up", "upgrade", "dedupe") && !hasGlobalFlag(args) && !containsAny(args, "global")
+	case "npx":
+		// npx executes packages in the project scope; the ordinary permission/sandbox
+		// layer handles path confinement. Allow by default so common dev commands
+		// (npx vitest, npx eslint, npx prettier) aren't blocked as high-risk.
+		return true
 	case "go":
 		return containsAny(args, "get", "mod", "work", "fmt", "build", "test") && !containsAny(args, "install", "clean")
 	case "cargo":

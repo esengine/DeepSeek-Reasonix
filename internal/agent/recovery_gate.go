@@ -169,6 +169,9 @@ const (
 	RecoveryActionContinue     RecoveryAction = "continue"
 	RecoveryActionContinueTask RecoveryAction = "continue_task"
 	RecoveryActionRevise       RecoveryAction = "revise"
+	// RecoveryActionOverride lets the user clear an episode stop and reset
+	// failure counts so Auto can continue without switching modes.
+	RecoveryActionOverride RecoveryAction = "override"
 )
 
 func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args json.RawMessage, readOnly, mutates bool, result string, err error, blocked, userRejected bool, generation uint64) {

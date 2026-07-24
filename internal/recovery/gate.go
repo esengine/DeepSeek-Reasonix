@@ -35,6 +35,9 @@ type Options struct {
 	// Headless, when true, never waits for a human: blocks the mutation with a
 	// structured blocker message instead.
 	Headless bool
+	// Level controls how aggressively Auto Guard escalates. Defaults to
+	// AutoGuardNormal when empty.
+	Level AutoGuardLevel
 	// PersistenceKey is sampled synchronously when a state change is scheduled.
 	// Persist receives that captured key so an asynchronous write cannot follow
 	// a later session switch and land in the wrong sidecar.
@@ -123,6 +126,9 @@ func NewGate(opts Options) *Gate {
 		generation:     1,
 		persistPending: map[string]int{},
 		persistDone:    map[string]uint64{},
+	}
+	if opts.Level == "" {
+		opts.Level = AutoGuardNormal
 	}
 	g.persistCond = sync.NewCond(&g.persistMu)
 	return g
@@ -513,6 +519,14 @@ func (g *Gate) Resolve(id string, action Action, feedback string) error {
 		if strings.TrimSpace(feedback) == "" {
 			feedback = DefaultReviseFeedback
 		}
+	case ActionOverride:
+		// Override clears the episode stop and resets all failure counts so
+		// Auto can continue without switching modes. Task grants are preserved.
+		rotateEpisode = true
+		g.metrics.HumanRevises++
+		if strings.TrimSpace(feedback) == "" {
+			feedback = "User overrode the Auto Guard stop. Continue with the task."
+		}
 	default:
 		g.mu.Unlock()
 		return fmt.Errorf("unknown recovery action %q", action)
@@ -605,7 +619,9 @@ func (g *Gate) ObserveResult(_ context.Context, obs Observation) string {
 		st.markOperationStopped(fp)
 		g.metrics.OperationStops++
 	}
-	if g.episode.totalFailures >= MaxEpisodeFailures {
+	// Episode-level stop is disabled in gentle mode so users never hit a
+	// hard dead-end. Per-operation limits still apply through BeforeMutation.
+	if g.opts.Level != AutoGuardGentle && g.episode.totalFailures >= MaxEpisodeFailures {
 		g.episode.stopped = true
 		g.episode.stopReason = StopReasonEpisodeFailures
 		g.metrics.EpisodeFailureStops++
@@ -641,6 +657,13 @@ func (g *Gate) ObserveResult(_ context.Context, obs Observation) string {
 func (g *Gate) BeforeMutation(ctx context.Context, proposal Proposal) (Decision, error) {
 	if g == nil {
 		return Decision{Allow: true}, nil
+	}
+
+	// Gentle mode: only intervene for deterministic high-risk operations that
+	// have already failed. Never escalate to Episode stop. Ordinary workspace
+	// commands (including test runners, build tools, package managers) run freely.
+	if g.opts.Level == AutoGuardGentle {
+		return g.beforeMutationGentle(ctx, proposal)
 	}
 
 	// Host-proven read-only diagnostics always continue unless the Episode is
@@ -692,6 +715,54 @@ func (g *Gate) BeforeMutation(ctx context.Context, proposal Proposal) (Decision,
 	default:
 		return Decision{Allow: true, Generation: gen}, nil
 	}
+}
+
+// beforeMutationGentle implements the gentle Auto Guard policy.
+// It only blocks deterministic high-risk operations (rm, sudo, chmod, etc.) after
+// repeated failures of the same exact operation. Ordinary workspace commands and
+// first-time high-risk attempts are allowed through. Episode stop is never used.
+func (g *Gate) beforeMutationGentle(ctx context.Context, proposal Proposal) (Decision, error) {
+	if !g.activeMode() {
+		return Decision{Allow: true}, nil
+	}
+	// Non-mutating diagnostic reads always continue.
+	if proposal.ReadOnly && !proposal.Mutates {
+		return Decision{Allow: true}, nil
+	}
+	if !proposal.Mutates && !proposal.Verification {
+		return Decision{Allow: true}, nil
+	}
+	// Only classify high-risk for gentle mode — the allowlist check is skipped
+	// so ordinary workspace commands flow freely.
+	boundary := riskBoundaryForProposal(proposal)
+	isHighRisk := boundary.highRisk
+	if !isHighRisk {
+		return Decision{Allow: true}, nil
+	}
+
+	taskID := normalizeTaskID(proposal.TaskID)
+	fp := CallFingerprint(proposal.Tool, proposal.Subject, proposal.Preview, proposal.Args)
+
+	g.mu.Lock()
+	gen := g.generation
+	st := g.tasks[taskID]
+	count := uint8(0)
+	if st != nil {
+		count = st.operationFailures[fp]
+	}
+	g.mu.Unlock()
+
+	// Gentle: allow up to MaxGentleOperationFailures attempts before blocking.
+	if count < MaxGentleOperationFailures {
+		return Decision{Allow: true, Generation: gen}, nil
+	}
+	return Decision{
+		Allow:      false,
+		Blocked:    true,
+		Message:    fmt.Sprintf("Auto Guard (gentle) blocked this operation after %d repeated failures: %s. Try a different approach or switch to Ask mode for manual control.", count, proposal.Tool),
+		Generation: gen,
+		StopReason: string(StopReasonOperationFailures),
+	}, nil
 }
 
 func (g *Gate) noteStoppedOpRetry(taskID, _ string, gen uint64, proposal Proposal) (Decision, bool) {
@@ -1155,6 +1226,14 @@ func (g *Gate) decisionFromResolve(payload resolvePayload) (Decision, error) {
 		}
 		msg += ": " + feedback
 		return Decision{Allow: false, Blocked: true, Message: msg}, nil
+	case ActionOverride:
+		// Override lets the user clear the stop and continue. The episode was
+		// already rotated by Resolve; return allow so the next proposal passes.
+		msg := "Auto Guard override accepted. Continuing with the task."
+		if f := strings.TrimSpace(payload.feedback); f != "" {
+			msg += " Note: " + f
+		}
+		return Decision{Allow: true, Message: msg}, nil
 	default:
 		return Decision{Allow: false, Blocked: true, Message: "blocked: unknown Auto Guard action"}, nil
 	}

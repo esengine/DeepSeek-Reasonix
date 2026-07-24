@@ -23,7 +23,7 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 		return fmt.Errorf("empty recovery approval id")
 	}
 	switch action {
-	case agent.RecoveryActionContinue, agent.RecoveryActionContinueTask, agent.RecoveryActionRevise:
+	case agent.RecoveryActionContinue, agent.RecoveryActionContinueTask, agent.RecoveryActionRevise, agent.RecoveryActionOverride:
 	default:
 		// Accept plain strings from wire clients.
 		switch strings.ToLower(strings.TrimSpace(string(action))) {
@@ -33,6 +33,8 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 			action = agent.RecoveryActionContinueTask
 		case "revise":
 			action = agent.RecoveryActionRevise
+		case "override":
+			action = agent.RecoveryActionOverride
 		case "stop":
 			// Compatibility for older clients: cancel this proposed mutation.
 			// Whole-task cancellation remains on the app's ordinary Stop control.
@@ -89,12 +91,13 @@ func clipUTF8(s string, n int) string {
 
 // initRecoveryGate constructs the shared recovery gate and attaches it to the
 // executor. Called from New when recovery is available.
-func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool) {
+func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool, level recovery.AutoGuardLevel) {
 	if c == nil || c.executor == nil {
 		return
 	}
 	gate := recovery.NewGate(recovery.Options{
 		Headless: headless,
+		Level:    level,
 		Mode: func() string {
 			return c.ToolApprovalMode()
 		},

@@ -1,5 +1,22 @@
 package recovery
 
+// AutoGuardLevel controls how aggressively Auto Guard blocks and escalates.
+// It is configured per-controller and persisted as a user preference.
+type AutoGuardLevel string
+
+const (
+	// AutoGuardGentle only blocks deterministic high-risk operations (rm, sudo,
+	// chmod, etc.) and never escalates to Episode stop. Safe for vibecoding
+	// users who work inside their workspace.
+	AutoGuardGentle AutoGuardLevel = "gentle"
+	// AutoGuardNormal (default) blocks repeated failures, reviewer rejects, and
+	// stopped-op retries with the host-defined budgets.
+	AutoGuardNormal AutoGuardLevel = "normal"
+	// AutoGuardStrict tightens budgets and adds additional checks for sensitive
+	// operations. Suitable for shared or regulated environments.
+	AutoGuardStrict AutoGuardLevel = "strict"
+)
+
 // Fixed product defaults for Auto recovery budgets. These are not configurable
 // via UI, CLI, or config files — they define the host-owned Auto safety envelope.
 const (
@@ -17,6 +34,10 @@ const (
 	// MaxStoppedOperationRetries is how many times an already-stopped operation
 	// may be re-proposed before the turn escalates to a hard Episode stop.
 	MaxStoppedOperationRetries = 3
+	// MaxGentleOperationFailures is the per-operation failure limit in gentle
+	// mode before the operation is blocked. Higher than normal mode to give
+	// vibecoding users more runway before intervention.
+	MaxGentleOperationFailures = 5
 )
 
 // StopReason identifies why an Episode-level stop was raised. Values are

@@ -214,6 +214,7 @@ const (
 	ActionContinue     = agent.RecoveryActionContinue
 	ActionContinueTask = agent.RecoveryActionContinueTask
 	ActionRevise       = agent.RecoveryActionRevise
+	ActionOverride     = agent.RecoveryActionOverride
 )
 
 // DefaultReviseFeedback is injected when the user chooses "try another approach"
