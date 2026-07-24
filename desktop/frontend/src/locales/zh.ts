@@ -1933,6 +1933,7 @@ export const zh: Record<DictKey, string> = {
   "settings.modeDeny": "deny（阻止写操作）",
   "settings.ruleForm": "规则格式：ToolName 或 ToolName(glob)。优先级：deny > ask > allow。",
   "settings.yolo": "YOLO —— 跳过普通工具权限提示（仅本会话）",
+  "settings.yoloAutoApproveCapabilities": "YOLO 自动审批沙箱能力授权",
   "settings.yoloHint": "Yolo批准会跳过普通工具权限提示（写文件、bash）。deny 规则与强制新鲜审查仍生效，ask 问题和计划确认仍会等待你选择。仅运行时生效，重启后失效。",
   "settings.addRule": "添加 {list} 规则…",
   "settings.sandboxTitle": "沙箱与工作区",

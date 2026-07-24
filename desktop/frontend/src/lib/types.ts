@@ -1465,6 +1465,7 @@ export interface SandboxView {
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
   effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  yoloAutoApproveCapabilities: boolean;
 }
 
 export interface NetworkProxyView {

@@ -1931,6 +1931,7 @@ export const en = {
   "settings.modeDeny": "deny (block writers)",
   "settings.ruleForm": "Rule form: ToolName or ToolName(glob). Precedence: deny > ask > allow.",
   "settings.yolo": "YOLO — skip ordinary tool permission prompts (this session)",
+  "settings.yoloAutoApproveCapabilities": "YOLO-auto-approve sandbox capability grants",
   "settings.yoloHint": "YOLO-approves ordinary permission-gated calls (writers, bash). Deny rules and fresh reviews still apply; ask questions and plan approvals still wait for you. Runtime-only — resets on relaunch.",
   "settings.addRule": "add {list} rule…",
   "settings.sandboxTitle": "Sandbox & workspace",

@@ -6584,7 +6584,7 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
   const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
   const effectiveShell = effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t);
   const set = (next: Partial<typeof sb>) =>
-    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
+    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell, next.yoloAutoApproveCapabilities ?? sb.yoloAutoApproveCapabilities));
   const reload = () => apply(() => app.ReloadSettings());
 
   return (
@@ -6624,6 +6624,12 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
         <label className="set-check set-check--inline">
           <input type="checkbox" checked={sb.network} disabled={busy} onChange={(e) => void set({ network: e.target.checked })} />
           {t("settings.allowNetwork")}
+        </label>
+      </SettingsField>
+      <SettingsField label={t("settings.yoloAutoApproveCapabilities")}>
+        <label className="set-check set-check--inline">
+          <input type="checkbox" checked={sb.yoloAutoApproveCapabilities} disabled={busy} onChange={(e) => void set({ yoloAutoApproveCapabilities: e.target.checked })} />
+          {t("settings.yoloAutoApproveCapabilities")}
         </label>
       </SettingsField>
       <SettingsField label={t("settings.workspaceRoot")}>

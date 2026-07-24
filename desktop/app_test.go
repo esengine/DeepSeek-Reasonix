@@ -5520,7 +5520,7 @@ func TestSettingsRebuildRejectsBackgroundJobs(t *testing.T) {
 		return "", ctx.Err()
 	})
 
-	err := app.SetSandbox("enforce", true, "", nil, "")
+	err := app.SetSandbox("enforce", true, "", nil, "", false)
 	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
 		t.Fatalf("SetSandbox with background job error = %v, want background-job guard", err)
 	}

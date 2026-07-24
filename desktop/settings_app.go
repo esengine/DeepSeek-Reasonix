@@ -103,14 +103,15 @@ type PermissionsView struct {
 }
 
 type SandboxView struct {
-	Bash                   string   `json:"bash"`
-	Network                bool     `json:"network"`
-	WorkspaceRoot          string   `json:"workspaceRoot"`
-	AllowWrite             []string `json:"allowWrite"`
-	EffectiveWorkspaceRoot string   `json:"effectiveWorkspaceRoot"`
-	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
-	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
-	EffectiveShell         string   `json:"effectiveShell,omitempty"`
+	Bash                        string   `json:"bash"`
+	Network                     bool     `json:"network"`
+	WorkspaceRoot               string   `json:"workspaceRoot"`
+	AllowWrite                  []string `json:"allowWrite"`
+	EffectiveWorkspaceRoot      string   `json:"effectiveWorkspaceRoot"`
+	EffectiveWriteRoots         []string `json:"effectiveWriteRoots"`
+	Shell                       string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
+	EffectiveShell              string   `json:"effectiveShell,omitempty"`
+	YOLOAutoApproveCapabilities bool     `json:"yoloAutoApproveCapabilities"`
 }
 
 type NetworkProxyView struct {
@@ -812,7 +813,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox: SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
+			Sandbox: SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)), YOLOAutoApproveCapabilities: false},
 			Agent: AgentView{
 				PlannerMaxSteps:        0,
 				MaxSubagentDepth:       agent.DefaultMaxSubagentDepth,
@@ -871,6 +872,7 @@ func (a *App) Settings() SettingsView {
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
 			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
 			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
+			YOLOAutoApproveCapabilities: cfg.Sandbox.YOLOAutoApproveCapabilities,
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -2802,14 +2804,16 @@ func (a *App) ReloadSettings() error {
 	return nil
 }
 
-// SetSandbox updates the bash sandbox mode, network egress, and write roots.
-func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
+// SetSandbox updates the bash sandbox mode, network egress, write roots,
+// shell preference, and YOLO sandbox capability auto-approval.
+func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string, yoloAutoApproveCapabilities bool) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Sandbox.Bash = bash
 		c.Sandbox.Network = network
 		c.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
 		c.Sandbox.AllowWrite = trimList(allowWrite)
 		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
+		c.Sandbox.YOLOAutoApproveCapabilities = yoloAutoApproveCapabilities
 		return nil
 	})
 }

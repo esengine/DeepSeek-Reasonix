@@ -1334,6 +1334,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.modeDeny": "deny（阻止寫操作）",
   "settings.ruleForm": "規則格式：ToolName 或 ToolName(glob)。優先順序：deny > ask > allow。",
   "settings.yolo": "YOLO —— 跳過普通工具權限提示（僅本會話）",
+  "settings.yoloAutoApproveCapabilities": "YOLO 自動審批沙箱能力授權",
   "settings.yoloHint": "普通工具權限呼叫（寫檔案、bash）會自動批准。deny 規則與強制新鮮審查仍生效，ask 問題和計劃確認仍會等待。僅執行時生效，重啟後失效。",
   "settings.addRule": "新增 {list} 規則…",
   "settings.sandboxTitle": "沙箱與工作區",
