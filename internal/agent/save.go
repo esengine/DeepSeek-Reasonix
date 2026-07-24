@@ -213,6 +213,18 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 	}
 	unlockFile, err := lockSessionFile(path)
 	if err != nil {
+		// Snapshot saves that cannot acquire the cross-process lock should
+		// still preserve in-memory state via a recovery branch instead of
+		// silently discarding the unsaved transcript (#6873, #6770).
+		if mode == sessionSaveSnapshot && errors.Is(err, ErrSessionFileLockHeld) {
+			if _, rbErr := s.SaveShutdownRecoveryBranch(RecoveryBranchOptions{
+				OriginalPath: path,
+				Reason:       "snapshot-locked",
+			}); rbErr != nil {
+				return fmt.Errorf("lock session file: %w (recovery branch also failed: %v)", err, rbErr)
+			}
+			return nil
+		}
 		return fmt.Errorf("lock session file: %w", err)
 	}
 	defer unlockFile()

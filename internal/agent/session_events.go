@@ -456,7 +456,7 @@ func appendSessionAppendEvent(sessionPath string, messageIndex int, msgs []provi
 		MessageIndex:  messageIndex,
 		Messages:      append([]provider.Message(nil), msgs...),
 		ContentDigest: digestString(digest),
-	}, false)
+	}, true) // fsync to prevent data loss on crash (#6873)
 }
 
 // compactSessionEventLog rewrites the log as a single replace event via an
