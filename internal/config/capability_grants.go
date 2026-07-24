@@ -70,14 +70,10 @@ func (s CapabilityGrantStore) SaveSandboxCapabilityGrant(_ context.Context, gran
 	return PersistProjectCapabilityGrant(workspace, grant)
 }
 
-// LoadProjectCapabilityGrants validates each project entry independently and
-// returns exact-canonical duplicates only once.
-func LoadProjectCapabilityGrants(workspace string) ([]sandboxauth.Grant, []sandboxauth.Diagnostic) {
-	root, err := canonicalCapabilityWorkspace(workspace)
-	if err != nil {
-		return nil, []sandboxauth.Diagnostic{{Source: capabilityConfigPath(workspace), Entry: -1, Code: "workspace", Message: err.Error()}}
-	}
-	path := capabilityConfigPath(root)
+// loadCapabilityGrantsFrom reads and parses [[sandbox.capability_grants]] from
+// the given file, validating each entry against root. Returns nil when the
+// file does not exist.
+func loadCapabilityGrantsFrom(path, root string) ([]sandboxauth.Grant, []sandboxauth.Diagnostic) {
 	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -114,6 +110,41 @@ func LoadProjectCapabilityGrants(workspace string) ([]sandboxauth.Grant, []sandb
 		}
 	}
 	return grants, diagnostics
+}
+
+// LoadProjectCapabilityGrants validates each project entry independently and
+// returns exact-canonical duplicates only once.
+func LoadProjectCapabilityGrants(workspace string) ([]sandboxauth.Grant, []sandboxauth.Diagnostic) {
+	root, err := canonicalCapabilityWorkspace(workspace)
+	if err != nil {
+		return nil, []sandboxauth.Diagnostic{{Source: capabilityConfigPath(workspace), Entry: -1, Code: "workspace", Message: err.Error()}}
+	}
+	path := capabilityConfigPath(root)
+	return loadCapabilityGrantsFrom(path, root)
+}
+
+// LoadUserCapabilityGrants reads capability grants from the user-level config
+// file (~/.reasonix/config.toml). Returns nil when the file does not exist.
+func LoadUserCapabilityGrants() ([]sandboxauth.Grant, []sandboxauth.Diagnostic) {
+	path := UserConfigPath()
+	if path == "" {
+		return nil, nil
+	}
+	userHome, _ := os.UserHomeDir()
+	root := userHome
+	if root == "" {
+		root = "/"
+	}
+	return loadCapabilityGrantsFrom(path, root)
+}
+
+// UserCapabilityGrantStore implements sandboxauth.GrantSource for the
+// user-level config file.
+type UserCapabilityGrantStore struct{}
+
+// SandboxCapabilityGrants implements sandboxauth.GrantSource.
+func (s UserCapabilityGrantStore) SandboxCapabilityGrants(_ context.Context, _ string) ([]sandboxauth.Grant, []sandboxauth.Diagnostic) {
+	return LoadUserCapabilityGrants()
 }
 
 // PersistProjectCapabilityGrant performs the capability-specific locked,

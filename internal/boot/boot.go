@@ -185,6 +185,9 @@ func applyProductionSandboxCapabilityAdapters(engine *sandboxauth.Engine, root s
 	if engine.Source == nil {
 		engine.Source = store
 	}
+	if engine.UserSource == nil {
+		engine.UserSource = config.UserCapabilityGrantStore{}
+	}
 	if engine.Persister == nil {
 		engine.Persister = store
 	}
@@ -207,7 +210,7 @@ func (a sandboxCapabilityEventAudit) RecordSandboxCapabilityDecision(_ context.C
 			Text:   "YOLO auto-approved sandbox capabilities for this invocation.",
 			Detail: "No reusable authorization was created.", SandboxCapabilityAudit: &recordCopy,
 		})
-	case sandboxauth.OriginSessionGrant, sandboxauth.OriginProjectGrant:
+	case sandboxauth.OriginSessionGrant, sandboxauth.OriginProjectGrant, sandboxauth.OriginUserGrant:
 		a.sink.Emit(event.Event{
 			Kind: event.Notice, Level: event.LevelInfo,
 			Code:                   event.NoticeCodeSandboxCapabilityGrant,

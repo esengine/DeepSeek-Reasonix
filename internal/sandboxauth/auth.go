@@ -92,6 +92,8 @@ const (
 	OriginSessionGrant DecisionOrigin = "session_grant"
 	// OriginProjectGrant means a persisted project grant matched.
 	OriginProjectGrant DecisionOrigin = "project_grant"
+	// OriginUserGrant means a persisted user-level grant matched.
+	OriginUserGrant DecisionOrigin = "user_grant"
 	// OriginHumanOnce means a fresh human allowed only this invocation.
 	OriginHumanOnce DecisionOrigin = "human_once"
 	// OriginHumanSession means a fresh human created or fell back to a session grant.
@@ -207,14 +209,15 @@ type Grant struct {
 	PreserveBackgroundProcesses bool                  `json:"preserve_background_processes" toml:"preserve_background_processes"`
 }
 
-// Engine implements Gate with session and optional project grants.
+// Engine implements Gate with session, user-level, and optional project grants.
 type Engine struct {
-	Approver  Approver
-	Hook      PolicyHook
-	Source    GrantSource
-	AutoOnce  AutoOncePolicy
-	Persister Persister
-	Audit     AuditSink
+	Approver   Approver
+	Hook       PolicyHook
+	Source     GrantSource // project-level grants
+	UserSource GrantSource // user-level grants (~/.reasonix/config.toml)
+	AutoOnce   AutoOncePolicy
+	Persister  Persister
+	Audit      AuditSink
 
 	mu      sync.RWMutex
 	session []Grant
@@ -361,13 +364,16 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 	projectMessages := diagnosticMessages(projectDiagnostics)
 	if identityErr == nil {
 		session := e.SessionGrants()
-		grants := append(session, project...)
+		user, _ := e.userGrants(ctx, req.Workspace)
+		grants := append(append(session, user...), project...)
 		if grant, index, ok := matchingGrant(grants, commandID, req); ok {
 			directArgv := append([]string(nil), commandID.argv...)
 			directArgv[0] = grant.CanonicalExecutable
 			origin := OriginProjectGrant
 			if index < len(session) {
 				origin = OriginSessionGrant
+			} else if index < len(session)+len(user) {
+				origin = OriginUserGrant
 			}
 			return Decision{Use: sandbox.AuthorizedDelta, Origin: origin, Diagnostic: strings.Join(projectMessages, "; "), ConfigDiagnostics: cloneDiagnostics(projectDiagnostics), CanonicalExecutable: grant.CanonicalExecutable, Argv: directArgv}, nil
 		}
@@ -578,6 +584,15 @@ func (e *Engine) projectGrants(ctx context.Context, workspace string) ([]Grant, 
 		return nil, nil
 	}
 	grants, diagnostics := e.Source.SandboxCapabilityGrants(ctx, workspace)
+	return cloneGrants(grants), cloneDiagnostics(diagnostics)
+}
+
+// userGrants loads persisted user-level grants from the user config file.
+func (e *Engine) userGrants(ctx context.Context, workspace string) ([]Grant, []Diagnostic) {
+	if e.UserSource == nil {
+		return nil, nil
+	}
+	grants, diagnostics := e.UserSource.SandboxCapabilityGrants(ctx, workspace)
 	return cloneGrants(grants), cloneDiagnostics(diagnostics)
 }
 
