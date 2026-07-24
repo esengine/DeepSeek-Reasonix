@@ -3498,6 +3498,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 		}
 		planReplacementAuthorized = planTransition && dec.AuthorizePlanReplacement
 	}
+	// Normalize permission args through the tool before the permission gate:
+	// tools can strip model-authored redundancies so the approval prompt,
+	// sandbox capability grant matching, and execution see the same command.
+	if normalizer, ok := execTool.(tool.PermissionArgNormalizer); ok {
+		permArgs = normalizer.NormalizePermissionArgs(permArgs)
+	}
 	// Trusted MCP fast path: installed tools and authorized lifecycle connects
 	// (mcp_connect__*) skip ordinary Ask/Auto/dontAsk gates. Only explicit deny
 	// and live authorization apply — first connect of an installed server must

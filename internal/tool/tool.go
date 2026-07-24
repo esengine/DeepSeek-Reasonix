@@ -77,6 +77,15 @@ type Previewer interface {
 	Preview(args json.RawMessage) (diff.Change, error)
 }
 
+// PermissionArgNormalizer lets a tool rewrite its raw JSON args before they
+// reach the permission gate. This gives tools a single point to normalize
+// model-authored redundancies (e.g. "cd <workDir> &&" and "2>&1" for bash)
+// so the permission prompt, sandbox capability grant matching, and execution
+// all observe the same normalized command.
+type PermissionArgNormalizer interface {
+	NormalizePermissionArgs(raw json.RawMessage) json.RawMessage
+}
+
 // PreviewChange returns the change a writer tool would make for args, or ok=false
 // when there's nothing renderable: t is read-only, doesn't implement Previewer,
 // the preview errored (the edit will likely fail too), or the file is binary.

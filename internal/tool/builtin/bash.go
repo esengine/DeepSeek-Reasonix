@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -162,6 +163,22 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	return invocation.Execute(ctx, sandbox.BaseOnly)
 }
 
+// NormalizePermissionArgs strips DeepSeek's redundant bash wrappers before
+// ordinary permission approval, so permission rules, sandbox capability
+// approval/grant matching, and execution all observe the underlying command.
+func (b bash) NormalizePermissionArgs(raw json.RawMessage) json.RawMessage {
+	var p bashParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return raw
+	}
+	p.Command = normalizeBashCommand(p.Command, b.workDir)
+	out, err := json.Marshal(p)
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(out)
+}
+
 type preparedBashInvocation struct {
 	b          bash
 	p          bashParams
@@ -182,6 +199,11 @@ func (b bash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage
 	if p.Command == "" {
 		return nil, fmt.Errorf("command is required")
 	}
+
+	// Strip DeepSeek's redundant bash wrappers before sandbox capability
+	// approval and grant matching; PrepareSandboxInvocation also normalizes
+	// direct callers that did not pass through the ordinary permission gate.
+	p.Command = normalizeBashCommand(p.Command, b.workDir)
 
 	sh := b.resolved()
 	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
@@ -555,6 +577,200 @@ func newProgressWriter(emit tool.ProgressFunc) *progressWriter { return &progres
 func (w *progressWriter) Write(p []byte) (int, error) {
 	w.emit(string(p))
 	return len(p), nil
+}
+
+// normalizeBashCommand strips "cd <workDir> &&" and trailing "2>&1", which
+// are redundant with cmd.Dir and the tool's merged stdout/stderr. DeepSeek has
+// a persistent preference for emitting both wrappers that is difficult to
+// change reliably through prompting. Removing them lets ordinary permission
+// approval and sandbox capability approval/grant matching reason about the
+// underlying command. When a safe source-only rewrite cannot be proven, the
+// command is returned unchanged.
+func normalizeBashCommand(command, workDir string) string {
+	if command == "" || workDir == "" {
+		return command
+	}
+	workDir = filepath.Clean(workDir)
+
+	file, err := shellparse.ParseBash(command)
+	if err != nil || shellparse.HasHereDoc(file) {
+		return command
+	}
+	if len(file.Stmts) != 1 {
+		return command
+	}
+
+	segs, ok := bashAndSegments(file.Stmts[0], len(command), -1)
+	if !ok || len(segs) == 0 {
+		return command
+	}
+
+	var edits []bashSourceEdit
+	first := segs[0]
+	if isCdToWorkDir(nodeSource(command, first.stmt), workDir) {
+		end := nodeEnd(first.stmt)
+		if first.connectorEnd >= 0 {
+			end = skipShellSpaceForward(command, first.connectorEnd)
+		}
+		if validSourceRange(command, nodeStart(first.stmt), end) {
+			edits = append(edits, bashSourceEdit{start: nodeStart(first.stmt), end: end})
+		}
+	}
+
+	for _, seg := range segs {
+		if edit, ok := trailingStderrRedirectEdit(command, seg); ok {
+			edits = append(edits, edit)
+		}
+	}
+
+	if len(edits) == 0 {
+		return command
+	}
+	return applyBashSourceEdits(command, edits)
+}
+
+type bashAndSegment struct {
+	stmt         *syntax.Stmt
+	limit        int
+	connectorEnd int
+}
+
+// bashAndSegments returns the leaf statements of a top-level && chain. limit
+// is the following && operator's byte offset for non-final segments and the
+// source length for the final segment.
+func bashAndSegments(stmt *syntax.Stmt, limit, connectorEnd int) ([]bashAndSegment, bool) {
+	if stmt == nil || stmt.Negated || stmt.Coprocess || stmt.Disown || stmt.Background {
+		return nil, false
+	}
+	if bin, ok := stmt.Cmd.(*syntax.BinaryCmd); ok {
+		if len(stmt.Redirs) > 0 {
+			return nil, false
+		}
+		if bin.Op != syntax.AndStmt {
+			return []bashAndSegment{{stmt: stmt, limit: limit, connectorEnd: connectorEnd}}, true
+		}
+		opStart := int(bin.OpPos.Offset())
+		left, ok := bashAndSegments(bin.X, opStart, opStart+2)
+		if !ok {
+			return nil, false
+		}
+		right, ok := bashAndSegments(bin.Y, limit, connectorEnd)
+		if !ok {
+			return nil, false
+		}
+		return append(left, right...), true
+	}
+	return []bashAndSegment{{stmt: stmt, limit: limit, connectorEnd: connectorEnd}}, true
+}
+
+func nodeStart(stmt *syntax.Stmt) int { return int(stmt.Pos().Offset()) }
+
+func nodeEnd(stmt *syntax.Stmt) int { return int(stmt.End().Offset()) }
+
+func nodeSource(source string, stmt *syntax.Stmt) string {
+	start, end := nodeStart(stmt), nodeEnd(stmt)
+	if !validSourceRange(source, start, end) {
+		return ""
+	}
+	return source[start:end]
+}
+
+func isCdToWorkDir(segment, workDir string) bool {
+	sc, err := shellparse.ParseStaticCommand(segment, shellparse.StaticCommandPolicy{})
+	return err == nil && len(sc.Argv) == 2 && sc.Argv[0] == "cd" &&
+		filepath.IsAbs(sc.Argv[1]) && filepath.Clean(sc.Argv[1]) == workDir
+}
+
+type bashSourceEdit struct {
+	start int
+	end   int
+}
+
+// trailingStderrRedirectEdit identifies a sole trailing 2>&1 redirection and
+// returns the exact source range to delete. Command words are deliberately not
+// reduced to argv: doing so would discard quoting and turn literal data back
+// into active shell syntax.
+func trailingStderrRedirectEdit(source string, seg bashAndSegment) (bashSourceEdit, bool) {
+	stmt := seg.stmt
+	if stmt == nil || len(stmt.Redirs) != 1 {
+		return bashSourceEdit{}, false
+	}
+	if _, ok := stmt.Cmd.(*syntax.CallExpr); !ok {
+		return bashSourceEdit{}, false
+	}
+	r := stmt.Redirs[0]
+	if r == nil || r.Op != syntax.DplOut || r.N == nil || r.N.Value != "2" {
+		return bashSourceEdit{}, false
+	}
+	word, ok := shellparse.StaticWord(r.Word)
+	if !ok || word != "1" {
+		return bashSourceEdit{}, false
+	}
+	start, end := int(r.Pos().Offset()), int(r.End().Offset())
+	if !validSourceRange(source, start, end) || end != nodeEnd(stmt) || seg.limit < end || seg.limit > len(source) {
+		return bashSourceEdit{}, false
+	}
+	if !onlyShellSpace(source[end:seg.limit]) {
+		return bashSourceEdit{}, false
+	}
+	start = skipShellSpaceBackward(source, start)
+	return bashSourceEdit{start: start, end: end}, true
+}
+
+func validSourceRange(source string, start, end int) bool {
+	return start >= 0 && end >= start && end <= len(source)
+}
+
+func onlyShellSpace(s string) bool {
+	return skipShellSpaceForward(s, 0) == len(s)
+}
+
+func skipShellSpaceForward(source string, at int) int {
+	for at < len(source) {
+		switch source[at] {
+		case ' ', '\t', '\r', '\n':
+			at++
+		case '\\':
+			if at+1 < len(source) && source[at+1] == '\n' {
+				at += 2
+				continue
+			}
+			if at+2 < len(source) && source[at+1] == '\r' && source[at+2] == '\n' {
+				at += 3
+				continue
+			}
+			return at
+		default:
+			return at
+		}
+	}
+	return at
+}
+
+func skipShellSpaceBackward(source string, at int) int {
+	for at > 0 {
+		switch source[at-1] {
+		case ' ', '\t':
+			at--
+		default:
+			return at
+		}
+	}
+	return at
+}
+
+func applyBashSourceEdits(source string, edits []bashSourceEdit) string {
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	out := source
+	previousStart := len(source)
+	for _, edit := range edits {
+		if !validSourceRange(source, edit.start, edit.end) || edit.end > previousStart {
+			return source
+		}
+		out = out[:edit.start] + out[edit.end:]
+		previousStart = edit.start
+	}
+	return out
 }
 
 // hasUnquotedSeq reports whether seq appears in s outside any single- or
