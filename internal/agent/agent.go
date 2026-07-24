@@ -2867,6 +2867,11 @@ func (a *Agent) emitFullToolDispatch(c provider.ToolCall, refreshed bool) {
 			ev.Profile = pr.ResolveProfile(json.RawMessage(c.Arguments))
 		}
 	}
+	if ok {
+		if normalizer, ok := t.(tool.PermissionArgNormalizer); ok {
+			ev.Args = string(normalizer.NormalizePermissionArgs(json.RawMessage(c.Arguments)))
+		}
+	}
 	a.sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: ev})
 }
 
