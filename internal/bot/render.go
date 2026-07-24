@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/event"
+	"reasonix/internal/sandboxauth"
 )
 
 // messageEditor 是适配器的可选能力：原地编辑已发送的消息。实现它的适配器
@@ -547,6 +548,29 @@ func isRecoveryPlanChange(a event.Approval) bool {
 func renderApprovalText(a event.Approval) string {
 	if isRecoveryApproval(a) {
 		return renderRecoveryText(a)
+	}
+	if a.Kind == sandboxauth.ApprovalKind && a.SandboxCapability != nil {
+		sc := a.SandboxCapability
+		var b strings.Builder
+		b.WriteString("⚠️ 需要批准沙箱能力:\n")
+		if sc.CanonicalExecutable != "" {
+			fmt.Fprintf(&b, "程序: %s\n", sc.CanonicalExecutable)
+		}
+		if len(sc.Argv) > 0 {
+			b.WriteString("命令: " + strings.Join(sc.Argv, " ") + "\n")
+		}
+		if sc.Review.Justification != "" {
+			fmt.Fprintf(&b, "理由: %s\n", sc.Review.Justification)
+		}
+		b.WriteString("\n")
+		if sc.Reusable && !sc.SuspectedSecret {
+			b.WriteString("回复 /approve <id> 允许一次\n")
+		} else {
+			b.WriteString("回复 /approve <id> 允许（不可重用）\n")
+		}
+		b.WriteString("回复 /deny <id> 在原始沙箱中执行\n")
+		fmt.Fprintf(&b, "ID: `%s`", a.ID)
+		return b.String()
 	}
 	return fmt.Sprintf("⚠️ 需要批准操作:\n工具: %s\n操作: %s\n\nID: `%s`\n回复 1 批准，回复 2 拒绝；也可用 /approve %s 或 /deny %s。",
 		a.Tool, a.Subject, a.ID, a.ID, a.ID)

@@ -2,7 +2,7 @@
 
 export const REMOTE_SCHEMA_FORMAT = "reasonix.remote.schema.v1" as const;
 export const REMOTE_PROTOCOL_VERSION = "1" as const;
-export const REMOTE_SCHEMA_HASH = "sha256:847bae5a9e131e9546fe865d0ef498aef84f5ae91ded11f636a09b935eb536e3" as const;
+export const REMOTE_SCHEMA_HASH = "sha256:e57eee5c65da2e4e7c9ba96a0fe86eccb3f903e8aec1cd745036214e119f0478" as const;
 
 export const REMOTE_FIXED_RESOURCES = {
   "protocol": {
@@ -2370,7 +2370,7 @@ export type PromptAnswerParamsHydrated = {
 };
 
 export type PromptApproveParamsRaw = {
-  "decision": "allow_once" | "allow_persistent" | "allow_session" | "deny";
+  "decision": "allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed";
   "expectedHostEpoch": string;
   "expectedRuntimeEpoch": string;
   "promptId": string;
@@ -2381,7 +2381,7 @@ export type PromptApproveParamsRaw = {
   };
 };
 export type PromptApproveParamsHydrated = {
-  "decision": "allow_once" | "allow_persistent" | "allow_session" | "deny";
+  "decision": "allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed";
   "expectedHostEpoch": string;
   "expectedRuntimeEpoch": string;
   "promptId": string;
@@ -4218,7 +4218,7 @@ export type SessionSubscribeResultRaw = {
     };
     "pendingPrompt": (({
       "approval"?: {
-        "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "deny">;
+        "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed">;
         "fresh": boolean;
         "promptId": string;
         "reason": string | null;
@@ -4238,11 +4238,11 @@ export type SessionSubscribeResultRaw = {
           "questionId": string;
         }>;
       };
-      "kind": "approval" | "ask";
+      "kind": "approval" | "ask" | "capability_approval";
     }) & (
       {
         "approval": {
-          "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "deny">;
+          "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed">;
           "fresh": boolean;
           "promptId": string;
           "reason": string | null;
@@ -4268,6 +4268,18 @@ export type SessionSubscribeResultRaw = {
           }>;
         };
         "kind": "ask";
+      }
+      | {
+        "approval": {
+          "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed">;
+          "fresh": boolean;
+          "promptId": string;
+          "reason": string | null;
+          "subject": string | null;
+          "tool": string;
+        };
+        "ask"?: never;
+        "kind": "capability_approval";
       }
     )) | null;
     "runtime": {
@@ -4638,7 +4650,7 @@ export type SessionSubscribeResultHydrated = {
     };
     "pendingPrompt": (({
       "approval"?: {
-        "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "deny">;
+        "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed">;
         "fresh": boolean;
         "promptId": string;
         "reason": string;
@@ -4658,11 +4670,11 @@ export type SessionSubscribeResultHydrated = {
           "questionId": string;
         }>;
       };
-      "kind": "approval" | "ask";
+      "kind": "approval" | "ask" | "capability_approval";
     }) & (
       {
         "approval": {
-          "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "deny">;
+          "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed">;
           "fresh": boolean;
           "promptId": string;
           "reason": string;
@@ -4688,6 +4700,18 @@ export type SessionSubscribeResultHydrated = {
           }>;
         };
         "kind": "ask";
+      }
+      | {
+        "approval": {
+          "allowedDecisions": Array<"allow_once" | "allow_persistent" | "allow_session" | "cancel_command" | "deny" | "run_sandboxed">;
+          "fresh": boolean;
+          "promptId": string;
+          "reason": string;
+          "subject": string;
+          "tool": string;
+        };
+        "ask"?: never;
+        "kind": "capability_approval";
       }
     )) | null;
     "runtime": {

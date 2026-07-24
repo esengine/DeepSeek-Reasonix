@@ -140,7 +140,7 @@ type PendingPrompt struct {
 }
 
 func (p PendingPrompt) Validate() error {
-	if p.Kind == PromptApproval && (p.Approval == nil || p.Ask != nil) {
+	if (p.Kind == PromptApproval || p.Kind == PromptCapabilityApproval) && (p.Approval == nil || p.Ask != nil) {
 		return validationError("approval prompt requires only approval payload")
 	}
 	if p.Kind == PromptAsk && (p.Ask == nil || p.Approval != nil) {

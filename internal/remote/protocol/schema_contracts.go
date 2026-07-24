@@ -24,6 +24,7 @@ func buildCustomSchemaContracts() map[reflect.Type]SchemaValidation {
 		typeOf[TopicCreateResult](): {Invariants: rules("sessionCount=0")},
 		typeOf[PendingPrompt](): {Discriminator: discriminator("kind",
 			variant([]string{string(PromptApproval)}, []string{"approval"}, []string{"ask"}, nil, nil),
+			variant([]string{string(PromptCapabilityApproval)}, []string{"approval"}, []string{"ask"}, nil, nil),
 			variant([]string{string(PromptAsk)}, []string{"ask"}, []string{"approval"}, nil, nil),
 		)},
 		typeOf[SessionSubmitParams](): {

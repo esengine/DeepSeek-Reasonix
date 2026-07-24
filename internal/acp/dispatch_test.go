@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 )
 
 // fakeNotifier captures Notify calls and answers Request via an injectable hook,
@@ -403,6 +404,94 @@ func TestUpdateSinkApprovalDenied(t *testing.T) {
 				}
 			case <-time.After(2 * time.Second):
 				t.Fatal("approve was never called")
+			}
+		})
+	}
+}
+
+func TestUpdateSinkCapabilityApprovalRoutesToResolveCapability(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(method string, params any) (json.RawMessage, error) {
+		if method != "session/request_permission" {
+			t.Errorf("request method = %q, want session/request_permission", method)
+		}
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		if p.ToolCall.Kind != "sandbox_capability" {
+			t.Errorf("toolCall.kind = %q, want sandbox_capability", p.ToolCall.Kind)
+		}
+		if p.ToolCall.Title != "bash pip install" {
+			t.Errorf("toolCall.title = %q, want 'bash pip install'", p.ToolCall.Title)
+		}
+		// Respond with allow_once
+		r, _ := json.Marshal(PermissionRequestResult{
+			Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(sandboxauth.AllowOnce)},
+		})
+		return r, nil
+	}}
+	sink := newUpdateSink(fn, "sess-1")
+	got := make(chan sandboxauth.Action, 1)
+	sink.bindResolveCapability(func(id string, action sandboxauth.Action) {
+		got <- action
+	})
+	// Also bind a fallback approve — must NOT be called.
+	sink.bindApprove(func(string, bool, bool, bool) {
+		t.Error("legacy Approve called for capability approval")
+	})
+
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "cap-1", Tool: "bash", Subject: "pip install", Kind: "sandbox_capability",
+		SandboxCapability: &sandboxauth.Prompt{Reusable: true, Argv: []string{"pip", "install"}},
+	}})
+
+	select {
+	case action := <-got:
+		if action != sandboxauth.AllowOnce {
+			t.Errorf("action = %q, want %q", action, sandboxauth.AllowOnce)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("resolveCapability was never called")
+	}
+}
+
+func TestUpdateSinkCapabilityApprovalDeniedFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		resp func() (json.RawMessage, error)
+	}{
+		{"cancelled", func() (json.RawMessage, error) {
+			r, _ := json.Marshal(PermissionRequestResult{Outcome: PermissionOutcome{Outcome: "cancelled"}})
+			return r, nil
+		}},
+		{"transport error", func() (json.RawMessage, error) {
+			return nil, context.Canceled
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fn := &fakeNotifier{onReq: func(string, any) (json.RawMessage, error) { return tc.resp() }}
+			sink := newUpdateSink(fn, "sess-1")
+			got := make(chan sandboxauth.Action, 1)
+			sink.bindResolveCapability(func(id string, action sandboxauth.Action) {
+				got <- action
+			})
+			sink.bindApprove(func(string, bool, bool, bool) {
+				t.Error("legacy Approve called")
+			})
+
+			sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+				ID: "cap-1", Tool: "bash", Subject: "test", Kind: "sandbox_capability",
+				SandboxCapability: &sandboxauth.Prompt{Reusable: true, Argv: []string{"test"}},
+			}})
+
+			select {
+			case action := <-got:
+				if action != sandboxauth.RunSandboxed {
+					t.Errorf("action = %q, want %q", action, sandboxauth.RunSandboxed)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("resolveCapability was never called")
 			}
 		})
 	}
