@@ -3107,6 +3107,14 @@ export function useController() {
     beginActiveNavigation();
     const snapshotAt = promptEventClock();
     const meta = await app.EnsureBlankTab(scope, workspaceRoot);
+    // Clear any stale backend session data that may remain from reusing a
+    // previously-closed tab (#6722).
+    try {
+      await app.NewSessionForTab(meta.id);
+      addBreadcrumb("tab.hydrate", `ensure-blank-session for ${meta.id}`);
+    } catch (err) {
+      addBreadcrumb("tab.hydrate", `ensure-blank-session failed ${meta.id}: ${errorMessage(err)}`);
+    }
     const isNewTab = !statesRef.current.has(meta.id);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
