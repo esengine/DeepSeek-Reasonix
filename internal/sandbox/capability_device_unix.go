@@ -9,7 +9,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func inspectCapabilityDevice(path string) (CapabilityDevice, error) {
+func InspectCapabilityDevice(path string) (CapabilityDevice, error) {
 	var stat unix.Stat_t
 	if err := unix.Lstat(path, &stat); err != nil {
 		return CapabilityDevice{}, err

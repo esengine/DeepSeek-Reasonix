@@ -231,7 +231,13 @@ func validateCapabilityGrantEntry(root string, entry capabilityGrantEntry) (sand
 		if err != nil {
 			return sandboxauth.Grant{}, fmt.Errorf("devices[%d].path: %w", i, err)
 		}
-		devices = append(devices, sandbox.CapabilityDevice{Path: device.Path, Canonical: canonical, Kind: kind, Major: device.Major, Minor: device.Minor})
+		maj, min := device.Major, device.Minor
+		if maj == 0 && min == 0 {
+			if resolved, err := sandbox.InspectCapabilityDevice(device.Path); err == nil {
+				maj, min = resolved.Major, resolved.Minor
+			}
+		}
+		devices = append(devices, sandbox.CapabilityDevice{Path: device.Path, Canonical: canonical, Kind: kind, Major: maj, Minor: min})
 	}
 	if !entry.Network && len(reads) == 0 && len(writes) == 0 && len(devices) == 0 {
 		return sandboxauth.Grant{}, fmt.Errorf("capability bundle is empty")

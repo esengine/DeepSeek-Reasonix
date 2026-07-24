@@ -379,7 +379,7 @@ func normalizeCapabilityDevices(requests []capabilityDeviceRequest) ([]Capabilit
 		if filepath.Clean(real) != req.Path {
 			return nil, fmt.Errorf("device path %q must not contain symlinks", req.Path)
 		}
-		device, err := inspectCapabilityDevice(req.Path)
+		device, err := InspectCapabilityDevice(req.Path)
 		if err != nil {
 			return nil, fmt.Errorf("device path %q: %w", req.Path, err)
 		}

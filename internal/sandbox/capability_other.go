@@ -199,7 +199,7 @@ func usableBwrapDevices(bwrap string) bool {
 	if cached, ok := bwrapDeviceUsability.Load(bwrap); ok {
 		return cached.(bool)
 	}
-	device, err := inspectCapabilityDevice("/dev/null")
+	device, err := InspectCapabilityDevice("/dev/null")
 	if err != nil || device.Kind != CapabilityCharacterDevice {
 		return false
 	}

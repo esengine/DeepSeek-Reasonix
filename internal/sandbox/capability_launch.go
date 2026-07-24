@@ -131,7 +131,7 @@ func revalidateCapabilityDevice(expected CapabilityDevice) error {
 	if filepath.Clean(real) != expected.Canonical {
 		return fmt.Errorf("device %q changed canonical identity to %q", expected.Canonical, real)
 	}
-	actual, err := inspectCapabilityDevice(expected.Canonical)
+	actual, err := InspectCapabilityDevice(expected.Canonical)
 	if err != nil {
 		return fmt.Errorf("revalidate device %q: %w", expected.Canonical, err)
 	}

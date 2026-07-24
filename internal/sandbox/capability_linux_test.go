@@ -20,7 +20,7 @@ import (
 )
 
 func TestEvaluateDeviceCapabilityStrictlyNormalizesExactCharacterDevice(t *testing.T) {
-	device, err := inspectCapabilityDevice("/dev/null")
+	device, err := InspectCapabilityDevice("/dev/null")
 	if err != nil {
 		t.Skipf("/dev/null is unavailable: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestCapabilityDeviceFromStatDeterministicallyRecordsBlockIdentity(t *testin
 }
 
 func TestDeviceCapabilityRevalidationDetectsMajorMinorReplacement(t *testing.T) {
-	device, err := inspectCapabilityDevice("/dev/null")
+	device, err := InspectCapabilityDevice("/dev/null")
 	if err != nil {
 		t.Skipf("/dev/null is unavailable: %v", err)
 	}
