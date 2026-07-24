@@ -43,8 +43,26 @@ func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
 	if response.Tasks[0].Kind != "background" || response.Tasks[0].SessionID != machineSessionIDWithKey("session", identityKey) {
 		t.Fatalf("task projection = %+v", response.Tasks[0])
 	}
+	if !response.Tasks[0].ArtifactComplete {
+		t.Fatalf("persisted task artifact should be complete: %+v", response.Tasks[0])
+	}
 	if strings.Contains(out.String(), "PRIVATE") || strings.Contains(out.String(), dir) {
 		t.Fatalf("task output leaked private data: %s", out.String())
+	}
+
+	if err := os.Remove(filepath.Join(jobs.ArtifactDir(path), job.ID+".log")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := runTaskCommand([]string{"list", "--json", "--dir", dir}, &out); code != 0 {
+		t.Fatalf("task list after artifact removal exit code = %d, output = %s", code, out.String())
+	}
+	response = machineTaskList{}
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode task list after artifact removal: %v", err)
+	}
+	if len(response.Tasks) != 1 || response.Tasks[0].ArtifactComplete {
+		t.Fatalf("task projection after artifact removal = %+v", response.Tasks)
 	}
 }
 

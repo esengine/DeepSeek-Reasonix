@@ -42,6 +42,21 @@ func writeHookTestBytes(t *testing.T, path string, body []byte) {
 	}
 }
 
+func TestContextFileUsableRequiresReadableRegularFile(t *testing.T) {
+	root := t.TempDir()
+	if ContextFileUsable("") {
+		t.Fatal("empty context path should be unusable")
+	}
+	if ContextFileUsable(root) {
+		t.Fatal("context directory should be unusable")
+	}
+	path := filepath.Join(root, "CLAUDE.md")
+	writeHookTestFile(t, path, "Use the bundled workflow.")
+	if !ContextFileUsable(path) {
+		t.Fatal("readable regular context file should be usable")
+	}
+}
+
 func requireNode(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("node"); err != nil {

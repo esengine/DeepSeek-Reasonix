@@ -89,13 +89,14 @@ func ListArtifactViews(sessionPath string) ([]ArtifactView, error) {
 		if strings.TrimSpace(meta.ID) == "" {
 			continue
 		}
+		artifactComplete := persistedArtifactComplete(dir, meta)
 		out = append(out, ArtifactView{
 			ID:               meta.ID,
 			Kind:             meta.Kind,
 			Status:           meta.Status,
 			StartedAt:        meta.StartedAt,
 			FinishedAt:       meta.FinishedAt,
-			ArtifactComplete: meta.ArtifactComplete,
+			ArtifactComplete: artifactComplete,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -105,6 +106,23 @@ func ListArtifactViews(sessionPath string) ([]ArtifactView, error) {
 		return out[i].StartedAt > out[j].StartedAt
 	})
 	return out, nil
+}
+
+func persistedArtifactComplete(dir string, meta artifactMeta) bool {
+	switch meta.Status {
+	case Done, Failed, Killed, Interrupted:
+	default:
+		return false
+	}
+	if !meta.ArtifactComplete || strings.TrimSpace(meta.ArtifactError) != "" {
+		return false
+	}
+	logName := strings.TrimSpace(meta.LogPath)
+	if logName == "" {
+		logName = meta.ID + jobLogExt
+	}
+	info, err := os.Stat(filepath.Join(dir, filepath.Base(logName)))
+	return err == nil && info.Mode().IsRegular()
 }
 
 // artifactMutationEvidence deliberately excludes receipt args, commands, and

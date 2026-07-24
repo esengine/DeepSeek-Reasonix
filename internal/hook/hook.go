@@ -172,6 +172,26 @@ func ProjectSettingsPath(projectRoot string) string {
 	return filepath.Join(projectRoot, SettingsDirname, SettingsFilename)
 }
 
+// ContextFileUsable reports whether a plugin contextFile can take the same
+// execution path as readContextFile. Keep machine status and diagnostics on
+// this shared predicate so a path that merely exists (for example, a
+// directory) is not advertised as runnable.
+func ContextFileUsable(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	return file.Close() == nil
+}
+
 // LoadOptions configure Load. Project hooks load only when Trusted; global hooks
 // always load.
 type LoadOptions struct {

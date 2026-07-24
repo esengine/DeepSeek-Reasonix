@@ -524,8 +524,8 @@ var Chinese = Messages{
   reasonix doctor [--json]                              输出脱敏的本地诊断信息
   reasonix doctor session <branch-id> [--zip] [--out PATH]  导出会话冲突诊断 zip
   reasonix session list --json [--dir PATH]             为机器客户端列出脱敏会话
-  reasonix session show|status <branch-id> --json [--dir PATH]  查询单个脱敏会话
-  reasonix session recovery [<branch-id>] --json [--dir PATH]  查询脱敏恢复状态
+  reasonix session show|status <machine-session-id> --json [--dir PATH]  查询单个脱敏会话
+  reasonix session recovery [<machine-session-id>] --json [--dir PATH]  查询脱敏恢复状态
   reasonix hook list|status --json [--dir PATH]         查看脱敏 Hook 状态
   reasonix task list|show --json [--dir PATH]           查看脱敏 Task 状态
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关

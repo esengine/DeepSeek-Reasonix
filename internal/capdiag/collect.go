@@ -331,12 +331,12 @@ func collectHooks(root, home, reasonixHome string, disp func(string) string) (Ho
 			})
 		}
 		if e.ContextFile != "" {
-			if _, err := os.Stat(e.ContextFile); err != nil {
+			if !hook.ContextFileUsable(e.ContextFile) {
 				issues = append(issues, Issue{
 					Severity: "error", Code: "hook.missing_context_file", Subsystem: "hooks",
 					Name: string(e.Event), Source: disp(e.ContextFile),
-					Message:     "hook contextFile does not exist",
-					Remediation: "Create the context file or fix the path in the hook entry",
+					Message:     "hook contextFile is missing or unreadable",
+					Remediation: "Create a readable regular context file or fix the path in the hook entry",
 					SettingsTab: "hooks",
 				})
 			}

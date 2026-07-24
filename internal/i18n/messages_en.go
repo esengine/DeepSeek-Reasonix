@@ -523,8 +523,8 @@ Usage:
   reasonix doctor [--json]                              print redacted local diagnostics
   reasonix doctor session <branch-id> [--zip] [--out PATH]  export a session conflict diagnostic zip
   reasonix session list --json [--dir PATH]             list redacted sessions for machine clients
-  reasonix session show|status <branch-id> --json [--dir PATH]  query one redacted session
-  reasonix session recovery [<branch-id>] --json [--dir PATH]  query redacted recovery state
+  reasonix session show|status <machine-session-id> --json [--dir PATH]  query one redacted session
+  reasonix session recovery [<machine-session-id>] --json [--dir PATH]  query redacted recovery state
   reasonix hook list|status --json [--dir PATH]         inspect redacted hook state
   reasonix task list|show --json [--dir PATH]           inspect redacted task state
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway

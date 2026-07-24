@@ -123,10 +123,8 @@ func machineHookEntryStatus(entry hook.Entry, trustedProject bool) string {
 		if command == "" && contextFile == "" {
 			return "invalid"
 		}
-		if contextFile != "" {
-			if _, err := os.Stat(contextFile); err != nil {
-				return "invalid"
-			}
+		if contextFile != "" && !hook.ContextFileUsable(contextFile) {
+			return "invalid"
 		}
 	} else if command == "" {
 		// Native project/global loading requires a command; contextFile is an

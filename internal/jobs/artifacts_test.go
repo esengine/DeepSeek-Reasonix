@@ -102,6 +102,83 @@ func TestJobArtifactMetadataPreservesLabel(t *testing.T) {
 	}
 }
 
+func TestListArtifactViewsVerifiesTerminalArtifactPresence(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	type artifactCase struct {
+		id       string
+		status   Status
+		metaOK   bool
+		metaErr  string
+		artifact string
+		legacy   bool
+		want     bool
+	}
+	cases := []artifactCase{
+		{id: "task-running", status: Running, metaOK: true, artifact: "file", want: false},
+		{id: "task-unknown", status: Status("future"), metaOK: true, artifact: "file", want: false},
+		{id: "task-missing", status: Done, metaOK: true, want: false},
+		{id: "task-error", status: Done, metaOK: true, metaErr: "write failed", artifact: "file", want: false},
+		{id: "task-directory", status: Done, metaOK: true, artifact: "directory", want: false},
+		{id: "task-complete", status: Done, metaOK: true, artifact: "file", want: true},
+		{id: "task-legacy", status: Done, metaOK: true, artifact: "file", legacy: true, want: true},
+	}
+	for _, tc := range cases {
+		logName := tc.id + jobLogExt
+		metaLogPath := logName
+		if tc.legacy {
+			metaLogPath = ""
+		}
+		if err := writeMeta(filepath.Join(dir, tc.id+jobMetaExt), artifactMeta{
+			ID:               tc.id,
+			Kind:             "task",
+			Status:           tc.status,
+			StartedAt:        time.Now().Add(-time.Minute).UnixMilli(),
+			FinishedAt:       time.Now().UnixMilli(),
+			ArtifactComplete: tc.metaOK,
+			ArtifactError:    tc.metaErr,
+			LogPath:          metaLogPath,
+		}); err != nil {
+			t.Fatalf("write %s metadata: %v", tc.id, err)
+		}
+		switch tc.artifact {
+		case "file":
+			if err := os.WriteFile(filepath.Join(dir, logName), []byte("persisted output"), 0o600); err != nil {
+				t.Fatalf("write %s artifact: %v", tc.id, err)
+			}
+		case "directory":
+			if err := os.Mkdir(filepath.Join(dir, logName), 0o700); err != nil {
+				t.Fatalf("create %s artifact directory: %v", tc.id, err)
+			}
+		}
+	}
+
+	views, err := ListArtifactViews(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool, len(views))
+	for _, view := range views {
+		got[view.ID] = view.ArtifactComplete
+	}
+	if len(got) != len(cases) {
+		t.Fatalf("artifact views = %+v, want %d entries", views, len(cases))
+	}
+	for _, tc := range cases {
+		complete, ok := got[tc.id]
+		if !ok {
+			t.Errorf("%s artifact view is missing", tc.id)
+			continue
+		}
+		if complete != tc.want {
+			t.Errorf("%s artifact complete = %v, want %v", tc.id, complete, tc.want)
+		}
+	}
+}
+
 func TestJobArtifactUsesPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows file ACLs are not represented by Unix permission bits")

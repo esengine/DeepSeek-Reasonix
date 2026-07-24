@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/hook"
 )
 
 func TestHookMachineListRedactsCommandsAndPreservesTrustState(t *testing.T) {
@@ -93,6 +95,27 @@ func TestHookMachineListReportsExecutability(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "PRIVATE") {
 		t.Fatalf("hook output leaked command content: %s", out.String())
+	}
+}
+
+func TestHookMachineEntryStatusRejectsNonRegularContextFile(t *testing.T) {
+	contextDir := t.TempDir()
+	entry := hook.Entry{
+		Event:       hook.SessionStart,
+		Scope:       hook.ScopePlugin,
+		ContextFile: contextDir,
+	}
+	if got := machineHookEntryStatus(entry, true); got != "invalid" {
+		t.Fatalf("directory context status = %q, want invalid", got)
+	}
+
+	contextFile := filepath.Join(contextDir, "context.md")
+	if err := os.WriteFile(contextFile, []byte("plugin context"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry.ContextFile = contextFile
+	if got := machineHookEntryStatus(entry, true); got != "active" {
+		t.Fatalf("readable regular context status = %q, want active", got)
 	}
 }
 

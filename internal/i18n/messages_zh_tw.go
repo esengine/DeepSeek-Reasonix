@@ -472,8 +472,8 @@ var ChineseTraditional = Messages{
   reasonix doctor [--json]                              輸出脫敏的本機診斷資訊
   reasonix doctor session <branch-id> [--zip] [--out PATH]  匯出會話衝突診斷 zip
   reasonix session list --json [--dir PATH]             為機器客戶列出脫敏會話
-  reasonix session show|status <branch-id> --json [--dir PATH]  查詢單一脫敏會話
-  reasonix session recovery [<branch-id>] --json [--dir PATH]  查詢脫敏復原狀態
+  reasonix session show|status <machine-session-id> --json [--dir PATH]  查詢單一脫敏會話
+  reasonix session recovery [<machine-session-id>] --json [--dir PATH]  查詢脫敏復原狀態
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
   reasonix task list|show --json [--dir PATH]           檢視脫敏 Task 狀態
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
