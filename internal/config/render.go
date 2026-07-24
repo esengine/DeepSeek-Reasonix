@@ -749,6 +749,22 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	return b.String()
 }
 
+// tomlRenderablePlugins returns plugins that should be serialized to TOML.
+// Plugins from .mcp.json (MCPSourceProjectMCPJSON) are excluded because they
+// belong in that file, not reasonix.toml. Writing them into reasonix.toml would
+// change their Source provenance on next load, invalidating launch grants and
+// activation receipts (#6702).
+func tomlRenderablePlugins(plugins []PluginEntry) []PluginEntry {
+	out := make([]PluginEntry, 0, len(plugins))
+	for _, pl := range plugins {
+		if pl.Source == MCPSourceProjectMCPJSON {
+			continue
+		}
+		out = append(out, pl)
+	}
+	return out
+}
+
 // RenderTOMLProjectDelta generates TOML containing only the sections and fields
 // that differ from built-in defaults. Unlike RenderTOMLForScope (which renders
 // the full config with comments), this emits clean TOML that can be surgically
@@ -1126,7 +1142,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [[plugins]] — always include when set; replaces all existing entries
-	for _, pl := range c.Plugins {
+	for _, pl := range tomlRenderablePlugins(c.Plugins) {
 		b.WriteString("[[plugins]]\n")
 		fmt.Fprintf(&b, "name    = %q\n", pl.Name)
 		if pl.Type != "" {
