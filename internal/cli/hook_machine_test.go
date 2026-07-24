@@ -49,6 +49,53 @@ func TestHookMachineListRedactsCommandsAndPreservesTrustState(t *testing.T) {
 	}
 }
 
+func TestHookMachineListReportsExecutability(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	globalSettings := filepath.Join(home, ".reasonix", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(globalSettings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"hooks":{` +
+		`"PreToolUse":[{"match":"bash","command":""},{"match":"[","command":"PRIVATE_INVALID_MATCHER"}],` +
+		`"Stop":[{"match":"[","command":"PRIVATE_NON_TOOL"}],` +
+		`"UnknownEvent":[{"command":"PRIVATE_UNKNOWN_EVENT"}]` +
+		`}}`
+	if err := os.WriteFile(globalSettings, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if code := runHookCommand([]string{"list", "--json", "--project-root", root, "--home-dir", home}, &out); code != 0 {
+		t.Fatalf("hook list exit code = %d, output = %s", code, out.String())
+	}
+	var response machineHookList
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode hook list: %v", err)
+	}
+	statuses := map[string]string{}
+	for _, item := range response.Hooks {
+		statuses[item.Event+"|"+item.Match] = item.Status
+	}
+	want := map[string]string{
+		"PreToolUse|bash": "invalid",
+		"PreToolUse|[":    "invalid",
+		"Stop|[":          "active",
+		"UnknownEvent|*":  "invalid",
+	}
+	if len(statuses) != len(want) {
+		t.Fatalf("statuses = %+v, want %+v", statuses, want)
+	}
+	for key, wantStatus := range want {
+		if got := statuses[key]; got != wantStatus {
+			t.Errorf("status[%q] = %q, want %q", key, got, wantStatus)
+		}
+	}
+	if strings.Contains(out.String(), "PRIVATE") {
+		t.Fatalf("hook output leaked command content: %s", out.String())
+	}
+}
+
 func TestHookMachineStatusHasStableRedactedSources(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

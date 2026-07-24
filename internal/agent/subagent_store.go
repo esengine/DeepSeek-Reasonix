@@ -198,9 +198,10 @@ func DeleteSubagentsByParent(sessionDir, parentSession string) error {
 	return nil
 }
 
-// CleanupStaleRunning marks persisted running sub-agents as interrupted. It is
-// intended for startup, before this process accepts new background sub-agent
-// work, so a previous crash cannot leave ghost "running" refs behind.
+// CleanupStaleRunning marks persisted running sub-agents as interrupted while
+// holding each parent transcript's session lease. A live parent in this or
+// another process therefore keeps its children untouched, while crash leftovers
+// remain repairable before this process accepts new background work.
 func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 	if s == nil {
 		return 0, nil
@@ -212,8 +213,11 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 		}
 		return 0, err
 	}
-	now := time.Now().UTC()
-	cleaned := 0
+	type staleParent struct {
+		sessionPath string
+		refs        []string
+	}
+	parents := map[string]*staleParent{}
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".meta.json") {
 			continue
@@ -224,19 +228,73 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 		}
 		meta, err := s.LoadMeta(ref)
 		if err != nil {
-			return cleaned, err
+			return 0, err
 		}
 		if meta.Status != SubagentRunning {
 			continue
 		}
-		meta.Status = SubagentInterrupted
-		meta.UpdatedAt = now
-		if err := s.saveMeta(meta); err != nil {
-			return cleaned, err
+		parentSession := strings.TrimSpace(meta.ParentSession)
+		sessionPath, ok := s.parentSessionPath(parentSession)
+		if !ok {
+			// Old or malformed metadata without a provable parent cannot
+			// authorize a destructive lifecycle rewrite.
+			continue
 		}
-		cleaned++
+		parent := parents[parentSession]
+		if parent == nil {
+			parent = &staleParent{sessionPath: sessionPath}
+			parents[parentSession] = parent
+		}
+		parent.refs = append(parent.refs, ref)
+	}
+
+	parentIDs := make([]string, 0, len(parents))
+	for parentID := range parents {
+		parentIDs = append(parentIDs, parentID)
+	}
+	sort.Strings(parentIDs)
+
+	now := time.Now().UTC()
+	cleaned := 0
+	for _, parentID := range parentIDs {
+		parent := parents[parentID]
+		lease, err := TryAcquireSessionLease(parent.sessionPath)
+		if errors.Is(err, ErrSessionLeaseHeld) {
+			continue
+		}
+		if err != nil {
+			return cleaned, fmt.Errorf("acquire parent session lease %q: %w", parentID, err)
+		}
+		for _, ref := range parent.refs {
+			// Re-read after acquiring the parent lease: the former owner may
+			// have completed the child between the initial scan and handoff.
+			meta, err := s.LoadMeta(ref)
+			if err != nil {
+				lease.Release()
+				return cleaned, err
+			}
+			if meta.Status != SubagentRunning || strings.TrimSpace(meta.ParentSession) != parentID {
+				continue
+			}
+			meta.Status = SubagentInterrupted
+			meta.UpdatedAt = now
+			if err := s.saveMeta(meta); err != nil {
+				lease.Release()
+				return cleaned, err
+			}
+			cleaned++
+		}
+		lease.Release()
 	}
 	return cleaned, nil
+}
+
+func (s *SubagentStore) parentSessionPath(parentSession string) (string, bool) {
+	parentSession = strings.TrimSpace(parentSession)
+	if parentSession == "" || parentSession == "." || parentSession == ".." || filepath.Base(parentSession) != parentSession {
+		return "", false
+	}
+	return filepath.Join(filepath.Dir(s.dir), parentSession+".jsonl"), true
 }
 
 func (s *SubagentStore) PrepareFresh(spec SubagentSpec) (*SubagentRun, error) {

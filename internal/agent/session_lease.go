@@ -18,15 +18,17 @@ import (
 
 var ErrSessionLeaseHeld = errors.New("session lease held by another runtime")
 
-// sessionLeaseOwners maps the canonical session path to the owning lease's
-// unique id (from sessionLeaseSeq). Storing an identity instead of a bare
-// sentinel lets Release and the acquire/reclaim failure paths use
-// CompareAndDelete, so a racing caller can never evict an entry it does not
-// own. Ids stay unique for the process lifetime, so a stale lease released
-// after its entry was reclaimed cannot delete the new owner's entry either.
+// sessionLeaseOwners reserves a canonical session path for one in-process
+// acquisition attempt or live lease. sessionLeaseActiveOwners contains only
+// generations that have acquired the cross-process lock and written their
+// lease metadata. Keeping the two states separate prevents ownership-sensitive
+// repair from treating a pending or failed acquisition as proof of ownership.
+// Storing identities instead of bare sentinels lets release and reclaim use
+// CompareAndDelete without an old generation evicting a newer one.
 var (
-	sessionLeaseOwners sync.Map
-	sessionLeaseSeq    atomic.Uint64
+	sessionLeaseOwners       sync.Map
+	sessionLeaseActiveOwners sync.Map
+	sessionLeaseSeq          atomic.Uint64
 )
 
 type SessionLeaseInfo struct {
@@ -85,11 +87,15 @@ func TryAcquireSessionLease(path string) (*SessionLease, error) {
 		}
 		return nil, err
 	}
+	// The OS lock proves any active-registry entry left without its reservation
+	// is stale. Clear it before publishing this generation.
+	sessionLeaseActiveOwners.Delete(path)
 	lease := &SessionLease{path: path, ownerID: ownerID, unlock: unlock}
 	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
 		lease.Release()
 		return nil, err
 	}
+	sessionLeaseActiveOwners.Store(path, ownerID)
 	return lease, nil
 }
 
@@ -137,11 +143,13 @@ func TryReclaimCurrentProcessSessionLease(path string) (*SessionLease, error) {
 	// later misses its CompareAndDelete against the new owner id.
 	ownerID := sessionLeaseSeq.Add(1)
 	lease := &SessionLease{path: path, ownerID: ownerID, unlock: unlock}
+	sessionLeaseActiveOwners.Delete(path)
 	sessionLeaseOwners.Store(path, ownerID)
 	if err := SaveSessionLeaseInfo(path, newSessionLeaseInfo(path)); err != nil {
 		lease.Release()
 		return nil, err
 	}
+	sessionLeaseActiveOwners.Store(path, ownerID)
 	return lease, nil
 }
 
@@ -158,7 +166,7 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 		return false
 	}
 	path = canonicalSessionSavePath(path)
-	if _, ok := sessionLeaseOwners.Load(path); ok {
+	if _, ok := sessionLeaseActiveOwners.Load(path); ok {
 		// Held by this process; no need to touch the lock file.
 		return false
 	}
@@ -194,15 +202,15 @@ func SessionLeaseHeldByOtherRuntime(path string) bool {
 	return true
 }
 
-// SessionLeaseHeldByCurrentRuntime reports whether this process currently owns
-// path's session lease. It is intentionally a registry-only query: callers use
-// it to authorize ownership-sensitive repairs without probing or disturbing the
-// cross-process lock.
+// SessionLeaseHeldByCurrentRuntime reports whether this process has completed
+// acquisition of path's session lease. Pending reservations and generations
+// already retiring report false, so callers cannot authorize destructive repair
+// before the OS lock is held or after release has begun.
 func SessionLeaseHeldByCurrentRuntime(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
 	}
-	_, ok := sessionLeaseOwners.Load(canonicalSessionSavePath(path))
+	_, ok := sessionLeaseActiveOwners.Load(canonicalSessionSavePath(path))
 	return ok
 }
 
@@ -218,6 +226,10 @@ func (l *SessionLease) Release() {
 		return
 	}
 	l.once.Do(func() {
+		// Revoke ownership-sensitive repair before the OS lock becomes available
+		// to a successor. CompareAndDelete keeps a stale generation from
+		// deauthorizing a newer reclaimed lease.
+		sessionLeaseActiveOwners.CompareAndDelete(l.path, l.ownerID)
 		_ = os.Remove(sessionLeaseInfoPath(l.path))
 		if l.unlock != nil {
 			l.unlock()

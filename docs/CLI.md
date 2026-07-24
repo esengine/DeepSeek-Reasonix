@@ -159,6 +159,9 @@ reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 For `session` and `task`, `--dir` explicitly selects the session storage
 directory; without it, Reasonix selects the current project's session store.
 For `hook`, `--dir` is an alias for `--project-root`.
+`hook list` reports `active`, `untrusted`, or `invalid`; `invalid` means the
+configured event cannot execute because its event, command/context source, or
+tool-event matcher is unusable. Matchers on non-tool events are ignored.
 
 Machine session IDs are keyed opaque hashes, not transcript file names. They
 remain stable for the same session and Reasonix user-state directory, while a

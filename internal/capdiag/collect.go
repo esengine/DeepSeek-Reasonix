@@ -341,7 +341,7 @@ func collectHooks(root, home, reasonixHome string, disp func(string) string) (Ho
 				})
 			}
 		}
-		if msg := hook.ValidateMatcher(e.Match); msg != "" {
+		if msg := hook.ValidateMatcher(e.Match); hook.UsesToolMatcher(e.Event) && msg != "" {
 			issues = append(issues, Issue{
 				Severity: "error", Code: "hook.invalid_matcher", Subsystem: "hooks",
 				Name: string(e.Event), Source: disp(e.Source),

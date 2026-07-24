@@ -255,6 +255,12 @@ func ValidateMatcher(match string) string {
 	return ""
 }
 
+// UsesToolMatcher reports whether an event evaluates HookConfig.Match.
+// Non-tool events ignore matchers entirely, including malformed ones.
+func UsesToolMatcher(event Event) bool {
+	return event == PreToolUse || event == PostToolUse || event == PostToolUseFailure || event == PermissionRequest
+}
+
 // IsKnownEvent reports whether event is one of the 11 supported hook events.
 func IsKnownEvent(event string) bool {
 	return validEvent(Event(event))

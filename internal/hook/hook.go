@@ -424,7 +424,7 @@ func cloneEnv(in map[string]string) map[string]string {
 // anchored regex; non-tool events always match. A malformed regex never fires
 // (safer than firing on everything).
 func MatchesTool(h ResolvedHook, toolName string) bool {
-	if h.Event != PreToolUse && h.Event != PostToolUse && h.Event != PostToolUseFailure && h.Event != PermissionRequest {
+	if !UsesToolMatcher(h.Event) {
 		return true
 	}
 	m := h.Match

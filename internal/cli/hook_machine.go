@@ -78,10 +78,7 @@ func runHookCommand(args []string, out io.Writer) int {
 	if operation == "list" {
 		items := make([]machineHook, 0, len(inspection.Entries))
 		for _, entry := range inspection.Entries {
-			status := "active"
-			if entry.Scope == hook.ScopeProject && !inspection.TrustedProject {
-				status = "untrusted"
-			}
+			status := machineHookEntryStatus(entry, inspection.TrustedProject)
 			match := entry.Match
 			if match == "" {
 				match = "*"
@@ -111,6 +108,35 @@ func runHookCommand(args []string, out io.Writer) int {
 		ProjectDefines: inspection.ProjectDefines,
 		Sources:        sources,
 	})
+}
+
+func machineHookEntryStatus(entry hook.Entry, trustedProject bool) string {
+	if entry.Scope == hook.ScopeProject && !trustedProject {
+		return "untrusted"
+	}
+	if !hook.IsKnownEvent(string(entry.Event)) {
+		return "invalid"
+	}
+	command := strings.TrimSpace(entry.Command)
+	contextFile := strings.TrimSpace(entry.ContextFile)
+	if entry.Scope == hook.ScopePlugin {
+		if command == "" && contextFile == "" {
+			return "invalid"
+		}
+		if contextFile != "" {
+			if _, err := os.Stat(contextFile); err != nil {
+				return "invalid"
+			}
+		}
+	} else if command == "" {
+		// Native project/global loading requires a command; contextFile is an
+		// internal plugin-only execution path.
+		return "invalid"
+	}
+	if hook.UsesToolMatcher(entry.Event) && hook.ValidateMatcher(entry.Match) != "" {
+		return "invalid"
+	}
+	return "active"
 }
 
 func parseHookMachineOptions(args []string) (hookMachineOptions, string, string) {
