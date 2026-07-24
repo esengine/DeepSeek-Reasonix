@@ -171,7 +171,7 @@ func (b bash) NormalizePermissionArgs(raw json.RawMessage) json.RawMessage {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return raw
 	}
-	p.Command = normalizeBashCommand(p.Command, b.workDir)
+	p.Command = b.normalizeCommand(p.Command)
 	out, err := json.Marshal(p)
 	if err != nil {
 		return raw
@@ -203,7 +203,7 @@ func (b bash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage
 	// Strip DeepSeek's redundant bash wrappers before sandbox capability
 	// approval and grant matching; PrepareSandboxInvocation also normalizes
 	// direct callers that did not pass through the ordinary permission gate.
-	p.Command = normalizeBashCommand(p.Command, b.workDir)
+	p.Command = b.normalizeCommand(p.Command)
 
 	sh := b.resolved()
 	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
@@ -537,6 +537,15 @@ func (b bash) foregroundTimeout() time.Duration {
 		return 0
 	}
 	return b.timeout
+}
+
+// normalizeCommand applies Bash-specific source rewrites only when Bash will
+// interpret the command. Other shells must retain their native source exactly.
+func (b bash) normalizeCommand(command string) string {
+	if b.resolved().Kind != sandbox.ShellBash {
+		return command
+	}
+	return normalizeBashCommand(command, b.workDir)
 }
 
 func shouldTrackShellProcess(wrapped bool, sh sandbox.Shell, command string, preserveBackgroundProcesses bool) bool {

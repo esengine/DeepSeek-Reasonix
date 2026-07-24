@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+
+	"reasonix/internal/sandbox"
 )
 
 func TestNormalizeBashCommand(t *testing.T) {
@@ -122,12 +124,46 @@ func TestNormalizeBashCommand(t *testing.T) {
 	}
 }
 
+func TestNormalizeCommandUsesActualShell(t *testing.T) {
+	work, err := filepath.Abs("/workspace")
+	if err != nil {
+		t.Fatalf("abs: %v", err)
+	}
+	command := "cd " + work + " && go test ./... 2>&1"
+
+	tests := []struct {
+		name  string
+		shell sandbox.Shell
+		want  string
+	}{
+		{
+			name:  "bash normalizes",
+			shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"},
+			want:  "go test ./...",
+		},
+		{
+			name:  "PowerShell preserves source",
+			shell: sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"},
+			want:  command,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := bash{workDir: work, shell: tt.shell}
+			if got := b.normalizeCommand(command); got != tt.want {
+				t.Fatalf("normalizeCommand() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizePermissionArgsPreservesNonCommandFields(t *testing.T) {
 	work, err := filepath.Abs("/workspace")
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
-	b := bash{workDir: work}
+	b := bash{workDir: work, shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"}}
 	raw := json.RawMessage(`{"command":"cd ` + work + ` && printf '%s\\n' 'hello world' 2>&1","run_in_background":true,"preserve_background_processes":true,"sandbox_capabilities":{"network":true,"justification":"test"}}`)
 
 	var got bashParams
