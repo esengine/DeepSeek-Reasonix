@@ -17,8 +17,8 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
-	"reasonix/internal/secrets"
 	"reasonix/internal/sandboxauth"
+	"reasonix/internal/secrets"
 )
 
 // GatewayConfig 是 BotGateway 的配置。
