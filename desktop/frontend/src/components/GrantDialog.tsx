@@ -49,7 +49,7 @@ export function GrantDialog({ grant, onSave, onClose, busy }: GrantDialogProps) 
   }, [executable, argvPrefix, network, background, preserveBg, reads, writes, devices, source, onSave]);
 
   const addPath = (list: PathEntry[], setList: (v: PathEntry[]) => void) => {
-    setList([...list, { identity: "workspace_relative", path: "", kind: "directory" }]);
+    setList([...list, { identity: "canonical_absolute", path: "", kind: "directory" }]);
   };
   const updatePath = (list: PathEntry[], setList: (v: PathEntry[]) => void, i: number, field: string, value: string) => {
     const next = list.map((p, j) => (j === i ? { ...p, [field]: value } : p));
