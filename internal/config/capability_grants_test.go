@@ -66,9 +66,18 @@ func TestPersistCapabilityGrantTargetedAppendIsIdempotentAndComplete(t *testing.
 	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Create a temp file so the device path is a valid absolute path on every
+	// platform.  The test provides explicit Major/Minor so InspectCapabilityDevice
+	// is never called; any absolute file path suffices for the persistence round-trip.
+	devFile, err := os.CreateTemp(root, "test-device-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	devicePath := devFile.Name()
+	devFile.Close()
 	grant := sandboxauth.Grant{
 		Workspace: root, CanonicalExecutable: capabilityTestExecutable(t), ArgvPrefix: []string{"echo", "ok"},
-		Capabilities: sandbox.CapabilitySet{Network: true, Devices: []sandbox.CapabilityDevice{{Path: "/dev/null", Canonical: "/dev/null", Kind: sandbox.CapabilityCharacterDevice, Major: 1, Minor: 3}}},
+		Capabilities: sandbox.CapabilitySet{Network: true, Devices: []sandbox.CapabilityDevice{{Path: devicePath, Canonical: devicePath, Kind: sandbox.CapabilityCharacterDevice, Major: 1, Minor: 3}}},
 		Background:   true, PreserveBackgroundProcesses: true,
 	}
 	if err := PersistProjectCapabilityGrant(root, grant); err != nil {
