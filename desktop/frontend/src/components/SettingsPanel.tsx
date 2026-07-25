@@ -6682,7 +6682,7 @@ function GrantDetailView({ grant }: { grant: CapabilityGrantView }) {
         <div className="grant-detail__section" key={i}>
           <div className="grant-detail__label">{section.label}</div>
           <ul className="grant-detail__items">
-            {section.items.map((item, j) => <li key={j}>{item}</li>)}
+            {section.items.map((item, j) => <li key={j}><code>{item}</code></li>)}
           </ul>
         </div>
       ))}
@@ -6771,7 +6771,7 @@ function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: Section
                         {expanded === idx ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                       </button>
                     </td>
-                    <td className="grant-table__exec">{g.canonicalExecutable}</td>
+                    <td className="grant-table__exec"><code>{g.canonicalExecutable}</code></td>
                     <td className="grant-table__prefix"><code>{g.argvPrefix?.join(" ") || "—"}</code></td>
                     <td className="grant-table__caps">{capabilitySummary(g)}</td>
                     <td className="grant-table__source">{g.source === "project" ? t("grant.sourceProject") : t("grant.sourceUser")}</td>
