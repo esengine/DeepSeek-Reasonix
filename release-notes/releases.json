@@ -6,15 +6,23 @@
       "date": "2026-07-25",
       "channel": "stable",
       "title": {
-        "en": "Desktop quality and security release",
-        "zh": "桌面质量与安全更新"
+        "en": "Smarter planning, safer execution, and a more reliable desktop",
+        "zh": "更智能的规划、更安全的执行与更可靠的桌面体验"
       },
       "summary": {
-        "en": "This stable release brings reliable paste undo, inline regex search in code previews, native crash diagnostics, and smarter planner routing. It also fixes code font application, provider retry cancellation, session conflicts, and plugin hooks. Security improvements include Authenticode signing of all Windows executables, credential sanitization in logs, and updated dependencies to close 12 advisories.",
-        "zh": "此稳定版带来可靠的粘贴撤销、代码预览中的内嵌正则搜索、原生崩溃诊断以及更智能的规划路由。同时修复了代码字体不生效、提供程序重试可取消、会话冲突及插件 Hooks 等问题。安全改进包括所有 Windows 可执行文件的 Authenticode 签名、日志凭据脱敏，以及更新依赖项以关闭 12 项安全公告。"
+        "en": "This stable release brings deterministic planning, reliable paste undo, inline regex search, and native crash diagnostics. It also keeps CLI diagnostics out of the terminal, makes provider retries cancellable, resolves session ownership conflicts, and hardens plugin Hooks. Security improvements include Authenticode signing of all Windows executables, credential sanitization in logs, and updated dependencies to close 12 advisories.",
+        "zh": "此稳定版带来确定性规划、可靠的粘贴撤销、内嵌正则搜索和原生崩溃诊断。同时将 CLI 诊断与终端界面隔离，使提供程序重试可取消，解决会话所有权冲突，并强化插件 Hooks。安全改进包括所有 Windows 可执行文件的 Authenticode 签名、日志凭据脱敏，以及更新依赖项以关闭 12 项安全公告。"
       },
       "surfaces": [
-        "desktop"
+        "agent",
+        "cli",
+        "desktop",
+        "mcp",
+        "plugin",
+        "provider",
+        "recovery",
+        "security",
+        "updates"
       ],
       "guides": [
         {
@@ -187,6 +195,20 @@
           },
           "refs": [
             6902
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Clean CLI diagnostics and atomic session recovery",
+            "zh": "清晰的 CLI 诊断与原子会话恢复"
+          },
+          "body": {
+            "en": "Interactive CLI diagnostics and plugin stderr now stay in a private bounded log instead of corrupting the TUI, while recovery lease ownership and in-place history mutations preserve failure atomicity.",
+            "zh": "交互式 CLI 诊断和插件标准错误现在写入私有有界日志，不再干扰 TUI；同时，恢复租约所有权与原地历史变更保持失败原子性。"
+          },
+          "refs": [
+            6912
           ]
         },
         {
@@ -381,6 +403,19 @@
             },
             "refs": [
               6902
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI diagnostics and recovery ownership",
+              "zh": "CLI 诊断与恢复所有权"
+            },
+            "body": {
+              "en": "Route interactive diagnostics away from the terminal and migrate recovery lease ownership atomically across runtime rebuilds.",
+              "zh": "将交互式诊断与终端隔离，并在运行时重建期间原子迁移恢复租约所有权。"
+            },
+            "refs": [
+              6912
             ]
           },
           {
