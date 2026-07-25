@@ -2,7 +2,9 @@ package config
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -2496,6 +2498,31 @@ func TestSaveToPreservesSymlinkToWritableTarget(t *testing.T) {
 	}
 }
 
+// makeDirReadOnly makes a directory non-writable in a platform-specific way.
+// On Unix it uses os.Chmod; on Windows it denies write permission via icacls.
+// The returned cleanup function restores write access.
+func makeDirReadOnly(dir string) (cleanup func(), err error) {
+	if runtime.GOOS == "windows" {
+		// Windows ACL: deny write for Everyone.
+		// icacls is available on all modern Windows SKUs.
+		if err := exec.Command("icacls", dir, "/deny", "Everyone:(W)").Run(); err != nil {
+			return nil, fmt.Errorf("icacls /deny: %w", err)
+		}
+		return func() {
+			// Remove the deny entry, restoring inherited permissions.
+			exec.Command("icacls", dir, "/remove:d", "Everyone").Run()
+		}, nil
+	}
+	orig, err := os.Stat(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		return nil, err
+	}
+	return func() { os.Chmod(dir, orig.Mode().Perm()) }, nil
+}
+
 func TestSaveToFallbackWhenSymlinkTargetDirNotWritable(t *testing.T) {
 	dir := t.TempDir()
 	targetDir := filepath.Join(dir, "readonly")
@@ -2514,10 +2541,11 @@ func TestSaveToFallbackWhenSymlinkTargetDirNotWritable(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Make target directory read-only so AtomicWriteFile can't create tmp files
-	if err := os.Chmod(targetDir, 0o555); err != nil {
-		t.Fatal(err)
+	cleanup, err := makeDirReadOnly(targetDir)
+	if err != nil {
+		t.Fatalf("makeDirReadOnly: %v", err)
 	}
-	t.Cleanup(func() { os.Chmod(targetDir, 0o755) })
+	t.Cleanup(cleanup)
 
 	// Save config through the symlink — should fallback and replace the symlink
 	c := Default()
