@@ -1429,11 +1429,47 @@ reasoning_language = %q
 	return cfg.ReasoningLanguage(), writeConfigFile(path, body)
 }
 
+// resolveConfigPath resolves a config file write path through symlinks.
+// If path is a symlink, it returns the symlink's final target (following
+// the full chain); otherwise it returns path unchanged.
+func resolveConfigPath(path string) string {
+	stat, err := os.Lstat(path)
+	if err != nil {
+		return path // cannot stat; fallback
+	}
+	if stat.Mode()&os.ModeSymlink == 0 {
+		return path // not a symlink
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path // resolution failed; fallback
+	}
+	return resolved
+}
+
+// atomicWriteToConfigFile writes body to the given config path atomically,
+// following symlinks. If writing to the resolved (symlink target) path fails,
+// it falls back to writing directly to the original path — which replaces the
+// symlink with a regular file (existing behaviour).
+func atomicWriteToConfigFile(path, body string, perm os.FileMode) error {
+	resolved := resolveConfigPath(path)
+	if resolved == path {
+		return fileutil.AtomicWriteFile(path, []byte(body), perm)
+	}
+	// Attempt write through the symlink to the target.
+	if err := fileutil.AtomicWriteFile(resolved, []byte(body), perm); err != nil {
+		// Fallback: replace the symlink itself (pre-v2 behaviour).
+		return fileutil.AtomicWriteFile(path, []byte(body), perm)
+	}
+	return nil
+}
+
 func writeConfigFile(path, body string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	return fileutil.AtomicWriteFile(path, []byte(body), configFilePerm(path))
+	perm := configFilePerm(path)
+	return atomicWriteToConfigFile(path, body, perm)
 }
 
 func configFilePerm(path string) os.FileMode {
