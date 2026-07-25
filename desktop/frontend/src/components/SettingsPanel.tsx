@@ -6702,26 +6702,28 @@ function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: Section
     setBusy(true);
     setError(null);
     try {
-      await app.AddCapabilityGrant(source, { ...grant, index: 0, source });
+      await _apply(async () => {
+        await app.AddCapabilityGrant(source, { ...grant, index: 0, source });
+      });
       setShowDialog(false);
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [_apply]);
 
   const handleDelete = useCallback(async (g: CapabilityGrantView) => {
     setBusy(true);
     setError(null);
     try {
-      await app.DeleteCapabilityGrant(g.source, g);
+      await _apply(() => app.DeleteCapabilityGrant(g.source, g));
     } catch (e) {
       setError(String(e));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [_apply]);
 
   const capabilitySummary = (g: CapabilityGrantView): string => {
     const parts: string[] = [];
