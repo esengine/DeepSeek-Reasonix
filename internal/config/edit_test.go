@@ -2421,10 +2421,17 @@ func TestResolveConfigPathFollowsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Resolve target itself so the comparison is valid on platforms where
+	// t.TempDir() goes through a symlink (macOS: /var -> /private/var).
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// resolveConfigPath should follow the symlink
 	got := resolveConfigPath(link)
-	if got != target {
-		t.Errorf("resolveConfigPath(%q) = %q, want %q (follow symlink)", link, got, target)
+	if got != resolvedTarget {
+		t.Errorf("resolveConfigPath(%q) = %q, want %q (follow symlink)", link, got, resolvedTarget)
 	}
 	// Non-symlink path should be returned unchanged
 	got2 := resolveConfigPath(target)
@@ -2444,8 +2451,8 @@ func TestResolveConfigPathFollowsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	got4 := resolveConfigPath(link2)
-	if got4 != target {
-		t.Errorf("resolveConfigPath(%q) = %q, want %q (multi-level)", link2, got4, target)
+	if got4 != resolvedTarget {
+		t.Errorf("resolveConfigPath(%q) = %q, want %q (multi-level)", link2, got4, resolvedTarget)
 	}
 }
 
