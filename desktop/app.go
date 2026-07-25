@@ -1657,7 +1657,7 @@ func (a *App) ResolveSandboxCapability(id string, action string) {
 	}
 	ctrl := a.ctrlByTabID("")
 	if ctrl != nil {
-		ctrl.ResolveSandboxCapability(id, sandboxauth.Action(action))
+		_ = ctrl.ResolveSandboxCapability(id, sandboxauth.Action(action))
 	}
 }
 
@@ -1669,7 +1669,7 @@ func (a *App) ResolveSandboxCapabilityTab(tabID, id, action string) {
 	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl != nil {
-		ctrl.ResolveSandboxCapability(id, sandboxauth.Action(action))
+		_ = ctrl.ResolveSandboxCapability(id, sandboxauth.Action(action))
 	}
 }
 
