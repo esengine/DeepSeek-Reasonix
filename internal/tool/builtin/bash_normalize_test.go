@@ -14,7 +14,7 @@ func TestNormalizeBashCommand(t *testing.T) {
 		if err != nil {
 			t.Fatalf("abs: %v", err)
 		}
-		return abs
+		return filepath.ToSlash(abs)
 	}
 	work := absWork("/workspace")
 	workSub := absWork("/workspace/subdir")
@@ -129,6 +129,7 @@ func TestNormalizeCommandUsesActualShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
+	work = filepath.ToSlash(work)
 	command := "cd " + work + " && go test ./... 2>&1"
 
 	tests := []struct {
@@ -163,8 +164,18 @@ func TestNormalizePermissionArgsPreservesNonCommandFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("abs: %v", err)
 	}
+	work = filepath.ToSlash(work)
 	b := bash{workDir: work, shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"}}
-	raw := json.RawMessage(`{"command":"cd ` + work + ` && printf '%s\\n' 'hello world' 2>&1","run_in_background":true,"preserve_background_processes":true,"sandbox_capabilities":{"network":true,"justification":"test"}}`)
+	params := bashParams{
+		Command:                     "cd " + work + " && printf '%s\\n' 'hello world' 2>&1",
+		RunInBackground:             true,
+		PreserveBackgroundProcesses: true,
+		SandboxCapabilities:         json.RawMessage(`{"network":true,"justification":"test"}`),
+	}
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var got bashParams
 	if err := json.Unmarshal(b.NormalizePermissionArgs(raw), &got); err != nil {

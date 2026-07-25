@@ -197,11 +197,11 @@ func TestConcurrentPermissionAndCapabilityTransactionsPreserveBoth(t *testing.T)
 
 func capabilityTestExecutable(t *testing.T) string {
 	t.Helper()
-	path, err := filepath.EvalSymlinks("/bin/echo")
+	exe, err := os.Executable()
 	if err != nil {
-		path = "/bin/echo"
+		t.Fatal(err)
 	}
-	return path
+	return exe
 }
 
 var _ sandboxauth.GrantSource = CapabilityGrantStore{}
