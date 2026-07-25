@@ -6692,36 +6692,30 @@ function GrantDetailView({ grant }: { grant: CapabilityGrantView }) {
 
 function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: SectionProps) {
   const t = useT();
-  const [busy, setBusy] = useState(false);
+  const [busy] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
   const grants = s.sandbox.capabilityGrants ?? [];
 
   const handleSave = useCallback(async (grant: Omit<CapabilityGrantView, "index" | "source">, source: string) => {
-    setBusy(true);
     setError(null);
     try {
-      await _apply(async () => {
-        await app.AddCapabilityGrant(source, { ...grant, index: 0, source });
-      });
+      await app.AddCapabilityGrant(source, { ...grant, index: 0, source });
       setShowDialog(false);
+      await _apply(async () => {});
     } catch (e) {
       setError(String(e));
-    } finally {
-      setBusy(false);
     }
   }, [_apply]);
 
   const handleDelete = useCallback(async (g: CapabilityGrantView) => {
-    setBusy(true);
     setError(null);
     try {
-      await _apply(() => app.DeleteCapabilityGrant(g.source, g));
+      await app.DeleteCapabilityGrant(g.source, g);
+      await _apply(async () => {});
     } catch (e) {
       setError(String(e));
-    } finally {
-      setBusy(false);
     }
   }, [_apply]);
 
@@ -6749,7 +6743,6 @@ function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: Section
           </button>
         }
       >
-        {error && <div className="settings-error">{error}</div>}
         {grants.length === 0 ? (
           <div className="mem-empty">{t("settings.noCapabilityGrants")}</div>
         ) : (
@@ -6796,7 +6789,7 @@ function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: Section
           </table>
         )}
       </SettingsSection>
-      {showDialog && <GrantDialog onSave={handleSave} onClose={() => setShowDialog(false)} busy={busy || parentBusy} />}
+      {showDialog && <GrantDialog onSave={handleSave} onClose={() => setShowDialog(false)} busy={busy || parentBusy} error={error} />}
     </>
   );
 }

@@ -8,12 +8,13 @@ interface GrantDialogProps {
   onSave: (grant: Omit<CapabilityGrantView, "index" | "source">, source: string) => void;
   onClose: () => void;
   busy: boolean;
+  error?: string | null;
 }
 
 type PathEntry = { identity: string; path: string; kind: string };
 type DeviceEntry = { path: string; kind: string; major: number; minor: number };
 
-export function GrantDialog({ grant, onSave, onClose, busy }: GrantDialogProps) {
+export function GrantDialog({ grant, onSave, onClose, busy, error }: GrantDialogProps) {
   const t = useT();
   const [source, setSource] = useState(grant?.source ?? "project");
   const [executable, setExecutable] = useState(grant?.canonicalExecutable ?? "");
@@ -159,6 +160,7 @@ export function GrantDialog({ grant, onSave, onClose, busy }: GrantDialogProps) 
         </div>
 
         <div className="modal-footer">
+          {error && <div className="modal-footer__error">{error}</div>}
           <button className="btn" disabled={busy} onClick={onClose}>{t("common.cancel")}</button>
           <button className="btn btn--primary" disabled={busy || !executable.trim()} onClick={handleSave}>{t("grant.save")}</button>
         </div>
