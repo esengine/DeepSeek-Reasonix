@@ -2,6 +2,92 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.18.0",
+      "date": "2026-07-25",
+      "channel": "stable",
+      "title": {
+        "en": "Stable and Preview release channels",
+        "zh": "Stable 与 Preview 双发布渠道"
+      },
+      "summary": {
+        "en": "This release introduces Stable and Preview public product channels for both desktop and native CLI, improving the release and update experience.",
+        "zh": "此版本为桌面和原生 CLI 同时引入 Stable 与 Preview 双公开产品渠道，改进了发布与更新体验。"
+      },
+      "surfaces": [
+        "desktop",
+        "cli"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Release Process",
+            "zh": "发布流程"
+          },
+          "body": {
+            "en": "Documentation for the release process including Stable and Preview channels.",
+            "zh": "包含 Stable 与 Preview 渠道的发布流程文档。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/908ce880e57eb825b3a80edad12c8d86757a86e4/docs/RELEASING.md"
+        },
+        {
+          "title": {
+            "en": "Windows Signing Standard Operating Procedure",
+            "zh": "Windows 签名标准操作程序"
+          },
+          "body": {
+            "en": "Procedure for Windows code signing and verification.",
+            "zh": "Windows 代码签名与验证程序。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/908ce880e57eb825b3a80edad12c8d86757a86e4/docs/SIGNPATH_WINDOWS_ADMIN_SOP.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Stable and Preview Release Channels",
+            "zh": "Stable 与 Preview 双发布渠道"
+          },
+          "body": {
+            "en": "Introduced two public product channels: Stable and Preview. Stable remains the weekly release, while Preview provides early access to upcoming features. Both channels are fully supported on desktop and native CLI, with secure update routing and code signing.",
+            "zh": "新增两个公开产品渠道：Stable 与 Preview。Stable 保持每周发布，Preview 提供早期功能体验。两个渠道均完整支持桌面和原生 CLI，并具备安全的更新路由和代码签名。"
+          },
+          "refs": [
+            6155
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Dual release channels for desktop and CLI",
+              "zh": "桌面和 CLI 的双发布渠道"
+            },
+            "body": {
+              "en": "Added Stable and Preview channels with distinct update tracks, verification, and distribution.",
+              "zh": "添加了 Stable 与 Preview 渠道，具备独立的更新轨迹、验证和分发机制。"
+            },
+            "refs": [
+              6155
+            ]
+          }
+        ],
+        "improved": [],
+        "fixed": []
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.18.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.21...desktop-v1.18.0",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.21",
       "date": "2026-07-25",
       "channel": "stable",
