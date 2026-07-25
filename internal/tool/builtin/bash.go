@@ -354,7 +354,7 @@ func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMe
 	if use == sandbox.AuthorizedDelta && launch.UsesDelta {
 		diagnostic = sandbox.CapabilityExecutionDiagnostic(launch, outcome)
 	}
-	if err != nil {
+	if err != nil && b.sb.Enforce() {
 		if d := sandbox.SandboxErrorDiagnostic(out); d != "" {
 			out = appendCapabilityDiagnostic(out, d)
 		}
