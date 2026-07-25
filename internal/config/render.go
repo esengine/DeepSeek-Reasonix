@@ -211,7 +211,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# recovery_model = \"deepseek-pro\"   # optional; falls back to guardian then main model\n")
 	}
 	if lang := c.ReasoningLanguage(); lang != "auto" {
-		fmt.Fprintf(&b, "reasoning_language = %q   # visible reasoning language: auto|zh|en\n", lang)
+		fmt.Fprintf(&b, "reasoning_language = %q   # visible reasoning language: auto|zh|en|off\n", lang)
 	} else {
 		b.WriteString("# reasoning_language = \"zh\"   # visible reasoning language: auto|zh|en\n")
 	}

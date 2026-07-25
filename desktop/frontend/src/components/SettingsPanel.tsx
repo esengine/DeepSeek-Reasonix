@@ -4192,7 +4192,7 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
             </SettingsField>
             <SettingsField label={t("settings.reasoningLanguage")} hint={t("settings.reasoningLanguageHint")}>
               <div className="set-seg">
-                {(["auto", "zh", "en"] as const).map((lang) => (
+                {(["auto", "zh", "en", "off"] as const).map((lang) => (
                   <button
                     key={lang}
                     className={`set-seg__btn${agent.reasoningLanguage === lang ? " set-seg__btn--on" : ""}`}

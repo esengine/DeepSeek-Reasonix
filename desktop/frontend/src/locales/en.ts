@@ -1551,6 +1551,7 @@ export const en = {
   "settings.reasoningLanguage.auto": "Auto",
   "settings.reasoningLanguage.zh": "中文",
   "settings.reasoningLanguage.en": "English",
+  "settings.reasoningLanguage.off": "Off",
   "settings.sound": "Sound",
   "settings.soundHint": "Background music and notification sounds",
   "settings.soundStatus.allOff": "All off",

@@ -1223,6 +1223,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.reasoningLanguage.auto": "自動",
   "settings.reasoningLanguage.zh": "中文",
   "settings.reasoningLanguage.en": "English",
+  "settings.reasoningLanguage.off": "關閉",
   "settings.keySet": "已設金鑰",
   "settings.noKey": "無金鑰",
   "settings.noKeyRequired": "無需金鑰",
