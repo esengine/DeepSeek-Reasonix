@@ -51,7 +51,7 @@ func main() {
 	if err := os.Chdir(dir); err != nil {
 		fatal("chdir: %v", err)
 	}
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	// Build the controller to get the real system prompt (with env probes,
 	// skills index, memory folding, etc.) and live tool registry.

@@ -82,14 +82,15 @@ func loadCapabilityGrantsFrom(path, root string) ([]sandboxauth.Grant, []sandbox
 		return nil, []sandboxauth.Diagnostic{{Source: path, Entry: -1, Code: "read", Message: err.Error()}}
 	}
 	var document capabilityGrantDocument
-	if _, err := toml.Decode(string(data), &document); err != nil {
+	md, err := toml.Decode(string(data), &document)
+	if err != nil {
 		return nil, []sandboxauth.Diagnostic{{Source: path, Entry: -1, Code: "toml", Message: fmt.Sprintf("load capability grants: %v", err)}}
 	}
 	grants := make([]sandboxauth.Grant, 0, len(document.Sandbox.CapabilityGrants))
 	diagnostics := make([]sandboxauth.Diagnostic, 0)
 	for i, primitive := range document.Sandbox.CapabilityGrants {
 		var entry capabilityGrantEntry
-		if err := toml.PrimitiveDecode(primitive, &entry); err != nil {
+		if err := md.PrimitiveDecode(primitive, &entry); err != nil {
 			diagnostics = append(diagnostics, grantDiagnostic(path, i, "decode", err))
 			continue
 		}

@@ -350,7 +350,7 @@ func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMe
 	}
 
 	defer launch.Close()
-	out, err, outcome := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv, launch.ExtraFiles)
+	out, outcome, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv, launch.ExtraFiles)
 	if use == sandbox.AuthorizedDelta && launch.UsesDelta {
 		diagnostic = sandbox.CapabilityExecutionDiagnostic(launch, outcome)
 	}
@@ -424,7 +424,7 @@ func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args j
 	})
 }
 
-func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, extraFiles []*os.File) (string, error, sandbox.CapabilityExecutionOutcome) {
+func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, extraFiles []*os.File) (string, sandbox.CapabilityExecutionOutcome, error) {
 	runCtx := ctx
 	timeout := b.foregroundTimeout()
 	if timeout > 0 {
@@ -458,13 +458,13 @@ func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell,
 	outcome := bashCapabilityExecutionOutcome(runCtx, cmd)
 
 	if errors.Is(context.Cause(runCtx), errBashTimeout) {
-		return out, fmt.Errorf("command timed out (> %s)", timeout), outcome
+		return out, outcome, fmt.Errorf("command timed out (> %s)", timeout)
 	}
 	if err != nil {
 		// Non-zero exit: feed output and error back so the model can self-correct.
-		return out, fmt.Errorf("command exited: %w", err), outcome
+		return out, outcome, fmt.Errorf("command exited: %w", err)
 	}
-	return out, nil, outcome
+	return out, outcome, nil
 }
 
 func bashCapabilityExecutionOutcome(ctx context.Context, cmd *exec.Cmd) sandbox.CapabilityExecutionOutcome {
