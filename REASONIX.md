@@ -27,6 +27,25 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 
 ## Notes
 
+### arch-optimize skill — DO NOT INVOKE
+
+The `arch-optimize` skill has been **PARKED** as of 2026-07-25. It is no longer
+in `.trae/skills/` and must NOT be re-created or invoked until the following
+conditions are ALL met:
+
+1. `agent.go` split into files of <= 800 lines each (currently 5,761)
+2. `Agent` struct fields <= 50 (currently 328)
+3. `Agent.Run()` <= 100 lines (currently 956)
+4. Functions > 50 lines in `internal/agent/` <= 20 (currently 80)
+5. `NewTaskTool` params <= 5 (currently 18)
+6. Full `internal/agent/` test baseline established at 100% pass
+7. Health score >= 50 (currently 0)
+
+The parked skill lives at `parked-skills/arch-optimize/` in the analysis
+workspace. The problems it found (8 Critical, 4 Warning) are all inherent to
+this codebase — the skill itself works correctly. See the parked `SKILL.md`
+for the full diagnostic report and recommended refactoring order.
+
 ## Pre-push CI simulation
 
 Run these **before every commit** to catch the fastest CI failures locally:
