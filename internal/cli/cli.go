@@ -1140,6 +1140,10 @@ func chatREPL(args []string) int {
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
 		m.cfg = cfg
 	}
+	// If the project enables YOLO sandbox capability expansion as a one-time
+	// override over the user's default, the user must accept it before any
+	// capability requests are auto-approved. Show the blocking banner now.
+	m.initYOLOAckState()
 
 	// /model support: a pure builder the TUI calls to rebuild on a different
 	// model (carrying the conversation). It must NOT touch the running model —

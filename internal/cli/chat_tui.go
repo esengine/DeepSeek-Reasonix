@@ -3977,6 +3977,20 @@ func (m *chatTUI) unsendPending() {
 	m.ctrl.Cancel()
 }
 
+// initYOLOAckState checks the controller's YOLO sandbox capability state and,
+// when acknowledgement is required for a project expansion, activates the
+// blocking acknowledgement banner before any tool calls are processed.
+func (m *chatTUI) initYOLOAckState() {
+	if m.ctrl == nil {
+		return
+	}
+	state, ok := m.ctrl.SandboxCapabilityYOLOState()
+	if ok && state.Acknowledgement == sandboxauth.YOLORequired {
+		m.yoloAckMode = true
+		m.approvalSelection = 0
+	}
+}
+
 // ingestEvent routes one typed event from the agent. Reasoning (dim) and answer
 // free-text accumulate in their live buffers; every other event first finalizes
 // the reasoning and answer streamed so far, then commits its own line —

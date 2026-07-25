@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/secrets"
 	"reasonix/internal/skill"
 	"reasonix/internal/testenv"
+	"reasonix/internal/tool"
 )
 
 type blockingTurnRunner struct{ started chan struct{} }
@@ -4256,5 +4257,37 @@ func TestCapabilityCardNoticeIntegration(t *testing.T) {
 	})
 	if !m.yoloAckMode {
 		t.Error("yoloAckMode should be set after sandbox_capability_project_expansion notice")
+	}
+}
+
+// TestTUIYOLOInitAckState verifies that initYOLOAckState activates the
+// blocking banner when the controller reports YOLORequired.
+func TestTUIYOLOInitAckState(t *testing.T) {
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix-home"))
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"),
+		[]byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := sandboxauth.NewYOLOPolicy(config.ResolveYOLOPolicyConfig(workspace))
+	engine := &sandboxauth.Engine{AutoOnce: policy}
+	ctrl := control.New(control.Options{
+		WorkspaceRoot:           workspace,
+		SandboxCapabilityEngine: engine,
+		Executor:                agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard),
+	})
+	ctrl.EnableInteractiveApproval()
+	ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.initYOLOAckState()
+
+	if !m.yoloAckMode {
+		t.Error("yoloAckMode should be true when YOLORequired state is detected")
+	}
+	if m.approvalSelection != 0 {
+		t.Error("approvalSelection should be 0 (Accept selected by default)")
 	}
 }
