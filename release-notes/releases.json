@@ -2,6 +2,467 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.17.21",
+      "date": "2026-07-25",
+      "channel": "stable",
+      "title": {
+        "en": "Desktop quality and security release",
+        "zh": "桌面质量与安全更新"
+      },
+      "summary": {
+        "en": "This stable release brings reliable paste undo, inline regex search in code previews, native crash diagnostics, and smarter planner routing. It also fixes code font application, provider retry cancellation, session conflicts, and plugin hooks. Security improvements include Authenticode signing of all Windows executables, credential sanitization in logs, and updated dependencies to close 12 advisories.",
+        "zh": "此稳定版带来可靠的粘贴撤销、代码预览中的内嵌正则搜索、原生崩溃诊断以及更智能的规划路由。同时修复了代码字体不生效、提供程序重试可取消、会话冲突及插件 Hooks 等问题。安全改进包括所有 Windows 可执行文件的 Authenticode 签名、日志凭据脱敏，以及更新依赖项以关闭 12 项安全公告。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "The official user guide for Reasonix Desktop.",
+            "zh": "Reasonix Desktop 的官方用户指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "The Chinese user guide for Reasonix Desktop.",
+            "zh": "Reasonix Desktop 的中文用户指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "The Reasonix specification.",
+            "zh": "Reasonix 规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/SPEC.md"
+        },
+        {
+          "title": {
+            "en": "Specification (Chinese)",
+            "zh": "规范（中文）"
+          },
+          "body": {
+            "en": "The Chinese Reasonix specification.",
+            "zh": "Reasonix 的中文规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/SPEC.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Inline regex search in code previews",
+            "zh": "代码预览中的内嵌正则搜索"
+          },
+          "body": {
+            "en": "A new regex toggle with bounded execution (Worker with timeout) enables safe pattern search in code views, with comprehensive result limits and error handling.",
+            "zh": "新增正则开关，通过限时执行（Worker 超时）在代码视图中启用安全的模式搜索，并提供了完整的结果限制和错误处理。"
+          },
+          "refs": [
+            6923
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Paste undo with Ctrl+Z on Windows",
+            "zh": "Windows 上 Ctrl+Z 粘贴撤销"
+          },
+          "body": {
+            "en": "Programmatic paste operations are now tracked in a per-draft transaction history, enabling Ctrl+Z to undo pastes while preserving native typing history and rich-composer state.",
+            "zh": "程序化粘贴操作现在按草稿跟踪事务历史，支持 Ctrl+Z 撤销粘贴，同时保留原生输入历史和富编辑器状态。"
+          },
+          "refs": [
+            6571
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Native crash diagnostics",
+            "zh": "原生崩溃诊断"
+          },
+          "body": {
+            "en": "Captures Go runtime fatal output and classifies abnormal exits with a bounded 10-report queue. Includes Windows responsiveness checks and crash worker integration.",
+            "zh": "捕获 Go 运行时致命输出并分类异常退出，采用有界 10 报告队列。包含 Windows 响应检查和崩溃 Worker 集成。"
+          },
+          "refs": [
+            6900
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Deterministic planner routing",
+            "zh": "确定性规划器路由"
+          },
+          "body": {
+            "en": "Replaces the boolean planner gate with explicit plan-and-execute, plan-for-approval, and plan-only routes, with light/full planning depth and bounded research.",
+            "zh": "将布尔规划器开关替换为明确的规划-执行、规划-批准和仅规划路由，并支持轻/全规划深度和有界研究。"
+          },
+          "refs": [
+            6918
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "MCP and Hooks trusted by default",
+            "zh": "默认信任 MCP 和 Hooks"
+          },
+          "body": {
+            "en": "Project and installed MCP servers and Hooks now load without separate trust confirmation, and trust state is removed. Duplicate names are resolved deterministically.",
+            "zh": "项目及已安装的 MCP 服务器和 Hooks 现在加载时无需单独信任确认，移除了信任状态。重复名称会确定性解析。"
+          },
+          "refs": [
+            6889
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Reduced Auto failure interruptions",
+            "zh": "减少 Auto 失败恢复打断"
+          },
+          "body": {
+            "en": "Tool failures are now treated as execution-reliability signals instead of task-wide approval boundaries, so unrelated work and read-only diagnosis continue automatically.",
+            "zh": "工具失败现在被视为执行可靠性信号而非任务范围批准边界，无关工作和只读诊断会自动继续。"
+          },
+          "refs": [
+            6896
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Redesigned search bar in code preview",
+            "zh": "重构的代码预览搜索栏"
+          },
+          "body": {
+            "en": "The full-width search toolbar is replaced with a compact floating popup that does not obscure code, while line numbers are properly aligned with content-box sizing.",
+            "zh": "全宽搜索工具栏替换为不遮挡代码的紧凑浮动弹窗，同时行号使用 content-box 尺寸正确对齐。"
+          },
+          "refs": [
+            6910
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Code font applied in chat and file preview",
+            "zh": "代码字体在对话和文件预览中生效"
+          },
+          "body": {
+            "en": "The code font selected in Typography Settings now correctly applies to chat code blocks and line-numbered file previews, overriding browser defaults.",
+            "zh": "排版设置中选择的代码字体现在正确应用于对话代码块和带行号的文件预览，覆盖浏览器默认值。"
+          },
+          "refs": [
+            6925
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Provider retries now cancellable",
+            "zh": "提供程序重试可取消"
+          },
+          "body": {
+            "en": "Retry status is treated as authoritative foreground activity, so the Stop button remains responsive and stale idle snapshots cannot hide the cancellation control.",
+            "zh": "重试状态被视为权威前台活动，因此停止按钮保持响应，过时的空闲快照无法隐藏取消控件。"
+          },
+          "refs": [
+            6902
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Session runtime ownership conflicts resolved",
+            "zh": "会话运行时所有权冲突已解决"
+          },
+          "body": {
+            "en": "One process now has one local session runtime owner per canonical session, preventing misleading 'lease blocked' errors in Goal + Delivery and duplicate-tab scenarios.",
+            "zh": "每个规范会话现在有一个进程内的本地会话运行时所有者，防止在 Goal + Delivery 及重复标签页中出现误导性的“租约阻塞”错误。"
+          },
+          "refs": [
+            6897
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Cross-platform plugin Hook execution",
+            "zh": "跨平台插件 Hook 执行"
+          },
+          "body": {
+            "en": "Plugin Hook execution contracts now correctly preserve explicit exec vs shell forms, and compound CMD/PowerShell scripts are transported intact without token re-rendering.",
+            "zh": "插件 Hook 执行契约现在正确保留显式 exec 与 shell 形式，复合 CMD/PowerShell 脚本原样传输且不重新渲染令牌。"
+          },
+          "refs": [
+            6911
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "All Windows executables signed",
+            "zh": "全部 Windows 可执行文件已签名"
+          },
+          "body": {
+            "en": "Every payload executable in the Windows installer is now Authenticode-signed, preventing Windows Defender from quarantining the app after installation or update.",
+            "zh": "Windows 安装程序中的每个载荷可执行文件现在均已 Authenticode 签名，防止安装或更新后 Windows Defender 隔离应用。"
+          },
+          "refs": [
+            6904
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Sanitized error logs",
+            "zh": "错误日志脱敏"
+          },
+          "body": {
+            "en": "Credentials and URL userinfo in error logs are now masked before writing, addressing CodeQL alerts and preventing sensitive data exposure.",
+            "zh": "错误日志中的凭据和 URL 用户信息在写入前被屏蔽，解决了 CodeQL 警报并防止敏感数据泄露。"
+          },
+          "refs": [
+            6924
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Dependency security patches",
+            "zh": "依赖安全补丁"
+          },
+          "body": {
+            "en": "Updated Astro, PostCSS, sharp, SVGO, DOMPurify, and other dependencies to close 12 Dependabot alerts across six vulnerability families.",
+            "zh": "更新了 Astro、PostCSS、sharp、SVGO、DOMPurify 等依赖项，关闭了六个漏洞系列中的 12 个 Dependabot 警报。"
+          },
+          "refs": [
+            6922
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Inline regex search in code previews",
+              "zh": "代码预览中的内嵌正则搜索"
+            },
+            "body": {
+              "en": "Add bounded regex search with Worker timeout, pattern/source limits, and result cap. Supports literal and regex toggles.",
+              "zh": "添加带 Worker 超时的有界正则搜索，限制模式和源码长度，并设置结果上限。支持字面量和正则切换。"
+            },
+            "refs": [
+              6923
+            ]
+          },
+          {
+            "title": {
+              "en": "Paste undo with Ctrl+Z",
+              "zh": "Ctrl+Z 粘贴撤销"
+            },
+            "body": {
+              "en": "Track programmatic paste edits in per-draft history, preserving native typing order. Undo/Redo added to context menu and shortcut catalog.",
+              "zh": "按草稿跟踪程序化粘贴编辑，保留原生输入顺序。在右键菜单和快捷键目录中添加撤销/重做。"
+            },
+            "refs": [
+              6571
+            ]
+          },
+          {
+            "title": {
+              "en": "Native crash diagnostics",
+              "zh": "原生崩溃诊断"
+            },
+            "body": {
+              "en": "Capture Go fatal output, classify exits, and queue up to 10 reports. Includes lifecycle signals and WebView2 checks.",
+              "zh": "捕获 Go 致命输出，分类退出并排队最多 10 份报告。包含生命周期信号和 WebView2 检查。"
+            },
+            "refs": [
+              6900
+            ]
+          },
+          {
+            "title": {
+              "en": "Deterministic planner routing",
+              "zh": "确定性规划器路由"
+            },
+            "body": {
+              "en": "Replace boolean gate with explicit routes (plan-and-execute, plan-for-approval, plan-only) and light/full depth.",
+              "zh": "用显式路由（规划-执行、规划-批准、仅规划）和轻/全深度替换布尔开关。"
+            },
+            "refs": [
+              6918
+            ]
+          },
+          {
+            "title": {
+              "en": "MCP and Hooks trusted by default",
+              "zh": "默认信任 MCP 和 Hooks"
+            },
+            "body": {
+              "en": "Remove launch confirmation for project MCP servers and Hooks. Persist installs to config.toml; resolve duplicates deterministically.",
+              "zh": "移除项目 MCP 服务器和 Hooks 的启动确认。将安装持久化到 config.toml；确定性解析重复项。"
+            },
+            "refs": [
+              6889
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Reduced Auto failure interruptions",
+              "zh": "减少 Auto 失败恢复打断"
+            },
+            "body": {
+              "en": "Treat tool failures as reliability signals, allowing unrelated work to continue. Bounded retries and concise recovery guidance.",
+              "zh": "将工具失败视为可靠性信号，允许无关工作继续。有界重试和简洁的恢复指引。"
+            },
+            "refs": [
+              6896
+            ]
+          },
+          {
+            "title": {
+              "en": "Redesigned search bar in code preview",
+              "zh": "重构的代码预览搜索栏"
+            },
+            "body": {
+              "en": "Replace full-width toolbar with floating search popup; align line numbers with content-box sizing.",
+              "zh": "用浮动搜索弹窗替换全宽工具栏；通过 content-box 尺寸对齐行号。"
+            },
+            "refs": [
+              6910
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Code font in chat and file preview",
+              "zh": "对话和文件预览中的代码字体"
+            },
+            "body": {
+              "en": "Apply configured code font to chat code blocks and line-numbered previews, overriding browser monospace.",
+              "zh": "将配置的代码字体应用于对话代码块和带行号的预览，覆盖浏览器等宽字体。"
+            },
+            "refs": [
+              6925
+            ]
+          },
+          {
+            "title": {
+              "en": "Provider retries cancellable",
+              "zh": "提供程序重试可取消"
+            },
+            "body": {
+              "en": "Treat retrying as foreground activity so Stop remains clickable regardless of snapshot order.",
+              "zh": "将重试视为前台活动，确保无论快照顺序如何，停止按钮始终可点击。"
+            },
+            "refs": [
+              6902
+            ]
+          },
+          {
+            "title": {
+              "en": "Session runtime ownership",
+              "zh": "会话运行时所有权"
+            },
+            "body": {
+              "en": "Enforce one local runtime owner per session to prevent duplicate builds and misleading lease errors.",
+              "zh": "每个会话强制单本地运行时所有者，防止重复构建和误导的租约错误。"
+            },
+            "refs": [
+              6897
+            ]
+          },
+          {
+            "title": {
+              "en": "Plugin Hook execution contracts",
+              "zh": "插件 Hook 执行契约"
+            },
+            "body": {
+              "en": "Preserve explicit exec/shell launch modes, transport compound scripts intact.",
+              "zh": "保留显式 exec/shell 启动模式，原样传输复合脚本。"
+            },
+            "refs": [
+              6911
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows Authenticode signing",
+              "zh": "Windows Authenticode 签名"
+            },
+            "body": {
+              "en": "Sign all payload executables to prevent Defender quarantine after install or update.",
+              "zh": "签名所有载荷可执行文件，防止安装或更新后被 Defender 隔离。"
+            },
+            "refs": [
+              6904
+            ]
+          },
+          {
+            "title": {
+              "en": "Sensitive data exposure in error logs",
+              "zh": "错误日志敏感信息泄露"
+            },
+            "body": {
+              "en": "Redact credentials and URL userinfo from heartbeat and bot controller error logs.",
+              "zh": "从心跳和机器人控制器错误日志中脱敏凭据和 URL 用户信息。"
+            },
+            "refs": [
+              6924
+            ]
+          },
+          {
+            "title": {
+              "en": "Dependency security updates",
+              "zh": "依赖安全更新"
+            },
+            "body": {
+              "en": "Patch 12 Dependabot alerts in Astro, PostCSS, sharp, SVGO, DOMPurify, etc.",
+              "zh": "修补 Astro、PostCSS、sharp、SVGO、DOMPurify 等中的 12 个 Dependabot 警报。"
+            },
+            "refs": [
+              6922
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "JesonChou",
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.21",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.20...desktop-v1.17.21",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.20",
       "date": "2026-07-24",
       "channel": "stable",
@@ -2333,12 +2794,12 @@
         {
           "kind": "security",
           "title": {
-			"en": "MCP launch authorization",
-			"zh": "MCP 启动授权"
+            "en": "MCP launch authorization",
+            "zh": "MCP 启动授权"
           },
           "body": {
-			"en": "User-installed MCP servers work immediately. Repository-declared servers still require one exact identity approval before startup, and identity changes invalidate that approval.",
-			"zh": "用户主动安装的 MCP server 可直接使用；仓库声明的 server 仍需在首次启动前确认一次精确身份，身份变化后原授权自动失效。"
+            "en": "User-installed MCP servers work immediately. Repository-declared servers still require one exact identity approval before startup, and identity changes invalidate that approval.",
+            "zh": "用户主动安装的 MCP server 可直接使用；仓库声明的 server 仍需在首次启动前确认一次精确身份，身份变化后原授权自动失效。"
           },
           "refs": [
             6482,
