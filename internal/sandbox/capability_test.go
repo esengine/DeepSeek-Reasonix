@@ -196,8 +196,9 @@ func TestEffectiveCapabilityDeltaSubtractsBaseAuthority(t *testing.T) {
 	allowed := CapabilityPath{Canonical: workspace, Kind: CapabilityDirectory}
 	extra := CapabilityPath{Canonical: external, Kind: CapabilityDirectory}
 	delta := effectiveCapabilityDelta(Spec{
-		Network:    true,
-		WriteRoots: []string{workspace},
+		Network:       true,
+		WriteRoots:    []string{workspace},
+		MinimalWrites: true,
 	}, CapabilitySet{
 		Network: true,
 		Reads:   []CapabilityPath{allowed},
