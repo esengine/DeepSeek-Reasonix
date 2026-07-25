@@ -124,8 +124,12 @@ func TestEvaluateCapabilityNormalizesIdentityAndPreservesKind(t *testing.T) {
 	if err := os.WriteFile(file, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	external := filepath.Join(t.TempDir(), "output.txt")
-	if err := os.WriteFile(external, nil, 0o644); err != nil {
+	externalRaw := filepath.Join(t.TempDir(), "output.txt")
+	if err := os.WriteFile(externalRaw, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	external, err := filepath.EvalSymlinks(externalRaw)
+	if err != nil {
 		t.Fatal(err)
 	}
 	raw := capabilityJSON(t, map[string]any{
@@ -181,8 +185,14 @@ func TestEvaluateCapabilityRejectsWorkspaceEscapeAndMissingTargets(t *testing.T)
 }
 
 func TestEffectiveCapabilityDeltaSubtractsBaseAuthority(t *testing.T) {
-	workspace := t.TempDir()
-	external := t.TempDir()
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	external, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	allowed := CapabilityPath{Canonical: workspace, Kind: CapabilityDirectory}
 	extra := CapabilityPath{Canonical: external, Kind: CapabilityDirectory}
 	delta := effectiveCapabilityDelta(Spec{
@@ -199,7 +209,10 @@ func TestEffectiveCapabilityDeltaSubtractsBaseAuthority(t *testing.T) {
 }
 
 func TestWriteUnderForbiddenReadRequiresExplicitSufficientRead(t *testing.T) {
-	secret := t.TempDir()
+	secret, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	child := filepath.Join(secret, "child")
 	if err := os.Mkdir(child, 0o755); err != nil {
 		t.Fatal(err)
@@ -239,7 +252,10 @@ func TestBroadCapabilityRootsRemainValidButCritical(t *testing.T) {
 }
 
 func TestSensitiveCapabilityPathsCarryCriticalRisk(t *testing.T) {
-	workspace := t.TempDir()
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	forbidden := filepath.Join(workspace, "private")
 	if err := os.Mkdir(forbidden, 0o755); err != nil {
 		t.Fatal(err)
