@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -185,6 +186,9 @@ func TestEvaluateCapabilityRejectsWorkspaceEscapeAndMissingTargets(t *testing.T)
 }
 
 func TestEffectiveCapabilityDeltaSubtractsBaseAuthority(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows capabilityBaseWriteRoots uses AppContainerWriteRoots, not WriteRoots")
+	}
 	workspace, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -240,6 +244,9 @@ func TestWriteUnderForbiddenReadRequiresExplicitSufficientRead(t *testing.T) {
 }
 
 func TestBroadCapabilityRootsRemainValidButCritical(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no Unix-style filesystem root suitable for CanonicalAbsolute")
+	}
 	raw := capabilityJSON(t, map[string]any{
 		"read_paths": []any{map[string]string{"identity": string(CanonicalAbsolute), "path": string(filepath.Separator)}},
 	})
