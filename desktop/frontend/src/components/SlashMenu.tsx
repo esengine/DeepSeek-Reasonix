@@ -51,11 +51,15 @@ export function SlashMenu({
   activeIndex,
   onPick,
   onHover,
+  isDisabled,
+  disabledReason,
 }: {
   items: CommandInfo[];
   activeIndex: number;
   onPick: (c: CommandInfo) => void;
   onHover: (i: number) => void;
+  isDisabled?: (c: CommandInfo) => boolean;
+  disabledReason?: string;
 }) {
   const t = useT();
   const grouped = new Map<SlashCommandGroup, Array<{ command: CommandInfo; commandIndex: number }>>();
@@ -88,16 +92,23 @@ export function SlashMenu({
         <button
           role="option"
           aria-selected={row.commandIndex === activeIndex}
-          className={`slashmenu__item ${row.commandIndex === activeIndex ? "slashmenu__item--active" : ""}`}
+          aria-disabled={isDisabled?.(row.command) || undefined}
+          className={`slashmenu__item ${row.commandIndex === activeIndex ? "slashmenu__item--active" : ""}${isDisabled?.(row.command) ? " slashmenu__item--disabled" : ""}`}
+          disabled={isDisabled?.(row.command)}
           onMouseDown={(e) => {
             e.preventDefault();
+            if (isDisabled?.(row.command)) return;
             onPick(row.command);
           }}
-          onMouseMove={() => onHover(row.commandIndex)}
+          onMouseMove={() => {
+            if (!isDisabled?.(row.command)) onHover(row.commandIndex);
+          }}
         >
           <span className="slashmenu__name">/{row.command.name}</span>
           {row.command.hint && <span className="slashmenu__hint">{row.command.hint}</span>}
-          <span className="slashmenu__desc">{row.command.description}</span>
+          <span className="slashmenu__desc">
+            {isDisabled?.(row.command) ? disabledReason : row.command.description}
+          </span>
           {slashCommandKindTag(row.command, t) && <span className="slashmenu__kind">{slashCommandKindTag(row.command, t)}</span>}
         </button>
       )}

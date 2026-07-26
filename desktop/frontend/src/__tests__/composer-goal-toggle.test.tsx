@@ -1375,6 +1375,115 @@ console.log("\ncomposer goal toggle");
 
 {
   const dom = installDom();
+  mockApp({
+    Commands: async () => [
+      { name: "writing-plans", description: "Write a plan", kind: "skill", color: "amber" },
+      { name: "review", description: "Review the result", kind: "skill" },
+      { name: "mcp", description: "Manage MCP servers", kind: "builtin", group: "integrations" },
+    ],
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+  });
+  const { root, calls, rerender } = await renderComposer();
+
+  const initialText = "请用/检查";
+  await replaceComposerDraft(rerender, 1900, initialText);
+  let textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("composer textarea did not render for middle slash completion");
+  const slashCaret = "请用/".length;
+  await act(async () => {
+    textarea!.focus();
+    textarea!.setSelectionRange(slashCaret, slashCaret);
+    textarea!.dispatchEvent(new window.Event("select", { bubbles: true }));
+    textarea!.dispatchEvent(new window.KeyboardEvent("keyup", { key: "/", bubbles: true }));
+    await flushTimers();
+  });
+  await waitFor("middle slash command menu", () => Boolean(document.querySelector(".slashmenu")));
+
+  await act(async () => {
+    textarea!.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+
+  let richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  let tokens = richInput?.querySelectorAll<HTMLElement>(".composer-invocation-token");
+  if (!richInput || !tokens?.[0]) throw new Error("middle skill invocation did not render");
+  eq(richComposerTaskText(richInput), "请用检查", "first middle skill selection preserves surrounding text");
+  eq(
+    document.querySelector<HTMLElement>(".invocation-display--composer")?.style.getPropertyValue("--invocation-color"),
+    "#d59a2f",
+    "middle skill selection keeps its configured color",
+  );
+
+  const afterFirstToken = document.createRange();
+  afterFirstToken.setStartAfter(tokens[0]);
+  afterFirstToken.collapse(true);
+  document.getSelection()?.removeAllRanges();
+  document.getSelection()?.addRange(afterFirstToken);
+  await act(async () => {
+    dispatchPasteText(richInput!, "更多");
+    await flushTimers();
+  });
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("rich input disappeared after middle-skill paste");
+  eq(richComposerTaskText(richInput), "请用更多检查", "paste after a middle skill preserves the entity and suffix");
+  eq(
+    richInput.querySelectorAll(".composer-invocation-token").length,
+    1,
+    "paste after a middle skill keeps the selected entity",
+  );
+
+  await appendRichComposerInput(richInput, " /review");
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("rich input disappeared before the second skill selection");
+  const queryAtEnd = document.createRange();
+  queryAtEnd.selectNodeContents(richInput);
+  queryAtEnd.collapse(false);
+  document.getSelection()?.removeAllRanges();
+  document.getSelection()?.addRange(queryAtEnd);
+  await act(async () => {
+    richInput!.dispatchEvent(new window.KeyboardEvent("keyup", { key: "w", bubbles: true }));
+    await flushTimers();
+  });
+  await waitFor("second skill menu at the end", () => Boolean(document.querySelector(".slashmenu")));
+  await act(async () => {
+    richInput!.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  tokens = richInput?.querySelectorAll<HTMLElement>(".composer-invocation-token");
+  eq(tokens?.length, 2, "a second skill can be inserted after existing text and an entity");
+  const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("send button did not render for middle skill submission");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+  eq(calls.structured[0]?.input, "请用更多检查", "middle skills submit the surrounding task text without slash tokens");
+  eq(
+    calls.structured[0]?.invocations.map((item) => item.name).join(","),
+    "writing-plans,review",
+    "multiple middle/end skills submit in visual order",
+  );
+  eq(calls.structured[0]?.invocations[0]?.offset, 2, "first middle skill keeps its text offset");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
   let commandsCalls = 0;
   const slashArgInputs: string[] = [];
   let availableCommands: CommandInfo[] = [

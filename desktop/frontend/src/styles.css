@@ -6033,6 +6033,14 @@ body > .mermaid-diagram--fullscreen {
 .slashmenu__item--active {
   background: var(--accent-soft);
 }
+.slashmenu__item--disabled {
+  color: var(--fg-faint);
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+.slashmenu__item--disabled .slashmenu__name {
+  color: var(--fg-faint);
+}
 .slashmenu__name {
   font-family: var(--mono);
   font-size: 13px;
@@ -6270,17 +6278,36 @@ body > .mermaid-diagram--fullscreen {
 .composer-invocation-token {
   display: inline-block;
   max-width: min(100%, 320px);
-  margin: 0 3px;
+  margin: 0 1px;
   vertical-align: baseline;
   white-space: nowrap;
 }
 .composer-invocation-token:first-child {
   margin-left: 0;
 }
+.composer-invocation-token .invocation-display--composer {
+  gap: 0;
+  min-height: 0;
+}
+.composer-invocation-token .invocation-display__identity {
+  gap: 4px;
+  padding: 0;
+}
+.composer-invocation-token .invocation-display__identity > svg {
+  width: 1em;
+  height: 1em;
+}
+.composer-invocation-token .invocation-display__name {
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+}
 .composer-invocation-caret-anchor {
   display: inline-block;
-  min-width: 8px;
+  width: 1px;
+  min-width: 1px;
   min-height: 1em;
+  overflow: hidden;
   vertical-align: text-bottom;
 }
 .composer-card--resized .composer__rich-input {

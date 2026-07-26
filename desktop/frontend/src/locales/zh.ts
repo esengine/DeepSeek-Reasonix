@@ -2516,6 +2516,7 @@ export const zh: Record<DictKey, string> = {
   "slash.mcp": "mcp",
   "slash.skill": "skill",
   "slash.subagent": "子智能体",
+  "slash.startOnly": "仅可在消息开头使用",
   "slash.group.actions": "快捷操作",
   "slash.group.management": "更多命令",
   "slash.group.subagents": "子智能体",

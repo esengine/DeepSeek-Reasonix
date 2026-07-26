@@ -49,6 +49,10 @@ export function commandUsesStructuredInvocation(command: CommandInfo): boolean {
   return command.kind === "skill" || command.kind === "subagent";
 }
 
+export function commandAvailableAtSlashPosition(command: CommandInfo, atMessageStart: boolean): boolean {
+  return atMessageStart || commandUsesStructuredInvocation(command);
+}
+
 export function invocationLabel(name: string): string {
   const unqualified = name.split(":").pop() || name;
   return unqualified
