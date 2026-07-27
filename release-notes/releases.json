@@ -10,11 +10,17 @@
         "zh": "新增 Kimi K3 支持、预览与稳定发布渠道、签名完整性保障"
       },
       "summary": {
-        "en": "This release introduces support for the Kimi K3 model, desktop release channels (Preview and Stable), and hardening of the release signing process.",
-        "zh": "本次发布新增对 Kimi K3 模型的支持，推出桌面版预览与稳定双渠道，并强化了发布签名流程。"
+        "en": "This release adds Kimi K3 support to the official Kimi APIs and OpenCode Go, introduces Preview and Stable channels for Desktop and native CLI, and hardens the Windows release signing process.",
+        "zh": "本次发布为官方 Kimi API 与 OpenCode Go 新增 Kimi K3 支持，为桌面版和原生 CLI 推出 Preview 与 Stable 双渠道，并强化 Windows 发布签名流程。"
       },
       "surfaces": [
-        "desktop"
+        "agent",
+        "cli",
+        "desktop",
+        "provider",
+        "remote",
+        "security",
+        "updates"
       ],
       "guides": [
         {
@@ -81,8 +87,8 @@
             "zh": "支持 Kimi K3 模型"
           },
           "body": {
-            "en": "We’ve added the Kimi K3 model to the official Kimi CN and Kimi Global direct-API providers, with native vision, a 1,048,576-token context window, and low/high/max reasoning scale.",
-            "zh": "我们已将 Kimi K3 模型添加到官方 Kimi 国内版和全球版直接 API 提供商中，支持原生视觉、1,048,576 token 上下文窗口以及低/高/最高推理等级。"
+            "en": "Kimi K3 is now available through the official Kimi CN and Global direct APIs and OpenCode Go. Official APIs support native vision, a 1,048,576-token context window, and low/high/max reasoning; OpenCode Go keeps its relay-specific high/max scale.",
+            "zh": "Kimi K3 现已支持官方 Kimi 国内版、全球版直接 API 及 OpenCode Go。官方 API 支持原生视觉、1,048,576 token 上下文窗口和低/高/最高推理等级；OpenCode Go 保留其专用的高/最高等级。"
           },
           "refs": [
             6921
@@ -95,8 +101,8 @@
             "zh": "预览版与稳定版发布渠道"
           },
           "body": {
-            "en": "Reasonix Desktop now offers two update channels: Preview for early access features and Stable for production use. You can switch channels in Settings.",
-            "zh": "Reasonix 桌面版现提供两种更新渠道：预览渠道可提前体验新功能，稳定渠道适用于正式使用。您可在设置中切换渠道。"
+            "en": "Reasonix Desktop and native CLI now expose two public product channels: Preview for early access and Stable for production use. Desktop users can switch channels in Settings.",
+            "zh": "Reasonix 桌面版和原生 CLI 现提供两个公开产品渠道：Preview 用于抢先体验，Stable 用于正式使用。桌面用户可在设置中切换渠道。"
           },
           "refs": [
             6155
@@ -134,6 +140,19 @@
           },
           {
             "title": {
+              "en": "Kimi K3 support in OpenCode Go",
+              "zh": "OpenCode Go 支持 Kimi K3"
+            },
+            "body": {
+              "en": "OpenCode Go now exposes Kimi K3 with its relay-specific high/max reasoning scale and existing OpenAI-compatible request behavior.",
+              "zh": "OpenCode Go 现支持 Kimi K3，并保留中继专用的高/最高推理等级及现有 OpenAI 兼容请求行为。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
               "en": "Native vision and 1M context for Kimi K3",
               "zh": "Kimi K3 支持原生视觉和百万级上下文"
             },
@@ -147,12 +166,12 @@
           },
           {
             "title": {
-              "en": "Desktop release channels",
-              "zh": "桌面版发布渠道"
+              "en": "Desktop and native CLI release channels",
+              "zh": "桌面版和原生 CLI 发布渠道"
             },
             "body": {
-              "en": "Introduced Preview and Stable channels for desktop updates, selectable in Settings.",
-              "zh": "推出桌面版预览与稳定更新渠道，可在设置中选择。"
+              "en": "Introduced Preview and Stable channels for Desktop updates and native CLI archives; Desktop users can select their channel in Settings.",
+              "zh": "为桌面更新和原生 CLI 归档推出 Preview 与 Stable 渠道；桌面用户可在设置中选择渠道。"
             },
             "refs": [
               6155
