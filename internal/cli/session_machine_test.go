@@ -48,6 +48,18 @@ func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
 	}
 }
 
+func TestMachineProjectSessionDirUsesProjectStore(t *testing.T) {
+	projectRoot := t.TempDir()
+	got := machineProjectSessionDir(projectRoot)
+	want := config.ProjectSessionDir(projectRoot)
+	if got != want {
+		t.Fatalf("machine project session dir = %q, want %q", got, want)
+	}
+	if got == projectRoot {
+		t.Fatalf("machine project session dir must not use the project root directly: %q", got)
+	}
+}
+
 func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
