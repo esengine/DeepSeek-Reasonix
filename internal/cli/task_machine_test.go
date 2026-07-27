@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 )
@@ -20,8 +21,7 @@ func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "session", time.Date(2026, 7, 23, 13, 0, 0, 0, time.UTC))
-	sessionDir := machineTestSessionDir(dir)
-	path := filepath.Join(sessionDir, "session.jsonl")
+	path := filepath.Join(dir, "session.jsonl")
 	manager := jobs.NewManager(event.Discard)
 	manager.SetActiveSessionPath("session", path)
 	job := manager.StartForSession("session", "task", "PRIVATE TASK LABEL", func(context.Context, io.Writer) (string, error) {
@@ -71,8 +71,7 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "session", time.Now())
-	sessionDir := machineTestSessionDir(dir)
-	subDir := filepath.Join(sessionDir, "subagents")
+	subDir := filepath.Join(dir, "subagents")
 	if err := os.MkdirAll(subDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +94,7 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		t.Fatal(err)
 	}
 
-	tasks, err := machineTasks(sessionDir, machineSessionIDWithKey("session", identityKey), identityKey)
+	tasks, err := machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,12 +112,12 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		t.Fatalf("missing artifact projection = %+v", got)
 	}
 
-	lease, err := agent.TryAcquireSessionLease(filepath.Join(sessionDir, "session.jsonl"))
+	lease, err := agent.TryAcquireSessionLease(filepath.Join(dir, "session.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.Release()
-	tasks, err = machineTasks(sessionDir, machineSessionIDWithKey("session", identityKey), identityKey)
+	tasks, err = machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,6 +125,33 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		if task.ID == "sa_running" && (task.Status != string(agent.SubagentRunning) || task.FinishedAt != "" || task.ArtifactComplete) {
 			t.Fatalf("live running projection = %+v", task)
 		}
+	}
+}
+
+func TestTaskMachineProjectRootUsesProjectStore(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	projectRoot := t.TempDir()
+	sessionDir := config.ProjectSessionDir(projectRoot)
+	saveMachineTestSession(t, sessionDir, "session", time.Date(2026, 7, 23, 13, 30, 0, 0, time.UTC))
+	path := filepath.Join(sessionDir, "session.jsonl")
+	manager := jobs.NewManager(event.Discard)
+	manager.SetActiveSessionPath("session", path)
+	job := manager.StartForSession("session", "task", "PRIVATE TASK LABEL", func(context.Context, io.Writer) (string, error) {
+		return "PRIVATE TASK OUTPUT", nil
+	})
+	manager.WaitForSession(context.Background(), "session", []string{job.ID}, 1)
+	manager.Close()
+
+	var out bytes.Buffer
+	if code := runTaskCommand([]string{"list", "--json", "--project-root", projectRoot}, &out); code != 0 {
+		t.Fatalf("task list exit code = %d, output = %s", code, out.String())
+	}
+	var response machineTaskList
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode task list: %v", err)
+	}
+	if len(response.Tasks) != 1 || response.Tasks[0].ID != job.ID || response.Tasks[0].SessionID != machineSessionIDWithKey("session", identityKey) {
+		t.Fatalf("tasks = %+v, want project task", response.Tasks)
 	}
 }
 
@@ -157,5 +183,21 @@ func TestTaskMachineEmptyListUsesAnArray(t *testing.T) {
 	}
 	if response.Tasks == nil {
 		t.Fatalf("tasks must be [] in empty response: %s", out.String())
+	}
+}
+
+func TestTaskMachineRejectsConflictingSessionSources(t *testing.T) {
+	installMachineTestIdentity(t)
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if code := runTaskCommand([]string{"list", "--json", "--dir", dir, "--project-root", dir}, &out); code != 2 {
+		t.Fatalf("exit code = %d, output = %s", code, out.String())
+	}
+	var response machineErrorResponse
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Error.Code != "invalid_argument" {
+		t.Fatalf("response = %+v", response)
 	}
 }

@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,11 +59,30 @@ func TestMachineProjectSessionDirUsesProjectStore(t *testing.T) {
 	}
 }
 
+func TestSessionMachineProjectRootUsesProjectStore(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	projectRoot := t.TempDir()
+	sessionDir := config.ProjectSessionDir(projectRoot)
+	saveMachineTestSession(t, sessionDir, "project", time.Date(2026, 7, 23, 11, 30, 0, 0, time.UTC))
+
+	var out bytes.Buffer
+	if code := runSessionCommand([]string{"list", "--json", "--project-root", projectRoot}, &out); code != 0 {
+		t.Fatalf("list exit code = %d, output = %s", code, out.String())
+	}
+	var response machineSessionList
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(response.Sessions) != 1 || response.Sessions[0].ID != machineSessionIDWithKey("project", identityKey) {
+		t.Fatalf("sessions = %+v, want project session", response.Sessions)
+	}
+}
+
 func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "busy", time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
-	path := filepath.Join(machineTestSessionDir(dir), "busy.jsonl")
+	path := filepath.Join(dir, "busy.jsonl")
 	lease, err := agent.TryAcquireSessionLease(path)
 	if err != nil {
 		t.Fatalf("acquire session lease: %v", err)
@@ -120,6 +138,7 @@ func TestSessionMachineErrorsAreJSONAndNonZero(t *testing.T) {
 	}{
 		{name: "missing json", args: []string{"list", "--dir", dir}, code: 2, err: "invalid_argument"},
 		{name: "missing session", args: []string{"show", "--json", "missing", "--dir", dir}, code: 1, err: "session_not_found"},
+		{name: "conflicting session sources", args: []string{"list", "--json", "--dir", dir, "--project-root", dir}, code: 2, err: "invalid_argument"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,11 +162,7 @@ func TestSessionMachineErrorsAreJSONAndNonZero(t *testing.T) {
 
 func saveMachineTestSession(t *testing.T, dir, id string, updatedAt time.Time) {
 	t.Helper()
-	sessionDir := config.ProjectSessionDir(dir)
-	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
-		t.Fatalf("create project session dir: %v", err)
-	}
-	path := filepath.Join(sessionDir, id+".jsonl")
+	path := filepath.Join(dir, id+".jsonl")
 	session := agent.NewSession("")
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "private prompt"})
 	session.Add(provider.Message{Role: provider.RoleAssistant, Content: "private answer"})
@@ -165,8 +180,4 @@ func saveMachineTestSession(t *testing.T, dir, id string, updatedAt time.Time) {
 	}); err != nil {
 		t.Fatalf("save branch meta: %v", err)
 	}
-}
-
-func machineTestSessionDir(projectRoot string) string {
-	return config.ProjectSessionDir(projectRoot)
 }
