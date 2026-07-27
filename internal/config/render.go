@@ -441,6 +441,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	b.WriteString("# without one, bash execution is refused. Empty defaults to enforce on macOS/Linux.\n")
 	b.WriteString("# Windows has no OS-level Bash sandbox and fixes bash = \"off\".\n")
 	b.WriteString("# network allows sandboxed bash egress.\n")
+	b.WriteString("# yolo_auto_approve_capabilities applies requested capability deltas for one invocation in YOLO.\n")
 	if c.Sandbox.WorkspaceRoot != "" {
 		fmt.Fprintf(&b, "workspace_root = %q\n", c.Sandbox.WorkspaceRoot)
 	} else {
@@ -458,6 +459,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	fmt.Fprintf(&b, "bash    = %q\n", c.BashMode())
 	fmt.Fprintf(&b, "network = %v\n", c.Sandbox.Network)
+	fmt.Fprintf(&b, "yolo_auto_approve_capabilities = %v\n", c.Sandbox.YOLOAutoApproveCapabilities)
 	b.WriteString("\n")
 
 	b.WriteString("[statusline]\n")
@@ -1109,6 +1111,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if c.Sandbox.Network != d.Sandbox.Network {
 			fmt.Fprintf(&sandboxBuf, "network = %v\n", c.Sandbox.Network)
+		}
+		if c.Sandbox.YOLOAutoApproveCapabilities != d.Sandbox.YOLOAutoApproveCapabilities {
+			fmt.Fprintf(&sandboxBuf, "yolo_auto_approve_capabilities = %v\n", c.Sandbox.YOLOAutoApproveCapabilities)
 		}
 		if sandboxBuf.Len() > 0 {
 			b.WriteString("[sandbox]\n")

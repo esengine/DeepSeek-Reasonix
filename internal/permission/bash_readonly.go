@@ -40,10 +40,11 @@ func isReadOnlyBashSubject(subject string) bool {
 	if !ok {
 		return false
 	}
-	fields, malformed := shellparse.StaticFields(subject)
-	if malformed != "" {
+	command, err := shellparse.ParseReusableCommand(subject)
+	if err != nil {
 		return false
 	}
+	fields := command.Argv
 	if sub == "" {
 		return !hasUnsafeReadOnlyArgs(base, fields[1:])
 	}

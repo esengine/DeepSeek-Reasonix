@@ -73,6 +73,17 @@ func StaticFields(command string) ([]string, string) {
 // ParseStaticCommand parses a single static Bash command into argv and optional
 // environment assignments. It never evaluates shell expansion or runs a shell.
 func ParseStaticCommand(command string, policy StaticCommandPolicy) (StaticCommand, error) {
+	return parseStaticCommand(command, policy, false)
+}
+
+// ParseReusableCommand parses one command whose argv remains stable when the
+// same source is later executed by a shell. It rejects unquoted shell
+// expansions in addition to ParseStaticCommand's ordinary static checks.
+func ParseReusableCommand(command string) (StaticCommand, error) {
+	return parseStaticCommand(command, StaticCommandPolicy{}, true)
+}
+
+func parseStaticCommand(command string, policy StaticCommandPolicy, reusable bool) (StaticCommand, error) {
 	var out StaticCommand
 	if strings.TrimSpace(command) == "" {
 		return out, nil
@@ -112,6 +123,9 @@ func ParseStaticCommand(command string, policy StaticCommandPolicy) (StaticComma
 
 	out.Argv = make([]string, 0, len(call.Args))
 	for _, arg := range call.Args {
+		if reusable && (syntax.SplitBraces(arg) || hasUnquotedExpansion(arg)) {
+			return out, staticReject(StaticRejectExpansion, "")
+		}
 		field, ok := StaticWord(arg)
 		if !ok {
 			return out, staticReject(StaticRejectExpansion, "")
@@ -122,6 +136,44 @@ func ParseStaticCommand(command string, policy StaticCommandPolicy) (StaticComma
 		return StaticCommand{}, staticReject(StaticRejectAssignment, "shell assignment without command")
 	}
 	return out, nil
+}
+
+func hasUnquotedExpansion(word *syntax.Word) bool {
+	if word == nil {
+		return false
+	}
+	for i, part := range word.Parts {
+		lit, ok := part.(*syntax.Lit)
+		if !ok {
+			continue
+		}
+		if i == 0 && strings.HasPrefix(lit.Value, "~") {
+			return true
+		}
+		escaped := false
+		bracket := false
+		for _, r := range lit.Value {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if r == '\\' {
+				escaped = true
+				continue
+			}
+			if r == '*' || r == '?' {
+				return true
+			}
+			if r == '[' {
+				bracket = true
+				continue
+			}
+			if r == ']' && bracket {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func staticFieldsMessage(err error) string {

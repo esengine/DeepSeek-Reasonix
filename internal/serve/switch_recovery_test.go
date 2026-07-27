@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 )
 
 // primarySessionFiles filters a recovery-branch glob down to primary session
@@ -233,6 +234,51 @@ func TestSwitchModelRestoresSessionAuthorizations(t *testing.T) {
 	}
 	if len(got.PlanModeReadOnlyCommands) != 1 || got.PlanModeReadOnlyCommands[0] != "go test ./..." {
 		t.Fatalf("restored plan-mode read-only commands = %+v, want [\"go test ./...\"]", got.PlanModeReadOnlyCommands)
+	}
+}
+
+func TestSwitchModelRestoresInteractivePostureAndYOLOSessionState(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	newEngine := func() *sandboxauth.Engine {
+		return &sandboxauth.Engine{AutoOnce: sandboxauth.NewYOLOPolicy(sandboxauth.YOLOPolicyConfig{
+			Workspace: workspace, Effective: true, ProjectExpansion: true,
+		})}
+	}
+	bc := NewBroadcaster()
+	old := control.New(control.Options{
+		Executor:      agent.New(nil, nil, agent.NewSession("old system"), agent.Options{}, event.Discard),
+		WorkspaceRoot: workspace, SandboxCapabilityEngine: newEngine(), Sink: bc,
+	})
+	old.EnableInteractiveApproval()
+	old.SetPlanMode(true)
+	old.SetToolApprovalMode(control.ToolApprovalYolo)
+	if !old.AcknowledgeSandboxCapabilityYOLO(true) {
+		t.Fatal("old controller did not accept required YOLO acknowledgement")
+	}
+
+	s := &Server{ctrl: old, bc: bc}
+	s.buildController = func(_ context.Context, _ string) (*control.Controller, error) {
+		return control.New(control.Options{
+			Executor:      agent.New(nil, nil, agent.NewSession("new system"), agent.Options{}, event.Discard),
+			WorkspaceRoot: workspace, SandboxCapabilityEngine: newEngine(), Sink: bc,
+		}), nil
+	}
+
+	if err := s.switchModel(context.Background(), "next-model"); err != nil {
+		t.Fatalf("switchModel: %v", err)
+	}
+	newCtrl := s.ctl()
+	if !newCtrl.PlanMode() || newCtrl.ToolApprovalMode() != control.ToolApprovalYolo {
+		t.Fatalf("rebuilt posture: plan=%v mode=%q", newCtrl.PlanMode(), newCtrl.ToolApprovalMode())
+	}
+	state, ok := newCtrl.SandboxCapabilityYOLOState()
+	if !ok || !state.Interactive || !state.YOLO || state.Acknowledgement != sandboxauth.YOLOAccepted {
+		t.Fatalf("rebuilt YOLO state = %+v ok=%v", state, ok)
 	}
 }
 

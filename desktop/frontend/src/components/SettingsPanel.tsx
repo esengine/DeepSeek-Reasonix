@@ -1,7 +1,8 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
+import { lazy, memo, Fragment, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
+import { GrantDialog } from "./GrantDialog";
 import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
@@ -38,7 +39,7 @@ import {
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
 import { getProcessFoldPreference, onProcessFoldPreferenceChange, setProcessFoldPreference, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
-import { normalizeToolApprovalMode } from "../lib/types";
+import { normalizeToolApprovalMode, type CapabilityGrantView } from "../lib/types";
 import {
   comboFromKeyboardEvent,
   detectShortcutPlatform,
@@ -286,7 +287,7 @@ export function SettingsPanel({
                 {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /><CapabilityGrantsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
@@ -6586,7 +6587,7 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
   const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
   const effectiveShell = effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t);
   const set = (next: Partial<typeof sb>) =>
-    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
+    apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell, next.yoloAutoApproveCapabilities ?? sb.yoloAutoApproveCapabilities));
   const reload = () => apply(() => app.ReloadSettings());
 
   return (
@@ -6628,6 +6629,12 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
           {t("settings.allowNetwork")}
         </label>
       </SettingsField>
+      <SettingsField label={t("settings.yoloAutoApproveCapabilities")}>
+        <label className="set-check set-check--inline">
+          <input type="checkbox" checked={sb.yoloAutoApproveCapabilities} disabled={busy} onChange={(e) => void set({ yoloAutoApproveCapabilities: e.target.checked })} />
+          {t("settings.yoloAutoApproveCapabilities")}
+        </label>
+      </SettingsField>
       <SettingsField label={t("settings.workspaceRoot")}>
         <input
           className="mem-input set-grow"
@@ -6658,6 +6665,134 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
         onRemove={(d) => set({ allowWrite: sb.allowWrite.filter((x) => x !== d) })}
       />
     </SettingsSection>
+  );
+}
+
+function GrantDetailView({ grant }: { grant: CapabilityGrantView }) {
+  const t = useT();
+  const detail: { label: string; items: string[] }[] = [];
+  if (grant.network) detail.push({ label: t("grant.network"), items: ["🌐"] });
+  if (grant.reads?.length) detail.push({ label: t("grant.reads"), items: grant.reads.map((r) => `${r.path} (${r.kind}, ${r.identity})`) });
+  if (grant.writes?.length) detail.push({ label: t("grant.writes"), items: grant.writes.map((w) => `${w.path} (${w.kind}, ${w.identity})`) });
+  if (grant.devices?.length) detail.push({ label: t("grant.devices"), items: grant.devices.map((d) => `${d.path} (${d.kind}, ${d.major}:${d.minor})`) });
+  if (grant.background) detail.push({ label: t("grant.background"), items: ["⏎"] });
+  if (grant.preserveBackgroundProcesses) detail.push({ label: t("grant.preserveBackground"), items: ["⏎+"] });
+  if (detail.length === 0) return <div className="grant-detail__empty">—</div>;
+  return (
+    <div className="grant-detail">
+      {detail.map((section, i) => (
+        <div className="grant-detail__section" key={i}>
+          <div className="grant-detail__label">{section.label}</div>
+          <ul className="grant-detail__items">
+            {section.items.map((item, j) => <li key={j}><code>{item}</code></li>)}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CapabilityGrantsSection({ s, busy: parentBusy, apply: _apply }: SectionProps) {
+  const t = useT();
+  const [busy] = useState(false);
+  const [showDialog, setShowDialog] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const grants = s.sandbox.capabilityGrants ?? [];
+
+  const handleSave = useCallback(async (grant: Omit<CapabilityGrantView, "index" | "source">, source: string) => {
+    setError(null);
+    try {
+      await app.AddCapabilityGrant(source, { ...grant, index: 0, source });
+      setShowDialog(false);
+      await _apply(async () => {});
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [_apply]);
+
+  const handleDelete = useCallback(async (g: CapabilityGrantView) => {
+    setError(null);
+    try {
+      await app.DeleteCapabilityGrant(g.source, g);
+      await _apply(async () => {});
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [_apply]);
+
+  const capabilitySummary = (g: CapabilityGrantView): string => {
+    const parts: string[] = [];
+    if (g.network) parts.push("🌐");
+    const readCount = g.reads?.length ?? 0;
+    const writeCount = g.writes?.length ?? 0;
+    const deviceCount = g.devices?.length ?? 0;
+    if (readCount > 0) parts.push(`📄${readCount}`);
+    if (writeCount > 0) parts.push(`🖊️${writeCount}`);
+    if (deviceCount > 0) parts.push(`🔧${deviceCount}`);
+    if (g.background) parts.push("⏎");
+    return parts.join(" ") || "—";
+  };
+
+  return (
+    <>
+      <SettingsSection
+        title={t("settings.capabilityGrantsTitle")}
+        description={t("settings.capabilityGrantsHint")}
+        actions={
+          <button className="btn btn--small" disabled={busy || parentBusy} onClick={() => setShowDialog(true)}>
+            {t("settings.addCapabilityGrant")}
+          </button>
+        }
+      >
+        {grants.length === 0 ? (
+          <div className="mem-empty">{t("settings.noCapabilityGrants")}</div>
+        ) : (
+          <table className="grant-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>{t("grant.executable")}</th>
+                <th>{t("grant.prefix")}</th>
+                <th>{t("grant.capabilities")}</th>
+                <th>{t("grant.source")}</th>
+                <th>{t("grant.actions")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grants.map((g, idx) => (
+                <Fragment key={`${g.source}-${g.index}`}>
+                  <tr>
+                    <td className="grant-table__expand">
+                      <button className="btn btn--small btn--ghost" onClick={() => setExpanded(expanded === idx ? null : idx)}>
+                        {expanded === idx ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                      </button>
+                    </td>
+                    <td className="grant-table__exec"><code>{g.canonicalExecutable}</code></td>
+                    <td className="grant-table__prefix"><code>{g.argvPrefix?.join(" ") || "—"}</code></td>
+                    <td className="grant-table__caps">{capabilitySummary(g)}</td>
+                    <td className="grant-table__source">{g.source === "project" ? t("grant.sourceProject") : t("grant.sourceUser")}</td>
+                    <td className="grant-table__actions">
+                      <button className="btn btn--small btn--danger" disabled={busy || parentBusy} onClick={() => void handleDelete(g)}>
+                        {t("common.delete")}
+                      </button>
+                    </td>
+                  </tr>
+                  {expanded === idx && (
+                    <tr className="grant-table__detail-row">
+                      <td colSpan={6}>
+                        <GrantDetailView grant={g} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </SettingsSection>
+      {showDialog && <GrantDialog onSave={handleSave} onClose={() => setShowDialog(false)} busy={busy || parentBusy} error={error} />}
+    </>
   );
 }
 

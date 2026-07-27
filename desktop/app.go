@@ -52,6 +52,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/repair"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
@@ -1647,6 +1648,56 @@ func (a *App) RecoveryCheckpointEnabled() bool {
 // RecoveryCheckpointEnabledTab is the tab-scoped compatibility alias.
 func (a *App) RecoveryCheckpointEnabledTab(_ string) bool {
 	return true
+}
+
+// ResolveSandboxCapability answers a sandbox capability approval by ID.
+func (a *App) ResolveSandboxCapability(id string, action string) {
+	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
+		return
+	}
+	ctrl := a.ctrlByTabID("")
+	if ctrl != nil {
+		_ = ctrl.ResolveSandboxCapability(id, sandboxauth.Action(action))
+	}
+}
+
+// ResolveSandboxCapabilityTab is like ResolveSandboxCapability but scoped to a tab.
+func (a *App) ResolveSandboxCapabilityTab(tabID, id, action string) {
+	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
+		a.ResolveSandboxCapability(id, action)
+		return
+	}
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl != nil {
+		_ = ctrl.ResolveSandboxCapability(id, sandboxauth.Action(action))
+	}
+}
+
+// SandboxCapabilityYOLOState returns the YOLO policy state.
+func (a *App) SandboxCapabilityYOLOState() (sandboxauth.YOLOPolicyState, bool) {
+	ctrl := a.ctrlByTabID("")
+	if ctrl != nil {
+		return ctrl.SandboxCapabilityYOLOState()
+	}
+	return sandboxauth.YOLOPolicyState{}, false
+}
+
+// AcknowledgeSandboxCapabilityYOLO accepts or refuses project expansion.
+func (a *App) AcknowledgeSandboxCapabilityYOLO(accept bool) bool {
+	ctrl := a.ctrlByTabID("")
+	if ctrl != nil {
+		return ctrl.AcknowledgeSandboxCapabilityYOLO(accept)
+	}
+	return false
+}
+
+// ReloadSandboxCapabilityYOLO refreshes and returns the YOLO policy state.
+func (a *App) ReloadSandboxCapabilityYOLO() (sandboxauth.YOLOPolicyState, bool) {
+	ctrl := a.ctrlByTabID("")
+	if ctrl != nil {
+		return ctrl.ReloadSandboxCapabilityYOLO()
+	}
+	return sandboxauth.YOLOPolicyState{}, false
 }
 
 // ReplayPendingPrompts asks every tab's controller to re-emit any approval/ask

@@ -16,7 +16,7 @@ import { t } from "./i18n";
 import { providerIsConfigured, providerRequiresKey } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
-import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
+import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode, CapabilityGrantView } from "./types";
 
 import type {
   AutoResearchFindingView,
@@ -100,6 +100,7 @@ import type {
   GitCommitView,
   GitCommitDetailView,
   WorkspaceView,
+  WireYOLOPolicyState,
 } from "./types";
 
 const GLOBAL_PROJECT_ORDER_KEY = "__global__";
@@ -378,7 +379,9 @@ export interface AppBindings {
   AddPermissionRule(list: string, rule: string): Promise<void>;
   RemovePermissionRule(list: string, rule: string): Promise<void>;
   ReloadSettings(): Promise<void>;
-  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string): Promise<void>;
+  SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string, yoloAutoApproveCapabilities: boolean): Promise<void>;
+  AddCapabilityGrant(source: string, grant: CapabilityGrantView): Promise<void>;
+  DeleteCapabilityGrant(source: string, grant: CapabilityGrantView): Promise<void>;
   SetNetwork(n: NetworkView): Promise<void>;
   SetBotSettings(b: BotSettingsView): Promise<void>;
   SetBotConnectionToolApprovalMode(connID: string, mode: string): Promise<void>;
@@ -500,6 +503,12 @@ export interface AppBindings {
   WorkbenchRemoteRequest(method: string, paramsJSON: string): Promise<string>;
   WorkbenchResolveProviderTrust(accept: boolean): Promise<void>;
   WorkbenchPendingProviderTrust(): Promise<ProviderTrustPrompt | null>;
+  // ── Sandbox Capability ──
+  ResolveSandboxCapability(id: string, action: string): Promise<void>;
+  ResolveSandboxCapabilityTab(tabID: string, id: string, action: string): Promise<void>;
+  SandboxCapabilityYOLOState(): Promise<WireYOLOPolicyState>;
+  AcknowledgeSandboxCapabilityYOLO(accept: boolean): Promise<boolean>;
+  ReloadSandboxCapabilityYOLO(): Promise<WireYOLOPolicyState>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -1373,7 +1382,7 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto") },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto"), yoloAutoApproveCapabilities: false, capabilityGrants: [] },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
@@ -2184,6 +2193,62 @@ function makeMockApp(): AppBindings {
             id: "mock-plan-approval-preview",
             tool: "exit_plan_mode",
             subject: "",
+          },
+        });
+        return;
+      }
+      if (trimmedInput === "/sandbox-preview" || trimmedInput === "sandbox capability preview" || trimmedInput === "沙箱能力预览") {
+        pendingApprovalPreview = true;
+        pendingApprovalPreviewPrompt = { id: "mock-sandbox-capability-preview", tool: "bash" };
+        await delay(250);
+        if (cancelled) return;
+        emit({
+          kind: "approval_request",
+          approval: {
+            id: "mock-sandbox-capability-preview",
+            tool: "bash",
+            subject: "pip install -r requirements.txt --break-system-packages",
+            reason: "The model requests network access to PyPI and write access to system site-packages.",
+            fresh: true,
+            kind: "sandbox_capability",
+            sandbox_capability: {
+              review: {
+                state: "ready",
+                request: {
+                  network: true,
+                  read_paths: [{ identity: "workspace_relative", path: "requirements.txt", canonical: "/home/user/project/requirements.txt", kind: "file" }],
+                  write_paths: [{ identity: "canonical_absolute", path: "/usr/lib/python3.12/site-packages", canonical: "/usr/lib/python3.12/site-packages", kind: "directory" }],
+                  devices: [{ path: "/dev/dri", canonical: "/dev/dri", kind: "directory", major: 226, minor: 0 }],
+                },
+                effective_delta: {
+                  network: true,
+                  read_paths: [{ identity: "workspace_relative", path: "requirements.txt", canonical: "/home/user/project/requirements.txt", kind: "file" }],
+                  write_paths: [{ identity: "canonical_absolute", path: "/usr/lib/python3.12/site-packages", canonical: "/usr/lib/python3.12/site-packages", kind: "directory" }],
+                  devices: [{ path: "/dev/dri", canonical: "/dev/dri", kind: "directory", major: 226, minor: 0 }],
+                },
+                argv_prefix: ["pip", "install"],
+                justification: "Writing to site-packages requires write access outside the project.",
+                risk: {
+                  level: "critical",
+                  findings: [
+                    { code: "broad_write_path", message: "Write path targets a system-wide directory outside the workspace." },
+                    { code: "network_access", message: "Network access combined with write path enables supply-chain risk." },
+                    { code: "device_access", message: "Device access grants direct hardware control." },
+                  ],
+                },
+                authority: { requested: true, supported: true, prepared: true, applied: "false" },
+                requested: true,
+              },
+              workspace: "/home/user/project",
+              canonical_executable: "/usr/bin/pip",
+              argv: ["install", "-r", "requirements.txt", "--break-system-packages"],
+              grant_prefix: ["pip", "install"],
+              background: false,
+              preserve_background_processes: true,
+              reusable: true,
+              suspected_secret: false,
+              warnings: ["This command runs with expanded sandbox permissions."],
+            },
           },
         });
         return;
@@ -3881,9 +3946,9 @@ function makeMockApp(): AppBindings {
       settings.permissions[k] = settings.permissions[k].filter((r) => r !== rule);
     },
         async ReloadSettings() {},
-        async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
+        async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string, yoloAutoApproveCapabilities: boolean) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell), yoloAutoApproveCapabilities, capabilityGrants: [] };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;
@@ -4726,6 +4791,28 @@ function makeMockApp(): AppBindings {
     async WorkbenchPendingProviderTrust() {
       return null;
     },
+    // ── Sandbox Capability mock ──
+    async ResolveSandboxCapability(_id, _action) {
+      if (!pendingApprovalPreview) return;
+      pendingApprovalPreview = false;
+      pendingApprovalPreviewPrompt = undefined;
+      emit({ kind: "message", text: `sandbox capability resolved: ${_action}` });
+      emitMockTurnDone();
+    },
+    async ResolveSandboxCapabilityTab(_tabID, id, action) {
+      await withMockTabScope(_tabID, () => this.ResolveSandboxCapability(id, action));
+    },
+    async SandboxCapabilityYOLOState() {
+      return { workspace: "", effective: false, yolo: false, interactive: false, acknowledgement: "not_required" };
+    },
+    async AcknowledgeSandboxCapabilityYOLO(_accept) {
+      return true;
+    },
+    async ReloadSandboxCapabilityYOLO() {
+      return { workspace: "", effective: false, yolo: false, interactive: false, acknowledgement: "not_required" };
+    },
+    async AddCapabilityGrant(_source: string, _grant: CapabilityGrantView) {},
+    async DeleteCapabilityGrant(_source: string, _grant: CapabilityGrantView) {},
   };
 }
 

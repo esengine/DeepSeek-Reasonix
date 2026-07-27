@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/tool"
 )
 
@@ -1124,6 +1125,145 @@ func TestGatewayApprovalReplyUnblocksWedgedTurn(t *testing.T) {
 	case <-ctrl.done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("deadlock: /approve reply was not delivered while the turn blocked on approval")
+	}
+}
+
+type blockingCapabilityController struct {
+	botController
+	emit     func(event.Event)
+	emitted  chan struct{}
+	resolved chan struct{}
+	done     chan struct{}
+	once     sync.Once
+}
+
+func (c *blockingCapabilityController) RunTurn(ctx context.Context, input string) error {
+	c.emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "cap-1", Tool: "bash", Subject: "pip install", Kind: "sandbox_capability",
+		SandboxCapability: &sandboxauth.Prompt{Reusable: true, Argv: []string{"pip", "install"}},
+	}})
+	close(c.emitted)
+	select {
+	case <-c.resolved:
+		close(c.done)
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *blockingCapabilityController) Approve(id string, allow, session, persist bool) {
+	// Must NOT be called for sandbox capability.
+}
+
+func (c *blockingCapabilityController) ResolveSandboxCapability(id string, action sandboxauth.Action) error {
+	c.once.Do(func() { close(c.resolved) })
+	return nil
+}
+
+func TestGatewayApprovalReplyRoutesCapabilityToResolveSandboxCapability(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	binding := AdapterBinding{ID: "feishu", Platform: PlatformFeishu, Adapter: adapter}
+	msg := InboundMessage{
+		Platform: PlatformFeishu, ConnectionID: "feishu",
+		ChatType: ChatDM, ChatID: "chat", UserID: "user",
+		Text: "do it",
+	}
+	key := BuildSessionKey(msg.Session())
+	sink := &sessionEventSink{}
+	ctrl := &blockingCapabilityController{
+		emit:     sink.Emit,
+		emitted:  make(chan struct{}),
+		resolved: make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	gw.controllers[key] = &sessionState{
+		ctrl:             ctrl,
+		sink:             sink,
+		platform:         PlatformFeishu,
+		connectionID:     "feishu",
+		pendingApprovals: map[string]event.Approval{},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go gw.dispatchLoop(ctx, binding)
+
+	adapter.msgCh <- msg
+	select {
+	case <-ctrl.emitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval request was never emitted; turn did not start")
+	}
+
+	// Give the dispatch loop time to process the emitted event
+	// so the pendingApprovals map is populated.
+	time.Sleep(50 * time.Millisecond)
+
+	adapter.msgCh <- InboundMessage{
+		Platform: PlatformFeishu, ConnectionID: "feishu",
+		ChatType: ChatDM, ChatID: "chat", UserID: "user",
+		Text: "/approve cap-1",
+	}
+
+	select {
+	case <-ctrl.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadlock: /approve reply was not delivered for capability approval")
+	}
+}
+
+func TestGatewayDenyReplyRoutesCapabilityToRunSandboxed(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := newFakeAdapter(PlatformFeishu, "fake-feishu")
+	binding := AdapterBinding{ID: "feishu", Platform: PlatformFeishu, Adapter: adapter}
+	msg := InboundMessage{
+		Platform: PlatformFeishu, ConnectionID: "feishu",
+		ChatType: ChatDM, ChatID: "chat", UserID: "user",
+		Text: "do it",
+	}
+	key := BuildSessionKey(msg.Session())
+	sink := &sessionEventSink{}
+	ctrl := &blockingCapabilityController{
+		emit:     sink.Emit,
+		emitted:  make(chan struct{}),
+		resolved: make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	gw.controllers[key] = &sessionState{
+		ctrl:             ctrl,
+		sink:             sink,
+		platform:         PlatformFeishu,
+		connectionID:     "feishu",
+		pendingApprovals: map[string]event.Approval{},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go gw.dispatchLoop(ctx, binding)
+
+	adapter.msgCh <- msg
+	select {
+	case <-ctrl.emitted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("approval request was never emitted; turn did not start")
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	adapter.msgCh <- InboundMessage{
+		Platform: PlatformFeishu, ConnectionID: "feishu",
+		ChatType: ChatDM, ChatID: "chat", UserID: "user",
+		Text: "/deny cap-1",
+	}
+
+	select {
+	case <-ctrl.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("deadlock: /deny reply was not delivered for capability approval")
 	}
 }
 

@@ -35,6 +35,7 @@ import (
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/remote/workbench/files"
 	"reasonix/internal/rpcwire"
+	"reasonix/internal/sandboxauth"
 )
 
 const (
@@ -1044,23 +1045,45 @@ func (s *Server) approve(p protocol.PromptApproveParams) (protocol.PromptResolve
 	if err != nil {
 		return protocol.PromptResolvedResult{}, err
 	}
-	controller, ok := sess.ctrl.(interface {
-		Approve(string, bool, bool, bool)
-	})
-	if !ok {
-		return protocol.PromptResolvedResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
-	}
 	s.mu.Lock()
 	pending := sess.pendingPrompt
-	if pending == nil || pending.Kind != protocol.PromptApproval || pending.Approval == nil || pending.Approval.PromptID != p.PromptID {
+	if pending == nil || pending.Approval == nil || pending.Approval.PromptID != p.PromptID {
 		s.mu.Unlock()
 		return protocol.PromptResolvedResult{}, protocol.MustRemoteError(protocol.ErrPromptNotPending, protocol.ErrorOptions{Target: &p.Target})
 	}
+	kind := pending.Kind
 	sess.pendingPrompt = nil
 	s.mu.Unlock()
-	allow := p.Decision != protocol.DecisionDeny
-	controller.Approve(string(p.PromptID), allow, p.Decision == protocol.DecisionAllowSession, p.Decision == protocol.DecisionAllowPersistent)
-	return protocol.PromptResolvedResult{Resolved: true, PromptID: p.PromptID}, nil
+
+	switch kind {
+	case protocol.PromptCapabilityApproval:
+		controller, ok := sess.ctrl.(interface {
+			ResolveSandboxCapability(string, sandboxauth.Action) error
+		})
+		if !ok {
+			return protocol.PromptResolvedResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
+		}
+		action := sandboxauth.Action(p.Decision)
+		if !action.Valid() {
+			return protocol.PromptResolvedResult{}, protocol.MustRemoteError(protocol.ErrPromptDecisionNotAllowed, protocol.ErrorOptions{Target: &p.Target})
+		}
+		if err := controller.ResolveSandboxCapability(string(p.PromptID), action); err != nil {
+			return protocol.PromptResolvedResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{Target: &p.Target})
+		}
+		return protocol.PromptResolvedResult{Resolved: true, PromptID: p.PromptID}, nil
+
+	default:
+		// Ordinary approval — includes PromptApproval.
+		controller, ok := sess.ctrl.(interface {
+			Approve(string, bool, bool, bool)
+		})
+		if !ok {
+			return protocol.PromptResolvedResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
+		}
+		allow := p.Decision != protocol.DecisionDeny
+		controller.Approve(string(p.PromptID), allow, p.Decision == protocol.DecisionAllowSession, p.Decision == protocol.DecisionAllowPersistent)
+		return protocol.PromptResolvedResult{Resolved: true, PromptID: p.PromptID}, nil
+	}
 }
 
 func (s *Server) answer(p protocol.PromptAnswerParams) (protocol.PromptResolvedResult, error) {
@@ -1679,6 +1702,20 @@ func emptyContext() protocol.ContextView {
 }
 
 func approvalPendingPrompt(approval event.Approval) *protocol.PendingPrompt {
+	if approval.Kind == sandboxauth.ApprovalKind && approval.SandboxCapability != nil {
+		sc := approval.SandboxCapability
+		decisions := make([]protocol.PromptDecision, 0, 5)
+		decisions = append(decisions, protocol.DecisionAllowOnce)
+		if sc.Reusable && !sc.SuspectedSecret {
+			decisions = append(decisions, protocol.DecisionAllowSession, protocol.DecisionAllowPersistent)
+		}
+		decisions = append(decisions, protocol.DecisionRunSandboxed, protocol.DecisionCancelCommand)
+		return &protocol.PendingPrompt{Kind: protocol.PromptCapabilityApproval, Approval: &protocol.ApprovalPrompt{
+			PromptID: protocol.PromptID(approval.ID), Tool: approval.Tool, Subject: approval.Subject,
+			Reason: stringPtrOrNil(approval.Reason), Fresh: approval.Fresh,
+			AllowedDecisions: decisions,
+		}}
+	}
 	return &protocol.PendingPrompt{Kind: protocol.PromptApproval, Approval: &protocol.ApprovalPrompt{
 		PromptID: protocol.PromptID(approval.ID), Tool: approval.Tool, Subject: approval.Subject,
 		Reason: stringPtrOrNil(approval.Reason), Fresh: approval.Fresh,

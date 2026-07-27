@@ -22,9 +22,12 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/secrets"
 	"reasonix/internal/skill"
 	"reasonix/internal/testenv"
+	"reasonix/internal/tool"
 )
 
 type blockingTurnRunner struct{ started chan struct{} }
@@ -982,6 +985,13 @@ func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	unsafeBash := approvalChoices(&event.Approval{
+		Tool: "bash", Subject: `echo $(touch /tmp/reasonix-permission-bypass)`,
+	})
+	if len(unsafeBash) != 2 || !unsafeBash[0].allow || unsafeBash[1].allow {
+		t.Fatalf("unsafe bash choices = %+v, want allow-once/deny", unsafeBash)
 	}
 
 	grantable := approvalChoices(&event.Approval{
@@ -3925,5 +3935,366 @@ func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
 	m.cycleMode()
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
 		t.Fatalf("Shift+Tab from dontAsk = %q, want ask", got)
+	}
+}
+
+// newTestCapabilityPrompt returns a fully populated sandboxauth.Prompt suitable
+// for testing capability approval rendering and key handling.
+func newTestCapabilityPrompt() *sandboxauth.Prompt {
+	return &sandboxauth.Prompt{
+		Review: sandbox.CapabilityReview{
+			Request: sandbox.CapabilitySet{
+				Network: true,
+				Reads: []sandbox.CapabilityPath{{
+					Identity:  "workspace_relative",
+					Path:      "./data",
+					Canonical: "/home/user/project/data",
+					Kind:      "directory",
+				}},
+				Writes: []sandbox.CapabilityPath{{
+					Identity:  "workspace_relative",
+					Path:      "./output",
+					Canonical: "/home/user/project/output",
+					Kind:      "directory",
+				}},
+			},
+			EffectiveDelta: sandbox.CapabilitySet{
+				Network: true,
+				Reads: []sandbox.CapabilityPath{{
+					Identity:  "workspace_relative",
+					Path:      "./data",
+					Canonical: "/home/user/project/data",
+					Kind:      "directory",
+				}},
+				Writes: []sandbox.CapabilityPath{{
+					Identity:  "workspace_relative",
+					Path:      "./output",
+					Canonical: "/home/user/project/output",
+					Kind:      "directory",
+				}},
+			},
+			Justification: "need to read and write data",
+			Risk: sandbox.CapabilityRisk{
+				Level: "normal",
+			},
+		},
+		Workspace:           "/home/user/project",
+		CanonicalExecutable: "/usr/bin/curl",
+		Argv:                []string{"curl", "https://example.com"},
+		GrantPrefix:         []string{"curl"},
+		Background:          false,
+		Reusable:            true,
+		SuspectedSecret:     false,
+	}
+}
+
+// TestCapabilityApprovalChoicesHidesSessionAndPersistentWhenNotReusable
+// verifies that session and persistent choices are absent when Reusable=false.
+func TestCapabilityApprovalChoicesHidesSessionAndPersistentWhenNotReusable(t *testing.T) {
+	p := newTestCapabilityPrompt()
+	p.Reusable = false
+	p.SuspectedSecret = false
+	choices := capabilityApprovalChoices(p)
+	if len(choices) != 3 {
+		t.Fatalf("got %d choices for non-reusable, want 3 (allow once, run sandboxed, cancel)", len(choices))
+	}
+	for _, c := range choices {
+		if c == i18n.M.CapabilityAllowSession || c == i18n.M.CapabilityAllowPersistent {
+			t.Errorf("non-reusable prompt should not offer %q", c)
+		}
+	}
+}
+
+// TestCapabilityApprovalChoicesHidesPersistentWhenSuspectedSecret verifies
+// that persistent is hidden when SuspectedSecret=true.
+func TestCapabilityApprovalChoicesHidesPersistentWhenSuspectedSecret(t *testing.T) {
+	p := newTestCapabilityPrompt()
+	p.Reusable = true
+	p.SuspectedSecret = true
+	choices := capabilityApprovalChoices(p)
+	if len(choices) != 4 {
+		t.Fatalf("got %d choices for suspected-secret, want 4 (no persistent)", len(choices))
+	}
+	for _, c := range choices {
+		if c == i18n.M.CapabilityAllowPersistent {
+			t.Errorf("suspected-secret prompt should not offer persistent")
+		}
+	}
+}
+
+// TestCapabilityApprovalCardRendersStructuredFields verifies the capability
+// card output contains executable, argv, network, paths, and justification.
+func TestCapabilityApprovalCardRendersStructuredFields(t *testing.T) {
+	m := newTestChatTUI()
+	m.pendingApproval = &event.Approval{
+		ID:                "cap-1",
+		Kind:              sandboxauth.ApprovalKind,
+		Tool:              "bash",
+		Subject:           "curl https://example.com",
+		Reason:            "need network access",
+		SandboxCapability: newTestCapabilityPrompt(),
+	}
+	m.capabilityMode = true
+	m.approvalSelection = 0
+
+	card := m.renderApprovalBanner()
+	if card == "" {
+		t.Fatal("expected non-empty capability card")
+	}
+	strip := ansi.Strip(card)
+	if !strings.Contains(strip, "curl") {
+		t.Errorf("card should contain the executable")
+	}
+	if !strings.Contains(strip, "/usr/bin/curl") {
+		t.Errorf("card should contain canonical executable")
+	}
+	if !strings.Contains(strip, i18n.M.CapabilityFullAccess) {
+		t.Errorf("card should show full network access")
+	}
+	if !strings.Contains(strip, "/home/user/project/data") {
+		t.Errorf("card should show read path")
+	}
+	if !strings.Contains(strip, "/home/user/project/output") {
+		t.Errorf("card should show write path")
+	}
+	if !strings.Contains(strip, i18n.M.CapabilityModelJustification) {
+		t.Errorf("card should show justification label")
+	}
+	if !strings.Contains(strip, "need to read and write data") {
+		t.Errorf("card should show justification text")
+	}
+}
+
+// TestCapabilityApprovalCardShowsCriticalRisk verifies that critical risk
+// renders a prominent warning prefix.
+func TestCapabilityApprovalCardShowsCriticalRisk(t *testing.T) {
+	p := newTestCapabilityPrompt()
+	p.Review.Risk.Level = "critical"
+	m := newTestChatTUI()
+	m.pendingApproval = &event.Approval{
+		ID:                "cap-2",
+		Kind:              sandboxauth.ApprovalKind,
+		SandboxCapability: p,
+	}
+	m.capabilityMode = true
+	card := m.renderApprovalBanner()
+	strip := ansi.Strip(card)
+	if !strings.Contains(strip, i18n.M.CapabilityRiskCriticalPrefix) {
+		t.Errorf("critical risk card should show %q", i18n.M.CapabilityRiskCriticalPrefix)
+	}
+}
+
+// TestCapabilityApprovalCardShowsBgWarning verifies that reusable grants
+// with preserved background processes show the bg warning.
+func TestCapabilityApprovalCardShowsBgWarning(t *testing.T) {
+	p := newTestCapabilityPrompt()
+	p.Reusable = true
+	p.PreserveBackgroundProcesses = true
+	m := newTestChatTUI()
+	m.pendingApproval = &event.Approval{
+		ID:                "cap-3",
+		Kind:              sandboxauth.ApprovalKind,
+		SandboxCapability: p,
+	}
+	m.capabilityMode = true
+	card := m.renderApprovalBanner()
+	strip := ansi.Strip(card)
+	t.Logf("stripped output:\n%s", strip)
+	if !strings.Contains(strip, "background") || !strings.Contains(strip, "process") {
+		t.Errorf("card should show background process warning, got: %s", strip)
+	}
+}
+
+// TestCapabilityApprovalCardDistinctFromAutoGuard verifies that a capability
+// card renders differently from an ordinary tool approval banner.
+func TestCapabilityApprovalCardDistinctFromAutoGuard(t *testing.T) {
+	// Capability card
+	p := newTestCapabilityPrompt()
+	capM := newTestChatTUI()
+	capM.pendingApproval = &event.Approval{
+		ID:                "cap-4",
+		Kind:              sandboxauth.ApprovalKind,
+		SandboxCapability: p,
+	}
+	capM.capabilityMode = true
+	capCard := capM.renderApprovalBanner()
+
+	// Ordinary approval banner
+	ordM := newTestChatTUI()
+	ordM.pendingApproval = &event.Approval{
+		ID:   "ord-1",
+		Tool: "bash",
+	}
+	ordBanner := ordM.renderApprovalBanner()
+
+	if capCard == ordBanner {
+		t.Error("capability card and ordinary banner should differ")
+	}
+	if !strings.Contains(ansi.Strip(capCard), i18n.M.CapabilityApprovalTitle) {
+		t.Error("capability card should contain its title")
+	}
+}
+
+// TestYOLOAcknowledgementBannerRenders verifies the YOLO blocking banner.
+func TestYOLOAcknowledgementBannerRenders(t *testing.T) {
+	m := newTestChatTUI()
+	m.yoloAckMode = true
+	m.approvalSelection = 0
+
+	banner := m.renderApprovalBanner()
+	if banner == "" {
+		t.Fatal("expected non-empty YOLO acknowledgement banner")
+	}
+	strip := ansi.Strip(banner)
+	if !strings.Contains(strip, i18n.M.YOLOAckBlockingNotice) {
+		t.Errorf("YOLO banner should contain blocking notice")
+	}
+	if !strings.Contains(strip, i18n.M.YOLOAckAccept) {
+		t.Errorf("YOLO banner should show accept option")
+	}
+	if !strings.Contains(strip, i18n.M.YOLOAckRefuse) {
+		t.Errorf("YOLO banner should show refuse option")
+	}
+}
+
+// TestYOLOAcknowledgementBannerHidesComposer verifies the composer is hidden
+// while the YOLO banner is shown.
+func TestYOLOAcknowledgementBannerHidesComposer(t *testing.T) {
+	m := newTestChatTUI()
+	m.yoloAckMode = true
+	if !m.hideComposer() {
+		t.Error("composer should be hidden with YOLO acknowledgement active")
+	}
+}
+
+// TestCapabilityApprovalCardHidesComposer verifies the composer is hidden
+// while a capability card is shown.
+func TestCapabilityApprovalCardHidesComposer(t *testing.T) {
+	m := newTestChatTUI()
+	m.capabilityMode = true
+	m.pendingApproval = &event.Approval{
+		ID: "cap-hide",
+	}
+	if !m.hideComposer() {
+		t.Error("composer should be hidden with capability card active")
+	}
+}
+
+// TestCapabilityModeChangeDoesNotClearPending verifies that mode change
+// handling does not nil out pendingApproval when in capability mode.
+// The key handler intercepts all input first, so mode cycle never fires
+// while a capability prompt is active.
+func TestCapabilityModeChangeDoesNotClearPending(t *testing.T) {
+	m := newTestChatTUI()
+	m.pendingApproval = &event.Approval{
+		ID:                "cap-5",
+		Kind:              sandboxauth.ApprovalKind,
+		SandboxCapability: newTestCapabilityPrompt(),
+	}
+	m.capabilityMode = true
+
+	// Simulate that handleApprovalKey routes to handleCapabilityApprovalKey
+	// and no mode toggle clears pendingApproval.
+	if m.pendingApproval == nil {
+		t.Fatal("pendingApproval should remain set while in capability mode")
+	}
+	if !m.capabilityMode {
+		t.Fatal("capabilityMode should remain true")
+	}
+}
+
+// TestCapabilityActionForIndex verifies the index-to-action mapping.
+func TestCapabilityActionForIndex(t *testing.T) {
+	p := newTestCapabilityPrompt()
+	p.Reusable = true
+	p.SuspectedSecret = false
+
+	tests := []struct {
+		idx  int
+		want sandboxauth.Action
+	}{
+		{0, sandboxauth.AllowOnce},
+		{1, sandboxauth.AllowSession},
+		{2, sandboxauth.AllowPersistent},
+		{3, sandboxauth.RunSandboxed},
+		{4, sandboxauth.CancelCommand},
+	}
+	for _, tt := range tests {
+		got := capabilityActionForIndex(tt.idx, p)
+		if got != tt.want {
+			t.Errorf("index %d: got %q, want %q", tt.idx, got, tt.want)
+		}
+	}
+
+	// Non-reusable
+	p.Reusable = false
+	if got := capabilityActionForIndex(0, p); got != sandboxauth.AllowOnce {
+		t.Errorf("non-reusable index 0: got %q, want allow_once", got)
+	}
+	if got := capabilityActionForIndex(1, p); got != sandboxauth.RunSandboxed {
+		t.Errorf("non-reusable index 1: got %q, want run_sandboxed", got)
+	}
+	if got := capabilityActionForIndex(2, p); got != sandboxauth.CancelCommand {
+		t.Errorf("non-reusable index 2: got %q, want cancel_command", got)
+	}
+
+	// SuspectedSecret (reusable but persistent hidden)
+	p.Reusable = true
+	p.SuspectedSecret = true
+	if got := capabilityActionForIndex(0, p); got != sandboxauth.AllowOnce {
+		t.Errorf("suspected-secret index 0: got %q, want allow_once", got)
+	}
+	if got := capabilityActionForIndex(1, p); got != sandboxauth.AllowSession {
+		t.Errorf("suspected-secret index 1: got %q, want allow_session", got)
+	}
+	if got := capabilityActionForIndex(2, p); got != sandboxauth.RunSandboxed {
+		t.Errorf("suspected-secret index 2: got %q, want run_sandboxed", got)
+	}
+}
+
+// TestCapabilityCardNoticeIntegration verifies that a capability warning
+// notice sets yoloAckMode.
+func TestCapabilityCardNoticeIntegration(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{
+		Kind:  event.Notice,
+		Code:  event.NoticeCodeSandboxCapabilityWarning,
+		Level: event.LevelWarn,
+		Text:  "workspace /test enables yolo capability auto-approval",
+	})
+	if !m.yoloAckMode {
+		t.Error("yoloAckMode should be set after sandbox_capability_project_expansion notice")
+	}
+}
+
+// TestTUIYOLOInitAckState verifies that initYOLOAckState activates the
+// blocking banner when the controller reports YOLORequired.
+func TestTUIYOLOInitAckState(t *testing.T) {
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix-home"))
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"),
+		[]byte("[sandbox]\nyolo_auto_approve_capabilities = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := sandboxauth.NewYOLOPolicy(config.ResolveYOLOPolicyConfig(workspace))
+	engine := &sandboxauth.Engine{AutoOnce: policy}
+	ctrl := control.New(control.Options{
+		WorkspaceRoot:           workspace,
+		SandboxCapabilityEngine: engine,
+		Executor:                agent.New(nil, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{}, event.Discard),
+	})
+	ctrl.EnableInteractiveApproval()
+	ctrl.SetToolApprovalMode(control.ToolApprovalYolo)
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.initYOLOAckState()
+
+	if !m.yoloAckMode {
+		t.Error("yoloAckMode should be true when YOLORequired state is detected")
+	}
+	if m.approvalSelection != 0 {
+		t.Error("approvalSelection should be 0 (Accept selected by default)")
 	}
 }

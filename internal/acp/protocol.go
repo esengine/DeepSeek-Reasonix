@@ -659,10 +659,17 @@ type SessionCancelParams struct {
 type PermissionOptionKind string
 
 const (
-	OptAllowOnce    PermissionOptionKind = "allow_once"
-	OptAllowAlways  PermissionOptionKind = "allow_always"
-	OptRejectOnce   PermissionOptionKind = "reject_once"
+	// OptAllowOnce grants the tool call for a single invocation.
+	OptAllowOnce PermissionOptionKind = "allow_once"
+	// OptAllowAlways grants the tool call for the remainder of the session.
+	OptAllowAlways PermissionOptionKind = "allow_always"
+	// OptRejectOnce rejects the tool call.
+	OptRejectOnce PermissionOptionKind = "reject_once"
+	// OptRejectAlways rejects the tool call permanently for the session.
 	OptRejectAlways PermissionOptionKind = "reject_always"
+	// OptAllowPersistent grants the sandbox capability persistently (project grant),
+	// only offered when the capability is reusable and not a suspected secret.
+	OptAllowPersistent PermissionOptionKind = "allow_persistent"
 )
 
 // PermissionOption is one choice offered to the user for a permission request.

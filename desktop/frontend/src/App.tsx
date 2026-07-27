@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
 import gsap from "gsap";
@@ -51,6 +52,7 @@ import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
+import type { WireYOLOPolicyState } from "./lib/types";
 
 /** Footer decision surface kinds. Priority: tool/plan approval > ask > clear context. */
 type DecisionSurfaceKind = "tool_approval" | "plan_approval" | "ask" | "clear_context";
@@ -1265,6 +1267,7 @@ export default function App() {
   const [sidebarTogglePressed, setSidebarTogglePressed] = useState(false);
   const [workspaceTogglePressed, setWorkspaceTogglePressed] = useState(false);
   const [clearContextPending, setClearContextPending] = useState(false);
+  const [yoloAcknowledgement, setYoloAcknowledgement] = useState<{ state: WireYOLOPolicyState; show: boolean } | null>(null);
   const topicRenameSkipCommitRef = useRef(false);
   const prevDecisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
   const decisionSurfaceRef = useRef<DecisionSurfaceKind | null>(null);
@@ -1664,6 +1667,20 @@ export default function App() {
     });
     return () => cancelAnimationFrame(frame);
   }, [activeTabId, closeTransientOverlays, decisionSurface]);
+
+  // Check YOLO sandbox capability acknowledgement state when session is ready.
+  useEffect(() => {
+    if (!activeTabId || state.hydrating || !controllerReady) return;
+    let cancelled = false;
+    app.SandboxCapabilityYOLOState().then((yoloState) => {
+      if (cancelled) return;
+      if (yoloState.acknowledgement === "required") {
+        setYoloAcknowledgement({ state: yoloState, show: true });
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeTabId, state.hydrating, controllerReady]);
+
   const patchActiveComposerProfile = useCallback(
     (patch: Partial<Omit<ComposerProfile, "pending">>, pendingFields: ComposerProfileField[]) => {
       if (!activeTabId) return;
@@ -4252,6 +4269,13 @@ export default function App() {
                 onStop={() => {
                   cancel();
                 }}
+                onResolveSandboxCapability={(action) => {
+                  if (activeTabId) {
+                    app.ResolveSandboxCapabilityTab(activeTabId, state.approval!.id, action);
+                  } else {
+                    app.ResolveSandboxCapability(state.approval!.id, action);
+                  }
+                }}
                 toolApprovalMode={toolApprovalMode}
               />
               )
@@ -4548,6 +4572,40 @@ export default function App() {
       <RemoteHostKeyDialog />
       <RemoteSecretDialog />
       <ProviderTrustDialog />
+
+      {yoloAcknowledgement?.show && createPortal(
+        <div className="modal-backdrop reasonix-confirm-backdrop" role="presentation">
+          <div className="modal reasonix-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="yolo-ack-title" aria-describedby="yolo-ack-message">
+            <div className="modal__title reasonix-confirm-dialog__title" id="yolo-ack-title">{t("approval.yoloAcknowledgementTitle")}</div>
+            <div className="reasonix-confirm-dialog__message" id="yolo-ack-message">{t("approval.yoloAcknowledgementText")}</div>
+            <div className="modal__actions reasonix-confirm-dialog__actions">
+              <button
+                className="btn btn--small"
+                type="button"
+                onClick={() => {
+                  app.AcknowledgeSandboxCapabilityYOLO(false).then(() => {
+                    setYoloAcknowledgement(null);
+                  });
+                }}
+              >
+                {t("approval.yoloAcknowledgementRefuse")}
+              </button>
+              <button
+                className="btn btn--small btn--primary"
+                type="button"
+                onClick={() => {
+                  app.AcknowledgeSandboxCapabilityYOLO(true).then(() => {
+                    setYoloAcknowledgement(null);
+                  });
+                }}
+              >
+                {t("approval.yoloAcknowledgementAccept")}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       <CommandPalette
         open={paletteOpen}

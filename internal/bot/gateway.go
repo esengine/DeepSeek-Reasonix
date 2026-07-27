@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/secrets"
 )
 
@@ -1207,6 +1208,23 @@ func (gw *BotGateway) pendingApprovalIsRecovery(key, id string) bool {
 	return strings.EqualFold(strings.TrimSpace(a.Kind), "recovery") || a.Recovery != nil
 }
 
+// pendingApprovalIsCapability reports whether the pending approval id is a
+// sandbox_capability approval, so the gateway can route through
+// ResolveSandboxCapability instead of the legacy boolean Approve.
+func (gw *BotGateway) pendingApprovalIsCapability(key, id string) bool {
+	gw.mu.Lock()
+	defer gw.mu.Unlock()
+	state, ok := gw.controllers[key]
+	if !ok || state.pendingApprovals == nil {
+		return false
+	}
+	a, ok := state.pendingApprovals[id]
+	if !ok {
+		return false
+	}
+	return a.Kind == sandboxauth.ApprovalKind
+}
+
 func decisionShortcutCommand(text string) (string, bool) {
 	if command, ok := approvalShortcutCommand(text); ok {
 		return command, true
@@ -1380,8 +1398,10 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		state, ok := gw.controllers[key]
 		gw.mu.Unlock()
 		if ok && state.ctrl != nil {
-			// Recovery cards map allow → continue for older clients that only know Approve.
-			if gw.pendingApprovalIsRecovery(key, parts[1]) {
+			// Sandbox capability approval uses typed actions.
+			if gw.pendingApprovalIsCapability(key, parts[1]) {
+				_ = state.ctrl.ResolveSandboxCapability(parts[1], sandboxauth.AllowOnce)
+			} else if gw.pendingApprovalIsRecovery(key, parts[1]) {
 				_ = state.ctrl.ResolveRecovery(parts[1], agent.RecoveryActionContinue, "")
 			} else {
 				state.ctrl.Approve(parts[1], true, false, false)
@@ -1405,7 +1425,9 @@ func (gw *BotGateway) handleSlashCommand(ctx context.Context, adapter Adapter, k
 		state, ok := gw.controllers[key]
 		gw.mu.Unlock()
 		if ok && state.ctrl != nil {
-			if gw.pendingApprovalIsRecovery(key, parts[1]) {
+			if gw.pendingApprovalIsCapability(key, parts[1]) {
+				_ = state.ctrl.ResolveSandboxCapability(parts[1], sandboxauth.RunSandboxed)
+			} else if gw.pendingApprovalIsRecovery(key, parts[1]) {
 				_ = state.ctrl.ResolveRecovery(parts[1], agent.RecoveryActionRevise, "")
 			} else {
 				state.ctrl.Approve(parts[1], false, false, false)

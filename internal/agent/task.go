@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -170,21 +171,26 @@ func (b foregroundOnlyBash) Description() string {
 	return desc + " Background execution is unavailable inside subagents."
 }
 
-func (foregroundOnlyBash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute in the foreground"}},"required":["command"]}`)
+func (b foregroundOnlyBash) Schema() json.RawMessage {
+	return foregroundBashSchema(b.inner, "Shell command to execute in the foreground")
 }
 
 func (b foregroundOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	var p struct {
-		RunInBackground bool `json:"run_in_background"`
-	}
-	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
-	}
-	if p.RunInBackground {
-		return "", fmt.Errorf("background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
+	if err := validateForegroundBashArgs(args); err != nil {
+		return "", err
 	}
 	return b.inner.Execute(ctx, args)
+}
+
+func (b foregroundOnlyBash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (tool.SandboxCapabilityInvocation, error) {
+	if err := validateForegroundBashArgs(args); err != nil {
+		return nil, err
+	}
+	capable, ok := b.inner.(tool.SandboxCapabilityTool)
+	if !ok {
+		return nil, fmt.Errorf("bash sandbox capability preparation is unavailable")
+	}
+	return capable.PrepareSandboxInvocation(ctx, args)
 }
 
 func (b foregroundOnlyBash) ReadOnly() bool { return b.inner.ReadOnly() }
@@ -204,8 +210,8 @@ func (b readOnlyBash) Description() string {
 	return desc + " Only permission-classified read-only commands are allowed; shell operators, background execution, process preservation, and write-capable arguments are blocked."
 }
 
-func (readOnlyBash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Read-only shell command to execute in the foreground. Must match the permission-layer read-only command policy."}},"required":["command"]}`)
+func (b readOnlyBash) Schema() json.RawMessage {
+	return foregroundBashSchema(b.inner, "Read-only shell command to execute in the foreground. Must match the permission-layer read-only command policy.")
 }
 
 func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
@@ -215,7 +221,52 @@ func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string
 	return b.inner.Execute(ctx, args)
 }
 
+func (b readOnlyBash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (tool.SandboxCapabilityInvocation, error) {
+	if !permission.BashCommandIsReadOnly(args) {
+		return nil, fmt.Errorf("read-only subagents can prepare only permission-classified foreground read-only commands")
+	}
+	capable, ok := b.inner.(tool.SandboxCapabilityTool)
+	if !ok {
+		return nil, fmt.Errorf("bash sandbox capability preparation is unavailable")
+	}
+	return capable.PrepareSandboxInvocation(ctx, args)
+}
+
 func (readOnlyBash) ReadOnly() bool { return true }
+
+func validateForegroundBashArgs(args json.RawMessage) error {
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return fmt.Errorf("invalid args: %w", err)
+	}
+	if p.RunInBackground {
+		return fmt.Errorf("background bash is unavailable in subagents; run a foreground command or ask the parent agent to start a background job")
+	}
+	return nil
+}
+
+func foregroundBashSchema(inner tool.Tool, commandDescription string) json.RawMessage {
+	var schema map[string]any
+	if inner == nil || json.Unmarshal(inner.Schema(), &schema) != nil {
+		return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return inner.Schema()
+	}
+	delete(properties, "run_in_background")
+	delete(properties, "preserve_background_processes")
+	if command, ok := properties["command"].(map[string]any); ok {
+		command["description"] = commandDescription
+	}
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		return inner.Schema()
+	}
+	return raw
+}
 
 // TaskTool spawns a sub-agent in its own session for a focused sub-task. The
 // sub-agent runs with a filtered tool whitelist and the same step budget shape
@@ -271,7 +322,8 @@ type TaskTool struct {
 	// capabilityRuntime is the session-shared MCP Host/specs substrate. Each
 	// sub-agent gets its own use_capability frontend so ledger state stays
 	// isolated while connections reuse the parent Host.
-	capabilityRuntime *MCPCapabilityRuntime
+	capabilityRuntime     *MCPCapabilityRuntime
+	sandboxCapabilityGate sandboxauth.Gate
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -552,7 +604,7 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("read-only sub-agent profile: %w", err)
 	}
-	answer, err := r.task.runReadOnlySubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth, subagentRecoveryTaskID(ctx, ""))
+	answer, err := r.task.runReadOnlySubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth, subagentRecoveryTaskID(ctx, ""), WritePathSet{})
 	if err != nil {
 		return "", err
 	}
@@ -789,9 +841,9 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (st
 	runSession := func(runCtx context.Context, sink event.Sink) (string, error) {
 		recoveryTaskID := subagentRecoveryTaskID(runCtx, run.Ref)
 		if spec.ReadOnly {
-			return t.runReadOnlySubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID)
+			return t.runReadOnlySubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, spec.WritePaths)
 		}
-		return t.runSubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID)
+		return t.runSubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID, spec.WritePaths)
 	}
 
 	if spec.RunInBackground {
@@ -1529,8 +1581,8 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID string) (string, error) {
-	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID)
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID string, writePaths WritePathSet) (string, error) {
+	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, writePaths)
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
@@ -1538,8 +1590,8 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
-func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID string) (string, error) {
-	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID)
+func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID string, writePaths WritePathSet) (string, error) {
+	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID, writePaths)
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
@@ -1551,31 +1603,84 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 // sub-agent spawned through this tool shares (task, read_only_task, and
 // parallel_tasks children). Compaction, language preferences, and depth limits
 // must stay uniform across those paths — add new fields here, not at call sites.
-func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string) Options {
+func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string, writePaths WritePathSet) Options {
+	delegation := t.sandboxDelegation(ctx, writePaths)
 	return Options{
-		MaxSteps:            maxSteps,
-		Temperature:         t.temperature,
-		Pricing:             pricing,
-		UsageSource:         event.UsageSourceSubagent,
-		Gate:                t.gate,
-		ContextWindow:       ctxWin,
-		RecentKeep:          t.recentKeep,
-		SoftCompactRatio:    t.softCompactRatio,
-		ToolResultSnipRatio: t.toolResultSnipRatio,
-		CompactRatio:        t.compactRatio,
-		CompactForceRatio:   t.compactForceRatio,
-		ArchiveDir:          t.archiveDir,
-		KeepPolicy:          t.keepPolicy,
-		ResponseLanguage:    ResponseLanguageFromContext(ctx),
-		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
-		SubagentDepth:       childDepth,
-		MaxSubagentDepth:    t.maxDepth(),
-		DeliveryProfile:     t.deliveryProfile,
-		WorkspaceLease:      t.workspaceLease,
-		RecoveryGate:        t.recoveryGate,
-		RecoveryAgentID:     "subagent",
-		RecoveryTaskID:      recoveryTaskID,
+		MaxSteps:              maxSteps,
+		Temperature:           t.temperature,
+		Pricing:               pricing,
+		UsageSource:           event.UsageSourceSubagent,
+		Gate:                  t.gate,
+		SandboxCapabilityGate: t.sandboxCapabilityGate,
+		SandboxWorkspace:      t.workspaceRoot,
+		SandboxDelegation:     delegation,
+		ContextWindow:         ctxWin,
+		RecentKeep:            t.recentKeep,
+		SoftCompactRatio:      t.softCompactRatio,
+		ToolResultSnipRatio:   t.toolResultSnipRatio,
+		CompactRatio:          t.compactRatio,
+		CompactForceRatio:     t.compactForceRatio,
+		ArchiveDir:            t.archiveDir,
+		KeepPolicy:            t.keepPolicy,
+		ResponseLanguage:      ResponseLanguageFromContext(ctx),
+		ReasoningLanguage:     ReasoningLanguageFromContext(ctx),
+		SubagentDepth:         childDepth,
+		MaxSubagentDepth:      t.maxDepth(),
+		DeliveryProfile:       t.deliveryProfile,
+		WorkspaceLease:        t.workspaceLease,
+		RecoveryGate:          t.recoveryGate,
+		RecoveryAgentID:       "subagent",
+		RecoveryTaskID:        recoveryTaskID,
 	}
+}
+
+func (t *TaskTool) sandboxDelegation(ctx context.Context, writePaths WritePathSet) sandboxauth.Delegation {
+	var writeRoots []string
+	if writePaths.WholeWorkspace {
+		writeRoots = []string{writePaths.WorkspaceRoot}
+	} else {
+		writeRoots = writePaths.Paths
+	}
+	return SandboxDelegationForChild(ctx, t.workspaceRoot, writeRoots)
+}
+
+// SandboxDelegationForChild derives a child ceiling from its requested
+// workspace roots and the authority carried by a parent sub-agent context.
+// Root callers establish the initial ceiling; nested callers can only narrow it.
+func SandboxDelegationForChild(ctx context.Context, workspace string, writeRoots []string) sandboxauth.Delegation {
+	delegation := sandboxauth.Delegation{
+		ReadRoots:  []string{workspace},
+		WriteRoots: append([]string(nil), writeRoots...),
+	}
+	if SubagentDepth(ctx) == 0 {
+		return delegation
+	}
+	parent := sandboxDelegationFromContext(ctx)
+	delegation.ReadRoots = intersectDelegationRoots(delegation.ReadRoots, parent.ReadRoots)
+	delegation.WriteRoots = intersectDelegationRoots(delegation.WriteRoots, parent.WriteRoots)
+	return delegation
+}
+
+func intersectDelegationRoots(requested, ceiling []string) []string {
+	var out []string
+	for _, request := range requested {
+		for _, parent := range ceiling {
+			if delegationPathAtOrBelow(request, parent) {
+				out = append(out, request)
+				break
+			}
+			if delegationPathAtOrBelow(parent, request) {
+				out = append(out, parent)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func delegationPathAtOrBelow(path, root string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func subagentRecoveryTaskID(ctx context.Context, ref string) string {
@@ -1594,6 +1699,15 @@ func (t *TaskTool) WithRecoveryGate(g RecoveryGate) *TaskTool {
 		return nil
 	}
 	t.recoveryGate = g
+	return t
+}
+
+// WithSandboxCapabilityGate shares runtime grants with spawned sub-agents.
+func (t *TaskTool) WithSandboxCapabilityGate(g sandboxauth.Gate) *TaskTool {
+	if t == nil {
+		return nil
+	}
+	t.sandboxCapabilityGate = g
 	return t
 }
 

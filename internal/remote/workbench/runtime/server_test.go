@@ -27,6 +27,7 @@ import (
 	remotebroker "reasonix/internal/remote/broker"
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/rpcwire"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/skill"
 )
 
@@ -1152,6 +1153,230 @@ func TestSessionRotationLeaseFailureRetiresSession(t *testing.T) {
 		})
 	}
 }
+
+func TestApprovalPendingPromptKindAndDecisions(t *testing.T) {
+	tests := []struct {
+		name          string
+		approval      event.Approval
+		wantKind      protocol.PromptKind
+		wantDecisions []protocol.PromptDecision
+		wantExtraDecs int // extra decisions beyond the base set
+	}{
+		{
+			name:     "ordinary approval",
+			approval: event.Approval{ID: "a1", Tool: "bash", Subject: "go test"},
+			wantKind: protocol.PromptApproval,
+			wantDecisions: []protocol.PromptDecision{
+				protocol.DecisionAllowOnce, protocol.DecisionAllowSession,
+				protocol.DecisionAllowPersistent, protocol.DecisionDeny,
+			},
+		},
+		{
+			name: "capability reusable",
+			approval: event.Approval{
+				ID: "a2", Tool: "bash", Subject: "pip install", Kind: "sandbox_capability",
+				SandboxCapability: &sandboxauth.Prompt{Reusable: true, Argv: []string{"pip", "install"}},
+			},
+			wantKind: protocol.PromptCapabilityApproval,
+			wantDecisions: []protocol.PromptDecision{
+				protocol.DecisionAllowOnce, protocol.DecisionAllowSession,
+				protocol.DecisionAllowPersistent, protocol.DecisionRunSandboxed,
+				protocol.DecisionCancelCommand,
+			},
+		},
+		{
+			name: "capability non-reusable",
+			approval: event.Approval{
+				ID: "a3", Tool: "bash", Subject: "bash -c pip", Kind: "sandbox_capability",
+				SandboxCapability: &sandboxauth.Prompt{Reusable: false, Argv: []string{"bash", "-c", "pip"}},
+			},
+			wantKind: protocol.PromptCapabilityApproval,
+			wantDecisions: []protocol.PromptDecision{
+				protocol.DecisionAllowOnce, protocol.DecisionRunSandboxed,
+				protocol.DecisionCancelCommand,
+			},
+		},
+		{
+			name: "capability suspected secret",
+			approval: event.Approval{
+				ID: "a4", Tool: "bash", Subject: "curl -H $TOKEN", Kind: "sandbox_capability",
+				SandboxCapability: &sandboxauth.Prompt{Reusable: true, SuspectedSecret: true, Argv: []string{"curl"}},
+			},
+			wantKind: protocol.PromptCapabilityApproval,
+			wantDecisions: []protocol.PromptDecision{
+				protocol.DecisionAllowOnce, protocol.DecisionRunSandboxed,
+				protocol.DecisionCancelCommand,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := approvalPendingPrompt(tt.approval)
+			if p.Kind != tt.wantKind {
+				t.Fatalf("Kind = %q, want %q", p.Kind, tt.wantKind)
+			}
+			if p.Approval == nil {
+				t.Fatal("Approval is nil")
+			}
+			if len(p.Approval.AllowedDecisions) != len(tt.wantDecisions) {
+				t.Fatalf("AllowedDecisions = %v, want %v", p.Approval.AllowedDecisions, tt.wantDecisions)
+			}
+			for i, d := range tt.wantDecisions {
+				if p.Approval.AllowedDecisions[i] != d {
+					t.Fatalf("AllowedDecisions[%d] = %q, want %q", i, p.Approval.AllowedDecisions[i], d)
+				}
+			}
+		})
+	}
+}
+
+// capabilityTrackingController records which resolution path was taken.
+type capabilityTrackingController struct {
+	*fakeController
+	approveCalls []struct {
+		id                      string
+		allow, session, persist bool
+	}
+	resolveCapCalls []struct {
+		id     string
+		action sandboxauth.Action
+	}
+}
+
+func (c *capabilityTrackingController) Approve(id string, allow, session, persist bool) {
+	c.approveCalls = append(c.approveCalls, struct {
+		id                      string
+		allow, session, persist bool
+	}{id, allow, session, persist})
+}
+
+func (c *capabilityTrackingController) ResolveSandboxCapability(id string, action sandboxauth.Action) error {
+	c.resolveCapCalls = append(c.resolveCapCalls, struct {
+		id     string
+		action sandboxauth.Action
+	}{id, action})
+	return nil
+}
+
+func TestPromptApproveRoutesToResolveSandboxCapability(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       protocol.PromptKind
+		decision   protocol.PromptDecision
+		wantCapErr bool // expect the approve handler to fail (no capability controller)
+		wantCap    *sandboxauth.Action
+		wantBool   *bool // set when Approve is expected instead
+	}{
+		{
+			name:     "ordinary approval allow_once",
+			kind:     protocol.PromptApproval,
+			decision: protocol.DecisionAllowOnce,
+			wantBool: boolPtr(true),
+		},
+		{
+			name:     "ordinary approval deny",
+			kind:     protocol.PromptApproval,
+			decision: protocol.DecisionDeny,
+			wantBool: boolPtr(false),
+		},
+		{
+			name:     "capability allow_once",
+			kind:     protocol.PromptCapabilityApproval,
+			decision: protocol.DecisionAllowOnce,
+			wantCap:  actionPtr(sandboxauth.AllowOnce),
+		},
+		{
+			name:     "capability run_sandboxed",
+			kind:     protocol.PromptCapabilityApproval,
+			decision: protocol.DecisionRunSandboxed,
+			wantCap:  actionPtr(sandboxauth.RunSandboxed),
+		},
+		{
+			name:     "capability cancel_command",
+			kind:     protocol.PromptCapabilityApproval,
+			decision: protocol.DecisionCancelCommand,
+			wantCap:  actionPtr(sandboxauth.CancelCommand),
+		},
+		{
+			name:     "capability allow_session",
+			kind:     protocol.PromptCapabilityApproval,
+			decision: protocol.DecisionAllowSession,
+			wantCap:  actionPtr(sandboxauth.AllowSession),
+		},
+		{
+			name:     "capability allow_persistent",
+			kind:     protocol.PromptCapabilityApproval,
+			decision: protocol.DecisionAllowPersistent,
+			wantCap:  actionPtr(sandboxauth.AllowPersistent),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := New(Options{Workspace: t.TempDir()})
+			ctrl := &capabilityTrackingController{fakeController: &fakeController{model: "local/test"}}
+			target := srv.installTestSession(ctrl)
+
+			// Set up a pending prompt matching the test kind.
+			srv.mu.Lock()
+			sess := srv.sessions[target.SessionID]
+			approvalPrompt := &protocol.ApprovalPrompt{
+				PromptID: "cap-1", Tool: "bash", Subject: "pip install",
+				AllowedDecisions: []protocol.PromptDecision{tt.decision},
+			}
+			sess.pendingPrompt = &protocol.PendingPrompt{
+				Kind:     tt.kind,
+				Approval: approvalPrompt,
+			}
+			srv.mu.Unlock()
+
+			handlers := committedTestHandlers(srv, 1)
+			handler := handlers[protocol.MethodPromptApprove]
+			params := protocol.PromptApproveParams{
+				SessionMutation: protocol.SessionMutation{
+					RequestID: "request-cap", ExpectedHostEpoch: srv.hostEpoch,
+					Target: target, ExpectedRuntimeEpoch: "runtime_test",
+				},
+				PromptID: "cap-1",
+				Decision: tt.decision,
+			}
+			_, err := handler(context.Background(), params)
+
+			srv.mu.Lock()
+			pendingAfter := sess.pendingPrompt
+			srv.mu.Unlock()
+
+			if err != nil {
+				t.Fatalf("approve handler: %v", err)
+			}
+			if pendingAfter != nil {
+				t.Fatal("pending prompt not cleared after approval")
+			}
+
+			if tt.wantCap != nil {
+				if len(ctrl.resolveCapCalls) != 1 {
+					t.Fatalf("ResolveSandboxCapability calls = %d, want 1; approve calls = %d", len(ctrl.resolveCapCalls), len(ctrl.approveCalls))
+				}
+				if ctrl.resolveCapCalls[0].action != *tt.wantCap {
+					t.Fatalf("action = %q, want %q", ctrl.resolveCapCalls[0].action, *tt.wantCap)
+				}
+				if ctrl.resolveCapCalls[0].id != "cap-1" {
+					t.Fatalf("id = %q, want cap-1", ctrl.resolveCapCalls[0].id)
+				}
+			}
+			if tt.wantBool != nil {
+				if len(ctrl.approveCalls) != 1 {
+					t.Fatalf("Approve calls = %d, want 1; resolveCapCalls = %d", len(ctrl.approveCalls), len(ctrl.resolveCapCalls))
+				}
+				if ctrl.approveCalls[0].allow != *tt.wantBool {
+					t.Fatalf("allow = %v, want %v", ctrl.approveCalls[0].allow, *tt.wantBool)
+				}
+			}
+		})
+	}
+}
+
+func boolPtr(v bool) *bool                               { return &v }
+func actionPtr(a sandboxauth.Action) *sandboxauth.Action { return &a }
 
 func TestTurnDoneClearsPendingPromptAndReplayEvents(t *testing.T) {
 	tests := []struct {

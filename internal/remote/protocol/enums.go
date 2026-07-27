@@ -78,20 +78,33 @@ const (
 	CancelAlreadyRequested CancelStatus = "already_requested"
 )
 
+// PromptDecision enumerates the user decisions a client can submit for a pending
+// approval or capability prompt via prompt/approve.
 type PromptDecision string
 
 const (
-	DecisionAllowOnce       PromptDecision = "allow_once"
-	DecisionAllowSession    PromptDecision = "allow_session"
+	// DecisionAllowOnce approves the action for a single invocation.
+	DecisionAllowOnce PromptDecision = "allow_once"
+	// DecisionAllowSession approves the action for the remainder of the session.
+	DecisionAllowSession PromptDecision = "allow_session"
+	// DecisionAllowPersistent persists the grant to the project configuration.
 	DecisionAllowPersistent PromptDecision = "allow_persistent"
-	DecisionDeny            PromptDecision = "deny"
+	// DecisionDeny rejects the approval.
+	DecisionDeny PromptDecision = "deny"
+	// DecisionRunSandboxed instructs core to execute the command in the
+	// unchanged base sandbox without applying the requested capability delta.
+	DecisionRunSandboxed PromptDecision = "run_sandboxed"
+	// DecisionCancelCommand cancels the command entirely and returns a
+	// diagnostic to the model instead of executing it.
+	DecisionCancelCommand PromptDecision = "cancel_command"
 )
 
 type PromptKind string
 
 const (
-	PromptApproval PromptKind = "approval"
-	PromptAsk      PromptKind = "ask"
+	PromptApproval           PromptKind = "approval"
+	PromptAsk                PromptKind = "ask"
+	PromptCapabilityApproval PromptKind = "capability_approval"
 )
 
 type RewindScope string

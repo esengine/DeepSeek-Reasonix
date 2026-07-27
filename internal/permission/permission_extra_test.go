@@ -314,6 +314,94 @@ func TestSessionGrantRuleForBashUsesPrefix(t *testing.T) {
 	}
 }
 
+func TestUnsafeBashCommandsCannotCreateReusableRules(t *testing.T) {
+	for _, command := range []string{
+		`git status $(touch /tmp/reasonix-permission-bypass)`,
+		"git status `touch /tmp/reasonix-permission-bypass`",
+		`git status <(touch /tmp/reasonix-permission-bypass)`,
+		`git status *.pem`,
+		`git status ~/repo`,
+		`git status {old,backup}`,
+	} {
+		if got := RememberRuleForScope("bash", command); got != "" {
+			t.Errorf("RememberRuleForScope(%q) = %q, want no reusable rule", command, got)
+		}
+		if got := SessionGrantRuleForScope("bash", command); got != "" {
+			t.Errorf("SessionGrantRuleForScope(%q) = %q, want no reusable rule", command, got)
+		}
+	}
+	if got := RememberRuleForScope("bash", `rm -rf /tmp/exact`); got != `bash=rm -rf /tmp/exact` {
+		t.Errorf("static dangerous command exact rule = %q", got)
+	}
+	if got := RememberRuleForScope("bash", `git add . && git status`); got != `bash=git add . && git status` {
+		t.Errorf("static compound exact rule = %q", got)
+	}
+}
+
+func TestBashReusableRulesPreserveQuotedArgvAndLiteralFallback(t *testing.T) {
+	prefix := RememberRuleForScope("bash", `grep '*.go' file`)
+	if prefix != `Bash(grep '*.go':*)` {
+		t.Fatalf("quoted prefix rule = %q", prefix)
+	}
+	if !RuleMatchesString(prefix, "bash", `grep '*.go' other`) {
+		t.Fatal("quoted prefix did not match the same literal argv")
+	}
+	if RuleMatchesString(prefix, "bash", `grep secret.go other`) {
+		t.Fatal("quoted prefix matched a different argv token")
+	}
+
+	exact := RememberRuleForScope("bash", `rm -rf '*.log'`)
+	if exact != `bash=rm -rf '*.log'` {
+		t.Fatalf("literal fallback rule = %q", exact)
+	}
+	if !RuleMatchesString(exact, "bash", `rm -rf '*.log'`) {
+		t.Fatal("literal fallback did not match its exact command")
+	}
+	if RuleMatchesString(exact, "bash", `rm -rf secrets.log`) {
+		t.Fatal("literal fallback treated '*' as permission glob")
+	}
+}
+
+func TestUnsafeBashCommandsDoNotMatchScopedAllowRules(t *testing.T) {
+	dynamic := `echo $(rm -rf /tmp/reasonix-inner)`
+	for name, rule := range map[string]string{
+		"exact":  "Bash(" + dynamic + ")",
+		"glob":   "Bash(echo*)",
+		"prefix": "Bash(echo:*)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if RuleMatchesString(rule, "bash", dynamic) {
+				t.Errorf("RuleMatchesString matched unsafe bash subject")
+			}
+			p := New("ask", []string{rule}, nil, nil)
+			if got := p.DecideSubject("bash", false, dynamic); got != Ask {
+				t.Fatalf("DecideSubject() = %v, want Ask", got)
+			}
+		})
+	}
+
+	prefix := New("ask", []string{"Bash(git status:*)"}, nil, nil)
+	for _, command := range []string{
+		`git status *.pem`,
+		`git status ~/repo`,
+		`git status {old,backup}`,
+	} {
+		if got := prefix.DecideSubject("bash", false, command); got != Ask {
+			t.Errorf("DecideSubject(%q) = %v, want Ask", command, got)
+		}
+	}
+
+	global := New("ask", []string{"Bash"}, nil, nil)
+	if got := global.DecideSubject("bash", false, dynamic); got != Allow {
+		t.Errorf("explicit tool-wide Bash rule = %v, want Allow", got)
+	}
+
+	fallback := New("ask", nil, nil, nil)
+	if got := fallback.DecideSubject("bash", true, dynamic); got != Ask {
+		t.Errorf("unsafe bash with readOnly hint = %v, want Ask", got)
+	}
+}
+
 func TestBashCommandPrefixRejectsShellSyntax(t *testing.T) {
 	if got := BashCommandPrefix("go test ./... && rm -rf /tmp/x"); got != "" {
 		t.Errorf("BashCommandPrefix with shell syntax = %q, want empty", got)

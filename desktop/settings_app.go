@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sandboxauth"
 )
 
 // settings_app.go is the desktop Settings panel's command surface: it reads the
@@ -103,14 +104,80 @@ type PermissionsView struct {
 }
 
 type SandboxView struct {
-	Bash                   string   `json:"bash"`
-	Network                bool     `json:"network"`
-	WorkspaceRoot          string   `json:"workspaceRoot"`
-	AllowWrite             []string `json:"allowWrite"`
-	EffectiveWorkspaceRoot string   `json:"effectiveWorkspaceRoot"`
-	EffectiveWriteRoots    []string `json:"effectiveWriteRoots"`
-	Shell                  string   `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
-	EffectiveShell         string   `json:"effectiveShell,omitempty"`
+	Bash                        string                `json:"bash"`
+	Network                     bool                  `json:"network"`
+	WorkspaceRoot               string                `json:"workspaceRoot"`
+	AllowWrite                  []string              `json:"allowWrite"`
+	EffectiveWorkspaceRoot      string                `json:"effectiveWorkspaceRoot"`
+	EffectiveWriteRoots         []string              `json:"effectiveWriteRoots"`
+	Shell                       string                `json:"shell"` // [tools.shell] prefer: auto|bash|powershell|pwsh
+	EffectiveShell              string                `json:"effectiveShell,omitempty"`
+	YOLOAutoApproveCapabilities bool                  `json:"yoloAutoApproveCapabilities"`
+	CapabilityGrants            []CapabilityGrantView `json:"capabilityGrants,omitempty"`
+}
+
+// CapabilityGrantView is the settings-panel view of one persisted grant.
+type CapabilityGrantView struct {
+	Index                       int               `json:"index"`
+	Source                      string            `json:"source"`
+	CanonicalExecutable         string            `json:"canonicalExecutable"`
+	ArgvPrefix                  []string          `json:"argvPrefix,omitempty"`
+	Network                     bool              `json:"network"`
+	Background                  bool              `json:"background"`
+	PreserveBackgroundProcesses bool              `json:"preserveBackgroundProcesses"`
+	Reads                       []PathGrantView   `json:"reads,omitempty"`
+	Writes                      []PathGrantView   `json:"writes,omitempty"`
+	Devices                     []DeviceGrantView `json:"devices,omitempty"`
+}
+
+// PathGrantView is one read/write path entry in a capability grant.
+type PathGrantView struct {
+	Identity string `json:"identity"`
+	Path     string `json:"path"`
+	Kind     string `json:"kind"`
+}
+
+// DeviceGrantView is one device entry in a capability grant.
+type DeviceGrantView struct {
+	Path  string `json:"path"`
+	Kind  string `json:"kind"`
+	Major uint32 `json:"major"`
+	Minor uint32 `json:"minor"`
+}
+
+// grantViews converts []sandboxauth.Grant to []CapabilityGrantView with source/index.
+func grantViews(grants []sandboxauth.Grant, source string) []CapabilityGrantView {
+	views := make([]CapabilityGrantView, len(grants))
+	for i, g := range grants {
+		views[i] = CapabilityGrantView{
+			Index: i, Source: source,
+			CanonicalExecutable:         g.CanonicalExecutable,
+			ArgvPrefix:                  g.ArgvPrefix,
+			Network:                     g.Capabilities.Network,
+			Background:                  g.Background,
+			PreserveBackgroundProcesses: g.PreserveBackgroundProcesses,
+			Reads:                       pathGrantViews(g.Capabilities.Reads),
+			Writes:                      pathGrantViews(g.Capabilities.Writes),
+			Devices:                     deviceGrantViews(g.Capabilities.Devices),
+		}
+	}
+	return views
+}
+
+func pathGrantViews(paths []sandbox.CapabilityPath) []PathGrantView {
+	views := make([]PathGrantView, len(paths))
+	for i, p := range paths {
+		views[i] = PathGrantView{Identity: string(p.Identity), Path: p.Path, Kind: string(p.Kind)}
+	}
+	return views
+}
+
+func deviceGrantViews(devices []sandbox.CapabilityDevice) []DeviceGrantView {
+	views := make([]DeviceGrantView, len(devices))
+	for i, d := range devices {
+		views[i] = DeviceGrantView{Path: d.Path, Kind: string(d.Kind), Major: d.Major, Minor: d.Minor}
+	}
+	return views
 }
 
 type NetworkProxyView struct {
@@ -816,7 +883,7 @@ func (a *App) Settings() SettingsView {
 				Ask:   []string{},
 				Deny:  []string{},
 			},
-			Sandbox: SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil))},
+			Sandbox: SandboxView{Bash: config.Default().BashMode(), AllowWrite: []string{}, EffectiveWriteRoots: []string{}, Shell: "auto", EffectiveShell: sandboxEffectiveShellView(sandbox.ResolveShell("", "", nil)), YOLOAutoApproveCapabilities: false},
 			Agent: AgentView{
 				PlannerMaxSteps:        0,
 				MaxSubagentDepth:       agent.DefaultMaxSubagentDepth,
@@ -856,6 +923,8 @@ func (a *App) Settings() SettingsView {
 		effectiveWorkspaceRoot = writeRoots[0]
 	}
 	effectiveShell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, nil)
+	projectGrants, _ := config.LoadProjectCapabilityGrants(root)
+	userGrants, _ := config.LoadUserCapabilityGrants()
 	v := SettingsView{
 		DefaultModel:      cfg.DefaultModel,
 		PlannerModel:      cfg.Agent.PlannerModel,
@@ -876,6 +945,8 @@ func (a *App) Settings() SettingsView {
 			WorkspaceRoot: cfg.Sandbox.WorkspaceRoot, AllowWrite: nonNil(cfg.Sandbox.AllowWrite),
 			EffectiveWorkspaceRoot: effectiveWorkspaceRoot, EffectiveWriteRoots: nonNil(writeRoots),
 			Shell: shell, EffectiveShell: sandboxEffectiveShellView(effectiveShell),
+			YOLOAutoApproveCapabilities: cfg.Sandbox.YOLOAutoApproveCapabilities,
+			CapabilityGrants:            append(grantViews(projectGrants, "project"), grantViews(userGrants, "user")...),
 		},
 		Network: NetworkView{
 			ProxyMode: cfg.NetworkProxyMode(),
@@ -2791,6 +2862,108 @@ func (a *App) RemovePermissionRule(list, rule string) error {
 	})
 }
 
+// grantViewToEntry converts a CapabilityGrantView to a capabilityGrantEntry for validation.
+func grantViewToEntry(v CapabilityGrantView) config.CapabilityGrantEntryForDesktop {
+	reads := make([]struct {
+		Identity string
+		Path     string
+		Kind     string
+	}, len(v.Reads))
+	for i, r := range v.Reads {
+		reads[i] = struct {
+			Identity string
+			Path     string
+			Kind     string
+		}{Identity: r.Identity, Path: r.Path, Kind: r.Kind}
+	}
+	writes := make([]struct {
+		Identity string
+		Path     string
+		Kind     string
+	}, len(v.Writes))
+	for i, w := range v.Writes {
+		writes[i] = struct {
+			Identity string
+			Path     string
+			Kind     string
+		}{Identity: w.Identity, Path: w.Path, Kind: w.Kind}
+	}
+	devices := make([]struct {
+		Path  string
+		Kind  string
+		Major uint32
+		Minor uint32
+	}, len(v.Devices))
+	for i, d := range v.Devices {
+		devices[i] = struct {
+			Path  string
+			Kind  string
+			Major uint32
+			Minor uint32
+		}{Path: d.Path, Kind: d.Kind, Major: d.Major, Minor: d.Minor}
+	}
+	return config.CapabilityGrantEntryForDesktop{
+		CanonicalExecutable:         v.CanonicalExecutable,
+		ArgvPrefix:                  v.ArgvPrefix,
+		Network:                     v.Network,
+		Background:                  v.Background,
+		PreserveBackgroundProcesses: v.PreserveBackgroundProcesses,
+		Reads:                       reads,
+		Writes:                      writes,
+		Devices:                     devices,
+	}
+}
+
+// AddCapabilityGrant persists a new sandbox capability grant.
+func (a *App) AddCapabilityGrant(source string, grant CapabilityGrantView) error {
+	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
+		return err
+	}
+	var persist func(sandboxauth.Grant) error
+	root := a.activeWorkspaceRoot()
+	if source == "project" {
+		persist = func(g sandboxauth.Grant) error {
+			return config.PersistProjectCapabilityGrant(root, g)
+		}
+	} else {
+		persist = config.PersistUserCapabilityGrant
+		root = ""
+	}
+	g, err := config.ValidateGrantView(grantViewToEntry(grant), root)
+	if err != nil {
+		return fmt.Errorf("invalid capability grant: %w", err)
+	}
+	if err := persist(g); err != nil {
+		return err
+	}
+	return a.rebuildSetting("settings")
+}
+
+// DeleteCapabilityGrant removes a persisted grant matching by content.
+func (a *App) DeleteCapabilityGrant(source string, grant CapabilityGrantView) error {
+	if err := a.ensureActiveTabRebuildAllowed("settings"); err != nil {
+		return err
+	}
+	var del func(sandboxauth.Grant) error
+	root := a.activeWorkspaceRoot()
+	if source == "project" {
+		del = func(g sandboxauth.Grant) error {
+			return config.DeleteProjectCapabilityGrant(root, g)
+		}
+	} else {
+		del = config.DeleteUserCapabilityGrant
+		root = ""
+	}
+	g, err := config.ValidateGrantView(grantViewToEntry(grant), root)
+	if err != nil {
+		return fmt.Errorf("invalid capability grant: %w", err)
+	}
+	if err := del(g); err != nil {
+		return err
+	}
+	return a.rebuildSetting("settings")
+}
+
 // ReloadSettings rebuilds the active controller from the current config without
 // changing any config file. It lets manual config.toml edits take effect.
 func (a *App) ReloadSettings() error {
@@ -2808,14 +2981,16 @@ func (a *App) ReloadSettings() error {
 	return nil
 }
 
-// SetSandbox updates the bash sandbox mode, network egress, and write roots.
-func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string) error {
+// SetSandbox updates the bash sandbox mode, network egress, write roots,
+// shell preference, and YOLO sandbox capability auto-approval.
+func (a *App) SetSandbox(bash string, network bool, workspaceRoot string, allowWrite []string, shell string, yoloAutoApproveCapabilities bool) error {
 	return a.applyConfigChange(func(c *config.Config) error {
 		c.Sandbox.Bash = bash
 		c.Sandbox.Network = network
 		c.Sandbox.WorkspaceRoot = strings.TrimSpace(workspaceRoot)
 		c.Sandbox.AllowWrite = trimList(allowWrite)
 		c.Tools.Shell.Prefer = strings.TrimSpace(shell)
+		c.Sandbox.YOLOAutoApproveCapabilities = yoloAutoApproveCapabilities
 		return nil
 	})
 }

@@ -12,6 +12,8 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/permission"
+	"reasonix/internal/recovery"
+	"reasonix/internal/sandboxauth"
 )
 
 // approvalManager owns the approval/ask prompt bookkeeping and the runtime
@@ -223,12 +225,49 @@ func (a *approvalManager) registerDecisionKind(tool, subject, reason string, fre
 	return id, reply
 }
 
+// registerSandboxCapability allocates from the shared approval ID namespace and
+// records the typed binding before its event can be delivered.
+func (a *approvalManager) registerSandboxCapability(prompt sandboxauth.Prompt) (string, chan sandboxauth.Action) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.nextID++
+	id := strconv.Itoa(a.nextID)
+	reply := make(chan sandboxauth.Action, 1)
+	promptCopy := prompt
+	a.approvals[id] = pendingApproval{
+		tool: "bash", subject: strings.Join(prompt.Argv, " "), reason: prompt.Review.Justification,
+		fresh: true, kind: sandboxauth.ApprovalKind, capabilityReply: reply,
+		sandboxCapability: &promptCopy,
+	}
+	return id, reply
+}
+
+// resolveSandboxCapability validates before deletion so unknown actions leave
+// the waiter pending and retryable.
+func (a *approvalManager) resolveSandboxCapability(id string, action sandboxauth.Action) (chan sandboxauth.Action, bool) {
+	if !action.Valid() {
+		return nil, false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.approvals[id]
+	if !ok || p.kind != sandboxauth.ApprovalKind || p.capabilityReply == nil {
+		return nil, false
+	}
+	delete(a.approvals, id)
+	return p.capabilityReply, true
+}
+
 // grantSession records a session-scoped grant so future calls in the same scope
 // short-circuit.
 func (a *approvalManager) grantSession(tool, subject string) {
+	rule := permission.SessionGrantRuleForScope(tool, subject)
+	if rule == "" {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.granted[permission.SessionGrantRuleForScope(tool, subject)] = true
+	a.granted[rule] = true
 }
 
 func (a *approvalManager) planModeReadOnlyCommandTrusted(prefix string) bool {
@@ -251,12 +290,15 @@ func (a *approvalManager) grantPlanModeReadOnlyCommand(prefix string) {
 	a.planModeReadOnlyCommands[prefix] = true
 }
 
-// SessionAuthorizations is the same-session tool-grant and Plan-mode
-// read-only command trust state a controller rebuild must carry forward; see
-// Controller.SessionAuthorizations / RestoreSessionAuthorizations.
+// SessionAuthorizations is ephemeral same-session authorization state and
+// non-authority delivery bookkeeping a controller rebuild must carry forward;
+// see Controller.SessionAuthorizations / RestoreSessionAuthorizations. It must
+// never be persisted to a transcript or restored for a history resume.
 type SessionAuthorizations struct {
 	Grants                   []string
 	PlanModeReadOnlyCommands []string
+	SandboxCapabilityGrants  []sandboxauth.Grant
+	SandboxCapabilityYOLO    sandboxauth.YOLOSessionState
 }
 
 func (a *approvalManager) snapshotSessionAuthorizations() SessionAuthorizations {
@@ -294,12 +336,30 @@ func (a *approvalManager) cancel(id string) {
 }
 
 // resolve removes and returns the pending approval for id (Approve path).
-func (a *approvalManager) resolve(id string) pendingApproval {
+func (a *approvalManager) resolve(id string) (pendingApproval, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	p := a.approvals[id]
+	p, ok := a.approvals[id]
+	if !ok {
+		return pendingApproval{}, false
+	}
 	delete(a.approvals, id)
-	return p
+	return p, true
+}
+
+// resolveNonRecovery removes an ordinary approval while leaving recovery
+// mirrors owned by the recovery gate. This kind check and removal must stay in
+// one critical section: a typed recovery resolver may have consumed the gate
+// waiter but not yet retired its mirror.
+func (a *approvalManager) resolveNonRecovery(id string) (pendingApproval, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.approvals[id]
+	if !ok || p.kind == recovery.ApprovalKindRecovery {
+		return pendingApproval{}, false
+	}
+	delete(a.approvals, id)
+	return p, true
 }
 
 // registerAsk allocates an ask ID, records the pending question batch, and
@@ -406,7 +466,7 @@ func (a *approvalManager) snapshotPrompts() ([]event.Approval, []event.Ask) {
 	for id, p := range a.approvals {
 		approvals = append(approvals, event.Approval{
 			ID: id, Tool: p.tool, Subject: p.subject, Reason: p.reason, Fresh: p.fresh,
-			Kind: p.kind, Recovery: p.recovery,
+			Kind: p.kind, Recovery: p.recovery, SandboxCapability: p.sandboxCapability,
 		})
 	}
 	asks := make([]event.Ask, 0, len(a.asks))

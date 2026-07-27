@@ -3820,6 +3820,38 @@ func TestApprovalPersistentBashPrefixRememberRule(t *testing.T) {
 	}
 }
 
+func TestApprovalUnsafeBashCannotPersistOrGrantSession(t *testing.T) {
+	ids := make(chan string, 1)
+	rememberCalls := 0
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				ids <- e.Approval.ID
+			}
+		}),
+		OnRemember: func(rule string) RememberResult {
+			rememberCalls++
+			return RememberResult{Rule: rule, Path: "reasonix.toml", Saved: true}
+		},
+	})
+	go func() {
+		c.Approve(<-ids, true, true, true)
+	}()
+
+	allow, remember, err := gateApprover{c}.Approve(
+		context.Background(), "bash", `echo $(touch /tmp/reasonix-permission-bypass)`, nil,
+	)
+	if err != nil || !allow || remember {
+		t.Fatalf("Approve = (%v,%v,%v), want allow once", allow, remember, err)
+	}
+	if rememberCalls != 0 {
+		t.Fatalf("OnRemember called %d times, want zero", rememberCalls)
+	}
+	if len(c.approval.granted) != 0 {
+		t.Fatalf("unsafe bash command created session grants: %+v", c.approval.granted)
+	}
+}
+
 func TestApprovalPersistenceFailureKeepsSessionGrant(t *testing.T) {
 	ids := make(chan string, 1)
 	var notices []event.Event

@@ -10,6 +10,7 @@ import {
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
+import { SandboxCapabilityApproval } from "./SandboxCapabilityApproval";
 import { DUR_FAST } from "../lib/gsapAnimations";
 import {
   FileReferenceMenu,
@@ -231,6 +232,7 @@ export function ApprovalModal({
   insertRequest,
   onRevisionActiveChange,
   toolApprovalMode,
+  onResolveSandboxCapability,
 }: {
   approval: WireApproval;
   onAnswer: (allow: boolean, session: boolean, persist: boolean) => void;
@@ -244,10 +246,23 @@ export function ApprovalModal({
   insertRequest?: ComposerInsertRequest | null;
   onRevisionActiveChange?: (active: boolean) => void;
   toolApprovalMode?: ToolApprovalMode;
+  onResolveSandboxCapability?: (action: string) => void;
 }) {
   const t = useT();
   const isPlanApproval = approval.tool === "exit_plan_mode";
   const isRecoveryApproval = approval.kind === "recovery" || Boolean(approval.recovery);
+  const isSandboxCapability = approval.kind === "sandbox_capability" || Boolean(approval.sandbox_capability);
+
+  // Early return for sandbox capability — handled by dedicated component
+  if (isSandboxCapability) {
+    return (
+      <SandboxCapabilityApproval
+        sandboxCapability={approval.sandbox_capability!}
+        onResolve={(action) => onResolveSandboxCapability?.(action)}
+      />
+    );
+  }
+
   const recovery = approval.recovery;
   const recoveryChangeKind = (recovery?.change_kind ?? "").toLowerCase();
   const isRecoveryPlanChange =

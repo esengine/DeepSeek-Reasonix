@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ var bashShellPATH = cachedBashShellPATH
 
 var (
 	bashSandboxCommand             = sandbox.Command
+	bashPrepareCapabilityCommand   = sandbox.PrepareCapabilityCommand
+	bashPrepareCapabilityDirect    = sandbox.PrepareCapabilityDirectCommand
 	bashSandboxEscapePromptEnabled = func() bool { return runtime.GOOS == "windows" }
 )
 
@@ -90,9 +93,10 @@ type bash struct {
 }
 
 type bashParams struct {
-	Command                     string `json:"command"`
-	RunInBackground             bool   `json:"run_in_background"`
-	PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
+	Command                     string          `json:"command"`
+	RunInBackground             bool            `json:"run_in_background"`
+	PreserveBackgroundProcesses bool            `json:"preserve_background_processes"`
+	SandboxCapabilities         json.RawMessage `json:"sandbox_capabilities"`
 }
 
 func (bash) Name() string { return "bash" }
@@ -136,7 +140,7 @@ func (b bash) resolved() sandbox.Shell {
 }
 
 func (bash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group."}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"run_in_background":{"type":"boolean","description":"Run detached: returns a job id immediately and keeps running across turns (no foreground timeout). Read new output with bash_output, wait with wait, stop it with kill_shell. Use for long-running commands like servers, watchers, or builds you don't need to block on."},"preserve_background_processes":{"type":"boolean","description":"After the shell command exits normally, keep any process-group members it intentionally left behind. Use only for deliberate daemonization, browser/GUI/session launchers such as playwright-cli open, or nohup/disown/setsid; cancellation and timeouts still kill the process group."},"sandbox_capabilities":{"type":"object","description":"Optional request for one-time OS-sandbox capability delta. When bash exits non-zero, retry the SAME command with sandbox_capabilities matching: \"NVIDIA driver\"→{\"devices\":[...]}; \"unable to open database\"/\"Read-only file system\"/\"Permission denied\"/\"no write access\"→{\"write_paths\":[...]}; \"Connection timed out\"/resolution→{\"network\":true}","additionalProperties":false,"properties":{"network":{"type":"boolean","description":"Request unrestricted network access."},"read_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"write_paths":{"type":"array","maxItems":4,"items":{"type":"object","additionalProperties":false,"properties":{"identity":{"type":"string","enum":["workspace_relative","canonical_absolute"]},"path":{"type":"string","maxLength":4096,"description":"Existing path; at most 4096 UTF-8 bytes."}},"required":["identity","path"]}},"devices":{"type":"array","maxItems":4,"description":"Currently only effective on Linux. Exact existing canonical-absolute character or block devices. The host materializes these with path-string --dev-bind (accepted TOCTOU; not descriptor-bound or race-free).","items":{"type":"object","additionalProperties":false,"properties":{"path":{"type":"string","maxLength":4096}},"required":["path"]}},"argv_prefix":{"type":"array","maxItems":8,"items":{"type":"string"},"description":"Optional proposed reusable argv prefix; it does not itself grant authority."},"justification":{"type":"string","maxLength":100,"description":"Model-authored reason, at most 100 Unicode characters; authoritative normalized capabilities are reviewed separately."}}}},"required":["command"]}`)
 }
 
 // ReadOnly is false: bash's effect cannot be inferred from args (rm, curl,
@@ -152,19 +156,137 @@ func (bash) SnipHint() tool.SnipHint {
 }
 
 func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	invocation, err := b.PrepareSandboxInvocation(ctx, args)
+	if err != nil {
+		return "", err
+	}
+	return invocation.Execute(ctx, sandbox.BaseOnly)
+}
+
+// NormalizePermissionArgs strips DeepSeek's redundant bash wrappers before
+// ordinary permission approval, so permission rules, sandbox capability
+// approval/grant matching, and execution all observe the underlying command.
+func (b bash) NormalizePermissionArgs(raw json.RawMessage) json.RawMessage {
+	var p bashParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return raw
+	}
+	p.Command = b.normalizeCommand(p.Command)
+	out, err := json.Marshal(p)
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(out)
+}
+
+type preparedBashInvocation struct {
+	b            bash
+	p            bashParams
+	args         json.RawMessage
+	assessment   sandbox.CapabilityAssessment
+	reusableArgv []string
+	mu           sync.Mutex
+	used         bool
+}
+
+// PrepareSandboxInvocation parses one immutable Bash call and evaluates its
+// optional capability request without granting authority. The future policy
+// gate reviews this same invocation before selecting AuthorizedDelta.
+func (b bash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (tool.SandboxCapabilityInvocation, error) {
 	var p bashParams
 	if err := json.Unmarshal(args, &p); err != nil {
-		return "", fmt.Errorf("invalid args: %w", err)
+		return nil, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Command == "" {
-		return "", fmt.Errorf("command is required")
+		return nil, fmt.Errorf("command is required")
 	}
+
+	// Strip DeepSeek's redundant bash wrappers before sandbox capability
+	// approval and grant matching; PrepareSandboxInvocation also normalizes
+	// direct callers that did not pass through the ordinary permission gate.
+	p.Command = b.normalizeCommand(p.Command)
 
 	sh := b.resolved()
 	if !sh.SupportsChaining() && (hasUnquotedSeq(p.Command, "&&") || hasUnquotedSeq(p.Command, "||")) {
-		return "", fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. " +
+		return nil, fmt.Errorf("this shell is Windows PowerShell, which does not parse '&&' or '||'. " +
 			"Sequence with ';' (both run regardless of the first's result), use 'if ($?) { ... }' for " +
 			"conditional chaining, or issue the commands as separate calls")
+	}
+	var reusableArgv []string
+	if sh.Kind == sandbox.ShellBash {
+		if command, err := shellparse.ParseReusableCommand(p.Command); err == nil {
+			reusableArgv = append([]string(nil), command.Argv...)
+		}
+	}
+	assessment := sandbox.EvaluateCapability(ctx, sandbox.CapabilityInput{
+		Base:      b.sb,
+		Workspace: b.workDir,
+		Raw:       p.SandboxCapabilities,
+	})
+	return &preparedBashInvocation{
+		b:            b,
+		p:            p,
+		args:         append(json.RawMessage(nil), args...),
+		assessment:   assessment,
+		reusableArgv: reusableArgv,
+	}, nil
+}
+
+func (i *preparedBashInvocation) Review() sandbox.CapabilityReview {
+	return i.assessment.Review()
+}
+
+func (i *preparedBashInvocation) SandboxCapabilityRequest() tool.SandboxCapabilityRequest {
+	return tool.SandboxCapabilityRequest{
+		Command:                     i.p.Command,
+		ReusableArgv:                append([]string(nil), i.reusableArgv...),
+		RunInBackground:             i.p.RunInBackground,
+		PreserveBackgroundProcesses: i.p.PreserveBackgroundProcesses,
+	}
+}
+
+func (i *preparedBashInvocation) Execute(ctx context.Context, use sandbox.CapabilityUse) (string, error) {
+	return i.execute(ctx, use, nil)
+}
+
+func (i *preparedBashInvocation) ExecuteDirect(ctx context.Context, use sandbox.CapabilityUse, canonicalExecutable string, argv []string) (string, error) {
+	if canonicalExecutable == "" || len(argv) == 0 || argv[0] != canonicalExecutable {
+		return "", fmt.Errorf("invalid canonical direct-execution witness")
+	}
+	return i.execute(ctx, use, append([]string(nil), argv...))
+}
+
+func (i *preparedBashInvocation) execute(ctx context.Context, use sandbox.CapabilityUse, directArgv []string) (string, error) {
+	i.mu.Lock()
+	if i.used {
+		i.mu.Unlock()
+		return "", fmt.Errorf("prepared bash invocation has already been executed")
+	}
+	i.used = true
+	i.mu.Unlock()
+	return i.b.executePrepared(ctx, i.p, i.args, i.assessment, use, directArgv)
+}
+
+func (b bash) executePrepared(ctx context.Context, p bashParams, args json.RawMessage, assessment sandbox.CapabilityAssessment, use sandbox.CapabilityUse, directArgv []string) (string, error) {
+	sh := b.resolved()
+	diagnostic := sandbox.CapabilityFallbackDiagnostic(assessment.Review(), use)
+
+	// Materialize authority before considering a host terminal. A terminal cannot
+	// honor local capability confinement, so a successfully prepared delta must
+	// always execute through the local launcher (and reusable grants therefore
+	// consume their canonical argv). If preparation falls back atomically to the
+	// base command, the terminal remains an eligible base executor and receives
+	// the truthful fallback diagnostic.
+	launch := sandbox.CapabilityLaunch{}
+	if use == sandbox.AuthorizedDelta {
+		if len(directArgv) > 0 {
+			launch = bashPrepareCapabilityDirect(ctx, assessment, use, sh, p.Command, directArgv)
+		} else {
+			launch = bashPrepareCapabilityCommand(ctx, assessment, use, sh, p.Command)
+		}
+		diagnostic = launch.Diagnostic
+	} else {
+		launch.Argv, launch.Wrapped = bashSandboxCommand(b.sb, sh, p.Command)
 	}
 
 	// A host-owned terminal runs the command where the user watches it live.
@@ -173,15 +295,17 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	// (the host terminal spawns with its own unfiltered environment, which
 	// would leak the credentials the user asked to strip), and never for
 	// background jobs. ok=false falls back to local execution unchanged.
-	if b.terminal != nil && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
+	if b.terminal != nil && !launch.UsesDelta && !p.RunInBackground && !b.sb.Enforce() && !secrets.FilterSubprocessEnv() {
 		if out, ok, err := b.terminal.RunCommand(ctx, p.Command, b.workDir, b.timeout); ok {
+			out = appendCapabilityDiagnostic(out, diagnostic)
 			return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
 		}
 	}
 
 	// Wrap in the OS sandbox when configured; otherwise argv is just the shell.
-	argv, wrapped := bashSandboxCommand(b.sb, sh, p.Command)
+	argv, wrapped := launch.Argv, launch.Wrapped
 	if b.sb.Enforce() && bashSandboxEscapeSessionAllowed(ctx, p.Command, args) {
+		launch.Close()
 		argv = unconfinedShellArgv(sh, p.Command)
 		wrapped = false
 	} else if b.sb.Enforce() && !wrapped {
@@ -195,6 +319,7 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			}
 			return "", fmt.Errorf("%s", sandbox.UnavailableMessage())
 		}
+		launch.Close()
 		argv = unconfinedShellArgv(sh, p.Command)
 	}
 	cmdEnv := bashCommandEnv(ctx)
@@ -202,15 +327,18 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 	if p.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
+			launch.Close()
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
 		workDir := b.workDir
 		// The job runs under the manager's session context (no foreground timeout), so it
 		// survives this turn; its combined output streams to the job buffer.
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "bash", commandPreview(p.Command), func(jobCtx context.Context, out io.Writer) (string, error) {
+			defer launch.Close()
 			cmd := exec.CommandContext(jobCtx, argv[0], argv[1:]...)
 			cmd.Dir = workDir
 			cmd.Env = cmdEnv
+			cmd.ExtraFiles = launch.ExtraFiles
 			cmd.WaitDelay = bashWaitDelay
 			cmd.Stdout = out
 			cmd.Stderr = out
@@ -218,14 +346,40 @@ func (b bash) Execute(ctx context.Context, args json.RawMessage) (string, error)
 			if shouldReapAfterRun(jobCtx, sh, p.Command, p.PreserveBackgroundProcesses) {
 				reapShellProcess(cmd, tracked) // reap process-group stragglers the job left running (#3702)
 			}
-			return "", normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses)
+			runErr = normalizeBashRunError(jobCtx, runErr, p.PreserveBackgroundProcesses)
+			if launch.UsesDelta {
+				outcome := bashCapabilityExecutionOutcome(jobCtx, cmd)
+				_, _ = fmt.Fprintln(out, sandbox.CapabilityExecutionDiagnostic(launch, outcome))
+			}
+			return "", runErr
 		})
 		msg := fmt.Sprintf("Started background job %q. It keeps running across turns; read new output with bash_output(job_id=%q), wait for it with wait, or stop it with kill_shell(job_id=%q).", job.ID, job.ID, job.ID)
+		msg = appendCapabilityDiagnostic(msg, diagnostic)
 		return appendSessionDataHint(msg, b.guard.CommandHint(b.workDir, p.Command)), nil
 	}
 
-	out, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv)
+	defer launch.Close()
+	out, outcome, err := b.runForeground(ctx, p, sh, argv, wrapped, cmdEnv, launch.ExtraFiles)
+	if use == sandbox.AuthorizedDelta && launch.UsesDelta {
+		diagnostic = sandbox.CapabilityExecutionDiagnostic(launch, outcome)
+	}
+	if err != nil && b.sb.Enforce() {
+		if d := sandbox.SandboxErrorDiagnostic(out); d != "" {
+			out = appendCapabilityDiagnostic(out, d)
+		}
+	}
+	out = appendCapabilityDiagnostic(out, diagnostic)
 	return appendSessionDataHint(out, b.guard.CommandHint(b.workDir, p.Command)), err
+}
+
+func appendCapabilityDiagnostic(out, diagnostic string) string {
+	if diagnostic == "" {
+		return out
+	}
+	if strings.TrimSpace(out) == "" {
+		return diagnostic
+	}
+	return out + "\n\n" + diagnostic
 }
 
 // appendSessionDataHint appends the session-data guard warning to command
@@ -279,7 +433,7 @@ func bashSandboxEscapeSessionAllowed(ctx context.Context, command string, args j
 	})
 }
 
-func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string) (string, error) {
+func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell, argv []string, wrapped bool, cmdEnv []string, extraFiles []*os.File) (string, sandbox.CapabilityExecutionOutcome, error) {
 	runCtx := ctx
 	timeout := b.foregroundTimeout()
 	if timeout > 0 {
@@ -291,6 +445,7 @@ func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell,
 	cmd := exec.CommandContext(runCtx, argv[0], argv[1:]...)
 	cmd.Dir = b.workDir // "" lets exec use the process working directory
 	cmd.Env = cmdEnv
+	cmd.ExtraFiles = extraFiles
 	cmd.WaitDelay = bashWaitDelay
 	var buf bytes.Buffer
 	w := io.Writer(&buf)
@@ -309,15 +464,33 @@ func (b bash) runForeground(ctx context.Context, p bashParams, sh sandbox.Shell,
 	}
 	err = normalizeBashRunError(runCtx, err, p.PreserveBackgroundProcesses)
 	out := buf.String()
+	outcome := bashCapabilityExecutionOutcome(runCtx, cmd)
 
 	if errors.Is(context.Cause(runCtx), errBashTimeout) {
-		return out, fmt.Errorf("command timed out (> %s)", timeout)
+		return out, outcome, fmt.Errorf("command timed out (> %s)", timeout)
 	}
 	if err != nil {
 		// Non-zero exit: feed output and error back so the model can self-correct.
-		return out, fmt.Errorf("command exited: %w", err)
+		return out, outcome, fmt.Errorf("command exited: %w", err)
 	}
-	return out, nil
+	return out, outcome, nil
+}
+
+func bashCapabilityExecutionOutcome(ctx context.Context, cmd *exec.Cmd) sandbox.CapabilityExecutionOutcome {
+	if cmd != nil && cmd.ProcessState != nil {
+		// On Unix, an externally signaled wrapper has ExitCode -1. Ordinary user
+		// exits such as 7 remain completed; Bubblewrap reports child exits as
+		// codes. A terminal ProcessState is stronger evidence than a context
+		// cancellation that may have raced with normal process completion.
+		if cmd.ProcessState.ExitCode() == -1 {
+			return sandbox.CapabilityExecutionInterrupted
+		}
+		return sandbox.CapabilityExecutionCompleted
+	}
+	if ctx.Err() != nil {
+		return sandbox.CapabilityExecutionInterrupted
+	}
+	return sandbox.CapabilityExecutionCompleted
 }
 
 func normalizeBashRunError(ctx context.Context, err error, preserveBackgroundProcesses bool) error {
@@ -375,6 +548,15 @@ func (b bash) foregroundTimeout() time.Duration {
 	return b.timeout
 }
 
+// normalizeCommand applies Bash-specific source rewrites only when Bash will
+// interpret the command. Other shells must retain their native source exactly.
+func (b bash) normalizeCommand(command string) string {
+	if b.resolved().Kind != sandbox.ShellBash {
+		return command
+	}
+	return normalizeBashCommand(command, b.workDir)
+}
+
 func shouldTrackShellProcess(wrapped bool, sh sandbox.Shell, command string, preserveBackgroundProcesses bool) bool {
 	if preserveBackgroundProcesses {
 		return false
@@ -413,6 +595,200 @@ func newProgressWriter(emit tool.ProgressFunc) *progressWriter { return &progres
 func (w *progressWriter) Write(p []byte) (int, error) {
 	w.emit(string(p))
 	return len(p), nil
+}
+
+// normalizeBashCommand strips "cd <workDir> &&" and trailing "2>&1", which
+// are redundant with cmd.Dir and the tool's merged stdout/stderr. DeepSeek has
+// a persistent preference for emitting both wrappers that is difficult to
+// change reliably through prompting. Removing them lets ordinary permission
+// approval and sandbox capability approval/grant matching reason about the
+// underlying command. When a safe source-only rewrite cannot be proven, the
+// command is returned unchanged.
+func normalizeBashCommand(command, workDir string) string {
+	if command == "" || workDir == "" {
+		return command
+	}
+	workDir = filepath.Clean(workDir)
+
+	file, err := shellparse.ParseBash(command)
+	if err != nil || shellparse.HasHereDoc(file) {
+		return command
+	}
+	if len(file.Stmts) != 1 {
+		return command
+	}
+
+	segs, ok := bashAndSegments(file.Stmts[0], len(command), -1)
+	if !ok || len(segs) == 0 {
+		return command
+	}
+
+	var edits []bashSourceEdit
+	first := segs[0]
+	if isCdToWorkDir(nodeSource(command, first.stmt), workDir) {
+		end := nodeEnd(first.stmt)
+		if first.connectorEnd >= 0 {
+			end = skipShellSpaceForward(command, first.connectorEnd)
+		}
+		if validSourceRange(command, nodeStart(first.stmt), end) {
+			edits = append(edits, bashSourceEdit{start: nodeStart(first.stmt), end: end})
+		}
+	}
+
+	for _, seg := range segs {
+		if edit, ok := trailingStderrRedirectEdit(command, seg); ok {
+			edits = append(edits, edit)
+		}
+	}
+
+	if len(edits) == 0 {
+		return command
+	}
+	return applyBashSourceEdits(command, edits)
+}
+
+type bashAndSegment struct {
+	stmt         *syntax.Stmt
+	limit        int
+	connectorEnd int
+}
+
+// bashAndSegments returns the leaf statements of a top-level && chain. limit
+// is the following && operator's byte offset for non-final segments and the
+// source length for the final segment.
+func bashAndSegments(stmt *syntax.Stmt, limit, connectorEnd int) ([]bashAndSegment, bool) {
+	if stmt == nil || stmt.Negated || stmt.Coprocess || stmt.Disown || stmt.Background {
+		return nil, false
+	}
+	if bin, ok := stmt.Cmd.(*syntax.BinaryCmd); ok {
+		if len(stmt.Redirs) > 0 {
+			return nil, false
+		}
+		if bin.Op != syntax.AndStmt {
+			return []bashAndSegment{{stmt: stmt, limit: limit, connectorEnd: connectorEnd}}, true
+		}
+		opStart := int(bin.OpPos.Offset())
+		left, ok := bashAndSegments(bin.X, opStart, opStart+2)
+		if !ok {
+			return nil, false
+		}
+		right, ok := bashAndSegments(bin.Y, limit, connectorEnd)
+		if !ok {
+			return nil, false
+		}
+		return append(left, right...), true
+	}
+	return []bashAndSegment{{stmt: stmt, limit: limit, connectorEnd: connectorEnd}}, true
+}
+
+func nodeStart(stmt *syntax.Stmt) int { return int(stmt.Pos().Offset()) }
+
+func nodeEnd(stmt *syntax.Stmt) int { return int(stmt.End().Offset()) }
+
+func nodeSource(source string, stmt *syntax.Stmt) string {
+	start, end := nodeStart(stmt), nodeEnd(stmt)
+	if !validSourceRange(source, start, end) {
+		return ""
+	}
+	return source[start:end]
+}
+
+func isCdToWorkDir(segment, workDir string) bool {
+	sc, err := shellparse.ParseStaticCommand(segment, shellparse.StaticCommandPolicy{})
+	return err == nil && len(sc.Argv) == 2 && sc.Argv[0] == "cd" &&
+		filepath.IsAbs(sc.Argv[1]) && filepath.Clean(sc.Argv[1]) == workDir
+}
+
+type bashSourceEdit struct {
+	start int
+	end   int
+}
+
+// trailingStderrRedirectEdit identifies a sole trailing 2>&1 redirection and
+// returns the exact source range to delete. Command words are deliberately not
+// reduced to argv: doing so would discard quoting and turn literal data back
+// into active shell syntax.
+func trailingStderrRedirectEdit(source string, seg bashAndSegment) (bashSourceEdit, bool) {
+	stmt := seg.stmt
+	if stmt == nil || len(stmt.Redirs) != 1 {
+		return bashSourceEdit{}, false
+	}
+	if _, ok := stmt.Cmd.(*syntax.CallExpr); !ok {
+		return bashSourceEdit{}, false
+	}
+	r := stmt.Redirs[0]
+	if r == nil || r.Op != syntax.DplOut || r.N == nil || r.N.Value != "2" {
+		return bashSourceEdit{}, false
+	}
+	word, ok := shellparse.StaticWord(r.Word)
+	if !ok || word != "1" {
+		return bashSourceEdit{}, false
+	}
+	start, end := int(r.Pos().Offset()), int(r.End().Offset())
+	if !validSourceRange(source, start, end) || end != nodeEnd(stmt) || seg.limit < end || seg.limit > len(source) {
+		return bashSourceEdit{}, false
+	}
+	if !onlyShellSpace(source[end:seg.limit]) {
+		return bashSourceEdit{}, false
+	}
+	start = skipShellSpaceBackward(source, start)
+	return bashSourceEdit{start: start, end: end}, true
+}
+
+func validSourceRange(source string, start, end int) bool {
+	return start >= 0 && end >= start && end <= len(source)
+}
+
+func onlyShellSpace(s string) bool {
+	return skipShellSpaceForward(s, 0) == len(s)
+}
+
+func skipShellSpaceForward(source string, at int) int {
+	for at < len(source) {
+		switch source[at] {
+		case ' ', '\t', '\r', '\n':
+			at++
+		case '\\':
+			if at+1 < len(source) && source[at+1] == '\n' {
+				at += 2
+				continue
+			}
+			if at+2 < len(source) && source[at+1] == '\r' && source[at+2] == '\n' {
+				at += 3
+				continue
+			}
+			return at
+		default:
+			return at
+		}
+	}
+	return at
+}
+
+func skipShellSpaceBackward(source string, at int) int {
+	for at > 0 {
+		switch source[at-1] {
+		case ' ', '\t':
+			at--
+		default:
+			return at
+		}
+	}
+	return at
+}
+
+func applyBashSourceEdits(source string, edits []bashSourceEdit) string {
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	out := source
+	previousStart := len(source)
+	for _, edit := range edits {
+		if !validSourceRange(source, edit.start, edit.end) || edit.end > previousStart {
+			return source
+		}
+		out = out[:edit.start] + out[edit.end:]
+		previousStart = edit.start
+	}
+	return out
 }
 
 // hasUnquotedSeq reports whether seq appears in s outside any single- or

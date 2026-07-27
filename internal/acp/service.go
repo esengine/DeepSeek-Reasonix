@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/store"
 	"reasonix/internal/tool/builtin"
 )
@@ -631,6 +632,9 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 	}
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
+	sink.bindResolveCapability(func(id string, action sandboxauth.Action) {
+		_ = ctrl.ResolveSandboxCapability(id, action)
+	})
 	sink.bindAnswer(ctrl.AnswerQuestion)
 
 	now := time.Now().UTC()
@@ -917,6 +921,9 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	}
 	ctrl.EnableInteractiveApproval()
 	sink.bindApprove(ctrl.Approve)
+	sink.bindResolveCapability(func(id string, action sandboxauth.Action) {
+		_ = ctrl.ResolveSandboxCapability(id, action)
+	})
 	sink.bindAnswer(ctrl.AnswerQuestion)
 
 	dir := ctrl.SessionDir()
@@ -1577,6 +1584,9 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 	}
 	sess.mu.Unlock()
 	sink.bindApprove(newCtrl.Approve)
+	sink.bindResolveCapability(func(id string, action sandboxauth.Action) {
+		_ = newCtrl.ResolveSandboxCapability(id, action)
+	})
 	sink.bindAnswer(newCtrl.AnswerQuestion)
 
 	cur.ReleaseResources()

@@ -51,6 +51,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sandboxauth"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
@@ -83,9 +84,11 @@ type Controller struct {
 	guardianPath string            // persisted guardian session file ("" when disabled)
 	// recoveryGate is the shared Auto Guard state for this controller.
 	// nil when the feature is not wired for this controller.
-	recoveryGate *recovery.Gate
-	sink         event.Sink
-	policy       permission.Policy
+	recoveryGate                 *recovery.Gate
+	sandboxCapabilities          *sandboxauth.Engine
+	sandboxCapabilityInteractive atomic.Bool
+	sink                         event.Sink
+	policy                       permission.Policy
 	// subagentGate is the shared gate every headless-only sub-agent surface
 	// reads from (see Options.SubagentGate). Nil when the caller didn't build
 	// one — sub-agents then keep whatever gate they were constructed with.
@@ -247,6 +250,14 @@ type Controller struct {
 	// turn counts model turns this session, passed to hooks in their payload.
 	turn int
 
+	// bootstrapResumeAvailable distinguishes the initial history adoption from
+	// a later switch to another logical session. The initial boot may emit a
+	// mandatory headless warning before its caller can Resume the selected
+	// history; that first Resume preserves only the warning-delivery marker so
+	// startup does not report the same warning twice. No authority is preserved.
+	// Guarded by mu and never included in persisted or authorization state.
+	bootstrapResumeAvailable bool
+
 	displayRecorder func(content, display string)
 }
 
@@ -257,14 +268,16 @@ type approvalReply struct {
 }
 
 type pendingApproval struct {
-	tool      string
-	subject   string
-	reason    string
-	fresh     bool
-	autoDrain bool
-	kind      string // tool | plan | recovery; empty = tool
-	recovery  *event.RecoveryApproval
-	reply     chan approvalReply
+	tool              string
+	subject           string
+	reason            string
+	fresh             bool
+	autoDrain         bool
+	kind              string // tool | plan | recovery; empty = tool
+	recovery          *event.RecoveryApproval
+	reply             chan approvalReply
+	capabilityReply   chan sandboxauth.Action
+	sandboxCapability *sandboxauth.Prompt
 }
 
 // pendingAsk is an in-flight ask question batch. questions is retained so the
@@ -456,6 +469,9 @@ type Options struct {
 	// RuntimeProfile selects capability routing/filtering behavior. Empty keeps
 	// the backward-compatible Balanced profile.
 	RuntimeProfile capability.Profile
+	// SandboxCapabilityEngine supplies runtime grant/policy adapters. Nil builds
+	// an in-memory engine; concrete project configuration belongs to Issue #6.
+	SandboxCapabilityEngine *sandboxauth.Engine
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard.
@@ -516,6 +532,7 @@ func New(opts Options) *Controller {
 		workspaceRoot:                     opts.WorkspaceRoot,
 		externalFolderToolRefs:            opts.ExternalFolderToolRefs,
 		approval:                          newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
+		bootstrapResumeAvailable:          true,
 	}
 	if strings.TrimSpace(opts.WorkspaceRoot) != "" {
 		c.autoResearch = autoresearch.NewStore(opts.WorkspaceRoot)
@@ -534,6 +551,16 @@ func New(opts Options) *Controller {
 	// Auto Guard is built into Auto. Ask and YOLO bypass it through the mode
 	// provider, so no separate enablement state is needed.
 	c.initRecoveryGate(opts.RecoveryReviewer, opts.RecoveryHeadless)
+	c.sandboxCapabilityInteractive.Store(false)
+	if c.executor != nil {
+		c.sandboxCapabilities = opts.SandboxCapabilityEngine
+		if c.sandboxCapabilities == nil {
+			c.sandboxCapabilities = &sandboxauth.Engine{}
+		}
+		c.sandboxCapabilities.Approver = c
+		c.sandboxCapabilities.SetYOLORuntimeMode(false, false)
+		c.executor.SetSandboxCapabilityGate(c.sandboxCapabilities, opts.WorkspaceRoot, sandboxauth.Delegation{})
+	}
 	return c
 }
 
@@ -1784,32 +1811,92 @@ func (c *Controller) Turn() int {
 	return c.turn
 }
 
-// Approve answers a pending ApprovalRequest by ID: allow runs the call, session
-// also remembers a grant for the rest of the session so the same approval scope
-// is not re-prompted. Unknown/expired IDs are ignored.
+// Approve answers a pending ApprovalRequest by ID. It retains the legacy
+// fire-and-forget API; transports that must distinguish stale IDs should call
+// ResolveApproval instead.
 func (c *Controller) Approve(id string, allow, session, persist bool) {
+	c.ResolveApproval(id, allow, session, persist)
+}
+
+// ResolveApproval answers a pending ApprovalRequest by ID and reports whether
+// the ID was still live. The lookup and removal happen inside the owning
+// approval registry, so transports can reject stale decisions without a
+// check-then-act race or visibility into registry internals.
+func (c *Controller) ResolveApproval(id string, allow, session, persist bool) bool {
 	// Recovery cards are strict fresh decisions. Prefer ResolveRecovery so a
 	// continue/deny from an old client that only knows Approve still maps onto
 	// the recovery state machine (allow=continue, deny=revise without feedback).
 	// Session/persist grants are intentionally ignored for recovery.
-	//
-	// Lookup must use the live waiter table (HasApproval), not Snapshot: pre-
-	// normal-execution plan prompts park a waiter without an armed taskRuntime, so
-	// they never appear in the persistence snapshot.
 	c.mu.Lock()
 	gate := c.recoveryGate
 	c.mu.Unlock()
-	if gate != nil && gate.HasApproval(id) {
+	if gate != nil {
 		action := agent.RecoveryActionRevise
 		if allow {
 			action = agent.RecoveryActionContinue
 		}
-		_ = c.ResolveRecovery(id, action, "")
-		return
+		// Resolve is the recovery decision's single atomic owner. Do not inspect
+		// the gate first: typed and legacy callers must contend on the same
+		// consume operation so at most one can report success.
+		if err := gate.Resolve(id, recovery.Action(action), ""); err == nil {
+			pending, ok := c.approval.resolve(id)
+			if ok && pending.reply != nil {
+				pending.reply <- approvalReply{allow: allow}
+			}
+			return true
+		}
 	}
-	pending := c.approval.resolve(id)
+	// A recovery entry here is only a UI/replay mirror. It cannot own a second
+	// decision after another caller consumed the gate waiter.
+	pending, ok := c.approval.resolveNonRecovery(id)
+	if !ok {
+		return false
+	}
+	if pending.kind == sandboxauth.ApprovalKind && pending.capabilityReply != nil {
+		// Old boolean transports cannot express capability authority. Both allow
+		// and deny therefore choose the unchanged base sandbox safely.
+		pending.capabilityReply <- sandboxauth.RunSandboxed
+		return true
+	}
 	if pending.reply != nil {
 		pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
+	}
+	return true
+}
+
+// ResolveSandboxCapability answers a typed capability approval. Invalid
+// actions return an error without consuming the pending waiter.
+func (c *Controller) ResolveSandboxCapability(id string, action sandboxauth.Action) error {
+	reply, ok := c.approval.resolveSandboxCapability(id, action)
+	if !ok {
+		return fmt.Errorf("invalid or unknown sandbox capability approval %q action %q", id, action)
+	}
+	reply <- action
+	return nil
+}
+
+// ApproveSandboxCapability implements sandboxauth.Approver using the shared,
+// strict-fresh Controller prompt channel.
+func (c *Controller) ApproveSandboxCapability(ctx context.Context, prompt sandboxauth.Prompt) (sandboxauth.Action, error) {
+	if !c.sandboxCapabilityInteractive.Load() {
+		return sandboxauth.RunSandboxed, nil
+	}
+	c.approval.promptMu.Lock()
+	defer c.approval.promptMu.Unlock()
+	id, reply := c.approval.registerSandboxCapability(prompt)
+	c.sink.Emit(c.approvalRequestEvent(event.Approval{
+		ID: id, Tool: "bash", Subject: strings.Join(prompt.Argv, " "),
+		Reason: prompt.Review.Justification, Fresh: true, Kind: sandboxauth.ApprovalKind,
+		SandboxCapability: &prompt,
+	}))
+	waitCtx, cancel := c.approval.waitContext(ctx)
+	defer cancel()
+	select {
+	case action := <-reply:
+		return action, nil
+	case <-waitCtx.Done():
+		c.approval.cancel(id)
+		return sandboxauth.RunSandboxed, waitCtx.Err()
 	}
 }
 
@@ -1819,6 +1906,10 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 // Interactive frontends (chat, desktop) call this; the headless run keeps the
 // silent gate and a nil asker from setup.
 func (c *Controller) EnableInteractiveApproval() {
+	c.sandboxCapabilityInteractive.Store(true)
+	if c.sandboxCapabilities != nil {
+		c.sandboxCapabilities.SetYOLORuntimeMode(c.ToolApprovalMode() == ToolApprovalYolo, true)
+	}
 	trustGate := planModeReadOnlyTrustApprover{c}
 	escapeApprover := sandboxEscapeApprover{c}
 	configApprover := managedConfigWriteApprover{c}
@@ -1995,6 +2086,11 @@ func rulesWithoutFreshHumanApproval(rules []permission.Rule) []permission.Rule {
 // which resolves ordinary ask decisions to allow for `reasonix run` autonomy.
 func (c *Controller) ApplyHeadlessApprovalMode(mode string) {
 	mode = normalizeToolApprovalMode(mode)
+	c.sandboxCapabilityInteractive.Store(false)
+	if c.sandboxCapabilities != nil {
+		c.sandboxCapabilities.SetYOLORuntimeMode(mode == ToolApprovalYolo, false)
+		c.emitSandboxCapabilityStartupWarnings()
+	}
 	c.approval.setMode(mode)
 	if c.subagentGate != nil {
 		c.subagentGate.Update(mode)
@@ -2583,6 +2679,7 @@ func (c *Controller) Compact(ctx context.Context, instructions string) error {
 func (c *Controller) maybeSessionStart(ctx context.Context) {
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.mu.Lock()
+	c.bootstrapResumeAvailable = false
 	if c.startedOnce {
 		c.mu.Unlock()
 		return
@@ -2617,6 +2714,9 @@ func (c *Controller) NewSession() error {
 		return err
 	}
 	c.hooks.SessionEnd(context.Background(), "clear")
+	if c.sandboxCapabilities != nil {
+		c.sandboxCapabilities.ClearSessionGrants()
+	}
 	// Hold snapshotMu across the swap so an in-flight save cannot pair the old
 	// path with the fresh session (or the fresh path with the old session).
 	c.snapshotMu.Lock()
@@ -2644,9 +2744,11 @@ func (c *Controller) NewSession() error {
 	c.ClearGoal()
 	c.mu.Lock()
 	c.startedOnce = true // NewSession fires SessionStart itself; don't re-fire on the next turn
+	c.bootstrapResumeAvailable = false
 	c.mu.Unlock()
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
+	c.emitSandboxCapabilityStartupWarnings()
 	return nil
 }
 
@@ -2666,6 +2768,9 @@ func (c *Controller) ClearSession() error {
 		return err
 	}
 	defer c.endRotation()
+	if c.sandboxCapabilities != nil {
+		c.sandboxCapabilities.ClearSessionGrants()
+	}
 	c.mu.Lock()
 	oldPath := c.sessionPath
 	c.mu.Unlock()
@@ -2714,6 +2819,7 @@ func (c *Controller) ClearSession() error {
 	c.ClearGoal()
 	c.mu.Lock()
 	c.startedOnce = true
+	c.bootstrapResumeAvailable = false
 	c.mu.Unlock()
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
@@ -2732,6 +2838,7 @@ func (c *Controller) ClearSession() error {
 			destroy.Finish()
 		}()
 	}
+	c.emitSandboxCapabilityStartupWarnings()
 	return nil
 }
 
@@ -3215,6 +3322,24 @@ func (c *Controller) summarizeAt(ctx context.Context, turn int, from bool) error
 // Resume seeds the session from a loaded transcript and pins the active file to
 // its path so auto-save keeps appending there.
 func (c *Controller) Resume(s *agent.Session, path string) {
+	c.mu.Lock()
+	bootstrapResume := c.bootstrapResumeAvailable
+	c.bootstrapResumeAvailable = false
+	c.mu.Unlock()
+	if c.sandboxCapabilities != nil {
+		// A first Resume immediately after construction adopts startup history; a
+		// headless Build may already have emitted its mandatory warning before the
+		// history was available. Clear all authority as every history resume must,
+		// but retain that non-authority delivery bit so one startup emits once.
+		yoloState := c.sandboxCapabilities.YOLOSessionState()
+		c.sandboxCapabilities.ClearSessionGrants()
+		if bootstrapResume && yoloState.StartupWarningDelivered {
+			c.sandboxCapabilities.RestoreYOLOSessionState(sandboxauth.YOLOSessionState{
+				Workspace:               yoloState.Workspace,
+				StartupWarningDelivered: true,
+			})
+		}
+	}
 	// See snapshotMu: the swap must not interleave with an in-flight save.
 	// recoverInterruptedTurn and maybeColdResumePrune snapshot on their own,
 	// so they stay outside the locked section (snapshotMu is not reentrant).
@@ -3239,6 +3364,7 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.snapshotMu.Unlock()
 	c.recoverInterruptedTurn(path)
 	c.maybeColdResumePrune(path)
+	c.emitSandboxCapabilityStartupWarnings()
 }
 
 func (c *Controller) loadGuardianSession() {
@@ -5003,10 +5129,12 @@ func (c *Controller) InheritLifecycleFrom(prev *Controller) {
 	prev.mu.Lock()
 	started := prev.startedOnce
 	turn := prev.turn
+	bootstrapResumeAvailable := prev.bootstrapResumeAvailable
 	prev.mu.Unlock()
 
 	c.mu.Lock()
 	c.startedOnce = started
+	c.bootstrapResumeAvailable = bootstrapResumeAvailable
 	if c.turn < turn {
 		c.turn = turn
 	}
@@ -5018,7 +5146,12 @@ func (c *Controller) InheritLifecycleFrom(prev *Controller) {
 // for carrying into a replacement controller across a rebuild — see
 // RestoreSessionAuthorizations.
 func (c *Controller) SessionAuthorizations() SessionAuthorizations {
-	return c.approval.snapshotSessionAuthorizations()
+	auth := c.approval.snapshotSessionAuthorizations()
+	if c.sandboxCapabilities != nil {
+		auth.SandboxCapabilityGrants = c.sandboxCapabilities.SessionGrants()
+		auth.SandboxCapabilityYOLO = c.sandboxCapabilities.YOLOSessionState()
+	}
+	return auth
 }
 
 // RestoreSessionAuthorizations re-applies session authorizations captured
@@ -5027,6 +5160,54 @@ func (c *Controller) SessionAuthorizations() SessionAuthorizations {
 // replacement forgets every grant the user already made this session.
 func (c *Controller) RestoreSessionAuthorizations(auth SessionAuthorizations) {
 	c.approval.restoreSessionAuthorizations(auth)
+	if c.sandboxCapabilities != nil {
+		// Re-resolve at the existing controller-rebuild boundary so a project
+		// false→true edit cannot inherit stale auto-approval policy.
+		c.sandboxCapabilities.ConfigureYOLOPolicy(config.ResolveYOLOPolicyConfig(c.workspaceRoot))
+		c.sandboxCapabilities.RestoreSessionGrants(auth.SandboxCapabilityGrants)
+		c.sandboxCapabilities.RestoreYOLOSessionState(auth.SandboxCapabilityYOLO)
+	}
+}
+
+// SandboxCapabilityYOLOState exposes transport-neutral acknowledgement and warnings.
+func (c *Controller) SandboxCapabilityYOLOState() (sandboxauth.YOLOPolicyState, bool) {
+	if c.sandboxCapabilities == nil {
+		return sandboxauth.YOLOPolicyState{}, false
+	}
+	return c.sandboxCapabilities.YOLOState()
+}
+
+// AcknowledgeSandboxCapabilityYOLO accepts or refuses the pending project expansion.
+func (c *Controller) AcknowledgeSandboxCapabilityYOLO(accept bool) bool {
+	return c.sandboxCapabilities != nil && c.sandboxCapabilities.AcknowledgeYOLOProjectExpansion(accept)
+}
+
+// ReloadSandboxCapabilityYOLO reloads the effective policy at an existing
+// config-reload boundary without introducing a watcher.
+func (c *Controller) ReloadSandboxCapabilityYOLO() (sandboxauth.YOLOPolicyState, bool) {
+	if c.sandboxCapabilities == nil {
+		return sandboxauth.YOLOPolicyState{}, false
+	}
+	cfg := config.ResolveYOLOPolicyConfig(c.workspaceRoot)
+	if !c.sandboxCapabilities.ConfigureYOLOPolicy(cfg) {
+		return sandboxauth.YOLOPolicyState{}, false
+	}
+	c.emitSandboxCapabilityStartupWarnings()
+	return c.sandboxCapabilities.YOLOState()
+}
+
+func (c *Controller) emitSandboxCapabilityStartupWarnings() {
+	if c.sandboxCapabilities == nil {
+		return
+	}
+	for _, warning := range c.sandboxCapabilities.TakeYOLOStartupWarnings() {
+		warningCopy := warning
+		c.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelWarn,
+			Code: event.NoticeCodeSandboxCapabilityWarning,
+			Text: warning.Message, SandboxCapabilityWarning: &warningCopy,
+		})
+	}
 }
 
 // ReleaseResources stops plugin subprocesses and releases resources without
@@ -5156,6 +5337,10 @@ func (c *Controller) ApplyToolApprovalMode(mode string) []string {
 			recoveryDismissed = ctrl.OnModeChange(mode)
 		}
 	}
+	if c.sandboxCapabilities != nil {
+		c.sandboxCapabilities.SetYOLORuntimeMode(mode == ToolApprovalYolo, c.sandboxCapabilityInteractive.Load())
+		c.emitSandboxCapabilityStartupWarnings()
+	}
 	pending := c.approval.setMode(mode)
 	if c.subagentGate != nil {
 		c.subagentGate.Update(mode)
@@ -5163,7 +5348,7 @@ func (c *Controller) ApplyToolApprovalMode(mode string) []string {
 	c.refreshInteractiveGate()
 	// Clear recovery cards dismissed by the mode switch outside the gate lock.
 	for _, id := range recoveryDismissed {
-		p := c.approval.resolve(id)
+		p, _ := c.approval.resolve(id)
 		if p.reply != nil {
 			// Do not approve the pending mutation; signal cancel/deny so legacy
 			// paths drop the card.
@@ -5852,7 +6037,9 @@ func (c *Controller) requestApprovalWithReason(ctx context.Context, tool, subjec
 		c.approval.grantSession(tool, subject)
 	}
 	if r.allow && r.persist && !requiresFreshApprovalTool(tool) && c.onRemember != nil {
-		c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject)))
+		if rule := permission.RememberRuleForScope(tool, subject); rule != "" {
+			c.emitRememberResult(c.onRemember(rule))
+		}
 	}
 	return r.allow, false, nil
 }

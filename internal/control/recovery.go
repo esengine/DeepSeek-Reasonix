@@ -63,8 +63,8 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 
 	// Also resolve any matching approvalManager entry so legacy Approve paths
 	// and ReplayPending do not keep a stale prompt.
-	pending := c.approval.resolve(id)
-	if pending.reply != nil {
+	pending, ok := c.approval.resolve(id)
+	if ok && pending.reply != nil {
 		switch action {
 		case agent.RecoveryActionContinue, agent.RecoveryActionContinueTask:
 			pending.reply <- approvalReply{allow: true}

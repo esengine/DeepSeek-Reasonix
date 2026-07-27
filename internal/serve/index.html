@@ -152,7 +152,53 @@ input,textarea{font:inherit;color:inherit}
 .approval__btn--allow:hover{background:oklch(68% .16 38/.25)}
 .approval__btn--deny{background:var(--bg-2);color:var(--fg-2)}
 .approval__btn--deny:hover{background:var(--panel);color:var(--fg)}
-.approval__key{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;font-family:var(--mono);font-size:9px;font-weight:700;color:var(--muted);background:var(--bg)}
+.approval__key,.cap-approval__key,.yolo-ack__key{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;font-family:var(--mono);font-size:9px;font-weight:700;color:var(--muted);background:var(--bg)}
+
+/* capability approval card */
+.cap-approval{background:var(--panel);border:1px solid var(--accent);border-left:3px solid var(--warning);border-radius:var(--radius-lg);padding:12px 14px;margin:8px 0;box-shadow:var(--shadow-md);animation:msg-in .2s ease}
+.cap-approval:focus{outline:none}
+.cap-approval__header{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+.cap-approval__icon{color:var(--warning);width:16px;height:16px}
+.cap-approval__title{font-weight:600;font-size:13px}
+.cap-approval__justification{font-size:11.5px;color:var(--fg-2);padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;margin-bottom:10px;white-space:pre-wrap;word-break:break-word;max-height:80px;overflow-y:auto}
+.cap-approval__justification-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:3px}
+.cap-approval__fields{display:grid;grid-template-columns:1fr;gap:5px;margin-bottom:10px}
+.cap-approval__field{display:flex;gap:6px;font-size:11.5px;line-height:1.5}
+.cap-approval__field-label{color:var(--muted);white-space:nowrap;min-width:80px;flex-shrink:0}
+.cap-approval__field-value{color:var(--fg);font-family:var(--mono);font-size:11px;word-break:break-all}
+.cap-approval__argv{display:flex;flex-wrap:wrap;gap:3px}
+.cap-approval__arg{padding:1px 4px;border:1px solid var(--border);border-radius:3px;background:var(--bg-2);white-space:pre-wrap;word-break:break-all}
+.cap-approval__field-value--warn{color:var(--warning);font-weight:600}
+.cap-approval__field-value--critical{color:var(--danger);font-weight:600}
+.cap-approval__path-list{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.cap-approval__path-item{font-family:var(--mono);font-size:10.5px;color:var(--fg-2)}
+.cap-approval__risk{font-size:11px;font-weight:600;padding:3px 8px;border-radius:4px;display:inline-block}
+.cap-approval__risk--normal{color:var(--fg-2);background:var(--bg-2)}
+.cap-approval__risk--critical{color:var(--danger);background:oklch(50% .2 25/.12)}
+.cap-approval__details{margin:7px 0 10px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2)}
+.cap-approval__details-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px}
+.cap-approval__details-list{margin:0;padding-left:17px;color:var(--fg-2);font-size:11px;line-height:1.5}
+.cap-approval__details--warning{border-color:var(--warning);background:var(--warning-soft)}
+.cap-approval__bg-warning{font-size:11px;color:var(--warning);background:var(--warning-soft);padding:6px 10px;border-radius:6px;margin-bottom:10px;line-height:1.4}
+.cap-approval__actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+.cap-approval__btn{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;transition:all .18s ease;border:1px solid var(--border)}
+.cap-approval__btn--allow{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.cap-approval__btn--allow:hover{background:oklch(68% .16 38/.25)}
+.cap-approval__btn--sandbox{background:var(--bg-2);color:var(--fg-2)}
+.cap-approval__btn--sandbox:hover{background:var(--panel);color:var(--fg)}
+.cap-approval__btn--cancel{background:oklch(50% .2 25/.08);color:var(--danger)}
+.cap-approval__btn--cancel:hover{background:oklch(50% .2 25/.16)}
+
+/* YOLO acknowledgement banner */
+.yolo-ack{background:var(--panel);border:1px solid var(--warning);border-radius:var(--radius-lg);padding:12px 14px;margin:8px 0;box-shadow:var(--shadow-md);animation:msg-in .2s ease}
+.yolo-ack__header{font-size:12.5px;font-weight:600;color:var(--warning);margin-bottom:8px;line-height:1.4}
+.yolo-ack__actions{display:flex;gap:8px}
+.yolo-ack__btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid var(--border);cursor:pointer;transition:all .18s ease}
+.yolo-ack__btn--accept{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.yolo-ack__btn--accept:hover{background:oklch(68% .16 38/.25)}
+.yolo-ack__btn--refuse{background:var(--bg-2);color:var(--fg-2)}
+.yolo-ack__btn--refuse:hover{background:var(--panel);color:var(--fg)}
+.yolo-ack__btn--selected{outline:2px solid var(--accent);outline-offset:1px}
 
 /* ask card */
 .ask{background:var(--panel);border:1px solid var(--border-strong);border-radius:var(--radius-lg);padding:14px;margin:8px 0;box-shadow:var(--shadow-md);animation:msg-in .2s ease}
@@ -727,6 +773,34 @@ const __T = {
     'rewind_title': 'Rewind — Select Turn',
     'action_title': 'Turn #{turn} — Select Action',
     'files': 'files',
+    'cap_approval_title': 'Capability Approval',
+    'cap_model_justification': 'Model justification (untrusted):',
+    'cap_command': 'Command:',
+    'cap_argv_scope': 'Reusable argv scope:',
+    'cap_executable': 'Executable:',
+    'cap_network': 'Network:',
+    'cap_read_paths': 'Read paths:',
+    'cap_write_paths': 'Write paths:',
+    'cap_devices': 'Devices:',
+    'cap_background': 'Background:',
+    'cap_reusable': 'Reusable:',
+    'cap_preserve_processes': 'Preserve processes:',
+    'cap_yes': 'Yes',
+    'cap_no': 'No',
+    'cap_full_access': 'Full access',
+    'cap_risk': 'Risk:',
+    'cap_risk_findings': 'Authoritative risk findings',
+    'cap_warnings': 'Host warnings',
+    'cap_critical': 'Critical risk',
+    'cap_allow_once': 'Allow once',
+    'cap_allow_session': 'Allow for this session',
+    'cap_allow_persistent': 'Allow for this project',
+    'cap_run_sandboxed': 'Run in original sandbox',
+    'cap_cancel_command': 'Cancel command',
+    'cap_bg_warning': '⚠ This grant permits preserved background processes that may outlive the session.',
+    'cap_acknowledge': 'Acknowledge',
+    'cap_refuse': 'Refuse',
+    'cap_yolo_ack': 'Project configuration expands YOLO sandbox capability auto-approval. Apply these expansions for this workspace and session?',
   },
   zh: {
     'new_session': '新会话',
@@ -862,6 +936,34 @@ const __T = {
     'rewind_title': '回退 — 选择轮次',
     'action_title': '第 #{turn} 轮 — 选择操作',
     'files': '个文件',
+    'cap_approval_title': '能力审批',
+    'cap_model_justification': '模型理由（不可信）：',
+    'cap_command': '命令：',
+    'cap_argv_scope': '可重用 argv 范围：',
+    'cap_executable': '可执行文件：',
+    'cap_network': '网络：',
+    'cap_read_paths': '读取路径：',
+    'cap_write_paths': '写入路径：',
+    'cap_devices': '设备：',
+    'cap_background': '后台：',
+    'cap_reusable': '可重用：',
+    'cap_preserve_processes': '保留进程：',
+    'cap_yes': '是',
+    'cap_no': '否',
+    'cap_full_access': '完全访问',
+    'cap_risk': '风险：',
+    'cap_risk_findings': '权威风险发现',
+    'cap_warnings': '主机警告',
+    'cap_critical': '严重风险',
+    'cap_allow_once': '允许一次',
+    'cap_allow_session': '允许本次会话',
+    'cap_allow_persistent': '允许此项目',
+    'cap_run_sandboxed': '在原始沙盒中运行',
+    'cap_cancel_command': '取消命令',
+    'cap_bg_warning': '⚠ 此授权允许保留后台进程，可能超出会话生命周期。',
+    'cap_acknowledge': '确认',
+    'cap_refuse': '拒绝',
+    'cap_yolo_ack': '项目配置扩大了 YOLO 沙盒能力自动批准范围。是否为当前工作区和会话应用这些扩展？',
   }
 };
 const __ = (key, ...args) => {
@@ -920,6 +1022,7 @@ let toolCards = {};
 let escTimer = null;
 let hasVisibleHistory = false, checkpointCount = 0;
 let sessionsCache = [], sessionFilter = '', pendingDeleteSession = null;
+let yoloAckBanner = null, yoloAckPending = false;
 
 // ── slash commands registry ──
 const SLASH_CMDS = [
@@ -1223,6 +1326,228 @@ function showApproval(a) {
   document.addEventListener('keydown',onkey);
 }
 
+// ── sandbox capability approval ──
+function showCapabilityApproval(a) {
+  const c = a.sandbox_capability;
+  if (!c) { showApproval(a); return; }
+  const d=el('div','cap-approval');
+  const review=c.review||{};
+  const delta=review.effective_delta||{};
+  let html='<div class="cap-approval__header"><svg class="cap-approval__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span class="cap-approval__title">'+__('cap_approval_title')+'</span></div>';
+
+  // Model justification (untrusted)
+  if(review.justification){
+    html+='<div class="cap-approval__justification-label">'+__('cap_model_justification')+'</div>';
+    html+='<div class="cap-approval__justification">'+escHtml(review.justification)+'</div>';
+  }
+
+  // Structured fields
+  html+='<div class="cap-approval__fields">';
+
+  // Command
+  if(c.argv&&c.argv.length){
+    const args=c.argv.map(arg=>'<span class="cap-approval__arg">'+escHtml(JSON.stringify(String(arg)))+'</span>').join('');
+    html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_command')+'</span><span class="cap-approval__field-value cap-approval__argv">'+args+'</span></div>';
+  }
+
+  // Reusable grants are scoped to this authoritative argv prefix.
+  if(c.grant_prefix&&c.grant_prefix.length){
+    const scope=c.grant_prefix.map(arg=>'<span class="cap-approval__arg">'+escHtml(JSON.stringify(String(arg)))+'</span>').join('');
+    html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_argv_scope')+'</span><span class="cap-approval__field-value cap-approval__argv">'+scope+'</span></div>';
+  }
+
+  // Executable
+  html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_executable')+'</span><span class="cap-approval__field-value">'+escHtml(c.canonical_executable||'—')+'</span></div>';
+
+  // Network
+  const netVal=delta.network?__('cap_full_access'):__('cap_no');
+  html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_network')+'</span><span class="cap-approval__field-value'+(delta.network?' cap-approval__field-value--warn':'')+'">'+netVal+'</span></div>';
+
+  // Read paths
+  if(delta.read_paths&&delta.read_paths.length){
+    const items=delta.read_paths.map(p=>'<div class="cap-approval__path-item">'+escHtml(p.canonical)+' ('+(p.kind==='directory'?'dir':'file')+')</div>').join('');
+    html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_read_paths')+'</span><div class="cap-approval__path-list">'+items+'</div></div>';
+  }
+
+  // Write paths
+  if(delta.write_paths&&delta.write_paths.length){
+    const items=delta.write_paths.map(p=>'<div class="cap-approval__path-item">'+escHtml(p.canonical)+' ('+(p.kind==='directory'?'dir':'file')+')</div>').join('');
+    html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_write_paths')+'</span><div class="cap-approval__path-list">'+items+'</div></div>';
+  }
+
+  // Devices
+  if(delta.devices&&delta.devices.length){
+    const items=delta.devices.map(dv=>'<div class="cap-approval__path-item">'+escHtml(dv.canonical)+'</div>').join('');
+    html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_devices')+'</span><div class="cap-approval__path-list">'+items+'</div></div>';
+  }
+
+  // Background
+  html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_background')+'</span><span class="cap-approval__field-value'+(c.background?' cap-approval__field-value--warn':'')+'">'+(c.background?__('cap_yes'):__('cap_no'))+'</span></div>';
+
+  // Preserve processes
+  html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_preserve_processes')+'</span><span class="cap-approval__field-value'+(c.preserve_background_processes?' cap-approval__field-value--warn':'')+'">'+(c.preserve_background_processes?__('cap_yes'):__('cap_no'))+'</span></div>';
+
+  // Reusable
+  html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_reusable')+'</span><span class="cap-approval__field-value">'+(c.reusable?__('cap_yes'):__('cap_no'))+'</span></div>';
+
+  // Risk
+  if(review.risk&&review.risk.level){
+    const rc=review.risk.level==='critical'?'cap-approval__risk--critical':'cap-approval__risk--normal';
+    const rl=review.risk.level==='critical'?__('cap_critical'):review.risk.level;
+    html+='<div class="cap-approval__field"><span class="cap-approval__field-label">'+__('cap_risk')+'</span><span class="cap-approval__risk '+rc+'">'+rl+'</span></div>';
+  }
+
+  html+='</div>';
+  html+='<div data-cap-risk-findings></div><div data-cap-warnings></div>';
+
+  // Background warning for reusable grants with process preservation
+  if(c.reusable&&c.preserve_background_processes){
+    html+='<div class="cap-approval__bg-warning">'+__('cap_bg_warning')+'</div>';
+  }
+
+  // Build action buttons
+  const acts=[];
+  const keyActs=[];
+  function addAct(action,label,key,cls){const shortcut=String(key).toLowerCase();acts.push({action,label,key:String(key).toUpperCase(),shortcut,cls});keyActs.push({action,key:shortcut});}
+
+  addAct('allow_once',__('cap_allow_once'),'Y','cap-approval__btn--allow');
+  if(c.reusable) addAct('allow_session',__('cap_allow_session'),'A','cap-approval__btn--allow');
+  if(c.reusable&&!c.suspected_secret) addAct('allow_persistent',__('cap_allow_persistent'),'P','cap-approval__btn--allow');
+  addAct('run_sandboxed',__('cap_run_sandboxed'),'S','cap-approval__btn--sandbox');
+  addAct('cancel_command',__('cap_cancel_command'),'C','cap-approval__btn--cancel');
+
+  const btnsHtml=acts.map((a,i)=>{
+    const n=i+1;
+    return '<button class="cap-approval__btn '+a.cls+'" data-action="'+a.action+'" data-num="'+n+'"><span class="cap-approval__key">'+n+'</span> <span class="cap-approval__key">'+a.key+'</span> '+escHtml(a.label)+'</button>';
+  }).join('');
+  html+='<div class="cap-approval__actions">'+btnsHtml+'</div>';
+
+  d.innerHTML=html;
+  const appendAuthoritativeList=(root,label,items,format,warning)=>{
+    if(!root||!Array.isArray(items)||items.length===0)return;
+    const section=el('div','cap-approval__details'+(warning?' cap-approval__details--warning':''));
+    section.appendChild(el('div','cap-approval__details-label',label));
+    const list=el('ul','cap-approval__details-list');
+    items.forEach(item=>{const value=format(item);if(value)list.appendChild(el('li','',value));});
+    if(!list.childNodes.length)return;
+    section.appendChild(list);root.appendChild(section);
+  };
+  appendAuthoritativeList(
+    d.querySelector('[data-cap-risk-findings]'),
+    __('cap_risk_findings'),
+    review.risk?.findings,
+    finding=>[finding?.code,finding?.message].filter(Boolean).map(String).join(': '),
+    false
+  );
+  appendAuthoritativeList(
+    d.querySelector('[data-cap-warnings]'),
+    __('cap_warnings'),
+    c.warnings,
+    warning=>String(warning||''),
+    true
+  );
+  log.appendChild(d);scrollDown(true);
+
+  d.tabIndex=-1;
+  if(!isTextEntry(document.activeElement)||(document.activeElement===input&&!input.value))d.focus({preventScroll:true});
+
+  const cleanup=()=>{pendingPrompts=pendingPrompts.filter(f=>f!==cleanup);const hadFocus=d.contains(document.activeElement);d.remove();document.removeEventListener('keydown',onkey);if(hadFocus)input.focus();};
+  pendingPrompts.push(cleanup);
+
+  let resolving=false;
+  const resolve=async action=>{
+    if(resolving)return;
+    resolving=true;
+    const buttons=Array.from(d.querySelectorAll('.cap-approval__btn'));
+    buttons.forEach(btn=>{btn.disabled=true;});
+    try{
+      const response=await post('/capability-approve',{id:a.id,action});
+      if(!response.ok)throw new Error((await response.text()).trim()||('HTTP '+response.status));
+      cleanup();
+    }catch(err){
+      resolving=false;
+      buttons.forEach(btn=>{btn.disabled=false;});
+      showNotice(String(err?.message||err),'warn');
+      d.focus({preventScroll:true});
+    }
+  };
+
+  d.querySelectorAll('.cap-approval__btn').forEach(btn=>{btn.onclick=()=>resolve(btn.dataset.action);});
+
+  const onkey=e=>{
+    if(!isPlainKey(e))return;
+    const k=e.key.toLowerCase();
+    // Numeric 1-N maps to visible actions
+    if(k>='1'&&k<='9'){
+      const idx=parseInt(k,10)-1;
+      if(idx<acts.length){e.preventDefault();void resolve(acts[idx].action);return;}
+    }
+    // Letter shortcuts
+    for(let i=0;i<keyActs.length;i++){if(k===keyActs[i].key){e.preventDefault();void resolve(keyActs[i].action);return;}}
+    // n → run_sandboxed (legacy deny)
+    if(k==='n'){e.preventDefault();void resolve('run_sandboxed');return;}
+    // escape → cancel
+    if(k==='escape'){e.preventDefault();void resolve('cancel_command');return;}
+  };
+  document.addEventListener('keydown',onkey);
+}
+
+// ── YOLO acknowledgement banner ──
+function renderYOLOPolicyState(state) {
+  if(!state)return;
+  const required=state.acknowledgement==='required'&&state.yolo&&state.interactive&&state.effective;
+  if(!required){
+    if(yoloAckBanner){yoloAckBanner.cleanup();yoloAckBanner=null;}
+    return;
+  }
+  if(yoloAckBanner)return;
+
+  const d=el('div','yolo-ack');
+  d.innerHTML='<div class="yolo-ack__header">'+escHtml(__('cap_yolo_ack'))+'</div>'+
+    '<div class="yolo-ack__actions">'+
+      '<button class="yolo-ack__btn yolo-ack__btn--accept yolo-ack__btn--selected" data-accept="true"><span class="yolo-ack__key">Y</span> '+__('cap_acknowledge')+'</button>'+
+      '<button class="yolo-ack__btn yolo-ack__btn--refuse" data-accept="false"><span class="yolo-ack__key">N</span> '+__('cap_refuse')+'</button>'+
+    '</div>';
+  log.appendChild(d);scrollDown(true);
+  d.tabIndex=-1;
+  if(!isTextEntry(document.activeElement)||(document.activeElement===input&&!input.value))d.focus({preventScroll:true});
+  input.disabled=true;btnSend.disabled=true;
+  const buttons=Array.from(d.querySelectorAll('.yolo-ack__btn'));
+  let selected=0;
+  const select=i=>{selected=(i+buttons.length)%buttons.length;buttons.forEach((btn,j)=>btn.classList.toggle('yolo-ack__btn--selected',j===selected));};
+  const cleanup=()=>{const hadFocus=d.contains(document.activeElement);document.removeEventListener('keydown',onkey);d.remove();input.disabled=false;btnSend.disabled=false;yoloAckPending=false;if(hadFocus)input.focus();};
+  const resolve=async accept=>{
+    if(yoloAckPending)return;
+    yoloAckPending=true;buttons.forEach(btn=>{btn.disabled=true;});
+    try{
+      const response=await post('/yolo-acknowledge',{accept});
+      let result=null;
+      try{result=await response.json();}catch{}
+      if(result?.state)renderYOLOPolicyState(result.state);
+      if(!response.ok&&!result?.state)throw new Error('HTTP '+response.status);
+      if(result?.state?.acknowledgement==='required'){
+        yoloAckPending=false;buttons.forEach(btn=>{btn.disabled=false;});d.focus({preventScroll:true});
+      }
+    }catch(err){
+      yoloAckPending=false;buttons.forEach(btn=>{btn.disabled=false;});showNotice(String(err?.message||err),'warn');d.focus({preventScroll:true});
+    }
+  };
+  buttons.forEach((btn,i)=>{btn.onclick=()=>{select(i);void resolve(btn.dataset.accept==='true');};});
+  const onkey=e=>{
+    if(isTextEntry(e.target)||e.metaKey||e.altKey)return;
+    const k=e.key.toLowerCase();
+    if((e.ctrlKey&&(k==='n'||k==='p'))||(!e.ctrlKey&&(k==='arrowdown'||k==='arrowright'||k==='j'||k==='arrowup'||k==='arrowleft'||k==='k'))){
+      e.preventDefault();select(selected+((k==='p'||k==='arrowup'||k==='arrowleft'||k==='k')?-1:1));return;
+    }
+    if(e.ctrlKey)return;
+    if(k==='y'||k==='1'){e.preventDefault();select(0);void resolve(true);return;}
+    if(k==='n'||k==='2'||k==='escape'){e.preventDefault();select(1);void resolve(false);return;}
+    if(k==='enter'){e.preventDefault();void resolve(selected===0);}
+  };
+  document.addEventListener('keydown',onkey);
+  yoloAckBanner={node:d,cleanup};
+}
+
 // ── ask ──
 function showAsk(ask) {
   const d=el('div','ask');
@@ -1423,7 +1748,7 @@ es.onmessage=ev=>{setConnState('connected');
       } break;
     case 'notice': log.appendChild(el('div','notice'+(e.level==='warn'?' notice--warn':''),(e.level==='warn'?'! ':'')+(e.text||'')));scrollDown();break;
     case 'phase': finalizeMsg(); log.appendChild(el('div','phase',e.text||''));scrollDown();break;
-    case 'approval_request': if(e.approval)showApproval(e.approval); break;
+    case 'approval_request': if(e.approval&&e.approval.kind==='sandbox_capability'){showCapabilityApproval(e.approval);}else if(e.approval){showApproval(e.approval);}break;
     case 'ask_request': if(e.ask)showAsk(e.ask); break;
     case 'compaction_started': showCompaction({trigger:e.compaction?.trigger}); break;
     case 'compaction_done': showCompaction(e.compaction||{}); break;
@@ -1448,6 +1773,7 @@ function fetchStatus(){
     bypassMode=toolApprovalMode==='yolo';
     if(!bypassMode&&toolApprovalMode==='auto')yoloRestoreMode='auto';
     updateModeButtons();
+    renderYOLOPolicyState(s.sandboxCapabilityYOLO);
     if(s.window){const pct=Math.min(100,Math.round(s.used/s.window*100));ctxFill.style.width=pct+'%';ctxFill.style.background=pct>85?'var(--warning)':pct>95?'var(--danger)':'var(--accent)';ctxUsed.textContent=fmtTok(s.used)+' tok';ctxWindow.textContent=fmtTok(s.window)+' tok';}
     // goal state
     goalText=(s.goal||'').trim();
@@ -1531,7 +1857,7 @@ function renderSessions(){
     const title=sessionTitle(s);
     const meta=s.turns?s.turns+' turns':'';
     item.innerHTML='<svg class="session-item__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><div class="session-item__body"><div class="session-item__title">'+escHtml(title)+'</div><div class="session-item__meta">'+escHtml(meta)+'</div></div><button type="button" class="session-del" data-name="'+escAttr(s.name)+'" title="'+escAttr(__('delete_session'))+'">&times;</button>';
-    item.onclick=ev=>{if(ev.target.closest('.session-del')||running||s.current)return;post('/resume',{path:s.path}).then(()=>{log.innerHTML='';log.appendChild(welcome);showWelcome();hasVisibleHistory=false;checkpointCount=0;todosDismissed=false;resetCumulativeStats();loadSessions();updateActionAvailability();setTimeout(()=>fetch('/history').then(r=>r.json()).then(msgs=>{renderHistoryMessages(msgs);fetchTodos();refreshCheckpointAvailability();}),300);});};
+    item.onclick=ev=>{if(ev.target.closest('.session-del')||running||s.current)return;post('/resume',{path:s.path}).then(r=>{if(!r.ok)return;if(yoloAckBanner){yoloAckBanner.cleanup();yoloAckBanner=null;}log.innerHTML='';log.appendChild(welcome);showWelcome();hasVisibleHistory=false;checkpointCount=0;todosDismissed=false;resetCumulativeStats();loadSessions();fetchStatus();updateActionAvailability();setTimeout(()=>fetch('/history').then(r=>r.json()).then(msgs=>{renderHistoryMessages(msgs);fetchTodos();refreshCheckpointAvailability();}),300);});};
     list.appendChild(item);
   });
 }
@@ -1636,6 +1962,7 @@ async function syncModeBeforeSubmit(){
   // If goalMode is on, we'll send as /goal command — no separate POST needed
 }
 async function send(){
+  if(yoloAckBanner)return;
   const v=input.value.trim(); if(!v)return;
   await syncModeBeforeSubmit();
   let submitInput=v;
@@ -1775,7 +2102,7 @@ $('#btn-plan').onclick=()=>void setPlan(!planMode);
 $('#btn-bypass').onclick=()=>void toggleYolo();
 $('#btn-goal').onclick=()=>toggleGoalMode();
 $('#goal-chip').onclick=()=>toggleGoalMode();
-$('#btn-new').onclick=()=>{if(running)return;post('/new').then(()=>{log.innerHTML='';log.appendChild(welcome);showWelcome();hasVisibleHistory=false;checkpointCount=0;todosState=[];todosDismissed=false;renderTodoPanel();resetCumulativeStats();loadSessions();updateActionAvailability();});};
+$('#btn-new').onclick=()=>{if(running)return;post('/new').then(r=>{if(!r.ok)return;if(yoloAckBanner){yoloAckBanner.cleanup();yoloAckBanner=null;}log.innerHTML='';log.appendChild(welcome);showWelcome();hasVisibleHistory=false;checkpointCount=0;todosState=[];todosDismissed=false;renderTodoPanel();resetCumulativeStats();loadSessions();fetchStatus();updateActionAvailability();});};
 $('#btn-compact').onclick=()=>{if(actionDisabled('btn-compact')){showNotice(__('no_conversation'),'warn');return;}post('/compact');};
 $('#btn-rewind').onclick=()=>{if(actionDisabled('btn-rewind')){showNotice(__('no_checkpoints'),'warn');return;}openRewindPicker();};
 $('#btn-tree').onclick=()=>openBranches();

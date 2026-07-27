@@ -13,6 +13,7 @@ import (
 
 	"reasonix/internal/diff"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandbox"
 )
 
 // Tool is a capability the model can invoke.
@@ -32,6 +33,43 @@ type Tool interface {
 	ReadOnly() bool
 }
 
+// SandboxCapabilityTool is the optional seam implemented by Bash for a call
+// that may request an atomic OS-sandbox capability delta. The ordinary Tool
+// interface remains unchanged; execution policy type-asserts this interface
+// only when it needs to review capabilities before Execute.
+type SandboxCapabilityTool interface {
+	PrepareSandboxInvocation(ctx context.Context, args json.RawMessage) (SandboxCapabilityInvocation, error)
+}
+
+// SandboxCapabilityInvocation binds validation, review, and execution to one
+// immutable Bash call so policy cannot accidentally authorize one request and
+// execute another. Implementations must treat AuthorizedDelta atomically.
+type SandboxCapabilityInvocation interface {
+	Review() sandbox.CapabilityReview
+	SandboxCapabilityRequest() SandboxCapabilityRequest
+	Execute(ctx context.Context, use sandbox.CapabilityUse) (string, error)
+}
+
+// DirectSandboxCapabilityInvocation consumes a canonical executable witness on
+// reusable-grant hits. The first argv element must be the same canonical path;
+// implementations must not route it back through a shell or PATH lookup.
+type DirectSandboxCapabilityInvocation interface {
+	SandboxCapabilityInvocation
+	ExecuteDirect(ctx context.Context, use sandbox.CapabilityUse, canonicalExecutable string, argv []string) (string, error)
+}
+
+// SandboxCapabilityRequest carries execution identity that is not part of the
+// capability value object. Authorization uses it to bind grants to the actual
+// command and process-lifetime dimensions reviewed by the host. ReusableArgv is
+// nil unless the tool can reduce this same immutable invocation to one stable
+// direct-execution argv without evaluating shell expansions.
+type SandboxCapabilityRequest struct {
+	Command                     string
+	ReusableArgv                []string
+	RunInBackground             bool
+	PreserveBackgroundProcesses bool
+}
+
 // Previewer is an optional capability a writer Tool may implement: given the
 // same raw JSON args Execute would receive, compute the file change the call
 // *would* make — without touching disk. A front-end uses it to show an approval
@@ -40,6 +78,15 @@ type Tool interface {
 // discover support; the file-writing built-ins implement it, most tools do not.
 type Previewer interface {
 	Preview(args json.RawMessage) (diff.Change, error)
+}
+
+// PermissionArgNormalizer lets a tool rewrite its raw JSON args before they
+// reach the permission gate. This gives tools a single point to normalize
+// model-authored redundancies (e.g. "cd <workDir> &&" and "2>&1" for bash)
+// so the permission prompt, sandbox capability grant matching, and execution
+// all observe the same normalized command.
+type PermissionArgNormalizer interface {
+	NormalizePermissionArgs(raw json.RawMessage) json.RawMessage
 }
 
 // PreviewChange returns the change a writer tool would make for args, or ok=false

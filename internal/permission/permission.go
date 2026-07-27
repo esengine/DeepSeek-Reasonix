@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"mvdan.cc/sh/v3/syntax"
+
 	"reasonix/internal/shellparse"
 )
 
@@ -168,19 +170,24 @@ func (p Policy) ExplicitlyDenies(toolName string, args json.RawMessage) bool {
 // stable approval subject from args.
 func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) Decision {
 	if canonicalRuleTool(toolName) == "bash" {
+		reusable := bashSubjectReusable(subject)
 		switch {
 		case matchAny(p.Deny, toolName, subject):
 			return Deny
-		case matchAny(p.SessionAllow, toolName, subject):
+		case matchReusableBashAllow(p.SessionAllow, toolName, subject, reusable):
 			return Allow
 		case matchAny(p.Ask, toolName, subject):
 			return Ask
-		case matchAny(p.Allow, toolName, subject):
+		case matchReusableBashAllow(p.Allow, toolName, subject, reusable):
 			return Allow
 		}
 		if parts := DecomposeBashCommand(subject); parts != nil {
 			return p.decideBashSegments(readOnly, parts)
 		}
+		if readOnly && reusable {
+			return Allow
+		}
+		return p.Mode
 	}
 	switch {
 	case matchAny(p.Deny, toolName, subject):
@@ -214,7 +221,8 @@ func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) De
 func (p Policy) decideBashSegments(readOnly bool, parts []string) Decision {
 	out := Allow
 	for _, sub := range parts {
-		segReadOnly := readOnly
+		reusable := bashSegmentReusable(sub)
+		segReadOnly := readOnly && reusable
 		if !segReadOnly {
 			if isReadOnlyBashSubject(sub) {
 				segReadOnly = true
@@ -223,11 +231,11 @@ func (p Policy) decideBashSegments(readOnly bool, parts []string) Decision {
 		switch {
 		case matchAny(p.Deny, "bash", sub):
 			return Deny
-		case matchAny(p.SessionAllow, "bash", sub):
+		case matchReusableBashAllow(p.SessionAllow, "bash", sub, reusable):
 			// covered by the explicit session allowlist
 		case matchAny(p.Ask, "bash", sub):
 			out = Ask
-		case matchAny(p.Allow, "bash", sub):
+		case matchReusableBashAllow(p.Allow, "bash", sub, reusable):
 			// covered
 		case segReadOnly:
 			// covered
@@ -287,11 +295,29 @@ func matchAny(rules []Rule, toolName, subject string) bool {
 	return false
 }
 
+func matchReusableBashAllow(rules []Rule, toolName, subject string, reusable bool) bool {
+	for _, r := range rules {
+		if !ruleToolMatches(r.Tool, toolName) {
+			continue
+		}
+		if r.Subject == "" {
+			return true
+		}
+		if reusable && subject != "" && ruleSubjectMatches(r, subject) {
+			return true
+		}
+	}
+	return false
+}
+
 // RuleMatchesString reports whether one config-style rule string matches the
 // given tool subject. It is used for session grants as well as persisted config
 // rules so both paths share identical matching semantics.
 func RuleMatchesString(rule, toolName, subject string) bool {
 	r, ok := ParseRule(rule)
+	if ok && canonicalRuleTool(r.Tool) == "bash" && r.Subject != "" && !bashSubjectReusable(subject) {
+		return false
+	}
 	return ok && matchAny([]Rule{r}, toolName, subject)
 }
 
@@ -533,16 +559,20 @@ func rememberRule(toolName, subject string) string {
 // RememberRuleForScope builds the rule string persisted when the user chooses
 // an always-allow option. Bash commands prefer a safe prefix (go test:*) so
 // similar invocations (different search terms, different test packages) match;
-// when no safe prefix can be extracted the exact command is used. File
-// mutation tools are always remembered tool-wide (Edit). Other tools use their
-// bare tool name. Deny rules still take precedence on every call.
+// stable commands without a safe prefix use a literal exact rule, while
+// shell-expanded commands return no reusable rule. File mutation tools are
+// always remembered tool-wide (Edit). Other tools use their bare tool name.
+// Deny rules still take precedence on every call.
 func RememberRuleForScope(toolName, subject string) string {
 	subject = strings.TrimSpace(subject)
 	if subject != "" && toolName == "bash" {
+		if !bashSubjectReusable(subject) {
+			return ""
+		}
 		if pattern := BashCommandPrefix(subject); pattern != "" {
 			return "Bash(" + pattern + ")"
 		}
-		return "Bash(" + subject + ")"
+		return "bash=" + subject
 	}
 	if IsFileMutationTool(toolName) {
 		return "Edit"
@@ -552,7 +582,8 @@ func RememberRuleForScope(toolName, subject string) string {
 
 // SessionGrantKey returns the in-memory rule for "allow this session". Bash
 // prefers a command prefix when one is available, falling back to the exact
-// command when unsafe. File mutation tools share a single Edit grant.
+// command when stable; shell-expanded commands return no grant. File mutation
+// tools share a single Edit grant.
 func SessionGrantKey(toolName, subject string) string {
 	return SessionGrantRuleForScope(toolName, subject)
 }
@@ -563,10 +594,13 @@ func SessionGrantKey(toolName, subject string) string {
 func SessionGrantRuleForScope(toolName, subject string) string {
 	subject = strings.TrimSpace(subject)
 	if toolName == "bash" && subject != "" {
+		if !bashSubjectReusable(subject) {
+			return ""
+		}
 		if pattern := BashCommandPrefix(subject); pattern != "" {
 			return "Bash(" + pattern + ")"
 		}
-		return "Bash(" + subject + ")"
+		return "bash=" + subject
 	}
 	if IsFileMutationTool(toolName) {
 		return "Edit"
@@ -580,14 +614,14 @@ func SessionGrantRuleForScope(toolName, subject string) string {
 // broader "go *".
 func BashCommandPrefix(subject string) string {
 	cmd := strings.TrimSpace(subject)
-	if cmd == "" || containsShellSyntax(cmd) {
+	if cmd == "" {
 		return ""
 	}
 	if BashDangerWarning(cmd) != "" {
 		return ""
 	}
-	fields, malformed := shellparse.StaticFields(cmd)
-	if malformed != "" {
+	fields, ok := reusableBashFields(cmd)
+	if !ok {
 		return ""
 	}
 	if len(fields) < 2 {
@@ -595,9 +629,50 @@ func BashCommandPrefix(subject string) string {
 	}
 	base := strings.ToLower(fields[0])
 	if isPackageManagerRun(base) && len(fields) >= 3 && strings.ToLower(fields[1]) == "run" {
-		return fields[0] + " " + fields[1] + " " + fields[2] + ":*"
+		return quoteBashPrefix(fields[:3])
 	}
-	return fields[0] + " " + fields[1] + ":*"
+	return quoteBashPrefix(fields[:2])
+}
+
+func quoteBashPrefix(fields []string) string {
+	quoted := make([]string, 0, len(fields))
+	for _, field := range fields {
+		token, err := syntax.Quote(field, syntax.LangBash)
+		if err != nil {
+			return ""
+		}
+		quoted = append(quoted, token)
+	}
+	return strings.Join(quoted, " ") + ":*"
+}
+
+func reusableBashFields(subject string) ([]string, bool) {
+	cmd, err := shellparse.ParseReusableCommand(subject)
+	if err != nil || len(cmd.Argv) == 0 {
+		return nil, false
+	}
+	return cmd.Argv, true
+}
+
+func bashSubjectReusable(subject string) bool {
+	parts := DecomposeBashCommand(subject)
+	if parts == nil {
+		return bashSegmentReusable(subject)
+	}
+	for _, part := range parts {
+		if !bashSegmentReusable(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func bashSegmentReusable(subject string) bool {
+	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
+		subject = normalized
+	}
+	_, ok := reusableBashFields(subject)
+	return ok
 }
 
 func isPackageManagerRun(base string) bool {
@@ -690,12 +765,12 @@ func bashPrefixMatches(base, subject string) bool {
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
 		subject = normalized
 	}
-	fields, malformed := shellparse.StaticFields(subject)
-	if malformed != "" {
+	fields, ok := reusableBashFields(subject)
+	if !ok {
 		return false
 	}
-	baseFields, malformed := shellparse.StaticFields(base)
-	if malformed != "" || len(baseFields) == 0 || len(fields) < len(baseFields) {
+	baseFields, ok := reusableBashFields(base)
+	if !ok || len(fields) < len(baseFields) {
 		return false
 	}
 	for i, want := range baseFields {

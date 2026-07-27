@@ -110,8 +110,87 @@ export interface WireApproval {
   subject: string;
   reason?: string;
   fresh?: boolean;
-  kind?: "tool" | "plan" | "recovery" | string;
+  kind?: "tool" | "plan" | "recovery" | "sandbox_capability" | string;
   recovery?: WireRecoveryApproval;
+  sandbox_capability?: WireSandboxCapabilityPrompt;
+}
+
+// ── Sandbox capability types ──
+export interface WireCapabilityPath {
+  identity: string;
+  path: string;
+  canonical: string;
+  kind: string;
+}
+
+export interface WireCapabilityDevice {
+  path: string;
+  canonical: string;
+  kind: string;
+  major: number;
+  minor: number;
+}
+
+export interface WireCapabilitySet {
+  network: boolean;
+  read_paths?: WireCapabilityPath[];
+  write_paths?: WireCapabilityPath[];
+  devices?: WireCapabilityDevice[];
+}
+
+export interface WireCapabilityRiskFinding {
+  code: string;
+  message: string;
+}
+
+export interface WireCapabilityRisk {
+  level: string;
+  findings?: WireCapabilityRiskFinding[];
+}
+
+export interface WireCapabilityReview {
+  state: string;
+  requested?: boolean;
+  request: WireCapabilitySet;
+  effective_delta: WireCapabilitySet;
+  argv_prefix?: string[];
+  justification?: string;
+  risk: WireCapabilityRisk;
+  diagnostic?: string;
+  authority: {
+    requested: boolean;
+    supported: boolean;
+    prepared: boolean;
+    applied: string;
+  };
+}
+
+export interface WireSandboxCapabilityPrompt {
+  review: WireCapabilityReview;
+  workspace: string;
+  canonical_executable: string;
+  argv?: string[];
+  grant_prefix?: string[];
+  background: boolean;
+  preserve_background_processes: boolean;
+  reusable: boolean;
+  suspected_secret: boolean;
+  warnings?: string[];
+}
+
+export interface WireYOLOWarning {
+  code: string;
+  message: string;
+  mandatory: boolean;
+}
+
+export interface WireYOLOPolicyState {
+  workspace: string;
+  effective: boolean;
+  yolo: boolean;
+  interactive: boolean;
+  acknowledgement: string;
+  warnings?: WireYOLOWarning[];
 }
 
 export interface WireGuardian {
@@ -1377,6 +1456,32 @@ export interface PermissionsView {
   deny: string[];
 }
 
+export interface DeviceGrantView {
+  path: string;
+  kind: string; // "character" | "block"
+  major: number;
+  minor: number;
+}
+
+export interface PathGrantView {
+  identity: string; // "workspace_relative" | "canonical_absolute"
+  path: string;
+  kind: string; // "directory" | "file"
+}
+
+export interface CapabilityGrantView {
+  index: number;
+  source: string; // "project" | "user"
+  canonicalExecutable: string;
+  argvPrefix: string[];
+  network: boolean;
+  background: boolean;
+  preserveBackgroundProcesses: boolean;
+  reads: PathGrantView[];
+  writes: PathGrantView[];
+  devices: DeviceGrantView[];
+}
+
 export interface SandboxView {
   bash: string; // "enforce" | "off"
   network: boolean;
@@ -1386,6 +1491,8 @@ export interface SandboxView {
   effectiveWriteRoots: string[];
   shell: string; // "auto" | "bash" | "powershell" | "pwsh"
   effectiveShell?: string; // "bash" | "git-bash" | "powershell" | "pwsh"
+  yoloAutoApproveCapabilities: boolean;
+  capabilityGrants: CapabilityGrantView[];
 }
 
 export interface NetworkProxyView {

@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 )
 
 // Kind tags an Event. Read the field(s) documented for that kind.
@@ -180,6 +181,8 @@ type Approval struct {
 	// Recovery carries Auto Guard card fields when Kind is "recovery".
 	// Old frontends ignore it and still render a one-shot fresh approval.
 	Recovery *RecoveryApproval
+	// SandboxCapability is authoritative when Kind is sandbox_capability.
+	SandboxCapability *sandboxauth.Prompt
 }
 
 // RecoveryApproval is the backward-compatible structured payload for Auto
@@ -306,6 +309,12 @@ const (
 	NoticeCodeLoopGuard       = "loop_guard"
 	NoticeCodeWorkspaceLease  = "workspace_lease"
 	NoticeCodeCancelledTurn   = "cancelled_turn_display"
+	// NoticeCodeSandboxCapabilityYOLO marks a high-visibility YOLO auto-once audit.
+	NoticeCodeSandboxCapabilityYOLO = "sandbox_capability_yolo_auto_once"
+	// NoticeCodeSandboxCapabilityGrant marks lower-noise reusable-grant metadata.
+	NoticeCodeSandboxCapabilityGrant = "sandbox_capability_grant_applied"
+	// NoticeCodeSandboxCapabilityWarning marks mandatory project-expansion warnings.
+	NoticeCodeSandboxCapabilityWarning = "sandbox_capability_project_expansion"
 )
 
 type Event struct {
@@ -325,19 +334,23 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit   int             // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss  int             // Usage: cumulative cache-miss prompt tokens this session
-	Level        Level           // Notice
-	Approval     Approval        // ApprovalRequest
-	Ask          Ask             // AskRequest
-	Err          error           // TurnDone: non-nil on failure
-	Cancelled    bool            // TurnDone: Cancel was requested while the turn was active
-	Outcome      string          // TurnDone: optional machine-readable recoverable outcome
-	Readiness    *FinalReadiness // TurnDone: structured final-readiness recovery state
-	Compaction   Compaction      // Compaction
-	Guardian     GuardianResult
-	RetryAttempt int // Retrying: 1-based attempt about to be made
-	RetryMax     int // Retrying: total attempts before giving up
+	SessionHit  int             // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss int             // Usage: cumulative cache-miss prompt tokens this session
+	Level       Level           // Notice
+	Approval    Approval        // ApprovalRequest
+	Ask         Ask             // AskRequest
+	Err         error           // TurnDone: non-nil on failure
+	Cancelled   bool            // TurnDone: Cancel was requested while the turn was active
+	Outcome     string          // TurnDone: optional machine-readable recoverable outcome
+	Readiness   *FinalReadiness // TurnDone: structured final-readiness recovery state
+	Compaction  Compaction      // Compaction
+	Guardian    GuardianResult
+	// SandboxCapabilityAudit carries the typed decision behind capability notices.
+	SandboxCapabilityAudit *sandboxauth.AuditRecord
+	// SandboxCapabilityWarning carries a typed mandatory policy warning.
+	SandboxCapabilityWarning *sandboxauth.Warning
+	RetryAttempt             int // Retrying: 1-based attempt about to be made
+	RetryMax                 int // Retrying: total attempts before giving up
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

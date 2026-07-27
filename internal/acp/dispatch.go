@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/sandboxauth"
 )
 
 // notifier is the slice of Conn the dispatch sink depends on: it pushes
@@ -51,11 +52,12 @@ type updateSink struct {
 	sessionID string
 	// cwd resolves relative tool-arg paths for tool_call locations. Set once
 	// via bindCwd before the sink receives events.
-	cwd     string
-	approve func(id string, allow, session, persist bool)
-	answer  func(id string, answers []event.AskAnswer)
-	mu      sync.Mutex
-	turnCtx context.Context
+	cwd               string
+	approve           func(id string, allow, session, persist bool)
+	resolveCapability func(id string, action sandboxauth.Action)
+	answer            func(id string, answers []event.AskAnswer)
+	mu                sync.Mutex
+	turnCtx           context.Context
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -73,6 +75,16 @@ func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool
 		return
 	}
 	s.approve = fn
+}
+
+// bindResolveCapability installs the controller's ResolveSandboxCapability
+// callback for sandbox_capability approval events.
+func (s *updateSink) bindResolveCapability(fn func(id string, action sandboxauth.Action)) {
+	if fn == nil {
+		s.resolveCapability = nil
+		return
+	}
+	s.resolveCapability = fn
 }
 
 // bindAnswer installs the controller's AnswerQuestion callback for AskRequest
@@ -252,6 +264,53 @@ func (s *updateSink) replay(msgs []provider.Message) {
 // approve. Any transport failure or a cancelled/rejected outcome denies the call,
 // so the model gets a blocked result rather than the turn hanging.
 func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
+	// Sandbox capability approval uses typed actions.
+	if a.Kind == sandboxauth.ApprovalKind && a.SandboxCapability != nil {
+		if s.resolveCapability == nil {
+			return
+		}
+		sc := a.SandboxCapability
+		title := a.Tool
+		if a.Subject != "" {
+			title = a.Tool + " " + a.Subject
+		}
+		options := make([]PermissionOption, 0, 5)
+		options = append(options, PermissionOption{OptionID: string(sandboxauth.AllowOnce), Name: "Allow Once", Kind: OptAllowOnce})
+		if sc.Reusable && !sc.SuspectedSecret {
+			options = append(options,
+				PermissionOption{OptionID: string(sandboxauth.AllowSession), Name: "Allow Session", Kind: OptAllowAlways},
+				PermissionOption{OptionID: string(sandboxauth.AllowPersistent), Name: "Allow Persistent", Kind: OptAllowPersistent},
+			)
+		}
+		options = append(options,
+			PermissionOption{OptionID: string(sandboxauth.RunSandboxed), Name: "Run Sandboxed", Kind: OptRejectOnce},
+			PermissionOption{OptionID: string(sandboxauth.CancelCommand), Name: "Cancel Command", Kind: OptRejectOnce},
+		)
+		params := PermissionRequestParams{
+			SessionID: s.sessionID,
+			ToolCall: PermissionToolCall{
+				ToolCallID: "gate-" + a.ID,
+				Title:      title,
+				Kind:       "sandbox_capability",
+				Status:     "pending",
+			},
+			Options: options,
+		}
+
+		action := sandboxauth.RunSandboxed // safe default
+		if raw, err := s.conn.Request(ctx, "session/request_permission", params); err == nil {
+			var res PermissionRequestResult
+			if json.Unmarshal(raw, &res) == nil && res.Outcome.Outcome == "selected" {
+				if act := sandboxauth.Action(res.Outcome.OptionID); act.Valid() {
+					action = act
+				}
+			}
+		}
+		s.resolveCapability(a.ID, action)
+		return
+	}
+
+	// Ordinary approval path.
 	if s.approve == nil {
 		return
 	}
@@ -375,6 +434,12 @@ func approvalOptions(tool, subject string, fresh bool) []PermissionOption {
 				{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 			}
 		}
+		return []PermissionOption{
+			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+		}
+	}
+	if permission.SessionGrantRuleForScope(tool, subject) == "" {
 		return []PermissionOption{
 			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
 			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
