@@ -699,7 +699,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	b.WriteString("# External MCP servers. type: \"stdio\" (default, a subprocess) | \"http\" | \"sse\".\n")
 	b.WriteString("# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.\n")
-	if len(c.Plugins) == 0 {
+	plugins := tomlPluginsForScope(c.Plugins, scope)
+	if len(plugins) == 0 {
 		b.WriteString("# [[plugins]]\n")
 		b.WriteString("# name    = \"example\"\n")
 		b.WriteString("# command = \"reasonix-plugin-example\"\n")
@@ -711,7 +712,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# url     = \"https://mcp.stripe.com\"\n")
 		b.WriteString("# headers = { Authorization = \"Bearer ${STRIPE_KEY}\" }\n")
 	} else {
-		for _, pl := range c.Plugins {
+		for _, pl := range plugins {
 			b.WriteString("\n[[plugins]]\n")
 			fmt.Fprintf(&b, "name    = %q\n", pl.Name)
 			if pl.Type != "" {
@@ -749,18 +750,27 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	return b.String()
 }
 
-// tomlRenderablePlugins returns plugins that should be serialized to TOML.
-// Plugins from .mcp.json (MCPSourceProjectMCPJSON) are excluded because they
-// belong in that file, not reasonix.toml. Writing them into reasonix.toml would
-// change their Source provenance on next load, invalidating launch grants and
-// activation receipts (#6702).
-func tomlRenderablePlugins(plugins []PluginEntry) []PluginEntry {
+// tomlPluginsForScope keeps merged runtime entries in their owning config
+// source. Unknown provenance is retained for callers that construct a Config
+// directly before saving it to a specific target.
+func tomlPluginsForScope(plugins []PluginEntry, scope RenderScope) []PluginEntry {
+	if scope == RenderScopeFull {
+		return plugins
+	}
 	out := make([]PluginEntry, 0, len(plugins))
 	for _, pl := range plugins {
-		if pl.Source == MCPSourceProjectMCPJSON {
-			continue
+		switch pl.Source {
+		case MCPSourceUnknown:
+			out = append(out, pl)
+		case MCPSourceUserConfig:
+			if scope == RenderScopeUser {
+				out = append(out, pl)
+			}
+		case MCPSourceProjectConfig:
+			if scope == RenderScopeProject {
+				out = append(out, pl)
+			}
 		}
-		out = append(out, pl)
 	}
 	return out
 }
@@ -1142,7 +1152,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [[plugins]] — always include when set; replaces all existing entries
-	for _, pl := range tomlRenderablePlugins(c.Plugins) {
+	for _, pl := range tomlPluginsForScope(c.Plugins, RenderScopeProject) {
 		b.WriteString("[[plugins]]\n")
 		fmt.Fprintf(&b, "name    = %q\n", pl.Name)
 		if pl.Type != "" {

@@ -2053,6 +2053,85 @@ func TestSaveToExistingProjectRemovesPluginDelta(t *testing.T) {
 	}
 }
 
+func TestSaveToNewProjectKeepsPluginSourcesSeparate(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "unknown", Command: "unknown-mcp"},
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, name := range []string{"unknown", "project"} {
+		if !strings.Contains(text, `name    = "`+name+`"`) {
+			t.Fatalf("new project config missing plugin %q:\n%s", name, text)
+		}
+	}
+	for _, name := range []string{"user", "mcp-json", "legacy", "package"} {
+		if strings.Contains(text, `name    = "`+name+`"`) {
+			t.Fatalf("new project config leaked plugin %q:\n%s", name, text)
+		}
+	}
+}
+
+func TestSaveToExistingProjectKeepsPluginSourcesSeparate(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("# keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `name    = "project"`) || strings.Contains(text, `name    = "user"`) || strings.Contains(text, `name    = "mcp-json"`) {
+		t.Fatalf("existing project config crossed plugin source boundaries:\n%s", text)
+	}
+}
+
+func TestSaveToExistingProjectRemovesPluginDeltaWithOnlyForeignSources(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[[plugins]]\nname = \"old\"\ncommand = \"old-mcp\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "[[plugins]]") {
+		t.Fatalf("project plugin block remained after its last owned entry was removed:\n%s", body)
+	}
+}
+
 func TestSaveToExistingProjectRemovesIneffectiveWindowsBashEnforce(t *testing.T) {
 	setRuntimeGOOS(t, "windows")
 	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
