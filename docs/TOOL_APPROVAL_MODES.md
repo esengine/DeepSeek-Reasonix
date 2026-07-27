@@ -50,8 +50,10 @@ Auto is designed as a behavior, not another feature to configure:
 - Workspace reads/writes, commands, source/config/workflow edits, dependencies, tests, and external operations follow the existing permission policy. Auto Guard no longer adds risk-based prompts.
 - Consequently, default Auto does not ask merely because an operation is `git push`, publish, deploy, destructive, privileged, or global. Explicit `ask` / `deny`, sandbox, MCP, and tool-specific permission boundaries still apply.
 - Creating an initial ordinary task plan stays on the fast path. When an active structured plan is rewritten, the independent reviewer compares the old plan, proposed plan, and user task. Reasonable implementation refinement continues. A genuine product, strategy, or scope choice shows a neutral plan-decision card with the removed and added steps; **Adopt the new plan and continue** proceeds, while **Do not adopt; tell Auto how to adjust** opens an inline feedback field without submitting a decision.
-- Diagnosis and recovery continue automatically after failures within a fixed host-owned Episode budget (no settings): the same exact operation stops after 3 failures; the Episode stops after 6 execution failures without real progress, 3 cumulative reviewer rejections, or 3 re-submissions of already-stopped operations. Parameter or command changes cannot reset the Episode total. Successful mutations and host-recognized verification reset the no-progress budget; diagnostic reads do not.
-- When an Episode hard-stops, Auto blocks remaining tools, gives the model one summarize-only round, and surfaces a calm `recovery_paused` status (not a send failure). The next user message opens a fresh Episode automatically.
+- A failure is an execution-reliability signal, not a task-wide permission boundary. Unrelated operations continue immediately without an Auto Guard confirmation or recovery-review call. Only a retry of the exact failed operation enters bounded recovery review; genuine structured plan choices remain the only recovery path that opens a human decision card.
+- Timeouts receive concise failure-path guidance to inspect current state and partial effects before retrying. They do not ask the user to reset Auto, switch modes, or restart the session.
+- Diagnosis and recovery continue automatically within a fixed host-owned Episode budget (no settings): the same exact operation stops after 3 failures; the Episode stops further mutation/verification after 6 execution failures without real progress, 3 cumulative reviewer rejections, or 3 re-submissions of already-stopped operations. Parameter or command changes cannot reset the Episode total. Successful mutations and host-recognized verification reset the no-progress budget; diagnostic reads do not.
+- When an Episode hard-stops, host-proven read-only diagnosis remains available while further mutation and verification are quarantined. Auto then gets one summarize-only round and surfaces a calm `recovery_paused` status (not a send failure). The next user message opens a fresh Episode automatically.
 - **Try another approach**, Plan **Start execution**, a real tool-permission mode change, and a new ordinary user message each open a fresh Episode. Goal auto-continues and sub-agents inherit the current Episode. Explicit **Continue task** grants stay on TaskScope across Episode rotation.
 - Reviewer unavailability does not turn ordinary recovery into a prompt. A detected structured plan transition is handed to the user rather than silently decided by Auto.
 - Headless runs fail closed when a genuine plan decision is required.
@@ -59,7 +61,7 @@ Auto is designed as a behavior, not another feature to configure:
 
 Auto is not a filesystem snapshot or rollback mechanism. Use a clean Git branch or disposable worktree when changes must be reversible. Plan decides whether to start; Auto handles ordinary execution afterward.
 
-Auto Guard has no writer-tool allowlist for users to manage and does not need one. Per-operation stops remain narrow; Episode hard-stops pause only the current automatic recovery turn. Permission policy and the sandbox continue to own capability boundaries.
+Auto Guard has no writer-tool allowlist or reset ritual for users to manage. Per-operation stops remain narrow; Episode hard-stops pause only the current automatic recovery turn. Permission policy and the sandbox continue to own capability boundaries.
 
 ## Yolo mode
 
@@ -67,7 +69,9 @@ Yolo maximizes continuous execution. Ordinary tool permission prompts are skippe
 
 ### How to enable
 
-- Select Yolo directly under the composer, choose it as the new-session default, or toggle with `Ctrl+Y` / `Cmd+Y`.
+- Select Yolo directly under the composer, choose it as the new-session default,
+  or use the current binding shown in **Settings → Shortcuts** (`Ctrl+Y` /
+  `Cmd+Y` by default).
 - Select Ask or Auto directly to leave Yolo.
 - When entered via shortcut, Reasonix remembers the previous Ask/Auto baseline and restores it on the next toggle.
 

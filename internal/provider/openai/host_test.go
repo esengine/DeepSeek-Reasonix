@@ -144,6 +144,26 @@ func TestIsLongCat(t *testing.T) {
 	}
 }
 
+func TestIsKimiAPI(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.moonshot.cn/v1", true},
+		{"https://api.moonshot.ai/v1", true},
+		{"https://API.MOONSHOT.CN/v1/chat/completions", true},
+		{"https://moonshot.cn/v1", false},
+		{"https://gateway.moonshot.cn/v1", false},
+		{"https://opencode.ai/zen/go/v1", false},
+		{"", false},
+		{"not-a-url", false},
+	} {
+		if got := IsKimiAPI(tc.baseURL); got != tc.want {
+			t.Errorf("IsKimiAPI(%q) = %v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
 func TestIsOllamaCloud(t *testing.T) {
 	for _, tc := range []struct {
 		baseURL string

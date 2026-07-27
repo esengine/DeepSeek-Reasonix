@@ -142,7 +142,8 @@ type Controller struct {
 	// tool registry the executor reads each turn, and the session-scoped context a
 	// hot-added stdio server binds its subprocess to — behind its own lock, off
 	// c.mu. The Controller keeps the config-facing orchestration (persisting
-	// reasonix.toml on add/remove, building specs from entries). See mcp.go.
+	// MCP entries to their global/project source on add/remove, building specs
+	// from entries). See mcp.go.
 	mcp                   mcpManager
 	mcpDefaultCallTimeout time.Duration
 	mcpConfigureSpec      func(*plugin.Spec)
@@ -544,6 +545,25 @@ func (c *Controller) SetDisplayRecorder(fn func(content, display string)) {
 	c.displayRecorder = fn
 }
 
+// SetOnSessionRecovered installs the ownership handoff invoked before the
+// controller commits to an automatically created recovery branch. Frontends
+// that acquire their session owner after controller construction (for example
+// reasonix serve) use this before publishing the controller.
+func (c *Controller) SetOnSessionRecovered(fn func(SessionRecoveryInfo) error) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onSessionRecovered = fn
+}
+
+func (c *Controller) sessionRecoveredHandler() func(SessionRecoveryInfo) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.onSessionRecovered
+}
+
 func (c *Controller) recordDisplay(content, display string) {
 	if strings.TrimSpace(display) == "" || content == display {
 		return
@@ -604,7 +624,11 @@ func (c *Controller) markEditedForNewUser(startMessages int, original string) {
 		}
 		msgs[i].Edited = true
 		msgs[i].Original = original
-		s.Replace(msgs)
+		// A periodic autosave may already contain this user message without its
+		// local edit metadata. Classify the prefix mutation atomically so the
+		// turn-end save performs an owned rewrite instead of forking a bogus
+		// same-revision recovery branch.
+		s.Rewrite(msgs)
 		return
 	}
 }
@@ -1621,6 +1645,7 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 	}
 	c.markInFlightTurn(startMessages, true)
 	defer c.clearInFlightTurn()
+	ctx = c.withPlannerTurnMetadata(ctx, rawInput, false, startMessages)
 	err = c.runner.Run(ctx, c.withCapabilityRoute(input, rawInput))
 	return err
 }
@@ -3678,8 +3703,8 @@ func (c *Controller) commitRecoveredSession(originalPath, reason string, info ag
 		Reason:       reason,
 		Meta:         info.Meta,
 	}
-	if c.onSessionRecovered != nil {
-		if err := c.onSessionRecovered(recoveryInfo); err != nil {
+	if onSessionRecovered := c.sessionRecoveredHandler(); onSessionRecovered != nil {
+		if err := onSessionRecovered(recoveryInfo); err != nil {
 			return fmt.Errorf("commit recovered session: %w", err)
 		}
 	}
@@ -4596,40 +4621,45 @@ func (c *Controller) DeleteSkill(name string, scope skill.Scope) error {
 // so a frontend can list the active hooks via `/hooks`.
 func (c *Controller) HookRunner() *hook.Runner { return c.hooks }
 
-// AddMCPServer connects an MCP server live and persists it to the config file. Its
-// tools are registered immediately and become available on the next turn (the
-// agent reads the registry per turn). The raw entry — ${VARS} intact — is what's
-// written to disk; the live connection uses the expanded form. Returns the number
-// of tools the server exposed. Persistence is transactional: a config or
-// activation failure removes the just-connected client so the live registry
+// AddMCPServer connects an MCP server live and persists it to the user-global
+// config. Its tools are registered immediately and become available on the next
+// turn (the agent reads the registry per turn). The raw entry — ${VARS} intact —
+// is what's written to disk; the live connection uses the expanded form. Returns
+// the number of tools the server exposed. Persistence is transactional: a config
+// or activation failure removes the just-connected client so the live registry
 // never claims an install that will disappear after restart.
 func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 	// AddMCPServer is an explicit user action. Mark the live entry with the same
 	// provenance it will receive when the saved user config is loaded next time,
 	// so /mcp add is add-and-use in the current session too.
 	e.Source = config.MCPSourceUserConfig
+	if effective, loadErr := config.LoadForRootReadOnly(c.workspaceRoot); loadErr != nil {
+		return 0, loadErr
+	} else {
+		for _, configured := range effective.Plugins {
+			if configured.Name != e.Name {
+				continue
+			}
+			if configured.Source != config.MCPSourceUserConfig && configured.Source != config.MCPSourceLegacyUser {
+				return 0, fmt.Errorf("MCP server %q is already configured by %s; edit or remove that declaration before installing a global server with the same name", e.Name, configured.Source)
+			}
+			break
+		}
+	}
 	n, err := c.connectMCPServer(e)
 	if err != nil {
 		return 0, err
 	}
-	cfg, lerr := config.Load()
-	if lerr != nil {
-		c.DisconnectMCPServer(e.Name)
-		return 0, fmt.Errorf("reloading config to save MCP server: %w", lerr)
-	}
 	var previous config.PluginEntry
 	hadPrevious := false
-	for _, configured := range cfg.Plugins {
+	for _, configured := range config.LoadForEdit(config.UserConfigPath()).Plugins {
 		if configured.Name == e.Name {
 			previous, hadPrevious = configured, true
+			previous.Source = config.MCPSourceUserConfig
 			break
 		}
 	}
-	if err := cfg.UpsertPlugin(e); err != nil {
-		c.DisconnectMCPServer(e.Name)
-		return 0, fmt.Errorf("config rejected MCP server: %w", err)
-	}
-	if err := cfg.Save(); err != nil {
+	if _, err := config.UpsertPluginInSourceForRoot(c.workspaceRoot, e); err != nil {
 		c.DisconnectMCPServer(e.Name)
 		return 0, fmt.Errorf("saving MCP server config: %w", err)
 	}
@@ -4637,12 +4667,12 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 	// catalog without a second activation step.
 	if err := config.DefaultMCPActivationStore().SetServerEnabled(e, c.WorkspaceRoot(), true); err != nil {
 		c.DisconnectMCPServer(e.Name)
+		var saveErr error
 		if hadPrevious {
-			_ = cfg.UpsertPlugin(previous)
+			_, saveErr = config.UpsertPluginInSourceForRoot(c.workspaceRoot, previous)
 		} else {
-			cfg.RemovePlugin(e.Name)
+			_, _, saveErr = config.RemovePluginFromSourceForRoot(c.workspaceRoot, e)
 		}
-		saveErr := cfg.Save()
 		c.syncCapabilityRuntimeFromConfig(e.Name, nil)
 		return 0, errors.Join(err, saveErr)
 	}
@@ -4683,23 +4713,25 @@ func (c *Controller) mcpSpec(e config.PluginEntry) plugin.Spec {
 	exp := e.ExpandedPlugin()
 	configSource := strings.TrimSpace(string(exp.Source))
 	spec := plugin.ApplyKnownOverrides(plugin.Spec{
-		Name:                  exp.Name,
-		Type:                  exp.Type,
-		Command:               exp.Command,
-		Args:                  exp.Args,
-		Env:                   exp.Env,
-		URL:                   exp.URL,
-		Headers:               exp.Headers,
-		DefaultCallTimeout:    c.mcpDefaultCallTimeout,
-		CallTimeout:           controllerMCPTimeout(exp.CallTimeoutSeconds),
-		ToolTimeouts:          controllerMCPToolTimeouts(exp.ToolTimeoutSeconds),
-		WorkspaceRoot:         c.WorkspaceRoot(),
-		ConfigSource:          configSource,
-		Authorized:            exp.Source.UserAuthorized(),
-		RequireLaunchApproval: exp.Source.RequiresLaunchApproval(),
+		Name:               exp.Name,
+		Type:               exp.Type,
+		Command:            exp.Command,
+		Args:               exp.Args,
+		Env:                exp.Env,
+		URL:                exp.URL,
+		Headers:            exp.Headers,
+		DefaultCallTimeout: c.mcpDefaultCallTimeout,
+		CallTimeout:        controllerMCPTimeout(exp.CallTimeoutSeconds),
+		ToolTimeouts:       controllerMCPToolTimeouts(exp.ToolTimeoutSeconds),
+		WorkspaceRoot:      c.WorkspaceRoot(),
+		ConfigSource:       configSource,
+		Authorized:         exp.Source.UserAuthorized(),
 		// Explicit user installs and reconnects run as trusted host processes.
 		ProcessMode: plugin.MCPProcessHost,
 	}, c.WorkspaceRoot())
+	if exp.Source.ProjectScoped() && strings.TrimSpace(spec.Dir) == "" {
+		spec.Dir = c.WorkspaceRoot()
+	}
 	if c.mcpConfigureSpec != nil {
 		c.mcpConfigureSpec(&spec)
 		if spec.ProcessMode == "" {
@@ -4766,36 +4798,31 @@ func controllerMCPToolTimeouts(values map[string]int) map[string]time.Duration {
 // live. A connection failure does not roll back the config import: the user can
 // fix local dependencies and reconnect in a later session.
 func (c *Controller) ImportMCPEntries(entries []config.PluginEntry) (total, added, updated, connected, failed, skipped int, err error) {
-	cfg, lerr := config.Load()
-	if lerr != nil {
-		return 0, 0, 0, 0, 0, 0, lerr
-	}
-	existing := make(map[string]bool, len(cfg.Plugins))
-	for _, p := range cfg.Plugins {
-		existing[p.Name] = true
-	}
-	for _, e := range entries {
-		if existing[e.Name] {
-			updated++
-		} else {
-			added++
-		}
-		if err := cfg.UpsertPlugin(e); err != nil {
-			return 0, 0, 0, 0, 0, 0, err
-		}
-		existing[e.Name] = true
-	}
-	if err := cfg.Save(); err != nil {
+	total, added, updated, err = config.ImportCCSwitchMCPEntries(entries)
+	if err != nil {
 		return 0, 0, 0, 0, 0, 0, err
 	}
-	for _, e := range entries {
+	effectiveCfg, loadErr := config.LoadForRoot(c.workspaceRoot)
+	if loadErr != nil {
+		return 0, 0, 0, 0, 0, 0, loadErr
+	}
+	effective := make(map[string]config.PluginEntry, len(effectiveCfg.Plugins))
+	for _, entry := range effectiveCfg.Plugins {
+		effective[entry.Name] = entry
+	}
+	for _, imported := range entries {
+		e, ok := effective[imported.Name]
+		if !ok || e.Source != config.MCPSourceUserConfig {
+			// A project declaration with the same name remains effective. The
+			// imported global entry is saved as its lower-priority fallback.
+			skipped++
+			continue
+		}
 		if c.mcp.hasServer(e.Name) {
 			if c.capabilityRuntime != nil {
 				// Import updates may intentionally keep an existing live client, but
 				// future proxy reconnects must use the newly persisted spec.
-				runtimeEntry := e
-				runtimeEntry.Source = config.MCPSourceUserConfig
-				c.capabilityRuntime.UpsertServer(runtimeEntry, c.mcpSpec(runtimeEntry), true)
+				c.capabilityRuntime.UpsertServer(e, c.mcpSpec(e), true)
 			}
 			skipped++
 			continue
@@ -4806,11 +4833,11 @@ func (c *Controller) ImportMCPEntries(entries []config.PluginEntry) (total, adde
 		}
 		connected++
 	}
-	return len(entries), added, updated, connected, failed, skipped, nil
+	return total, added, updated, connected, failed, skipped, nil
 }
 
 func (c *Controller) ConfiguredMCPNames() []string {
-	cfg, err := config.Load()
+	cfg, err := config.LoadForRootReadOnly(c.workspaceRoot)
 	if err != nil {
 		return nil
 	}
@@ -4822,7 +4849,7 @@ func (c *Controller) ConfiguredMCPNames() []string {
 }
 
 func (c *Controller) DisconnectedMCPNames() []string {
-	cfg, err := config.Load()
+	cfg, err := config.LoadForRootReadOnly(c.workspaceRoot)
 	if err != nil {
 		return nil
 	}
@@ -4840,16 +4867,24 @@ func (c *Controller) DisconnectedMCPNames() []string {
 }
 
 func (c *Controller) ConnectConfiguredMCPServer(name string) (int, error) {
-	cfg, err := config.Load()
+	p, err := c.configuredMCPServer(name)
 	if err != nil {
 		return 0, err
 	}
+	return c.connectMCPServer(p)
+}
+
+func (c *Controller) configuredMCPServer(name string) (config.PluginEntry, error) {
+	cfg, err := config.LoadForRoot(c.workspaceRoot)
+	if err != nil {
+		return config.PluginEntry{}, err
+	}
 	for _, p := range cfg.Plugins {
 		if p.Name == name {
-			return c.connectMCPServer(p)
+			return p, nil
 		}
 	}
-	return 0, fmt.Errorf("no configured MCP server named %q", name)
+	return config.PluginEntry{}, fmt.Errorf("no configured MCP server named %q", name)
 }
 
 // RemoveMCPServer removes a writable MCP configuration before disconnecting the
@@ -4864,13 +4899,14 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 	if owner, ok := cfg.PluginPackageOwner(name); ok {
 		return false, fmt.Errorf("MCP server %q is managed by plugin %q; disable or remove the plugin instead", name, owner)
 	}
-	removed, rerr := config.RemovePluginFromSourcesForRoot(c.workspaceRoot, name)
+	entry, removed, _, rerr := config.RemovePluginFromEffectiveSourceForRoot(c.workspaceRoot, name)
 	if rerr != nil {
 		return false, rerr
 	}
 	if !removed {
 		return false, fmt.Errorf("no removable MCP server named %q", name)
 	}
+	_ = config.DefaultMCPActivationStore().ClearServer(entry, c.workspaceRoot)
 	if c.capabilityRuntime != nil {
 		// Revoke before touching the shared Host so an overlapping resolver cannot
 		// reuse a sibling tab's still-connected client.
@@ -4879,6 +4915,22 @@ func (c *Controller) RemoveMCPServer(name string) (disconnected bool, err error)
 	disconnected = c.mcp.disconnect(name)
 	if !disconnected {
 		c.mcp.removeToolPrefix(name)
+	}
+	// A lower-priority same-name declaration may now be effective. Restore its
+	// cached/on-demand surface without starting a process; otherwise ensure the
+	// removed name stays absent.
+	if fallback, fallbackErr := c.configuredMCPServer(name); fallbackErr == nil {
+		enabled := fallback.ShouldAutoStart()
+		if resolved, resolveErr := config.DefaultMCPActivationStore().IsEnabled(fallback, c.workspaceRoot); resolveErr == nil {
+			enabled = resolved
+		}
+		if enabled {
+			_, _ = c.RegisterMCPServerOnDemand(fallback)
+		} else {
+			c.syncCapabilityRuntimeFromConfig(name, &enabled)
+		}
+	} else {
+		c.syncCapabilityRuntimeFromConfig(name, nil)
 	}
 	return disconnected, nil
 }

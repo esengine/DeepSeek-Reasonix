@@ -146,7 +146,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
 # PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in
 # settings.json: <Reasonix home>/settings.json (global, always on) and
-# <project>/.reasonix/settings.json (project, runs only after `/hooks trust`).
+# <project>/.reasonix/settings.json (project, loaded automatically).
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
 # <Reasonix home>/settings.json:
 #   { "hooks": {

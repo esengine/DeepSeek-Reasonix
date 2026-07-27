@@ -35,9 +35,10 @@ func (a *App) HooksSettings(scope string) HooksSettingsView {
 		Scope:       s,
 		Path:        path,
 		ProjectRoot: root,
-		Trusted:     s == string(hook.ScopeGlobal) || hook.IsTrusted(root, ""),
-		Hooks:       []HookConfigView{},
-		Events:      hookEventNames(),
+		// Retained for older Wails clients. Both scopes are enabled by default.
+		Trusted: true,
+		Hooks:   []HookConfigView{},
+		Events:  hookEventNames(),
 	}
 	settings, err := readHooksSettingsFile(path)
 	if err != nil || settings.Hooks == nil {
@@ -86,15 +87,15 @@ func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookCo
 }
 
 func (a *App) TrustProjectHooks() error {
-	return a.TrustProjectHooksForRoot(a.activeHookProjectRoot())
+	// Retained for older generated Wails clients. Project hooks are enabled by
+	// default, so there is no trust state to mutate.
+	return nil
 }
 
 func (a *App) TrustProjectHooksForRoot(root string) error {
-	root = strings.TrimSpace(root)
-	if strings.TrimSpace(root) == "" || root == "." {
-		return fmt.Errorf("no active project workspace")
-	}
-	return hook.Trust(root, "")
+	// Retained for older generated Wails clients. Project hooks are enabled by
+	// default, so there is no trust state to mutate.
+	return nil
 }
 
 func (a *App) activeHookProjectRoot() string {

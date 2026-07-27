@@ -267,6 +267,10 @@ func (lt *lazyTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 
 		switch sp.state {
 		case spawnReady:
+			if !lt.hasCache {
+				sp.mu.Unlock()
+				return fmt.Sprintf("MCP server %q is connected; its real tools are now available on the next turn", sp.spec.Name), nil
+			}
 			real := sp.real[lt.name]
 			safetyErr := lt.reconcileLiveSafety(real)
 			sp.mu.Unlock()

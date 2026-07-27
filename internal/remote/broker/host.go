@@ -176,10 +176,11 @@ func (h *Host) catalogFor(ctx context.Context) ([]provider.Descriptor, error) {
 			ContextWindow: item.ContextWindow, PricingCurrency: item.PricingCurrency,
 			CacheHitPerMillion: item.CacheHitPerMillion, InputPerMillion: item.InputPerMillion, OutputPerMillion: item.OutputPerMillion,
 			Vision: item.SupportsVision, Tools: true,
-			Reasoning:                      len(item.SupportedEfforts) > 0 || item.ToolCallReasoning,
+			Reasoning:                      len(item.SupportedEfforts) > 0 || item.ToolCallReasoning || item.ReasoningRoundTrip,
 			Efforts:                        append([]string(nil), item.SupportedEfforts...),
 			DefaultEffort:                  item.DefaultEffort,
 			ToolCallReasoning:              item.ToolCallReasoning,
+			ReasoningRoundTrip:             item.ReasoningRoundTrip,
 			WarnOnMissingToolCallReasoning: item.WarnOnMissingToolCallReasoning,
 		})
 	}
@@ -229,6 +230,10 @@ func (p *hostProvider) Name() string {
 
 func (p *hostProvider) RequiresToolCallReasoning() bool {
 	return p != nil && p.descriptor.ToolCallReasoning
+}
+
+func (p *hostProvider) RequiresReasoningRoundTrip() bool {
+	return p != nil && p.descriptor.ReasoningRoundTrip
 }
 
 func (p *hostProvider) WarnOnMissingToolCallReasoning() bool {

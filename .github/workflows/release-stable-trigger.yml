@@ -1,0 +1,42 @@
+name: Relay stable release
+run-name: Relay stable release ${{ github.ref_name }}
+
+# The tag event itself has a tag-shaped origin. Relay the immutable tag name to
+# release-stable.yml on protected main-v2 so the production SignPath policy can
+# allow exactly one branch name without trusting wildcard tag-like branches.
+on:
+  push:
+    tags:
+      - 'v*'
+      - '!v*-*'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  relay:
+    name: dispatch protected stable control plane
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch release-stable.yml on main-v2
+        uses: actions/github-script@v9
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          CONTROL_PLANE_REF: ${{ github.event.repository.default_branch }}
+        with:
+          script: |
+            if (process.env.CONTROL_PLANE_REF !== 'main-v2') {
+              core.setFailed(`Unexpected default branch: ${process.env.CONTROL_PLANE_REF}`);
+              return;
+            }
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'release-stable.yml',
+              ref: process.env.CONTROL_PLANE_REF,
+              inputs: {
+                tag: process.env.RELEASE_TAG,
+                allow_recovery: 'false',
+              },
+            });

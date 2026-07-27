@@ -613,6 +613,7 @@ func (g *Gate) ObserveResult(_ context.Context, obs Observation) string {
 
 	st.lastFailure = &activeFailure{
 		evidence: FailureEvent{
+			Class:         ClassifyFailure(obs),
 			Tool:          obs.Tool,
 			ArgsSummary:   ArgsSummary(obs.Args, 200),
 			Subject:       obs.Subject,
@@ -643,9 +644,9 @@ func (g *Gate) BeforeMutation(ctx context.Context, proposal Proposal) (Decision,
 		return Decision{Allow: true}, nil
 	}
 
-	// Host-proven read-only diagnostics always continue unless the Episode is
-	// already exhausted. Decide also encodes the non-Auto bypass so Ask and
-	// YOLO keep their existing semantics.
+	// Host-proven read-only diagnostics always continue, including after the
+	// Episode execution budget is exhausted. Decide also encodes the non-Auto
+	// bypass so Ask and YOLO keep their existing semantics.
 	facts, failure, diagNotes, taskID, fp, gen := g.classify(proposal)
 	route := Decide(facts)
 
@@ -661,7 +662,7 @@ func (g *Gate) BeforeMutation(ctx context.Context, proposal Proposal) (Decision,
 	}
 
 	// Episode total failure hard stop before reviewer work.
-	if facts.AutoMode && facts.EpisodeFailureCount >= MaxEpisodeFailures && (facts.Mutates || facts.Verification || facts.EpisodeStopped) {
+	if facts.AutoMode && facts.EpisodeFailureCount >= MaxEpisodeFailures && (facts.Mutates || facts.Verification) {
 		return g.stopTurnDecision(taskID, gen, StopReasonEpisodeFailures, proposal), nil
 	}
 
@@ -813,7 +814,13 @@ func (g *Gate) classify(proposal Proposal) (Facts, *FailureEvent, []string, stri
 	facts.HighRisk = boundary.highRisk
 
 	taskID := normalizeTaskID(proposal.TaskID)
-	fp := CallFingerprint(proposal.Tool, proposal.Subject, proposal.Preview, proposal.Args)
+	// Operation failure accounting intentionally excludes Preview. Agent calls
+	// always carry a display/approval preview, while completed observations do
+	// not; mixing the two shapes would make an exact retry look like an unseen
+	// operation and bypass its three-failure stop. Keep the preview-bound
+	// fingerprint for one-shot human approval below.
+	operationFP := CallFingerprint(proposal.Tool, proposal.Subject, "", proposal.Args)
+	approvalFP := CallFingerprint(proposal.Tool, proposal.Subject, proposal.Preview, proposal.Args)
 
 	g.mu.Lock()
 	gen := g.generation
@@ -829,11 +836,6 @@ func (g *Gate) classify(proposal Proposal) (Facts, *FailureEvent, []string, stri
 	facts.StopReason = g.episode.stopReason
 	facts.EpisodeFailureCount = g.episode.totalFailures
 	facts.ReviewRejects = g.episode.reviewRejects
-	// Any qualifying failure in this Episode arms recovery for every TaskID so
-	// a sub-agent cannot skip the reviewer after the root already failed.
-	if g.episode.totalFailures > 0 {
-		facts.HasActiveFailure = true
-	}
 	if st != nil && !facts.AutoMode {
 		if !st.empty() || g.episode.totalFailures > 0 || g.episode.reviewRejects > 0 || g.episode.stopped {
 			st.clearTaskRecoveryState()
@@ -858,8 +860,8 @@ func (g *Gate) classify(proposal Proposal) (Facts, *FailureEvent, []string, stri
 		} else if st.episodeID == "" {
 			st.episodeID = g.episodeID
 		}
-		facts.OperationAlreadyStopped = st.isOperationStopped(fp)
-		facts.FailureCount = st.operationFailureCount(fp)
+		facts.OperationAlreadyStopped = st.isOperationStopped(operationFP)
+		facts.FailureCount = st.operationFailureCount(operationFP)
 		if st.lastFailure != nil {
 			failure = st.evidenceCopy()
 			diagNotes = st.diagnosisNotes()
@@ -867,7 +869,8 @@ func (g *Gate) classify(proposal Proposal) (Facts, *FailureEvent, []string, stri
 			facts.SameFailedOperation = sameFailedOperation(failure, proposal)
 			// When proposing the same op, FailureCount is the map value.
 			// When proposing a different op after failures, HasActiveFailure
-			// still true so reviewer path runs for recovery mutations.
+			// remains true for accounting, but Decide keeps that unrelated
+			// operation on the automatic path.
 			if facts.SameFailedOperation && facts.FailureCount == 0 {
 				// Evidence exists but count was cleared somehow — treat as 1.
 				facts.FailureCount = 1
@@ -906,7 +909,7 @@ func (g *Gate) classify(proposal Proposal) (Facts, *FailureEvent, []string, stri
 			facts.SafeRetryAvailable = false
 		}
 	}
-	return facts, failure, diagNotes, taskID, fp, gen
+	return facts, failure, diagNotes, taskID, approvalFP, gen
 }
 
 func (g *Gate) ensureTaskLocked(taskID string) *taskRuntime {
@@ -974,7 +977,7 @@ func (g *Gate) reviewOrEscalate(ctx context.Context, taskID, fp string, gen uint
 				Generation:               gen,
 			}, nil
 		}
-		if reviewerPlanDecision(verdict) {
+		if proposal.PlanTransition && reviewerPlanDecision(verdict) {
 			return g.askHuman(ctx, taskID, fp, gen, proposal, failure, diagNotes, verdict.ChangeKind, verdict.Rationale)
 		}
 		blocks := g.recordReviewBlock(taskID, verdict)
@@ -1188,10 +1191,12 @@ func (g *Gate) recoveryGuidanceLocked(st *taskRuntime) string {
 		return ""
 	}
 	st.guidanceSent = true
-	return "Auto Guard is active after a tool/verification failure. " +
-		"Diagnose with read-only tools first (read logs, search code, inspect the failing command output). " +
-		"Before changing strategy, scope, or risk of the next write, explain the diagnosis and the proposed recovery step. " +
-		"The host will block uncertain proposals with a reason and escalate repeated or high-risk changes automatically."
+	if st.lastFailure != nil && st.lastFailure.evidence.Class == FailureClassTransient {
+		return "The tool timed out or hit a transient execution limit. Inspect its current state and output before retrying so partial effects are not duplicated. " +
+			"Read-only diagnosis and unrelated work remain available without asking the user; retry the exact operation only after ruling out partial effects."
+	}
+	return "A tool failed. Use read-only diagnosis as needed, continue unrelated work automatically, and do not ask the user unless a genuine product or plan choice is required. " +
+		"Repeated retries of the exact failed operation remain bounded."
 }
 
 func diagnosticObservationNote(obs Observation) string {

@@ -135,12 +135,25 @@ func (s *Session) UpdateToolCallResolution(call provider.ToolCall) bool {
 	return false
 }
 
-// Replace swaps the whole message log — used by compaction, which rewrites the
-// middle of the history.
+// Replace swaps the whole message log without classifying the change as a
+// persisted-history rewrite. Call Rewrite when a live session changes messages
+// that a mid-turn snapshot may already have written.
 func (s *Session) Replace(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Messages = msgs
+	s.version++
+}
+
+// Rewrite atomically replaces the message log and marks it as a rewrite. The
+// atomic classification matters when a periodic snapshot races compaction,
+// pruning, or local metadata edits: a later autosave must use owned-rewrite
+// conflict checks instead of mistaking the modified prefix for another writer.
+func (s *Session) Rewrite(msgs []provider.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Messages = msgs
+	s.rewriteVersion++
 	s.version++
 }
 

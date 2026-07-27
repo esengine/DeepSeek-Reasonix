@@ -64,8 +64,9 @@ func providerPresetDisplayRank(id string) int {
 }
 
 var (
-	kimiAPIModels       = []string{"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
-	kimiAPIVisionModels = []string{"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
+	legacyKimiAPIModels = []string{"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
+	kimiAPIModels       = []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
+	kimiAPIVisionModels = []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
 	kimiCodingModels    = []string{"kimi-for-coding"}
 
 	longCat20Models = []string{"LongCat-2.0"}
@@ -88,7 +89,9 @@ var (
 
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
 
-	opencodeGoModels                 = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
+	legacyOpenCodeGoModels           = []string{"glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
+	opencodeGoModels                 = []string{"glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"}
+	opencodeGoVisionModels           = []string{"kimi-k3"}
 	opencodeGoAnthropicModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"}
 	opencodeZenAnthropicModels       = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"}
 	opencodeZenAnthropicVisionModels = []string{"claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"}
@@ -100,6 +103,15 @@ var (
 	nvidiaModels      = []string{"nvidia/nemotron-3-nano-30b-a3b", "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "deepseek-ai/deepseek-v4-pro", "qwen/qwen3.5-397b-a17b"}
 	ollamaCloudModels = []string{"glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "deepseek-v4-flash", "minimax-m3", "nemotron-3-nano:30b", "qwen3-coder-next"}
 )
+
+func kimiK3DirectOverride() ProviderModelOverride {
+	return ProviderModelOverride{
+		ReasoningProtocol: ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"low", "high", "max"},
+		DefaultEffort:     "max",
+		ContextWindow:     1_048_576,
+	}
+}
 
 var curatedProviderPresets = []ProviderPreset{
 	{
@@ -159,6 +171,9 @@ var curatedProviderPresets = []ProviderPreset{
 			BalanceURL:        "https://api.moonshot.cn/v1/users/me/balance",
 			ContextWindow:     262144,
 			ReasoningProtocol: ReasoningProtocolNone,
+			ModelOverrides: map[string]ProviderModelOverride{
+				"kimi-k3": kimiK3DirectOverride(),
+			},
 		}},
 	},
 	{
@@ -177,6 +192,9 @@ var curatedProviderPresets = []ProviderPreset{
 			BalanceURL:        "https://api.moonshot.ai/v1/users/me/balance",
 			ContextWindow:     262144,
 			ReasoningProtocol: ReasoningProtocolNone,
+			ModelOverrides: map[string]ProviderModelOverride{
+				"kimi-k3": kimiK3DirectOverride(),
+			},
 		}},
 	},
 	{
@@ -517,6 +535,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Kind:          "openai",
 			BaseURL:       "https://opencode.ai/zen/go/v1",
 			Models:        opencodeGoModels,
+			VisionModels:  opencodeGoVisionModels,
 			Default:       "glm-5.2",
 			APIKeyEnv:     "OPENCODE_GO_API_KEY",
 			ContextWindow: 128000,
@@ -540,6 +559,12 @@ var curatedProviderPresets = []ProviderPreset{
 					ReasoningProtocol: ReasoningProtocolOpenAI,
 					SupportedEfforts:  []string{"low", "medium", "high"},
 					DefaultEffort:     "high",
+				},
+				"kimi-k3": {
+					ReasoningProtocol: ReasoningProtocolOpenAI,
+					SupportedEfforts:  []string{"high", "max"},
+					DefaultEffort:     "max",
+					ContextWindow:     1_048_576,
 				},
 			},
 		}},

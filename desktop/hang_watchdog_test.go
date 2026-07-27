@@ -34,10 +34,11 @@ func TestMainThreadHangReportIsStructuredPerformanceReport(t *testing.T) {
 
 	r := mainThreadHangReport(16*time.Second, last, observed)
 
-	if r.Kind != "performance" || r.Source != "native.watchdog" || r.Label != "mac.main_thread.hang" {
+	wantLabel, wantErrorType, _, _ := mainThreadDiagnosticIdentity()
+	if r.Kind != "performance" || r.Source != "native.watchdog" || r.Label != wantLabel {
 		t.Fatalf("unexpected report identity: %+v", r)
 	}
-	if r.SchemaVersion != 2 || r.ErrorType != "MacMainThreadHang" || r.TopFrame == "" || r.OccurredAt == "" {
+	if r.SchemaVersion != 2 || r.ErrorType != wantErrorType || r.TopFrame == "" || r.OccurredAt == "" {
 		t.Fatalf("structured fields missing: %+v", r)
 	}
 	for _, want := range []string{"Reasonix detected", "last heartbeat:", "bucket: s_15_30", "goroutines:"} {
@@ -73,7 +74,7 @@ func TestMainThreadHeartbeatAgeIgnoresWallClockJump(t *testing.T) {
 
 func TestRecordMainThreadHangWritesPendingReportAndMetrics(t *testing.T) {
 	t.Cleanup(func() {
-		os.Remove(pendingCrashPath())
+		removeAllPendingCrashes()
 		os.Remove(filepath.Join(config.MemoryUserDir(), metricsPendingFile))
 	})
 	app := NewApp()
@@ -86,12 +87,14 @@ func TestRecordMainThreadHangWritesPendingReportAndMetrics(t *testing.T) {
 	if !ok {
 		t.Fatal("expected pending hang report")
 	}
-	if r.Kind != "performance" || r.Source != "native.watchdog" || r.Label != "mac.main_thread.hang" {
+	wantLabel, _, _, _ := mainThreadDiagnosticIdentity()
+	if r.Kind != "performance" || r.Source != "native.watchdog" || r.Label != wantLabel {
 		t.Fatalf("pending report = %+v", r)
 	}
 	c := readCounters(filepath.Join(config.MemoryUserDir(), metricsPendingFile))
-	if got := c["desktop_hang"]["main_thread"]; got != 1 {
-		t.Fatalf("desktop_hang/main_thread = %d, want 1", got)
+	metricBucket := mainThreadMetricBucket()
+	if got := c["desktop_hang"][metricBucket]; got != 1 {
+		t.Fatalf("desktop_hang/%s = %d, want 1", metricBucket, got)
 	}
 	if got := c["desktop_hang_age"]["s_15_30"]; got != 1 {
 		t.Fatalf("desktop_hang_age/s_15_30 = %d, want 1", got)

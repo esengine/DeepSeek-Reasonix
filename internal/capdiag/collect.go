@@ -274,19 +274,19 @@ func collectCommands(root string, disp func(string) string) (AssetReport, []Issu
 
 func collectHooks(root, home, reasonixHome string, disp func(string) string) (HookReport, []Issue) {
 	var issues []Issue
-	// Prefer explicit home for trust/settings when tests isolate HOME.
+	// Prefer explicit home for settings when tests isolate HOME.
 	homeDir := home
 	if reasonixHome != "" && home == "" {
 		homeDir = filepath.Dir(reasonixHome)
 	}
-	trusted := hook.IsTrusted(root, homeDir)
 	insp := hook.Inspect(hook.LoadOptions{
 		ProjectRoot: root,
 		HomeDir:     homeDir,
-		Trusted:     trusted,
 	})
 	rep := HookReport{
-		TrustedProject: insp.TrustedProject || trusted,
+		// Retained in schema v1 for compatibility; project hooks are enabled by
+		// default whenever a project root is present.
+		TrustedProject: insp.TrustedProject,
 		ProjectDefines: insp.ProjectDefines,
 		Sources:        []HookSource{},
 		Entries:        []HookEntry{},
@@ -302,15 +302,6 @@ func collectHooks(root, home, reasonixHome string, disp func(string) string) (Ho
 				Source:      disp(s.Path),
 				Message:     "hooks settings JSON is malformed",
 				Remediation: "Fix JSON syntax in the settings file",
-				SettingsTab: "hooks",
-			})
-		}
-		if s.Status == "untrusted_skipped" && insp.ProjectDefines {
-			issues = append(issues, Issue{
-				Severity: "warning", Code: "hook.untrusted_project", Subsystem: "hooks",
-				Source:      disp(s.Path),
-				Message:     "project defines hooks but the workspace is not trusted",
-				Remediation: "Trust this project in Settings → Hooks (or CLI trust flow) before project hooks run",
 				SettingsTab: "hooks",
 			})
 		}

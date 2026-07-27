@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -239,6 +238,13 @@ func (a *App) retryDeferredStartupBuild(tabID string, tab *WorkspaceTab) {
 		a.clearDeferredRebuild(tabID)
 		return
 	}
+	a.mu.RLock()
+	path := strings.TrimSpace(tab.SessionPath)
+	a.mu.RUnlock()
+	if path != "" && a.attachExistingSessionRuntime(tab, path, a.ctx) {
+		a.clearDeferredRebuild(tabID)
+		return
+	}
 	if !a.deferredRebuildLeaseLooksFree(tab) {
 		return
 	}
@@ -289,6 +295,7 @@ func (a *App) rebuildStartupTabLocked(tab *WorkspaceTab) error {
 	tab.buildCancel = cancel
 	tab.Ready = false
 	clearTabStartupError(tab)
+	a.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
 	tab.ActivityStatus = ""
 	if tab.sink == nil {
 		tab.sink = &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
@@ -366,16 +373,25 @@ func (a *App) deferredRebuildLeaseLooksFree(tab *WorkspaceTab) bool {
 	if path == "" {
 		return true // nothing to probe; let the rebuild decide
 	}
-	lease, err := agent.TryAcquireSessionLease(sessionRuntimeKey(path))
+	key := sessionRuntimeKey(path)
+	a.mu.RLock()
+	rt := a.runtimeBySessionKey[key]
+	ownedByTab := rt != nil && rt.Owner == tab
+	ownedByOther := rt != nil && rt.Owner != nil && rt.Owner != tab && a.runtimeOwnerLiveLocked(rt)
+	a.mu.RUnlock()
+	if ownedByOther {
+		return false
+	}
+	if ownedByTab && tab.sessionLeaseRuntimeKey() == key {
+		return true
+	}
+	lease, err := agent.TryAcquireSessionLease(key)
 	if err != nil {
-		var leaseErr *agent.SessionLeaseError
-		if errors.As(err, &leaseErr) && leaseErr.Info != nil && leaseErr.Info.PID == os.Getpid() {
-			if host, _ := os.Hostname(); leaseErr.Info.Hostname == host {
-				// This process (usually this very tab) holds the probed path;
-				// the blocking lease is some other path. Attempt the rebuild
-				// and let its own lease checks decide.
-				return true
-			}
+		if sameCurrentProcessLease(err) {
+			// The registry ruled out a live sibling owner above, so this is an
+			// orphaned current-process lease. Let the rebuild helper reclaim it
+			// under runtimeRebuildMu instead of looping against our own marker.
+			return true
 		}
 		return !errors.Is(err, agent.ErrSessionLeaseHeld)
 	}

@@ -414,6 +414,7 @@ export interface AppBindings {
   GetDesktopZoomFactor(): Promise<number>;
   RestartApplication(): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
+  SetDesktopUpdateChannel(channel: string): Promise<void>;
   SetDesktopTelemetry(enabled: boolean): Promise<void>;
   SetDesktopMetrics(enabled: boolean): Promise<void>;
   SetExpandThinking(on: boolean): Promise<void>;
@@ -428,9 +429,9 @@ export interface AppBindings {
   // Runtime-only.
   SetBypass(on: boolean): Promise<void>;
   Version(): Promise<string>;
-  CheckUpdate(): Promise<UpdateInfo | null>;
-  DownloadUpdate(): Promise<UpdateDownloadResult | null>;
-  InstallUpdate(): Promise<void>;
+  CheckUpdate(channel: string): Promise<UpdateInfo | null>;
+  DownloadUpdate(channel: string): Promise<UpdateDownloadResult | null>;
+  InstallUpdate(channel: string): Promise<void>;
   ApplyUpdate(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
   NeedsOnboarding(): Promise<boolean>;
@@ -698,9 +699,14 @@ export function onFilesDropped(cb: (paths: string[]) => void): () => void {
 // onRuntimeRebuilt fires when a tab's controller is replaced in place
 // (model/effort/token-mode switch, clear-while-running). The rebuilt
 // controller restarts prompt ids, so per-tab id-keyed state must reset.
-export function onRuntimeRebuilt(cb: (tabId?: string) => void): () => void {
+export function onRuntimeRebuilt(cb: (tabId?: string, runtimeEpoch?: string) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
-    return window.runtime.EventsOn("runtime:rebuilt", (tabId?: unknown) => cb(typeof tabId === "string" ? tabId : undefined));
+    return window.runtime.EventsOn("runtime:rebuilt", (tabId?: unknown, runtimeEpoch?: unknown) =>
+      cb(
+        typeof tabId === "string" ? tabId : undefined,
+        typeof runtimeEpoch === "string" ? runtimeEpoch : undefined,
+      )
+    );
   }
   return () => {};
 }
@@ -984,7 +990,7 @@ function mockPreset(id: string, label: string, description: string, keyEnv: stri
   return { id, label, description, keyEnv, provider };
 }
 
-const mockKimiAPIModels = ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"];
+const mockKimiAPIModels = ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"];
 const mockLongCatModels = ["LongCat-2.0"];
 const mockMiMoV25Models = ["mimo-v2.5-pro", "mimo-v2.5"];
 const mockMiniMaxModels = ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"];
@@ -995,7 +1001,7 @@ const mockQwenAPIModels = ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3
 const mockQwenPlanModels = ["qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"];
 const mockQwenPlanVisionModels = ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"];
 const mockStepFunModels = ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"];
-const mockOpenCodeGoModels = ["glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"];
+const mockOpenCodeGoModels = ["glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"];
 const mockOpenCodeGoAnthropicModels = ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"];
 const mockOpenCodeZenAnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"];
 const mockNovitaModels = ["zai-org/glm-5.2", "moonshotai/kimi-k2.7-code", "minimax/minimax-m3", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "qwen/qwen3.6-plus", "zai-org/glm-5v-turbo"];
@@ -1006,8 +1012,8 @@ const mockOllamaCloudModels = ["glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "
 const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
   mockPreset("longcat-openai", "LongCat OpenAI", "LongCat Platform OpenAI-compatible endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-openai", kind: "openai", baseUrl: "https://api.longcat.chat/openai/v1", modelsUrl: "https://api.longcat.chat/openai/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("longcat-anthropic", "LongCat Anthropic", "LongCat Platform Anthropic-compatible Messages endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-anthropic", kind: "anthropic", baseUrl: "https://api.longcat.chat/anthropic", modelsUrl: "https://api.longcat.chat/anthropic/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", authHeader: true, contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
-  mockPreset("kimi-cn", "Kimi CN API", "Moonshot Kimi China OpenAI-compatible API.", "KIMI_API_KEY", mockProviderTemplate({ name: "kimi-cn", kind: "openai", baseUrl: "https://api.moonshot.cn/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "KIMI_API_KEY", balanceUrl: "https://api.moonshot.cn/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none" })),
-  mockPreset("kimi-global", "Kimi Global API", "Moonshot Kimi international OpenAI-compatible API.", "MOONSHOT_API_KEY", mockProviderTemplate({ name: "kimi-global", kind: "openai", baseUrl: "https://api.moonshot.ai/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "MOONSHOT_API_KEY", balanceUrl: "https://api.moonshot.ai/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none" })),
+  mockPreset("kimi-cn", "Kimi CN API", "Moonshot Kimi China OpenAI-compatible API.", "KIMI_API_KEY", mockProviderTemplate({ name: "kimi-cn", kind: "openai", baseUrl: "https://api.moonshot.cn/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "KIMI_API_KEY", balanceUrl: "https://api.moonshot.cn/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none", modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["low", "high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
+  mockPreset("kimi-global", "Kimi Global API", "Moonshot Kimi international OpenAI-compatible API.", "MOONSHOT_API_KEY", mockProviderTemplate({ name: "kimi-global", kind: "openai", baseUrl: "https://api.moonshot.ai/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "MOONSHOT_API_KEY", balanceUrl: "https://api.moonshot.ai/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none", modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["low", "high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
   mockPreset("kimi-coding-plan", "Kimi Coding Plan", "Kimi Coding Plan via its dedicated Anthropic-compatible endpoint.", "KIMI_CODING_API_KEY", mockProviderTemplate({ name: "kimi-coding-plan", kind: "anthropic", baseUrl: "https://api.kimi.com/coding/", models: ["kimi-for-coding"], visionModels: ["kimi-for-coding"], default: "kimi-for-coding", apiKeyEnv: "KIMI_CODING_API_KEY", headers: { "User-Agent": "claude-code/0.1.0" }, thinking: "adaptive", contextWindow: 262144 })),
   mockPreset("mimo-api", "MiMo API", "Xiaomi MiMo direct API with text and vision-capable models.", "MIMO_API_KEY", mockProviderTemplate({ name: "mimo-api", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: mockMiMoV25Models, visionModels: ["mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", contextWindow: 1048576 })),
   mockPreset("mimo-anthropic", "MiMo Anthropic", "Xiaomi MiMo direct Anthropic-compatible endpoint.", "MIMO_API_KEY", mockProviderTemplate({ name: "mimo-anthropic", kind: "anthropic", baseUrl: "https://api.xiaomimimo.com/anthropic", models: mockMiMoV25Models, visionModels: ["mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", thinking: "adaptive", contextWindow: 1048576 })),
@@ -1027,7 +1033,7 @@ const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
   mockPreset("glm-coding-plan-cn-anthropic", "GLM Coding Plan CN Anthropic", "Zhipu GLM China coding-plan Anthropic-compatible endpoint.", "GLM_PLAN_API_KEY", mockProviderTemplate({ name: "glm-coding-plan-cn-anthropic", kind: "anthropic", baseUrl: "https://open.bigmodel.cn/api/anthropic", models: mockGLMAnthropicModels, default: "glm-5.2[1m]", apiKeyEnv: "GLM_PLAN_API_KEY", authHeader: true, thinking: "adaptive", contextWindow: 1000000 })),
   mockPreset("zai-coding-plan-global", "Z.AI Coding Plan Global", "Z.AI international coding-plan endpoint.", "ZAI_CODING_API_KEY", mockProviderTemplate({ name: "zai-coding-plan-global", kind: "openai", baseUrl: "https://api.z.ai/api/coding/paas/v4", models: mockGLMCodingModels, default: "glm-5.2", apiKeyEnv: "ZAI_CODING_API_KEY", contextWindow: 1000000, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("zai-coding-plan-global-anthropic", "Z.AI Coding Plan Global Anthropic", "Z.AI international coding-plan Anthropic-compatible endpoint.", "ZAI_CODING_API_KEY", mockProviderTemplate({ name: "zai-coding-plan-global-anthropic", kind: "anthropic", baseUrl: "https://api.z.ai/api/anthropic", models: mockGLMAnthropicModels, default: "glm-5.2[1m]", apiKeyEnv: "ZAI_CODING_API_KEY", authHeader: true, thinking: "adaptive", contextWindow: 1000000 })),
-  mockPreset("opencode-go", "OpenCode Go", "OpenCode Go relay with per-model capability overrides.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", models: mockOpenCodeGoModels, default: "glm-5.2", apiKeyEnv: "OPENCODE_GO_API_KEY", contextWindow: 128000 })),
+  mockPreset("opencode-go", "OpenCode Go", "OpenCode Go relay with per-model capability overrides.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", models: mockOpenCodeGoModels, visionModels: ["kimi-k3"], default: "glm-5.2", apiKeyEnv: "OPENCODE_GO_API_KEY", contextWindow: 128000, modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
   mockPreset("opencode-go-anthropic", "OpenCode Go Anthropic", "OpenCode Go subscription Anthropic-compatible route for Qwen and MiniMax models.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen/go", models: mockOpenCodeGoAnthropicModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus"], default: "qwen3.7-plus", apiKeyEnv: "OPENCODE_GO_API_KEY", thinking: "adaptive", contextWindow: 262144 })),
   mockPreset("opencode-zen-anthropic", "OpenCode Zen Anthropic", "OpenCode Zen Anthropic-compatible route for Claude and Qwen models.", "OPENCODE_API_KEY", mockProviderTemplate({ name: "opencode-zen-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen", models: mockOpenCodeZenAnthropicModels, visionModels: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"], default: "claude-sonnet-4-6", apiKeyEnv: "OPENCODE_API_KEY", contextWindow: 262144 })),
   mockPreset("qwen-cn", "Qwen CN API", "Alibaba DashScope China standard OpenAI-compatible endpoint.", "QWEN_API_KEY", mockProviderTemplate({ name: "qwen-cn", kind: "openai", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: mockQwenAPIModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"], default: "qwen3.7-plus", apiKeyEnv: "QWEN_API_KEY" })),
@@ -1170,6 +1176,25 @@ function makeMockApp(): AppBindings {
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
   let capServers: ServerView[] = [
+    {
+      name: "project-knowledge",
+      transport: "http",
+      status: "connected",
+      configured: true,
+      autoStart: true,
+      tier: "background",
+      source: "project",
+      configSource: "reasonix.toml",
+      url: "https://mcp.example.test/project",
+      tools: 3,
+      prompts: 0,
+      resources: 1,
+      toolList: [
+        { name: "search_knowledge", description: "Search the project knowledge base.", readOnlyHint: true },
+        { name: "get_document", description: "Read a knowledge-base document.", readOnlyHint: true },
+        { name: "list_topics", description: "List available knowledge topics.", readOnlyHint: true },
+      ],
+    },
     {
       name: "github",
       transport: "stdio",
@@ -1501,6 +1526,7 @@ function makeMockApp(): AppBindings {
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
     defaultToolApprovalMode: "auto",
     checkUpdates: true,
+    updateChannel: "stable",
     telemetry: true,
     metrics: true,
     configPath: "~/projects/reasonix/reasonix.toml",
@@ -3331,7 +3357,6 @@ function makeMockApp(): AppBindings {
         ],
         "/hooks": [
           { label: "list", insert: "list", hint: "list active hooks" },
-          { label: "trust", insert: "trust", hint: "trust this project's hooks" },
         ],
         "/model": [
           { label: "deepseek/deepseek-v4-flash", insert: "deepseek/deepseek-v4-flash", hint: "current" },
@@ -3711,12 +3736,10 @@ function makeMockApp(): AppBindings {
       hookSettings[key].hooks = JSON.parse(JSON.stringify(hooks)) as HookConfigView[];
     },
     async TrustProjectHooks() {
-      hookSettings.project.trusted = true;
+      // Compatibility no-op: project hooks are enabled automatically.
     },
-    async TrustProjectHooksForRoot(projectRoot: string) {
-      if (projectRoot && projectRoot === hookSettings.project.projectRoot) {
-        hookSettings.project.trusted = true;
-      }
+    async TrustProjectHooksForRoot(_projectRoot: string) {
+      // Compatibility no-op: project hooks are enabled automatically.
     },
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;
@@ -4119,6 +4142,9 @@ function makeMockApp(): AppBindings {
         async SetDesktopCheckUpdates(enabled: boolean) {
           settings.checkUpdates = enabled;
         },
+        async SetDesktopUpdateChannel(channel: string) {
+          settings.updateChannel = channel === "preview" ? "preview" : "stable";
+        },
         async SetDesktopTelemetry(enabled: boolean) {
           settings.telemetry = enabled;
         },
@@ -4162,7 +4188,7 @@ function makeMockApp(): AppBindings {
     async Version() {
       return "v1.0.0 (browser dev)";
     },
-    async CheckUpdate() {
+    async CheckUpdate(channel: string) {
       // Keep the default browser preview focused on the primary product surface.
       // DownloadUpdate/InstallUpdate remain mocked for explicit updater-flow tests.
       return {
@@ -4170,7 +4196,7 @@ function makeMockApp(): AppBindings {
         current: "v1.0.0",
         latest: "v1.0.0",
         notes: "",
-        channel: "stable",
+        channel: channel === "preview" ? "preview" : "stable",
         canSelfUpdate: false,
         manualOnly: true,
         installMode: "manual",
@@ -4180,7 +4206,7 @@ function makeMockApp(): AppBindings {
         assetSize: 0,
       };
     },
-    async DownloadUpdate() {
+    async DownloadUpdate(channel: string) {
       const total = 12_345_678;
       for (let r = 0; r <= total; r += 1_800_000) {
         emitUpdater({ phase: "downloading", received: Math.min(r, total), total });
@@ -4189,9 +4215,9 @@ function makeMockApp(): AppBindings {
       emitUpdater({ phase: "verifying", received: total, total });
       await delay(500);
       emitUpdater({ phase: "downloaded", received: total, total });
-      return { version: "v1.1.0", channel: "stable", path: "/tmp/reasonix-update", size: total, sha256: "mock" };
+      return { version: "v1.1.0", channel: channel === "preview" ? "preview" : "stable", path: "/tmp/reasonix-update", size: total, sha256: "mock" };
     },
-    async InstallUpdate() {
+    async InstallUpdate(_channel: string) {
       const total = 12_345_678;
       emitUpdater({ phase: "installing", received: total, total });
       await delay(500);
@@ -4199,8 +4225,8 @@ function makeMockApp(): AppBindings {
       // The real shell relaunches here; the mock just stops.
     },
     async ApplyUpdate() {
-      await this.DownloadUpdate();
-      await this.InstallUpdate();
+      await this.DownloadUpdate("");
+      await this.InstallUpdate("");
     },
     async OpenDownloadPage() {
       if (typeof window !== "undefined") {

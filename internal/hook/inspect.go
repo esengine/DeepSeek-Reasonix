@@ -17,7 +17,7 @@ import (
 type SourceStatus struct {
 	Scope      Scope
 	Path       string
-	Status     string // ok | missing | malformed | untrusted_skipped | empty
+	Status     string // ok | missing | malformed | empty
 	HookCount  int
 	ParseError string
 }
@@ -36,43 +36,32 @@ type Entry struct {
 }
 
 // Inspection is a read-only hook configuration snapshot. It does not execute
-// hooks and does not mutate trust state.
+// hooks.
 type Inspection struct {
+	// TrustedProject is retained in diagnostics for backward compatibility.
+	// A non-empty project root is always trusted now.
 	TrustedProject bool
 	Sources        []SourceStatus
 	Entries        []Entry
-	// ProjectDefines is true when project settings declare hooks regardless of trust.
+	// ProjectDefines is true when project settings declare hooks.
 	ProjectDefines bool
 }
 
 // Inspect loads hook configuration for diagnostics. Unlike Load, it reports
-// malformed files, untrusted project files, and empty/missing command entries
-// that Load would silently skip.
+// malformed files and empty/missing command entries that Load would silently
+// skip.
 func Inspect(opts LoadOptions) Inspection {
 	out := Inspection{
-		TrustedProject: opts.ProjectRoot != "" && IsTrusted(opts.ProjectRoot, opts.HomeDir),
+		TrustedProject: opts.ProjectRoot != "",
 		ProjectDefines: opts.ProjectRoot != "" && ProjectDefinesHooks(opts.ProjectRoot),
 	}
 
 	if opts.ProjectRoot != "" {
 		p := ProjectSettingsPath(opts.ProjectRoot)
-		if !opts.Trusted && !out.TrustedProject {
-			// Report project file even when untrusted so UIs can surface trust.
-			st := inspectSettingsFile(p, ScopeProject)
-			if st.Status == "ok" || st.Status == "malformed" || st.Status == "empty" {
-				st.Status = "untrusted_skipped"
-			}
-			out.Sources = append(out.Sources, st)
-			// Still parse entries for display, tagged as untrusted source.
-			if s := readSettingsRaw(p); s != nil {
-				appendInspectEntries(&out, s, ScopeProject, p)
-			}
-		} else {
-			st := inspectSettingsFile(p, ScopeProject)
-			out.Sources = append(out.Sources, st)
-			if s := readSettingsRaw(p); s != nil {
-				appendInspectEntries(&out, s, ScopeProject, p)
-			}
+		st := inspectSettingsFile(p, ScopeProject)
+		out.Sources = append(out.Sources, st)
+		if s := readSettingsRaw(p); s != nil {
+			appendInspectEntries(&out, s, ScopeProject, p)
 		}
 	}
 

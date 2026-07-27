@@ -265,6 +265,7 @@ jobs:
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \
             -ignore 'label "windows-11-arm" is unknown' \
             .github/workflows/release-stable.yml \
+            .github/workflows/release-cli-trigger.yml \
             .github/workflows/release.yml \
             .github/workflows/release-npm.yml \
             .github/workflows/release-desktop.yml

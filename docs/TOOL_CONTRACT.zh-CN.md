@@ -50,7 +50,7 @@ Skill/MCP 的 require/prefer 路由受门禁约束（只读回答同样不能跳
 read/diff 证据。
 
 双模型 Planner 与全部 task/fleet 子 Agent 同样使用 `use_capability`（且从不暴露直接
-`mcp__*` schema）。Planner 与普通可写子 Agent 可调用已安装或项目已授权 MCP，不要求
+`mcp__*` schema）。Planner 与普通可写子 Agent 可调用已安装或项目配置 MCP，不要求
 `readOnlyHint`；Planner 将 `destructiveHint` 留给 Executor，普通子 Agent 走可信 MCP 路径
 （实时授权复核 + 仅显式 deny）。writer/destructive 调用仍会串行并按 mutation 记录，继续受
 证据、工作区租约和 Delivery 门禁约束。严格只读子 Agent 共享同一代理 schema 与 Host 连接，但执行仍要求 `readOnlyHint` 且
@@ -60,7 +60,7 @@ read/diff 证据。
 
 `use_capability` 的解析阶段无副作用：`action=list` 返回已配置 MCP 服务器的排序列表且不启动服务器；
 对未连接服务器的 `action=call` 只生成惰性目标；Plan 只会对真实目标重新检查显式阶段 opt-out，服务器进程只在
-权限门禁与 PreToolUse Hook 放行之后才启动（未授权项目 MCP 在进程或网络请求前阻止）。按需启动的
+权限门禁与 PreToolUse Hook 放行之后才启动。按需启动的
 子进程随会话存活（不会随单次调用结束而退出）；`action=inspect` 对已连接服务器列出实时工具，未连接
 时只读取缓存 schema，绝不启动进程。无 schema 缓存的服务器首次发现走 `mcp-server:` id 的
 `action=call`：解析为受门禁保护的连接目标（权限名为独立的

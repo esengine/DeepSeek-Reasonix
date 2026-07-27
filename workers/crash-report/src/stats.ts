@@ -178,6 +178,22 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   turns: { en: "Turns", zh: "轮次" },
   desktop_hang: { en: "Desktop hangs", zh: "桌面卡死" },
   desktop_hang_age: { en: "Desktop hang age", zh: "桌面卡死时长" },
+  desktop_exit: { en: "Desktop exits", zh: "桌面退出" },
+  desktop_exit_phase: { en: "Abnormal exit phase", zh: "异常退出阶段" },
+  desktop_uptime: { en: "Uptime before exit", zh: "退出前运行时长" },
+  desktop_install: { en: "Install profile", zh: "安装方式" },
+  desktop_update_transition: { en: "Update transition", zh: "升级阶段" },
+  desktop_restore: { en: "Window restore", zh: "窗口恢复" },
+  desktop_webview2_failure: { en: "WebView2 failures", zh: "WebView2 故障" },
+  recovery_failure: { en: "Recovery failures", zh: "恢复失败" },
+  recovery_rule_continue: { en: "Rule recovery continues", zh: "规则恢复继续" },
+  recovery_review_continue: { en: "Review recovery continues", zh: "复核恢复继续" },
+  recovery_human_prompt: { en: "Recovery prompts", zh: "恢复询问" },
+  recovery_human_continue: { en: "Human recovery continues", zh: "人工恢复继续" },
+  recovery_human_revise: { en: "Human recovery revisions", zh: "人工恢复修订" },
+  recovery_review_error: { en: "Recovery review errors", zh: "恢复复核错误" },
+  recovery_repeat_prompt: { en: "Repeated recovery prompts", zh: "重复恢复询问" },
+  recovery_review_latency: { en: "Recovery review latency", zh: "恢复复核耗时" },
   client_surface: { en: "Client surface", zh: "客户端形态" },
   client_version: { en: "Client version", zh: "客户端版本" },
   settings_language: { en: "Settings: language", zh: "设置：语言" },
@@ -225,6 +241,22 @@ const AGENT_METRIC_SIGNALS = [
   "turns",
   "desktop_hang",
   "desktop_hang_age",
+  "desktop_exit",
+  "desktop_exit_phase",
+  "desktop_uptime",
+  "desktop_install",
+  "desktop_update_transition",
+  "desktop_restore",
+  "desktop_webview2_failure",
+  "recovery_failure",
+  "recovery_rule_continue",
+  "recovery_review_continue",
+  "recovery_human_prompt",
+  "recovery_human_continue",
+  "recovery_human_revise",
+  "recovery_review_error",
+  "recovery_repeat_prompt",
+  "recovery_review_latency",
 ];
 const DEFAULT_OPEN_SETTING_GROUPS = new Set(["Client", "Models", "Providers"]);
 
@@ -394,6 +426,10 @@ function agentHealth(rows: MetricRow[], previousRows: MetricRow[]): string {
   const prevCache = cacheHitRate(previousRows);
   const desktopHangs = sumMetric(rows, "desktop_hang");
   const prevDesktopHangs = sumMetric(previousRows, "desktop_hang");
+  const abnormalExits = rows.filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal").reduce((sum, r) => sum + r.total, 0);
+  const prevAbnormalExits = previousRows.filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal").reduce((sum, r) => sum + r.total, 0);
+  const webViewFailures = sumMetric(rows, "desktop_webview2_failure");
+  const prevWebViewFailures = sumMetric(previousRows, "desktop_webview2_failure");
   const rateCard = (signal: string, en: string, zh: string) => {
     const value = ratioPer100(rows, signal);
     const prev = ratioPer100(previousRows, signal);
@@ -423,6 +459,20 @@ ${healthCard(
   countHealthLevel(desktopHangs),
   healthDeltaHTML(deltaLabel(desktopHangs, prevDesktopHangs)),
   healthDetailHTML(rows, "desktop_hang_age"),
+)}
+${healthCard(
+  { en: "Abnormal desktop exits", zh: "桌面异常退出" },
+  String(abnormalExits),
+  countHealthLevel(abnormalExits),
+  healthDeltaHTML(deltaLabel(abnormalExits, prevAbnormalExits)),
+  healthDetailHTML(rows, "desktop_exit_phase"),
+)}
+${healthCard(
+  { en: "WebView2 process failures", zh: "WebView2 进程故障" },
+  String(webViewFailures),
+  countHealthLevel(webViewFailures),
+  healthDeltaHTML(deltaLabel(webViewFailures, prevWebViewFailures)),
+  healthDetailHTML(rows, "desktop_webview2_failure"),
 )}
 </div>`;
 }
@@ -563,9 +613,15 @@ export function renderStats(
   const providerRate = ratioPer100(agentMetrics, "provider_error");
   const toolRate = ratioPer100(agentMetrics, "tool_error");
   const desktopHangs = sumMetric(agentMetrics, "desktop_hang");
+  const abnormalExits = agentMetrics
+    .filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal")
+    .reduce((sum, r) => sum + r.total, 0);
+  const webViewFailures = sumMetric(agentMetrics, "desktop_webview2_failure");
   const healthWatchCount =
     [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length +
-    (desktopHangs > 0 ? 1 : 0);
+    (desktopHangs > 0 ? 1 : 0) +
+    (abnormalExits > 0 ? 1 : 0) +
+    (webViewFailures > 0 ? 1 : 0);
   const modulePath = (module: StatsModule) => (module === "usage" ? "/stats" : `/stats/${module}`);
   const filterQS = (patch: Record<string, string>, module: StatsModule = activeModule) => {
     const params = new URLSearchParams();

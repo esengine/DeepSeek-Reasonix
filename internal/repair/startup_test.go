@@ -209,3 +209,76 @@ func TestStartupTrackerWithoutStateDirIsDisabled(t *testing.T) {
 		t.Fatalf("path = %q", tracker.Path())
 	}
 }
+
+func TestStartupTrackerObservesHealthyProcessThatExitedUncleanly(t *testing.T) {
+	now := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	tracker := NewStartupTracker(filepath.Join(t.TempDir(), "startup.json"))
+	tracker.now = func() time.Time { return now }
+	tracker.processAlive = func(int) bool { return false }
+	state := StartupState{
+		SchemaVersion:     1,
+		Phase:             "healthy",
+		PID:               42,
+		Version:           "v2",
+		InstallProfile:    "installer",
+		UpdateFromVersion: "v1",
+		UpdateToVersion:   "v2",
+		StartedAt:         now.Add(-3 * time.Minute).Format(time.RFC3339Nano),
+		UpdatedAt:         now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}
+	if err := tracker.write(state); err != nil {
+		t.Fatal(err)
+	}
+	got := tracker.ObservePreviousRun()
+	if !got.Abnormal || got.Phase != "healthy" || got.UptimeBucket != "m_2_10" {
+		t.Fatalf("observation = %+v", got)
+	}
+	if got.InstallProfile != "installer" || got.UpdateFrom != "v1" || got.UpdateTo != "v2" {
+		t.Fatalf("launch attribution missing: %+v", got)
+	}
+}
+
+func TestStartupTrackerDoesNotObserveLiveOwnerOrCleanExit(t *testing.T) {
+	tracker := NewStartupTracker(filepath.Join(t.TempDir(), "startup.json"))
+	tracker.processAlive = func(pid int) bool { return pid == 42 }
+	if err := tracker.write(StartupState{SchemaVersion: 1, Phase: "healthy", PID: 42}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tracker.ObservePreviousRun(); got.Abnormal {
+		t.Fatalf("live owner reported as abnormal: %+v", got)
+	}
+	tracker.processAlive = func(int) bool { return false }
+	if err := tracker.write(StartupState{SchemaVersion: 1, Phase: "clean-exit", PID: 42}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tracker.ObservePreviousRun(); got.Abnormal {
+		t.Fatalf("clean exit reported as abnormal: %+v", got)
+	}
+}
+
+func TestStartupTrackerHeartbeatAndLaunchContextPreservePhase(t *testing.T) {
+	now := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	tracker := NewStartupTracker(filepath.Join(t.TempDir(), "startup.json"))
+	tracker.now = func() time.Time { return now }
+	tracker.processAlive = func(int) bool { return false }
+	if _, err := tracker.Begin("v2", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.MarkLaunchContext("portable", "v1", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	if err := tracker.Heartbeat(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := tracker.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Phase != "starting" || got.InstallProfile != "portable" || got.UpdateFromVersion != "v1" || got.UpdateToVersion != "v2" {
+		t.Fatalf("heartbeat/context changed state incorrectly: %+v", got)
+	}
+	if got.UpdatedAt != now.Format(time.RFC3339Nano) {
+		t.Fatalf("updatedAt = %q, want %q", got.UpdatedAt, now.Format(time.RFC3339Nano))
+	}
+}

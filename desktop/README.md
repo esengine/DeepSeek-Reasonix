@@ -282,16 +282,20 @@ desktop/
 
 The desktop app sends one anonymous ping per launch to `crash.reasonix.io`:
 a random install id (generated locally, tied to nothing), app version, OS,
-arch, and OS version. It exists solely to count active installs. It never
-includes conversations, API keys, file contents, or paths.
+arch, and OS version. When the previous process ended abnormally, the next
+normal launch may also send a bounded native diagnostic (lifecycle phase,
+symbolized stack, WebView2/window failure kind, and coarse device facts).
+Panic values are removed and paths/secrets are scrubbed before the report is
+queued. It never includes conversations, API keys, or file contents.
 
 Opt out any time: Settings > Updates > "Anonymous usage ping", or set
 `telemetry = false` under `[desktop]` in the global config. Dev builds
-never ping. Crash and performance-pressure reports are separate and only
-ever sent when the user clicks "Send report" on the diagnostic UI.
+never ping or upload queued native diagnostics. Frontend crash and
+performance-pressure reports remain separate and are sent only when the user
+clicks "Send report" on the diagnostic UI.
 
 Aggregate quality metrics are also enabled by default and can be disabled from
 Settings > Updates > "Share aggregate quality metrics", or by setting
 `metrics = false` under `[desktop]`. These metrics are anonymous signal/bucket
-counts and preference buckets; they never include conversations, prompts, keys,
-paths, base URLs, or file contents.
+counts, lifecycle/window failure buckets, and preference buckets; they never
+include conversations, prompts, keys, paths, base URLs, or file contents.

@@ -182,12 +182,30 @@ export interface WireEvent {
   // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
   // route each event to the correct per-tab reducer.
   tabId?: string;
+  runtimeEpoch?: string;
   sessionHitTokens?: number;
   sessionMissTokens?: number;
   sessionCost?: number;
   sessionCurrency?: string;
   // Deprecated compatibility alias. Prefer sessionCost + sessionCurrency.
   sessionCostUsd?: number;
+}
+
+export type SessionRuntimePhase = "starting" | "ready" | "lease_blocked" | "failed" | "closing";
+
+export interface SessionRuntimeIssue {
+  code: "session_lease_held" | "startup_failed";
+  message: string;
+  retryable: boolean;
+  holderPid?: number;
+  holderHost?: string;
+  acquiredAt?: string;
+}
+
+export interface SessionRuntimeView {
+  phase: SessionRuntimePhase;
+  epoch: string;
+  issue?: SessionRuntimeIssue;
 }
 
 export interface WireFinalReadiness {
@@ -213,6 +231,7 @@ export interface TabMeta {
   projectColor?: string;
   label: string;
   ready: boolean;
+  runtime?: SessionRuntimeView;
   running: boolean;
   pendingPrompt?: boolean;
   backgroundJobs?: number;
@@ -489,6 +508,7 @@ export interface ContextInfo {
 export interface Meta {
   label: string;
   ready: boolean;
+  runtime?: SessionRuntimeView;
   startupErr?: string;
   eventChannel: string;
   cwd: string;
@@ -720,6 +740,8 @@ export interface ServerView {
   enabled?: boolean;
   installed?: boolean;
   action?: "none" | "authenticate" | "authorize" | "retry" | string;
+  source?: "project" | "user" | "plugin" | "builtin" | string;
+  configSource?: string;
   builtIn?: boolean;
   configured?: boolean;
   /** @deprecated same as enabled */
@@ -1625,8 +1647,9 @@ export interface SettingsView {
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
   checkUpdates: boolean; // check for new versions on startup
-  telemetry: boolean; // anonymous launch ping (install id + version + OS)
-  metrics: boolean; // aggregate desktop metrics (anonymous signal/bucket counts)
+  updateChannel: string; // "stable" | "preview"
+  telemetry: boolean; // anonymous launch ping + scrubbed next-launch native crash diagnostics
+  metrics: boolean; // aggregate quality/lifecycle metrics (anonymous signal/bucket counts)
   configPath: string;
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
@@ -1644,6 +1667,7 @@ export interface DesktopStartupSettingsView {
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
+  updateChannel: string; // "stable" | "preview"
   safeMode?: boolean; // recovery startup with external integrations disabled
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
 }

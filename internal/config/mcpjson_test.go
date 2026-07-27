@@ -427,6 +427,159 @@ func TestLoadMergesPluginsAcrossTOMLSources(t *testing.T) {
 	}
 }
 
+func TestLoadProjectMCPPriorityIsReasonixThenMCPJSONThenGlobal(t *testing.T) {
+	_, userConfig, _ := legacyHome(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfig, []byte(`
+[[plugins]]
+name = "shared"
+command = "global-mcp"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, mcpJSONFile), []byte(`{
+  "mcpServers": {
+    "shared": { "command": "project-json-mcp" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := pluginEntryByName(cfg.Plugins, "shared")
+	if !ok || entry.Command != "project-json-mcp" || entry.Source != MCPSourceProjectMCPJSON {
+		t.Fatalf("global + .mcp.json effective entry = %+v, want project .mcp.json", entry)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "shared"
+command = "project-reasonix-mcp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok = pluginEntryByName(cfg.Plugins, "shared")
+	if !ok || entry.Command != "project-reasonix-mcp" || entry.Source != MCPSourceProjectConfig {
+		t.Fatalf("reasonix.toml + .mcp.json + global effective entry = %+v, want project reasonix.toml", entry)
+	}
+}
+
+func TestUpsertPluginInSourcePreservesGlobalAndProjectBoundaries(t *testing.T) {
+	_, userConfig, _ := legacyHome(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfig, []byte(`
+[[plugins]]
+name = "global"
+command = "global-old"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[[plugins]]
+name = "project"
+command = "project-old"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if path, err := UpsertPluginInSourceForRoot(root, PluginEntry{
+		Name: "global", Command: "global-new", Source: MCPSourceUserConfig,
+	}); err != nil || !samePath(path, userConfig) {
+		t.Fatalf("upsert global path=%q err=%v, want %q", path, err, userConfig)
+	}
+	if path, err := UpsertPluginInSourceForRoot(root, PluginEntry{
+		Name: "project", Command: "project-new", Source: MCPSourceProjectConfig,
+	}); err != nil || !samePath(path, projectPath) {
+		t.Fatalf("upsert project path=%q err=%v, want %q", path, err, projectPath)
+	}
+
+	globalCfg := LoadForEdit(userConfig)
+	if entry, ok := pluginEntryByName(globalCfg.Plugins, "global"); !ok || entry.Command != "global-new" {
+		t.Fatalf("global config entry = %+v, found=%v", entry, ok)
+	}
+	if _, ok := pluginEntryByName(globalCfg.Plugins, "project"); ok {
+		t.Fatalf("project MCP leaked into global config: %+v", globalCfg.Plugins)
+	}
+	projectCfg := LoadForEdit(projectPath)
+	if entry, ok := pluginEntryByName(projectCfg.Plugins, "project"); !ok || entry.Command != "project-new" {
+		t.Fatalf("project config entry = %+v, found=%v", entry, ok)
+	}
+	if _, ok := pluginEntryByName(projectCfg.Plugins, "global"); ok {
+		t.Fatalf("global MCP leaked into project config: %+v", projectCfg.Plugins)
+	}
+}
+
+func TestRemoveEffectivePluginRevealsLowerPriorityDeclaration(t *testing.T) {
+	_, userConfig, _ := legacyHome(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(userConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userConfig, []byte(`
+[[plugins]]
+name = "shared"
+command = "global-mcp"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(root, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[[plugins]]
+name = "shared"
+command = "project-reasonix-mcp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mcpPath := filepath.Join(root, mcpJSONFile)
+	if err := os.WriteFile(mcpPath, []byte(`{
+  "mcpServers": {
+    "shared": { "command": "project-json-mcp" }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, ok, path, err := RemovePluginFromEffectiveSourceForRoot(root, "shared")
+	if err != nil || !ok || removed.Source != MCPSourceProjectConfig || !samePath(path, projectPath) {
+		t.Fatalf("remove project TOML = entry:%+v removed:%v path:%q err:%v", removed, ok, path, err)
+	}
+	cfg, err := LoadForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, found := pluginEntryByName(cfg.Plugins, "shared")
+	if !found || entry.Source != MCPSourceProjectMCPJSON || entry.Command != "project-json-mcp" {
+		t.Fatalf("after removing project TOML effective entry = %+v, found=%v", entry, found)
+	}
+
+	removed, ok, path, err = RemovePluginFromEffectiveSourceForRoot(root, "shared")
+	if err != nil || !ok || removed.Source != MCPSourceProjectMCPJSON || !samePath(path, mcpPath) {
+		t.Fatalf("remove project .mcp.json = entry:%+v removed:%v path:%q err:%v", removed, ok, path, err)
+	}
+	cfg, err = LoadForRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, found = pluginEntryByName(cfg.Plugins, "shared")
+	if !found || entry.Source != MCPSourceUserConfig || entry.Command != "global-mcp" {
+		t.Fatalf("after removing project sources effective entry = %+v, found=%v", entry, found)
+	}
+}
+
 func TestLoadNormalizesTOMLPastedCommandLine(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

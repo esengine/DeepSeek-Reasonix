@@ -18,6 +18,10 @@ func windowsBatchArgvCommand(ctx context.Context, command string, args []string)
 	return newWindowsBatchCommand(ctx, commandLine, ok)
 }
 
+func windowsCmdShellCommand(ctx context.Context, command string) (*exec.Cmd, bool) {
+	return newWindowsBatchCommand(ctx, windowsCmdCommandLine(command), true)
+}
+
 func newWindowsBatchCommand(ctx context.Context, commandLine string, ok bool) (*exec.Cmd, bool) {
 	if !ok {
 		return nil, false

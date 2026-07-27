@@ -244,6 +244,13 @@ eq(
 );
 eq(finalDeclaration(".code", "font-family"), "var(--font-code-family)", "code blocks keep the regional code font");
 eq(finalDeclaration(".md-code", "font-family"), "var(--font-code-family)", "inline code keeps the regional code font");
+eq(finalDeclaration(".code code", "font-family"), "inherit", "nested code text inherits the regional code font");
+eq(finalDeclaration(".code-line-text", "font-family"), "inherit", "line-numbered code text inherits its viewer font");
+eq(
+  finalDeclaration(".code-lines-wrap", "font-family"),
+  "var(--typography-code-font, var(--font-mono))",
+  "line-numbered code viewers use the regional code font",
+);
 eq(
   finalDeclaration(".diff", "font-size"),
   "var(--typography-code-size, calc(12.5px * var(--global-font-scale)))",

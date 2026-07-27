@@ -130,14 +130,64 @@ type Hook struct {
 	Match         string            `json:"match,omitempty"`
 	Command       string            `json:"command,omitempty"`
 	Args          []string          `json:"args,omitempty"`
+	ArgsSet       bool              `json:"-"`
 	ContextFile   string            `json:"contextFile,omitempty"`
 	ShellCommand  bool              `json:"shellCommand,omitempty"`
+	Shell         string            `json:"shell,omitempty"`
 	Async         bool              `json:"async,omitempty"`
 	PayloadFormat string            `json:"payloadFormat,omitempty"`
 	Description   string            `json:"description,omitempty"`
 	Timeout       int               `json:"timeout,omitempty"`
 	Cwd           string            `json:"cwd,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
+}
+
+// UnmarshalJSON preserves whether args was present, including an explicit
+// empty array. Hook execution uses field presence — not argument count — to
+// distinguish exec form from shell form.
+func (h *Hook) UnmarshalJSON(data []byte) error {
+	type hookJSON Hook
+	var decoded hookJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*h = Hook(decoded)
+	for name := range fields {
+		if strings.EqualFold(name, "args") {
+			h.ArgsSet = true
+			break
+		}
+	}
+	return nil
+}
+
+// MarshalJSON keeps an explicit empty args array visible. Without this custom
+// form, omitempty would erase args:[] and silently change exec form into shell
+// form after a JSON round trip.
+func (h Hook) MarshalJSON() ([]byte, error) {
+	type hookJSON Hook
+	data, err := json.Marshal(hookJSON(h))
+	if err != nil || !h.ArgsSet {
+		return data, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	args := h.Args
+	if args == nil {
+		args = []string{}
+	}
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	fields["args"] = rawArgs
+	return json.Marshal(fields)
 }
 
 type MCPServer struct {
@@ -663,6 +713,10 @@ func normalizeHooks(in map[string][]Hook) map[string][]Hook {
 			h.Command = strings.TrimSpace(h.Command)
 			h.ContextFile = strings.TrimSpace(h.ContextFile)
 			h.Cwd = strings.TrimSpace(h.Cwd)
+			h.Shell = strings.ToLower(strings.TrimSpace(h.Shell))
+			if h.Shell != "" && !h.ArgsSet {
+				h.ShellCommand = true
+			}
 			if h.Command == "" && h.ContextFile == "" {
 				continue
 			}
@@ -699,6 +753,9 @@ func validateManifest(root string, m *Manifest) error {
 			if h.Command == "" && h.ContextFile == "" {
 				return fmt.Errorf("hook command or contextFile is required")
 			}
+			if !h.ArgsSet && !validHookShell(h.Shell) {
+				return fmt.Errorf("hook shell %q is not supported (use auto, bash, powershell, pwsh, or cmd)", h.Shell)
+			}
 			if h.Command != "" && !h.ShellCommand && !filepath.IsAbs(h.Command) {
 				if err := validateRelativePath(h.Command); err != nil {
 					return err
@@ -725,6 +782,15 @@ func validateManifest(root string, m *Manifest) error {
 		return err
 	}
 	return nil
+}
+
+func validHookShell(shell string) bool {
+	switch strings.ToLower(strings.TrimSpace(shell)) {
+	case "", "auto", "bash", "powershell", "pwsh", "cmd":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateRelativePath(p string) error {

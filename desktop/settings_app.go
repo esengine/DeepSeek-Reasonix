@@ -276,6 +276,7 @@ type SettingsView struct {
 	DefaultToolApprovalMode string               `json:"defaultToolApprovalMode"`
 
 	CheckUpdates      bool   `json:"checkUpdates"`
+	UpdateChannel     string `json:"updateChannel"`
 	Telemetry         bool   `json:"telemetry"`
 	Metrics           bool   `json:"metrics"`
 	ExpandThinking    bool   `json:"expandThinking"`
@@ -306,6 +307,7 @@ type DesktopStartupSettingsView struct {
 	StatusBarStyle     string          `json:"statusBarStyle"`
 	StatusBarItems     []string        `json:"statusBarItems"`
 	CheckUpdates       bool            `json:"checkUpdates"`
+	UpdateChannel      string          `json:"updateChannel"`
 	SafeMode           bool            `json:"safeMode,omitempty"`
 	ConversationWidth  string          `json:"conversationWidth,omitempty"`
 }
@@ -764,6 +766,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 			StatusBarStyle:     "text",
 			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
 			CheckUpdates:       true,
+			UpdateChannel:      "stable",
 			ConversationWidth:  "standard",
 		}
 	}
@@ -777,6 +780,7 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
 		StatusBarItems:     cfg.DesktopStatusBarItems(),
 		CheckUpdates:       cfg.DesktopCheckUpdates(),
+		UpdateChannel:      cfg.DesktopUpdateChannel(),
 		SafeMode:           cfg.SafeMode(),
 		ConversationWidth:  cfg.DesktopConversationWidth(),
 	}
@@ -832,6 +836,7 @@ func (a *App) Settings() SettingsView {
 			StatusBarItems:          config.DefaultDesktopStatusBarItems(),
 			DefaultToolApprovalMode: "auto",
 			CheckUpdates:            true,
+			UpdateChannel:           "stable",
 			Telemetry:               true,
 			Metrics:                 true,
 			ExpandThinking:          false,
@@ -906,6 +911,7 @@ func (a *App) Settings() SettingsView {
 		StatusBarItems:          cfg.DesktopStatusBarItems(),
 		DefaultToolApprovalMode: cfg.DesktopDefaultToolApprovalMode(),
 		CheckUpdates:            cfg.DesktopCheckUpdates(),
+		UpdateChannel:           cfg.DesktopUpdateChannel(),
 		Telemetry:               cfg.DesktopTelemetry(),
 		Metrics:                 cfg.DesktopMetrics(),
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
@@ -1510,13 +1516,6 @@ func providerCredentialSourceNotice(apiKeyEnv, value string) string {
 	return ""
 }
 
-func projectConfigPathForRoot(root string) string {
-	if strings.TrimSpace(root) == "" || root == "." {
-		return "reasonix.toml"
-	}
-	return filepath.Join(root, "reasonix.toml")
-}
-
 func sameConfigPath(a, b string) bool {
 	a = strings.TrimSpace(a)
 	b = strings.TrimSpace(b)
@@ -1646,7 +1645,12 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 			leaseHeld := false
 			a.mu.Lock()
 			leaseHeld = setTabStartupError(tab, err)
-			tab.Ready = true
+			tab.Ready = false
+			if leaseHeld {
+				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
+			} else {
+				a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
+			}
 			a.mu.Unlock()
 			if leaseHeld {
 				a.scheduleDeferredStartupBuild(tab.ID)
@@ -1690,6 +1694,7 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	}
 	a.persistTabSessionPath(tab, path)
 	a.clearDeferredRebuild(tab.ID)
+	a.notifyTabRuntimeRebuilt(tab)
 	a.emitReady(a.ctx)
 	return nil
 }
@@ -2485,6 +2490,11 @@ func (a *App) removeBuiltInProviderAccessAndRetargetTabs(name string) error {
 		clearTabStartupError(tab)
 		tab.Ready = a.ctx == nil
 		if a.ctx != nil {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
+		} else {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, fmt.Errorf("desktop runtime is not started"))
+		}
+		if a.ctx != nil {
 			rebuildTabs = append(rebuildTabs, tab)
 		}
 	}
@@ -2617,6 +2627,11 @@ func (a *App) deleteProviderAndRetargetTabs(name string) error {
 		tab.Label = fallbackRef
 		clearTabStartupError(tab)
 		tab.Ready = a.ctx == nil
+		if a.ctx != nil {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
+		} else {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, fmt.Errorf("desktop runtime is not started"))
+		}
 		if a.ctx != nil {
 			rebuildTabs = append(rebuildTabs, tab)
 		}
@@ -3040,6 +3055,12 @@ func (a *App) SetDesktopLayoutStyle(style string) error {
 // preference. Manual checks in Settings are unaffected.
 func (a *App) SetDesktopCheckUpdates(enabled bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCheckUpdates(enabled) })
+}
+
+// SetDesktopUpdateChannel changes the rolling update pointer used by startup
+// and manual checks. Legacy canary values are normalized to preview.
+func (a *App) SetDesktopUpdateChannel(channel string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopUpdateChannel(channel) })
 }
 
 // SetDesktopTelemetry sets whether the desktop sends the anonymous launch ping.

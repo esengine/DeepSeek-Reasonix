@@ -97,9 +97,9 @@ type Options struct {
 	// access to extra directories without changing persisted sandbox config.
 	AdditionalDirs []string
 	// Stderr is the writer for diagnostic warnings and plugin subprocess
-	// stderr output. When nil, defaults to os.Stderr. Set to io.Discard
-	// during model switch inside a bubbletea session to prevent any output
-	// from corrupting the TUI's terminal raw mode.
+	// stderr output. When nil, defaults to os.Stderr. Interactive terminal
+	// frontends must provide a private diagnostic writer (or io.Discard) so
+	// background output cannot corrupt the TUI's terminal raw mode.
 	Stderr io.Writer
 	// WorkspaceRoot is the project root directory for config, skills, memory,
 	// commands, hooks, and tool confinement. When empty, the current working
@@ -733,27 +733,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		WithSessionAllow(opts.PermissionAllow)
 	headlessGate := control.NewSharedHeadlessGate(policy, opts.HeadlessApprovalMode)
 
-	// Hooks: load the global settings.json plus the project's (only when trusted —
-	// project hooks run arbitrary shell commands, so cloning a repo must not
-	// silently execute them). Non-blocking hook output is surfaced to the user as
-	// a Notice through the shared sink. The runner fires PreToolUse/PostToolUse in
-	// the agent loop and PermissionRequest/UserPromptSubmit/Stop at the controller
-	// boundary.
-	hooksTrusted := !cfg.SafeMode() && hook.IsTrusted(root, "")
+	// Hooks: load the global settings.json plus the project's. Non-blocking hook
+	// output is surfaced to the user as a Notice through the shared sink. The
+	// runner fires PreToolUse/PostToolUse in the agent loop and
+	// PermissionRequest/UserPromptSubmit/Stop at the controller boundary.
 	var resolvedHooks []hook.ResolvedHook
 	if !cfg.SafeMode() {
-		resolvedHooks = hook.Load(hook.LoadOptions{ProjectRoot: root, Trusted: hooksTrusted})
+		resolvedHooks = hook.Load(hook.LoadOptions{ProjectRoot: root})
 	}
 	hookRunner := hook.NewRunner(
 		resolvedHooks,
 		root, nil,
 		func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg}) },
 	)
-	if !cfg.SafeMode() && hook.ProjectDefinesHooks(root) && !hooksTrusted {
-		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-			Text: "this project defines hooks but they are not trusted — run /hooks trust to enable them"})
-	}
-
 	// The `task` tool spawns sub-agents that reuse the parent's provider and
 	// tool registry. Wired here after the built-ins / plugins are loaded so
 	// sub-agents inherit the full tool set (minus `task` itself, to keep
@@ -1613,7 +1605,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				CapabilityLedger:         plannerLedger,
 				CapabilityAudit:          plannerAudit,
 			}
-			runner = agent.NewCoordinator(plannerProv, plannerSess, pe.Price, plannerTools, plannerOpts, executor, cfg.Agent.Temperature, sink, control.NewPlannerGate())
+			runner = agent.NewCoordinatorWithPlannerPolicy(plannerProv, plannerSess, pe.Price, plannerTools, plannerOpts, executor, cfg.Agent.Temperature, sink, control.NewPlannerPolicy())
 			label = entry.Model + " + planner " + pe.Model
 		}
 	}
@@ -2176,6 +2168,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"api_key_source":     e.APIKeySourceLabel(),
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
+			"supported_efforts":  e.SupportedEfforts,
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"chat_url":           e.ChatURL,
 			"headers":            e.Headers,
@@ -2312,23 +2305,25 @@ func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, 
 		configSource = opts.ConfigSource
 	}
 	spec := plugin.ApplyKnownOverrides(plugin.Spec{
-		Name:                  e.Name,
-		Package:               strings.TrimSpace(opts.PackageOwners[e.Name]),
-		Type:                  e.Type,
-		Command:               e.Command,
-		Args:                  e.Args,
-		Env:                   e.Env,
-		URL:                   e.URL,
-		Headers:               e.Headers,
-		DefaultCallTimeout:    opts.DefaultCallTimeout,
-		CallTimeout:           secondsDuration(e.CallTimeoutSeconds),
-		ToolTimeouts:          toolTimeoutDurations(e.ToolTimeoutSeconds),
-		WorkspaceRoot:         strings.TrimSpace(workspaceRoot),
-		LaunchManager:         opts.LaunchManager,
-		ConfigSource:          configSource,
-		Authorized:            e.Source.UserAuthorized(),
-		RequireLaunchApproval: e.Source.RequiresLaunchApproval(),
+		Name:               e.Name,
+		Package:            strings.TrimSpace(opts.PackageOwners[e.Name]),
+		Type:               e.Type,
+		Command:            e.Command,
+		Args:               e.Args,
+		Env:                e.Env,
+		URL:                e.URL,
+		Headers:            e.Headers,
+		DefaultCallTimeout: opts.DefaultCallTimeout,
+		CallTimeout:        secondsDuration(e.CallTimeoutSeconds),
+		ToolTimeouts:       toolTimeoutDurations(e.ToolTimeoutSeconds),
+		WorkspaceRoot:      strings.TrimSpace(workspaceRoot),
+		LaunchManager:      opts.LaunchManager,
+		ConfigSource:       configSource,
+		Authorized:         e.Source.UserAuthorized(),
 	}, workspaceRoot)
+	if e.Source.ProjectScoped() && strings.TrimSpace(spec.Dir) == "" {
+		spec.Dir = workspaceRoot
+	}
 	applyMCPIsolation(&spec, workspaceRoot, opts)
 	return spec
 }

@@ -62,6 +62,12 @@ func TestSwitchModelContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 		Sink:        bc,
 	})
 	s := &Server{ctrl: old, bc: bc}
+	leases := control.NewSessionLeaseKeeper()
+	t.Cleanup(leases.Release)
+	if err := leases.Rebind(originalPath); err != nil {
+		t.Fatalf("seed original lease: %v", err)
+	}
+	s.SetSessionLeases(leases)
 
 	var built *control.Controller
 	s.buildController = func(_ context.Context, _ string) (*control.Controller, error) {
@@ -85,6 +91,9 @@ func TestSwitchModelContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	if s.ctl() != built {
 		t.Fatal("switchModel did not publish the rebuilt controller")
 	}
+	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
+		t.Fatalf("lease after pre-switch recovery = %q, want %q", got, want)
+	}
 
 	matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
 	if err != nil {
@@ -107,6 +116,29 @@ func TestSwitchModelContinuesRecoveryPathAfterSnapshotConflict(t *testing.T) {
 	matches = primarySessionFiles(matches)
 	if len(matches) != 1 || matches[0] != recoveryPath {
 		t.Fatalf("recovery branches after follow-up snapshot = %v, want only %q", matches, recoveryPath)
+	}
+
+	// A later ordinary autosave on the rebuilt controller must use the same
+	// ownership callback. Force another divergence after the switch and verify
+	// the keeper follows the second recovery before the controller commits it.
+	diskAfterSwitch, err := agent.LoadSession(recoveryPath)
+	if err != nil {
+		t.Fatalf("load recovery transcript for external change: %v", err)
+	}
+	diskAfterSwitch.Add(provider.Message{Role: provider.RoleUser, Content: "disk third"})
+	if err := diskAfterSwitch.Save(recoveryPath); err != nil {
+		t.Fatalf("save external recovery transcript change: %v", err)
+	}
+	built.Executor().Session().Add(provider.Message{Role: provider.RoleUser, Content: "local third"})
+	if err := built.Snapshot(); err != nil {
+		t.Fatalf("Snapshot rebuilt controller after divergence: %v", err)
+	}
+	secondRecoveryPath := built.SessionPath()
+	if secondRecoveryPath == recoveryPath || !strings.Contains(filepath.Base(secondRecoveryPath), "-recovery-") {
+		t.Fatalf("rebuilt controller path = %q, want recovery path distinct from %q", secondRecoveryPath, recoveryPath)
+	}
+	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(secondRecoveryPath); got != want {
+		t.Fatalf("lease after rebuilt-controller recovery = %q, want %q", got, want)
 	}
 }
 

@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -138,6 +140,51 @@ func TestObserveRecoveryResultMarksCancellation(t *testing.T) {
 	}
 	if gate.observation.TaskScopeID == "" {
 		t.Fatalf("observation = %+v, want a host-owned recovery scope", gate.observation)
+	}
+}
+
+func TestObserveRecoveryResultKeepsToolOwnedDeadlineAsFailure(t *testing.T) {
+	gate := &recordingRecoveryGate{}
+	a := &Agent{recoveryGate: gate}
+	a.observeRecoveryResult(
+		context.Background(),
+		"mcp__server__write",
+		json.RawMessage(`{"value":"x"}`),
+		false,
+		true,
+		"",
+		fmt.Errorf("MCP tool timed out after 30s: %w", context.DeadlineExceeded),
+		false,
+		false,
+		0,
+	)
+	if gate.observation.Cancelled {
+		t.Fatalf("observation = %+v, tool-owned deadline must remain a qualifying transient failure", gate.observation)
+	}
+	if !strings.Contains(gate.observation.ErrSummary, "timed out") {
+		t.Fatalf("observation = %+v, want timeout evidence preserved", gate.observation)
+	}
+}
+
+func TestObserveRecoveryResultMarksParentDeadlineCancellation(t *testing.T) {
+	gate := &recordingRecoveryGate{}
+	a := &Agent{recoveryGate: gate}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	a.observeRecoveryResult(
+		ctx,
+		"mcp__server__write",
+		json.RawMessage(`{"value":"x"}`),
+		false,
+		true,
+		"",
+		context.DeadlineExceeded,
+		false,
+		false,
+		0,
+	)
+	if !gate.observation.Cancelled {
+		t.Fatalf("observation = %+v, parent deadline must remain a cancellation", gate.observation)
 	}
 }
 

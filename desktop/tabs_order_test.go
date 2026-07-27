@@ -962,8 +962,14 @@ func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
 	if tab.Ctrl != nil {
 		t.Fatalf("tab controller = %T, want nil when lease is held", tab.Ctrl)
 	}
-	if !tab.Ready {
-		t.Fatal("tab should be ready with startup error")
+	if tab.Ready {
+		t.Fatal("tab with no controller must not report ready")
+	}
+	app.mu.RLock()
+	runtimeView := app.sessionRuntimeViewLocked(tab)
+	app.mu.RUnlock()
+	if runtimeView.Phase != sessionRuntimeLeaseBlocked {
+		t.Fatalf("runtime phase = %q, want %q", runtimeView.Phase, sessionRuntimeLeaseBlocked)
 	}
 	// The surfaced startup error is the sanitized busy message: the raw lease
 	// error would leak the session path and the holder's host-pid-writer id

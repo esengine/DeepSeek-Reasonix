@@ -163,17 +163,12 @@ func TestManualUpdateRequiredErrorPreservesReason(t *testing.T) {
 }
 
 func TestChannelSelectsDistinctPointers(t *testing.T) {
-	orig := channel
-	t.Cleanup(func() { channel = orig })
-
-	channel = "stable"
-	stable := manifestEndpoints()
-	channel = "canary"
-	canary := manifestEndpoints()
+	stable := manifestEndpoints("stable")
+	preview := manifestEndpoints("preview")
 
 	for _, u := range stable {
-		if strings.Contains(u, "canary") {
-			t.Errorf("stable endpoint leaks into canary: %q", u)
+		if strings.Contains(u, "preview") || strings.Contains(u, "canary") {
+			t.Errorf("stable endpoint leaks into preview: %q", u)
 		}
 	}
 	if !strings.Contains(stable[0], "/latest/latest.json") {
@@ -189,27 +184,87 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 	if len(stable) != 3 || stable[2] != githubManifestFallback {
 		t.Errorf("stable endpoints = %q, want the GitHub compatibility manifest last", stable)
 	}
-	for _, u := range append(stable[:2:2], canary...) {
+	for _, u := range append(stable[:2:2], preview...) {
 		if strings.Contains(u, "/releases/latest") {
 			t.Errorf("manifest endpoint uses GitHub's repository-wide latest release: %q", u)
 		}
 	}
-	for _, u := range canary {
+	for _, u := range preview {
 		if strings.Contains(u, "/latest/") {
-			t.Errorf("canary endpoint hits the stable latest/ pointer: %q", u)
+			t.Errorf("preview endpoint hits the stable latest/ pointer: %q", u)
 		}
 	}
-	if !strings.Contains(canary[0], "/canary/latest.json") {
-		t.Errorf("canary primary = %q, want the canary/ pointer", canary[0])
+	if preview[0] != r2Base+"/preview/latest.json" {
+		t.Errorf("preview primary = %q, want the preview/ pointer", preview[0])
 	}
-	if canary[1] != releaseGatewayBase+"/canary/latest.json" {
-		t.Errorf("canary fallback = %q, want the release gateway", canary[1])
+	if preview[1] != r2Base+"/canary/latest.json" {
+		t.Errorf("preview compatibility fallback = %q, want the legacy canary/ pointer", preview[1])
+	}
+	if preview[2] != releaseGatewayBase+"/preview/latest.json" {
+		t.Errorf("preview gateway = %q, want the preview release gateway", preview[2])
+	}
+	if preview[3] != releaseGatewayBase+"/canary/latest.json" {
+		t.Errorf("preview gateway compatibility fallback = %q, want the legacy canary gateway", preview[3])
 	}
 	if strings.Contains(downloadPage(), "/releases/latest") {
 		t.Errorf("download page should not use GitHub's repository-wide latest release: %q", downloadPage())
 	}
 	if downloadPage() != "https://reasonix.io/?download=desktop#start" {
 		t.Errorf("download page = %q, want the desktop install deep link", downloadPage())
+	}
+}
+
+func TestManifestChannelValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		channel   string
+		version   string
+		wantError bool
+	}{
+		{name: "stable release", channel: "stable", version: "v1.17.21"},
+		{name: "preview release", channel: "preview", version: "v1.18.0-preview.7"},
+		{name: "legacy alias selects Preview", channel: "canary", version: "v1.18.0-preview.7"},
+		{name: "Preview rejects legacy Canary", channel: "preview", version: "v1.17.21-canary.56", wantError: true},
+		{name: "Preview rejects Stable", channel: "preview", version: "v1.17.21", wantError: true},
+		{name: "Stable rejects Preview", channel: "stable", version: "v1.18.0-preview.7", wantError: true},
+		{name: "invalid version", channel: "preview", version: "dev", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateManifestChannel(tt.channel, &update.Manifest{Version: tt.version})
+			if (err != nil) != tt.wantError {
+				t.Fatalf("validateManifestChannel(%q, %q) error = %v, wantError=%v", tt.channel, tt.version, err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestFetchManifestSkipsLegacyCanaryBuildForPreview(t *testing.T) {
+	var calls []string
+	client := &http.Client{Transport: rtFunc(func(req *http.Request) (*http.Response, error) {
+		calls = append(calls, req.URL.String())
+		version := "v1.17.21-canary.56"
+		if strings.Contains(req.URL.Path, "/canary/") {
+			version = "v1.18.0-preview.7"
+		}
+		body := fmt.Sprintf(`{"version":%q}`, version)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	manifest, err := fetchManifest(context.Background(), client, nil, "preview")
+	if err != nil {
+		t.Fatalf("fetchManifest: %v", err)
+	}
+	if manifest.Version != "v1.18.0-preview.7" {
+		t.Fatalf("version = %q, want Preview compatibility manifest", manifest.Version)
+	}
+	if len(calls) != 2 || !strings.Contains(calls[0], "/preview/") || !strings.Contains(calls[1], "/canary/") {
+		t.Fatalf("endpoint calls = %q, want Preview first and legacy Canary fallback second", calls)
 	}
 }
 
@@ -288,9 +343,6 @@ func TestCachedUpdateRejectsTamperedArtifact(t *testing.T) {
 
 func TestCachedUpdateRejectsDifferentChannel(t *testing.T) {
 	withUpdateCacheDir(t)
-	oldChannel := channel
-	channel = "stable"
-	t.Cleanup(func() { channel = oldChannel })
 
 	data := []byte("verified artifact")
 	asset := update.Asset{
@@ -298,12 +350,36 @@ func TestCachedUpdateRejectsDifferentChannel(t *testing.T) {
 		Size:   int64(len(data)),
 		SHA256: sha256Hex(data),
 	}
-	if _, err := saveCachedUpdate("v9.9.9", asset, data, artifactKindTarball, nil); err != nil {
-		t.Fatalf("saveCachedUpdate: %v", err)
+	if _, err := saveCachedUpdateForChannel("stable", "v9.9.9", asset, data, artifactKindTarball, nil); err != nil {
+		t.Fatalf("saveCachedUpdateForChannel: %v", err)
 	}
-	channel = "canary"
-	if _, _, err := readVerifiedCachedUpdate(); err == nil {
+	if _, _, err := readVerifiedCachedUpdateForChannel("preview"); err == nil {
 		t.Fatal("readVerifiedCachedUpdate should reject a cache from another channel")
+	}
+}
+
+func TestExplicitChannelSwitchAllowsOlderStable(t *testing.T) {
+	oldChannel := channel
+	channel = "preview"
+	t.Cleanup(func() { channel = oldChannel })
+
+	m := &update.Manifest{
+		Version: "v1.6.0",
+		Platforms: map[string]update.Asset{
+			update.CurrentPlatform(): {Size: 100},
+		},
+	}
+	got := evaluateWithProfileForChannel(
+		"v1.7.0-preview.12",
+		"stable",
+		m,
+		installProfile{Mode: installModePortable, CanSelfUpdate: true},
+	)
+	if !got.Available {
+		t.Fatalf("explicit preview-to-stable switch should be available: %+v", got)
+	}
+	if got.Channel != "stable" {
+		t.Fatalf("channel = %q, want stable", got.Channel)
 	}
 }
 

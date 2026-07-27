@@ -363,7 +363,7 @@ func (h *botBridgeHub) turnDoneNotification(tabID string, e event.Event) desktop
 	label := h.tabLabel(tabID)
 	if e.Outcome == event.TurnOutcomeRecoveryPaused {
 		return desktopBridgeNotification{text: constText(fmt.Sprintf(
-			"⏸️ 桌面会话「%s」已暂停自动恢复。已完成的工作会保留，可直接发送“继续”或补充要求。",
+			"⏸️ 桌面会话「%s」已暂停自动重试。已完成的工作会保留；发送“继续”即可开始新一轮，也可以补充要求调整方向。",
 			label,
 		))}
 	}

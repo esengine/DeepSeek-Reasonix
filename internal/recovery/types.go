@@ -38,6 +38,17 @@ const (
 	ReviewConfirm  ReviewOutcome = "confirm"
 )
 
+// FailureClass separates execution reliability from permission and product
+// decisions. Permission/sandbox/user blocks never become FailureEvents.
+type FailureClass string
+
+const (
+	FailureClassExecution    FailureClass = "execution"
+	FailureClassMutation     FailureClass = "mutation"
+	FailureClassTransient    FailureClass = "transient"
+	FailureClassVerification FailureClass = "verification"
+)
+
 // ReviewVerdict is the strict JSON shape the recovery reviewer must produce.
 // Host already knows failure/diagnosis/proposed action; only outcome fields are
 // required. Extra fields from older models are tolerated on parse.
@@ -56,13 +67,14 @@ type ReviewVerdict struct {
 // SafeRetryLeft/RepeatCount/DiagnosisNotes remain on the wire for old
 // snapshots; runtime budgets live on taskRuntime.
 type FailureEvent struct {
-	Tool          string `json:"tool"`
-	ArgsSummary   string `json:"args_summary,omitempty"`
-	Subject       string `json:"subject,omitempty"`
-	ErrSummary    string `json:"err_summary,omitempty"`
-	OutputExcerpt string `json:"output_excerpt,omitempty"`
-	SourceAgent   string `json:"source_agent,omitempty"`
-	TaskID        string `json:"task_id,omitempty"`
+	Class         FailureClass `json:"class,omitempty"`
+	Tool          string       `json:"tool"`
+	ArgsSummary   string       `json:"args_summary,omitempty"`
+	Subject       string       `json:"subject,omitempty"`
+	ErrSummary    string       `json:"err_summary,omitempty"`
+	OutputExcerpt string       `json:"output_excerpt,omitempty"`
+	SourceAgent   string       `json:"source_agent,omitempty"`
+	TaskID        string       `json:"task_id,omitempty"`
 	// TaskScopeID persists only stable goal scopes. Ordinary turn scopes are
 	// runtime-local and intentionally omitted so a restart cannot revive a stale
 	// technical latch for a new user turn. It never acts as the Episode budget key.

@@ -150,7 +150,7 @@ reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 
 对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录；未指定时，Reasonix
 选择当前项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
-`hook list` 的状态值为 `active`、`untrusted` 或 `invalid`；`invalid` 表示配置的
+`hook list` 的状态值为 `active` 或 `invalid`；`invalid` 表示配置的
 event 因事件名、命令/context 来源或工具事件 matcher 无效而无法执行。非工具事件
 会忽略 matcher。
 

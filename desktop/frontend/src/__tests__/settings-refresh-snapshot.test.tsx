@@ -16,6 +16,11 @@ import {
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { SettingsView } from "../lib/types";
+import {
+  applyTypographyPreferences,
+  createDefaultTypographyPreferences,
+  getTypographyPreferences,
+} from "../lib/typographyPreferences";
 
 let passed = 0;
 let failed = 0;
@@ -134,6 +139,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     statusBarItems: ["model", "workspace", "git_branch", "cache", "balance"],
     defaultToolApprovalMode: "auto",
     checkUpdates: true,
+    updateChannel: "stable",
     telemetry: true,
     metrics: true,
     configPath: "/tmp/reasonix/config.toml",
@@ -200,6 +206,16 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
 localStorage.clear();
+
+const regionalTypography = createDefaultTypographyPreferences();
+regionalTypography.code = {
+  followGlobal: false,
+  fontFamily: "jetbrains",
+  customFontName: "",
+  fontSize: 15,
+};
+applyTypographyPreferences(regionalTypography);
+const regionalCodeFont = document.documentElement.style.getPropertyValue("--typography-code-font");
 
 const settingsSnapshots = [baseSettings("standard"), baseSettings("compact")];
 let settingsCalls = 0;
@@ -385,6 +401,23 @@ await act(async () => {
   await flushPromises();
 });
 await waitFor("persisted display zoom sync", () => document.querySelector(".zoom-slider__value")?.textContent?.trim() === "50%");
+
+const monoFontSelect = zoomRootEl.querySelector("select[aria-labelledby='appearance-mono-font-family-label']") as HTMLSelectElement | null;
+if (!monoFontSelect) throw new Error("monospace font selector did not render");
+await act(async () => {
+  monoFontSelect.value = "custom";
+  monoFontSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  await flushPromises();
+});
+
+const preservedTypography = getTypographyPreferences();
+eq(preservedTypography.code.followGlobal, false, "global monospace changes preserve an explicit code-region override");
+eq(preservedTypography.code.fontFamily, "jetbrains", "global monospace changes preserve the regional code font choice");
+eq(
+  document.documentElement.style.getPropertyValue("--typography-code-font"),
+  regionalCodeFont,
+  "global monospace changes keep the regional code font CSS variable",
+);
 
 const resetZoomButton = document.querySelector("button[aria-label='Reset display zoom to 100%']") as HTMLButtonElement | null;
 if (!resetZoomButton) throw new Error("display zoom reset button did not render");

@@ -62,8 +62,8 @@ reasonix doctor capabilities --json | jq '.skills.entries, .commands.entries, .i
 reasonix doctor capabilities | sed -n '/Hooks/,/Plugins/p'
 ```
 
-若出现 `hook.untrusted_project`，在 **设置 → Hooks**（或 CLI trust 流程）信任该
-工作区。`match` 是**锚定**正则：`file` **不会**匹配 `read_file`。
+项目 Hooks 会从 `.reasonix/settings.json` 自动加载。若没有触发，请确认当前工作区，
+保存后重启 Reasonix。`match` 是**锚定**正则：`file` **不会**匹配 `read_file`。
 
 ### 3. 「配置了 MCP 但模型看不到工具」
 
@@ -166,7 +166,7 @@ schema **不会**混入新字段。
 | 包含当前会话运行状态 | 仅合并活动标签 Host 的 connected / failed / deferred / disabled |
 | 前往设置（Issue 上） | 当 `settings_tab` 有值时跳到 MCP / Skills / Plugins / Hooks |
 
-页面不提供自动编辑、自动 trust、自动启用或自动重连。打开诊断页**不会**
+页面不提供自动编辑、执行 hooks、自动启用或自动重连。打开诊断页**不会**
 rebuild controller，也不会 snapshot 会话。
 
 ## JSON schema（version 1）
@@ -181,7 +181,7 @@ Issue 含稳定 `code`、`severity`、`subsystem`、`source`、`message`、`reme
 
 - `skill.shadowed`、`skill.missing_description`、`skill.disabled`
 - `command.shadowed`、`command.read_failed`
-- `hook.untrusted_project`、`hook.invalid_matcher`、`hook.missing_command`、`hook.malformed_settings`
+- `hook.invalid_matcher`、`hook.missing_command`、`hook.malformed_settings`
 - `plugin.missing_root`、`plugin.invalid_manifest`、`plugin.compatibility`
 - `mcp.invalid_transport`、`mcp.command_not_found`、`mcp.missing_command`、`mcp.missing_url`
 - `mcp.start_failed`、`mcp.no_tools`、`mcp.runtime_unavailable`

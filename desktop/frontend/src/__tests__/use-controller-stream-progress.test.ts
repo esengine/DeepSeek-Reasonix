@@ -7,8 +7,10 @@
 //    panel keeps refreshing during sub-agent runs.
 // 3. A mid-turn context snapshot reporting used=0 does not collapse a gauge
 //    that already shows real usage.
+// 4. A retry event repairs stale idle snapshots in either delivery order so
+//    the turn remains stoppable.
 
-import { initialState, reducer } from "../lib/useController";
+import { initialState, promptEventClock, reducer } from "../lib/useController";
 import type { WireEvent } from "../lib/types";
 
 let passed = 0;
@@ -123,6 +125,61 @@ function ev(s: typeof initialState, e: WireEvent) {
   let idle = { ...initialState, context: { used: 14000, window: 1000000, sessionTokens: 20000 } };
   idle = reducer(idle, { type: "context", context: { used: 0, window: 1000000, sessionTokens: 0 } } as never);
   eq(idle.context.used, 0, "idle used=0 snapshot applies (genuine reset)");
+}
+
+// --- 4. retrying is authoritative foreground activity ---
+{
+  let s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+  s = reducer(s, {
+    type: "backend_status",
+    running: false,
+    pendingPrompt: false,
+    backgroundJobs: 0,
+    cancelRequested: false,
+    cancellable: false,
+  });
+  eq(s.running, false, "stale idle snapshot reproduces the hidden-stop state");
+
+  s = ev(s, { kind: "retrying", retryAttempt: 3, retryMax: 10 } as WireEvent);
+  eq(s.retry?.attempt, 3, "retry status keeps the current attempt");
+  eq(s.retry?.max, 10, "retry status keeps the retry budget");
+  eq(s.running, true, "retry event restores the active turn");
+  eq(s.turnActive, true, "retry event restores the turn epoch");
+  eq(s.cancellable, true, "retry event keeps Stop and Escape cancellation available");
+  eq(s.turnStartAt > 0, true, "retry event restores timing for a reattached turn");
+
+  const repaired = s;
+  const completed = ev(repaired, { kind: "turn_done" } as WireEvent);
+  eq(completed.running, false, "turn_done still ends the repaired turn");
+  eq(completed.retry, undefined, "turn_done clears the retry indicator");
+
+  const staleSnapshotAt = promptEventClock();
+  s = ev(repaired, { kind: "retrying", retryAttempt: 4, retryMax: 10 } as WireEvent);
+  s = reducer(s, {
+    type: "backend_status",
+    running: false,
+    pendingPrompt: false,
+    backgroundJobs: 0,
+    cancelRequested: false,
+    cancellable: false,
+    snapshotAt: staleSnapshotAt,
+  });
+  eq(s.running, true, "idle snapshot fetched before retry cannot hide Stop when it returns later");
+  eq(s.turnActive, true, "idle snapshot fetched before retry cannot end the active turn");
+  eq(s.cancellable, true, "idle snapshot fetched before retry preserves cancellation");
+  eq(s.retry?.attempt, 4, "stale idle snapshot preserves the newer retry status");
+
+  s = reducer(s, {
+    type: "backend_status",
+    running: false,
+    pendingPrompt: false,
+    backgroundJobs: 0,
+    cancelRequested: false,
+    cancellable: false,
+    snapshotAt: Number.MAX_SAFE_INTEGER,
+  });
+  eq(s.running, false, "fresh idle snapshot can reconcile a missed turn_done");
+  eq(s.retry, undefined, "fresh idle snapshot clears the retry indicator");
 }
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);

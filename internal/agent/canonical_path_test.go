@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -11,6 +12,40 @@ func TestCanonicalSessionPathMatchesLeaseRegistryKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "Mixed-Case", "20260705-Test.jsonl")
 	if got, want := CanonicalSessionPath(path), canonicalSessionSavePath(path); got != want {
 		t.Fatalf("CanonicalSessionPath(%q) = %q, want lease key %q", path, got, want)
+	}
+}
+
+func TestCanonicalSessionPathResolvesDirectorySymlink(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasDir := filepath.Join(root, "alias")
+	if err := os.Symlink(realDir, aliasDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	realPath := filepath.Join(realDir, "session.jsonl")
+	aliasPath := filepath.Join(aliasDir, "session.jsonl")
+	if got, want := CanonicalSessionPath(aliasPath), CanonicalSessionPath(realPath); got != want {
+		t.Fatalf("directory alias split session identity: %q != %q", got, want)
+	}
+}
+
+func TestCanonicalSessionPathResolvesNearestExistingAncestor(t *testing.T) {
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasDir := filepath.Join(root, "alias")
+	if err := os.Symlink(realDir, aliasDir); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	realPath := filepath.Join(realDir, "not-created", "nested", "session.jsonl")
+	aliasPath := filepath.Join(aliasDir, "not-created", "nested", "session.jsonl")
+	if got, want := CanonicalSessionPath(aliasPath), CanonicalSessionPath(realPath); got != want {
+		t.Fatalf("nearest existing ancestor alias split session identity: %q != %q", got, want)
 	}
 }
 

@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/composer-context-menu-clipboard.test.tsx
 //
 // Regression coverage for the composer edit context menu's clipboard guards:
+// - Undo/redo must expose the same fixed shortcuts as the composer keyboard path.
 // - Cut must not delete the selection when every clipboard path failed.
 // - Paste must not replace the selection when the clipboard has no text.
 // - Shortcut hints must use the platform modifier (Ctrl outside macOS).
@@ -193,7 +194,7 @@ async function openInputMenu(): Promise<HTMLButtonElement[]> {
     await flushTimers();
   });
   const items = Array.from(document.querySelectorAll(".context-menu__item")) as HTMLButtonElement[];
-  if (items.length !== 4) throw new Error(`expected 4 edit menu items, got ${items.length}`);
+  if (items.length !== 6) throw new Error(`expected 6 edit menu items, got ${items.length}`);
   return items;
 }
 
@@ -235,8 +236,10 @@ async function main() {
     await typeAndSelect("hello world", 0, 5);
     const items = await openInputMenu();
     const hints = items.map((item) => item.querySelector(".context-menu__shortcut")?.textContent ?? "");
-    eq(hints[0], "Ctrl+X", "cut hint uses the platform modifier");
-    eq(hints[2], "Ctrl+V", "paste hint uses the platform modifier");
+    eq(hints[0], "Ctrl+Z", "undo hint uses the platform modifier");
+    eq(hints[1], "Ctrl+Shift+Z", "redo hint uses the platform modifier");
+    eq(hints[2], "Ctrl+X", "cut hint uses the platform modifier");
+    eq(hints[4], "Ctrl+V", "paste hint uses the platform modifier");
     ok(hints.every((hint) => !hint.includes("⌘")), "no hardcoded mac glyph on a non-mac platform");
     // Close the menu without acting.
     await act(async () => {
@@ -245,13 +248,29 @@ async function main() {
     });
   }
 
+  // --- context-menu undo and redo share the programmatic edit history ---
+  {
+    await typeAndSelect("menu undo", 9, 9);
+    const undoItems = await openInputMenu();
+    ok(!undoItems[0].disabled, "undo is enabled at a programmatic edit boundary");
+    ok(undoItems[1].disabled, "redo is disabled before an undo");
+    await clickMenuItem(undoItems[0]);
+    eq(textarea().value, "hello world", "context-menu undo restores the previous composer text");
+
+    const redoItems = await openInputMenu();
+    ok(redoItems[0].disabled === false, "older programmatic history remains undoable");
+    ok(!redoItems[1].disabled, "redo is enabled after context-menu undo");
+    await clickMenuItem(redoItems[1]);
+    eq(textarea().value, "menu undo", "context-menu redo restores the undone composer edit");
+  }
+
   // --- cut keeps the draft when every clipboard path fails ---
   {
     stubClipboard({});
     (document as Document & { execCommand?: () => boolean }).execCommand = () => false;
     await typeAndSelect("hello world", 0, 5);
     const items = await openInputMenu();
-    await clickMenuItem(items[0]);
+    await clickMenuItem(items[2]);
     eq(textarea().value, "hello world", "failed cut must not delete the selection");
   }
 
@@ -260,7 +279,7 @@ async function main() {
     stubClipboard({ writeText: () => Promise.resolve() });
     await typeAndSelect("hello world", 0, 6);
     const items = await openInputMenu();
-    await clickMenuItem(items[0]);
+    await clickMenuItem(items[2]);
     eq(textarea().value, "world", "successful cut removes the selected text");
   }
 
@@ -269,7 +288,7 @@ async function main() {
     stubClipboard({ readText: () => Promise.resolve("") });
     await typeAndSelect("hello world", 0, 5);
     const items = await openInputMenu();
-    await clickMenuItem(items[2]);
+    await clickMenuItem(items[4]);
     eq(textarea().value, "hello world", "empty-clipboard paste must not erase the selection");
   }
 
@@ -278,7 +297,7 @@ async function main() {
     stubClipboard({ readText: () => Promise.resolve("bye") });
     await typeAndSelect("hello world", 0, 5);
     const items = await openInputMenu();
-    await clickMenuItem(items[2]);
+    await clickMenuItem(items[4]);
     eq(textarea().value, "bye world", "text paste replaces the selection");
   }
 

@@ -5,25 +5,25 @@
 #
 #   stable: from a desktop-v* prerelease tag push, a manual dispatch with `tag`,
 #           or the stable release orchestrator's workflow_call input.
-#   canary: a manual dispatch with channel=canary; version is synthesized from
-#           base_version + the monotonic run_number, tag is the rolling
-#           `desktop-canary`, and it is always a prerelease.
+#   preview: a manual dispatch with channel=preview (legacy canary accepted);
+#            version is synthesized from base_version + the monotonic run_number,
+#            tag is the rolling `desktop-preview`, and it is always a prerelease.
 set -euo pipefail
 
 stable_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 release_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
 
-if [ "${IN_CHANNEL:-stable}" = "canary" ]; then
-	base="${IN_BASE_VERSION:?canary dispatch requires base_version}"
+if [ "${IN_CHANNEL:-stable}" = "preview" ] || [ "${IN_CHANNEL:-stable}" = "canary" ]; then
+	base="${IN_BASE_VERSION:?preview dispatch requires base_version}"
 	base="${base#v}"
 	base="${base#desktop-v}"
 	if [[ ! "$base" =~ $stable_semver_re ]]; then
-		echo "::error::canary base version must be MAJOR.MINOR.PATCH, got: $base" >&2
+		echo "::error::preview base version must be MAJOR.MINOR.PATCH, got: $base" >&2
 		exit 1
 	fi
-	version="v${base}-canary.${RUN_NUMBER}"
-	tag="desktop-canary"
-	channel="canary"
+	version="v${base}-preview.${RUN_NUMBER}"
+	tag="desktop-preview"
+	channel="preview"
 	prerelease="true"
 else
 	if [ -n "${IN_TAG:-}" ]; then

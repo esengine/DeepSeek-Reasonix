@@ -3,12 +3,10 @@ package control
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
 	"reasonix/internal/config"
-	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/migration"
 	"reasonix/internal/pluginpkg"
@@ -341,7 +339,6 @@ func hooksArgItems(prior []string) []SlashItem {
 	if len(prior) <= 1 {
 		return []SlashItem{
 			{Label: "list", Insert: "list", Hint: i18n.M.ArgHooksList},
-			{Label: "trust", Insert: "trust", Hint: i18n.M.ArgHooksTrust},
 		}
 	}
 	return nil
@@ -461,17 +458,10 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		case "", "list", "ls":
 			c.notice(c.hookListText())
 		case "trust":
-			root := c.workspaceRoot
-			if root == "" {
-				root, _ = os.Getwd()
-			}
-			if err := hook.Trust(root, ""); err != nil {
-				c.notice("hooks trust: " + err.Error())
-			} else {
-				c.notice("trusted this project's hooks — restart Reasonix to load them")
-			}
+			// Backward-compatible response for old clients and saved commands.
+			c.notice("project hooks are enabled automatically; no trust action is required")
 		default:
-			c.notice("unknown /hooks subcommand " + fields[1] + " — try: /hooks, /hooks trust")
+			c.notice("unknown /hooks subcommand " + fields[1] + " — try: /hooks or /hooks list")
 		}
 	case "/mcp":
 		if len(fields) >= 3 && fields[1] == "connect" {

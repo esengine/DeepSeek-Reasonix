@@ -21,7 +21,7 @@ export type UpdateStatus =
 
 export interface Updater {
   status: UpdateStatus;
-  check: () => Promise<void>;
+  check: (channel?: string) => Promise<void>;
   download: (info: UpdateInfo) => void;
   install: () => void;
   openDownload: () => void;
@@ -83,10 +83,10 @@ function useUpdaterInternal(): Updater {
     });
   }, []);
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (channel = "") => {
     setStatus({ kind: "checking" });
     try {
-      const info = await app.CheckUpdate();
+      const info = await app.CheckUpdate(channel);
       if (!info) {
         setStatus({ kind: "upToDate", current: "" });
         return;
@@ -111,7 +111,7 @@ function useUpdaterInternal(): Updater {
       return;
     }
     setStatus({ kind: "downloading", received: 0, total: info.assetSize, info });
-    void app.DownloadUpdate()
+    void app.DownloadUpdate(info.channel || "")
       .then((result) => {
         if (result) setStatus({ kind: "downloaded", info: { ...info, downloaded: true } });
       })
@@ -127,14 +127,14 @@ function useUpdaterInternal(): Updater {
       }
       return { kind: "installing", info };
     });
-    void app.InstallUpdate().catch((e) => {
+    void app.InstallUpdate("info" in status ? status.info?.channel || "" : "").catch((e) => {
       const message = errMsg(e);
       setStatus((cur) => {
         const info = "info" in cur ? cur.info : undefined;
         return { kind: "error", message, info, manualHint: offersManualFallback(message) };
       });
     });
-  }, []);
+  }, [status]);
 
   const openDownload = useCallback(() => {
     void app.OpenDownloadPage();

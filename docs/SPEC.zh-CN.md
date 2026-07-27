@@ -120,8 +120,23 @@ type Tool interface {
 
 当 `agent.planner_model` 与 executor 不同时，planner 与 executor 使用独立 session：
 
-- planner 低频运行，只暴露经筛选的只读研究工具，生成简洁计划；
-- executor 在另一 session 中使用完整工具执行计划；
+- 宿主使用原始用户文本和可信回合元数据做确定性路由，不调用 classifier 模型，也不从
+  controller 注入的 prompt block 猜测宿主状态；路由结果为 executor-only、Light、Full、
+  plan-for-approval 或显式 plan-only，并用不含用户原文的 route/depth/reason 写入阶段详情；
+- 显式 Plan Mode、synthetic turn、上下文短回复、明确单点小改和边界清楚的纯只读动作
+  不再调用第二个 Planner；跨面、结构化、模糊或高风险工作使用 Full；活跃 Goal 与
+  Delivery 中的非原子修改工作同样升级为 Full，纯只读动作仍直达 Executor；
+- Light 使用较小的单轮调研预算，输出紧凑目标、1–4 个有序步骤、候选触点和主要验证；
+  Full 使用较大的有界预算，区分已验证与候选触点，并补充风险、验收标准、命令级验证及
+  必要回滚；深度合约保持在同一个稳定 system prompt 中，单轮只追加很小的
+  `<planner-turn>`；若 Planner 在有界调研和最终总结轮后仍未收敛，普通
+  plan-and-execute 用原始任务降级到 Executor，plan-only 与 plan-for-approval 仍保持
+  fail-closed；不完整的 Planner 回合会被回滚，不暴露成无法继续的手动续跑；
+- 普通“先规划”在计划完成后直接交接 Executor；plan-for-approval 只用于明确要求等待
+  确认的请求，由宿主强制审批边界，批准后交接 Executor；headless 场景会保存计划供后续
+  回合继续；明确 plan-only 会保存计划并结束当前回合；上述两种执行边界下 Planner 失败
+  都不能降级执行；这些边界可位于任务子句之后，引号内的示例不改变路由；
+- executor 在另一 session 中验证候选假设，并使用完整工具执行计划；
 - 两条会话互不混合，prompt prefix 都只追加增长，避免切换模型破坏 prefix cache。
 
 ### 3.6 上下文管理
@@ -153,7 +168,7 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
 - rule 可以是 `Tool` 或 `Tool(specifier)`，例如 `Bash(go test:*)`、`Edit(docs/**)`。
 - 优先级为 `deny > ask > allow > fallback`；只读工具 fallback 为 Allow，写工具 fallback 使用 `Mode`。
 - 交互模式中的 Ask 由用户选择单次允许、session scope 允许、持久允许或拒绝；显式 Deny 在所有模式下都不可绕过。
-- 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；显式全局 `deny` 仍然优先。仓库声明的 server 在启动前只确认一次精确身份，身份变化时才重新确认。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
+- 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
 - Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划。
 - 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、同一阻塞状态重复三次、用户停止或达到安全续跑边界。只有用户在输入框中选择 Goal 或运行 `/goal` 显式启动后，长周期研究、调试、优化或实现目标才可启用 AutoResearch；普通聊天不会隐式切换协作模式，也不会创建持久化 AutoResearch 状态。动态状态保存在 `.reasonix/autoresearch/.../`。

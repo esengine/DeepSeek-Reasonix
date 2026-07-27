@@ -1626,7 +1626,12 @@ export default function App() {
   const toolApprovalMode = composerProfile.toolApprovalMode;
   const tokenMode: TokenMode = composerProfile.tokenMode;
   const runtimeTransitioning = Boolean(activeTabId && runtimeTransitionsByTab[activeTabId]) || workbenchTargetTransitioning(workbenchTarget);
-  const controllerReady = state.meta?.ready === true && !state.backendActivationPending && !runtimeTransitioning;
+  const controllerReady =
+    state.meta?.ready === true &&
+    (!state.meta.runtime || state.meta.runtime.phase === "ready") &&
+    !state.meta.startupErr &&
+    !state.backendActivationPending &&
+    !runtimeTransitioning;
   // Single footer decision surface. Composer stays mounted underneath and is
   // only visually/a11y-hidden so per-session draft caches survive.
   const decisionSurface = useMemo((): DecisionSurfaceKind | null => {
@@ -2893,7 +2898,13 @@ export default function App() {
     const sourceTab = tabMetas.find((tab) => tab.id === sourceTabId);
     if (!sourceTab) throw new Error(t("composer.workspaceStarting"));
     if (sourceTab.readOnly) throw new Error(t("composer.readOnlyChannel"));
-    if (sourceTab.ready === false) throw new Error(t("composer.workspaceStarting"));
+    if (
+      sourceTab.ready !== true ||
+      (sourceTab.runtime && sourceTab.runtime.phase !== "ready") ||
+      sourceTab.startupErr
+    ) {
+      throw new Error(sourceTab.runtime?.issue?.message || sourceTab.startupErr || t("composer.workspaceStarting"));
+    }
     const rs = rewindStatesByTabRef.current[sourceTabId];
     if (rs) {
       setRewindStateForTab(sourceTabId, null);

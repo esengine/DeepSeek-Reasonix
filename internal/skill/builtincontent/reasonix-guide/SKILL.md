@@ -1,6 +1,6 @@
 ---
 name: reasonix-guide
-description: "Troubleshoot and configure Reasonix capabilities: Skills (project/custom/global/builtin priority, discovery dirs), Commands (override order, /dir:file naming), Hooks (11 events, project trust, matchers, timeouts), MCP (reasonix.toml + .mcp.json + plugin packages, auto_start), plugin packages (native/Codex/Claude manifests), and AGENTS.md / instruction docs. Use when the user asks how to configure, debug missing skills/commands/hooks/MCP/plugins, or diagnose capability loading."
+description: "Troubleshoot and configure Reasonix capabilities: Skills (project/custom/global/builtin priority, discovery dirs), Commands (override order, /dir:file naming), Hooks (11 events, automatic project loading, matchers, timeouts), MCP (reasonix.toml + .mcp.json + plugin packages, auto_start), plugin packages (native/Codex/Claude manifests), and AGENTS.md / instruction docs. Use when the user asks how to configure, debug missing skills/commands/hooks/MCP/plugins, or diagnose capability loading."
 runAs: inline
 ---
 
@@ -100,9 +100,9 @@ CLI/Desktop Diagnostics → Commands; invoke `/name` in chat.
 
 **Blocking** (exit 2 can gate the loop): `PreToolUse`, `UserPromptSubmit`. Others warn or contribute context only.
 
-### Sources and trust
+### Sources
 
-- Project: `<workspace>/.reasonix/settings.json` — **only when trusted** (`trust.json` under Reasonix home)
+- Project: `<workspace>/.reasonix/settings.json` — loaded automatically
 - Plugin packages: installed enabled packages
 - Global: `<Reasonix home>/settings.json` (always)
 
@@ -116,7 +116,7 @@ Match field is an **anchored** regex: `file` does **not** match `read_file`; use
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Project hooks silent | Untrusted project | Trust project (`hook.untrusted_project`) |
+| Project hooks silent | Wrong workspace / restart required | Confirm the project path and restart Reasonix after saving |
 | Matcher never fires | Non-anchored assumption / bad regex | Fix match (`hook.invalid_matcher`) |
 | Command missing | Empty command / missing context file | Fix settings entry |
 | Malformed JSON | Invalid settings.json | Repair JSON (file yields no hooks, no crash) |
@@ -190,7 +190,8 @@ User global docs → ancestor chain → project docs → project-local (`*.local
 
 Recognized names: `REASONIX.md`, `AGENTS.md`, `CLAUDE.md` (and `*.local.md` variants). Multiple files in one directory can load; symlink identity is deduped.
 
-Not the same as Hooks trust. Instructions fold into the system prompt at session boot (cache-stable prefix).
+Instructions fold into the system prompt at session boot (cache-stable prefix);
+Hooks remain runtime event handlers loaded from their configured locations.
 
 ### Checks
 
@@ -211,7 +212,7 @@ Diagnostics → Instructions; memory Settings; read files on disk.
 - Copy redacted JSON
 - Optional session runtime merge (read-only Host)
 - Jump to Settings for MCP / Skills / Plugins / Hooks when issue `settings_tab` is set
-- **Never** auto-edit config, auto-trust, or auto-reconnect from this page
+- **Never** auto-edit config, execute hooks, or auto-reconnect from this page
 
 ---
 

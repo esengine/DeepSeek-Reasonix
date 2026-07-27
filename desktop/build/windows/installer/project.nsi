@@ -83,8 +83,13 @@ LangString reasonixUpdateSubtitle ${LANG_ENGLISH} "Installing the verified updat
 LangString reasonixUpdateSubtitle ${LANG_SIMPCHINESE} "正在安装已验证的更新，完成后 Reasonix 将自动重启。"
 LangString reasonixUpdateSubtitle ${LANG_TRADCHINESE} "正在安裝已驗證的更新，完成後 Reasonix 將自動重新啟動。"
 
-## The following two statements can be used to sign the installer and the uninstaller. The path to the binaries are provided in %1
-#!uninstfinalize 'signtool --file "%1"'
+## Preserve the first-pass generated uninstaller so the release workflow can
+## Authenticode-sign it together with the other installed payload files.
+## The second pass provides ARG_REASONIX_SIGNED_UNINSTALLER and embeds that
+## signed binary instead of generating another unsigned uninstaller.
+!ifndef ARG_REASONIX_SIGNED_UNINSTALLER
+!uninstfinalize 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'
+!endif
 #!finalize 'signtool --file "%1"'
 
 Name "${INFO_PRODUCTNAME}"
@@ -106,7 +111,11 @@ ShowInstDetails show # This will always show the installation details.
 ## wails.deleteUninstaller, which write HKLM and would fail without admin rights.
 ####
 !macro reasonix.writeUninstaller
+    !ifdef ARG_REASONIX_SIGNED_UNINSTALLER
+    File "/oname=uninstall.exe" "${ARG_REASONIX_SIGNED_UNINSTALLER}"
+    !else
     WriteUninstaller "$INSTDIR\uninstall.exe"
+    !endif
 
     WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
     WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${INFO_PRODUCTNAME}"

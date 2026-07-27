@@ -207,6 +207,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.StatusBarItems = []string{"model", "balance", "cache"}
 	orig.Desktop.DefaultToolApprovalMode = "auto"
 	orig.Desktop.CheckUpdates = boolPtr(false)
+	orig.Desktop.UpdateChannel = "preview"
 	orig.Desktop.Telemetry = boolPtr(false)
 	orig.Notifications.Enabled = true
 	orig.Notifications.TurnDone = true
@@ -368,6 +369,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
 		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)
+	}
+	if got.DesktopUpdateChannel() != "preview" {
+		t.Errorf("desktop.update_channel = %q, want preview", got.DesktopUpdateChannel())
 	}
 	if got.Agent.RecoveryModel != "mimo-pro" || got.Agent.RecoveryTemperature != 0 {
 		t.Errorf("agent recovery settings not preserved: %+v", got.Agent)
@@ -762,18 +766,19 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Desktop.StatusBarStyle = "text"
 	c.Desktop.DefaultToolApprovalMode = "auto"
 	c.Desktop.CheckUpdates = boolPtr(false)
+	c.Desktop.UpdateChannel = "preview"
 	c.Agent.RecoveryModel = "deepseek-pro"
 	c.Agent.RecoveryTemperature = 0.2
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 5", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 5", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `update_channel = "preview"`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
 	}
 
 	project := RenderTOMLForScope(c, RenderScopeProject)
-	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "default_tool_approval_mode =", "default_auto_recovery_checkpoint =", "check_updates =", "max_steps", "planner_max_steps"} {
+	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "default_tool_approval_mode =", "default_auto_recovery_checkpoint =", "check_updates =", "update_channel =", "max_steps", "planner_max_steps"} {
 		if strings.Contains(project, forbidden) {
 			t.Fatalf("project render should not contain %q:\n%s", forbidden, project)
 		}

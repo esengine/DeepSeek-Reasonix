@@ -482,24 +482,35 @@ console.log("capabilities panel MCP actions");
     active: true,
     cwd: "/tmp/reasonix-test",
   }];
-  let projectAuthorizationCount = 0;
   let servers: ServerView[] = [{
     name: "github",
     transport: "stdio",
-    status: "failed",
-    runtimeState: "issue",
+    status: "connected",
+    runtimeState: "ready",
     configured: true,
+    source: "project",
+    configSource: "reasonix.toml",
     autoStart: true,
-    tools: 0,
+    tools: 3,
     prompts: 0,
     resources: 0,
-    error: "project-provided MCP server is blocked until the user authorizes it",
-    requiresLaunchApproval: true,
     toolList: [
       { name: "issue_read", description: "Read issues.", readOnlyHint: true },
       { name: "issue_write", description: "Write issues." },
       { name: "wipe", description: "Delete data.", destructiveHint: true },
     ],
+  }, {
+    name: "linear",
+    transport: "http",
+    status: "connected",
+    runtimeState: "ready",
+    configured: true,
+    source: "user",
+    autoStart: true,
+    tools: 1,
+    prompts: 0,
+    resources: 0,
+    toolList: [{ name: "get_issue", description: "Read an issue.", readOnlyHint: true }],
   }];
   window.go = {
     main: {
@@ -507,16 +518,6 @@ console.log("capabilities panel MCP actions");
         Meta: async () => meta,
         ListTabs: async () => tabs,
         MCPServers: async () => servers,
-        AuthorizeAndConnectMCPServer: async () => {
-          projectAuthorizationCount += 1;
-          servers = servers.map((item) => ({
-            ...item,
-            status: "connected",
-            runtimeState: "ready",
-            requiresLaunchApproval: false,
-            error: "",
-          }));
-        },
       } as Partial<AppBindings> as AppBindings,
     },
   };
@@ -533,16 +534,17 @@ console.log("capabilities panel MCP actions");
       await flush();
     });
   };
-  await waitFor("project MCP authorization action", () => Boolean(findButton("Authorize and connect")));
-  ok(!findButton("Review changes"), "project MCP launch approval has no separate change-review workflow");
+  await waitFor("trusted project MCP", () => Boolean(document.querySelector('[data-status="connected"]')));
+  ok(document.body.textContent?.includes("This project"), "project MCP is grouped under This project");
+  ok(document.body.textContent?.includes("Global MCP"), "user-installed MCP is grouped by its global scope");
+  ok(document.body.textContent?.includes("Install once and use automatically in every Reasonix project."), "global MCP explains its cross-project availability");
+  ok(document.body.textContent?.includes("Project"), "project MCP row shows a project source badge");
+  ok(document.body.textContent?.includes("Declared by this project and available automatically."), "project MCP explains zero-confirmation availability");
+  ok(!findButton("Install and use"), "trusted project MCP has no install confirmation");
+  ok(!findButton("Authorize and connect"), "trusted project MCP has no authorization action");
+  ok(!findButton("Review changes"), "project MCP has no separate change-review workflow");
   ok(!findButton("Refresh catalog"), "catalog maintenance is not part of the normal MCP workflow");
-  ok(!document.querySelector('[role="dialog"]'), "project authorization does not open a second modal");
-  await act(async () => {
-    findButton("Authorize and connect")?.click();
-    await flush();
-  });
-  await waitFor("durable project launch authorization", () => projectAuthorizationCount === 1 && Boolean(document.querySelector('[data-status="connected"]')));
-  ok(!document.querySelector('[role="dialog"]'), "project confirmation connects directly without a second modal");
+  ok(!document.querySelector('[role="dialog"]'), "project MCP does not open a confirmation modal");
 
   servers = servers.map((item) => ({
     ...item,
@@ -576,13 +578,14 @@ console.log("capabilities panel MCP actions");
     requiresLaunchApproval: false,
   }));
   await refreshStatus();
-  await waitFor("authorized project server row", () => Boolean(document.querySelector('[data-status="connected"]')));
+  await waitFor("trusted project server row", () => Boolean(document.querySelector('[data-status="connected"]')));
   await act(async () => {
     (document.querySelector(".cap-mcp-list-row__main") as HTMLButtonElement | null)?.click();
     await flush();
   });
   await waitFor("connected project server detail", () => Boolean(document.querySelector(".cap-mcp-subpage")));
-  ok(!findButton("Review changes"), "an authorized connected project server does not show a change alarm");
+  ok(document.body.textContent?.includes("Current project · reasonix.toml"), "project MCP details show their configuration source");
+  ok(!findButton("Review changes"), "a trusted connected project server does not show a change alarm");
   ok(!findButton("Revoke trust"), "normal MCP details do not expose a second authorization-management workflow");
 
   await act(async () => {

@@ -73,12 +73,11 @@ func runHookCommand(args []string, out io.Writer) int {
 	inspection := hook.Inspect(hook.LoadOptions{
 		ProjectRoot: options.projectRoot,
 		HomeDir:     options.homeDir,
-		Trusted:     hook.IsTrusted(options.projectRoot, options.homeDir),
 	})
 	if operation == "list" {
 		items := make([]machineHook, 0, len(inspection.Entries))
 		for _, entry := range inspection.Entries {
-			status := machineHookEntryStatus(entry, inspection.TrustedProject)
+			status := machineHookEntryStatus(entry)
 			match := entry.Match
 			if match == "" {
 				match = "*"
@@ -110,10 +109,7 @@ func runHookCommand(args []string, out io.Writer) int {
 	})
 }
 
-func machineHookEntryStatus(entry hook.Entry, trustedProject bool) string {
-	if entry.Scope == hook.ScopeProject && !trustedProject {
-		return "untrusted"
-	}
+func machineHookEntryStatus(entry hook.Entry) string {
 	if !hook.IsKnownEvent(string(entry.Event)) {
 		return "invalid"
 	}

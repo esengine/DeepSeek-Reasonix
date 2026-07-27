@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,6 +75,10 @@ func TestRuntimeSwitchesRejectRunningBackgroundJobs(t *testing.T) {
 // diverged from what path holds on disk, so its next Snapshot hits a conflict
 // and retargets the controller to a recovery branch.
 func divergedSessionController(t *testing.T, dir, path string) *control.Controller {
+	return divergedSessionControllerWithRecovery(t, dir, path, nil)
+}
+
+func divergedSessionControllerWithRecovery(t *testing.T, dir, path string, onRecovered func(control.SessionRecoveryInfo) error) *control.Controller {
 	t.Helper()
 	disk := agent.NewSession("sys prompt")
 	disk.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
@@ -88,11 +93,89 @@ func divergedSessionController(t *testing.T, dir, path string) *control.Controll
 	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
 	stale.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
 	return control.New(control.Options{
-		Executor:    agent.New(nil, nil, stale, agent.Options{}, event.Discard),
-		SessionDir:  dir,
-		SessionPath: path,
-		Label:       "deepseek-flash",
+		Executor:           agent.New(nil, nil, stale, agent.Options{}, event.Discard),
+		SessionDir:         dir,
+		SessionPath:        path,
+		Label:              "deepseek-flash",
+		OnSessionRecovered: onRecovered,
 	})
+}
+
+func TestSessionRecoveryCallbackMovesLeaseBeforeControllerCommit(t *testing.T) {
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "turn-end-conflict.jsonl")
+	leases := control.NewSessionLeaseKeeper()
+	t.Cleanup(leases.Release)
+	if err := leases.Rebind(originalPath); err != nil {
+		t.Fatalf("seed original lease: %v", err)
+	}
+	ctrl := divergedSessionControllerWithRecovery(t, dir, originalPath, cliSessionRecoveredHandler(leases))
+	t.Cleanup(ctrl.Close)
+
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	recoveryPath := ctrl.SessionPath()
+	if recoveryPath == "" || recoveryPath == originalPath || !strings.Contains(filepath.Base(recoveryPath), "-recovery-") {
+		t.Fatalf("controller path = %q, want recovery path distinct from %q", recoveryPath, originalPath)
+	}
+	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(recoveryPath); got != want {
+		t.Fatalf("lease after recovery callback = %q, want %q", got, want)
+	}
+	if probe, err := agent.TryAcquireSessionLease(originalPath); err != nil {
+		t.Fatalf("original lease was not released after recovery: %v", err)
+	} else {
+		probe.Release()
+	}
+	if probe, err := agent.TryAcquireSessionLease(recoveryPath); !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		if probe != nil {
+			probe.Release()
+		}
+		t.Fatalf("recovery path was not guarded after callback: %v", err)
+	}
+}
+
+func TestSessionRecoveryCallbackFailureKeepsOriginalLeaseAndPath(t *testing.T) {
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "held-recovery-conflict.jsonl")
+	leases := control.NewSessionLeaseKeeper()
+	t.Cleanup(leases.Release)
+	if err := leases.Rebind(originalPath); err != nil {
+		t.Fatalf("seed original lease: %v", err)
+	}
+	handler := cliSessionRecoveredHandler(leases)
+	var heldRecovery *agent.SessionLease
+	ctrl := divergedSessionControllerWithRecovery(t, dir, originalPath, func(info control.SessionRecoveryInfo) error {
+		var err error
+		heldRecovery, err = agent.TryAcquireSessionLease(info.RecoveryPath)
+		if err != nil {
+			return fmt.Errorf("hold recovery path for test: %w", err)
+		}
+		return handler(info)
+	})
+	t.Cleanup(ctrl.Close)
+	t.Cleanup(func() {
+		if heldRecovery != nil {
+			heldRecovery.Release()
+		}
+	})
+
+	err := ctrl.Snapshot()
+	if err == nil {
+		t.Fatal("Snapshot succeeded while recovery path lease was held")
+	}
+	if strings.Contains(err.Error(), dir) || strings.Contains(err.Error(), filepath.Base(originalPath)) {
+		t.Fatalf("recovery bind error exposed a local path: %q", err)
+	}
+	if !strings.Contains(err.Error(), "session is in use") {
+		t.Fatalf("recovery bind error = %q, want sanitized lease refusal", err)
+	}
+	if got := ctrl.SessionPath(); got != originalPath {
+		t.Fatalf("controller path after failed callback = %q, want original %q", got, originalPath)
+	}
+	if got, want := leases.HeldPath(), agent.CanonicalSessionPath(originalPath); got != want {
+		t.Fatalf("lease after failed callback = %q, want original %q", got, want)
+	}
 }
 
 // TestModelSwitchCarriesRecoveryPathAfterSnapshotConflict is the TUI /model

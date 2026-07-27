@@ -129,7 +129,7 @@ func (a *App) trayLocale() string {
 }
 
 func (a *App) showFromTray() {
-	a.showMainWindow()
+	a.showMainWindowFrom("tray")
 }
 
 func (a *App) quitFromTray() {

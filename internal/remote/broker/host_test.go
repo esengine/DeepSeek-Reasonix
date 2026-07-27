@@ -6,10 +6,129 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/event"
 	"reasonix/internal/provider"
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/rpcwire"
+	"reasonix/internal/tool"
 )
+
+const (
+	rawRoundTripReasoning      = "provider-issued reasoning"
+	translatedDisplayReasoning = "translated display reasoning"
+)
+
+type reasoningRoundTripProvider struct {
+	requests chan provider.Request
+	calls    int
+}
+
+func (p *reasoningRoundTripProvider) Name() string { return "round-trip-stub" }
+
+func (p *reasoningRoundTripProvider) RequiresReasoningRoundTrip() bool { return true }
+
+func (p *reasoningRoundTripProvider) Stream(_ context.Context, request provider.Request) (<-chan provider.Chunk, error) {
+	p.requests <- request
+	p.calls++
+	chunks := make(chan provider.Chunk, 3)
+	if p.calls == 1 {
+		chunks <- provider.Chunk{Type: provider.ChunkReasoning, Text: rawRoundTripReasoning}
+		chunks <- provider.Chunk{Type: provider.ChunkText, Text: "first answer"}
+	} else {
+		chunks <- provider.Chunk{Type: provider.ChunkText, Text: "second answer"}
+	}
+	chunks <- provider.Chunk{Type: provider.ChunkDone}
+	close(chunks)
+	return chunks, nil
+}
+
+type rewritingPostLLMHooks struct {
+	seen []string
+}
+
+func (*rewritingPostLLMHooks) PreToolUse(context.Context, string, json.RawMessage) (bool, string) {
+	return false, ""
+}
+
+func (*rewritingPostLLMHooks) PostToolUse(context.Context, string, json.RawMessage, string) {}
+
+func (*rewritingPostLLMHooks) PostToolUseFailure(context.Context, string, json.RawMessage, string, error) {
+}
+
+func (h *rewritingPostLLMHooks) PostLLMCall(_ context.Context, reasoning string, _ int) string {
+	h.seen = append(h.seen, reasoning)
+	return translatedDisplayReasoning
+}
+
+func (*rewritingPostLLMHooks) HasPostLLMCall() bool                      { return true }
+func (*rewritingPostLLMHooks) SubagentStop(context.Context, string)      {}
+func (*rewritingPostLLMHooks) PreCompact(context.Context, string) string { return "" }
+
+func TestHostProviderPreservesReasoningRoundTripAcrossPostLLMHook(t *testing.T) {
+	pipes := newPipePair()
+	desktopConn := rpcwire.NewConn(pipes.clientR, pipes.clientW, rpcwire.Options{
+		Name: "desktop", StrictJSONRPC: true, MaxInboundBytes: 1 << 20, MaxOutboundBytes: 1 << 20,
+	})
+	hostConn := rpcwire.NewConn(pipes.hostR, pipes.hostW, rpcwire.Options{
+		Name: "host", StrictJSONRPC: true, MaxInboundBytes: 1 << 20, MaxOutboundBytes: 1 << 20,
+	})
+	local := &reasoningRoundTripProvider{requests: make(chan provider.Request, 2)}
+	desktop, err := Attach(desktopConn, Options{
+		Catalog: func(context.Context, map[string]struct{}) ([]protocol.BrokerProviderDescriptor, error) {
+			return []protocol.BrokerProviderDescriptor{
+				DescriptorFromProvider("kimi/kimi-k3", "Kimi K3", "kimi-k3", local, []string{"max"}, "max", true, 1_048_576, nil),
+			}, nil
+		},
+		Open: func(ctx context.Context, _ string, _ string, request provider.Request) (<-chan provider.Chunk, error) {
+			return local.Stream(ctx, request)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := desktop.Activate(); err != nil {
+		t.Fatal(err)
+	}
+	defer desktop.Close()
+
+	host := NewHost()
+	if err := host.Attach(hostConn, 1); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go desktopConn.Serve(ctx)
+	go hostConn.Serve(ctx)
+
+	remote, err := host.Resolve(provider.Selection{Ref: "kimi/kimi-k3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks := &rewritingPostLLMHooks{}
+	runner := agent.New(remote, tool.NewRegistry(), agent.NewSession(""), agent.Options{Hooks: hooks}, event.Discard)
+	if err := runner.Run(ctx, "first"); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	<-local.requests
+	if len(hooks.seen) != 1 || hooks.seen[0] != rawRoundTripReasoning {
+		t.Fatalf("PostLLM hook saw %v, want raw provider reasoning", hooks.seen)
+	}
+	if err := runner.Run(ctx, "second"); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	second := <-local.requests
+	for _, message := range second.Messages {
+		if message.Role != provider.RoleAssistant {
+			continue
+		}
+		if message.ReasoningContent != rawRoundTripReasoning {
+			t.Fatalf("replayed reasoning = %q, want %q (display hook returned %q)", message.ReasoningContent, rawRoundTripReasoning, translatedDisplayReasoning)
+		}
+		return
+	}
+	t.Fatal("second Broker request did not include the first assistant message")
+}
 
 func TestHostIgnoresNotificationsFromSupersededGeneration(t *testing.T) {
 	h := NewHost()

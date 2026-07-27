@@ -222,7 +222,13 @@ Reasonix plugins can declare `reasonix-plugin.json` at the plugin root:
     "SessionStart": [
       {
         "command": "hooks/session-start",
+        "args": [],
         "description": "Load startup context"
+      },
+      {
+        "command": "printf 'ready' && ./hooks/audit",
+        "shell": "bash",
+        "description": "Run a compound shell script"
       }
     ]
   },
@@ -236,6 +242,19 @@ Reasonix plugins can declare `reasonix-plugin.json` at the plugin root:
 
 Relative paths are resolved inside the plugin root. Reasonix does not run
 third-party install scripts during plugin installation.
+
+Plugin hook execution is explicit:
+
+- When `args` is present, including `"args": []`, the hook uses **exec form**.
+  `command` is the executable and every argument is passed literally, without
+  shell parsing or interpolation.
+- When `args` is absent and `shell` is present, the hook uses **shell form**.
+  The complete `command` is handed unchanged to `bash`, `powershell`/`pwsh`,
+  `cmd` (Windows only), or `auto`. On Windows, `auto` prefers Git Bash and
+  falls back to PowerShell.
+- Existing native hooks that declare neither field keep the historical
+  Reasonix shell-command behavior. `shellCommand: true` remains supported as
+  the legacy spelling of shell form.
 
 ## Codex & Claude Compatibility
 
@@ -291,8 +310,12 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
 - A plugin-root `CLAUDE.md` file to a built-in `SessionStart` context hook. The
   file is read directly by Reasonix, without spawning a shell command.
 - `.claude/settings.json` and `hooks/hooks.json` command hooks to Reasonix hook
-  events when the event names match. `matcher`, `args`, `async`, `env`, and
-  timeout are preserved. `matcher` and the `tool_name` a hook script sees are
+  events when the event names match. `matcher`, `args`, `shell`, `async`,
+  `env`, and timeout are preserved. Claude's execution contract is retained:
+  an `args` field (even an empty array) selects exec form and preserves every
+  argument literally; omitting `args` selects shell form and passes the raw
+  command to the declared Bash or PowerShell interpreter. `matcher` and the
+  `tool_name` a hook script sees are
   translated between Reasonix's own tool names and Claude's (`bash` ↔
   `Bash`, `write_file` ↔ `Write`, ...), so a matcher like `"Bash"` fires
   correctly; every Reasonix subagent-spawning tool (`task`, `read_only_task`,
@@ -332,8 +355,10 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   expands `${CLAUDE_PLUGIN_ROOT}` and `${REASONIX_PLUGIN_ROOT}` (plus their
   unbraced `$NAME` and Windows `%NAME%` spellings), so plugin-relative paths
   do not depend on the target shell's environment-variable syntax. On Windows,
-  a bare `sh -c` or `bash -c` hook is routed through a discovered Git for
-  Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
+  shell-form hooks without an explicit shell use the same Git Bash-first,
+  PowerShell-fallback selection as Reasonix's shell tool. Explicit Bash hooks
+  and legacy bare `sh -c`/`bash -c` hooks are routed through a discovered Git
+  for Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
   interpreter path remains untouched. If no usable Bash is installed, the hook
   reports a clear prerequisite error instead of the localized `sh is not
   recognized` output. Captured legacy-code-page output is normalized to UTF-8

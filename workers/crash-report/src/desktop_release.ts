@@ -1,7 +1,7 @@
 const R2_BASE = "https://dl.reasonix.io";
 const GITHUB_RELEASES_API = "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases?per_page=30";
 
-type ReleaseChannel = "stable" | "canary";
+type ReleaseChannel = "stable" | "preview" | "canary";
 
 type GitHubAsset = {
   name?: string;
@@ -16,7 +16,8 @@ type GitHubRelease = {
 };
 
 function manifestPointer(channel: ReleaseChannel): string {
-  return channel === "canary" ? `${R2_BASE}/canary/latest.json` : `${R2_BASE}/latest/latest.json`;
+  if (channel === "stable") return `${R2_BASE}/latest/latest.json`;
+  return channel === "preview" ? `${R2_BASE}/preview/latest.json` : `${R2_BASE}/canary/latest.json`;
 }
 
 function gatewayHeaders(source: string): HeadersInit {
@@ -83,6 +84,11 @@ export async function handleDesktopReleaseManifest(channel: ReleaseChannel): Pro
   const r2 = await fetchManifestText(manifestPointer(channel), `r2-${channel}`);
   if (r2) return r2;
 
+  if (channel === "preview") {
+    const canary = await fetchManifestText(manifestPointer("canary"), "r2-canary-compat");
+    if (canary) return canary;
+  }
+
   if (channel === "stable") {
     const github = await fetchLatestDesktopManifestFromGitHub();
     if (github) return github;
@@ -95,6 +101,6 @@ export async function handleDesktopReleaseManifest(channel: ReleaseChannel): Pro
 }
 
 export function desktopReleaseChannel(path: string): ReleaseChannel | null {
-  const match = path.match(/^\/v1\/desktop\/releases\/(stable|canary)\/latest\.json$/);
+  const match = path.match(/^\/v1\/desktop\/releases\/(stable|preview|canary)\/latest\.json$/);
   return (match?.[1] as ReleaseChannel | undefined) ?? null;
 }

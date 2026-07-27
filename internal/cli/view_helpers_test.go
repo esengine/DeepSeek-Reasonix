@@ -106,8 +106,8 @@ func TestRenderHooksUsesSharedVisualLanguage(t *testing.T) {
 		HookConfig: hook.HookConfig{Command: strings.Repeat("echo ", 30)},
 		Event:      hook.PreToolUse,
 		Scope:      hook.ScopeProject,
-	}}, false, true)
-	for _, want := range []string{"hooks (1 active)", "PreToolUse", "project", "…", "not trusted", "/hooks trust"} {
+	}})
+	for _, want := range []string{"hooks (1 active)", "PreToolUse", "project", "…", ".reasonix/settings.json"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hooks view missing %q:\n%s", want, got)
 		}
@@ -121,7 +121,7 @@ func TestRenderHooksShowsPermissionRequestMatch(t *testing.T) {
 		HookConfig: hook.HookConfig{Command: "notify", Match: "bash"},
 		Event:      hook.PermissionRequest,
 		Scope:      hook.ScopeGlobal,
-	}}, true, true)
+	}})
 	for _, want := range []string{"PermissionRequest", "global", "bash", "notify"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hooks view missing %q:\n%s", want, got)

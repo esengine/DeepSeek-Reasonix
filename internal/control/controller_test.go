@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,15 @@ func isolateControlConfigHome(t *testing.T) string {
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(t.TempDir())
 	return home
+}
+
+func controlTestPluginByName(entries []config.PluginEntry, name string) (config.PluginEntry, bool) {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return config.PluginEntry{}, false
 }
 
 type appendingRunner struct {
@@ -1044,6 +1054,45 @@ func TestSnapshotActivityPersistsOwnedCompactionRewrite(t *testing.T) {
 	}
 	if matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
 		t.Fatalf("recovery branches after owned compaction rewrite = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestEditedPromptMetadataAfterMidTurnSnapshotStaysOnOwnedSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edited-mid-turn.jsonl")
+
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "edited prompt"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial"})
+	if err := sess.Save(path); err != nil {
+		t.Fatalf("Save mid-turn transcript: %v", err)
+	}
+	// The model finishes after the periodic snapshot. Turn teardown then adds
+	// local inline-edit metadata to the already-persisted user message.
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "final"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	ctrl := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	ctrl.markEditedForNewUser(1, "original prompt")
+
+	if err := ctrl.SnapshotActivity(); err != nil {
+		t.Fatalf("SnapshotActivity edited turn: %v", err)
+	}
+	if got := ctrl.SessionPath(); got != path {
+		t.Fatalf("edited turn moved to recovery path %q, want owned path %q", got, path)
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := len(loaded.Messages); got != 4 {
+		t.Fatalf("saved message count = %d, want 4: %+v", got, loaded.Messages)
+	}
+	user := loaded.Messages[1]
+	if !user.Edited || user.Original != "original prompt" || user.Content != "edited prompt" {
+		t.Fatalf("saved edited user metadata = %+v", user)
+	}
+	if matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("spurious recovery branches = %v err=%v, want none", matches, err)
 	}
 }
 
@@ -2602,6 +2651,179 @@ func TestAddMCPServerAuthorizesExplicitUserAddBeforeConnecting(t *testing.T) {
 	}
 }
 
+func TestAddMCPServerWritesGlobalConfigWithoutShadowingProject(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	projectPath := filepath.Join(workspace, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[[plugins]]
+name = "project-only"
+command = "project-only"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := any(map[string]any{})
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "global-docs", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "search",
+				"description": "Search documentation.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	}))
+	defer server.Close()
+
+	host := plugin.NewHost()
+	defer host.Close()
+	ctrl := New(Options{Host: host, Registry: tool.NewRegistry(), PluginCtx: context.Background(), WorkspaceRoot: workspace})
+	if n, err := ctrl.AddMCPServer(config.PluginEntry{Name: "global-docs", Type: "http", URL: server.URL}); err != nil || n != 1 {
+		t.Fatalf("AddMCPServer(global-docs) = (%d, %v), want one connected tool", n, err)
+	}
+	globalCfg := config.LoadForEdit(config.UserConfigPath())
+	globalEntry, found := controlTestPluginByName(globalCfg.Plugins, "global-docs")
+	if !found || globalEntry.URL != server.URL {
+		t.Fatalf("global config entry = %+v, found=%v", globalEntry, found)
+	}
+	projectCfg := config.LoadForEdit(projectPath)
+	if _, found := controlTestPluginByName(projectCfg.Plugins, "global-docs"); found {
+		t.Fatalf("global install leaked into project config: %+v", projectCfg.Plugins)
+	}
+	if _, found := controlTestPluginByName(projectCfg.Plugins, "project-only"); !found {
+		t.Fatalf("project config was not preserved: %+v", projectCfg.Plugins)
+	}
+}
+
+func TestAddMCPServerRejectsProjectNameCollision(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "shared"
+command = "project-shared"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := New(Options{Host: plugin.NewHost(), WorkspaceRoot: workspace})
+	defer ctrl.Close()
+	if _, err := ctrl.AddMCPServer(config.PluginEntry{Name: "shared", Command: "global-shared"}); err == nil || !strings.Contains(err.Error(), "already configured") {
+		t.Fatalf("AddMCPServer(shared) error = %v, want project collision", err)
+	}
+	if _, found := controlTestPluginByName(config.LoadForEdit(config.UserConfigPath()).Plugins, "shared"); found {
+		t.Fatal("rejected project collision created a global shadow")
+	}
+}
+
+func TestConnectConfiguredProjectMCPIsTrustedByDefault(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := any(map[string]any{})
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "project-docs", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "search",
+				"description": "Search project documentation.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	}))
+	defer server.Close()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(fmt.Sprintf(`
+[[plugins]]
+name = "project-docs"
+type = "http"
+url = %q
+`, server.URL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	host := plugin.NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	var configured plugin.Spec
+	ctrl := New(Options{
+		Host:          host,
+		Registry:      reg,
+		PluginCtx:     context.Background(),
+		WorkspaceRoot: workspace,
+		MCPConfigureSpec: func(spec *plugin.Spec) {
+			configured = *spec
+		},
+	})
+
+	n, err := ctrl.ConnectConfiguredMCPServer("project-docs")
+	if err != nil {
+		t.Fatalf("ConnectConfiguredMCPServer: %v", err)
+	}
+	if n != 1 || requests.Load() == 0 {
+		t.Fatalf("trusted project MCP = %d tools, %d requests; want 1 tool and a live connection", n, requests.Load())
+	}
+	if _, ok := reg.Get("mcp__project-docs__search"); !ok {
+		t.Fatalf("project MCP tool missing; names=%v", reg.Names())
+	}
+	if !configured.Authorized || configured.RequireLaunchApproval || configured.Dir != workspace {
+		t.Fatalf("project MCP spec = %+v, want trusted project-scoped runtime", configured)
+	}
+
+	nextHost := plugin.NewHost()
+	defer nextHost.Close()
+	nextCtrl := New(Options{
+		Host:          nextHost,
+		Registry:      tool.NewRegistry(),
+		PluginCtx:     context.Background(),
+		WorkspaceRoot: workspace,
+	})
+	if n, err := nextCtrl.ConnectConfiguredMCPServer("project-docs"); err != nil || n != 1 {
+		t.Fatalf("subsequent project MCP connection = (%d, %v), want zero-confirmation trust", n, err)
+	}
+}
+
 func TestConnectMCPServerAppliesConfiguredCallTimeouts(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -2763,6 +2985,29 @@ tier = "lazy"
 	listed, listErr := proxy.Execute(context.Background(), json.RawMessage(`{"action":"list"}`))
 	if listErr != nil || strings.Contains(listed, `"name": "mock"`) {
 		t.Fatalf("removed server leaked through capability list = %q, %v", listed, listErr)
+	}
+}
+
+func TestConfiguredMCPNamesUseControllerWorkspaceInsteadOfProcessCWD(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	other := t.TempDir()
+	t.Chdir(other)
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "workspace-mcp"
+command = "workspace-mcp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := New(Options{WorkspaceRoot: workspace, Host: plugin.NewHost()})
+	defer c.Close()
+	if got := c.ConfiguredMCPNames(); !reflect.DeepEqual(got, []string{"workspace-mcp"}) {
+		t.Fatalf("ConfiguredMCPNames() = %v, want workspace-mcp from %s", got, workspace)
+	}
+	if got := c.DisconnectedMCPNames(); !reflect.DeepEqual(got, []string{"workspace-mcp"}) {
+		t.Fatalf("DisconnectedMCPNames() = %v, want workspace-mcp from %s", got, workspace)
 	}
 }
 

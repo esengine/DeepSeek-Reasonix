@@ -491,7 +491,7 @@ func mcpInstallWithClient(args []string, client *mcpregistry.Client) int {
 		fmt.Fprintf(os.Stderr, "MCP server %q was not installed: %s\n", pluginEntry.Name, installResult.Message)
 		return 1
 	}
-	if err := persistCLIInstalledMCP(cfg, pluginEntry); err != nil {
+	if err := persistCLIInstalledMCP(mcpCLIWorkspaceRoot(), pluginEntry); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -513,7 +513,8 @@ func mcpEnableCLI(args []string, enabled bool) int {
 		return 2
 	}
 	name := strings.TrimSpace(args[0])
-	cfg, err := config.Load()
+	workspace := mcpCLIWorkspaceRoot()
+	cfg, err := config.LoadForRoot(workspace)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -532,7 +533,7 @@ func mcpEnableCLI(args []string, enabled bool) int {
 		return 1
 	}
 	store := config.DefaultMCPActivationStore()
-	if err := store.SetServerEnabled(entry, "", enabled); err != nil {
+	if err := store.SetServerEnabled(entry, workspace, enabled); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -769,7 +770,7 @@ func mcpAddCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "MCP server %q was not added: %s\n", entry.Name, result.Message)
 		return 1
 	}
-	if err := persistCLIInstalledMCP(cfg, entry); err != nil {
+	if err := persistCLIInstalledMCP(mcpCLIWorkspaceRoot(), entry); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
@@ -806,22 +807,19 @@ func probeMCPReadiness(entry config.PluginEntry) (plugin.MCPInstallResult, error
 	return host.InstallAndConnect(ctx, specs[0])
 }
 
-func persistCLIInstalledMCP(cfg *config.Config, entry config.PluginEntry) error {
+func persistCLIInstalledMCP(workspace string, entry config.PluginEntry) error {
 	entry.Source = config.MCPSourceUserConfig
-	if err := cfg.UpsertPlugin(entry); err != nil {
-		return err
-	}
-	if err := cfg.Save(); err != nil {
+	if _, err := config.UpsertPluginInSourceForRoot(workspace, entry); err != nil {
 		return err
 	}
 	store := config.DefaultMCPActivationStore()
-	activationErr := store.SetServerEnabled(entry, "", true)
+	activationErr := store.SetServerEnabled(entry, workspace, true)
 	if !entry.ShouldAutoStart() {
-		activationErr = store.ClearServer(entry, "")
+		activationErr = store.ClearServer(entry, workspace)
 	}
 	if activationErr != nil {
-		cfg.RemovePlugin(entry.Name)
-		return errors.Join(activationErr, cfg.Save())
+		_, _, rollbackErr := config.RemovePluginFromSourceForRoot(workspace, entry)
+		return errors.Join(activationErr, rollbackErr)
 	}
 	return nil
 }
@@ -832,35 +830,32 @@ func mcpRemoveCLI(args []string) int {
 		return 2
 	}
 	name := args[0]
-	cfg, err := config.Load()
+	workspace := mcpCLIWorkspaceRoot()
+	removed, ok, _, err := config.RemovePluginFromEffectiveSourceForRoot(workspace, name)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	var removed config.PluginEntry
-	for _, p := range cfg.Plugins {
-		if p.Name == name {
-			removed = p
-			break
-		}
-	}
-	if !cfg.RemovePlugin(name) {
+	if !ok {
 		fmt.Fprintf(os.Stderr, "no MCP server named %q in config\n", name)
-		return 1
-	}
-	if err := cfg.Save(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	// Uninstall clears activation overrides; schema/auth cleanup is handled by
 	// the live session path when present.
-	_ = config.DefaultMCPActivationStore().ClearServer(removed, "")
+	_ = config.DefaultMCPActivationStore().ClearServer(removed, workspace)
 	fmt.Printf("removed MCP server %q\n", name)
 	return 0
 }
 
+func mcpCLIWorkspaceRoot() string {
+	if cwd, err := os.Getwd(); err == nil && strings.TrimSpace(cwd) != "" {
+		return cwd
+	}
+	return "."
+}
+
 func mcpUsage() {
-	fmt.Println(`Manage MCP servers (persisted to reasonix.toml + mcp-activation.json).
+	fmt.Println(`Manage MCP servers (global installs use config.toml; project entries stay in project config).
 
 Usage:
   reasonix mcp list
@@ -893,9 +888,10 @@ CLI config changes take effect on the next session. Inside a running chat, use
 /mcp add to save and connect a server immediately. Installing a server is also
 its authorization; there is no separate trust step.
 
-Servers merely discovered in project configuration ask once for confirmation of
-the exact command or endpoint, then reconnect automatically while it is unchanged.
-After authorization, writer or destructive annotations never trigger per-call
-approval. Explicit deny rules still win; Plan Mode and strict read-only subagents
-may filter which tools are available.`)
+Servers declared by project reasonix.toml or .mcp.json are trusted configuration
+and need no separate launch confirmation. Project entries override same-name
+global entries; within a project, reasonix.toml overrides .mcp.json. Writer or
+destructive annotations never trigger per-call approval. Explicit deny rules
+still win; Plan Mode and strict read-only subagents may filter which tools are
+available.`)
 }

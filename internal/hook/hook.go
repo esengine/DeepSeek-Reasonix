@@ -14,6 +14,7 @@ package hook
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,11 +26,13 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"reasonix/internal/config"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/proc"
+	"reasonix/internal/sandbox"
 	"reasonix/internal/secrets"
 )
 
@@ -107,17 +110,33 @@ const (
 	ScopeGlobal  Scope = "global"
 )
 
+// ExecutionMode is the contract between a hook manifest and its process
+// launcher. The zero value is the legacy Reasonix settings behavior, where a
+// command string is interpreted by the platform shell after compatibility
+// repairs. Plugin manifests can opt into an unambiguous exec or shell form.
+type ExecutionMode string
+
+const (
+	ExecutionLegacy ExecutionMode = ""
+	ExecutionExec   ExecutionMode = "exec"
+	ExecutionShell  ExecutionMode = "shell"
+)
+
 // HookConfig is one hook as written in settings.json.
 type HookConfig struct {
 	// Match is an anchored regex selecting tools (Pre/PostToolUse and
 	// PermissionRequest only); "" or "*" = every tool. Anchored: "file" won't
 	// match "read_file" — use ".*file".
 	Match string `json:"match,omitempty"`
-	// Command is the shell command to run (spawned through the platform shell).
+	// Command is the executable, shell script, or legacy shell command to run,
+	// according to ExecutionMode.
 	Command string `json:"command"`
-	// Argv bypasses the shell and is used by imported Claude hooks whose
-	// command and args are separate manifest fields.
+	// Argv is the literal argument vector for exec-form plugin hooks.
 	Argv []string `json:"-"`
+	// ExecutionMode and Shell are internal plugin-package metadata. Native
+	// Reasonix settings retain their legacy shell-command behavior.
+	ExecutionMode ExecutionMode `json:"-"`
+	Shell         string        `json:"-"`
 	// ContextFile is an internal plugin-package helper: when set, the hook reads
 	// this file and treats it as stdout instead of spawning a shell command.
 	ContextFile string `json:"contextFile,omitempty"`
@@ -192,20 +211,21 @@ func ContextFileUsable(path string) bool {
 	return file.Close() == nil
 }
 
-// LoadOptions configure Load. Project hooks load only when Trusted; global hooks
-// always load.
+// LoadOptions configure Load.
 type LoadOptions struct {
 	ProjectRoot string
 	HomeDir     string
-	Trusted     bool
+	// Trusted is retained for source compatibility. Project hooks are enabled
+	// automatically now, so callers no longer need to set it.
+	Trusted bool
 }
 
-// Load resolves hooks: project first (only when trusted), then global; within a
-// scope, settings.json array order. A malformed file yields no hooks (never an
-// error — a typo shouldn't take down the CLI).
+// Load resolves hooks: project first, then global; within a scope,
+// settings.json array order. A malformed file yields no hooks (never an error
+// — a typo shouldn't take down the CLI).
 func Load(opts LoadOptions) []ResolvedHook {
 	var out []ResolvedHook
-	if opts.ProjectRoot != "" && opts.Trusted {
+	if opts.ProjectRoot != "" {
 		p := ProjectSettingsPath(opts.ProjectRoot)
 		if s := readSettings(p); s != nil {
 			appendResolved(&out, s, ScopeProject, p)
@@ -226,8 +246,7 @@ func Load(opts LoadOptions) []ResolvedHook {
 }
 
 // ProjectDefinesHooks reports whether a project's settings.json exists and
-// declares at least one hook — regardless of trust. Frontends use this to decide
-// whether to prompt the user to trust the project.
+// declares at least one hook.
 func ProjectDefinesHooks(projectRoot string) bool {
 	s := readSettings(ProjectSettingsPath(projectRoot))
 	if s == nil {
@@ -296,13 +315,24 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 				continue
 			}
 			for _, h := range pkg.Manifest.Hooks[eventName] {
+				mode := ExecutionLegacy
+				switch {
+				case h.ArgsSet:
+					mode = ExecutionExec
+				case h.ShellCommand:
+					mode = ExecutionShell
+				}
 				command := expandPluginRoot(h.Command, pkg.Root)
-				if command != "" && !h.ShellCommand && !filepath.IsAbs(command) {
+				resolveFromPluginRoot := mode != ExecutionShell &&
+					!(mode == ExecutionExec && h.PayloadFormat == "claude")
+				if command != "" && resolveFromPluginRoot && !filepath.IsAbs(command) {
 					command = filepath.Join(pkg.Root, filepath.FromSlash(command))
 				}
-				command = NormalizeCommand(command)
+				if mode == ExecutionLegacy {
+					command = NormalizeCommand(command)
+				}
 				var argv []string
-				if len(h.Args) > 0 {
+				if h.ArgsSet {
 					argv = make([]string, 0, len(h.Args))
 				}
 				for _, arg := range h.Args {
@@ -346,6 +376,8 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 						Match:         h.Match,
 						Command:       command,
 						Argv:          argv,
+						ExecutionMode: mode,
+						Shell:         h.Shell,
 						ContextFile:   contextFile,
 						Description:   h.Description,
 						Timeout:       h.Timeout,
@@ -1012,6 +1044,8 @@ func claudeJSONAllow(event Event, stdout string) bool {
 type SpawnInput struct {
 	Command string
 	Args    []string
+	Mode    ExecutionMode
+	Shell   string
 	Cwd     string
 	Env     map[string]string
 	Stdin   string
@@ -1052,7 +1086,16 @@ func Run(ctx context.Context, payload Payload, hooks []ResolvedHook, spawner Spa
 		}
 		timeout := h.timeout()
 		stdin := marshalPayload(payload, h.PayloadFormat)
-		input := SpawnInput{Command: h.Command, Args: h.Argv, Cwd: cwd, Env: h.Env, Stdin: stdin, Timeout: timeout}
+		input := SpawnInput{
+			Command: h.Command,
+			Args:    h.Argv,
+			Mode:    h.ExecutionMode,
+			Shell:   h.Shell,
+			Cwd:     cwd,
+			Env:     h.Env,
+			Stdin:   stdin,
+			Timeout: timeout,
+		}
 		if h.Async {
 			asyncCtx := context.WithoutCancel(ctx)
 			go runResolvedHook(asyncCtx, h, input, spawner)
@@ -1175,14 +1218,14 @@ func stderrFor(r SpawnResult, timeout time.Duration) string {
 	return ""
 }
 
-// DefaultSpawner runs the command through the platform shell with the payload on
-// stdin, capping captured output and honoring both the per-hook timeout and the
-// parent context's cancellation.
+// DefaultSpawner executes the hook according to its explicit execution
+// contract, with the payload on stdin, capped output, and both per-hook timeout
+// and parent-context cancellation.
 func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 	cctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
 
-	cmd, spawnErr := spawnCommand(cctx, in.Command, in.Args)
+	cmd, spawnErr := spawnCommand(cctx, in.Command, in.Mode, in.Shell, in.Args)
 	if spawnErr != nil {
 		return SpawnResult{ExitCode: -1, SpawnErr: spawnErr}
 	}
@@ -1233,10 +1276,39 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 	return res
 }
 
-// spawnCommand picks the execution vehicle for a hook command. Commands run
-// through the shell by default — that is the documented contract, and scripts
-// may rely on shell expansion ($VAR, backticks). Direct exec (no shell) is
-// used only where it is strictly better:
+// spawnCommand picks the execution vehicle from the manifest contract.
+// Explicit exec-form hooks pass their argv directly to the executable;
+// explicit shell-form hooks pass the raw command to the selected interpreter.
+// Legacy settings retain Reasonix's historical shell behavior and repairs.
+func spawnCommand(ctx context.Context, command string, mode ExecutionMode, shell string, args []string) (*exec.Cmd, error) {
+	switch mode {
+	case ExecutionExec:
+		return spawnExecCommand(ctx, command, args)
+	case ExecutionShell:
+		return spawnShellCommand(ctx, command, shell)
+	case ExecutionLegacy:
+		return spawnLegacyCommand(ctx, command, args)
+	default:
+		return nil, fmt.Errorf("unsupported hook execution mode %q", mode)
+	}
+}
+
+func spawnExecCommand(ctx context.Context, command string, args []string) (*exec.Cmd, error) {
+	if runtime.GOOS == "windows" {
+		if cmd, matched := windowsBatchArgvCommand(ctx, command, args); matched {
+			return cmd, nil
+		}
+		if resolvedShell, resolvedArgs, matched, err := windowsPOSIXShellArgvInvocation(command, args); matched {
+			if err != nil {
+				return nil, err
+			}
+			return exec.CommandContext(ctx, resolvedShell, resolvedArgs...), nil
+		}
+	}
+	return exec.CommandContext(ctx, command, args...), nil
+}
+
+// spawnLegacyCommand preserves the pre-contract behavior:
 //   - a command this call just repaired (its broken quoting means it never
 //     worked through a shell, so there is no expansion behavior to preserve);
 //   - on Windows, a recognized node -e stdin-hook command: `cmd /c` mangles
@@ -1248,20 +1320,9 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 // POSIX commands that were already well-formed keep their shell semantics
 // verbatim — normalizeStaticNodeEval's rendering escapes $ and backticks, so
 // even repaired commands re-entering here behave identically under sh -c.
-func spawnCommand(ctx context.Context, command string, argv ...[]string) (*exec.Cmd, error) {
-	if len(argv) > 0 && argv[0] != nil {
-		if runtime.GOOS == "windows" {
-			if cmd, matched := windowsBatchArgvCommand(ctx, command, argv[0]); matched {
-				return cmd, nil
-			}
-			if shell, args, matched, err := windowsPOSIXShellArgvInvocation(command, argv[0]); matched {
-				if err != nil {
-					return nil, err
-				}
-				return exec.CommandContext(ctx, shell, args...), nil
-			}
-		}
-		return exec.CommandContext(ctx, command, argv[0]...), nil
+func spawnLegacyCommand(ctx context.Context, command string, args []string) (*exec.Cmd, error) {
+	if args != nil {
+		return spawnExecCommand(ctx, command, args)
 	}
 	if node, flag, script, ok := repairableNodeEvalArgs(command); ok {
 		return exec.CommandContext(ctx, node, flag, script), nil
@@ -1282,9 +1343,88 @@ func spawnCommand(ctx context.Context, command string, argv ...[]string) (*exec.
 		if node, flag, script, ok := directNodeEvalArgs(command); ok {
 			return exec.CommandContext(ctx, node, flag, script), nil
 		}
+		if cmd, ok := windowsCmdShellCommand(ctx, command); ok {
+			return cmd, nil
+		}
 	}
 	name, args := shellInvocation(command)
 	return exec.CommandContext(ctx, name, args...), nil
+}
+
+func spawnShellCommand(ctx context.Context, command, preferred string) (*exec.Cmd, error) {
+	preferred = strings.ToLower(strings.TrimSpace(preferred))
+	switch preferred {
+	case "", "auto":
+		if runtime.GOOS == "windows" {
+			// Retain the established #6668 compatibility path for the common
+			// quoted .cmd/.bat hook shape. More complex scripts continue to
+			// the selected shell without being parsed or re-rendered.
+			if cmd, matched := windowsBatchCommand(ctx, command); matched {
+				return cmd, nil
+			}
+			sh, err := cachedWindowsDefaultHookShell()
+			if err != nil {
+				return nil, err
+			}
+			return rawShellCommand(ctx, sh, command)
+		}
+		return exec.CommandContext(ctx, "sh", "-c", command), nil
+	case "bash":
+		if runtime.GOOS == "windows" {
+			path, err := cachedWindowsHookBash()
+			if err != nil {
+				return nil, err
+			}
+			return exec.CommandContext(ctx, path, "-c", command), nil
+		}
+		return exec.CommandContext(ctx, "bash", "-c", command), nil
+	case "powershell", "pwsh":
+		sh := sandbox.ResolveShell(preferred, "", nil)
+		if sh.Kind != sandbox.ShellPowerShell {
+			return nil, fmt.Errorf("hook requires %s, but no usable PowerShell was found", preferred)
+		}
+		path, err := resolvedHookShellPath(sh)
+		if err != nil {
+			return nil, err
+		}
+		return powerShellCommand(ctx, path, command), nil
+	case "cmd":
+		if cmd, ok := windowsCmdShellCommand(ctx, command); ok {
+			return cmd, nil
+		}
+		return nil, errors.New("hook shell \"cmd\" is only available on Windows")
+	default:
+		return nil, fmt.Errorf("unsupported hook shell %q", preferred)
+	}
+}
+
+func rawShellCommand(ctx context.Context, sh sandbox.Shell, command string) (*exec.Cmd, error) {
+	path, err := resolvedHookShellPath(sh)
+	if err != nil {
+		return nil, err
+	}
+	if sh.Kind == sandbox.ShellPowerShell {
+		return powerShellCommand(ctx, path, command), nil
+	}
+	return exec.CommandContext(ctx, path, "-c", command), nil
+}
+
+func powerShellCommand(ctx context.Context, path, command string) *exec.Cmd {
+	// PowerShell's native command-line parser does not follow
+	// CommandLineToArgvW consistently for a complex -Command argument.
+	// -EncodedCommand transports the exact script as UTF-16LE and avoids a
+	// second layer of quote/backslash interpretation. Force captured output to
+	// UTF-8 before encoding so Windows PowerShell does not emit the host console
+	// code page into Reasonix's stdout/stderr text contract.
+	command = sandbox.PowerShellUTF8Script(command)
+	codeUnits := utf16.Encode([]rune(command))
+	raw := make([]byte, len(codeUnits)*2)
+	for i, unit := range codeUnits {
+		raw[i*2] = byte(unit)
+		raw[i*2+1] = byte(unit >> 8)
+	}
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	return exec.CommandContext(ctx, path, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded)
 }
 
 func shellInvocation(command string) (string, []string) {
@@ -1339,14 +1479,6 @@ func legacyGlobalSettingsPath(homeDir string) string {
 		return ""
 	}
 	return filepath.Join(dir, SettingsFilename)
-}
-
-func legacyTrustPath(homeDir string) string {
-	dir := legacyReasonixHome(homeDir)
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, TrustFilename)
 }
 
 func legacyReasonixHome(override string) string {

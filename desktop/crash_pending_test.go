@@ -13,7 +13,11 @@ import (
 
 func readPending(t *testing.T) (crashReport, bool) {
 	t.Helper()
-	body, err := os.ReadFile(pendingCrashPath())
+	paths := pendingCrashPaths()
+	if len(paths) == 0 {
+		return crashReport{}, false
+	}
+	body, err := os.ReadFile(paths[0])
 	if err != nil {
 		return crashReport{}, false
 	}
@@ -25,7 +29,7 @@ func readPending(t *testing.T) (crashReport, bool) {
 }
 
 func TestRecoverToPendingCapturesAndReraises(t *testing.T) {
-	t.Cleanup(func() { os.Remove(pendingCrashPath()) })
+	t.Cleanup(removeAllPendingCrashes)
 
 	func() {
 		defer func() {
@@ -45,7 +49,7 @@ func TestRecoverToPendingCapturesAndReraises(t *testing.T) {
 	if r.Kind != "crash" {
 		t.Errorf("kind = %q, want crash", r.Kind)
 	}
-	if !strings.Contains(r.Message, "[go panic] unit:") {
+	if !strings.Contains(r.Message, "[go panic] unit") {
 		t.Errorf("message missing site prefix: %q", r.Message)
 	}
 	if r.Source != "go" || r.Label != "unit" || r.ErrorMessage == "" || r.Stack == "" || r.TopFrame == "" {
@@ -57,7 +61,7 @@ func TestRecoverToPendingCapturesAndReraises(t *testing.T) {
 }
 
 func TestWritePendingCrashCaps(t *testing.T) {
-	t.Cleanup(func() { os.Remove(pendingCrashPath()) })
+	t.Cleanup(removeAllPendingCrashes)
 	writePendingCrash("big", "x", []byte(strings.Repeat("a", 64<<10)))
 	r, ok := readPending(t)
 	if !ok {
@@ -68,8 +72,8 @@ func TestWritePendingCrashCaps(t *testing.T) {
 	}
 }
 
-func TestWritePendingReportCanAvoidOverwritingExistingCrash(t *testing.T) {
-	t.Cleanup(func() { os.Remove(pendingCrashPath()) })
+func TestWritePendingReportQueuesWithoutOverwritingExistingCrash(t *testing.T) {
+	t.Cleanup(removeAllPendingCrashes)
 	writePendingCrash("panic", "boom", []byte("stack"))
 	before, ok := readPending(t)
 	if !ok {
@@ -80,8 +84,8 @@ func TestWritePendingReportCanAvoidOverwritingExistingCrash(t *testing.T) {
 	hang.Source = "native.watchdog"
 	hang.Label = "mac.main_thread.hang"
 	hang.Message = "hang"
-	if writePendingReport(hang, false) {
-		t.Fatal("writePendingReport overwrite=false should not replace existing report")
+	if !writePendingReport(hang, false) {
+		t.Fatal("writePendingReport should enqueue the second report")
 	}
 	after, ok := readPending(t)
 	if !ok {
@@ -90,10 +94,13 @@ func TestWritePendingReportCanAvoidOverwritingExistingCrash(t *testing.T) {
 	if after.Label != before.Label || after.Message != before.Message {
 		t.Fatalf("pending crash was overwritten: before=%+v after=%+v", before, after)
 	}
+	if got := len(pendingCrashPaths()); got != 2 {
+		t.Fatalf("pending reports = %d, want 2", got)
+	}
 }
 
-func TestWritePendingReportNonOverwriteAllowsOneConcurrentWriter(t *testing.T) {
-	t.Cleanup(func() { os.Remove(pendingCrashPath()) })
+func TestWritePendingReportQueueIsBoundedUnderConcurrentWriters(t *testing.T) {
+	t.Cleanup(removeAllPendingCrashes)
 	const writers = 32
 	start := make(chan struct{})
 	var ready sync.WaitGroup
@@ -120,27 +127,28 @@ func TestWritePendingReportNonOverwriteAllowsOneConcurrentWriter(t *testing.T) {
 	close(start)
 	done.Wait()
 
-	if got := successes.Load(); got != 1 {
-		t.Fatalf("successful non-overwrite writers = %d, want 1", got)
+	if got := successes.Load(); got != writers {
+		t.Fatalf("successful queued writers = %d, want %d", got, writers)
 	}
-	if _, ok := readPending(t); !ok {
-		t.Fatal("expected one pending report")
+	if got := len(pendingCrashPaths()); got != maxPendingCrashes {
+		t.Fatalf("pending reports = %d, want bounded queue of %d", got, maxPendingCrashes)
 	}
 }
 
 func TestWritePendingCrashScrubsSensitiveText(t *testing.T) {
-	t.Cleanup(func() { os.Remove(pendingCrashPath()) })
+	t.Cleanup(removeAllPendingCrashes)
 	apiKey := "sk-proj-" + "abcdefghijklmnopqrstuvwxyz1234567890"
 	bearer := "abcdefghijklmnopqrstuvwxyz1234567890ABCDE"
 	longHex := "0123456789abcdef0123456789abcdef"
 
-	writePendingCrash("unit", "boom api_key="+apiKey+" user alice@example.com", []byte("goroutine\nAuthorization: Bearer "+bearer+"\n/home/alice/project/x.go:12\nhash "+longHex))
+	privatePanicValue := "private user prompt contents"
+	writePendingCrash("unit", privatePanicValue+" api_key="+apiKey+" user alice@example.com", []byte("goroutine\nAuthorization: Bearer "+bearer+"\n/home/alice/project/x.go:12\nhash "+longHex))
 	r, ok := readPending(t)
 	if !ok {
 		t.Fatal("expected a pending crash file")
 	}
 	freeText := strings.Join([]string{r.Message, r.ErrorMessage, r.Stack, r.TopFrame}, "\n")
-	for _, leaked := range []string{apiKey, bearer, longHex, "alice@example.com", "/home/alice"} {
+	for _, leaked := range []string{privatePanicValue, apiKey, bearer, longHex, "alice@example.com", "/home/alice"} {
 		if strings.Contains(freeText, leaked) {
 			t.Fatalf("sensitive value leaked %q in %+v", leaked, r)
 		}
@@ -151,7 +159,7 @@ func TestFlushPendingCrashSendsAndClears(t *testing.T) {
 	oldVersion, oldEndpoint := version, crashEndpoint
 	t.Cleanup(func() {
 		version, crashEndpoint = oldVersion, oldEndpoint
-		os.Remove(pendingCrashPath())
+		removeAllPendingCrashes()
 	})
 	version = "v9.9.9"
 
@@ -178,7 +186,7 @@ func TestFlushPendingCrashDevGuard(t *testing.T) {
 	oldVersion := version
 	t.Cleanup(func() {
 		version = oldVersion
-		os.Remove(pendingCrashPath())
+		removeAllPendingCrashes()
 	})
 	version = "dev"
 
@@ -195,7 +203,7 @@ func TestFlushPendingCrashRetainsInSafeMode(t *testing.T) {
 	oldVersion := version
 	t.Cleanup(func() {
 		version = oldVersion
-		os.Remove(pendingCrashPath())
+		removeAllPendingCrashes()
 	})
 	version = "v9.9.9"
 

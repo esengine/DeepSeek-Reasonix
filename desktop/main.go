@@ -43,9 +43,10 @@ var assets embed.FS
 // prompts to update.
 var version = "dev"
 
-// channel selects which updater pointer this build polls, injected via
-// `-X main.channel=canary`. Default "stable" tracks the public release; "canary"
-// tracks the opt-in pre-release line and never crosses over to stable.
+// channel records the build's release line, injected via
+// `-X main.channel=preview`. Default "stable" tracks the public release;
+// "preview" tracks the opt-in test line. Legacy "canary" builds are treated as
+// preview for compatibility.
 var channel = "stable"
 
 // macSelfUpdate is injected as "true" only for Developer ID signed + notarized
@@ -75,7 +76,7 @@ func windowsWebview2GPUDisabled() bool {
 			return false
 		}
 	}
-	return channel == "canary"
+	return channel == "preview" || channel == "canary"
 }
 
 func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
@@ -99,6 +100,8 @@ func main() {
 	if handled, exitCode := RunRemoteAskPassHelper(context.Background(), os.Args[1:], os.Getenv, os.Stdout); handled {
 		os.Exit(exitCode)
 	}
+	capturePreviousFatalCrash()
+	installFatalCrashOutput()
 
 	launch := parseDesktopLaunchArgs(os.Args[1:])
 	if config.SafeModeRequested() {
@@ -106,6 +109,7 @@ func main() {
 	}
 
 	tracker := repair.NewStartupTracker("")
+	previousRun := tracker.ObservePreviousRun()
 	var continueLaunch bool
 	launch.SafeMode, continueLaunch = preparePackagedStartupRecovery(tracker, tracker.SafeModeRecommended(), launch.SafeMode)
 	if !continueLaunch {
@@ -120,6 +124,14 @@ func main() {
 	// counts as a crash toward the Safe Mode threshold.
 	startupState, _ := tracker.Begin(version, launch.SafeMode)
 	trackerOwned := startupState.PID == os.Getpid()
+	installProfile := telemetryInstallProfile()
+	updateFrom, updateTo := "", ""
+	if tx, err := repair.ReadPendingUpdate(); err == nil {
+		updateFrom, updateTo = tx.FromVersion, tx.ToVersion
+	}
+	if trackerOwned {
+		_ = tracker.MarkLaunchContext(installProfile, updateFrom, updateTo)
+	}
 	// Keep WebKit acceleration enabled during normal Linux launches. If the
 	// startup tracker selects Safe Mode after a crash loop (or the user requests
 	// it explicitly), NVIDIA systems use the broader renderer fallback before
@@ -127,6 +139,7 @@ func main() {
 	configureWebKitRendererRecovery(launch.SafeMode)
 
 	app := NewApp()
+	app.previousRun = previousRun
 	if trackerOwned {
 		app.startupTracker = tracker
 	}
@@ -162,6 +175,7 @@ func main() {
 		Width:     width,
 		Height:    height,
 		Frameless: goruntime.GOOS == "windows",
+		Logger:    newCrashCaptureLogger(app),
 		MinWidth:  760,
 		MinHeight: 480,
 		// Match the dark UI shell so the initial webview background doesn't flash

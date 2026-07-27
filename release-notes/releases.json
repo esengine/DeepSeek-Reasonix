@@ -2,6 +2,1038 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.18.0",
+      "date": "2026-07-27",
+      "channel": "stable",
+      "title": {
+        "en": "Kimi K3 Support, Preview & Stable Channels, and Signing Integrity",
+        "zh": "新增 Kimi K3 支持、预览与稳定发布渠道、签名完整性保障"
+      },
+      "summary": {
+        "en": "This release adds Kimi K3 support to the official Kimi APIs and OpenCode Go, introduces Preview and Stable channels for Desktop and native CLI, and hardens the Windows release signing process.",
+        "zh": "本次发布为官方 Kimi API 与 OpenCode Go 新增 Kimi K3 支持，为桌面版和原生 CLI 推出 Preview 与 Stable 双渠道，并强化 Windows 发布签名流程。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "desktop",
+        "provider",
+        "remote",
+        "security",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Reasonix User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Comprehensive guide for using Reasonix.",
+            "zh": "Reasonix 使用综合指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Reasonix User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Comprehensive guide for using Reasonix in Chinese.",
+            "zh": "Reasonix 使用综合指南（中文版）。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers Configuration",
+            "zh": "推理提供商配置"
+          },
+          "body": {
+            "en": "How to configure AI model providers in Reasonix.",
+            "zh": "如何在 Reasonix 中配置 AI 模型提供商。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/REASONING_PROVIDERS.md"
+        },
+        {
+          "title": {
+            "en": "Release Process",
+            "zh": "发布流程"
+          },
+          "body": {
+            "en": "Details on Reasonix release channels and process.",
+            "zh": "Reasonix 发布渠道与流程详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/RELEASING.md"
+        },
+        {
+          "title": {
+            "en": "Windows Signing Admin SOP",
+            "zh": "Windows 签名管理 SOP"
+          },
+          "body": {
+            "en": "Standard operating procedure for Windows code signing.",
+            "zh": "Windows 代码签名标准操作流程。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/SIGNPATH_WINDOWS_ADMIN_SOP.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Kimi K3 model support",
+            "zh": "支持 Kimi K3 模型"
+          },
+          "body": {
+            "en": "Kimi K3 is now available through the official Kimi CN and Global direct APIs and OpenCode Go. Official APIs support native vision, a 1,048,576-token context window, and low/high/max reasoning; OpenCode Go keeps its relay-specific high/max scale.",
+            "zh": "Kimi K3 现已支持官方 Kimi 国内版、全球版直接 API 及 OpenCode Go。官方 API 支持原生视觉、1,048,576 token 上下文窗口和低/高/最高推理等级；OpenCode Go 保留其专用的高/最高等级。"
+          },
+          "refs": [
+            6921
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Preview and Stable release channels",
+            "zh": "预览版与稳定版发布渠道"
+          },
+          "body": {
+            "en": "Reasonix Desktop and native CLI now expose two public product channels: Preview for early access and Stable for production use. Desktop users can switch channels in Settings.",
+            "zh": "Reasonix 桌面版和原生 CLI 现提供两个公开产品渠道：Preview 用于抢先体验，Stable 用于正式使用。桌面用户可在设置中切换渠道。"
+          },
+          "refs": [
+            6155
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Release signing integrity hardening",
+            "zh": "加强发布签名完整性"
+          },
+          "body": {
+            "en": "We fixed a signing configuration that blocked the v1.17.21 Desktop release and added automated checks to verify the signing contract for all future releases.",
+            "zh": "我们修复了导致 v1.17.21 桌面版发布受阻的签名配置，并增加了自动化检查以验证所有未来发布的签名合约。"
+          },
+          "refs": [
+            6944
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Kimi K3 model available in official providers",
+              "zh": "官方提供商支持 Kimi K3 模型"
+            },
+            "body": {
+              "en": "The Kimi K3 model is now available in the Kimi CN and Kimi Global providers.",
+              "zh": "Kimi K3 模型现已在 Kimi 国内版和全球版提供商中可用。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Kimi K3 support in OpenCode Go",
+              "zh": "OpenCode Go 支持 Kimi K3"
+            },
+            "body": {
+              "en": "OpenCode Go now exposes Kimi K3 with its relay-specific high/max reasoning scale and existing OpenAI-compatible request behavior.",
+              "zh": "OpenCode Go 现支持 Kimi K3，并保留中继专用的高/最高推理等级及现有 OpenAI 兼容请求行为。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Native vision and 1M context for Kimi K3",
+              "zh": "Kimi K3 支持原生视觉和百万级上下文"
+            },
+            "body": {
+              "en": "Kimi K3 comes with native vision support, a 1,048,576-token context window, and low/high/max reasoning scale.",
+              "zh": "Kimi K3 具备原生视觉支持、1,048,576 token 上下文窗口以及低/高/最高推理等级。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop and native CLI release channels",
+              "zh": "桌面版和原生 CLI 发布渠道"
+            },
+            "body": {
+              "en": "Introduced Preview and Stable channels for Desktop updates and native CLI archives; Desktop users can select their channel in Settings.",
+              "zh": "为桌面更新和原生 CLI 归档推出 Preview 与 Stable 渠道；桌面用户可在设置中选择渠道。"
+            },
+            "refs": [
+              6155
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Signing contract automated validation",
+              "zh": "签名合约自动验证"
+            },
+            "body": {
+              "en": "The release process now validates the signing contract automatically to prevent misconfigurations.",
+              "zh": "发布流程现自动验证签名合约，防止配置错误。"
+            },
+            "refs": [
+              6944
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Fixed v1.17.21 Desktop release signing",
+              "zh": "修复 v1.17.21 桌面版发布签名"
+            },
+            "body": {
+              "en": "Resolved a signing issue that prevented the previous Desktop release from being published.",
+              "zh": "解决了导致前一个桌面版发布未能发布的签名问题。"
+            },
+            "refs": [
+              6944
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.18.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.21...desktop-v1.18.0",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
+      "version": "1.17.21",
+      "date": "2026-07-25",
+      "channel": "stable",
+      "title": {
+        "en": "Smarter planning, safer execution, and a more reliable desktop",
+        "zh": "更智能的规划、更安全的执行与更可靠的桌面体验"
+      },
+      "summary": {
+        "en": "This stable release brings deterministic planning, reliable paste undo, inline regex search, and native crash diagnostics. It also keeps CLI diagnostics out of the terminal, makes provider retries cancellable, resolves session ownership conflicts, and hardens plugin Hooks. Security improvements include Authenticode signing of all Windows executables, credential sanitization in logs, and updated dependencies to close 12 advisories.",
+        "zh": "此稳定版带来确定性规划、可靠的粘贴撤销、内嵌正则搜索和原生崩溃诊断。同时将 CLI 诊断与终端界面隔离，使提供程序重试可取消，解决会话所有权冲突，并强化插件 Hooks。安全改进包括所有 Windows 可执行文件的 Authenticode 签名、日志凭据脱敏，以及更新依赖项以关闭 12 项安全公告。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "desktop",
+        "mcp",
+        "plugin",
+        "provider",
+        "recovery",
+        "security",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "The official user guide for Reasonix Desktop.",
+            "zh": "Reasonix Desktop 的官方用户指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "The Chinese user guide for Reasonix Desktop.",
+            "zh": "Reasonix Desktop 的中文用户指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "The Reasonix specification.",
+            "zh": "Reasonix 规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/SPEC.md"
+        },
+        {
+          "title": {
+            "en": "Specification (Chinese)",
+            "zh": "规范（中文）"
+          },
+          "body": {
+            "en": "The Chinese Reasonix specification.",
+            "zh": "Reasonix 的中文规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/dcca564ec87e96632a65a8332455ee3f6c1370d7/docs/SPEC.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Inline regex search in code previews",
+            "zh": "代码预览中的内嵌正则搜索"
+          },
+          "body": {
+            "en": "A new regex toggle with bounded execution (Worker with timeout) enables safe pattern search in code views, with comprehensive result limits and error handling.",
+            "zh": "新增正则开关，通过限时执行（Worker 超时）在代码视图中启用安全的模式搜索，并提供了完整的结果限制和错误处理。"
+          },
+          "refs": [
+            6923
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Paste undo with Ctrl+Z on Windows",
+            "zh": "Windows 上 Ctrl+Z 粘贴撤销"
+          },
+          "body": {
+            "en": "Programmatic paste operations are now tracked in a per-draft transaction history, enabling Ctrl+Z to undo pastes while preserving native typing history and rich-composer state.",
+            "zh": "程序化粘贴操作现在按草稿跟踪事务历史，支持 Ctrl+Z 撤销粘贴，同时保留原生输入历史和富编辑器状态。"
+          },
+          "refs": [
+            6571
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Native crash diagnostics",
+            "zh": "原生崩溃诊断"
+          },
+          "body": {
+            "en": "Captures Go runtime fatal output and classifies abnormal exits with a bounded 10-report queue. Includes Windows responsiveness checks and crash worker integration.",
+            "zh": "捕获 Go 运行时致命输出并分类异常退出，采用有界 10 报告队列。包含 Windows 响应检查和崩溃 Worker 集成。"
+          },
+          "refs": [
+            6900
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Deterministic planner routing",
+            "zh": "确定性规划器路由"
+          },
+          "body": {
+            "en": "Replaces the boolean planner gate with explicit plan-and-execute, plan-for-approval, and plan-only routes, with light/full planning depth and bounded research.",
+            "zh": "将布尔规划器开关替换为明确的规划-执行、规划-批准和仅规划路由，并支持轻/全规划深度和有界研究。"
+          },
+          "refs": [
+            6918
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "MCP and Hooks trusted by default",
+            "zh": "默认信任 MCP 和 Hooks"
+          },
+          "body": {
+            "en": "Project and installed MCP servers and Hooks now load without separate trust confirmation, and trust state is removed. Duplicate names are resolved deterministically.",
+            "zh": "项目及已安装的 MCP 服务器和 Hooks 现在加载时无需单独信任确认，移除了信任状态。重复名称会确定性解析。"
+          },
+          "refs": [
+            6889
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Reduced Auto failure interruptions",
+            "zh": "减少 Auto 失败恢复打断"
+          },
+          "body": {
+            "en": "Tool failures are now treated as execution-reliability signals instead of task-wide approval boundaries, so unrelated work and read-only diagnosis continue automatically.",
+            "zh": "工具失败现在被视为执行可靠性信号而非任务范围批准边界，无关工作和只读诊断会自动继续。"
+          },
+          "refs": [
+            6896
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Redesigned search bar in code preview",
+            "zh": "重构的代码预览搜索栏"
+          },
+          "body": {
+            "en": "The full-width search toolbar is replaced with a compact floating popup that does not obscure code, while line numbers are properly aligned with content-box sizing.",
+            "zh": "全宽搜索工具栏替换为不遮挡代码的紧凑浮动弹窗，同时行号使用 content-box 尺寸正确对齐。"
+          },
+          "refs": [
+            6910
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Code font applied in chat and file preview",
+            "zh": "代码字体在对话和文件预览中生效"
+          },
+          "body": {
+            "en": "The code font selected in Typography Settings now correctly applies to chat code blocks and line-numbered file previews, overriding browser defaults.",
+            "zh": "排版设置中选择的代码字体现在正确应用于对话代码块和带行号的文件预览，覆盖浏览器默认值。"
+          },
+          "refs": [
+            6925
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Provider retries now cancellable",
+            "zh": "提供程序重试可取消"
+          },
+          "body": {
+            "en": "Retry status is treated as authoritative foreground activity, so the Stop button remains responsive and stale idle snapshots cannot hide the cancellation control.",
+            "zh": "重试状态被视为权威前台活动，因此停止按钮保持响应，过时的空闲快照无法隐藏取消控件。"
+          },
+          "refs": [
+            6902
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Clean CLI diagnostics and atomic session recovery",
+            "zh": "清晰的 CLI 诊断与原子会话恢复"
+          },
+          "body": {
+            "en": "Interactive CLI diagnostics and plugin stderr now stay in a private bounded log instead of corrupting the TUI, while recovery lease ownership and in-place history mutations preserve failure atomicity.",
+            "zh": "交互式 CLI 诊断和插件标准错误现在写入私有有界日志，不再干扰 TUI；同时，恢复租约所有权与原地历史变更保持失败原子性。"
+          },
+          "refs": [
+            6912
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Session runtime ownership conflicts resolved",
+            "zh": "会话运行时所有权冲突已解决"
+          },
+          "body": {
+            "en": "One process now has one local session runtime owner per canonical session, preventing misleading 'lease blocked' errors in Goal + Delivery and duplicate-tab scenarios.",
+            "zh": "每个规范会话现在有一个进程内的本地会话运行时所有者，防止在 Goal + Delivery 及重复标签页中出现误导性的“租约阻塞”错误。"
+          },
+          "refs": [
+            6897
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Cross-platform plugin Hook execution",
+            "zh": "跨平台插件 Hook 执行"
+          },
+          "body": {
+            "en": "Plugin Hook execution contracts now correctly preserve explicit exec vs shell forms, and compound CMD/PowerShell scripts are transported intact without token re-rendering.",
+            "zh": "插件 Hook 执行契约现在正确保留显式 exec 与 shell 形式，复合 CMD/PowerShell 脚本原样传输且不重新渲染令牌。"
+          },
+          "refs": [
+            6911
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "All Windows executables signed",
+            "zh": "全部 Windows 可执行文件已签名"
+          },
+          "body": {
+            "en": "Every payload executable in the Windows installer is now Authenticode-signed, preventing Windows Defender from quarantining the app after installation or update.",
+            "zh": "Windows 安装程序中的每个载荷可执行文件现在均已 Authenticode 签名，防止安装或更新后 Windows Defender 隔离应用。"
+          },
+          "refs": [
+            6904
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Sanitized error logs",
+            "zh": "错误日志脱敏"
+          },
+          "body": {
+            "en": "Credentials and URL userinfo in error logs are now masked before writing, addressing CodeQL alerts and preventing sensitive data exposure.",
+            "zh": "错误日志中的凭据和 URL 用户信息在写入前被屏蔽，解决了 CodeQL 警报并防止敏感数据泄露。"
+          },
+          "refs": [
+            6924
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Dependency security patches",
+            "zh": "依赖安全补丁"
+          },
+          "body": {
+            "en": "Updated Astro, PostCSS, sharp, SVGO, DOMPurify, and other dependencies to close 12 Dependabot alerts across six vulnerability families.",
+            "zh": "更新了 Astro、PostCSS、sharp、SVGO、DOMPurify 等依赖项，关闭了六个漏洞系列中的 12 个 Dependabot 警报。"
+          },
+          "refs": [
+            6922
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Inline regex search in code previews",
+              "zh": "代码预览中的内嵌正则搜索"
+            },
+            "body": {
+              "en": "Add bounded regex search with Worker timeout, pattern/source limits, and result cap. Supports literal and regex toggles.",
+              "zh": "添加带 Worker 超时的有界正则搜索，限制模式和源码长度，并设置结果上限。支持字面量和正则切换。"
+            },
+            "refs": [
+              6923
+            ]
+          },
+          {
+            "title": {
+              "en": "Paste undo with Ctrl+Z",
+              "zh": "Ctrl+Z 粘贴撤销"
+            },
+            "body": {
+              "en": "Track programmatic paste edits in per-draft history, preserving native typing order. Undo/Redo added to context menu and shortcut catalog.",
+              "zh": "按草稿跟踪程序化粘贴编辑，保留原生输入顺序。在右键菜单和快捷键目录中添加撤销/重做。"
+            },
+            "refs": [
+              6571
+            ]
+          },
+          {
+            "title": {
+              "en": "Native crash diagnostics",
+              "zh": "原生崩溃诊断"
+            },
+            "body": {
+              "en": "Capture Go fatal output, classify exits, and queue up to 10 reports. Includes lifecycle signals and WebView2 checks.",
+              "zh": "捕获 Go 致命输出，分类退出并排队最多 10 份报告。包含生命周期信号和 WebView2 检查。"
+            },
+            "refs": [
+              6900
+            ]
+          },
+          {
+            "title": {
+              "en": "Deterministic planner routing",
+              "zh": "确定性规划器路由"
+            },
+            "body": {
+              "en": "Replace boolean gate with explicit routes (plan-and-execute, plan-for-approval, plan-only) and light/full depth.",
+              "zh": "用显式路由（规划-执行、规划-批准、仅规划）和轻/全深度替换布尔开关。"
+            },
+            "refs": [
+              6918
+            ]
+          },
+          {
+            "title": {
+              "en": "MCP and Hooks trusted by default",
+              "zh": "默认信任 MCP 和 Hooks"
+            },
+            "body": {
+              "en": "Remove launch confirmation for project MCP servers and Hooks. Persist installs to config.toml; resolve duplicates deterministically.",
+              "zh": "移除项目 MCP 服务器和 Hooks 的启动确认。将安装持久化到 config.toml；确定性解析重复项。"
+            },
+            "refs": [
+              6889
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Reduced Auto failure interruptions",
+              "zh": "减少 Auto 失败恢复打断"
+            },
+            "body": {
+              "en": "Treat tool failures as reliability signals, allowing unrelated work to continue. Bounded retries and concise recovery guidance.",
+              "zh": "将工具失败视为可靠性信号，允许无关工作继续。有界重试和简洁的恢复指引。"
+            },
+            "refs": [
+              6896
+            ]
+          },
+          {
+            "title": {
+              "en": "Redesigned search bar in code preview",
+              "zh": "重构的代码预览搜索栏"
+            },
+            "body": {
+              "en": "Replace full-width toolbar with floating search popup; align line numbers with content-box sizing.",
+              "zh": "用浮动搜索弹窗替换全宽工具栏；通过 content-box 尺寸对齐行号。"
+            },
+            "refs": [
+              6910
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Code font in chat and file preview",
+              "zh": "对话和文件预览中的代码字体"
+            },
+            "body": {
+              "en": "Apply configured code font to chat code blocks and line-numbered previews, overriding browser monospace.",
+              "zh": "将配置的代码字体应用于对话代码块和带行号的预览，覆盖浏览器等宽字体。"
+            },
+            "refs": [
+              6925
+            ]
+          },
+          {
+            "title": {
+              "en": "Provider retries cancellable",
+              "zh": "提供程序重试可取消"
+            },
+            "body": {
+              "en": "Treat retrying as foreground activity so Stop remains clickable regardless of snapshot order.",
+              "zh": "将重试视为前台活动，确保无论快照顺序如何，停止按钮始终可点击。"
+            },
+            "refs": [
+              6902
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI diagnostics and recovery ownership",
+              "zh": "CLI 诊断与恢复所有权"
+            },
+            "body": {
+              "en": "Route interactive diagnostics away from the terminal and migrate recovery lease ownership atomically across runtime rebuilds.",
+              "zh": "将交互式诊断与终端隔离，并在运行时重建期间原子迁移恢复租约所有权。"
+            },
+            "refs": [
+              6912
+            ]
+          },
+          {
+            "title": {
+              "en": "Session runtime ownership",
+              "zh": "会话运行时所有权"
+            },
+            "body": {
+              "en": "Enforce one local runtime owner per session to prevent duplicate builds and misleading lease errors.",
+              "zh": "每个会话强制单本地运行时所有者，防止重复构建和误导的租约错误。"
+            },
+            "refs": [
+              6897
+            ]
+          },
+          {
+            "title": {
+              "en": "Plugin Hook execution contracts",
+              "zh": "插件 Hook 执行契约"
+            },
+            "body": {
+              "en": "Preserve explicit exec/shell launch modes, transport compound scripts intact.",
+              "zh": "保留显式 exec/shell 启动模式，原样传输复合脚本。"
+            },
+            "refs": [
+              6911
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows Authenticode signing",
+              "zh": "Windows Authenticode 签名"
+            },
+            "body": {
+              "en": "Sign all payload executables to prevent Defender quarantine after install or update.",
+              "zh": "签名所有载荷可执行文件，防止安装或更新后被 Defender 隔离。"
+            },
+            "refs": [
+              6904
+            ]
+          },
+          {
+            "title": {
+              "en": "Sensitive data exposure in error logs",
+              "zh": "错误日志敏感信息泄露"
+            },
+            "body": {
+              "en": "Redact credentials and URL userinfo from heartbeat and bot controller error logs.",
+              "zh": "从心跳和机器人控制器错误日志中脱敏凭据和 URL 用户信息。"
+            },
+            "refs": [
+              6924
+            ]
+          },
+          {
+            "title": {
+              "en": "Dependency security updates",
+              "zh": "依赖安全更新"
+            },
+            "body": {
+              "en": "Patch 12 Dependabot alerts in Astro, PostCSS, sharp, SVGO, DOMPurify, etc.",
+              "zh": "修补 Astro、PostCSS、sharp、SVGO、DOMPurify 等中的 12 个 Dependabot 警报。"
+            },
+            "refs": [
+              6922
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "JesonChou",
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.21",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.20...desktop-v1.17.21",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
+      "version": "1.17.20",
+      "date": "2026-07-24",
+      "channel": "stable",
+      "title": {
+        "en": "Machine-ready CLI, trusted MCP delegation, and safer desktop updates",
+        "zh": "机器友好 CLI、可信 MCP 协作与更安全的桌面更新"
+      },
+      "summary": {
+        "en": "This release adds privacy-preserving machine interfaces for CLI automation, lets Planner and sub-agents use authorized MCP capabilities through a stable cache-friendly proxy, enables verified in-app updates for Debian packages, and makes desktop model switching, rich-text editing, Plan recovery, and code previews more reliable.",
+        "zh": "此版本为 CLI 自动化新增保护隐私的机器接口，让 Planner 与子 Agent 通过稳定且缓存友好的代理使用已授权 MCP 能力，为 Debian 安装包带来经过验证的应用内更新，并提升桌面端模型切换、富文本编辑、Plan 恢复和代码预览的可靠性。"
+      },
+      "surfaces": [
+        "cli",
+        "agent",
+        "mcp",
+        "desktop",
+        "updates",
+        "recovery"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "CLI automation interfaces",
+            "zh": "CLI 自动化接口"
+          },
+          "body": {
+            "en": "Use the documented session, task, hook, and event-stream contracts to integrate Reasonix without parsing terminal presentation.",
+            "zh": "使用文档化的会话、任务、Hook 和事件流契约集成 Reasonix，无需解析终端展示文本。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/16d71aa4758765b6e7f86d8659e794bdd4a5b535/docs/CLI.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Privacy-preserving machine interfaces",
+            "zh": "保护隐私的机器接口"
+          },
+          "body": {
+            "en": "CLI automation can inspect sessions, tasks, hooks, and lifecycle events through structured contracts with opaque machine identities, verified artifact state, and fail-closed runtime ownership.",
+            "zh": "CLI 自动化现在可通过结构化契约检查会话、任务、Hook 和生命周期事件，并使用不透明机器身份、经过验证的制品状态和安全失败的运行时所有权边界。"
+          },
+          "refs": [
+            6859
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Planner and sub-agents can use trusted MCPs",
+            "zh": "Planner 与子 Agent 可使用可信 MCP"
+          },
+          "body": {
+            "en": "Installed and authorized MCP capabilities are available through one stable use_capability schema, preserving provider-prefix cache stability while enforcing live authorization, exact runtime identity, revocation, and destructive-effect boundaries.",
+            "zh": "已安装并授权的 MCP 能力现在通过稳定的 use_capability schema 提供，在保持 Provider 前缀缓存稳定的同时，执行实时授权、精确运行时身份、撤销和破坏性效果边界。"
+          },
+          "refs": [
+            6865
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Verified Debian package updates",
+            "zh": "经过验证的 Debian 安装包更新"
+          },
+          "body": {
+            "en": "Debian and Ubuntu desktop installs can authorize upgrades through a packaged Polkit helper that rechecks ownership, signatures, package identity, architecture, and version before apt installs the update.",
+            "zh": "Debian 与 Ubuntu 桌面安装现在可通过随包提供的 Polkit helper 授权升级；在 apt 安装更新前，会重新检查所有权、签名、包身份、架构和版本。"
+          },
+          "refs": [
+            6866
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop editing and provider state stay stable",
+            "zh": "桌面编辑与 Provider 状态更加稳定"
+          },
+          "body": {
+            "en": "Rich-composer edits no longer jump to the end around invocation chips, transcript selections survive Plan revision refreshes, and rapid model switches cannot restore stale provider balance or overwrite session and global defaults.",
+            "zh": "富文本输入框在调用标签附近编辑时不再跳到末尾，Plan 修订刷新不会清除历史文本选择，快速模型切换也不会恢复过期余额或混淆会话模型与全局默认值。"
+          },
+          "refs": [
+            6872,
+            6466,
+            6881
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Structured session, task, hook, and event output",
+              "zh": "结构化会话、任务、Hook 与事件输出"
+            },
+            "body": {
+              "en": "New machine-facing CLI projections expose durable lifecycle state without leaking provider-controlled tool names or guessable transcript identities, while existing json and stream-json session identifiers remain compatible.",
+              "zh": "新的 CLI 机器投影可提供持久生命周期状态，同时避免泄露 Provider 控制的工具名称或可猜测的历史记录身份；现有 json 与 stream-json 会话标识保持兼容。"
+            },
+            "refs": [
+              6859
+            ]
+          },
+          {
+            "title": {
+              "en": "Stable MCP capability routing for delegated work",
+              "zh": "委派任务的稳定 MCP 能力路由"
+            },
+            "body": {
+              "en": "Planner, review, task, fleet, and dual-model Executor paths share authorized MCP runtime state while keeping per-agent ledgers, exact allowlists, serialized writers, structured image results, and provider-visible schemas stable.",
+              "zh": "Planner、Review、Task、Fleet 和双模型 Executor 现在共享已授权 MCP 运行时状态，同时保持每个 Agent 的独立记录、精确白名单、写操作串行化、结构化图片结果和稳定的 Provider 可见 schema。"
+            },
+            "refs": [
+              6865
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Episode-bounded Auto recovery and explicit Plan exit",
+              "zh": "按 Episode 限制 Auto 恢复并支持明确退出 Plan"
+            },
+            "body": {
+              "en": "Recovery limits now apply to the current execution episode and reset on real new work, while Desktop and CLI can leave Plan without executing or discarding the active Goal.",
+              "zh": "恢复上限现在只作用于当前执行 Episode，并会在真正的新工作开始时重置；桌面端和 CLI 也可退出 Plan 而不执行计划或丢失当前 Goal。"
+            },
+            "refs": [
+              6871
+            ]
+          },
+          {
+            "title": {
+              "en": "More accurate completion evidence",
+              "zh": "更准确的完成证据"
+            },
+            "body": {
+              "en": "complete_step accepts fresh structured review receipts only when they follow the latest mutation and cover the changed result, rejecting stale reviews and background-task starts.",
+              "zh": "complete_step 现在只接受位于最新变更之后并覆盖其结果的新鲜结构化 Review 回执，同时拒绝过期 Review 和仅启动的后台任务。"
+            },
+            "refs": [
+              6762
+            ]
+          },
+          {
+            "title": {
+              "en": "Broader and bounded syntax highlighting",
+              "zh": "覆盖更广且有安全上限的语法高亮"
+            },
+            "body": {
+              "en": "Desktop previews support 52 languages and share one path-aware resolver across chat, diffs, and files, with large blocks falling back to escaped plain text instead of overloading highlighting.",
+              "zh": "桌面预览现在支持 52 种语言，并在聊天、Diff 和文件视图中共用路径感知的解析器；超大代码块会安全回退为转义纯文本，避免高亮负载过大。"
+            },
+            "refs": [
+              6861
+            ]
+          },
+          {
+            "title": {
+              "en": "Recoverable stable-release channels",
+              "zh": "可按通道恢复的稳定版发布"
+            },
+            "body": {
+              "en": "Stable release recoveries now carry the reviewed notes validated by the protected control plane and can retry only failed channels while still verifying every public artifact.",
+              "zh": "稳定版恢复现在会携带受保护控制面验证过的审核版说明，并可只重试失败通道，同时仍校验全部公开制品。"
+            },
+            "refs": [
+              6843
+            ]
+          },
+          {
+            "title": {
+              "en": "Fewer release-only pull requests",
+              "zh": "减少仅用于发版的 Pull Request"
+            },
+            "body": {
+              "en": "Release notes can now be generated into an existing same-repository release-bound pull request, keeping the dedicated release-notes PR as a fallback while preserving protected-main review and every publication gate.",
+              "zh": "发布说明现在可直接生成到同仓库已有的发版边界 Pull Request 中，专用发布说明 PR 仅作为兜底，同时继续保留受保护 main-v2 审核和全部发布门禁。"
+            },
+            "refs": [
+              6893
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Rich-composer caret and IME stability",
+              "zh": "富文本输入框光标与输入法稳定性"
+            },
+            "body": {
+              "en": "Selection mapping now handles invocation chips, NBSP anchors, ranges, repeated text, temporary selection loss, and WebView2 IME ordering without moving mid-text edits to the end.",
+              "zh": "选择映射现在能正确处理调用标签、NBSP 锚点、范围选择、重复文本、临时选择丢失和 WebView2 输入法事件顺序，不再把中间编辑移到末尾。"
+            },
+            "refs": [
+              6872
+            ]
+          },
+          {
+            "title": {
+              "en": "Last-click-wins model switching",
+              "zh": "最后点击生效的模型切换"
+            },
+            "body": {
+              "en": "Per-tab model switches are serialized, stale balance and catalog responses are discarded, failed switches restore safe state, and session-local picks no longer rewrite the global default for new sessions.",
+              "zh": "每个标签页的模型切换现在会串行执行，过期余额和模型目录响应会被丢弃，失败切换会恢复安全状态，会话内选择也不会改写新会话使用的全局默认值。"
+            },
+            "refs": [
+              6881
+            ]
+          },
+          {
+            "title": {
+              "en": "Plan revision preserves transcript selection",
+              "zh": "Plan 修订保留历史文本选择"
+            },
+            "body": {
+              "en": "Periodic parent refreshes no longer refocus the revision editor and clear transcript text that the user selected for copying.",
+              "zh": "周期性父级刷新不再重新聚焦修订编辑器，也不会清除用户为复制而选中的历史文本。"
+            },
+            "refs": [
+              6466
+            ]
+          },
+          {
+            "title": {
+              "en": "Documentation sidebar tracks the active section",
+              "zh": "文档侧边栏正确跟随当前章节"
+            },
+            "body": {
+              "en": "The documentation site now highlights the section that is actually visible instead of leaving a stale sidebar item active.",
+              "zh": "文档站现在会高亮实际可见的章节，不再让过期的侧边栏项目保持激活。"
+            },
+            "refs": [
+              6222
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "warning",
+          "title": {
+            "en": "One-time bootstrap for existing Debian packages",
+            "zh": "现有 Debian 安装需要一次性 bootstrap"
+          },
+          "body": {
+            "en": "Older .deb installs do not contain the new Polkit helper. Install the 1.17.20 .deb once with sudo apt install ./Reasonix-linux-amd64.deb; later in-app updates can use the authorized helper without uninstalling first.",
+            "zh": "旧版 .deb 尚未包含新的 Polkit helper。请先执行一次 sudo apt install ./Reasonix-linux-amd64.deb 安装 1.17.20；之后即可使用应用内授权更新，无需先卸载。"
+          },
+          "refs": [
+            6866
+          ]
+        },
+        {
+          "level": "info",
+          "title": {
+            "en": "Keep Desktop and Remote hosts on matching versions",
+            "zh": "Desktop 与 Remote Host 请保持同版本"
+          },
+          "body": {
+            "en": "The remote protocol adds optional resolved-capability metadata. Old data remains readable, but Desktop and Remote hosts should follow the existing matching-build upgrade contract.",
+            "zh": "远程协议新增可选的已解析能力元数据。旧数据仍可读取，但 Desktop 与 Remote Host 应继续遵循同版本构建的升级约定。"
+          },
+          "refs": [
+            6865
+          ]
+        },
+        {
+          "level": "info",
+          "title": {
+            "en": "No manual data migration required",
+            "zh": "无需手动迁移数据"
+          },
+          "body": {
+            "en": "Existing providers, sessions, projects, Goals, jobs, and MCP definitions continue to load. The events-jsonl machine interface creates a private per-install identity key on first use; legacy json and stream-json resume identifiers remain unchanged.",
+            "zh": "现有 Provider、会话、项目、Goal、后台任务和 MCP 定义会继续加载。events-jsonl 机器接口首次使用时会创建每次安装私有的身份密钥；旧有 json 与 stream-json 恢复标识保持不变。"
+          },
+          "refs": [
+            6859
+          ]
+        }
+      ],
+      "risks": [
+        {
+          "title": {
+            "en": "Installed MCP authorization is the trust boundary",
+            "zh": "已安装 MCP 的授权状态是信任边界"
+          },
+          "body": {
+            "en": "Planner and ordinary sub-agents can call installed and authorized MCP capabilities without another launch prompt. Explicit deny rules, live revocation, destructive checks, exact runtime identity, and serialized writer dispatch still apply.",
+            "zh": "Planner 与普通子 Agent 可在不重复弹出启动确认的情况下调用已安装且授权的 MCP 能力。显式 deny、实时撤销、破坏性检查、精确运行时身份和写操作串行化仍然生效。"
+          },
+          "refs": [
+            6865
+          ]
+        }
+      ],
+      "contributors": [
+        "SivanCola",
+        "mchenziyi",
+        "JesonChou",
+        "SauronSkywalker",
+        "9710willy",
+        "par73e"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.17.20",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.17.19...desktop-v1.17.20",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.19",
       "date": "2026-07-22",
       "channel": "stable",
@@ -2016,12 +3048,12 @@
         {
           "kind": "security",
           "title": {
-			"en": "MCP launch authorization",
-			"zh": "MCP 启动授权"
+            "en": "MCP launch authorization",
+            "zh": "MCP 启动授权"
           },
           "body": {
-			"en": "User-installed MCP servers work immediately. Repository-declared servers still require one exact identity approval before startup, and identity changes invalidate that approval.",
-			"zh": "用户主动安装的 MCP server 可直接使用；仓库声明的 server 仍需在首次启动前确认一次精确身份，身份变化后原授权自动失效。"
+            "en": "User-installed MCP servers work immediately. Repository-declared servers still require one exact identity approval before startup, and identity changes invalidate that approval.",
+            "zh": "用户主动安装的 MCP server 可直接使用；仓库声明的 server 仍需在首次启动前确认一次精确身份，身份变化后原授权自动失效。"
           },
           "refs": [
             6482,

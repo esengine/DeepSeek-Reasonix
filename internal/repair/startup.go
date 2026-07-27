@@ -24,6 +24,9 @@ type StartupState struct {
 	SchemaVersion       int    `json:"schemaVersion"`
 	Phase               string `json:"phase"`
 	Version             string `json:"version,omitempty"`
+	InstallProfile      string `json:"installProfile,omitempty"`
+	UpdateFromVersion   string `json:"updateFromVersion,omitempty"`
+	UpdateToVersion     string `json:"updateToVersion,omitempty"`
 	PID                 int    `json:"pid,omitempty"`
 	SafeMode            bool   `json:"safeMode,omitempty"`
 	ConsecutiveFailures int    `json:"consecutiveFailures,omitempty"`
@@ -31,6 +34,18 @@ type StartupState struct {
 	StartedAt           string `json:"startedAt,omitempty"`
 	UpdatedAt           string `json:"updatedAt,omitempty"`
 	Error               string `json:"error,omitempty"`
+}
+
+// PreviousRunObservation is a privacy-safe description of a startup record
+// whose owner is no longer alive. PID and filesystem paths remain local.
+type PreviousRunObservation struct {
+	Abnormal       bool
+	Phase          string
+	Version        string
+	InstallProfile string
+	UpdateFrom     string
+	UpdateTo       string
+	UptimeBucket   string
 }
 
 type StartupTracker struct {
@@ -77,6 +92,50 @@ func (t *StartupTracker) SafeModeRecommended() bool {
 		return false
 	}
 	return nextFailureCount(state, t.now(), defaultCrashWindow) >= defaultFailureLimit
+}
+
+// ObservePreviousRun reports an unclean prior process without mutating its
+// record. A healthy process that later vanished is observable here even though
+// it is intentionally not counted toward the startup crash-loop threshold.
+func (t *StartupTracker) ObservePreviousRun() PreviousRunObservation {
+	state, err := t.Read()
+	if err != nil || state.Phase == "" || state.Phase == "clean-exit" {
+		return PreviousRunObservation{}
+	}
+	if runningStartupPhase(state.Phase) && state.PID > 0 && t.processAlive(state.PID) {
+		return PreviousRunObservation{}
+	}
+	return PreviousRunObservation{
+		Abnormal:       true,
+		Phase:          state.Phase,
+		Version:        state.Version,
+		InstallProfile: state.InstallProfile,
+		UpdateFrom:     state.UpdateFromVersion,
+		UpdateTo:       state.UpdateToVersion,
+		UptimeBucket:   startupUptimeBucket(state),
+	}
+}
+
+func startupUptimeBucket(state StartupState) string {
+	started, startErr := time.Parse(time.RFC3339Nano, state.StartedAt)
+	updated, updateErr := time.Parse(time.RFC3339Nano, state.UpdatedAt)
+	if startErr != nil || updateErr != nil || updated.Before(started) {
+		return "unknown"
+	}
+	switch d := updated.Sub(started); {
+	case d < 30*time.Second:
+		return "s_0_30"
+	case d < 2*time.Minute:
+		return "m_0_2"
+	case d < 10*time.Minute:
+		return "m_2_10"
+	case d < time.Hour:
+		return "m_10_60"
+	case d < 6*time.Hour:
+		return "h_1_6"
+	default:
+		return "h_6_plus"
+	}
 }
 
 // lock serializes the tracker's cross-process read-modify-write cycles. Lock
@@ -135,6 +194,41 @@ func (t *StartupTracker) Begin(version string, safeMode bool) (StartupState, err
 		UpdatedAt:           now.Format(time.RFC3339Nano),
 	}
 	return state, t.write(state)
+}
+
+// MarkLaunchContext attaches bounded, non-secret release metadata to the
+// currently-owned startup record for later crash attribution.
+func (t *StartupTracker) MarkLaunchContext(installProfile, updateFrom, updateTo string) error {
+	unlock := t.lock()
+	defer unlock()
+	state, err := t.Read()
+	if err != nil {
+		return err
+	}
+	if state.PID != os.Getpid() {
+		return nil
+	}
+	state.InstallProfile = installProfile
+	state.UpdateFromVersion = updateFrom
+	state.UpdateToVersion = updateTo
+	state.UpdatedAt = t.now().UTC().Format(time.RFC3339Nano)
+	return t.write(state)
+}
+
+// Heartbeat refreshes UpdatedAt without changing the startup phase. It makes a
+// later hard exit attributable to a coarse uptime bucket.
+func (t *StartupTracker) Heartbeat() error {
+	unlock := t.lock()
+	defer unlock()
+	state, err := t.Read()
+	if err != nil {
+		return err
+	}
+	if state.PID != os.Getpid() || !runningStartupPhase(state.Phase) {
+		return nil
+	}
+	state.UpdatedAt = t.now().UTC().Format(time.RFC3339Nano)
+	return t.write(state)
 }
 
 func incompleteStartupPhase(phase string) bool {

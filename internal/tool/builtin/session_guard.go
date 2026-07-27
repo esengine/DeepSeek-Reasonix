@@ -56,7 +56,7 @@ func (g SessionDataGuard) Check(target string) error {
 		return nil // can't resolve -> let the caller's normal error path handle it
 	}
 	if g.deniesSecurity(abs) {
-		return fmt.Errorf("path %q is a Reasonix security boundary file (%s holds the global hooks and hook trust store; hooks execute arbitrary shell commands on every future session). Agents may not modify it. "+
+		return fmt.Errorf("path %q is a Reasonix security boundary file (%s holds the global hooks; hooks execute arbitrary shell commands on every future session). Agents may not modify it. "+
 			"Ask the user to edit it themselves, or to add the directory to [sandbox] allow_write in reasonix.toml if raw access is truly intended",
 			target, g.stateRoot)
 	}
@@ -70,15 +70,11 @@ func (g SessionDataGuard) Check(target string) error {
 
 // securityStateFile reports whether name (a state-root-direct file name,
 // already case-folded when the platform folds) is a security boundary rather
-// than a mere runtime ledger: settings.json defines the global hooks —
-// arbitrary shell commands executed on harness events in every project — and
-// trust.json records which projects' hooks are trusted to run at all. An agent
-// that can write either one can persist code execution across all future
-// sessions, so these deny even when the racing-saves rationale of
-// runtimeStateFile does not apply.
+// than a mere runtime ledger. settings.json defines the global hooks:
+// arbitrary shell commands executed on harness events in every project.
 func securityStateFile(name string) bool {
 	switch name {
-	case "settings.json", "trust.json":
+	case "settings.json":
 		return true
 	}
 	return false
@@ -118,8 +114,8 @@ func (g SessionDataGuard) deniesSecurity(abs string) bool {
 // periodic flushes — so an agent edit vanishes the same way a session-file edit
 // does. config.toml / credentials / skills stay writable: editing those on the
 // user's request is a legitimate flow with no autonomous rewriter racing it —
-// but settings.json / trust.json are a security boundary, not a ledger, and are
-// denied separately by securityStateFile.
+// but settings.json is a security boundary, not a ledger, and is denied
+// separately by securityStateFile.
 // heartbeat-tasks.json stays writable too — it is documented as human- and
 // AI-editable (desktop/heartbeat.go, and the heartbeat panel tip says "AI
 // agents can also edit heartbeat-tasks.json"), so the product explicitly

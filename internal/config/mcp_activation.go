@@ -270,7 +270,7 @@ func activationIdentity(entry PluginEntry, workspace string) (MCPActivationScope
 		owner = strings.TrimSpace(source)
 		return MCPActivationGlobal, "", source, owner
 	}
-	if entry.Source.RequiresLaunchApproval() || source == "workspace_config" || source == "project" || source == ".mcp.json" {
+	if entry.Source.ProjectScoped() || source == "workspace_config" || source == "project" || source == ".mcp.json" {
 		return MCPActivationWorkspace, mcplaunch.WorkspaceFingerprint(workspace), source, owner
 	}
 	return MCPActivationGlobal, "", source, owner

@@ -11,6 +11,10 @@ on:
         description: "Previous release tag (defaults to the newest catalog entry)"
         required: false
         type: string
+      target_pr:
+        description: "Optional open same-repository PR into main-v2 to reuse instead of opening a release-only PR"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -29,20 +33,54 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Prepare the release-notes branch
+      - name: Select the review branch
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
+          TARGET_PR: ${{ inputs.target_pr }}
         run: |
           set -euo pipefail
-          branch="release-notes/v${VERSION#v}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch" main-v2
+          git fetch origin main-v2
+
+          if [ -n "$TARGET_PR" ]; then
+            if [[ ! "$TARGET_PR" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::target_pr must be a positive pull request number"
+              exit 1
+            fi
+            mapfile -t pr_state < <(
+              gh pr view "$TARGET_PR" --repo "$REPOSITORY" \
+                --json state,baseRefName,headRefName,isCrossRepository \
+                --jq '[.state, .baseRefName, .headRefName, (.isCrossRepository | tostring)][]'
+            )
+            if [ "${pr_state[0]}" != "OPEN" ] || [ "${pr_state[1]}" != "main-v2" ]; then
+              echo "::error::target_pr must be an open pull request into main-v2"
+              exit 1
+            fi
+            if [ "${pr_state[3]}" != "false" ]; then
+              echo "::error::target_pr comes from a fork; the repository token cannot safely update that branch"
+              exit 1
+            fi
+            branch="${pr_state[2]}"
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
             git checkout -b "$branch" --track "origin/$branch"
-            git merge --no-edit origin/main-v2
+            if ! git merge-base --is-ancestor origin/main-v2 HEAD; then
+              echo "::error::target_pr must include the latest main-v2 before release notes are generated"
+              exit 1
+            fi
+            echo "RELEASE_NOTES_PR=$TARGET_PR" >> "$GITHUB_ENV"
           else
-            git checkout -b "$branch"
+            branch="release-notes/v${VERSION#v}"
+            if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+              git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+              git checkout -b "$branch" --track "origin/$branch"
+              git merge --no-edit origin/main-v2
+            else
+              git checkout -b "$branch"
+            fi
+            echo "RELEASE_NOTES_PR=" >> "$GITHUB_ENV"
           fi
           echo "RELEASE_NOTES_BRANCH=$branch" >> "$GITHUB_ENV"
 
@@ -61,6 +99,11 @@ jobs:
           node scripts/release-notes.mjs validate
           node --test scripts/release-notes.test.mjs
           node scripts/release-notes.mjs render --version "$VERSION" --output /tmp/release-notes.md
+          {
+            echo "## Review draft for v${VERSION#v}"
+            echo
+            cat /tmp/release-notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Open or update the review PR
         env:
@@ -71,10 +114,16 @@ jobs:
           git add release-notes/releases.json
           if ! git diff --cached --quiet; then
             git commit -m "docs(release): prepare v${VERSION#v} notes" \
-              -m "Generate a bilingual, product-focused draft from merged pull request metadata. The reviewed catalog will drive the website, desktop app, and GitHub releases."
+              -m "Summary:
+          Generate a bilingual, product-focused draft from merged pull request metadata. Reuse the selected release-bound PR when one is available.
+
+          Verification:
+          Validate the catalog, citations, bilingual fields, and rendered GitHub release notes before committing."
           fi
           git push -u origin "$RELEASE_NOTES_BRANCH"
-          if ! gh pr list --head "$RELEASE_NOTES_BRANCH" --state open --json number --jq 'length > 0' | grep -q true; then
+          if [ -n "$RELEASE_NOTES_PR" ]; then
+            echo "Updated existing release-bound PR #$RELEASE_NOTES_PR"
+          elif ! gh pr list --head "$RELEASE_NOTES_BRANCH" --state open --json number --jq 'length > 0' | grep -q true; then
             gh pr create \
               --base main-v2 \
               --head "$RELEASE_NOTES_BRANCH" \

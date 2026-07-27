@@ -314,7 +314,7 @@ func TestQualifyingFailureReturnsGuidanceAndPersistsArmedState(t *testing.T) {
 		Args:       json.RawMessage(`{"command":"go test ./..."}`),
 		ErrSummary: "exit status 1", Output: "FAIL",
 	})
-	if !strings.Contains(guidance, "Diagnose with read-only tools first") {
+	if !strings.Contains(guidance, "Use read-only diagnosis as needed") {
 		t.Fatalf("guidance = %q", guidance)
 	}
 	select {
@@ -460,7 +460,9 @@ func TestRepeatedFailureStopsOnlyTheSameOperation(t *testing.T) {
 	}
 	retry := Proposal{
 		TaskScopeID: "turn:1", Tool: "bash", Subject: "mvn test",
-		Verification: true, Args: failedArgs,
+		// Agent.executeOne always supplies a display/approval preview. Recovery
+		// operation accounting must still match the observation, which has none.
+		Preview: "mvn test", Verification: true, Args: failedArgs,
 	}
 	g.ObserveResult(context.Background(), failed)
 	for attempt := 0; attempt < 2; attempt++ {
@@ -573,8 +575,9 @@ func TestReviseClosesFailureEpisodeBeforeAlternative(t *testing.T) {
 		return "revise-1", nil
 	}
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
-		TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go", Mutates: true,
-		Args: json.RawMessage(`{"path":"a.go","content":"first"}`),
+		TaskScopeID: "turn:1", Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+		PlanBefore: "1. Keep the current approach [in_progress]",
+		PlanAfter:  "1. Replace the current approach [in_progress]",
 	})
 	if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, "targeted edit") {
 		t.Fatalf("revise decision = %+v, %v", dec, err)
@@ -596,11 +599,12 @@ func TestReviewerRejectBudgetIsEpisodeCumulative(t *testing.T) {
 	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
 		Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "not proven",
 	}}})
+	argsA := json.RawMessage(`{"path":"a.go"}`)
 	g.ObserveResult(context.Background(), Observation{
-		TaskScopeID: "turn:1", Tool: "bash", Subject: "go test", Verification: true,
-		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+		TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go", Mutates: true,
+		Args: argsA, ErrSummary: "fail",
 	})
-	proposalA := Proposal{TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go", Mutates: true, Args: json.RawMessage(`{"path":"a.go"}`)}
+	proposalA := Proposal{TaskScopeID: "turn:1", Tool: "write_file", Subject: "a.go", Mutates: true, Args: argsA}
 	for i := 0; i < 3; i++ {
 		dec, err := g.BeforeMutation(context.Background(), proposalA)
 		if err != nil || dec.Allow || !dec.Blocked {
@@ -770,9 +774,10 @@ func TestReviewerContinueSkipsPrompt(t *testing.T) {
 			Rationale: "same patch retry",
 		}},
 	})
+	args := json.RawMessage(`{"path":"foo/a.go","content":"fix"}`)
 	g.ObserveResult(context.Background(), Observation{
-		Tool: "bash", Verification: true, Subject: "go test ./foo",
-		Args: json.RawMessage(`{"command":"go test ./foo"}`), ErrSummary: "fail",
+		Tool: "write_file", Subject: "foo/a.go", Mutates: true,
+		Args: args, ErrSummary: "fail",
 	})
 	var prompted atomic.Bool
 	g.opts.EmitPrompt = func(ctx context.Context, taskID string, pending PendingProposal, failure *FailureEvent) (string, error) {
@@ -780,8 +785,7 @@ func TestReviewerContinueSkipsPrompt(t *testing.T) {
 		return "x", nil
 	}
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
-		Tool: "write_file", Subject: "a.go", Mutates: true,
-		Args: json.RawMessage(`{"path":"a.go","content":"y"}`),
+		Tool: "write_file", Subject: "foo/a.go", Mutates: true, Args: args,
 	})
 	if err != nil || !dec.Allow {
 		t.Fatalf("reviewer continue = %+v %v", dec, err)
@@ -798,9 +802,10 @@ func TestReviewerBlockReturnsReasonThenStops(t *testing.T) {
 			Diagnosis: "scope is not yet proven", Rationale: "inspect the failing package first",
 		}},
 	})
+	args := json.RawMessage(`{"path":"foo/a.go","content":"fix"}`)
 	g.ObserveResult(context.Background(), Observation{
-		Tool: "bash", Verification: true, Subject: "go test ./foo",
-		Args: json.RawMessage(`{"command":"go test ./foo"}`), ErrSummary: "fail",
+		Tool: "write_file", Subject: "foo/a.go", Mutates: true,
+		Args: args, ErrSummary: "fail",
 	})
 	prompts := 0
 	g.opts.EmitPrompt = func(_ context.Context, taskID string, _ PendingProposal, _ *FailureEvent) (string, error) {
@@ -813,7 +818,7 @@ func TestReviewerBlockReturnsReasonThenStops(t *testing.T) {
 	}
 	proposal := Proposal{
 		Tool: "write_file", Subject: "foo/a.go", Mutates: true,
-		Args: json.RawMessage(`{"path":"foo/a.go","content":"fix"}`),
+		Args: args,
 	}
 	for attempt := 1; attempt < 3; attempt++ {
 		dec, err := g.BeforeMutation(context.Background(), proposal)
@@ -835,13 +840,14 @@ func TestReviewerUsesProposalTaskSummaryBeforeRootFallback(t *testing.T) {
 		Reviewer:    reviewer,
 		TaskSummary: func() string { return "root task" },
 	})
+	args := json.RawMessage(`{"path":"child.go"}`)
 	g.ObserveResult(context.Background(), Observation{
-		TaskID: "subagent:child", Tool: "bash", Verification: true,
-		Args: json.RawMessage(`{"command":"go test ./child"}`), ErrSummary: "fail",
+		TaskID: "subagent:child", Tool: "write_file", Subject: "child.go", Mutates: true,
+		Args: args, ErrSummary: "fail",
 	})
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
 		TaskID: "subagent:child", TaskSummary: "child task", Tool: "write_file",
-		Subject: "child.go", Mutates: true, Args: json.RawMessage(`{"path":"child.go"}`),
+		Subject: "child.go", Mutates: true, Args: args,
 	})
 	if err != nil || !dec.Allow {
 		t.Fatalf("review decision = %+v, %v", dec, err)
@@ -856,9 +862,10 @@ func TestReviewerReceivesBoundedTaskLocalDiagnosticEvidence(t *testing.T) {
 		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
 	}}
 	g := NewGate(Options{Reviewer: reviewer})
+	editArgs := json.RawMessage(`{"path":"child.go","old_string":"stale()","new_string":"fresh()"}`)
 	g.ObserveResult(context.Background(), Observation{
-		TaskID: "subagent:child", Tool: "bash", Verification: true,
-		Args: json.RawMessage(`{"command":"go test ./child"}`), ErrSummary: "fail",
+		TaskID: "subagent:child", Tool: "edit_file", Subject: "child.go", Mutates: true,
+		Args: editArgs, ErrSummary: "fail",
 	})
 	g.ObserveResult(context.Background(), Observation{
 		TaskID: "root", Tool: "bash", Verification: true,
@@ -893,7 +900,7 @@ func TestReviewerReceivesBoundedTaskLocalDiagnosticEvidence(t *testing.T) {
 
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
 		TaskID: "subagent:child", Tool: "edit_file", Subject: "child.go", Mutates: true,
-		Args: json.RawMessage(`{"path":"child.go","old_string":"stale()","new_string":"fresh()"}`),
+		Args: editArgs,
 	})
 	if err != nil || !dec.Allow {
 		t.Fatalf("decision = %+v, err = %v", dec, err)
@@ -1111,6 +1118,75 @@ func TestUserRejectAndBlockedDoNotArm(t *testing.T) {
 	}
 }
 
+func TestTimeoutFailureUsesConciseLowFrictionGuidance(t *testing.T) {
+	g := NewGate(Options{})
+	guidance := g.ObserveResult(context.Background(), Observation{
+		Tool:       "bash",
+		Subject:    "long-running-analysis",
+		Mutates:    true,
+		Args:       json.RawMessage(`{"command":"run-analysis"}`),
+		ErrSummary: "command timed out (> 10m)",
+	})
+	if strings.Contains(guidance, "Auto Guard is active") {
+		t.Fatalf("timeout guidance retained the generic guard wall: %q", guidance)
+	}
+	if !strings.Contains(guidance, "timed out") ||
+		!strings.Contains(guidance, "without asking the user") ||
+		!strings.Contains(guidance, "partial effects") {
+		t.Fatalf("timeout guidance = %q", guidance)
+	}
+	st := g.Snapshot().Tasks["root"]
+	if st == nil || st.Failure == nil || st.Failure.Class != FailureClassTransient {
+		t.Fatalf("timeout failure = %+v, want transient classification", st)
+	}
+}
+
+func TestFailureClassificationKeepsTransientDetectionNarrow(t *testing.T) {
+	tests := []struct {
+		name string
+		obs  Observation
+		want FailureClass
+	}{
+		{
+			name: "command timeout",
+			obs:  Observation{ErrSummary: "command timed out (> 10m)", Mutates: true},
+			want: FailureClassTransient,
+		},
+		{
+			name: "context deadline",
+			obs:  Observation{Output: "rpc error: context deadline exceeded", Verification: true},
+			want: FailureClassTransient,
+		},
+		{
+			name: "ordinary verification failure",
+			obs:  Observation{ErrSummary: "exit status 1", Verification: true},
+			want: FailureClassVerification,
+		},
+		{
+			name: "ordinary mutation failure",
+			obs:  Observation{ErrSummary: "write failed", Mutates: true},
+			want: FailureClassMutation,
+		},
+		{
+			name: "ordinary execution failure",
+			obs:  Observation{ErrSummary: "process exited with status 2"},
+			want: FailureClassExecution,
+		},
+		{
+			name: "configuration word is not a timeout",
+			obs:  Observation{ErrSummary: "invalid timeout_seconds configuration", Mutates: true},
+			want: FailureClassMutation,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ClassifyFailure(tt.obs); got != tt.want {
+				t.Fatalf("ClassifyFailure() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEpisodeTotalFailuresHardStopAcrossFingerprints(t *testing.T) {
 	g := NewGate(Options{Reviewer: staticReviewer{ReviewVerdict{
 		Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy,
@@ -1129,12 +1205,14 @@ func TestEpisodeTotalFailuresHardStopAcrossFingerprints(t *testing.T) {
 	if err != nil || dec.Allow || !dec.Blocked || !dec.StopTurn {
 		t.Fatalf("episode hard stop = %+v, %v", dec, err)
 	}
-	// Read-only diagnosis is also blocked once the Episode is exhausted.
+	// A hard stop quarantines further execution but keeps diagnosis available,
+	// so Auto can explain the failure without asking the user to restart or
+	// switch permission modes.
 	ro, err := g.BeforeMutation(context.Background(), Proposal{
 		Tool: "read_file", Subject: "fresh.go", ReadOnly: true,
 	})
-	if err != nil || ro.Allow || !ro.Blocked || !ro.StopTurn {
-		t.Fatalf("read-only after stop = %+v, %v", ro, err)
+	if err != nil || !ro.Allow || ro.Blocked || ro.StopTurn {
+		t.Fatalf("read-only diagnosis after stop = %+v, %v", ro, err)
 	}
 }
 
@@ -1187,11 +1265,11 @@ func TestReviewerContinueDoesNotResetCumulativeRejects(t *testing.T) {
 			return ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "not proven"}, nil
 		}),
 	})
+	args := json.RawMessage(`{"path":"a.go"}`)
 	g.ObserveResult(context.Background(), Observation{
-		Tool: "bash", Subject: "go test", Verification: true,
-		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
+		Tool: "write_file", Subject: "a.go", Mutates: true, Args: args, ErrSummary: "fail",
 	})
-	prop := Proposal{Tool: "write_file", Subject: "a.go", Mutates: true, Args: json.RawMessage(`{"path":"a.go"}`)}
+	prop := Proposal{Tool: "write_file", Subject: "a.go", Mutates: true, Args: args}
 	// Two rejects.
 	for i := 1; i <= 2; i++ {
 		dec, err := g.BeforeMutation(context.Background(), prop)
@@ -1348,10 +1426,6 @@ func TestModeChangeDismissesWaiterWithoutApproving(t *testing.T) {
 		}},
 	})
 	g.OnModeChange("auto") // pin baseline so yolo is a real change
-	g.ObserveResult(context.Background(), Observation{
-		Tool: "bash", Subject: "go test", Verification: true,
-		Args: json.RawMessage(`{"command":"go test"}`), ErrSummary: "fail",
-	})
 	done := make(chan Decision, 1)
 	g.opts.EmitPrompt = func(_ context.Context, taskID string, _ PendingProposal, _ *FailureEvent) (string, error) {
 		g.BindApprovalID(taskID, "wait-1")
@@ -1359,8 +1433,9 @@ func TestModeChangeDismissesWaiterWithoutApproving(t *testing.T) {
 	}
 	go func() {
 		dec, err := g.BeforeMutation(context.Background(), Proposal{
-			Tool: "write_file", Subject: "a.go", Mutates: true,
-			Args: json.RawMessage(`{"path":"a.go"}`),
+			Tool: "todo_write", ReadOnly: true, PlanTransition: true,
+			PlanBefore: "1. Keep current [in_progress]",
+			PlanAfter:  "1. Replace current [in_progress]",
 		})
 		if err != nil {
 			t.Errorf("BeforeMutation err: %v", err)

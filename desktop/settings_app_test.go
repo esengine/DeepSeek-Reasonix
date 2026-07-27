@@ -929,6 +929,29 @@ func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	}
 }
 
+func TestSetDesktopUpdateChannelPersistsToUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if got := app.Settings().UpdateChannel; got != "stable" {
+		t.Fatalf("Settings().UpdateChannel default = %q, want stable", got)
+	}
+	if err := app.SetDesktopUpdateChannel("canary"); err != nil {
+		t.Fatalf("SetDesktopUpdateChannel: %v", err)
+	}
+	view := app.Settings()
+	if view.UpdateChannel != "preview" {
+		t.Fatalf("Settings().UpdateChannel = %q, want preview", view.UpdateChannel)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if cfg.Desktop.UpdateChannel != "preview" {
+		t.Fatalf("desktop.update_channel = %q, want preview", cfg.Desktop.UpdateChannel)
+	}
+	if cfg.DesktopUpdateChannel() != "preview" {
+		t.Fatalf("DesktopUpdateChannel() = %q, want preview", cfg.DesktopUpdateChannel())
+	}
+}
+
 func TestSetDesktopConversationWidthPersistsToUserConfig(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
@@ -1134,7 +1157,7 @@ func TestSaveHooksSettingsNormalizesQuotedNodeEvalHookCommand(t *testing.T) {
 	}
 }
 
-func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
+func TestProjectHooksSettingsUseActiveWorkspaceRootAndLoadByDefault(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	project := t.TempDir()
 	app := NewApp()
@@ -1150,12 +1173,6 @@ func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("SaveHooksSettings(project): %v", err)
 	}
-	if err := app.TrustProjectHooks(); err != nil {
-		t.Fatalf("TrustProjectHooks: %v", err)
-	}
-	if !hook.IsTrusted(project, "") {
-		t.Fatal("project hooks were not trusted")
-	}
 	view := app.HooksSettings("project")
 	if view.Scope != "project" || view.ProjectRoot != project || !view.Trusted {
 		t.Fatalf("project hook view metadata = %+v", view)
@@ -1166,27 +1183,20 @@ func TestProjectHooksSettingsUseActiveWorkspaceRootAndTrust(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(project, ".reasonix", "settings.json")); err != nil {
 		t.Fatalf("project hooks settings file missing: %v", err)
 	}
+	loaded := hook.Load(hook.LoadOptions{ProjectRoot: project})
+	if len(loaded) != 1 || loaded[0].Scope != hook.ScopeProject || loaded[0].Event != hook.Stop {
+		t.Fatalf("project hooks should load by default: %+v", loaded)
+	}
 }
 
-func TestTrustProjectHooksForRootUsesDisplayedProjectRoot(t *testing.T) {
+func TestLegacyTrustProjectHooksMethodsAreNoOps(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	projectA := t.TempDir()
-	projectB := t.TempDir()
 	app := NewApp()
-	app.tabs = map[string]*WorkspaceTab{
-		"a": {ID: "a", Scope: "project", WorkspaceRoot: projectA, Ready: true},
-		"b": {ID: "b", Scope: "project", WorkspaceRoot: projectB, Ready: true},
+	if err := app.TrustProjectHooks(); err != nil {
+		t.Fatalf("TrustProjectHooks compatibility call: %v", err)
 	}
-	app.activeTabID = "b"
-
-	if err := app.TrustProjectHooksForRoot(projectA); err != nil {
-		t.Fatalf("TrustProjectHooksForRoot: %v", err)
-	}
-	if !hook.IsTrusted(projectA, "") {
-		t.Fatal("displayed project root was not trusted")
-	}
-	if hook.IsTrusted(projectB, "") {
-		t.Fatal("active project root was trusted instead of displayed project root")
+	if err := app.TrustProjectHooksForRoot(t.TempDir()); err != nil {
+		t.Fatalf("TrustProjectHooksForRoot compatibility call: %v", err)
 	}
 }
 

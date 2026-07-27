@@ -59,6 +59,23 @@ describe("metrics compatibility", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("accepts desktop lifecycle and Windows diagnostic counters", () => {
+    const parsed = Metrics.safeParse({
+      version: "v1.19.0",
+      os: "windows",
+      counters: [
+        { signal: "desktop_exit_phase", bucket: "healthy", count: 2 },
+        { signal: "desktop_uptime", bucket: "m_2_10", count: 2 },
+        { signal: "desktop_webview2_failure", bucket: "gpu_process_exited", count: 1 },
+        { signal: "desktop_restore", bucket: "timeout", count: 1 },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+    expect(parsed.data.counters).toHaveLength(4);
+  });
 });
 
 describe("diagnostic classification", () => {

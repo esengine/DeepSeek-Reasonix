@@ -288,8 +288,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			summaryTagClose,
 	})
 	compacted = append(compacted, msgs[start:]...)
-	a.session.Replace(compacted)
-	a.session.IncrementRewrite()
+	a.session.Rewrite(compacted)
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
@@ -332,8 +331,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
 	next = append(next, localOnly...)
-	a.session.Replace(next)
-	a.session.IncrementRewrite()
+	a.session.Rewrite(next)
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -370,8 +368,7 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	})
 	next = append(next, localOnly...)
 	next = append(next, msgs[toIdx:]...)
-	a.session.Replace(next)
-	a.session.IncrementRewrite()
+	a.session.Rewrite(next)
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil

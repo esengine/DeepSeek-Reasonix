@@ -202,7 +202,13 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
     "SessionStart": [
       {
         "command": "hooks/session-start",
+        "args": [],
         "description": "Load startup context"
+      },
+      {
+        "command": "printf 'ready' && ./hooks/audit",
+        "shell": "bash",
+        "description": "Run a compound shell script"
       }
     ]
   },
@@ -215,6 +221,16 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
 ```
 
 相对路径都按插件根目录解析。Reasonix 安装插件时不会执行第三方安装脚本。
+
+插件 Hook 的执行形态是显式的：
+
+- 只要出现 `args`（包括 `"args": []`），就使用 **exec form**。`command`
+  是可执行文件，每个参数都会按原值直接传递，不经过 Shell 解析或变量展开。
+- 未提供 `args` 且提供 `shell` 时，使用 **shell form**。完整 `command`
+  会原样交给 `bash`、`powershell`/`pwsh`、`cmd`（仅 Windows）或 `auto`。
+  Windows 上 `auto` 优先选择 Git Bash，找不到时回退 PowerShell。
+- 既未声明 `args` 也未声明 `shell` 的已有原生 Hook 继续使用 Reasonix
+  历史 Shell 命令行为；`shellCommand: true` 仍作为 shell form 的旧写法兼容。
 
 ## Codex 与 Claude 兼容
 
@@ -257,7 +273,10 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
 - 插件根目录的 `CLAUDE.md` 会映射为内置的 `SessionStart` 上下文 hook。
   Reasonix 会直接读取该文件，不通过 shell 命令。
 - `.claude/settings.json` 和 `hooks/hooks.json` 里的 command hooks 会按同名事件映射。
-  `matcher`、`args`、`async`、`env` 和 timeout 均会保留。`matcher` 以及 Hook 脚本看到的
+  `matcher`、`args`、`shell`、`async`、`env` 和 timeout 均会保留。Claude 的执行契约
+  也会完整保留：只要出现 `args`（即使是空数组）就按 exec form 执行，并逐项原样传参；
+  省略 `args` 才按 shell form 执行，将原始命令交给声明的 Bash 或 PowerShell。
+  `matcher` 以及 Hook 脚本看到的
   `tool_name` 会在 Reasonix 与 Claude 的工具名之间互译（`bash` ↔ `Bash`、
   `write_file` ↔ `Write` 等），因此 `"Bash"` 这类 matcher 能正确触发；Reasonix 里所有会
   启动子代理的工具（`task`、`read_only_task`、`parallel_tasks`，以及专用的
@@ -286,8 +305,10 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
   stdin 使用 Claude 兼容的 snake_case 载荷（包括 `hook_event_name`）。宿主会在启动
   进程前展开 `${CLAUDE_PLUGIN_ROOT}` 和 `${REASONIX_PLUGIN_ROOT}`，也兼容不带花括号的
   `$NAME` 与 Windows `%NAME%` 写法，因此插件相对路径不再依赖目标 shell 的环境变量
-  语法。Windows 上显式声明的裸 `sh -c`/`bash -c` hook 会复用 Git for Windows Bash
-  探测，即使 Bash 不在 `cmd.exe` 的 `PATH` 中也能执行；带目录的显式解释器路径保持
+  语法。Windows 上未显式指定 Shell 的 shell-form Hook 会和 Reasonix Shell 工具一样，
+  优先选择 Git Bash，找不到时回退 PowerShell。显式 Bash Hook 以及旧式裸
+  `sh -c`/`bash -c` Hook 会复用 Git for Windows Bash 探测，即使 Bash 不在
+  `cmd.exe` 的 `PATH` 中也能执行；带目录的显式解释器路径保持
   不变。如果机器确实没有可用 Bash，hook 会返回清晰的依赖提示，而不是本地化的
   “无法识别 sh”乱码。旧代码页输出也会在进入界面前转换为 UTF-8。`PreToolUse` 和
   `UserPromptSubmit` hook 仍可

@@ -1366,21 +1366,47 @@ func TestUnsendDiscardsBufferedEvents(t *testing.T) {
 }
 
 func TestRecoveryPauseTurnDoneIsInformational(t *testing.T) {
-	m := newTestChatTUI()
-	message := "Automatic recovery paused. Completed work is kept; reply continue."
-
-	m.ingestEvent(event.Event{
-		Kind:    event.TurnDone,
-		Err:     &agent.RecoveryPauseError{Message: message},
-		Outcome: event.TurnOutcomeRecoveryPaused,
-	})
-
-	got := ansi.Strip(strings.Join(*m.pendingCommit, "\n"))
-	if !strings.Contains(got, message) {
-		t.Fatalf("recovery pause transcript = %q, want pause message", got)
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+	const backendFallback = "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction."
+	tests := []struct {
+		lang string
+		want string
+	}{
+		{
+			lang: "en",
+			want: "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.",
+		},
+		{
+			lang: "zh",
+			want: "已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。",
+		},
+		{
+			lang: "zh-TW",
+			want: "已暫停自動重試。Reasonix 已停止重複嘗試，並保留已完成的工作。傳送「繼續」即可開始新一輪，也可以補充要求來調整方向。",
+		},
 	}
-	if strings.Contains(got, i18n.M.ErrorPrefix) {
-		t.Fatalf("recovery pause transcript = %q, must not use error prefix %q", got, i18n.M.ErrorPrefix)
+	for _, tt := range tests {
+		t.Run(tt.lang, func(t *testing.T) {
+			i18n.DetectLanguage(tt.lang)
+			m := newTestChatTUI()
+			m.width = 240
+			m.ingestEvent(event.Event{
+				Kind:    event.TurnDone,
+				Err:     &agent.RecoveryPauseError{Message: backendFallback},
+				Outcome: event.TurnOutcomeRecoveryPaused,
+			})
+
+			got := ansi.Strip(strings.Join(*m.pendingCommit, "\n"))
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("recovery pause transcript = %q, want localized pause message %q", got, tt.want)
+			}
+			if tt.lang != "en" && strings.Contains(got, backendFallback) {
+				t.Fatalf("recovery pause transcript = %q, must not leak English fallback into %s", got, tt.lang)
+			}
+			if strings.Contains(got, i18n.M.ErrorPrefix) {
+				t.Fatalf("recovery pause transcript = %q, must not use error prefix %q", got, i18n.M.ErrorPrefix)
+			}
+		})
 	}
 }
 

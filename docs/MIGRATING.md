@@ -101,15 +101,20 @@ and DeepSeek prefix-cache–oriented design.
 - **MCP project identity and schema-cache URLs are credential-aware**: userinfo
   and credential query values (token, api_key, password, ...) do not enter the
   project launch identity digest or schema cache key, so credential rotation
-  keeps an unchanged project launch authorization. User-installed servers do
-  not compute a project identity digest. Legacy per-tool reader receipts are
-  ignored and removed on the next authorization-state write.
-- **MCP setup is now add-and-use.** Servers added by the user (Desktop, user
-  config, legacy user import, or a user-installed plugin package) connect
-  immediately and permit all calls. Repository `reasonix.toml` / `.mcp.json`
-  servers instead require one pre-launch confirmation for their exact stable
-  identity, before a subprocess or network request exists. Host sandbox,
-  read-root, and write-root policy changes do not invalidate server identity.
+  keeps the same project runtime/cache identity. User-installed servers do not
+  compute a project identity digest. Legacy launch/tool authorization receipts
+  are no longer required by configured MCP servers.
+- **MCP setup is now add-and-use.** Servers added by the user (Desktop, CLI,
+  user config, legacy user import, or a user-installed plugin package) are
+  trusted immediately and global installs persist to `config.toml`. Repository
+  `reasonix.toml` / `.mcp.json` servers stay project-scoped and are trusted
+  without a separate launch confirmation. Project entries override same-name
+  global entries; `reasonix.toml` overrides `.mcp.json` inside the project.
+  Treat opening an unfamiliar repository as opting into executable project
+  configuration: review `.reasonix/settings.json`, `reasonix.toml`, and
+  `.mcp.json` before starting Reasonix. If a repository causes unexpected MCP
+  or Hook behavior, restart in Safe Mode to disable those external integrations
+  while recovering.
 - **stdio MCP connections are persistent.** This fixes stateful servers that
   lost browser/session state when writer calls received a fresh process.
 - **Plan mode and permission policy are now independent**: Plan directs the
@@ -119,7 +124,7 @@ and DeepSeek prefix-cache–oriented design.
   whole planning phase. Explicit execution-phase tools such as `complete_step` also
   remain unavailable until plan approval. `plan_mode_read_only_commands` is
   still parsed and round-tripped for old configs, but it no longer controls
-  main Plan availability. Installed or explicitly authorized servers contribute their
+  main Plan availability. Installed or project-configured servers contribute their
   non-destructive `readOnlyHint` tools to planner/read-only registries
   automatically. Use `read_only_task` /
   `read_only_skill` when a child must be technically restricted to read-only;

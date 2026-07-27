@@ -245,7 +245,7 @@ ok(
 );
 
 ok(
-  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending && !runtimeTransitioning;/.test(appSource) &&
+  /const controllerReady =\s*state\.meta\?\.ready === true &&\s*\(!state\.meta\.runtime \|\| state\.meta\.runtime\.phase === "ready"\) &&\s*!state\.meta\.startupErr &&\s*!state\.backendActivationPending &&\s*!runtimeTransitioning;/.test(appSource) &&
     /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),

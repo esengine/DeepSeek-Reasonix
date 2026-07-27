@@ -7,7 +7,9 @@ export type ShortcutAction =
   | "app.newSession"
   | "commandPalette.open"
   | "composer.newline"
+  | "composer.redo"
   | "composer.send"
+  | "composer.undo"
   | "selection.addToChat"
   | "settings.open"
   | "tab.close"
@@ -91,9 +93,9 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     defaults: modCombo("w"),
     preventDefault: true,
   },
-  // composer.send / composer.newline are handled inside the composer's own
-  // keydown path (see composerKeyboard.ts), not via useGlobalShortcut. That
-  // path also owns backward compatibility for the default send behavior.
+  // Composer-owned shortcuts are handled inside its keydown path rather than
+  // useGlobalShortcut. Undo/redo stay locked to the platform editing standard
+  // so native textarea history and Reasonix transactions share one chord.
   {
     action: "composer.send",
     section: "session",
@@ -111,6 +113,28 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     defaults: allPlatforms({ key: "Enter", shift: true }),
     allowInEditable: true,
     allowedKeys: ["Enter"],
+  },
+  {
+    action: "composer.undo",
+    section: "session",
+    labelKey: "shortcuts.action.composerUndo",
+    descriptionKey: "shortcuts.desc.composerUndo",
+    defaults: modCombo("z"),
+    allowInEditable: true,
+    configurable: false,
+  },
+  {
+    action: "composer.redo",
+    section: "session",
+    labelKey: "shortcuts.action.composerRedo",
+    descriptionKey: "shortcuts.desc.composerRedo",
+    defaults: {
+      darwin: { key: "z", meta: true, shift: true },
+      windows: { key: "z", ctrl: true, shift: true },
+      linux: { key: "z", ctrl: true, shift: true },
+    },
+    allowInEditable: true,
+    configurable: false,
   },
   {
     action: "selection.addToChat",
@@ -428,6 +452,16 @@ export function matchesShortcut(event: KeyboardShortcutEvent, action: ShortcutAc
   return definition.aliases?.[platform]?.some((alias) => sameCombo(combo, alias)) ?? false;
 }
 
+export function isReservedComposerHistoryShortcut(
+  event: KeyboardShortcutEvent,
+  platform: ShortcutPlatform,
+): boolean {
+  const combo = comboFromKeyboardEvent(event);
+  if (!combo) return false;
+  return sameCombo(combo, defaultShortcutCombo("composer.undo", platform))
+    || sameCombo(combo, defaultShortcutCombo("composer.redo", platform));
+}
+
 export function shortcutConflict(
   action: ShortcutAction,
   combo: ShortcutCombo,
@@ -458,7 +492,12 @@ export function useGlobalShortcut(
     const platform = detectShortcutPlatform();
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (isShortcutRecorderTarget(event.target)) return;
-      if (!definition.allowInEditable && isEditableTarget(event.target)) return;
+      const editableTarget = isEditableTarget(event.target);
+      if (!definition.allowInEditable && editableTarget) return;
+      // Existing installations may already have a global action stored on
+      // Cmd/Ctrl+Z. Keep that legacy binding outside editors, but never let it
+      // intercept the platform undo/redo chord while text is being edited.
+      if (editableTarget && isReservedComposerHistoryShortcut(event, platform)) return;
       if (!matchesShortcut(event, action, platform)) return;
       if (definition.preventDefault !== false) event.preventDefault();
       handler(event);

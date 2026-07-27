@@ -14,7 +14,7 @@
 #
 # Usage: scripts/desktop-build.sh <os/arch> <version> [channel]
 #   e.g. scripts/desktop-build.sh darwin/arm64 v1.1.0
-#        scripts/desktop-build.sh darwin/arm64 v1.5.0-canary.20260608.42 canary
+#        scripts/desktop-build.sh darwin/arm64 v1.5.0-preview.42 preview
 set -euo pipefail
 
 PLATFORM="${1:?usage: desktop-build.sh <os/arch> <version> [channel]}"
@@ -126,6 +126,9 @@ if [ "$os" = windows ]; then
 	cli_out="$ROOT/desktop/build/windows/installer/$WINDOWS_CLINAME.exe"
 	build_cli
 	stamp_windows_executable "$cli_out" "Reasonix CLI" "$WINDOWS_CLINAME" "$WINDOWS_CLINAME.exe"
+	# The first NSIS pass must regenerate this release's uninstaller; a stale
+	# preserved file must never enter the signing payload.
+	rm -f "build/windows/installer/reasonix-uninstall.exe"
 fi
 build_args=()
 [ "${DESKTOP_BUILD_CLEAN:-1}" != "0" ] && build_args+=(-clean)
@@ -238,28 +241,19 @@ darwin)
 	rm -rf "$staging"
 	;;
 windows)
-	# `wails build -nsis` writes the installer under build/bin; its exact name
-	# varies, so glob for it and copy to a stable, platform-keyed name.
-	installer=$(ls build/bin/*installer*.exe 2>/dev/null | head -n1 || true)
-	[ -n "$installer" ] || { echo "no NSIS installer found in build/bin" >&2; exit 1; }
-	cp "$installer" "$ROOT/dist/${APPNAME}-windows-${arch}-installer.exe"
-	portable=$(find build/bin -maxdepth 1 -type f -name "*.exe" ! -name "*installer*.exe" | head -n1 || true)
-	[ -n "$portable" ] || { echo "no portable Windows exe found in build/bin" >&2; exit 1; }
-	staging=$(mktemp -d)
-	cp "$portable" "$staging/$BINNAME.exe"
-	helper="build/windows/installer/$UPDATE_HELPER"
-	if [ -f "$helper" ]; then
-		cp "$helper" "$staging/$UPDATE_HELPER"
-	fi
-	cp "$launcher_out" "$staging/${APPNAME}.exe"
-	cp "$launcher_out" "$staging/$LAUNCHERNAME.exe"
-	cp "$guard_out" "$staging/$GUARDNAME.exe"
-	cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$staging/$WINDOWS_CLINAME.exe"
-	"$ROOT/scripts/verify-windows-portable.sh" "$staging"
-	staging_win=$(cygpath -w "$staging")
-	zip_win=$(cygpath -w "$ROOT/dist/${APPNAME}-windows-${arch}.zip")
-	powershell.exe -NoProfile -Command "Compress-Archive -Force -Path '$staging_win\\*' -DestinationPath '$zip_win'"
-	rm -rf "$staging"
+	# Keep one canonical flat payload for SignPath. The release workflow signs
+	# these files, then calls package-windows-desktop.sh again so both the
+	# portable archive and the files embedded by NSIS carry Authenticode.
+	payload_dir="$ROOT/desktop/build/windows/signing-payload"
+	rm -rf -- "$payload_dir"
+	mkdir -p "$payload_dir"
+	cp "build/bin/$BINNAME.exe" "$payload_dir/$BINNAME.exe"
+	cp "build/windows/installer/$UPDATE_HELPER" "$payload_dir/$UPDATE_HELPER"
+	cp "$launcher_out" "$payload_dir/$LAUNCHERNAME.exe"
+	cp "$guard_out" "$payload_dir/$GUARDNAME.exe"
+	cp "build/windows/installer/$WINDOWS_CLINAME.exe" "$payload_dir/$WINDOWS_CLINAME.exe"
+	cp "build/windows/installer/reasonix-uninstall.exe" "$payload_dir/reasonix-uninstall.exe"
+	"$ROOT/scripts/package-windows-desktop.sh" "$arch" "$payload_dir"
 	;;
 linux)
 	for desktop_contract in \

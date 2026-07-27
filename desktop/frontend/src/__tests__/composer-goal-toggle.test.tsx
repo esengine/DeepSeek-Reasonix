@@ -6,10 +6,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { Composer, composerPickFileEntry } from "../components/Composer";
 import { InvocationMetadataContext, UserMessage } from "../components/Message";
+import { selectionFromDom } from "../components/RichComposerInput";
 import { LocaleProvider } from "../lib/i18n";
 import { ToastProvider } from "../lib/toast";
 import type { AppBindings } from "../lib/bridge";
-import type { StructuredInvocationSubmit } from "../lib/invocationDisplay";
+import type { ComposerInvocation, StructuredInvocationSubmit } from "../lib/invocationDisplay";
 import type { CollaborationMode, CommandInfo, DirEntry, ToolApprovalMode, TokenMode } from "../lib/types";
 
 let passed = 0;
@@ -430,6 +431,126 @@ console.log("\ncomposer goal toggle");
     await flushTimers();
   });
   eq(calls.structured[0]?.invocations[1]?.offset, expandedText.length, "trimmed structured submission keeps the normalized following invocation offset");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const command: CommandInfo = {
+    name: "writing-plans",
+    description: "Write a plan",
+    kind: "skill",
+  };
+  mockApp({
+    Commands: async () => [command],
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+  });
+  const { root, rerender } = await renderComposer();
+  await replaceComposerDraft(rerender, 4201, "/writing-plans");
+  await waitFor("skill menu for paste undo selection", () => Boolean(document.querySelector(".slashmenu")));
+  const initialTextarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!initialTextarea) throw new Error("composer textarea did not render for paste undo selection");
+  await act(async () => {
+    initialTextarea.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+
+  let richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  let token = richInput?.querySelector<HTMLElement>(".composer-invocation-token");
+  const invocationId = token?.dataset.invocationId;
+  if (!richInput || !token || !invocationId) throw new Error("rich invocation did not render for paste undo selection");
+  const afterToken = document.createRange();
+  afterToken.setStartAfter(token);
+  afterToken.collapse(true);
+  document.getSelection()?.removeAllRanges();
+  document.getSelection()?.addRange(afterToken);
+  await act(async () => {
+    dispatchPasteText(richInput!, "pasted");
+    await flushTimers();
+  });
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("rich input disappeared after paste");
+  eq(richComposerTaskText(richInput), "pasted", "paste after an invocation inserts on the token's right side");
+
+  await act(async () => {
+    richInput!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  let richMenuItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".context-menu__item"));
+  eq(richMenuItems.length, 6, "rich composer exposes the shared edit context menu");
+  ok(richMenuItems[0]?.disabled === false, "rich composer context-menu undo is enabled after paste");
+  ok(richMenuItems[1]?.disabled === true, "rich composer context-menu redo is disabled before undo");
+  await act(async () => {
+    richMenuItems[0]?.click();
+    await flushTimers();
+  });
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("rich input disappeared after context-menu undo");
+  eq(richComposerTaskText(richInput), "", "rich composer context-menu undo removes the pasted text");
+
+  await act(async () => {
+    richInput!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    await flushTimers();
+  });
+  richMenuItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".context-menu__item"));
+  ok(richMenuItems[1]?.disabled === false, "rich composer context-menu redo is enabled after undo");
+  await act(async () => {
+    richMenuItems[1]?.click();
+    await flushTimers();
+  });
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("rich input disappeared after context-menu redo");
+  eq(richComposerTaskText(richInput), "pasted", "rich composer context-menu redo restores the pasted text");
+
+  const undoPaste = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    richInput!.dispatchEvent(undoPaste);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
+  eq(undoPaste.defaultPrevented, true, "Ctrl+Z restores the rich-composer paste transaction");
+
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  token = richInput?.querySelector<HTMLElement>(".composer-invocation-token");
+  if (!richInput || !token) throw new Error("rich invocation disappeared after paste undo");
+  const restoredInvocation: ComposerInvocation = { id: invocationId, offset: 0, command };
+  const restoredSelection = selectionFromDom(
+    richInput,
+    new Map([[invocationId, restoredInvocation]]),
+  );
+  eq(
+    restoredSelection.ok ? restoredSelection.selection.afterInvocationId : undefined,
+    invocationId,
+    "paste undo restores the caret after the invocation token",
+  );
+
+  await act(async () => {
+    richInput!.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Backspace",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+  ok(
+    document.querySelector(".composer-invocation-token") === null,
+    "Backspace after paste undo removes the invocation on the caret's left",
+  );
 
   await act(async () => {
     root.unmount();
@@ -1364,8 +1485,42 @@ console.log("\ncomposer goal toggle");
     document.activeElement === textareaAfterEntityRemoval,
     "removing the last entity hands focus to the textarea that replaces the rich input",
   );
+  const undoEntityRemoval = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textareaAfterEntityRemoval.dispatchEvent(undoEntityRemoval);
+    await flushTimers();
+  });
+  eq(undoEntityRemoval.defaultPrevented, true, "Ctrl+Z restores a token removed by the rich composer");
+  ok(
+    document.querySelector(".invocation-display--composer") !== null,
+    "undoing the programmatic Backspace restores the selected skill",
+  );
+  const restoredRichInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!restoredRichInput) throw new Error("rich composer did not return after undoing token removal");
+  const redoEntityRemoval = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    restoredRichInput.dispatchEvent(redoEntityRemoval);
+    await flushTimers();
+  });
+  eq(redoEntityRemoval.defaultPrevented, true, "Ctrl+Shift+Z redoes rich token removal");
+  ok(
+    document.querySelector(".invocation-display--composer") === null,
+    "redoing the programmatic Backspace removes the selected skill again",
+  );
 
   await replaceComposerDraft(rerender, 2002, "/writing-plans");
+  await waitFor("plain composer after replacing the restored skill", () => Boolean(document.querySelector("textarea")));
   await waitFor("skill menu after removal", () => Boolean(document.querySelector(".slashmenu")));
   textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea did not return after removing the skill");

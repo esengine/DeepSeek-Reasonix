@@ -3867,8 +3867,8 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.queueEditCursor = -1
 		m.queueEditDraft = ""
 		m.clearSubmittedPastes()
-		if e.Outcome == event.TurnOutcomeRecoveryPaused && e.Err != nil && e.Err.Error() != "" {
-			m.commitLine(wrapForViewport("⏸ "+e.Err.Error(), m.width, activeCLITheme.info))
+		if e.Outcome == event.TurnOutcomeRecoveryPaused {
+			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
 		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
 			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
 		}
@@ -4433,7 +4433,7 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 			m.notice("mcp add: " + err.Error())
 			return
 		}
-		m.notice(fmt.Sprintf("connected %s — %d tools, saved to config (available next message)", entry.Name, n))
+		m.notice(fmt.Sprintf("connected %s — %d tools, saved to global config (available next message)", entry.Name, n))
 	case "connect":
 		if len(args) < 3 {
 			m.notice("usage: /mcp connect <name>")

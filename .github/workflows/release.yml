@@ -1,21 +1,33 @@
 name: Release
 
-# CLI binary line. Stable releases are called by release-stable.yml after its
-# single GitHub `release`-environment approval. Direct tag pushes are retained
-# only for CLI prereleases so they can still ship independently; those runs keep
-# their own approval gate. goreleaser auto-skips the cask upload for prereleases
-# (brew has no prerelease channel — see .goreleaser.yaml).
+# Native CLI binary line. Stable releases are called by release-stable.yml after
+# its single GitHub `release`-environment approval. Preview uses immutable
+# vX.Y.Z-preview.N tags, publishes a GitHub prerelease behind the same `canary`
+# gate as Desktop Preview, and never moves Homebrew or GitHub Latest. Other
+# standalone prereleases remain internal stable-channel checkpoints behind the
+# `release` gate.
 on:
-  push:
-    tags: ['v*-*']
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Native CLI release channel"
+        required: true
+        # Preserve existing tag-only recovery dispatches as Stable. Preview must
+        # be an explicit operator choice or arrive through the tag relay.
+        default: stable
+        type: choice
+        options: [stable, preview]
       tag:
-        description: "Existing CLI tag to publish (for example v1.18.0-rc.1)"
+        description: "Existing protected CLI tag (Preview: v1.18.0-preview.1; Stable/RC: v1.18.0-rc.1)"
         required: true
         type: string
   workflow_call:
     inputs:
+      channel:
+        description: "Native CLI release channel selected by the approved orchestrator"
+        required: false
+        default: stable
+        type: string
       tag:
         description: "Existing CLI tag selected by the approved release orchestrator"
         required: true
@@ -38,8 +50,61 @@ permissions:
   contents: write # create the release and upload archives
 
 jobs:
+  resolve:
+    name: resolve CLI release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      base_version: ${{ steps.release.outputs.base_version }}
+      notes_version: ${{ steps.release.outputs.notes_version }}
+      channel: ${{ steps.release.outputs.channel }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Resolve channel and tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+        run: bash scripts/resolve-cli-release.sh
+      - name: Record immutable candidate
+        id: candidate
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          set -euo pipefail
+          git fetch origin main-v2
+          sha="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          if ! git merge-base --is-ancestor "$sha" origin/main-v2; then
+            echo "::error::$RELEASE_TAG points to $sha, which is not on main-v2 history"
+            exit 1
+          fi
+          if [ "$RELEASE_CHANNEL" = "preview" ] && [ "$sha" != "$(git rev-parse origin/main-v2)" ]; then
+            echo "::error::CLI Preview must tag current main-v2; $RELEASE_TAG points to $sha"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Verify existing protected tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          APPROVED_SHA: ${{ steps.candidate.outputs.sha }}
+          VERIFY_RELEASE_CHECKOUT: false
+        run: bash scripts/verify-release-tag.sh
+
   orchestration-guard:
     name: verify approved orchestrator
+    needs: resolve
     if: ${{ inputs.orchestrated }}
     runs-on: ubuntu-latest
     permissions:
@@ -68,23 +133,25 @@ jobs:
 
   release-gate:
     name: approve standalone CLI release
+    needs: resolve
     if: ${{ !inputs.orchestrated }}
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ needs.resolve.outputs.channel == 'preview' && 'canary' || 'release' }}
     steps:
       - env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: echo "Approved standalone CLI release $RELEASE_TAG"
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+        run: echo "Approved standalone CLI $RELEASE_CHANNEL release $RELEASE_TAG"
 
   cache-guard:
     name: cache hit guard
-    needs: [orchestration-guard, release-gate]
-    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
+    needs: [resolve, orchestration-guard, release-gate]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+          ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -93,7 +160,7 @@ jobs:
 
   goreleaser:
     name: archives + checksums + homebrew tap
-    needs: cache-guard
+    needs: [resolve, cache-guard]
     if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
     # The stable caller has already passed the single GitHub release approval.
@@ -103,7 +170,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+          ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -125,13 +192,12 @@ jobs:
       - name: Render reviewed release notes
         if: ${{ !inputs.orchestrated }}
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.notes_version }}
         run: node scripts/release-notes.mjs render --version "$RELEASE_TAG" --output /tmp/release-notes.md
       - name: Revalidate approved release ref
-        if: ${{ inputs.orchestrated }}
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
-          APPROVED_SHA: ${{ inputs.approved_sha }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
         run: bash scripts/verify-release-tag.sh
       - uses: goreleaser/goreleaser-action@v7
         with:
@@ -139,22 +205,22 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ needs.resolve.outputs.channel == 'stable' && secrets.HOMEBREW_TAP_TOKEN || '' }}
           # workflow_dispatch recovery runs have a branch-shaped GITHUB_REF even
           # though checkout is on the release tag. Pin GoReleaser explicitly, and
           # avoid ambiguity from the three release tags sharing one commit.
-          GORELEASER_CURRENT_TAG: ${{ inputs.tag || github.ref_name }}
+          GORELEASER_CURRENT_TAG: ${{ needs.resolve.outputs.tag }}
 
       - name: Publish product release notes
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: gh release edit "$TAG" --notes-file /tmp/release-notes.md
 
       - name: Attach desktop manifest compatibility asset
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
@@ -196,7 +262,7 @@ jobs:
       # cover the release CDN propagating the freshly uploaded asset.
       - name: Smoke public compatibility manifest
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
         run: |
           set -euo pipefail
@@ -243,7 +309,7 @@ jobs:
       #     owns asserting the dist-tag lands.
       - name: Check npm latest dist-tag freshness
         env:
-          TAG: ${{ inputs.tag || github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           set -euo pipefail
           case "$TAG" in

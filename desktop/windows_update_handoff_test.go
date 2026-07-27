@@ -110,11 +110,25 @@ func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) 
 		`./cmd/update-helper`,
 		`build/windows/installer/$UPDATE_HELPER`,
 		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER"`,
-		`cp "$helper" "$staging/$UPDATE_HELPER"`,
-		`"$ROOT/scripts/verify-windows-portable.sh" "$staging"`,
+		`cp "build/windows/installer/$UPDATE_HELPER" "$payload_dir/$UPDATE_HELPER"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh missing %q", want)
+		}
+	}
+
+	packageData, err := os.ReadFile("../scripts/package-windows-desktop.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packager := string(packageData)
+	for _, want := range []string{
+		`cp "$PAYLOAD/$UPDATE_HELPER" "$INSTALLER_DIR/$UPDATE_HELPER"`,
+		`cp "$PAYLOAD/$UPDATE_HELPER" "$portable_staging/$UPDATE_HELPER"`,
+		`"$ROOT/scripts/verify-windows-portable.sh" "$portable_staging"`,
+	} {
+		if !strings.Contains(packager, want) {
+			t.Fatalf("package-windows-desktop.sh missing %q", want)
 		}
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"reasonix/internal/hook"
 )
 
-func TestHookMachineListRedactsCommandsAndPreservesTrustState(t *testing.T) {
+func TestHookMachineListRedactsCommandsAndEnablesProjectHooks(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	projectSettings := filepath.Join(root, ".reasonix", "settings.json")
@@ -40,7 +40,7 @@ func TestHookMachineListRedactsCommandsAndPreservesTrustState(t *testing.T) {
 	if len(response.Hooks) != 2 {
 		t.Fatalf("hooks = %+v", response.Hooks)
 	}
-	if response.Hooks[0].Event != "PreToolUse" || response.Hooks[0].Status != "untrusted" {
+	if response.Hooks[0].Event != "PreToolUse" || response.Hooks[0].Status != "active" {
 		t.Errorf("project hook = %+v", response.Hooks[0])
 	}
 	if response.Hooks[1].Event != "Stop" || response.Hooks[1].Status != "active" {
@@ -105,7 +105,7 @@ func TestHookMachineEntryStatusRejectsNonRegularContextFile(t *testing.T) {
 		Scope:       hook.ScopePlugin,
 		ContextFile: contextDir,
 	}
-	if got := machineHookEntryStatus(entry, true); got != "invalid" {
+	if got := machineHookEntryStatus(entry); got != "invalid" {
 		t.Fatalf("directory context status = %q, want invalid", got)
 	}
 
@@ -114,7 +114,7 @@ func TestHookMachineEntryStatusRejectsNonRegularContextFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry.ContextFile = contextFile
-	if got := machineHookEntryStatus(entry, true); got != "active" {
+	if got := machineHookEntryStatus(entry); got != "active" {
 		t.Fatalf("readable regular context status = %q, want active", got)
 	}
 }
@@ -130,7 +130,7 @@ func TestHookMachineStatusHasStableRedactedSources(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
 		t.Fatalf("decode hook status: %v", err)
 	}
-	if response.SchemaVersion != machineSchemaVersion || response.Command != "hook.status" || response.TrustedProject {
+	if response.SchemaVersion != machineSchemaVersion || response.Command != "hook.status" || !response.TrustedProject {
 		t.Fatalf("status = %+v", response)
 	}
 	if len(response.Sources) != 2 {

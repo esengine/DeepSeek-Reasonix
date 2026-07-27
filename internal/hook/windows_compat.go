@@ -2,6 +2,7 @@ package hook
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,12 @@ var windowsHookBash struct {
 	sync.Once
 	path string
 	err  error
+}
+
+var windowsDefaultHookShell struct {
+	sync.Once
+	shell sandbox.Shell
+	err   error
 }
 
 // windowsPOSIXShellInvocation preserves explicit `sh -c` / `bash -c` hook
@@ -106,6 +113,13 @@ func windowsBatchArgvCommandLine(command string, args []string) (string, bool) {
 	}
 	b.WriteByte('"')
 	return b.String(), true
+}
+
+// windowsCmdCommandLine wraps a raw shell-form script without tokenizing or
+// re-rendering it. cmd.exe owns all quote, variable, pipeline, and chaining
+// semantics inside the /c string.
+func windowsCmdCommandLine(command string) string {
+	return `cmd.exe /d /s /c "` + command + `"`
 }
 
 func normalizeWindowsBatchExecutable(executable string) string {
@@ -204,24 +218,44 @@ func cachedWindowsHookBash() (string, error) {
 			windowsHookBash.err = missingWindowsHookBashError()
 			return
 		}
-		path := strings.TrimSpace(shell.Path)
-		if path == "" {
+		path, err := resolvedHookShellPath(shell)
+		if err != nil {
 			windowsHookBash.err = missingWindowsHookBashError()
 			return
 		}
-		if resolved, err := exec.LookPath(path); err == nil {
-			windowsHookBash.path = resolved
-			return
-		}
-		if filepath.IsAbs(path) {
-			if info, err := os.Stat(path); err == nil && !info.IsDir() {
-				windowsHookBash.path = path
-				return
-			}
-		}
-		windowsHookBash.err = missingWindowsHookBashError()
+		windowsHookBash.path = path
 	})
 	return windowsHookBash.path, windowsHookBash.err
+}
+
+func cachedWindowsDefaultHookShell() (sandbox.Shell, error) {
+	windowsDefaultHookShell.Do(func() {
+		sh := sandbox.ResolveShell("", "", nil)
+		path, err := resolvedHookShellPath(sh)
+		if err != nil {
+			windowsDefaultHookShell.err = errors.New("hook requires a shell on Windows, but neither Git Bash nor PowerShell is usable")
+			return
+		}
+		sh.Path = path
+		windowsDefaultHookShell.shell = sh
+	})
+	return windowsDefaultHookShell.shell, windowsDefaultHookShell.err
+}
+
+func resolvedHookShellPath(shell sandbox.Shell) (string, error) {
+	path := strings.TrimSpace(shell.Path)
+	if path == "" {
+		path = shell.Kind.String()
+	}
+	if resolved, err := exec.LookPath(path); err == nil {
+		return resolved, nil
+	}
+	if filepath.IsAbs(path) {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("hook shell %q is not executable", path)
 }
 
 func missingWindowsHookBashError() error {

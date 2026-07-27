@@ -1287,6 +1287,92 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderPreservesExplicitlySupportedKimiK3Efforts(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "opencode-go",
+		Kind:              "openai",
+		BaseURL:           srv.URL,
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "max" {
+		t.Fatalf("reasoning_effort = %#v, want explicitly supported max", got)
+	}
+}
+
+func TestNewProviderAppliesOfficialKimiK3RequestContract(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "kimi-cn",
+		Kind:              "openai",
+		BaseURL:           "https://api.moonshot.cn/v1",
+		ChatURL:           srv.URL,
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"low", "high", "max"},
+		DefaultEffort:     "max",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages:    []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Temperature: provider.TemperaturePtr(0),
+		MaxTokens:   2000,
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if gotReq["reasoning_effort"] != "max" || gotReq["max_completion_tokens"] != float64(2000) {
+		t.Fatalf("official Kimi K3 request = %+v, want max effort and max_completion_tokens", gotReq)
+	}
+	for _, field := range []string{"temperature", "max_tokens"} {
+		if _, ok := gotReq[field]; ok {
+			t.Fatalf("official Kimi K3 request must omit %q: %+v", field, gotReq)
+		}
+	}
+}
+
 func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -4140,8 +4226,8 @@ func TestPluginSpecsMapMCPSourceDefaults(t *testing.T) {
 		{name: "user config", source: config.MCPSourceUserConfig, wantAuthorized: true},
 		{name: "legacy user config", source: config.MCPSourceLegacyUser, wantAuthorized: true},
 		{name: "plugin package", source: config.MCPSourcePluginPackage, wantAuthorized: true},
-		{name: "project config", source: config.MCPSourceProjectConfig, wantApproval: true},
-		{name: "project mcp json", source: config.MCPSourceProjectMCPJSON, wantApproval: true},
+		{name: "project config", source: config.MCPSourceProjectConfig, wantAuthorized: true},
+		{name: "project mcp json", source: config.MCPSourceProjectMCPJSON, wantAuthorized: true},
 		{name: "unknown"},
 	}
 

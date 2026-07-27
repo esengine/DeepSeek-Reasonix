@@ -35,10 +35,10 @@ type RecoveryPauseError struct {
 
 func (e *RecoveryPauseError) Error() string {
 	if e == nil {
-		return "this automatic recovery turn paused to avoid repeated execution"
+		return "automatic retries paused"
 	}
 	if strings.TrimSpace(e.Message) != "" {
 		return e.Message
 	}
-	return "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue."
+	return "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction."
 }

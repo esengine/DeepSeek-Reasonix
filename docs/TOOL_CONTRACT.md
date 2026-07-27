@@ -57,7 +57,7 @@ whose `reviewed_paths` must be backed by host-observed read/diff receipts.
 
 The two-model Planner and all task/fleet sub-agents also use `use_capability`
 (and never direct `mcp__*` schemas). Planner and ordinary writer-capable
-sub-agents may call installed or project-authorized MCP without
+sub-agents may call installed or project-configured MCP without
 `readOnlyHint`; Planner leaves `destructiveHint` tools for the Executor, while
 ordinary sub-agents use the trusted MCP path (live authorization plus explicit
 deny only). Writer/destructive calls are still serialized and recorded as
@@ -73,8 +73,7 @@ remains single-model without an independent Planner.
 configured MCP servers without starting them; `action=call` on a
 not-yet-connected server resolves to a deferred target, Plan re-checks only an
 explicit phase opt-out on the real target, and the server process starts only
-after the permission gate and PreToolUse hooks approve the call (unauthorized
-project MCP is blocked before process or network start). On-demand children
+after the permission gate and PreToolUse hooks approve the call. On-demand children
 share the session lifetime (they outlive the starting call and exit with the
 session); `action=inspect` lists live tools for connected servers and cached
 schemas otherwise, never starting a process. First discovery of a server with

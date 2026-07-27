@@ -50,10 +50,10 @@ func TestDecisionMatrix(t *testing.T) {
 			want: DecisionResult{Route: RouteAllow},
 		},
 		{
-			name: "execution risk does not replace failure reviewer path",
+			name: "same failed operation still uses bounded recovery review",
 			f: Facts{
 				AutoMode: true, Mutates: true, HighRisk: true,
-				HasActiveFailure: true, FailureCount: 1,
+				HasActiveFailure: true, SameFailedOperation: true, FailureCount: 1,
 			},
 			want: DecisionResult{Route: RouteReview},
 		},
@@ -71,26 +71,26 @@ func TestDecisionMatrix(t *testing.T) {
 			want: DecisionResult{Route: RouteAllow, ConsumeSafeRetry: true},
 		},
 		{
-			name: "expanded scope after failure stays automatic",
+			name: "different scoped operation after failure stays automatic",
 			f: Facts{
 				AutoMode: true, Mutates: true,
 				HasActiveFailure: true, FailureCount: 1, ExpandedScope: true,
 			},
-			want: DecisionResult{Route: RouteReview},
+			want: DecisionResult{Route: RouteAllow},
 		},
 		{
-			name: "strategy change after failure stays automatic",
+			name: "different strategy operation after failure stays automatic",
 			f: Facts{
 				AutoMode: true, Mutates: true,
 				HasActiveFailure: true, FailureCount: 1, StrategyChanged: true,
 			},
-			want: DecisionResult{Route: RouteReview},
+			want: DecisionResult{Route: RouteAllow},
 		},
 		{
-			name: "second failure during recovery stays automatic",
+			name: "second attempt of failed operation uses bounded recovery review",
 			f: Facts{
 				AutoMode: true, Mutates: true,
-				HasActiveFailure: true, FailureCount: 2,
+				HasActiveFailure: true, SameFailedOperation: true, FailureCount: 2,
 			},
 			want: DecisionResult{Route: RouteReview},
 		},
@@ -108,15 +108,23 @@ func TestDecisionMatrix(t *testing.T) {
 				AutoMode: true, Mutates: true,
 				HasActiveFailure: true, FailureCount: 3,
 			},
+			want: DecisionResult{Route: RouteAllow},
+		},
+		{
+			name: "ambiguous retry of the failed operation goes to reviewer",
+			f: Facts{
+				AutoMode: true, Mutates: true,
+				HasActiveFailure: true, SameFailedOperation: true, FailureCount: 1,
+			},
 			want: DecisionResult{Route: RouteReview},
 		},
 		{
-			name: "ambiguous recovery mutation goes to reviewer",
+			name: "episode stop preserves read only diagnosis",
 			f: Facts{
-				AutoMode: true, Mutates: true,
-				HasActiveFailure: true, FailureCount: 1,
+				AutoMode: true, ReadOnly: true, EpisodeStopped: true,
+				StopReason: StopReasonEpisodeFailures,
 			},
-			want: DecisionResult{Route: RouteReview},
+			want: DecisionResult{Route: RouteAllow},
 		},
 		{
 			name: "safe retry budget does not apply when scope expands",
@@ -258,7 +266,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("expanded scope uses reviewer without prompting", func(t *testing.T) {
+	t.Run("different scoped operation bypasses recovery reviewer", func(t *testing.T) {
 		got := run(t, func(g *Gate) {
 			g.ObserveResult(context.Background(), Observation{
 				Tool: "write_file", Mutates: true, Subject: "a.go", ErrSummary: "fail",
@@ -268,11 +276,11 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			Tool: "write_file", Mutates: true, Subject: "b.go", ExpandedScope: true,
 			Args: json.RawMessage(`{"path":"b.go","content":"x"}`),
 		}, nil)
-		if !got.allow || got.prompted || got.reviews != 1 {
+		if !got.allow || got.prompted || got.reviews != 0 {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("strategy change uses reviewer without prompting", func(t *testing.T) {
+	t.Run("different strategy operation bypasses recovery reviewer", func(t *testing.T) {
 		got := run(t, func(g *Gate) {
 			g.ObserveResult(context.Background(), Observation{
 				Tool: "bash", Verification: true, ErrSummary: "fail",
@@ -282,7 +290,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			Tool: "write_file", Mutates: true, StrategyChanged: true,
 			Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
 		}, nil)
-		if !got.allow || got.prompted || got.reviews != 1 {
+		if !got.allow || got.prompted || got.reviews != 0 {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -298,7 +306,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			})
 		}, Proposal{
 			Tool: "write_file", Mutates: true, Subject: "a.go",
-			Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
+			Args: json.RawMessage(`{"path":"a.go"}`),
 		}, nil)
 		if !got.allow || got.prompted || got.reviews != 1 {
 			t.Fatalf("got %+v", got)
@@ -332,7 +340,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			Tool: "write_file", Mutates: true, Subject: "a.go",
 			Args: json.RawMessage(`{"path":"a.go","content":"fix"}`),
 		}, nil)
-		if !got.allow || got.prompted || got.reviews != 1 || got.blocked {
+		if !got.allow || got.prompted || got.reviews != 0 || got.blocked {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -344,7 +352,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			})
 		}, Proposal{
 			Tool: "write_file", Mutates: true, Subject: "a.go",
-			Args: json.RawMessage(`{"path":"a.go","content":"fixed"}`),
+			Args: json.RawMessage(`{"path":"a.go"}`),
 		}, nil)
 		if !got.allow || got.prompted || got.reviews != 1 {
 			t.Fatalf("got %+v", got)
@@ -360,25 +368,25 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			Tool: "write_file", Mutates: true, Subject: "a.go",
 			Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
 		}, staticReviewer{ReviewVerdict{Outcome: ReviewContinue, ChangeKind: ChangeSameStrategy}})
-		if !got.allow || got.prompted || got.reviews != 1 {
+		if !got.allow || got.prompted || got.reviews != 0 {
 			t.Fatalf("got %+v", got)
 		}
 	})
-	t.Run("reviewer material plan change prompts immediately", func(t *testing.T) {
+	t.Run("non plan recovery never opens a human confirmation", func(t *testing.T) {
 		for _, kind := range []ChangeKind{ChangeStrategy, ChangeScope} {
 			t.Run(string(kind), func(t *testing.T) {
+				args := json.RawMessage(`{"path":"a.go","content":"x"}`)
 				got := run(t, func(g *Gate) {
 					g.ObserveResult(context.Background(), Observation{
-						Tool: "bash", Verification: true, ErrSummary: "fail",
-						Args: json.RawMessage(`{"command":"go test"}`),
+						Tool: "write_file", Mutates: true, Subject: "a.go",
+						ErrSummary: "fail", Args: args,
 					})
 				}, Proposal{
-					Tool: "write_file", Mutates: true, Subject: "adopt replacement plan",
-					Args: json.RawMessage(`{"path":"b.go","content":"x"}`),
+					Tool: "write_file", Mutates: true, Subject: "a.go", Args: args,
 				}, staticReviewer{ReviewVerdict{
 					Outcome: ReviewConfirm, ChangeKind: kind, Rationale: "the task now needs a user-owned plan choice",
 				}})
-				if !got.allow || !got.prompted || got.reviews != 1 || got.blocked {
+				if got.allow || got.prompted || got.reviews != 1 || !got.blocked {
 					t.Fatalf("got %+v", got)
 				}
 			})
@@ -397,14 +405,14 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 		}
 	})
 	t.Run("reviewer reject returns to agent without prompt", func(t *testing.T) {
+		args := json.RawMessage(`{"path":"a.go","content":"x"}`)
 		got := run(t, func(g *Gate) {
 			g.ObserveResult(context.Background(), Observation{
-				Tool: "bash", Verification: true, ErrSummary: "fail",
-				Args: json.RawMessage(`{"command":"go test"}`),
+				Tool: "write_file", Mutates: true, Subject: "a.go",
+				ErrSummary: "fail", Args: args,
 			})
 		}, Proposal{
-			Tool: "write_file", Mutates: true, Subject: "a.go",
-			Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
+			Tool: "write_file", Mutates: true, Subject: "a.go", Args: args,
 		}, staticReviewer{ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "not proven"}})
 		if got.allow || !got.blocked || got.prompted || got.reviews != 1 {
 			t.Fatalf("got %+v", got)
@@ -419,9 +427,9 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 				return ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "no"}, nil
 			}),
 		})
+		args := json.RawMessage(`{"path":"a.go"}`)
 		g.ObserveResult(context.Background(), Observation{
-			Tool: "bash", Verification: true, ErrSummary: "fail",
-			Args: json.RawMessage(`{"command":"go test"}`),
+			Tool: "write_file", Mutates: true, Subject: "a.go", ErrSummary: "fail", Args: args,
 		})
 		g.opts.EmitPrompt = func(_ context.Context, taskID string, _ PendingProposal, _ *FailureEvent) (string, error) {
 			prompts++
@@ -429,7 +437,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			_ = g.Resolve("esc", ActionContinue, "")
 			return "esc", nil
 		}
-		prop := Proposal{Tool: "write_file", Mutates: true, Args: json.RawMessage(`{"path":"a.go"}`)}
+		prop := Proposal{Tool: "write_file", Mutates: true, Subject: "a.go", Args: args}
 		for i := 1; i <= 2; i++ {
 			dec, err := g.BeforeMutation(context.Background(), prop)
 			if err != nil || dec.Allow || !dec.Blocked {
@@ -450,9 +458,9 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 				return ReviewVerdict{}, errors.New("timeout")
 			}),
 		})
+		args := json.RawMessage(`{"path":"a.go","content":"x"}`)
 		g.ObserveResult(context.Background(), Observation{
-			Tool: "write_file", Mutates: true, ErrSummary: "fail",
-			Args: json.RawMessage(`{"path":"a.go"}`),
+			Tool: "write_file", Mutates: true, Subject: "a.go", ErrSummary: "fail", Args: args,
 		})
 		g.opts.EmitPrompt = func(_ context.Context, taskID string, _ PendingProposal, _ *FailureEvent) (string, error) {
 			prompted.Store(true)
@@ -461,7 +469,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 			return "err", nil
 		}
 		dec, err := g.BeforeMutation(context.Background(), Proposal{
-			Tool: "write_file", Mutates: true, Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
+			Tool: "write_file", Mutates: true, Subject: "a.go", Args: args,
 		})
 		if err != nil || !dec.Allow || prompted.Load() || reviews.Load() != 1 {
 			t.Fatalf("got allow=%v prompted=%v reviews=%d err=%v", dec.Allow, prompted.Load(), reviews.Load(), err)
@@ -470,7 +478,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 		g.opts.Reviewer = staticReviewer{ReviewVerdict{Outcome: ReviewConfirm, ChangeKind: ChangeUncertain, Rationale: "no"}}
 		g.opts.EmitPrompt = nil
 		dec, err = g.BeforeMutation(context.Background(), Proposal{
-			Tool: "write_file", Mutates: true, Args: json.RawMessage(`{"path":"a.go","content":"y"}`),
+			Tool: "write_file", Mutates: true, Subject: "a.go", Args: args,
 		})
 		if err != nil || dec.Allow || !dec.Blocked || !strings.Contains(dec.Message, "attempt 1/3") {
 			t.Fatalf("post-error reject = %+v %v", dec, err)
@@ -498,7 +506,7 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 				}, Proposal{
 					Tool: "write_file", Mutates: true, Args: json.RawMessage(`{"path":"b.go","content":"x"}`),
 				}, staticReviewer{ReviewVerdict{Outcome: ReviewContinue, ChangeKind: kind}})
-				if !got.allow || got.prompted || got.reviews != 1 {
+				if !got.allow || got.prompted || got.reviews != 0 {
 					t.Fatalf("bounded %s recovery = %+v", kind, got)
 				}
 			})
@@ -507,13 +515,14 @@ func TestBehaviorMatrixGolden(t *testing.T) {
 	t.Run("risk or uncertainty cannot silently continue", func(t *testing.T) {
 		for _, kind := range []ChangeKind{ChangeRisk, ChangeUncertain} {
 			t.Run(string(kind), func(t *testing.T) {
+				args := json.RawMessage(`{"path":"a.go","content":"x"}`)
 				got := run(t, func(g *Gate) {
 					g.ObserveResult(context.Background(), Observation{
-						Tool: "write_file", Mutates: true, ErrSummary: "fail",
-						Args: json.RawMessage(`{"path":"a.go"}`),
+						Tool: "write_file", Mutates: true, Subject: "a.go",
+						ErrSummary: "fail", Args: args,
 					})
 				}, Proposal{
-					Tool: "write_file", Mutates: true, Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
+					Tool: "write_file", Mutates: true, Subject: "a.go", Args: args,
 				}, staticReviewer{ReviewVerdict{Outcome: ReviewContinue, ChangeKind: kind}})
 				if got.allow {
 					t.Fatalf("unsafe %s recovery auto-allowed: %+v", kind, got)
@@ -620,7 +629,7 @@ func TestTaskIsolationByTaskID(t *testing.T) {
 	})
 	dec, err := g.BeforeMutation(context.Background(), Proposal{
 		TaskID: "subagent:a", Tool: "write_file", Mutates: true,
-		Args: json.RawMessage(`{"path":"a.go","content":"x"}`),
+		Args: json.RawMessage(`{"path":"a.go"}`),
 	})
 	if err != nil || !dec.Allow {
 		t.Fatalf("task a = %+v %v", dec, err)

@@ -23,6 +23,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/secrets"
 )
 
 // ── Data model ──────────────────────────────────────────────────────────────
@@ -310,7 +311,7 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 		tabMeta, err = e.app.openGlobalTabInactive(topicID)
 	}
 	if err != nil {
-		log.Printf("[heartbeat] OpenTab(%q): %v", t.Title, err)
+		log.Printf("[heartbeat] OpenTab(%q): %s", t.Title, secrets.RedactError(err))
 		t.LastRunAt = time.Now().UnixMilli()
 		return t
 	}

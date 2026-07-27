@@ -36,10 +36,10 @@ import (
 
 // Manifest endpoints — R2 CDN first (fast, especially in CN), then the crash
 // worker release gateway, then GitHub as the stable channel's last resort. The
-// build channel picks the rolling pointer so a canary build polls the canary
-// line and a stable build polls latest; the two never cross. The gateway still
-// avoids GitHub's repository-wide /releases/latest shortcut so the app is not
-// coupled to GitHub's homepage badge semantics.
+// selected update channel picks the rolling pointer; it is user-configurable and
+// independent from the build channel embedded for diagnostics/backcompat. The
+// gateway still avoids GitHub's repository-wide /releases/latest shortcut so the
+// app is not coupled to GitHub's homepage badge semantics.
 const (
 	r2Base                  = "https://dl.reasonix.io"
 	releaseGatewayBase      = "https://crash.reasonix.io/v1/desktop/releases"
@@ -56,23 +56,50 @@ var fetchAttemptTimeout = 5 * time.Second
 // at once (#6005); GitHub is separate infrastructure. Stable desktop releases
 // own the repo-wide latest badge and publish latest.json directly, while
 // release.yml also keeps a desktop-manifest mirror attached to stable CLI
-// releases for older publishing windows. Canary has no GitHub release, so its
-// chain stays two-deep.
+// releases for older publishing windows. Preview has no GitHub release, so its
+// chain remains first-party only.
 const githubManifestFallback = "https://github.com/esengine/DeepSeek-Reasonix/releases/latest/download/latest.json"
 
-// manifestEndpoints returns the manifest URLs for the running build's channel,
+func normalizeUpdateChannel(ch string) string {
+	return config.NormalizeDesktopUpdateChannel(ch)
+}
+
+func configuredUpdateChannel() string {
+	cfg, err := config.Load()
+	if err != nil {
+		return "stable"
+	}
+	return cfg.DesktopUpdateChannel()
+}
+
+func targetUpdateChannel(selected string) string {
+	if strings.TrimSpace(selected) != "" {
+		return normalizeUpdateChannel(selected)
+	}
+	return configuredUpdateChannel()
+}
+
+func runningUpdateChannel() string {
+	return normalizeUpdateChannel(channel)
+}
+
+// manifestEndpoints returns the manifest URLs for the selected update channel,
 // in the order fetchManifest tries them.
-func manifestEndpoints() []string {
-	if channel == "canary" {
+func manifestEndpoints(selected string) []string {
+	switch normalizeUpdateChannel(selected) {
+	case "preview":
 		return []string{
+			r2Base + "/preview/latest.json",
 			r2Base + "/canary/latest.json",
+			releaseGatewayBase + "/preview/latest.json",
 			releaseGatewayBase + "/canary/latest.json",
 		}
-	}
-	return []string{
-		r2Base + "/latest/latest.json",
-		releaseGatewayBase + "/stable/latest.json",
-		githubManifestFallback,
+	default:
+		return []string{
+			r2Base + "/latest/latest.json",
+			releaseGatewayBase + "/stable/latest.json",
+			githubManifestFallback,
+		}
 	}
 }
 
@@ -80,8 +107,8 @@ func manifestEndpoints() []string {
 // is exactly what edge bot protection scores worst (#6005); a descriptive UA
 // lets the release edge allowlist updater requests and makes them attributable
 // in server logs.
-func updaterUserAgent() string {
-	return fmt.Sprintf("Reasonix-Updater/%s (%s/%s; %s)", version, runtime.GOOS, runtime.GOARCH, channel)
+func updaterUserAgent(selected string) string {
+	return fmt.Sprintf("Reasonix-Updater/%s (%s/%s; build=%s; update=%s)", version, runtime.GOOS, runtime.GOARCH, channel, normalizeUpdateChannel(selected))
 }
 
 // downloadPage is the human-facing releases page shown when self-update is
@@ -172,15 +199,39 @@ func normalizeVersion(v string) (string, bool) {
 	return semver.Canonical(v), true
 }
 
+// validateManifestChannel prevents compatibility fallbacks from crossing the
+// public channel boundary. In particular, the legacy canary/ pointer may still
+// contain an old test-signed vX.Y.Z-canary.N build until the first Preview
+// release mirrors over it; new Preview clients must skip that manifest.
+func validateManifestChannel(selected string, m *update.Manifest) error {
+	version, ok := normalizeVersion(m.Version)
+	if !ok {
+		return fmt.Errorf("%s manifest has invalid version %q", normalizeUpdateChannel(selected), m.Version)
+	}
+	prerelease := semver.Prerelease(version)
+	switch normalizeUpdateChannel(selected) {
+	case "preview":
+		if !strings.HasPrefix(prerelease, "-preview.") {
+			return fmt.Errorf("preview manifest has non-Preview version %q", m.Version)
+		}
+	default:
+		if prerelease != "" {
+			return fmt.Errorf("stable manifest has prerelease version %q", m.Version)
+		}
+	}
+	return nil
+}
+
 // fetchManifest pulls latest.json from each endpoint in order until one both
-// responds and decodes. Every endpoint's failure is kept — a user staring at a
-// gateway 403 (#6005) needs to see that the R2 pointer failed too, not just
-// whichever endpoint happened to die last.
-func fetchManifest(ctx context.Context, c, fallback *http.Client) (*update.Manifest, error) {
+// responds, decodes, and matches the selected public channel. Every endpoint's
+// failure is kept — a user staring at a gateway 403 (#6005) needs to see that
+// the R2 pointer failed too, not just whichever endpoint happened to die last.
+func fetchManifest(ctx context.Context, c, fallback *http.Client, selected string) (*update.Manifest, error) {
 	var errs []error
-	for _, url := range manifestEndpoints() {
+	selected = normalizeUpdateChannel(selected)
+	for _, url := range manifestEndpoints(selected) {
 		endpointCtx, cancel := context.WithTimeout(ctx, manifestEndpointTimeout)
-		b, err := fetchManifestBytes(endpointCtx, c, fallback, url)
+		b, err := fetchManifestBytes(endpointCtx, c, fallback, selected, url)
 		cancel()
 		if err != nil {
 			errs = append(errs, err)
@@ -188,6 +239,10 @@ func fetchManifest(ctx context.Context, c, fallback *http.Client) (*update.Manif
 		}
 		var m update.Manifest
 		if err := json.Unmarshal(b, &m); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", url, err))
+			continue
+		}
+		if err := validateManifestChannel(selected, &m); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
@@ -199,16 +254,16 @@ func fetchManifest(ctx context.Context, c, fallback *http.Client) (*update.Manif
 // fetchManifestBytes gives the default and IPv4 transports separate halves of
 // the endpoint budget. A stalled IPv6 dial must not consume the whole timeout
 // before the IPv4 fallback gets a chance to run (#6713).
-func fetchManifestBytes(ctx context.Context, c, fallback *http.Client, url string) ([]byte, error) {
+func fetchManifestBytes(ctx context.Context, c, fallback *http.Client, selected, url string) ([]byte, error) {
 	attemptTimeout := manifestEndpointTimeout / 2
 	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
-	data, err := fetchBytesOnce(attemptCtx, c, url)
+	data, err := fetchBytesOnce(attemptCtx, c, selected, url)
 	cancel()
 	if err == nil || !isTransientFetchError(err) || fallback == nil {
 		return data, err
 	}
 	attemptCtx, cancel = context.WithTimeout(ctx, attemptTimeout)
-	fallbackData, fallbackErr := fetchBytesOnce(attemptCtx, fallback, url)
+	fallbackData, fallbackErr := fetchBytesOnce(attemptCtx, fallback, selected, url)
 	cancel()
 	if fallbackErr == nil {
 		return fallbackData, nil
@@ -216,15 +271,21 @@ func fetchManifestBytes(ctx context.Context, c, fallback *http.Client, url strin
 	return nil, errors.Join(err, fallbackErr)
 }
 
-// evaluate compares the running version against the manifest and builds the
-// frontend-facing result. I/O is limited to install-profile detection and cache
-// probes so unit tests can inject a fixed profile via evaluateWithProfile.
-func evaluate(current string, m *update.Manifest) UpdateInfo {
-	return evaluateWithProfile(current, m, profileForManifest(detectInstallProfile(), m))
+// evaluateForChannel compares the running version against the selected channel's
+// manifest and builds the frontend-facing result. I/O is limited to install-profile
+// detection and cache probes so tests can inject a fixed profile below.
+func evaluateForChannel(current, selected string, m *update.Manifest) UpdateInfo {
+	return evaluateWithProfileForChannel(current, selected, m, profileForManifest(detectInstallProfile(), m))
 }
 
-// evaluateWithProfile is the pure comparison core once the install profile is known.
 func evaluateWithProfile(current string, m *update.Manifest, profile installProfile) UpdateInfo {
+	return evaluateWithProfileForChannel(current, runningUpdateChannel(), m, profile)
+}
+
+// evaluateWithProfileForChannel is the pure comparison core once the install
+// profile and selected update channel are known.
+func evaluateWithProfileForChannel(current, selected string, m *update.Manifest, profile installProfile) UpdateInfo {
+	selected = normalizeUpdateChannel(selected)
 	page := m.DownloadPage
 	if page == "" {
 		page = downloadPage()
@@ -233,7 +294,7 @@ func evaluateWithProfile(current string, m *update.Manifest, profile installProf
 		Current:           current,
 		Latest:            m.Version,
 		Notes:             m.Notes,
-		Channel:           channel,
+		Channel:           selected,
 		CanSelfUpdate:     profile.CanSelfUpdate,
 		ManualOnly:        !profile.CanSelfUpdate,
 		ManualReason:      profile.ManualReason,
@@ -258,13 +319,19 @@ func evaluateWithProfile(current string, m *update.Manifest, profile installProf
 		info.Err = "manifest has no valid version"
 		return info
 	}
-	// A dev/invalid running version never auto-prompts.
-	if okCur && semver.Compare(latest, cur) > 0 {
-		info.Available = true
+	// A dev/invalid running version never auto-prompts. Within a channel, only a
+	// newer semver is an update. Across channels, a different target latest is an
+	// explicit channel switch, so allow installing stable over a newer preview.
+	if okCur {
+		if selected != runningUpdateChannel() {
+			info.Available = latest != cur
+		} else if semver.Compare(latest, cur) > 0 {
+			info.Available = true
+		}
 	}
 	if a, kind, ok := selectUpdateAsset(m, profile); ok {
 		info.AssetSize = a.Size
-		info.Downloaded = cachedUpdateMatches(m.Version, a, kind)
+		info.Downloaded = cachedUpdateMatchesForChannel(selected, m.Version, a, kind)
 	} else if a, ok := m.Asset(); ok {
 		// Manual installs (or a missing native package) still surface the portable
 		// artifact size so the UI can show how large the download is on the page.
@@ -355,6 +422,11 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 }
 
 func saveCachedUpdate(version string, asset update.Asset, data []byte, kind string, signature []byte) (*cachedUpdate, error) {
+	return saveCachedUpdateForChannel(runningUpdateChannel(), version, asset, data, kind, signature)
+}
+
+func saveCachedUpdateForChannel(selected, version string, asset update.Asset, data []byte, kind string, signature []byte) (*cachedUpdate, error) {
+	selected = normalizeUpdateChannel(selected)
 	if err := checkSHA256(data, asset.SHA256); err != nil {
 		return nil, err
 	}
@@ -369,7 +441,7 @@ func saveCachedUpdate(version string, asset update.Asset, data []byte, kind stri
 	}
 	meta := &cachedUpdate{
 		Version:      version,
-		Channel:      channel,
+		Channel:      selected,
 		Platform:     update.CurrentPlatform(),
 		Path:         path,
 		Size:         int64(len(data)),
@@ -421,6 +493,11 @@ func loadCachedUpdate() (*cachedUpdate, error) {
 }
 
 func cachedUpdateMatches(version string, asset update.Asset, kind string) bool {
+	return cachedUpdateMatchesForChannel(runningUpdateChannel(), version, asset, kind)
+}
+
+func cachedUpdateMatchesForChannel(selected, version string, asset update.Asset, kind string) bool {
+	selected = normalizeUpdateChannel(selected)
 	meta, err := loadCachedUpdate()
 	if err != nil {
 		return false
@@ -440,7 +517,7 @@ func cachedUpdateMatches(version string, asset update.Asset, kind string) bool {
 		return false
 	}
 	return meta.Version == version &&
-		meta.Channel == channel &&
+		meta.Channel == selected &&
 		meta.Platform == update.CurrentPlatform() &&
 		strings.EqualFold(meta.SHA256, asset.SHA256) &&
 		meta.Size == asset.Size &&
@@ -461,12 +538,17 @@ func fileSHA256Matches(path, want string) bool {
 }
 
 func readVerifiedCachedUpdate() (*cachedUpdate, []byte, error) {
+	return readVerifiedCachedUpdateForChannel(runningUpdateChannel())
+}
+
+func readVerifiedCachedUpdateForChannel(selected string) (*cachedUpdate, []byte, error) {
+	selected = normalizeUpdateChannel(selected)
 	meta, err := loadCachedUpdate()
 	if err != nil {
 		return nil, nil, err
 	}
-	if meta.Channel != channel {
-		return nil, nil, fmt.Errorf("update: cached update is for %s channel, current channel is %s", meta.Channel, channel)
+	if meta.Channel != selected {
+		return nil, nil, fmt.Errorf("update: cached update is for %s channel, selected channel is %s", meta.Channel, selected)
 	}
 	if meta.Platform != update.CurrentPlatform() {
 		return nil, nil, fmt.Errorf("update: cached update is for %s, current platform is %s", meta.Platform, update.CurrentPlatform())
@@ -543,13 +625,18 @@ func isTransientFetchError(err error) bool {
 
 // fetchBytes GETs a URL fully into memory, retrying transient transport failures.
 func fetchBytes(ctx context.Context, c *http.Client, url string) ([]byte, error) {
-	return fetchBytesFallback(ctx, c, nil, url)
+	return fetchBytesFallbackForChannel(ctx, c, nil, runningUpdateChannel(), url)
 }
 
 // fetchBytesFallback retries transport failures with the IPv4-pinned client.
 // This covers small manifest/signature requests as well as the artifact body;
 // previously only the large artifact download escaped a broken IPv6 route.
 func fetchBytesFallback(ctx context.Context, c, fallback *http.Client, url string) ([]byte, error) {
+	return fetchBytesFallbackForChannel(ctx, c, fallback, runningUpdateChannel(), url)
+}
+
+func fetchBytesFallbackForChannel(ctx context.Context, c, fallback *http.Client, selected, url string) ([]byte, error) {
+	selected = normalizeUpdateChannel(selected)
 	var data []byte
 	err := retryTransient(ctx, func(attempt int) error {
 		client := c
@@ -558,19 +645,19 @@ func fetchBytesFallback(ctx context.Context, c, fallback *http.Client, url strin
 		}
 		var e error
 		attemptCtx, cancel := context.WithTimeout(ctx, fetchAttemptTimeout)
-		data, e = fetchBytesOnce(attemptCtx, client, url)
+		data, e = fetchBytesOnce(attemptCtx, client, selected, url)
 		cancel()
 		return e
 	})
 	return data, err
 }
 
-func fetchBytesOnce(ctx context.Context, c *http.Client, url string) ([]byte, error) {
+func fetchBytesOnce(ctx context.Context, c *http.Client, selected, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", updaterUserAgent())
+	req.Header.Set("User-Agent", updaterUserAgent(selected))
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
@@ -588,13 +675,18 @@ func fetchBytesOnce(ctx context.Context, c *http.Client, url string) ([]byte, er
 // client (when provided) since a reset usually means the IPv6 route is the problem.
 // total is the expected size for the progress denominator (refined from the response).
 func download(ctx context.Context, c, fallback *http.Client, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
+	return downloadForChannel(ctx, c, fallback, runningUpdateChannel(), url, total, onProgress)
+}
+
+func downloadForChannel(ctx context.Context, c, fallback *http.Client, selected, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
+	selected = normalizeUpdateChannel(selected)
 	var buf bytes.Buffer
 	err := retryTransient(ctx, func(attempt int) error {
 		client := c
 		if attempt > 1 && fallback != nil {
 			client = fallback
 		}
-		return downloadInto(ctx, client, url, &buf, &total, onProgress)
+		return downloadInto(ctx, client, selected, url, &buf, &total, onProgress)
 	})
 	if err != nil {
 		return nil, err
@@ -607,12 +699,12 @@ func download(ctx context.Context, c, fallback *http.Client, url string, total i
 // remaining bytes; a 200 means the server ignored Range, so buf is reset and the
 // whole file re-downloaded. total is refined from the response for the progress
 // denominator (Content-Length on 200, the size field of Content-Range on 206).
-func downloadInto(ctx context.Context, c *http.Client, url string, buf *bytes.Buffer, total *int64, onProgress func(received, total int64)) error {
+func downloadInto(ctx context.Context, c *http.Client, selected, url string, buf *bytes.Buffer, total *int64, onProgress func(received, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", updaterUserAgent())
+	req.Header.Set("User-Agent", updaterUserAgent(selected))
 	if buf.Len() > 0 {
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", buf.Len()))
 	}

@@ -1,6 +1,7 @@
 // Ingest + dashboard for desktop crash/feedback/performance reports and the
-// anonymous launch ping. Reports are user-initiated; pings are opt-out
-// (desktop.telemetry).
+// anonymous launch ping. Frontend reports are user-initiated; native fatal and
+// lifecycle reports are sent on the next launch under the same opt-out desktop
+// telemetry gate as pings.
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
@@ -95,6 +96,22 @@ const METRIC_SIGNALS = [
   "turns",
   "desktop_hang",
   "desktop_hang_age",
+  "desktop_exit",
+  "desktop_exit_phase",
+  "desktop_uptime",
+  "desktop_install",
+  "desktop_update_transition",
+  "desktop_restore",
+  "desktop_webview2_failure",
+  "recovery_failure",
+  "recovery_rule_continue",
+  "recovery_review_continue",
+  "recovery_human_prompt",
+  "recovery_human_continue",
+  "recovery_human_revise",
+  "recovery_review_error",
+  "recovery_repeat_prompt",
+  "recovery_review_latency",
   "client_surface",
   "client_version",
   "settings_language",

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1179,6 +1180,163 @@ func TestRebindTabToLoadedSessionPersistsAndRestoresSessionProfile(t *testing.T)
 	if got := currentTabToolApprovalMode(tab); got != control.ToolApprovalYolo {
 		t.Fatalf("rebound tool approval = %q, want yolo", got)
 	}
+}
+
+func newAtomicRebindTestApp(t *testing.T) (*App, *WorkspaceTab, control.SessionAPI, string, string, *agent.Session) {
+	t.Helper()
+	isolateDesktopUserDirs(t)
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	sourcePath := filepath.Join(dir, "atomic-source.jsonl")
+	targetPath := filepath.Join(dir, "atomic-target.jsonl")
+	writeHistoryTestSession(t, sourcePath, "source prompt")
+	writeHistoryTestSession(t, targetPath, "target prompt")
+	if err := agent.SaveBranchMetaPreserveUpdated(targetPath, agent.BranchMeta{
+		TokenMode:        boot.TokenModeDelivery,
+		Mode:             "normal",
+		ToolApprovalMode: control.ToolApprovalAsk,
+	}); err != nil {
+		t.Fatalf("save target profile: %v", err)
+	}
+	loaded, err := agent.LoadSession(targetPath)
+	if err != nil {
+		t.Fatalf("load target: %v", err)
+	}
+	sourceSession, err := agent.LoadSession(sourcePath)
+	if err != nil {
+		t.Fatalf("load source: %v", err)
+	}
+	exec := agent.New(nil, nil, sourceSession, agent.Options{}, event.Discard)
+	oldCtrl := control.New(control.Options{
+		Executor: exec, SessionDir: dir, SessionPath: sourcePath, Label: "source", Sink: event.Discard,
+	})
+	oldCtrl.Resume(sourceSession, sourcePath)
+	oldCtrl.SetPlanMode(true)
+	oldCtrl.SetToolApprovalMode(control.ToolApprovalYolo)
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	tab := &WorkspaceTab{
+		ID:               "atomic-rebind",
+		Scope:            "global",
+		WorkspaceRoot:    root,
+		SessionPath:      sourcePath,
+		Ctrl:             oldCtrl,
+		Ready:            true,
+		model:            "",
+		tokenMode:        boot.TokenModeEconomy,
+		mode:             "plan-yolo",
+		toolApprovalMode: control.ToolApprovalYolo,
+		sink:             &tabEventSink{tabID: "atomic-rebind", app: app, ctx: app.ctx},
+		disabledMCP:      map[string]ServerView{},
+	}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	if err := tab.ensureSessionLease(sourcePath); err != nil {
+		t.Fatalf("lease source: %v", err)
+	}
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(tab, sessionRuntimeKey(sourcePath))
+	app.advanceSessionRuntimeEpochLocked(tab)
+	app.mu.Unlock()
+	t.Cleanup(func() {
+		if ctrl := app.controllerForTab(tab); ctrl != nil {
+			ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+	return app, tab, oldCtrl, sourcePath, targetPath, loaded
+}
+
+func assertAtomicRebindFailurePreservedSource(
+	t *testing.T,
+	app *App,
+	tab *WorkspaceTab,
+	oldCtrl control.SessionAPI,
+	sourcePath string,
+	targetPath string,
+	oldEpoch string,
+) {
+	t.Helper()
+	if got := app.controllerForTab(tab); got != oldCtrl {
+		t.Fatalf("controller after failed rebind = %p, want source %p", got, oldCtrl)
+	}
+	if got := tab.currentSessionPath(); sessionRuntimeKey(got) != sessionRuntimeKey(sourcePath) {
+		t.Fatalf("session path after failed rebind = %q, want %q", got, sourcePath)
+	}
+	if got := tab.sessionLeaseRuntimeKey(); got != sessionRuntimeKey(sourcePath) {
+		t.Fatalf("lease after failed rebind = %q, want source key %q", got, sessionRuntimeKey(sourcePath))
+	}
+	if !oldCtrl.PlanMode() || oldCtrl.ToolApprovalMode() != control.ToolApprovalYolo ||
+		currentTabTokenMode(tab) != boot.TokenModeEconomy {
+		t.Fatalf("source profile changed after failed rebind: plan=%v approval=%q token=%q",
+			oldCtrl.PlanMode(), oldCtrl.ToolApprovalMode(), currentTabTokenMode(tab))
+	}
+	app.mu.RLock()
+	view := app.sessionRuntimeViewLocked(tab)
+	sourceRuntime := app.runtimeBySessionKey[sessionRuntimeKey(sourcePath)]
+	targetRuntime := app.runtimeBySessionKey[sessionRuntimeKey(targetPath)]
+	app.mu.RUnlock()
+	if view.Phase != sessionRuntimeReady || view.Epoch != oldEpoch {
+		t.Fatalf("runtime after failed rebind = phase %q epoch %q, want ready/%q", view.Phase, view.Epoch, oldEpoch)
+	}
+	if sourceRuntime == nil || sourceRuntime.Owner != tab || targetRuntime != nil {
+		t.Fatalf("registry after failed rebind source=%#v target=%#v", sourceRuntime, targetRuntime)
+	}
+	if meta := app.MetaForTab(tab.ID); !meta.Ready || meta.Runtime.Phase != sessionRuntimeReady {
+		t.Fatalf("failed rebind disabled source runtime: ready=%v phase=%q", meta.Ready, meta.Runtime.Phase)
+	}
+}
+
+func TestRebindTargetLeaseFailureKeepsSourceRuntimeAtomic(t *testing.T) {
+	app, tab, oldCtrl, sourcePath, targetPath, loaded := newAtomicRebindTestApp(t)
+	app.mu.RLock()
+	oldEpoch := app.sessionRuntimeViewLocked(tab).Epoch
+	app.mu.RUnlock()
+
+	holder, err := agent.TryAcquireSessionLease(targetPath)
+	if err != nil {
+		t.Fatalf("hold target lease: %v", err)
+	}
+	defer holder.Release()
+
+	err = app.rebindTabToLoadedSessionPath(tab, targetPath, loaded)
+	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		t.Fatalf("rebind error = %v, want ErrSessionLeaseHeld", err)
+	}
+	assertAtomicRebindFailurePreservedSource(t, app, tab, oldCtrl, sourcePath, targetPath, oldEpoch)
+	if _, err := agent.TryAcquireSessionLease(sourcePath); !errors.Is(err, agent.ErrSessionLeaseHeld) {
+		t.Fatalf("source lease became acquirable after failed target claim: %v", err)
+	}
+}
+
+func TestRebindPostLeaseValidationFailureRollsBackCandidate(t *testing.T) {
+	app, tab, oldCtrl, sourcePath, targetPath, loaded := newAtomicRebindTestApp(t)
+	app.mu.RLock()
+	oldEpoch := app.sessionRuntimeViewLocked(tab).Epoch
+	app.mu.RUnlock()
+	app.rebindCandidateHook = func(stage string) error {
+		if stage == "lease_acquired" {
+			return errors.New("injected post-lease validation failure")
+		}
+		return nil
+	}
+
+	err := app.rebindTabToLoadedSessionPath(tab, targetPath, loaded)
+	if err == nil || !strings.Contains(err.Error(), "injected post-lease") {
+		t.Fatalf("rebind error = %v, want injected validation failure", err)
+	}
+	assertAtomicRebindFailurePreservedSource(t, app, tab, oldCtrl, sourcePath, targetPath, oldEpoch)
+	targetLease, err := agent.TryAcquireSessionLease(targetPath)
+	if err != nil {
+		t.Fatalf("candidate target lease leaked after rollback: %v", err)
+	}
+	targetLease.Release()
 }
 
 func TestCloseTabPersistsSessionProfileBeforeRemovingVisibleTab(t *testing.T) {

@@ -367,7 +367,7 @@ func TestBridgeRecoveryPauseNotifiesAsControlledPause(t *testing.T) {
 		Outcome: event.TurnOutcomeRecoveryPaused,
 	})
 	call := env.waitNotification(t)
-	if strings.Contains(call.msg.Text, "❌") || !strings.Contains(call.msg.Text, "已暂停自动恢复") || !strings.Contains(call.msg.Text, "继续") {
+	if strings.Contains(call.msg.Text, "❌") || !strings.Contains(call.msg.Text, "已暂停自动重试") || !strings.Contains(call.msg.Text, "继续") {
 		t.Fatalf("recovery pause text = %q, want a neutral actionable pause notice", call.msg.Text)
 	}
 }

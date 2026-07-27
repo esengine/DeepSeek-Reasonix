@@ -32,6 +32,43 @@ func QualifyingFailure(obs Observation) bool {
 	return false
 }
 
+// ClassifyFailure identifies the owning recovery policy without treating an
+// execution reliability problem as a permission or user-decision boundary.
+// The classifier is deliberately narrow: permission/sandbox/user blocks are
+// filtered by QualifyingFailure before this is called.
+func ClassifyFailure(obs Observation) FailureClass {
+	if transientFailureText(obs.ErrSummary) || transientFailureText(obs.Output) {
+		return FailureClassTransient
+	}
+	if obs.Verification {
+		return FailureClassVerification
+	}
+	if obs.Mutates {
+		return FailureClassMutation
+	}
+	return FailureClassExecution
+}
+
+func transientFailureText(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"command timed out",
+		"timed out after",
+		"timed out (>",
+		"context deadline exceeded",
+		"deadline exceeded",
+		"execution timeout",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsVerificationCall reports whether the host recognizes the call as a
 // verification command (test/lint/build/typecheck/compile).
 func IsVerificationCall(tool string, args json.RawMessage, readOnly bool) bool {

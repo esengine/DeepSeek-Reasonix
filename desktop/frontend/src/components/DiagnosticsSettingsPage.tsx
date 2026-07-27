@@ -223,11 +223,6 @@ export function DiagnosticsSettingsPage({
             open={!!open.hooks}
             onToggle={() => toggle("hooks")}
           >
-            <p className="diag-page__hint">
-              {t("diag.hooksTrust", {
-                trusted: report.hooks.trusted_project ? t("diag.yes") : t("diag.no"),
-              })}
-            </p>
             {report.hooks.entries.map((e, i) => (
               <div key={`${e.event}-${e.source}-${i}`} className="diag-row">
                 <span>{e.event} [{e.scope}]</span>

@@ -165,6 +165,7 @@ type WorkspaceTab struct {
 	Ready               bool               // true once boot.Build completes
 	StartupErr          string             // build error, surfaced to the frontend
 	StartupErrLeaseHeld bool               // true when StartupErr can be retried after a session lease releases
+	runtimeID           string             // process-local SessionRuntime registry identity
 	sessionLease        *agent.SessionLease
 	sessionLeaseMu      sync.Mutex
 	sessionLeaseKey     atomic.Pointer[string] // lock-free mirror; updated with sessionLease under sessionLeaseMu
@@ -589,6 +590,7 @@ func (a *App) detachSessionRuntime(tab *WorkspaceTab) bool {
 	a.mu.Lock()
 	a.ensureDetachedSessionsLocked()
 	tab.SessionPath = canonicalTabSessionPath(path)
+	a.bindSessionRuntimeKeyLocked(tab, path)
 	a.detachedSessions[key] = tab
 	a.mu.Unlock()
 	return true
@@ -625,6 +627,7 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		Ready:               tab.Ready,
 		StartupErr:          tab.StartupErr,
 		StartupErrLeaseHeld: tab.StartupErrLeaseHeld,
+		runtimeID:           tab.runtimeID,
 		sink:                tab.sink,
 		ActivityStatus:      tab.ActivityStatus,
 		readTelemetry:       readTelemetry,
@@ -658,25 +661,39 @@ func (a *App) detachRuntimeForReplacement(tab *WorkspaceTab) bool {
 	// The lease transfer stays deadlock-safe here: neither side holds a lease
 	// to release, so no lease I/O runs under a.mu.
 	a.mu.Lock()
+	detached := a.detachRuntimeForReplacementLocked(tab)
+	a.mu.Unlock()
+	return detached
+}
+
+// detachRuntimeForReplacementLocked transfers a visible tab's live runtime to
+// the detached registry without closing its controller or releasing its lease.
+// Callers must hold App.mu. The transfer itself performs no file or host I/O.
+func (a *App) detachRuntimeForReplacementLocked(tab *WorkspaceTab) bool {
+	if tab == nil {
+		return false
+	}
 	if tab.removed || a.tabs[tab.ID] != tab {
-		a.mu.Unlock()
 		return false
 	}
 	sourcePath := tab.currentSessionPath()
 	key := sessionRuntimeKey(sourcePath)
 	if key == "" {
-		a.mu.Unlock()
 		return false
 	}
 	detached := cloneDetachedRuntimeTab(tab, key, sourcePath)
 	if detached == nil {
-		a.mu.Unlock()
 		return false
 	}
 	// Transfer lease ownership through the locked helpers: a concurrent
 	// ensureSessionLease (blank-session boot, recovery callback) must never
 	// observe a torn pointer or have its freshly acquired lease clobbered.
 	detached.adoptSessionLease(tab.takeSessionLease())
+	if rt := a.runtimeForTabLocked(tab); rt != nil {
+		rt.Owner = detached
+		detached.runtimeID = rt.ID
+		tab.runtimeID = ""
+	}
 	if detached.sink != nil {
 		detached.sink.setBinding(detached.ID, nil)
 		// clearContext (locked nil + drain the queued emitter), not a bare
@@ -687,7 +704,6 @@ func (a *App) detachRuntimeForReplacement(tab *WorkspaceTab) bool {
 	}
 	a.ensureDetachedSessionsLocked()
 	a.detachedSessions[key] = detached
-	a.mu.Unlock()
 	return true
 }
 
@@ -719,7 +735,7 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.SessionPath = canonicalTabSessionPath(path)
 	target.SharedHostKey = source.SharedHostKey
 	target.Label = source.Label
-	target.Ready = true
+	target.Ready = source.Ready && source.Ctrl != nil
 	clearTabStartupError(target)
 	target.ActivityStatus = source.ActivityStatus
 	target.model = source.model
@@ -733,6 +749,36 @@ func applyRuntimeTab(target, source *WorkspaceTab, path string, wailsCtx context
 	target.readTelemetry = readTelemetry
 	target.usageTelemetry = usageTelemetry
 	target.telemetrySessionKey = telemetrySessionKey
+	if app != nil {
+		key := sessionRuntimeKey(path)
+		rt := app.runtimeForTabLocked(source)
+		targetRuntime := app.runtimeForTabLocked(target)
+		if rt == nil {
+			rt = targetRuntime
+		}
+		if rt == nil {
+			rt = app.newSessionRuntimeLocked(source, key)
+		} else if targetRuntime != nil && targetRuntime != rt {
+			app.removeSessionRuntimeMappingsLocked(targetRuntime)
+			target.runtimeID = ""
+		}
+		if source.Ctrl != nil && source.Ready {
+			rt.Phase = sessionRuntimeReady
+			rt.Issue = nil
+			closeRuntimeReadyChannelLocked(rt)
+		}
+		rt.Owner = target
+		if rt.Key != "" && rt.Key != key && app.runtimeBySessionKey[rt.Key] == rt {
+			delete(app.runtimeBySessionKey, rt.Key)
+		}
+		rt.Key = key
+		app.runtimeBySessionKey[key] = rt
+		target.runtimeID = rt.ID
+		source.runtimeID = ""
+		if target.sink != nil {
+			target.sink.setRuntimeEpoch(rt.Epoch)
+		}
+	}
 }
 
 func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wailsCtx context.Context) bool {
@@ -746,8 +792,48 @@ func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wails
 		a.mu.Unlock()
 		return false
 	}
+	if rt := a.runtimeBySessionKey[key]; rt != nil && !a.runtimeOwnerLiveLocked(rt) {
+		a.removeSessionRuntimeMappingsLocked(rt)
+	}
+	registered := a.runtimeBySessionKey[key]
+	if registered != nil && registered.Phase == sessionRuntimeStarting && registered.Owner != tab {
+		// A starting runtime owns only an admission placeholder; its controller,
+		// lease, and sink have not been published yet. Moving that tab would
+		// supersede the owner build while the attaching build closes its own
+		// candidate, leaving the session permanently starting with no controller.
+		// claimSessionRuntime waits on readyCh and retries the attach after the
+		// owner publishes a terminal phase. The owner itself may still adopt a
+		// usable legacy runtime that predates the registry.
+		a.mu.Unlock()
+		return false
+	}
+	attachable := func(source *WorkspaceTab) bool {
+		if source == nil || source.Ctrl == nil {
+			return false
+		}
+		if rt := a.runtimeForTabLocked(source); rt != nil {
+			return rt.Phase == sessionRuntimeReady
+		}
+		// Compatibility for visible/detached runtimes constructed before the
+		// process-local registry existed.
+		return source.Ready
+	}
 	detached := a.detachedSessions[key]
+	if detached == nil {
+		if rt := a.runtimeBySessionKey[key]; rt != nil && rt.Owner != nil && rt.Owner != tab {
+			detached = rt.Owner
+			if a.tabs[detached.ID] != detached {
+				delete(a.detachedSessions, key)
+			} else {
+				detached = nil
+			}
+		}
+	}
 	if detached != nil {
+		if !attachable(detached) {
+			a.mu.Unlock()
+			return false
+		}
 		delete(a.detachedSessions, key)
 		applyRuntimeTab(tab, detached, path, wailsCtx, a)
 		if current := a.tabs[tab.ID]; current == tab {
@@ -762,7 +848,13 @@ func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wails
 	}
 
 	var source *WorkspaceTab
+	if rt := a.runtimeBySessionKey[key]; rt != nil && rt.Owner != nil && rt.Owner != tab {
+		source = rt.Owner
+	}
 	for _, candidate := range a.tabs {
+		if source != nil {
+			break
+		}
 		if candidate == nil || candidate == tab {
 			continue
 		}
@@ -772,6 +864,10 @@ func (a *App) attachExistingSessionRuntime(tab *WorkspaceTab, path string, wails
 		}
 	}
 	if source == nil {
+		a.mu.Unlock()
+		return false
+	}
+	if !attachable(source) {
 		a.mu.Unlock()
 		return false
 	}
@@ -1201,6 +1297,7 @@ type tabEventSink struct {
 	app           *App
 	mu            sync.RWMutex
 	ctx           context.Context
+	runtimeEpoch  string
 	runtimeEvents asyncRuntimeEmitter
 	botSink       event.Sink // optional: when set, events are also forwarded here
 	botSinkGen    uint64
@@ -1227,6 +1324,24 @@ func (s *tabEventSink) setBinding(tabID string, app *App) {
 		s.app = app
 	}
 	s.mu.Unlock()
+}
+
+func (s *tabEventSink) setRuntimeEpoch(epoch string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.runtimeEpoch = epoch
+	s.mu.Unlock()
+}
+
+func (s *tabEventSink) runtimeEpochSnapshot() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.runtimeEpoch
 }
 
 func (s *tabEventSink) Emit(e event.Event) {
@@ -1260,7 +1375,7 @@ func (s *tabEventSink) Emit(e event.Event) {
 			s.flushDisplay(e.Cancelled)
 		}
 	}
-	s.emitRuntimeEvent(eventChannel, toWireTab(e, tabID))
+	s.emitRuntimeEvent(eventChannel, toWireTab(e, tabID, s.runtimeEpochSnapshot()))
 	if app != nil {
 		if status, update := topicActivityStatusFromEvent(e); update {
 			changed := app.setTabActivityStatus(tabID, status)
@@ -1536,15 +1651,28 @@ func (a *App) notifyTabRuntimeRebuilt(tab *WorkspaceTab) {
 	if tab == nil {
 		return
 	}
+	a.mu.Lock()
+	epoch := a.advanceSessionRuntimeEpochLocked(tab)
+	a.mu.Unlock()
+	a.notifyTabRuntimeRebuiltAtEpoch(tab, epoch)
+}
+
+// notifyTabRuntimeRebuiltAtEpoch emits the rebuild fence for a transaction
+// that advanced its epoch inside the controller/path/lease commit. Keeping the
+// chosen epoch avoids a second generation bump after publication.
+func (a *App) notifyTabRuntimeRebuiltAtEpoch(tab *WorkspaceTab, epoch string) {
+	if tab == nil {
+		return
+	}
 	a.mu.RLock()
 	sink := tab.sink
 	tabID := tab.ID
 	a.mu.RUnlock()
 	if sink != nil && sink.context() != nil {
-		sink.emitRuntimeEvent("runtime:rebuilt", tabID)
+		sink.emitRuntimeEvent("runtime:rebuilt", tabID, epoch)
 		return
 	}
-	a.emitRuntimeEvent("runtime:rebuilt", tabID)
+	a.emitRuntimeEvent("runtime:rebuilt", tabID, epoch)
 }
 
 func (a *App) emitReady(ctx context.Context, tabID ...string) {
@@ -1773,11 +1901,16 @@ func (s *tabEventSink) telemetryTab() (*WorkspaceTab, string) {
 
 // --- wire event with tab ----------------------------------------------------
 
-func toWireTab(e event.Event, tabID string) wireEventTab {
+func toWireTab(e event.Event, tabID string, runtimeEpoch ...string) wireEventTab {
 	w := eventwire.ToWire(e)
+	epoch := ""
+	if len(runtimeEpoch) > 0 {
+		epoch = runtimeEpoch[0]
+	}
 	return wireEventTab{
 		Event:             w,
 		TabID:             tabID,
+		RuntimeEpoch:      epoch,
 		SessionHitTokens:  e.SessionHit,
 		SessionMissTokens: e.SessionMiss,
 		SessionCost:       0, // filled by frontend accumulator per tab
@@ -1790,7 +1923,8 @@ func toWireTab(e event.Event, tabID string) wireEventTab {
 // uses tabId to dispatch to the correct per-tab state.
 type wireEventTab struct {
 	eventwire.Event
-	TabID string `json:"tabId"`
+	TabID        string `json:"tabId"`
+	RuntimeEpoch string `json:"runtimeEpoch,omitempty"`
 	// Session-cumulative tokens per tab.
 	SessionHitTokens  int `json:"sessionHitTokens,omitempty"`
 	SessionMissTokens int `json:"sessionMissTokens,omitempty"`
@@ -1820,6 +1954,7 @@ type TabMeta struct {
 	ProjectColor      string                   `json:"projectColor,omitempty"`
 	Label             string                   `json:"label"`
 	Ready             bool                     `json:"ready"`
+	Runtime           SessionRuntimeView       `json:"runtime"`
 	Running           bool                     `json:"running"`
 	PendingPrompt     bool                     `json:"pendingPrompt,omitempty"`
 	RemoteControlled  bool                     `json:"remoteControlled,omitempty"`
@@ -1859,6 +1994,7 @@ func enrichTabMetas(metas []TabMeta) []TabMeta {
 }
 
 func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
+	runtimeView := a.sessionRuntimeViewLocked(tab)
 	m := TabMeta{
 		ID:                tab.ID,
 		Scope:             tab.Scope,
@@ -1870,7 +2006,8 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		SessionPath:       tab.currentSessionPath(),
 		ReadOnly:          tab.ReadOnly,
 		Label:             tab.Label,
-		Ready:             tab.Ready,
+		Ready:             runtimeView.Phase == sessionRuntimeReady && tab.Ctrl != nil,
+		Runtime:           runtimeView,
 		Mode:              currentTabMode(tab),
 		CollaborationMode: currentTabCollaborationMode(tab),
 		ToolApprovalMode:  currentTabToolApprovalMode(tab),
@@ -3073,6 +3210,9 @@ func (a *App) closeTabRuntimeAdmissionHeld(tab *WorkspaceTab) {
 		sink.clearContext()
 	}
 	tab.releaseSessionLease()
+	a.mu.Lock()
+	a.releaseSessionRuntimeLocked(tab)
+	a.mu.Unlock()
 }
 
 // buildTabController assembles a controller for a tab in the background, the
@@ -3182,6 +3322,13 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 	if a.tabBuildSuperseded(tab, buildGeneration) {
 		return
 	}
+	a.mu.Lock()
+	if !tab.removed && tab.Ctrl == nil {
+		tab.Ready = false
+		clearTabStartupError(tab)
+		a.setSessionRuntimePhaseLocked(tab, sessionRuntimeStarting, nil)
+	}
+	a.mu.Unlock()
 
 	a.reconcileTabWithPinnedSessionMeta(tab)
 
@@ -3215,7 +3362,12 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 			return
 		}
 		leaseHeld = setTabStartupError(tab, err)
-		tab.Ready = true
+		tab.Ready = false
+		if leaseHeld {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
+		} else {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
+		}
 		tab.releaseSessionLease()
 		a.mu.Unlock()
 		if leaseHeld {
@@ -3351,7 +3503,12 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 			return
 		}
 		leaseHeld = setTabStartupError(tab, err)
-		tab.Ready = true
+		tab.Ready = false
+		if leaseHeld {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
+		} else {
+			a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
+		}
 		hostKey := takeTabSharedHostKey(tab)
 		tab.releaseSessionLease()
 		a.mu.Unlock()
@@ -3422,14 +3579,14 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 		}
 		// Write/update scope/session meta.
 		if path != "" {
-			if a.attachExistingSessionRuntime(tab, path, wailsCtx) {
+			if a.claimSessionRuntime(tab, path, buildCtx) {
 				ctrl.Close()
 				a.releaseSharedHost(rootKey)
 				a.emitReady(wailsCtx, tab.ID)
 				return
 			}
 			preLeaseKey := tab.sessionLeaseRuntimeKey()
-			if err := tab.ensureSessionLease(path); err != nil {
+			if err := a.ensureTabSessionLeaseForRebuild(tab, path, ""); err != nil {
 				leaseHeld := false
 				a.mu.Lock()
 				if a.tabBuildSupersededLocked(tab, buildGeneration) {
@@ -3438,7 +3595,12 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 					return
 				}
 				leaseHeld = setTabStartupError(tab, err)
-				tab.Ready = true
+				tab.Ready = false
+				if leaseHeld {
+					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, err)
+				} else {
+					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, err)
+				}
 				hostKey := takeTabSharedHostKey(tab)
 				// Release only a lease bound to THIS build's session: a failed
 				// ensure leaves any prior lease untouched, and that lease may
@@ -3483,7 +3645,12 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 					return
 				}
 				leaseHeld = setTabStartupError(tab, restoreErr)
-				tab.Ready = true
+				tab.Ready = false
+				if leaseHeld {
+					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeLeaseBlocked, restoreErr)
+				} else {
+					a.setSessionRuntimePhaseLocked(tab, sessionRuntimeFailed, restoreErr)
+				}
 				hostKey := takeTabSharedHostKey(tab)
 				tab.releaseSessionLeaseForKey(sessionRuntimeKey(path))
 				a.mu.Unlock()
@@ -3535,6 +3702,8 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 	applyNormalizedRuntimeToTabLocked(tab, restoredRuntime)
 	tab.Ready = true
 	clearTabStartupError(tab)
+	a.bindSessionRuntimeKeyLocked(tab, tab.currentSessionPath())
+	a.advanceSessionRuntimeEpochLocked(tab)
 	keepBuildContext = true
 	a.mu.Unlock()
 	a.emitReady(wailsCtx, tab.ID)
@@ -5495,7 +5664,7 @@ func (a *App) handleTabSessionRecovered(tab *WorkspaceTab) func(control.SessionR
 			return nil
 		}
 		if tab != nil && !tab.ReadOnly {
-			if err := tab.ensureSessionLease(info.RecoveryPath); err != nil {
+			if err := a.ensureTabSessionLeaseForRebuild(tab, info.RecoveryPath, ""); err != nil {
 				slog.Warn("desktop: acquire recovery session lease", "path", info.RecoveryPath, "err", err)
 				reason := "lease_unavailable"
 				if errors.Is(err, agent.ErrSessionLeaseHeld) {

@@ -13,8 +13,8 @@ const (
 	// RouteStop blocks one exact operation after repeated technical failure.
 	// Other operations in the same Episode may still proceed.
 	RouteStop
-	// RouteStopTurn blocks the whole Episode (including read-only tools) after
-	// an Episode-level hard limit. The agent gets one finalization round.
+	// RouteStopTurn blocks further execution after an Episode-level hard limit.
+	// Host-proven read-only diagnosis remains available.
 	RouteStopTurn
 )
 
@@ -87,14 +87,15 @@ type DecisionResult struct {
 //
 // Order is fixed by product policy:
 //  1. non-Auto → bypass ordinary approval
-//  2. Episode already stopped → stop turn (all tools, including read-only)
+//  2. Episode already stopped → allow read-only diagnosis, stop execution
 //  3. structured plan transition → reviewer
-//  4. read-only diagnosis → allow (unless Episode stopped, handled above)
+//  4. read-only diagnosis → allow
 //  5. no active failure → allow ordinary mutations
-//  6. first safe verification retry → allow (+ consume budget)
-//  7. already-stopped operation re-proposal is handled by the gate (retries)
-//  8. three consecutive failures of the same operation → stop that operation
-//  9. remaining failure-recovery mutations → reviewer
+//  6. operations other than the exact failed operation → allow
+//  7. first safe verification retry → allow (+ consume budget)
+//  8. already-stopped operation re-proposal is handled by the gate (retries)
+//  9. three consecutive failures of the same operation → stop that operation
+//  10. remaining exact-operation retries → reviewer
 //
 // Episode-level totals (6 failures / 3 review rejects / 3 stopped-op retries)
 // are enforced by the gate before or after Decide; Decide focuses on pure
@@ -104,6 +105,9 @@ func Decide(f Facts) DecisionResult {
 		return DecisionResult{Route: RouteBypass}
 	}
 	if f.EpisodeStopped {
+		if f.ReadOnly && !f.Mutates && !f.Verification && !f.PlanTransition {
+			return DecisionResult{Route: RouteAllow}
+		}
 		reason := f.StopReason
 		if reason == StopReasonNone {
 			reason = StopReasonEpisodeFailures
@@ -126,6 +130,12 @@ func Decide(f Facts) DecisionResult {
 	}
 	if f.SafeRetryAvailable {
 		return DecisionResult{Route: RouteAllow, ConsumeSafeRetry: true}
+	}
+	// A failure is an execution-reliability signal, not a task-wide safety
+	// boundary. Keep unrelated work on the zero-confirmation path; permission,
+	// sandbox, and the Episode ceiling still apply independently.
+	if !f.SameFailedOperation {
+		return DecisionResult{Route: RouteAllow}
 	}
 	// Already-stopped exact operation: gate escalates retries; Decide stops the
 	// operation so the agent cannot re-run it.

@@ -14,9 +14,9 @@
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260601.0",
+    "@cloudflare/workers-types": "^5.20260724.1",
     "typescript": "^5.8.0",
-    "wrangler": "^4.102.0"
+    "wrangler": "^4.114.0"
   },
   "overrides": {
     "esbuild": "0.28.1"

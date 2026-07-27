@@ -20,7 +20,7 @@ function ok(value: boolean, label: string) {
   }
 }
 
-function Consumer({ id, checking = false }: { id: string; checking?: boolean }) {
+function Consumer({ id, checking = false, channel = "" }: { id: string; checking?: boolean; channel?: string }) {
   const updater = useUpdater();
   return (
     <section>
@@ -28,7 +28,7 @@ function Consumer({ id, checking = false }: { id: string; checking?: boolean }) 
       <output id={`${id}-manual`}>
         {updater.status.kind === "error" && updater.status.manualHint ? "manual" : ""}
       </output>
-      {checking && <button id="check-update" type="button" onClick={() => void updater.check()}>Check</button>}
+      {checking && <button id={`${id}-check-update`} type="button" onClick={() => void updater.check(channel)}>Check</button>}
       {updater.status.kind === "available" && (
         <button id={`${id}-download`} type="button" onClick={() => updater.download(updater.status.info)}>Download</button>
       )}
@@ -57,7 +57,7 @@ await act(async () => {
   root.render(
     <UpdaterProvider>
       <Consumer id="banner" checking />
-      <Consumer id="settings" />
+      <Consumer id="settings" checking channel="preview" />
     </UpdaterProvider>,
   );
 });
@@ -66,7 +66,7 @@ ok(document.getElementById("banner-status")?.textContent === "idle", "banner sta
 ok(document.getElementById("settings-status")?.textContent === "idle", "settings starts idle");
 
 await act(async () => {
-  (document.getElementById("check-update") as HTMLButtonElement).click();
+  (document.getElementById("banner-check-update") as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
@@ -88,10 +88,12 @@ const debInfo = {
   assetSize: 42,
 };
 const installAttempts: Array<{ resolve: () => void; reject: (err: Error) => void }> = [];
+const checkedChannels: string[] = [];
 window.go = {
   main: {
     App: {
-      async CheckUpdate() {
+      async CheckUpdate(channel: string) {
+        checkedChannels.push(channel);
         return debInfo;
       },
       async DownloadUpdate() {
@@ -105,9 +107,10 @@ window.go = {
 };
 
 await act(async () => {
-  (document.getElementById("check-update") as HTMLButtonElement).click();
+  (document.getElementById("settings-check-update") as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
+ok(checkedChannels[0] === "preview", "settings check forwards the selected Preview channel");
 ok(document.getElementById("banner-status")?.textContent === "available", "deb update becomes available");
 ok(document.getElementById("settings-status")?.textContent === "available", "deb availability is shared");
 

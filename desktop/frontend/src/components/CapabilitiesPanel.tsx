@@ -1036,6 +1036,12 @@ function ServerDetails({
           <span className="cap-detail__label">{t("caps.status")}</span>
           <span className="cap-detail__value">{serverStatusLabel(s, t)}</span>
         </div>
+        {s.source && (
+          <div className="cap-detail">
+            <span className="cap-detail__label">{t("caps.serverSource")}</span>
+            <span className="cap-detail__value">{mcpServerSourceLabel(s, t)}</span>
+          </div>
+        )}
         <div className="cap-detail">
           <span className="cap-detail__label">{t("caps.transport")}</span>
           <span className="cap-detail__value">{s.transport}</span>
@@ -2371,12 +2377,19 @@ function mcpSettingsServerSummary(server: ServerView, t: ReturnType<typeof useT>
 	return parts.join(" · ");
 }
 
-function mcpLaunchAuthorizationRequired(server: ServerView): boolean {
-	return Boolean(server.requiresLaunchApproval);
-}
-
-function mcpLaunchAuthorizationLabel(t: ReturnType<typeof useT>): string {
-	return t("caps.authorizeAndConnect");
+function mcpServerSourceLabel(server: ServerView, t: ReturnType<typeof useT>): string {
+	switch (server.source) {
+		case "project":
+			return server.configSource
+				? t("caps.sourceProjectConfig", { config: server.configSource })
+				: t("caps.sourceProject");
+		case "plugin":
+			return t("caps.sourcePlugin");
+		case "builtin":
+			return t("caps.sourceBuiltin");
+		default:
+			return t("caps.sourceUser");
+	}
 }
 
 function mcpSettingsSearchText(server: ServerView): string {
@@ -2385,6 +2398,8 @@ function mcpSettingsSearchText(server: ServerView): string {
 		server.transport,
 		serverCommand(server),
 		server.error,
+		server.source,
+		server.configSource,
 		server.managedByPlugin,
 		...(server.toolList ?? []).flatMap((tool) => [tool.name, tool.description]),
 	].filter(Boolean).join(" ").toLowerCase();
@@ -2417,27 +2432,20 @@ function MCPSettingsServerRow({
 	busy,
 	onOpen,
 	onRetry,
-	onAuthorize,
 	onToggle,
 }: {
 	server: ServerView;
 	busy: boolean;
 	onOpen: () => void;
 	onRetry: () => void;
-	onAuthorize: () => void;
 	onToggle: (enabled: boolean) => void;
 }) {
 	const t = useT();
 	const lifecycle = mcpServerLifecycleActions(server);
 	const target = serverCommand(server);
 	const opensAuth = shouldOpenAuth(server);
-	const requiresAuthorization = !opensAuth && server.status !== "disabled" && Boolean(server.requiresLaunchApproval);
-	const actionLabel = requiresAuthorization ? mcpLaunchAuthorizationLabel(t) : serverActionLabel(server, t);
+	const actionLabel = serverActionLabel(server, t);
 	const handlePrimaryAction = () => {
-		if (requiresAuthorization) {
-			onAuthorize();
-			return;
-		}
 		if (opensAuth) {
 			openExternal((server.authUrl || "").trim());
 			return;
@@ -2456,6 +2464,7 @@ function MCPSettingsServerRow({
 						<span className={`cap-dot cap-dot--${server.status}`} aria-hidden />
 						<span className="cap-mcp-list-row__name">{server.name}</span>
 						<span className="cap-mcp-list-row__transport">{server.transport}</span>
+						{server.source === "project" && <span className="cap-row__builtin">{t("caps.projectServerBadge")}</span>}
 						{server.builtIn && <span className="cap-row__builtin">{t("caps.builtIn")}</span>}
 					</span>
 					<span className={`cap-mcp-list-row__summary${server.status === "failed" ? " cap-mcp-list-row__summary--error" : ""}`}>
@@ -2469,7 +2478,7 @@ function MCPSettingsServerRow({
 				<ChevronRight className="cap-mcp-list-row__chevron" aria-hidden size={16} />
 			</button>
 			<div className="cap-mcp-list-row__actions">
-				{requiresAuthorization || lifecycle.showRetryInRow ? (
+				{lifecycle.showRetryInRow ? (
 					<button className="btn btn--small" disabled={busy} type="button" onClick={handlePrimaryAction}>
 						{actionLabel}
 					</button>
@@ -2498,7 +2507,6 @@ function MCPSettingsServerGroup({
 	busy,
 	onOpen,
 	onRetry,
-	onAuthorize,
 	onToggle,
 }: {
 	title: string;
@@ -2507,7 +2515,6 @@ function MCPSettingsServerGroup({
 	busy: boolean;
 	onOpen: (name: string) => void;
 	onRetry: (name: string) => void;
-	onAuthorize: (name: string) => void;
 	onToggle: (name: string, enabled: boolean) => void;
 }) {
 	if (servers.length === 0) return null;
@@ -2527,7 +2534,6 @@ function MCPSettingsServerGroup({
 						busy={busy}
 						onOpen={() => onOpen(server.name)}
 						onRetry={() => onRetry(server.name)}
-						onAuthorize={() => onAuthorize(server.name)}
 						onToggle={(enabled) => onToggle(server.name, enabled)}
 					/>
 				))}
@@ -3016,8 +3022,6 @@ export function MCPServersSettingsPage() {
 			setBusy(false);
 		}
 	};
-	const authorizeProjectAndConnect = async (name: string) =>
-		mutate(() => app.AuthorizeAndConnectMCPServer(name));
 	const browseMarketplace = async (search = marketplaceQuery) => {
 		setBusy(true);
 		setErr(null);
@@ -3045,8 +3049,15 @@ export function MCPServersSettingsPage() {
 		const normalizedQuery = query.trim().toLowerCase();
 		return normalizedQuery ? sorted.filter((server) => mcpSettingsSearchText(server).includes(normalizedQuery)) : sorted;
 	}, [query, servers]);
-	const configuredServers = useMemo(() => filteredServers.filter((server) => !server.managedByPlugin), [filteredServers]);
-	const managedServers = useMemo(() => filteredServers.filter((server) => Boolean(server.managedByPlugin)), [filteredServers]);
+	const projectServers = useMemo(() => filteredServers.filter((server) => server.source === "project"), [filteredServers]);
+	const managedServers = useMemo(
+		() => filteredServers.filter((server) => server.source === "plugin" || Boolean(server.managedByPlugin)),
+		[filteredServers],
+	);
+	const installedServers = useMemo(
+		() => filteredServers.filter((server) => server.source !== "project" && server.source !== "plugin" && !server.managedByPlugin),
+		[filteredServers],
+	);
 	const selectedServer = screen.kind === "detail" || screen.kind === "edit"
 		? servers?.find((server) => server.name === screen.name)
 		: undefined;
@@ -3095,12 +3106,21 @@ export function MCPServersSettingsPage() {
 					{!loading && servers.length === 0 && <div className="mem-empty">{t("caps.noServers")}</div>}
 					{!loading && servers.length > 0 && filteredServers.length === 0 && <div className="mem-empty">{t("caps.noServerMatches")}</div>}
 					<MCPSettingsServerGroup
-						title={t("caps.configuredServers")}
-						servers={configuredServers}
+						title={t("caps.projectServers")}
+						hint={t("caps.projectServersHint")}
+						servers={projectServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
 						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onAuthorize={(name) => void authorizeProjectAndConnect(name)}
+						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+					/>
+					<MCPSettingsServerGroup
+						title={t("caps.installedServers")}
+						hint={t("caps.installedServersHint")}
+						servers={installedServers}
+						busy={actionBusy}
+						onOpen={(name) => setScreen({ kind: "detail", name })}
+						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
 						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
 					/>
 					<MCPSettingsServerGroup
@@ -3110,7 +3130,6 @@ export function MCPServersSettingsPage() {
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
 						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onAuthorize={(name) => void authorizeProjectAndConnect(name)}
 						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
 					/>
 				</>
@@ -3189,12 +3208,6 @@ export function MCPServersSettingsPage() {
 							</details>
 						</div>
 					)}
-					{mcpLaunchAuthorizationRequired(selectedServer) && <div className="cap-mcp-detail-error">
-						<div className="drawer__summary">{t("caps.projectLaunchExplanation")}</div>
-						<div className="cap-mcp-editor__actions">
-							<button className="btn btn--small" disabled={actionBusy} type="button" onClick={() => void authorizeProjectAndConnect(selectedServer.name)}>{mcpLaunchAuthorizationLabel(t)}</button>
-						</div>
-					</div>}
 					<ServerDetails
 						s={selectedServer}
 						tools={selectedServer.toolList ?? []}

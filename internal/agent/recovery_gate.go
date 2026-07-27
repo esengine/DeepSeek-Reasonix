@@ -154,8 +154,9 @@ type RecoveryDecision struct {
 	// Generation is the gate generation that authorized or blocked this call.
 	// Tool results must carry the same generation for ObserveResult.
 	Generation uint64
-	// StopTurn means the Recovery Episode is exhausted; remaining tools in the
-	// batch must be blocked and the agent gets one summarize-only finalization.
+	// StopTurn means the Recovery Episode execution budget is exhausted; the
+	// current batch stops and the agent gets one summarize-only finalization.
+	// Host-proven read-only diagnosis may be admitted before that final stop.
 	StopTurn bool
 	// StopReason is an internal classifier (episode_failures, review_rejects, …).
 	// User-facing surfaces must not expose it.
@@ -187,7 +188,12 @@ func (a *Agent) observeRecoveryResult(ctx context.Context, toolName string, args
 	} else if blocked {
 		errSummary = firstLine(result)
 	}
-	cancelled := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	// A tool may own a shorter internal deadline while the parent turn remains
+	// active (for example an MCP call timeout). That is a qualifying transient
+	// execution failure, not a user cancellation. Parent context state remains
+	// the source of truth for turn cancellation/deadline; a direct Canceled
+	// result is still treated as cancellation for adapters that return it first.
+	cancelled := errors.Is(err, context.Canceled)
 	if ctx != nil && ctx.Err() != nil {
 		cancelled = true
 	}

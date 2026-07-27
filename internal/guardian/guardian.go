@@ -344,8 +344,7 @@ func (gs *Session) normalizeAlternation() {
 	if !merged {
 		return
 	}
-	gs.sess.Replace(out)
-	gs.sess.IncrementRewrite()
+	gs.sess.Rewrite(out)
 }
 
 // Load replaces the guardian's internal agent session with the one at path,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"reasonix/internal/config"
 	"reasonix/internal/mcpdiag"
 )
 
@@ -68,16 +69,13 @@ func (p *mcpManager) renderList(width int) string {
 	lastGroup := ""
 	for i := start; i < end; i++ {
 		s := p.snapshot.servers[i]
-		group := "User MCPs"
-		if s.BuiltIn {
-			group = "Managed MCPs"
-		}
+		group := mcpServerGroupLabel(s)
 		if group != lastGroup {
 			if lastGroup != "" {
 				b.WriteByte('\n')
 			}
 			header := group
-			if group == "User MCPs" && p.snapshot.configPath != "" {
+			if group == "Global MCPs" && p.snapshot.configPath != "" {
 				header += " (" + p.snapshot.configPath + ")"
 			}
 			fmt.Fprintf(&b, "  %s\n", bold(header))
@@ -136,6 +134,10 @@ func (p *mcpManager) renderDetail(width int) string {
 	writeMCPDetailField(&b, "Transport", fallbackText(v.Transport, "unknown"))
 	if v.BuiltIn {
 		writeMCPDetailField(&b, "Config location", "built-in")
+	} else if v.Source == config.MCPSourceProjectMCPJSON {
+		writeMCPDetailField(&b, "Config location", "current project .mcp.json")
+	} else if v.Source == config.MCPSourceProjectConfig {
+		writeMCPDetailField(&b, "Config location", "current project reasonix.toml")
 	} else {
 		loc := fallbackText(p.snapshot.configPath, "not saved")
 		if loc != "not saved" {
@@ -238,6 +240,7 @@ func (p *mcpManager) renderConfirmClearAuth(width int) string {
 
 func mcpActionsFor(v mcpServerView, configPath string) []mcpActionItem {
 	var out []mcpActionItem
+	managed := v.BuiltIn || v.Source == config.MCPSourcePluginPackage
 	if v.Tools > 0 || len(v.ToolList) > 0 {
 		out = append(out, mcpActionItem{mcpActionViewTools, "View tools"})
 	}
@@ -268,13 +271,14 @@ func mcpActionsFor(v mcpServerView, configPath string) []mcpActionItem {
 	if v.Status != "disabled" {
 		out = append(out, mcpActionItem{mcpActionDisable, "Disable for this session"})
 	}
-	if !v.BuiltIn {
+	if !managed {
 		out = append(out, mcpActionItem{mcpActionRemove, "Remove server"})
 	}
 	return out
 }
 
 func appendMCPFailureSecondaryActions(out []mcpActionItem, v mcpServerView, configPath string) []mcpActionItem {
+	managed := v.BuiltIn || v.Source == config.MCPSourcePluginPackage
 	if strings.TrimSpace(v.Error) != "" {
 		out = append(out, mcpActionItem{mcpActionLogs, "View logs"})
 	}
@@ -282,7 +286,7 @@ func appendMCPFailureSecondaryActions(out []mcpActionItem, v mcpServerView, conf
 	if v.Status != "disabled" {
 		out = append(out, mcpActionItem{mcpActionDisable, "Disable for this session"})
 	}
-	if !v.BuiltIn {
+	if !managed {
 		out = append(out, mcpActionItem{mcpActionRemove, "Remove server"})
 	}
 	return out
@@ -290,11 +294,19 @@ func appendMCPFailureSecondaryActions(out []mcpActionItem, v mcpServerView, conf
 
 func appendMCPConfigActions(out []mcpActionItem, v mcpServerView, configPath string) []mcpActionItem {
 	if v.Configured {
-		if !v.BuiltIn && configPath != "" {
+		path := mcpConfigPathForView(v, configPath)
+		if !v.BuiltIn && v.Source != config.MCPSourcePluginPackage && path != "" {
 			out = append(out, mcpActionItem{mcpActionEdit, "Edit config"})
 		}
 	}
 	return out
+}
+
+func mcpConfigPathForView(v mcpServerView, fallback string) string {
+	if path := strings.TrimSpace(v.ConfigPath); path != "" {
+		return path
+	}
+	return strings.TrimSpace(fallback)
 }
 
 func writeMCPDetailField(b *strings.Builder, label, value string) {
@@ -320,6 +332,17 @@ func mcpStatusLabel(v mcpServerView) string {
 		return "○ disabled"
 	default:
 		return viewMeta("unknown")
+	}
+}
+
+func mcpServerGroupLabel(v mcpServerView) string {
+	switch mcpServerGroupRank(v) {
+	case 0:
+		return "Managed MCPs"
+	case 1:
+		return "Project MCPs"
+	default:
+		return "Global MCPs"
 	}
 }
 

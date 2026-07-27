@@ -83,12 +83,21 @@ eq(finalDeclaration(".workspace-preview__body--code .workspace-note", "flex"), "
 eq(finalDeclaration(".workspace-preview__body--code .code-block", "display"), "flex", "code block fills the preview viewport");
 eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "display"), "flex", "code wrapper keeps the preview viewport height");
 eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "flex"), "1 1 auto", "code wrapper participates in the preview flex height");
+eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "flex-direction"), "column", "search toolbar stacks above the code viewport");
 eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "min-height"), "0", "code wrapper can shrink around the scrollable code viewport");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "position"), "static", "workspace search toolbar participates in layout");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "z-index"), "var(--z-local-handle)", "workspace search toolbar stays clickable above the copy affordance");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "flex"), "0 0 auto", "workspace search toolbar keeps a dedicated row");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "flex-wrap"), "wrap", "narrow workspace search toolbars can form a second control row");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "width"), "100%", "workspace search toolbar spans the code viewport");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "border-width"), "0 0 1px", "workspace search toolbar uses a divider instead of a floating card");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "box-shadow"), "none", "workspace search toolbar does not retain popup elevation");
+eq(finalDeclaration(".code-search__actions", "display"), "flex", "search actions remain one coherent wrapping group");
+eq(finalDeclaration(".code-search__actions", "margin-left"), "auto", "wrapped search actions stay aligned to the toolbar edge");
 eq(finalDeclaration(".workspace-preview__body--code .code", "overflow"), "auto", "code viewport owns horizontal and vertical scrolling");
 eq(finalDeclaration(".workspace-preview__body--code .code", "min-height"), "0", "code viewport can shrink inside the preview pane");
 eq(finalDeclaration(".workspace-preview__body--code .code", "margin"), "0", "code viewport scrollbar sits at the visible pane bottom");
-eq(finalDeclaration(".code-search__input", "min-width"), "0", "search input can shrink in the minimum preview width");
-eq(finalDeclaration(".code-block__wrap--search-open .code-block__copy", "top"), "42px", "open search moves copy below its toolbar");
+eq(finalDeclaration(".code-search__input", "min-width"), "60px", "search input reserves a minimum readable width");
 eq(
   computedDeclaration(
     `<html data-theme-style="default"><head></head><body><div class="workspace-preview__body workspace-preview__body--code"><div class="code code--lines"></div></div></body></html>`,

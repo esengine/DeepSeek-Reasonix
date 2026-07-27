@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"reasonix/internal/capdiag"
-	"reasonix/internal/hook"
 	"reasonix/internal/pluginpkg"
 )
 
@@ -31,7 +30,7 @@ func TestCollectStaticNoNetworkSideEffects(t *testing.T) {
 	write(t, filepath.Join(home, ".reasonix", "commands", "hi.md"),
 		"---\ndescription: home hi\n---\nH $ARGUMENTS\n")
 
-	// Untrusted project hooks.
+	// Project hooks load automatically.
 	write(t, filepath.Join(root, ".reasonix", "settings.json"), `{
   "hooks": {
     "PreToolUse": [{"match": "(", "command": "echo bad"}, {"match": ".*", "command": "echo ok"}]
@@ -76,7 +75,7 @@ auto_start = false
 	}
 	for _, want := range []string{
 		"skill.shadowed", "skill.missing_description", "command.shadowed",
-		"hook.untrusted_project", "hook.invalid_matcher", "mcp.command_not_found",
+		"hook.invalid_matcher", "mcp.command_not_found",
 	} {
 		if !codes[want] {
 			t.Fatalf("missing issue code %s in %+v", want, codes)
@@ -143,7 +142,7 @@ func TestMissingConventionDirsNoWarning(t *testing.T) {
 	_ = r.Skills.Roots
 }
 
-func TestTrustedProjectHooks(t *testing.T) {
+func TestProjectHooksEnabledByDefault(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -151,19 +150,14 @@ func TestTrustedProjectHooks(t *testing.T) {
 	write(t, filepath.Join(root, ".reasonix", "settings.json"), `{
   "hooks": {"Stop": [{"command": "echo done"}]}
 }`)
-	if err := hook.Trust(root, home); err != nil {
-		t.Fatal(err)
-	}
 	r := capdiag.Collect(capdiag.Options{
 		Root: root, HomeDir: home, ReasonixHomeDir: filepath.Join(home, ".reasonix"),
 	})
-	for _, is := range r.Issues {
-		if is.Code == "hook.untrusted_project" {
-			t.Fatalf("trusted project should not warn untrusted: %+v", is)
-		}
-	}
 	if !r.Hooks.TrustedProject {
-		t.Fatal("expected trusted_project")
+		t.Fatal("compatibility field trusted_project should reflect default enablement")
+	}
+	if len(r.Hooks.Entries) != 1 || r.Hooks.Entries[0].Scope != "project" {
+		t.Fatalf("project hook should be diagnosed as active by default: %+v", r.Hooks.Entries)
 	}
 }
 
@@ -214,10 +208,6 @@ func TestUnknownHookEventIsReported(t *testing.T) {
     "NotARealEvent": [{"command": "echo hi"}]
   }
 }`)
-	// Trust so project hooks load into inspect entries.
-	if err := hook.Trust(root, home); err != nil {
-		t.Fatal(err)
-	}
 	r := capdiag.Collect(capdiag.Options{
 		Root: root, HomeDir: home, ReasonixHomeDir: filepath.Join(home, ".reasonix"),
 	})

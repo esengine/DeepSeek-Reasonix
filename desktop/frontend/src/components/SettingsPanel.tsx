@@ -349,6 +349,7 @@ export function SettingsPanel({
                     <UpdatesSection
                       configPath={s.configPath}
                       checkUpdates={s.checkUpdates}
+                      updateChannel={s.updateChannel}
                       telemetry={s.telemetry !== false}
                       metrics={s.metrics !== false}
                       settingsBusy={busy}
@@ -1360,6 +1361,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     conversationWidth: normalizeConversationWidth(view.conversationWidth),
     checkUpdates: view.checkUpdates !== false,
+    updateChannel: view.updateChannel === "preview" ? "preview" : "stable",
   };
 }
 
@@ -6392,31 +6394,12 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
       setBusy(false);
     }
   };
-  const trustProject = async () => {
-    const projectRoot = view?.projectRoot?.trim() ?? "";
-    if (!projectRoot) {
-      setErr(t("settings.hooksProjectRootUnavailable"));
-      return;
-    }
-    setBusy(true);
-    setErr(null);
-    try {
-      await app.TrustProjectHooksForRoot(projectRoot);
-      await load("project");
-      onChanged();
-    } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <>
       {err && <div className="banner banner--error">{err}</div>}
       <SettingsSection title={t("settings.hooksScopeSection")} description={t("settings.hooksScopeHint")}>
         <SettingsField label={t("settings.hooksScopeField")}>
-          <select className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
+          <select name="hooks-scope" className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
             <option value="global">{t("settings.hooksGlobal")}</option>
             <option value="project">{t("settings.hooksProject")}</option>
           </select>
@@ -6432,19 +6415,6 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
             {pathMessage && <div className="hooks-path-display__message">{pathMessage}</div>}
           </div>
         </SettingsField>
-        {scope === "project" && (
-          <SettingsField label={t("settings.hooksTrust")} hint={t("settings.hooksTrustHint")}>
-            <div className="hooks-trust-stack">
-              <div className="hooks-trust-row">
-                <span className={`set-rule${view?.trusted ? "" : " set-rule--warn"}`}>{view?.trusted ? t("settings.hooksTrusted") : t("settings.hooksUntrusted")}</span>
-                <button className="btn btn--small" disabled={busy || view?.trusted || !view?.projectRoot} onClick={() => void trustProject()}>{t("settings.hooksTrustProject")}</button>
-              </div>
-              <code className={`hooks-trust-root${view?.projectRoot ? "" : " hooks-trust-root--empty"}`} title={view?.projectRoot || t("settings.hooksProjectRootUnavailable")}>
-                {view?.projectRoot || t("settings.hooksProjectRootUnavailable")}
-              </code>
-            </div>
-          </SettingsField>
-        )}
       </SettingsSection>
 
       <SettingsSection
@@ -6468,6 +6438,7 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
               </div>
             </div>
             <textarea
+              name="hooks-json"
               className="mem-textarea hooks-json-panel__textarea"
               value={jsonText}
               disabled={busy}
@@ -6700,6 +6671,7 @@ const mb = (n: number) => (n / MB).toFixed(1);
 function UpdatesSection({
   configPath,
   checkUpdates,
+  updateChannel,
   telemetry,
   metrics,
   settingsBusy,
@@ -6707,13 +6679,15 @@ function UpdatesSection({
 }: {
   configPath: string;
   checkUpdates: boolean;
+  updateChannel: string;
   telemetry: boolean;
   metrics: boolean;
   settingsBusy: boolean;
   applySettings: (fn: () => Promise<void>) => Promise<void>;
 }) {
   const t = useT();
-  const { status, check, download: downloadUpdate, install: installUpdate, openDownload } = useUpdater();
+  const { status, check, download: downloadUpdate, install: installUpdate, openDownload, reset } = useUpdater();
+  const selectedChannel = updateChannel === "preview" ? "preview" : "stable";
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
@@ -6728,6 +6702,28 @@ function UpdatesSection({
 
   return (
     <SettingsSection title={t("updater.title")}>
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("updater.channelSettingLabel")}
+        hint={t("updater.channelSettingHint")}
+      >
+        <div className="provider-add-segmented" role="group" aria-label={t("updater.channelSettingLabel")}>
+          {(["stable", "preview"] as const).map((nextChannel) => (
+            <button
+              key={nextChannel}
+              type="button"
+              disabled={settingsBusy || updaterBusy}
+              className={selectedChannel === nextChannel ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+              onClick={() => {
+                if (nextChannel === selectedChannel) return;
+                void applySettings(() => app.SetDesktopUpdateChannel(nextChannel)).then(reset);
+              }}
+            >
+              {nextChannel === "stable" ? t("updater.channelStable") : t("updater.channelPreview")}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
       <SettingsField
         className="settings-field--wide-copy"
         label={t("updater.autoCheckLabel")}
@@ -6762,7 +6758,7 @@ function UpdatesSection({
         />
       </SettingsField>
       <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
-        <button className="btn btn--small" disabled={updaterBusy} onClick={() => void check()}>
+        <button className="btn btn--small" disabled={updaterBusy} onClick={() => void check(selectedChannel)}>
           {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}
         </button>
       </SettingsField>

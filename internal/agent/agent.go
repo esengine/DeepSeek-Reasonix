@@ -1118,6 +1118,16 @@ func (a *Agent) reserveParentWrite(runTool tool.Tool, args json.RawMessage, read
 // a round count. A positive maxSteps imposes an optional hard guard, surfaced as
 // a resumable notice when hit.
 func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
+	runMaxSteps := a.maxSteps
+	runMaxStepsKey := a.maxStepsKey
+	runLimitHostOwned := false
+	if limit, ok := runStepLimitFromContext(ctx); ok {
+		runMaxSteps = limit.steps
+		runLimitHostOwned = true
+		if limit.key != "" {
+			runMaxStepsKey = limit.key
+		}
+	}
 	a.recoveryRunSeq.Add(1)
 	if a.deliveryProfile && a.workspaceLease != nil {
 		a.workspaceLease.BeginRun()
@@ -1253,7 +1263,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		}
 	}
 	executorHandoff := a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker)
-	for step := 0; a.maxSteps <= 0 || step < a.maxSteps || graceRound || recoveryGraceRound; step++ {
+	for step := 0; runMaxSteps <= 0 || step < runMaxSteps || graceRound || recoveryGraceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -1300,9 +1310,8 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		}
 
 		// Keep reasoning_content on the assistant turn for display and session
-		// archive. It is NOT re-uploaded to the API: the openai provider drops it
-		// when building the request, since re-sent reasoning is billable prompt
-		// input for no cache or coherence gain.
+		// archive. Most OpenAI-compatible backends do not replay it; providers
+		// with an explicit round-trip contract retain the raw provider text.
 		calls = a.withPreviewFileDiffs(calls)
 		a.warnMissingToolCallReasoning(calls, reasoning)
 		a.session.Add(provider.Message{
@@ -1325,7 +1334,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 					_, _ = ctrl.ConsumeFinalization(a.recoveryTaskID)
 				}
 				return &RecoveryPauseError{
-					Message:    "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+					Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
 					StopReason: reason,
 				}
 			}
@@ -1333,7 +1342,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			readiness := a.finalReadinessCheckFor(finalizeTask)
 			if graceRound && (readiness.reason != "" || !hasVisibleFinalAnswer(text)) {
 				a.maybeCompact(ctx, usage)
-				return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
+				return &maxStepsPause{steps: runMaxSteps, key: runMaxStepsKey}
 			}
 			if readiness.reason != "" {
 				// Extend the base retry budget only when the missing-requirement
@@ -1405,7 +1414,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		// Grace round guard: if we already gave the model one extra response
 		// and it still wants to call tools, stop here.
 		if graceRound {
-			return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
+			return &maxStepsPause{steps: runMaxSteps, key: runMaxStepsKey}
 		}
 		// Recovery Episode exhausted: one finalization round only. Further tool
 		// calls are not executed; return a typed pause so the host can surface
@@ -1427,7 +1436,7 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			}
 			a.maybeCompact(ctx, usage)
 			return &RecoveryPauseError{
-				Message:    "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+				Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
 				StopReason: reason,
 			}
 		}
@@ -1506,27 +1515,26 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			}
 			nudge := "Auto recovery has reached its limit for this turn. Do not call any more tools. Summarize what was completed, what failed, and what the user should do next. The user can continue in the next message."
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-			a.sink.Emit(event.Event{
-				Kind: event.Notice, Level: event.LevelInfo,
-				Text:   "Automatic recovery paused for this turn.",
-				Detail: firstNonEmpty(batch.recoveryStopReason, "episode recovery budget exhausted"),
-			})
 			continue
 		}
 
 		// When the tool-call budget runs out this round, give the model
 		// one grace round to produce a final answer from completed work.
-		if a.maxSteps > 0 && step+1 >= a.maxSteps {
+		if runMaxSteps > 0 && step+1 >= runMaxSteps {
 			graceRound = true
-			nudge := fmt.Sprintf("Do not call any more tools — your tool-call round limit (%s) has been reached. Instead, synthesize a final answer from all the work already completed: summarize what was accomplished, what remains to be done, and any decisions the user should make. The user can increase %s or continue in the next turn if more work is needed.", a.maxStepsKey, a.maxStepsKey)
+			nextStep := fmt.Sprintf("The user can increase %s or continue in the next turn if more work is needed.", runMaxStepsKey)
+			if runLimitHostOwned {
+				nextStep = "Use the evidence already collected, label remaining uncertainty, and keep the final answer actionable."
+			}
+			nudge := fmt.Sprintf("Do not call any more tools — your tool-call round limit (%s) has been reached. Instead, synthesize a final answer from all the work already completed: summarize what was accomplished, what remains to be done, and any decisions the user should make. %s", runMaxStepsKey, nextStep)
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget, Text: toolBudgetNoticeText(), Detail: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", a.maxStepsKey, a.maxSteps)})
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget, Text: toolBudgetNoticeText(), Detail: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", runMaxStepsKey, runMaxSteps)})
 		}
 	}
 	// Only reached when a positive maxSteps guard is configured. The work so far
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
-	return &maxStepsPause{steps: a.maxSteps, key: a.maxStepsKey}
+	return &maxStepsPause{steps: runMaxSteps, key: runMaxStepsKey}
 }
 
 // warnMissingToolCallReasoning surfaces a thinking-mode tool_calls turn that
@@ -1556,9 +1564,9 @@ func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasonin
 
 // maxStepsPause is the deliberate stop when a positive tool-call budget runs
 // out: the session already holds the completed work and the user is asked to
-// continue. It is a control-flow signal, not a provider failure — Coordinator
-// matches on it to surface the pause instead of degrading the turn to
-// executor-only.
+// continue. It is a control-flow signal, not a provider failure. Coordinator
+// treats planner research budgets specially: ordinary plan-and-execute work
+// falls back to the executor, while explicit execution boundaries fail closed.
 type maxStepsPause struct {
 	steps int
 	key   string
@@ -2416,7 +2424,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			}
 		}
 		stored = display
-		if signature != "" || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
+		if signature != "" || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
 			stored = original
 		}
 		return stored, display
@@ -3150,6 +3158,25 @@ type toolOutcome struct {
 	recoveryStopReason string
 }
 
+// completedMCPConnect recognizes a synthetic cache-miss connect call whose
+// background discovery finished after the provider request was serialized. The
+// connect placeholder is intentionally absent once real tools replace it, but
+// the already-advertised call still completed its only job and must not surface
+// as an unknown tool.
+func completedMCPConnect(reg *tool.Registry, name string) (string, bool) {
+	server, rawName, ok := tool.SplitMCPName(name)
+	if !ok || rawName != "connect" {
+		return "", false
+	}
+	prefix := tool.MCPNamePrefix + server + "__"
+	for _, current := range reg.Names() {
+		if current != name && strings.HasPrefix(current, prefix) {
+			return server, true
+		}
+	}
+	return "", false
+}
+
 // executeOne runs a single tool call. It is pure with respect to the event sink
 // — the caller emits ToolDispatch/ToolResult — so it is safe to invoke from
 // parallel goroutines.
@@ -3173,6 +3200,11 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 		}
 	}
 	if t == nil {
+		if server, ok := completedMCPConnect(a.tools, call.Name); ok {
+			return toolOutcome{
+				output: fmt.Sprintf("MCP server %q is connected; its real tools are now available", server),
+			}
+		}
 		return toolOutcome{
 			output: fmt.Sprintf("error: unknown tool %q", call.Name),
 			errMsg: fmt.Sprintf("unknown tool %q", call.Name),
@@ -3352,7 +3384,8 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	// permission approval and workspace write-lock acquisition, so a waiting
 	// recovery card never holds a write lease. Consult on mutations,
 	// verification, plan transitions, and again for every tool once an Episode
-	// is exhausted (including read-only). Ask/Yolo still bypass inside the gate.
+	// is exhausted so host-proven read-only diagnosis can remain available while
+	// further execution is quarantined. Ask/Yolo still bypass inside the gate.
 	verification := evidenceName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(evidenceArgs))
 	planTransition, planBefore, planAfter := a.recoveryPlanTransition(evidenceName, evidenceArgs)
 	planReplacementAuthorized := false

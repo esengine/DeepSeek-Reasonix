@@ -273,6 +273,8 @@ export function WorkspacePanel({
   const [treeWidthMode, setTreeWidthMode] = useState<WorkspaceSplitTreeWidthMode>("manual");
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [codeSearchRequestPending, setCodeSearchRequestPending] = useState(false);
+  const [codeSearchRequestPath, setCodeSearchRequestPath] = useState<string | null>(null);
   /** Changes overview: commit history is secondary and starts collapsed. */
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false);
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
@@ -1415,6 +1417,19 @@ export function WorkspacePanel({
       !preview.binary &&
       !isMarkdown,
   );
+  useEffect(() => {
+    setCodeSearchRequestPending(false);
+    setCodeSearchRequestPath(null);
+  }, [selectedPath]);
+
+  const openCodeSearch = () => {
+    if (!codePreviewActive || !selectedPath) return;
+    setCodeSearchRequestPath(selectedPath);
+    setCodeSearchRequestPending(true);
+  };
+  const consumeCodeSearchRequest = useCallback(() => {
+    setCodeSearchRequestPending(false);
+  }, []);
   const treeBlankMenuItems: ContextMenuItem[] = [
     {
       key: "refresh-tree",
@@ -1430,6 +1445,17 @@ export function WorkspacePanel({
       className={`workspace-panel${embeddedDockMode ? " workspace-panel--embedded" : ""}${showTreeRail ? " workspace-panel--with-tree-rail" : ""}${changedMode ? " workspace-panel--detail-only" : ""}${changedMode && !selectedPath ? " workspace-panel--changed-overview" : ""}${previewVisible && actualTreeVisible ? " workspace-panel--split-preview" : ""}${actualTreeVisible ? "" : " workspace-panel--tree-hidden"}${previewVisible ? "" : " workspace-panel--preview-hidden"}${treeResizing ? " workspace-panel--tree-resizing" : ""}`}
       aria-label={t("workspace.title")}
       style={panelStyle}
+      onKeyDownCapture={(event) => {
+        if (
+          codePreviewActive
+          && (event.ctrlKey || event.metaKey)
+          && event.key.toLowerCase() === "f"
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          openCodeSearch();
+        }
+      }}
     >
       {previewVisible && <section className="workspace-preview">
         <header className="workspace-preview__head">
@@ -1460,6 +1486,19 @@ export function WorkspacePanel({
           </div>
 
           <div className="workspace-preview__window-actions">
+            {codePreviewActive && (
+              <Tooltip label={t("workspace.searchPlaceholder")}>
+                <button
+                  className="workspace-iconbtn"
+                  type="button"
+                  aria-label={t("workspace.searchPlaceholder")}
+                  aria-keyshortcuts="Control+F Meta+F"
+                  onClick={openCodeSearch}
+                >
+                  <Search size={15} />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip label={maximized ? t("workspace.restore") : t("workspace.maximize")}>
               <button className="workspace-iconbtn" onClick={onToggleMaximized}>
                 {maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
@@ -1850,6 +1889,8 @@ export function WorkspacePanel({
                   language={languageFor(selectedPath)}
                   sourceSize={preview.size}
                   showLineNumbers
+                  searchRequestPending={codeSearchRequestPending && codeSearchRequestPath === selectedPath}
+                  onSearchRequestConsumed={consumeCodeSearchRequest}
                 />
               )}
             </>

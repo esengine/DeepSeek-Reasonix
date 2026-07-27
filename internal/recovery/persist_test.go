@@ -48,6 +48,43 @@ func TestTaskScopePersistenceIsBackwardCompatible(t *testing.T) {
 	}
 }
 
+func TestFailureClassPersistenceIsBackwardCompatible(t *testing.T) {
+	const oldJSON = `{"tasks":{"root":{"phase":"diagnosing","last_failure":{"tool":"bash","err_summary":"command timed out"}}}}`
+	var old Snapshot
+	if err := json.Unmarshal([]byte(oldJSON), &old); err != nil {
+		t.Fatalf("decode old snapshot: %v", err)
+	}
+	if got := old.Tasks["root"].LastFailure.Class; got != "" {
+		t.Fatalf("old snapshot failure class = %q, want zero value", got)
+	}
+
+	newJSON, err := json.Marshal(Snapshot{Tasks: map[string]*TaskState{
+		"root": {
+			Phase: PhaseDiagnosing,
+			LastFailure: &FailureEvent{
+				Class: FailureClassTransient, Tool: "bash", ErrSummary: "command timed out",
+			},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("encode new snapshot: %v", err)
+	}
+	var legacy struct {
+		Tasks map[string]struct {
+			LastFailure struct {
+				Tool       string `json:"tool"`
+				ErrSummary string `json:"err_summary,omitempty"`
+			} `json:"last_failure"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal(newJSON, &legacy); err != nil {
+		t.Fatalf("legacy reader rejected failure class: %v", err)
+	}
+	if got := legacy.Tasks["root"].LastFailure.Tool; got != "bash" {
+		t.Fatalf("legacy reader lost known failure fields: %q", got)
+	}
+}
+
 func TestSaveSnapshotIsAtomicAndOwnerOnly(t *testing.T) {
 	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
 	const writers = 24

@@ -10,6 +10,17 @@ import LineNumberCode, {
   splitHighlightedCodeLines,
 } from "../components/editors/LineNumberCode";
 import {
+  findRegexCodeMatches,
+  MAX_REGEX_PATTERN_LENGTH,
+  MAX_REGEX_SOURCE_LENGTH,
+  type RegexSearchRequest,
+  type RegexSearchResponse,
+} from "../components/editors/codeSearch";
+import {
+  startRegexSearch,
+  type RegexSearchWorker,
+} from "../components/editors/regexSearchClient";
+import {
   highlightToHtml,
   MAX_HIGHLIGHT_BYTES,
   MAX_HIGHLIGHT_LINES,
@@ -62,6 +73,191 @@ ok(
   findCodeMatches("猫 猫咪 猫", "猫", false, true).matches.length === 2,
   "whole-word matching respects Unicode word characters",
 );
+ok(
+  findCodeMatches("a+b aab a+b", "a+b").matches.length === 2,
+  "treats regex metacharacters as literal search text",
+);
+
+const regexRequest = (overrides: Partial<RegexSearchRequest> = {}): RegexSearchRequest => ({
+  requestId: 1,
+  source: "foo1 foo22\nbar3",
+  pattern: String.raw`foo\d+`,
+  caseSensitive: false,
+  wholeWord: false,
+  maxMatches: MAX_SEARCH_MATCHES,
+  ...overrides,
+});
+const regexMatches = findRegexCodeMatches(regexRequest());
+ok(regexMatches.ok && regexMatches.result.matches.length === 2, "regex mode evaluates explicit patterns");
+ok(
+  regexMatches.ok && regexMatches.result.matches.map((match) => match.start).join(",") === "0,5",
+  "regex mode returns JavaScript-compatible UTF-16 offsets",
+);
+const lineAnchoredRegex = findRegexCodeMatches(regexRequest({
+  source: "foo\nfoo",
+  pattern: "^foo",
+}));
+ok(
+  lineAnchoredRegex.ok
+    && lineAnchoredRegex.result.matches.length === 2
+    && lineAnchoredRegex.result.matches.map((match) => match.lineIndex).join(",") === "0,1",
+  "regex anchors continue to address individual source lines",
+);
+const multilineRegex = findRegexCodeMatches(regexRequest({
+  source: "foo\nbar",
+  pattern: String.raw`foo\nbar`,
+}));
+ok(!multilineRegex.ok && multilineRegex.error === "multiline_unsupported", "reports unsupported multiline regex matches");
+const regexLiteralDifference = findRegexCodeMatches(regexRequest({
+  source: "a+b aab aaab",
+  pattern: "a+b",
+}));
+ok(
+  regexLiteralDifference.ok && regexLiteralDifference.result.matches.length === 2,
+  "regex mode keeps metacharacter semantics separate from literal search",
+);
+const invalidRegex = findRegexCodeMatches(regexRequest({ pattern: "(" }));
+ok(!invalidRegex.ok && invalidRegex.error === "invalid_pattern", "reports invalid regular expressions");
+const zeroLengthRegex = findRegexCodeMatches(regexRequest({ pattern: "^" }));
+ok(
+  !zeroLengthRegex.ok && zeroLengthRegex.error === "zero_length_unsupported",
+  "rejects zero-length regex matches that cannot be highlighted safely",
+);
+const mixedLengthRegex = findRegexCodeMatches(regexRequest({
+  source: "abc",
+  pattern: ".*",
+}));
+ok(
+  mixedLengthRegex.ok
+    && mixedLengthRegex.result.matches.length === 1
+    && mixedLengthRegex.result.matches[0].start === 0
+    && mixedLengthRegex.result.matches[0].end === 3,
+  "keeps non-empty regex results when the expression also produces an empty match",
+);
+const longRegex = findRegexCodeMatches(regexRequest({ pattern: "x".repeat(MAX_REGEX_PATTERN_LENGTH + 1) }));
+ok(!longRegex.ok && longRegex.error === "pattern_too_long", "caps regular-expression length");
+const oversizedRegexSource = findRegexCodeMatches(regexRequest({
+  source: "x".repeat(MAX_REGEX_SOURCE_LENGTH + 1),
+}));
+ok(
+  !oversizedRegexSource.ok && oversizedRegexSource.error === "source_too_large",
+  "caps source copied into the regex worker",
+);
+const cappedRegex = findRegexCodeMatches(regexRequest({
+  source: "x x x",
+  pattern: "x",
+  maxMatches: 2,
+}));
+ok(
+  cappedRegex.ok && cappedRegex.result.matches.length === 2 && cappedRegex.result.truncated,
+  "caps regex result sets before returning them to the UI",
+);
+
+class FakeRegexWorker implements RegexSearchWorker {
+  onmessage: ((event: MessageEvent<RegexSearchResponse>) => void) | null = null;
+  onerror: ((event: ErrorEvent) => void) | null = null;
+  posted: RegexSearchRequest[] = [];
+  terminated = false;
+
+  postMessage(request: RegexSearchRequest) {
+    this.posted.push(request);
+  }
+
+  terminate() {
+    this.terminated = true;
+  }
+
+  respond(response: RegexSearchResponse) {
+    this.onmessage?.({ data: response } as MessageEvent<RegexSearchResponse>);
+  }
+}
+
+const timedOutWorker = new FakeRegexWorker();
+let timeoutCallback: (() => void) | null = null;
+let timeoutResponse: RegexSearchResponse | null = null;
+startRegexSearch(
+  regexRequest({ requestId: 2 }),
+  { onResponse: (response) => { timeoutResponse = response; } },
+  {
+    createWorker: async () => timedOutWorker,
+    setTimer: (callback) => {
+      timeoutCallback = callback;
+      return 1;
+    },
+    clearTimer: () => {},
+  },
+);
+await Promise.resolve();
+timeoutCallback?.();
+ok(timedOutWorker.terminated, "hard timeout terminates a stuck regex worker");
+ok(
+  timeoutResponse != null && !timeoutResponse.ok && timeoutResponse.error === "timeout",
+  "hard timeout reports a bounded search failure",
+);
+
+let creationTimeoutCallback: (() => void) | null = null;
+let creationTimeoutResponse: RegexSearchResponse | null = null;
+startRegexSearch(
+  regexRequest({ requestId: 5 }),
+  { onResponse: (response) => { creationTimeoutResponse = response; } },
+  {
+    createWorker: () => new Promise<RegexSearchWorker>(() => {}),
+    setTimer: (callback) => {
+      creationTimeoutCallback = callback;
+      return 5;
+    },
+    clearTimer: () => {},
+  },
+);
+creationTimeoutCallback?.();
+ok(
+  creationTimeoutResponse != null
+    && !creationTimeoutResponse.ok
+    && creationTimeoutResponse.error === "timeout",
+  "hard timeout covers a worker that never finishes initializing",
+);
+
+const staleWorker = new FakeRegexWorker();
+let staleResponseAccepted = false;
+const cancelStaleSearch = startRegexSearch(
+  regexRequest({ requestId: 3 }),
+  { onResponse: () => { staleResponseAccepted = true; } },
+  {
+    createWorker: async () => staleWorker,
+    setTimer: () => 2,
+    clearTimer: () => {},
+  },
+);
+await Promise.resolve();
+cancelStaleSearch();
+staleWorker.respond({
+  requestId: 3,
+  ok: true,
+  result: { matches: [], truncated: false },
+});
+ok(staleWorker.terminated, "cancelling a stale request terminates its worker");
+ok(!staleResponseAccepted, "discarded requests cannot update search results");
+
+const completedWorker = new FakeRegexWorker();
+let completedResponse: RegexSearchResponse | null = null;
+let completedTimerCleared = false;
+startRegexSearch(
+  regexRequest({ requestId: 4 }),
+  { onResponse: (response) => { completedResponse = response; } },
+  {
+    createWorker: async () => completedWorker,
+    setTimer: () => 3,
+    clearTimer: () => { completedTimerCleared = true; },
+  },
+);
+await Promise.resolve();
+completedWorker.respond({
+  requestId: 4,
+  ok: true,
+  result: { matches: [], truncated: false },
+});
+ok(completedResponse?.requestId === 4, "accepts the current worker response");
+ok(completedWorker.terminated && completedTimerCleared, "successful searches release worker and timer resources");
 
 const cappedMatches = findCodeMatches("x".repeat(MAX_SEARCH_MATCHES + 1), "x");
 ok(cappedMatches.matches.length === MAX_SEARCH_MATCHES, "caps pathological result sets");
@@ -159,6 +355,41 @@ ok(
   container.querySelectorAll(".code-block__wrap")[1].querySelector(".code-search") == null,
   "does not fan the shortcut out to sibling viewers",
 );
+const firstViewer = container.querySelectorAll<HTMLElement>(".code-block__wrap")[0];
+ok(
+  firstViewer.querySelector(".code-block__copy") == null,
+  "removes the covered floating copy control while search is open",
+);
+ok(
+  firstViewer.querySelector('.code-search .code-search__copy[aria-label="Copy"]') != null,
+  "keeps copy available as a visible search-toolbar action",
+);
+
+const pendingRequestContainer = document.createElement("div");
+document.body.appendChild(pendingRequestContainer);
+const pendingRequestRoot = createRoot(pendingRequestContainer);
+let pendingRequestConsumed = false;
+await act(async () => {
+  pendingRequestRoot.render(
+    <LocaleProvider>
+      <LineNumberCode
+        value="pending search"
+        showLineNumbers
+        searchRequestPending
+        onSearchRequestConsumed={() => {
+          pendingRequestConsumed = true;
+        }}
+      />
+    </LocaleProvider>,
+  );
+  await flush();
+});
+ok(
+  pendingRequestContainer.querySelector(".code-search") != null,
+  "consumes a search request that arrived before the editor mounted",
+);
+ok(pendingRequestConsumed, "acknowledges a consumed search request");
+await act(async () => pendingRequestRoot.unmount());
 
 const searchInput = container.querySelector<HTMLInputElement>(".code-search__input")!;
 await act(async () => {
@@ -214,6 +445,39 @@ await act(async () => {
   await flush();
 });
 ok(caseToggle.getAttribute("aria-pressed") === "true", "exposes the active match-case state");
+
+await act(async () => {
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+  setter?.call(searchInput, "");
+  searchInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  searchInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await wait(130);
+});
+const regexToggle = container.querySelector<HTMLButtonElement>('[aria-label="Use regular expression"]')!;
+ok(regexToggle.getAttribute("aria-pressed") === "false", "keeps regex mode disabled by default");
+await act(async () => {
+  regexToggle.click();
+  await flush();
+});
+ok(regexToggle.getAttribute("aria-pressed") === "true", "exposes regex mode as an explicit advanced toggle");
+await act(async () => {
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+  setter?.call(searchInput, "x".repeat(MAX_REGEX_PATTERN_LENGTH + 1));
+  searchInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  searchInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+  await wait(130);
+});
+ok(
+  container.querySelector(".code-search__count--error")?.textContent === "Expression too long",
+  "shows a localized error before unsafe regex work starts",
+);
+
+await act(async () => {
+  container.querySelector<HTMLButtonElement>('[aria-label="Close search"]')?.click();
+  await flush();
+});
+ok(firstViewer.querySelector(".code-search") == null, "closes the viewer-scoped search toolbar");
+ok(firstViewer.querySelector(".code-block__copy") != null, "restores the floating copy control after search closes");
 
 await act(async () => root.unmount());
 

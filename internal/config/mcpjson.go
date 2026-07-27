@@ -218,15 +218,21 @@ func pluginEntryFromMCPSpec(name string, s mcpServerSpec) PluginEntry {
 // Reasonix-specific, more explicit of the two, so it overrides the shared,
 // checked-in .mcp.json rather than the other way round.
 func (c *Config) mergeMCPJSON(entries []PluginEntry) {
-	have := make(map[string]bool, len(c.Plugins))
-	for _, p := range c.Plugins {
-		have[p.Name] = true
+	index := make(map[string]int, len(c.Plugins))
+	for i, p := range c.Plugins {
+		index[p.Name] = i
 	}
 	for _, e := range entries {
-		if have[e.Name] {
+		if i, exists := index[e.Name]; exists {
+			// Project configuration always wins over user-global configuration.
+			// Within one project, reasonix.toml remains more specific than the
+			// Claude-compatible .mcp.json file.
+			if e.Source == MCPSourceProjectMCPJSON && !c.Plugins[i].Source.ProjectScoped() {
+				c.Plugins[i] = e
+			}
 			continue
 		}
-		have[e.Name] = true
+		index[e.Name] = len(c.Plugins)
 		c.Plugins = append(c.Plugins, e)
 	}
 }

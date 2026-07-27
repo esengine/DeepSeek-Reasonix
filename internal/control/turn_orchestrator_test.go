@@ -11,12 +11,57 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/capability"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+type plannerMetadataRunner struct {
+	meta  plannerTurnMetadata
+	input string
+}
+
+func (r *plannerMetadataRunner) Run(ctx context.Context, input string) error {
+	r.meta, _ = plannerTurnMetadataFromContext(ctx)
+	r.input = input
+	return nil
+}
+
+func TestTurnOrchestratorAttachesTrustedPlannerMetadata(t *testing.T) {
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "explain the bug"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "the bug is in parser.go"})
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	runner := &plannerMetadataRunner{}
+	c := New(Options{
+		Runner:         runner,
+		Executor:       exec,
+		RuntimeProfile: capability.ProfileDelivery,
+	})
+	c.SetGoal("migrate authentication across the backend")
+
+	const raw = "fix typo in README"
+	const expanded = "Referenced context:\n\nprivate injected details\n\nfix typo in README"
+	if err := newTurnOrchestrator(c).runTurnWithRawDisplay(context.Background(), expanded, raw, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if runner.meta.UserText != raw {
+		t.Fatalf("planner metadata user text = %q, want pristine %q", runner.meta.UserText, raw)
+	}
+	if runner.meta.ExplicitPlanMode || !runner.meta.GoalActive || !runner.meta.DeliveryProfile {
+		t.Fatalf("planner metadata missing trusted host state: %+v", runner.meta)
+	}
+	if !runner.meta.HasConversationContext {
+		t.Fatalf("planner metadata lost executor conversation ownership: %+v", runner.meta)
+	}
+	if !strings.Contains(runner.input, expanded) {
+		t.Fatalf("model input lost expanded context: %q", runner.input)
+	}
+}
 
 func TestTurnOrchestratorRunsForegroundUnit(t *testing.T) {
 	runner := &fakeTurnRunner{}
@@ -142,7 +187,7 @@ func (r *recoveryPauseRunner) Run(ctx context.Context, _ string) error {
 		r.scopes = append(r.scopes, scope)
 	}
 	return &agent.RecoveryPauseError{
-		Message:    "This automatic recovery turn paused to avoid repeated execution. Completed work is kept; send more requirements or reply continue.",
+		Message:    "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction.",
 		StopReason: "episode_failures",
 	}
 }

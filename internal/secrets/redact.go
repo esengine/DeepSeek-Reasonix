@@ -27,6 +27,20 @@ var (
 	slackTokenPattern   = regexp.MustCompile(`\b(xox[baprs]-[A-Za-z0-9-]{16,})\b`)
 	awsAccessKeyPattern = regexp.MustCompile(`\b(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16})\b`)
 	jwtPattern          = regexp.MustCompile(`\b(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b`)
+	// Match through the final @ before a path/whitespace so raw @ characters
+	// inside userinfo cannot leave a password suffix visible.
+	urlUserInfoPattern = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]*://)([^/\s]+)@`)
+
+	// maskedCredentialPattern collapses partially masked credentials and any
+	// visible prefix/suffix around the stars ("****ae54", "sk-ab****").
+	maskedCredentialPattern = regexp.MustCompile(`[A-Za-z0-9._-]*\*{2,}[A-Za-z0-9._-]*`)
+	// credentialContextPattern catches prose forms such as
+	// "api key: relaykey..." that are not KEY=value pairs.
+	credentialContextPattern = regexp.MustCompile(`(?i)\b(api[ _-]?key|access[ _-]?key|secret|token|authorization|bearer|credential)s?\b(['"]?\s*[:=]?\s*['"]?)([A-Za-z0-9._~+/-]{12,})`)
+	// credentialTokenPattern is a conservative fallback for opaque key-shaped
+	// runs. Single-case, digit-free identifiers remain readable.
+	credentialTokenPattern = regexp.MustCompile(`[A-Za-z0-9_-]{16,}`)
+	digitPattern           = regexp.MustCompile(`[0-9]`)
 )
 
 const redactedValue = "[redacted]"
@@ -144,6 +158,7 @@ func Redact(s string) string {
 	if s == "" {
 		return s
 	}
+	s = urlUserInfoPattern.ReplaceAllString(s, "$1"+redactedValue+"@")
 	s = redactKeyValues(s)
 	s = cookieHeaderPattern.ReplaceAllStringFunc(s, func(match string) string {
 		parts := cookieHeaderPattern.FindStringSubmatch(match)
@@ -163,6 +178,35 @@ func Redact(s string) string {
 		s = rx.ReplaceAllStringFunc(s, mask)
 	}
 	return s
+}
+
+// RedactCredentials applies the stronger credential scrub used at external
+// error and logging boundaries. In addition to known key shapes, it removes
+// partially masked credentials, prose-form credentials, and opaque tokens that
+// carry a digit or mixed case.
+func RedactCredentials(s string) string {
+	if s == "" {
+		return s
+	}
+	s = Redact(s)
+	s = credentialContextPattern.ReplaceAllString(s, "${1}${2}****")
+	s = maskedCredentialPattern.ReplaceAllString(s, "****")
+	return credentialTokenPattern.ReplaceAllStringFunc(s, func(token string) string {
+		mixedCase := strings.ToLower(token) != token && strings.ToUpper(token) != token
+		if digitPattern.MatchString(token) || mixedCase {
+			return "****"
+		}
+		return token
+	})
+}
+
+// RedactError returns an error string safe for an external log or diagnostic
+// boundary. A nil error produces an empty string.
+func RedactError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return RedactCredentials(err.Error())
 }
 
 func redactKeyValues(s string) string {
@@ -221,10 +265,13 @@ func redactKeyValues(s string) string {
 			out.Grow(len(s))
 		}
 		out.WriteString(s[last:valueStart])
+		value := s[valueStart:valueEnd]
 		if authorizationKey(key) {
 			out.WriteString(redactedValue)
+		} else if value == "****" || value == redactedValue {
+			out.WriteString(value)
 		} else {
-			out.WriteString(mask(s[valueStart:valueEnd]))
+			out.WriteString(mask(value))
 		}
 		last = valueEnd
 		sep = valueEnd - 1

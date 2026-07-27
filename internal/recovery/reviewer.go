@@ -202,6 +202,7 @@ func buildReviewEvidence(failure *FailureEvent, diagnosis []string, proposal Pro
 	if failure != nil {
 		f := map[string]any{
 			"tool":         clipBytes(failure.Tool, 120),
+			"class":        failure.Class,
 			"verification": failure.Verification,
 			"mutates":      failure.Mutates,
 		}

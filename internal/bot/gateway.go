@@ -17,6 +17,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/secrets"
 )
 
 // GatewayConfig 是 BotGateway 的配置。
@@ -2208,7 +2209,7 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		ApprovalTimeout: gw.approvalTimeout(),
 	})
 	if err != nil {
-		gw.logger.Error("build controller failed", "err", err)
+		gw.logger.Error("build controller failed", "err", secrets.RedactError(err))
 		return nil
 	}
 	leases := control.NewSessionLeaseKeeper()

@@ -605,7 +605,7 @@ func TestLazyBackgroundKick(t *testing.T) {
 	}
 }
 
-func TestLazyBackgroundCacheMissPersistsSchema(t *testing.T) {
+func TestLazyBackgroundCacheMissPersistsSchemaAndCompletesAdvertisedConnect(t *testing.T) {
 	redirectCache(t)
 	spec := helperSpec()
 
@@ -616,6 +616,13 @@ func TestLazyBackgroundCacheMissPersistsSchema(t *testing.T) {
 	defer cancel()
 
 	tools := LazyToolset(spec, nil, host, reg, ctx, true) // cache miss + background kick
+	if len(tools) != 1 {
+		t.Fatalf("cache-miss LazyToolset returned %d tools, want one connect placeholder", len(tools))
+	}
+	connect, ok := tools[0].(*lazyTool)
+	if !ok {
+		t.Fatalf("cache-miss placeholder type = %T, want *lazyTool", tools[0])
+	}
 	for _, lt := range tools {
 		reg.Add(lt)
 	}
@@ -631,6 +638,12 @@ func TestLazyBackgroundCacheMissPersistsSchema(t *testing.T) {
 	}
 	if !got["echo"] || !got["zed"] {
 		t.Fatalf("cached tools = %v, want echo and zed", got)
+	}
+	if _, found := reg.Get(connect.Name()); found {
+		t.Fatalf("connect placeholder remained provider-visible after discovery; names=%v", reg.Names())
+	}
+	if out, err := connect.Execute(ctx, json.RawMessage(`{}`)); err != nil || !strings.Contains(out, "real tools are now available") {
+		t.Fatalf("already-advertised connect after discovery = (%q, %v), want controlled connected result", out, err)
 	}
 }
 
