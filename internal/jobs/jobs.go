@@ -1105,10 +1105,10 @@ func (m *Manager) SetActiveSession(parentSession string) {
 }
 
 // validateTrustedSessionPath performs defense-in-depth syntax validation on a
-// transcript path already trusted by the store/controller layer. It is not a
-// trusted-root containment check: normal absolute and workspace-relative paths
-// remain valid. It rejects control characters and explicit `..` components
-// before filepath operations can normalize them.
+// transcript path already trusted by the store/controller layer. It rejects
+// control characters, but deliberately preserves separators and `..`: those are
+// valid host-path syntax, and rejecting them without a trusted root would break
+// legitimate relative paths without establishing filesystem containment.
 func validateTrustedSessionPath(sessionPath string) error {
 	if sessionPath == "" {
 		return fmt.Errorf("jobs: sessionPath must not be empty")
@@ -1116,12 +1116,6 @@ func validateTrustedSessionPath(sessionPath string) error {
 	for i, r := range sessionPath {
 		if r < 0x20 || r == 0x7f {
 			return fmt.Errorf("jobs: sessionPath contains control character 0x%02x at index %d", r, i)
-		}
-	}
-	normalized := strings.ReplaceAll(sessionPath, `\`, "/")
-	for _, part := range strings.Split(normalized, "/") {
-		if part == ".." {
-			return fmt.Errorf("jobs: sessionPath contains '..' path component")
 		}
 	}
 	return nil
@@ -1145,6 +1139,13 @@ func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 	// Reject malformed trusted paths before any filesystem side effect. This is
 	// syntax hardening, not a boundary for arbitrary caller-controlled paths.
 	if err := validateTrustedSessionPath(sessionPath); err != nil {
+		m.mu.Lock()
+		m.active = parentSession
+		// A rejected rebinding must not leave future jobs writing to a stale
+		// transcript that happened to use the same parent session id.
+		delete(m.artifactDirs, parentSession)
+		delete(m.loaded, parentSession)
+		m.mu.Unlock()
 		m.sink.Emit(event.Event{
 			Kind:   event.Notice,
 			Level:  event.LevelWarn,

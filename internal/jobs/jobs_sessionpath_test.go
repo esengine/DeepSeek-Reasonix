@@ -65,13 +65,12 @@ func TestValidateTrustedSessionPath(t *testing.T) {
 		// Filenames with a hidden segment are still legitimate.
 		{"..hidden is allowed", "/home/u/.reasonix/..hidden.jsonl", false},
 		{"triple-dot is allowed", "/home/u/...jsonl", false},
-		// Path traversal — the actual attack.
-		{"traversal with separators", "/safe/../escape.jsonl", true},
-		{"traversal as full input", "../escape.jsonl", true},
-		{"trailing dotdot", "/safe/dir/..", true},
-		{"leading dotdot", "../etc/passwd.jsonl", true},
-		// Windows-style traversal must also be rejected on Unix hosts.
-		{"windows backslash traversal", `C:\safe\..\etc\passwd.jsonl`, true},
+		// Trusted paths keep their host-path semantics. This validator is not a
+		// trusted-root containment boundary.
+		{"dotdot with separators", "/safe/../session.jsonl", false},
+		{"leading dotdot", "../sessions/abc.jsonl", false},
+		{"trailing dotdot", "/safe/dir/..", false},
+		{"windows backslashes", `C:\safe\..\sessions\abc.jsonl`, false},
 		// Control characters and NUL.
 		{"NUL byte", "/safe/abc\x00.jsonl", true},
 		{"newline", "/safe/abc\n.jsonl", true},
@@ -91,92 +90,77 @@ func TestValidateTrustedSessionPath(t *testing.T) {
 	}
 }
 
-// TestSetActiveSessionPath_RejectsTraversalPayload is the integration
-// companion to TestValidateTrustedSessionPath. It proves that a malformed
-// trusted path does not reach the filesystem or pollute artifactDirs.
-func TestSetActiveSessionPath_RejectsTraversalPayload(t *testing.T) {
+// TestSetActiveSessionPath_AcceptsTrustedDotDotPath preserves valid relative
+// transcript spellings used by callers such as headless --resume.
+func TestSetActiveSessionPath_AcceptsTrustedDotDotPath(t *testing.T) {
 	root := t.TempDir()
-	// Place a canary file in a path the payload would otherwise create or
-	// write into. We construct the path with filepath.Join so the canary
-	// lives in a deterministic location, but the payload we hand to
-	// SetActiveSessionPath is built by string concatenation so the `..`
-	// component survives to the validator (filepath.Join would collapse it).
-	canaryDir := filepath.Join(root, "sibling")
-	if err := os.MkdirAll(canaryDir, 0o700); err != nil {
-		t.Fatalf("seed canary dir: %v", err)
+	intermediate := filepath.Join(root, "intermediate")
+	if err := os.MkdirAll(intermediate, 0o700); err != nil {
+		t.Fatalf("create intermediate dir: %v", err)
 	}
-	canary := filepath.Join(canaryDir, "passwd.jsonl")
-	if err := os.WriteFile(canary, []byte("pre-existing"), 0o600); err != nil {
-		t.Fatalf("seed canary file: %v", err)
-	}
-
 	sink := &captureSink{}
 	m := NewManager(sink)
 	defer m.Close()
 
-	// Raw concatenation preserves the `..` component. Without the validator
-	// this would resolve to <root>/sibling/passwd.jsonl and SetActiveSessionPath
-	// would create a sidecar at <root>/sibling/passwd.jobs, overwriting or
-	// sitting next to the canary.
-	sessionPath := root + string(os.PathSeparator) + "tmp" + string(os.PathSeparator) +
-		".." + string(os.PathSeparator) + "sibling" + string(os.PathSeparator) + "passwd.jsonl"
+	// Raw concatenation preserves the trusted `..` spelling that filepath.Join
+	// would otherwise clean before it reaches SetActiveSessionPath.
+	sessionPath := intermediate + string(os.PathSeparator) + ".." +
+		string(os.PathSeparator) + "session.jsonl"
 
 	m.SetActiveSessionPath("session-a", sessionPath)
 
-	// The canary must be intact: SetActiveSessionPath must not have created
-	// a passwd.jobs sidecar directory next to it.
-	got, err := os.ReadFile(canary)
-	if err != nil {
-		t.Fatalf("canary missing or unreadable: %v", err)
-	}
-	if string(got) != "pre-existing" {
-		t.Fatalf("canary contents changed: %q", got)
-	}
-	canarySibling := filepath.Join(canaryDir, "passwd.jobs")
-	if _, err := os.Stat(canarySibling); err == nil {
-		t.Fatalf("artifact sidecar directory was created at %q; the fix failed", canarySibling)
-	} else if !os.IsNotExist(err) {
-		t.Fatalf("unexpected stat error for %q: %v", canarySibling, err)
-	}
-
-	// The manager must not have cached any directory for the rejected
-	// session; a follow-up StartForSession should fall back to the temp
-	// root, not to the rejected path.
 	m.mu.Lock()
-	cached, hasCached := m.artifactDirs["session-a"]
+	active := m.active
+	cached := m.artifactDirs["session-a"]
 	m.mu.Unlock()
-	if hasCached && cached != "" {
-		t.Fatalf("artifactDirs cached %q for rejected sessionPath; expected no entry", cached)
+	if active != "session-a" {
+		t.Fatalf("active = %q, want %q", active, "session-a")
 	}
-	if cached != "" {
-		t.Fatalf("artifactDirs contains a non-empty entry for rejected sessionPath: %q", cached)
+	wantDir := store.SessionJobsDir(sessionPath)
+	if cached != wantDir {
+		t.Fatalf("cached dir = %q, want %q", cached, wantDir)
+	}
+	if sink.hasText("Ignoring SetActiveSessionPath with invalid session path") {
+		t.Fatalf("trusted dotdot path unexpectedly emitted a warning: %v", sink.texts())
 	}
 
-	// The user-visible signal: a warning event hit the sink.
-	if !sink.hasText("Ignoring SetActiveSessionPath with invalid session path") {
-		t.Fatalf("expected warning emission, got events: %v", sink.texts())
+	j := m.StartForSession("session-a", "bash", "trusted relative path", func(_ context.Context, _ io.Writer) (string, error) {
+		return "ok", nil
+	})
+	<-j.done
+	if j.artifactErr != "" {
+		t.Fatalf("artifactErr = %q, want empty", j.artifactErr)
+	}
+	if got, want := filepath.Clean(filepath.Dir(j.artifactPath)), filepath.Join(root, "session.jobs"); got != want {
+		t.Fatalf("artifact dir = %q, want %q", got, want)
 	}
 }
 
-// TestSetActiveSessionPath_RejectsLeadingDotDot covers a second traversal
-// shape from #6932 follow-up: a sessionPath that starts with `..` and so
-// walks out of whatever the caller expected the artifact root to be.
-// Built with raw concatenation so the `..` component is preserved for
-// the validator to reject.
-func TestSetActiveSessionPath_RejectsLeadingDotDot(t *testing.T) {
+// TestSetActiveSessionPath_InvalidPathUpdatesActiveAndClearsBinding verifies
+// that filesystem rejection does not leave lifecycle notices or future jobs
+// attached to the previous session/path.
+func TestSetActiveSessionPath_InvalidPathUpdatesActiveAndClearsBinding(t *testing.T) {
 	sink := &captureSink{}
 	m := NewManager(sink)
 	defer m.Close()
 
-	sessionPath := ".." + string(os.PathSeparator) + "etc" + string(os.PathSeparator) + "passwd.jsonl"
-
-	m.SetActiveSessionPath("session-x", sessionPath)
+	m.SetActiveSessionPath("session-x", filepath.Join(t.TempDir(), "old.jsonl"))
+	m.SetActiveSession("old-session")
+	m.SetActiveSessionPath("session-x", filepath.Join(t.TempDir(), "bad\npath.jsonl"))
 
 	m.mu.Lock()
+	active := m.active
 	_, hasCached := m.artifactDirs["session-x"]
+	_, loaded := m.loaded["session-x"]
 	m.mu.Unlock()
+	if active != "session-x" {
+		t.Fatalf("active = %q, want %q", active, "session-x")
+	}
 	if hasCached {
-		t.Fatal("artifactDirs cached an entry for a leading-dotdot sessionPath")
+		t.Fatal("artifactDirs retained the stale binding for a rejected sessionPath")
+	}
+	if loaded {
+		t.Fatal("loaded retained the stale binding for a rejected sessionPath")
 	}
 	if !sink.hasText("Ignoring SetActiveSessionPath with invalid session path") {
 		t.Fatalf("expected warning emission, got events: %v", sink.texts())
