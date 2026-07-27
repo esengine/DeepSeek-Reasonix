@@ -3107,25 +3107,21 @@ export function useController() {
     beginActiveNavigation();
     const snapshotAt = promptEventClock();
     const meta = await app.EnsureBlankTab(scope, workspaceRoot);
-    // Clear any stale backend session data that may remain from reusing a
-    // previously-closed tab (#6722).
-    try {
-      await app.NewSessionForTab(meta.id);
-      addBreadcrumb("tab.hydrate", `ensure-blank-session for ${meta.id}`);
-    } catch (err) {
-      addBreadcrumb("tab.hydrate", `ensure-blank-session failed ${meta.id}: ${errorMessage(err)}`);
-    }
+    // EnsureBlankTab may return a tab id already present in local state.
+    // Invalidate its old hydration and force a fresh history read, otherwise a
+    // late request can restore orphaned tool cards from the prior session.
+    bumpCheckpointRefreshSeq(meta.id);
     const isNewTab = !statesRef.current.has(meta.id);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
     confirmBackendActiveTab(meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
-    const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic");
+    const load = loadSessionDataForTab(meta.id, true, "new-session", { sessionPath: meta.sessionPath });
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
     else void load;
     return meta;
-  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
+  }, [beginActiveNavigation, bumpCheckpointRefreshSeq, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, reconcileTabRuntime]);
 
   const ensureBlankSurface = useCallback(async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
     beginActiveNavigation();
