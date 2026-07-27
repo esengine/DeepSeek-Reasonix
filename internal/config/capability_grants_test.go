@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,58 @@ import (
 	"reasonix/internal/sandbox"
 	"reasonix/internal/sandboxauth"
 )
+
+type capabilityRejectingApprover struct {
+	calls int
+}
+
+func (a *capabilityRejectingApprover) ApproveSandboxCapability(context.Context, sandboxauth.Prompt) (sandboxauth.Action, error) {
+	a.calls++
+	return sandboxauth.RunSandboxed, nil
+}
+
+func TestUserCapabilityGrantMatchesOutsideHomeWorkspace(t *testing.T) {
+	reasonixHome := filepath.Join(t.TempDir(), "reasonix-home")
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	if err := os.MkdirAll(reasonixHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	executable := capabilityTestExecutable(t)
+	body := fmt.Sprintf(`
+[[sandbox.capability_grants]]
+canonical_executable = %q
+argv_prefix = [%q]
+network = true
+`, executable, executable)
+	if err := os.WriteFile(UserConfigPath(), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := t.TempDir()
+	approver := &capabilityRejectingApprover{}
+	engine := &sandboxauth.Engine{
+		Approver:   approver,
+		UserSource: UserCapabilityGrantStore{},
+	}
+	decision, err := engine.Authorize(context.Background(), sandboxauth.Request{
+		Review: sandbox.CapabilityReview{
+			State:          sandbox.CapabilityReady,
+			EffectiveDelta: sandbox.CapabilitySet{Network: true},
+			Authority:      sandbox.CapabilityAuthorityStatus{Requested: true, Supported: true},
+		},
+		Workspace: workspace,
+		Command:   executable,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Use != sandbox.AuthorizedDelta || decision.Origin != sandboxauth.OriginUserGrant {
+		t.Fatalf("decision=%+v, want existing user grant authorization", decision)
+	}
+	if approver.calls != 0 {
+		t.Fatalf("capability approver called %d times, want grant match to skip approval", approver.calls)
+	}
+}
 
 func TestCapabilityGrantInvalidEntryIsolationAndCanonicalDedupe(t *testing.T) {
 	root := t.TempDir()

@@ -365,17 +365,24 @@ func (e *Engine) Authorize(ctx context.Context, req Request) (decision Decision,
 	if identityErr == nil {
 		session := e.SessionGrants()
 		user, _ := e.userGrants(ctx, req.Workspace)
-		grants := append(append(session, user...), project...)
-		if grant, index, ok := matchingGrant(grants, commandID, req); ok {
-			directArgv := append([]string(nil), commandID.argv...)
-			directArgv[0] = grant.CanonicalExecutable
-			origin := OriginProjectGrant
-			if index < len(session) {
-				origin = OriginSessionGrant
-			} else if index < len(session)+len(user) {
-				origin = OriginUserGrant
+		// User grants are global across workspaces. Their Workspace remains the
+		// user-home root used to canonicalize workspace-relative capability paths;
+		// only session and project grants use it as an authorization scope.
+		sources := []struct {
+			grants          []Grant
+			origin          DecisionOrigin
+			workspaceScoped bool
+		}{
+			{grants: session, origin: OriginSessionGrant, workspaceScoped: true},
+			{grants: user, origin: OriginUserGrant, workspaceScoped: false},
+			{grants: project, origin: OriginProjectGrant, workspaceScoped: true},
+		}
+		for _, source := range sources {
+			if grant, ok := matchingGrant(source.grants, commandID, req, source.workspaceScoped); ok {
+				directArgv := append([]string(nil), commandID.argv...)
+				directArgv[0] = grant.CanonicalExecutable
+				return Decision{Use: sandbox.AuthorizedDelta, Origin: source.origin, Diagnostic: strings.Join(projectMessages, "; "), ConfigDiagnostics: cloneDiagnostics(projectDiagnostics), CanonicalExecutable: grant.CanonicalExecutable, Argv: directArgv}, nil
 			}
-			return Decision{Use: sandbox.AuthorizedDelta, Origin: origin, Diagnostic: strings.Join(projectMessages, "; "), ConfigDiagnostics: cloneDiagnostics(projectDiagnostics), CanonicalExecutable: grant.CanonicalExecutable, Argv: directArgv}, nil
 		}
 	}
 	if e.AutoOnce != nil {
@@ -512,13 +519,13 @@ func (id identity) grant(req Request) Grant {
 	return Grant{Workspace: id.workspace, CanonicalExecutable: id.executable, ArgvPrefix: append([]string(nil), id.prefix...), Capabilities: cloneCapabilitySet(req.Review.EffectiveDelta), Background: req.Background, PreserveBackgroundProcesses: req.PreserveBackgroundProcesses}
 }
 
-func matchingGrant(grants []Grant, id identity, req Request) (Grant, int, bool) {
-	for i, g := range grants {
-		if g.Workspace == id.workspace && g.CanonicalExecutable == id.executable && argvHasPrefix(id.argv, g.ArgvPrefix) && capabilitySetCovers(g.Capabilities, req.Review.EffectiveDelta) && (!req.Background || g.Background) && (!req.PreserveBackgroundProcesses || g.PreserveBackgroundProcesses) {
-			return g, i, true
+func matchingGrant(grants []Grant, id identity, req Request, workspaceScoped bool) (Grant, bool) {
+	for _, g := range grants {
+		if (!workspaceScoped || g.Workspace == id.workspace) && g.CanonicalExecutable == id.executable && argvHasPrefix(id.argv, g.ArgvPrefix) && capabilitySetCovers(g.Capabilities, req.Review.EffectiveDelta) && (!req.Background || g.Background) && (!req.PreserveBackgroundProcesses || g.PreserveBackgroundProcesses) {
+			return g, true
 		}
 	}
-	return Grant{}, -1, false
+	return Grant{}, false
 }
 
 func capabilitySetCovers(granted, requested sandbox.CapabilitySet) bool {
