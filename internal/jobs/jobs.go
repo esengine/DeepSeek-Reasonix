@@ -319,50 +319,6 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	return m.StartForSession("", kind, label, run)
 }
 
-// validateSessionPath is the sessionPath equivalent of validatePathSegment.
-// It is used at SetActiveSessionPath entry to reject transcript paths that
-// would let a caller redirect artifact storage (and the subsequent
-// loadSessionArtifacts scan) outside the expected session transcript area.
-//
-// Unlike validatePathSegment, separators are allowed because sessionPath is
-// an absolute or workspace-relative path. The check rejects:
-//
-//   - empty input (caller must provide a transcript path)
-//   - NUL and any control character
-//   - `..` as a *path component* (so `..hidden` and `...` are still accepted,
-//     but `a/../b`, `a/..`, and `..` alone are not)
-//
-// The check runs on the raw path components rather than the cleaned result
-// because filepath.Clean collapses `..` and would let a payload like
-// `/safe/../escape` pass after it resolves to `/escape`. Splitting the raw
-// path (with separators normalized to `/`) catches the `..` component before
-// it ever gets a chance to be resolved.
-//
-// See #6932 follow-up: SetActiveSessionPath had the same shape of bug as
-// StartForSession. A malicious or malformed sessionPath like "/etc/passwd.jsonl"
-// combined with store.SessionJobsDir would compute "/etc/passwd.jobs" and
-// then either mkdir the directory, copy artifacts into it, or read meta
-// files from it on a later SetActiveSessionPath call.
-func validateSessionPath(sessionPath string) error {
-	if sessionPath == "" {
-		return fmt.Errorf("jobs: sessionPath must not be empty")
-	}
-	for i, r := range sessionPath {
-		if r < 0x20 || r == 0x7f {
-			return fmt.Errorf("jobs: sessionPath contains control character 0x%02x at index %d", r, i)
-		}
-	}
-	// Detect `..` as a path component before filepath.Clean collapses it.
-	// Normalize separators so both `a/../b` (POSIX) and `a\..\b` (Windows)
-	// are caught by the same check.
-	for _, part := range strings.Split(filepath.ToSlash(sessionPath), "/") {
-		if part == ".." {
-			return fmt.Errorf("jobs: sessionPath contains '..' path component")
-		}
-	}
-	return nil
-}
-
 // StartForSession launches a job owned by parentSession. Session-scoped readers
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
@@ -1148,18 +1104,47 @@ func (m *Manager) SetActiveSession(parentSession string) {
 	m.mu.Unlock()
 }
 
+// validateTrustedSessionPath performs defense-in-depth syntax validation on a
+// transcript path already trusted by the store/controller layer. It is not a
+// trusted-root containment check: normal absolute and workspace-relative paths
+// remain valid. It rejects control characters and explicit `..` components
+// before filepath operations can normalize them.
+func validateTrustedSessionPath(sessionPath string) error {
+	if sessionPath == "" {
+		return fmt.Errorf("jobs: sessionPath must not be empty")
+	}
+	for i, r := range sessionPath {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("jobs: sessionPath contains control character 0x%02x at index %d", r, i)
+		}
+	}
+	normalized := strings.ReplaceAll(sessionPath, `\`, "/")
+	for _, part := range strings.Split(normalized, "/") {
+		if part == ".." {
+			return fmt.Errorf("jobs: sessionPath contains '..' path component")
+		}
+	}
+	return nil
+}
+
 // SetActiveSessionPath binds a parent session id to its persistent transcript
 // path, migrates any temporary artifacts, and loads completed job tombstones from
-// the session sidecar.
+// the session sidecar. sessionPath must come from the trusted store/controller
+// path; this method does not establish filesystem containment on its own.
 func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 	parentSession = strings.TrimSpace(parentSession)
 	sessionPath = strings.TrimSpace(sessionPath)
-	// Reject malformed transcript paths before any filesystem side effect.
-	// A bad path here would otherwise flow through store.SessionJobsDir into
-	// m.artifactDirs, then drive an os.MkdirAll, a loadSessionArtifacts scan,
-	// and an artifact migration to a location the caller picked. See #6932
-	// follow-up; the StartForSession fix is in #6936.
-	if err := validateSessionPath(sessionPath); err != nil {
+	// Preserve the legacy active-only behavior for calls without a complete
+	// binding. In particular, an empty path is not an error or filesystem input.
+	if parentSession == "" || sessionPath == "" {
+		m.mu.Lock()
+		m.active = parentSession
+		m.mu.Unlock()
+		return
+	}
+	// Reject malformed trusted paths before any filesystem side effect. This is
+	// syntax hardening, not a boundary for arbitrary caller-controlled paths.
+	if err := validateTrustedSessionPath(sessionPath); err != nil {
 		m.sink.Emit(event.Event{
 			Kind:   event.Notice,
 			Level:  event.LevelWarn,
@@ -1170,10 +1155,6 @@ func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 	}
 	m.mu.Lock()
 	m.active = parentSession
-	if parentSession == "" || sessionPath == "" {
-		m.mu.Unlock()
-		return
-	}
 	oldDir := m.artifactDirLocked(parentSession)
 	adoptDefault := false
 	if _, hasDir := m.artifactDirs[parentSession]; !hasDir && m.hasUnscopedJobsLocked() {

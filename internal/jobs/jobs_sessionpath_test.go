@@ -47,12 +47,10 @@ func (s *captureSink) hasText(needle string) bool {
 	return false
 }
 
-// TestValidateSessionPath exhaustively covers the transcript-path validator
-// that guards SetActiveSessionPath against #6932 follow-up. Unlike
-// validatePathSegment, this one permits `/` and `\` because sessionPath is an
-// absolute or workspace-relative path; the boundary it enforces is that no
-// path component is `..`.
-func TestValidateSessionPath(t *testing.T) {
+// TestValidateTrustedSessionPath covers the defense-in-depth syntax validator
+// for transcript paths supplied by the trusted store/controller layer. It is
+// deliberately not a trusted-root containment check.
+func TestValidateTrustedSessionPath(t *testing.T) {
 	cases := []struct {
 		name    string
 		input   string
@@ -72,8 +70,7 @@ func TestValidateSessionPath(t *testing.T) {
 		{"traversal as full input", "../escape.jsonl", true},
 		{"trailing dotdot", "/safe/dir/..", true},
 		{"leading dotdot", "../etc/passwd.jsonl", true},
-		// Windows-style backslash traversal. filepath.ToSlash normalizes them
-		// before the split, so the same check catches `a\..\b`.
+		// Windows-style traversal must also be rejected on Unix hosts.
 		{"windows backslash traversal", `C:\safe\..\etc\passwd.jsonl`, true},
 		// Control characters and NUL.
 		{"NUL byte", "/safe/abc\x00.jsonl", true},
@@ -83,21 +80,20 @@ func TestValidateSessionPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateSessionPath(tc.input)
+			err := validateTrustedSessionPath(tc.input)
 			if tc.wantErr && err == nil {
-				t.Fatalf("validateSessionPath(%q) = nil, want error", tc.input)
+				t.Fatalf("validateTrustedSessionPath(%q) = nil, want error", tc.input)
 			}
 			if !tc.wantErr && err != nil {
-				t.Fatalf("validateSessionPath(%q) = %v, want nil", tc.input, err)
+				t.Fatalf("validateTrustedSessionPath(%q) = %v, want nil", tc.input, err)
 			}
 		})
 	}
 }
 
 // TestSetActiveSessionPath_RejectsTraversalPayload is the integration
-// companion to TestValidateSessionPath. It proves that an adversarial
-// sessionPath does not reach the filesystem or pollute the manager's
-// artifactDirs cache. See #6932 follow-up.
+// companion to TestValidateTrustedSessionPath. It proves that a malformed
+// trusted path does not reach the filesystem or pollute artifactDirs.
 func TestSetActiveSessionPath_RejectsTraversalPayload(t *testing.T) {
 	root := t.TempDir()
 	// Place a canary file in a path the payload would otherwise create or
@@ -184,6 +180,30 @@ func TestSetActiveSessionPath_RejectsLeadingDotDot(t *testing.T) {
 	}
 	if !sink.hasText("Ignoring SetActiveSessionPath with invalid session path") {
 		t.Fatalf("expected warning emission, got events: %v", sink.texts())
+	}
+}
+
+// TestSetActiveSessionPath_EmptyPathUpdatesActiveOnly preserves the legacy
+// active-session update used before a persistent transcript path is available.
+func TestSetActiveSessionPath_EmptyPathUpdatesActiveOnly(t *testing.T) {
+	sink := &captureSink{}
+	m := NewManager(sink)
+	defer m.Close()
+
+	m.SetActiveSessionPath("session-active", "")
+
+	m.mu.Lock()
+	active := m.active
+	_, hasCached := m.artifactDirs["session-active"]
+	m.mu.Unlock()
+	if active != "session-active" {
+		t.Fatalf("active = %q, want %q", active, "session-active")
+	}
+	if hasCached {
+		t.Fatal("empty sessionPath unexpectedly populated artifactDirs")
+	}
+	if sink.hasText("Ignoring SetActiveSessionPath with invalid session path") {
+		t.Fatalf("empty sessionPath unexpectedly emitted a warning: %v", sink.texts())
 	}
 }
 
