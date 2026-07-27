@@ -465,7 +465,7 @@ func commandIdentity(req Request) (identity, error) {
 	if err != nil {
 		return out, fmt.Errorf("canonical workspace: %w", err)
 	}
-	cmd, err := shellparse.ParseStaticCommand(req.Command, shellparse.StaticCommandPolicy{})
+	cmd, err := shellparse.ParseReusableCommand(req.Command)
 	if err != nil || len(cmd.Argv) == 0 {
 		return out, errors.New("reusable grants require one static simple command")
 	}

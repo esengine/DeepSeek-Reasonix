@@ -261,9 +261,13 @@ func (a *approvalManager) resolveSandboxCapability(id string, action sandboxauth
 // grantSession records a session-scoped grant so future calls in the same scope
 // short-circuit.
 func (a *approvalManager) grantSession(tool, subject string) {
+	rule := permission.SessionGrantRuleForScope(tool, subject)
+	if rule == "" {
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.granted[permission.SessionGrantRuleForScope(tool, subject)] = true
+	a.granted[rule] = true
 }
 
 func (a *approvalManager) planModeReadOnlyCommandTrusted(prefix string) bool {

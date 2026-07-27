@@ -122,6 +122,35 @@ func TestParseStaticCommandPolicy(t *testing.T) {
 	}
 }
 
+func TestParseReusableCommandRejectsUnquotedGlob(t *testing.T) {
+	if _, err := ParseReusableCommand(`git status *.pem`); err == nil {
+		t.Fatal("ParseReusableCommand accepted an unquoted glob")
+	}
+}
+
+func TestParseReusableCommandExpansionQuoting(t *testing.T) {
+	for _, command := range []string{
+		`echo ~/secrets`,
+		`echo file{old,backup}`,
+		`echo file[0-9].txt`,
+	} {
+		if _, err := ParseReusableCommand(command); err == nil {
+			t.Errorf("ParseReusableCommand accepted shell expansion %q", command)
+		}
+	}
+	for _, command := range []string{
+		`echo '*'`,
+		`echo \*`,
+		`echo "~"`,
+		`echo '{old,backup}'`,
+		`echo 'file[0-9].txt'`,
+	} {
+		if _, err := ParseReusableCommand(command); err != nil {
+			t.Errorf("ParseReusableCommand rejected quoted literal %q: %v", command, err)
+		}
+	}
+}
+
 func assertStaticRejectReason(t *testing.T, err error, want StaticRejectReason) {
 	t.Helper()
 	var reject *StaticRejectError

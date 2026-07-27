@@ -86,6 +86,45 @@ func TestSessionGrantRequiresOneCompleteMatchingGrant(t *testing.T) {
 	}
 }
 
+func TestUnsafeShellExpansionCannotReuseCapabilityGrant(t *testing.T) {
+	workspace := t.TempDir()
+	safe := Request{Review: readyReview(true), Workspace: workspace, Command: "printf safe"}
+	id, err := commandIdentity(safe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := id.grant(safe)
+	grant.ArgvPrefix = []string{"printf"}
+
+	for _, command := range []string{
+		`printf *`,
+		`printf ~/secrets`,
+		`printf {old,backup}`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			missApprover := &actionApprover{action: RunSandboxed}
+			matcher := &Engine{
+				Approver: missApprover,
+				Source:   memoryGrantSource{grants: []Grant{grant}},
+			}
+			got, err := matcher.Authorize(context.Background(), Request{
+				Review: readyReview(true), Workspace: workspace, Command: command,
+			})
+			if err != nil || got.Use != sandbox.BaseOnly || missApprover.calls != 1 {
+				t.Fatalf("existing grant decision=%+v err=%v approver_calls=%d", got, err, missApprover.calls)
+			}
+
+			creator := &Engine{Approver: &actionApprover{action: AllowSession}}
+			got, err = creator.Authorize(context.Background(), Request{
+				Review: readyReview(true), Workspace: workspace, Command: command,
+			})
+			if err != nil || got.Use != sandbox.BaseOnly || len(creator.SessionGrants()) != 0 {
+				t.Fatalf("new grant decision=%+v err=%v grants=%+v", got, err, creator.SessionGrants())
+			}
+		})
+	}
+}
+
 func TestOneGrantMayCoverANarrowerCompleteBundleButPartialGrantsNeverUnion(t *testing.T) {
 	workspace := t.TempDir()
 	root := filepath.Join(workspace, "root")

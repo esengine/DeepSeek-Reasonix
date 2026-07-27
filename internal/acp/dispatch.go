@@ -439,6 +439,12 @@ func approvalOptions(tool, subject string, fresh bool) []PermissionOption {
 			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
 		}
 	}
+	if permission.SessionGrantRuleForScope(tool, subject) == "" {
+		return []PermissionOption{
+			{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},
+			{OptionID: string(OptRejectOnce), Name: "Reject", Kind: OptRejectOnce},
+		}
+	}
 	allowSessionName := approvalSessionOptionName(tool, subject)
 	options := []PermissionOption{
 		{OptionID: string(OptAllowOnce), Name: "Allow", Kind: OptAllowOnce},

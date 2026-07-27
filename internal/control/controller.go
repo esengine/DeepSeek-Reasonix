@@ -6037,7 +6037,9 @@ func (c *Controller) requestApprovalWithReason(ctx context.Context, tool, subjec
 		c.approval.grantSession(tool, subject)
 	}
 	if r.allow && r.persist && !requiresFreshApprovalTool(tool) && c.onRemember != nil {
-		c.emitRememberResult(c.onRemember(permission.RememberRuleForScope(tool, subject)))
+		if rule := permission.RememberRuleForScope(tool, subject); rule != "" {
+			c.emitRememberResult(c.onRemember(rule))
+		}
 	}
 	return r.allow, false, nil
 }

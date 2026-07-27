@@ -288,15 +288,16 @@ func TestClaudeStyleRuleMatchesExactCommandWithoutWildcard(t *testing.T) {
 	}
 }
 
-// TestLegacyLiteralRuleMatchesExactly guards configs written before the
-// Claude-style Bash(...) rules: a literal "bash=rm *.log" must allow only that
-// exact command, never the wildcard expansion a glob "bash(rm *.log)" would
-// have matched.
-func TestLegacyLiteralRuleMatchesExactly(t *testing.T) {
-	p := New("ask", []string{"bash=rm *.log"}, nil, nil)
+// TestLegacyLiteralRuleRequiresReusableBashSubject guards old exact rules
+// without letting their literal spelling authorize shell-expanded argv.
+func TestLegacyLiteralRuleRequiresReusableBashSubject(t *testing.T) {
+	p := New("ask", []string{"bash=rm exact.log", "bash=rm *.log"}, nil, nil)
 
-	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm *.log"}`)); got != Allow {
-		t.Errorf("exact command = %v, want Allow", got)
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm exact.log"}`)); got != Allow {
+		t.Errorf("safe exact command = %v, want Allow", got)
+	}
+	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm *.log"}`)); got != Ask {
+		t.Errorf("shell-expanded exact command = %v, want Ask", got)
 	}
 	if got := p.Decide("bash", false, json.RawMessage(`{"command":"rm secrets.log"}`)); got == Allow {
 		t.Errorf("literal rule wildcard-matched %q — '*' must stay literal", "rm secrets.log")

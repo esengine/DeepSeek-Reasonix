@@ -987,6 +987,13 @@ func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 		})
 	}
 
+	unsafeBash := approvalChoices(&event.Approval{
+		Tool: "bash", Subject: `echo $(touch /tmp/reasonix-permission-bypass)`,
+	})
+	if len(unsafeBash) != 2 || !unsafeBash[0].allow || unsafeBash[1].allow {
+		t.Fatalf("unsafe bash choices = %+v, want allow-once/deny", unsafeBash)
+	}
+
 	grantable := approvalChoices(&event.Approval{
 		Kind: "recovery", Recovery: &event.RecoveryApproval{CanGrantTask: true},
 	})

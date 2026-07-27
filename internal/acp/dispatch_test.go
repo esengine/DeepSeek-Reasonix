@@ -631,6 +631,13 @@ func TestApprovalOptionsFreshDynamicToolOnlyAllowOnceOrReject(t *testing.T) {
 	}
 }
 
+func TestApprovalOptionsUnsafeBashOnlyAllowOnceOrReject(t *testing.T) {
+	options := approvalOptions("bash", `echo $(touch /tmp/reasonix-permission-bypass)`, false)
+	if len(options) != 2 || options[0].Kind != OptAllowOnce || options[1].Kind != OptRejectOnce {
+		t.Fatalf("unsafe bash options = %+v, want allow-once/reject", options)
+	}
+}
+
 func TestClipKeepsValidUTF8(t *testing.T) {
 	text := strings.Repeat("a", maxResultChars-1) + "界" + strings.Repeat("b", 20)
 	got := clip(text)

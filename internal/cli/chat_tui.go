@@ -2577,6 +2577,8 @@ func approvalChoices(a *event.Approval) []approvalChoice {
 		decisions = []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}}
 	case fresh:
 		decisions = []approvalChoice{{allow: true}, {}}
+	case !approvalCanBeRemembered(a):
+		decisions = []approvalChoice{{allow: true}, {}}
 	default:
 		decisions = []approvalChoice{
 			{allow: true},
@@ -2608,7 +2610,7 @@ func approvalChoiceLabels(a *event.Approval) []string {
 		}
 	} else if a.Tool == planApprovalTool {
 		choices = i18n.M.PlanApprovalChoices
-	} else if !fresh {
+	} else if !fresh && approvalCanBeRemembered(a) {
 		exactSessionRule := permission.SessionGrantRuleForScope(a.Tool, a.Subject)
 		exactPersistentRule := permission.RememberRuleForScope(a.Tool, a.Subject)
 		choices = fmt.Sprintf(i18n.M.ToolApprovalChoices, exactSessionRule, exactPersistentRule)
@@ -2640,6 +2642,14 @@ func approvalChoiceLabels(a *event.Approval) []string {
 		}
 	}
 	return labels
+}
+
+func approvalCanBeRemembered(a *event.Approval) bool {
+	if a == nil {
+		return false
+	}
+	return permission.SessionGrantRuleForScope(a.Tool, a.Subject) != "" &&
+		permission.RememberRuleForScope(a.Tool, a.Subject) != ""
 }
 
 // handleApprovalKey resolves a pending approval from a keystroke and re-arms the
