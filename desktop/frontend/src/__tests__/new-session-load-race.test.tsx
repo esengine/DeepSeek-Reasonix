@@ -269,6 +269,72 @@ await act(async () => {
   root.unmount();
 });
 
+// Reusing a blank tab must invalidate the old hydration request. The backend
+// may return the same tab id, so the request sequence (not the tab id) is the
+// session boundary that prevents orphaned tool cards from coming back.
+const reusedOldHistory = deferred<{
+  messages: HistoryMessage[];
+  startTurn: number;
+  endTurn: number;
+  totalTurns: number;
+  hasOlder: boolean;
+}>();
+const reusedHistoryCalls: string[] = [];
+const reusedTab = tabMeta({ id: "tab-reused", sessionPath: "/sessions/old.jsonl" });
+const reusedTabPage = {
+  messages: [
+    { role: "assistant", content: "", toolCalls: [{ id: "old-call", name: "bash", arguments: "pwd" }] },
+    { role: "tool", toolCallId: "old-call", toolName: "bash", content: "/old" },
+  ] as HistoryMessage[],
+  startTurn: 0,
+  endTurn: 0,
+  totalTurns: 0,
+  hasOlder: false,
+};
+const reusedEmptyPage = { messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false };
+window.go.main.App = {
+  ListTabs: async () => [reusedTab],
+  MetaForTab: async () => meta({ sessionPath: "/sessions/new.jsonl" }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryPageForTab: async () => {
+    reusedHistoryCalls.push("history");
+    return reusedHistoryCalls.length === 1 ? reusedOldHistory.promise : reusedEmptyPage;
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankTab: async () => ({ ...reusedTab, sessionPath: "/sessions/new.jsonl", active: true }),
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const reuseRoot = createRoot(rootEl);
+await act(async () => {
+  reuseRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("reused tab startup history", () => reusedHistoryCalls.length === 1);
+
+await act(async () => {
+  await controller?.ensureBlankTab("project", "/repo");
+  await flushPromises();
+});
+eq(reusedHistoryCalls.length, 2, "reusing a blank tab forces a fresh history request");
+eq(controller?.state.items.some((item) => item.kind === "tool" && item.id === "old-call"), false, "fresh blank-tab hydration has no old tool card");
+
+await act(async () => {
+  reusedOldHistory.resolve(reusedTabPage);
+  await reusedOldHistory.promise;
+  await flushPromises();
+});
+eq(controller?.state.items.some((item) => item.kind === "tool" && item.id === "old-call"), false, "late old-session history cannot restore an orphaned tool card");
+
+await act(async () => {
+  reuseRoot.unmount();
+});
+
 const guardedStartupTabs = deferred<TabMeta[]>();
 const staleProjectA = "/repo/project-a";
 const targetProjectB = "/repo/project-b";
