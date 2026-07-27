@@ -168,9 +168,37 @@ func (p Policy) ExplicitlyDenies(toolName string, args json.RawMessage) bool {
 // stable approval subject from args.
 func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) Decision {
 	if canonicalRuleTool(toolName) == "bash" {
-		switch {
-		case matchAny(p.Deny, toolName, subject):
+		// Deny always checks the full string first — catches subshells too.
+		if matchAny(p.Deny, toolName, subject) {
 			return Deny
+		}
+
+		// Subshell interception: inner commands must be evaluated independently.
+		// A prefix allow rule like "Bash(git *)" must not cover an arbitrary
+		// inner command like "touch /tmp/evil".
+		if innerCmds := ExtractSubshellCommands(subject); len(innerCmds) > 0 {
+			skeleton := StripSubshells(subject)
+
+			// Evaluate the outer skeleton through normal rules — preserves
+			// user's Ask/SessionAllow/Allow intent for the outer command.
+			outer := p.decideBashSkeleton(toolName, readOnly, skeleton)
+
+			// Evaluate each inner command recursively.
+			for _, inner := range innerCmds {
+				innerRO := readOnly || isReadOnlyBashSubject(inner)
+				d := p.DecideSubject("bash", innerRO, inner)
+				if d == Deny {
+					return Deny
+				}
+				if d == Ask {
+					outer = Ask
+				}
+			}
+			return outer
+		}
+
+		// Original path: no subshells — unchanged.
+		switch {
 		case matchAny(p.SessionAllow, toolName, subject):
 			return Allow
 		case matchAny(p.Ask, toolName, subject):
@@ -192,6 +220,26 @@ func (p Policy) DecideSubject(toolName string, readOnly bool, subject string) De
 	case matchAny(p.Allow, toolName, subject):
 		return Allow
 	case readOnly:
+		return Allow
+	default:
+		return p.Mode
+	}
+}
+
+// decideBashSkeleton evaluates a subshell-free command skeleton against the
+// permission rules using the same precedence as DecideSubject's inner switch.
+// Keep in sync if the outer switch changes.
+func (p Policy) decideBashSkeleton(toolName string, readOnly bool, skeleton string) Decision {
+	switch {
+	case matchAny(p.Deny, toolName, skeleton):
+		return Deny
+	case matchAny(p.SessionAllow, toolName, skeleton):
+		return Allow
+	case matchAny(p.Ask, toolName, skeleton):
+		return Ask
+	case matchAny(p.Allow, toolName, skeleton):
+		return Allow
+	case readOnly || isReadOnlyBashSubject(skeleton):
 		return Allow
 	default:
 		return p.Mode
