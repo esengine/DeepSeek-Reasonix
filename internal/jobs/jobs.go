@@ -320,7 +320,9 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 }
 
 // validatePathSegment rejects values that would let parentSession or kind
-// escape the job temp root via filepath.Join. It is intentionally conservative:
+// escape the temp-root fallback built by artifactDirLocked. Persistent artifact
+// directories bound by SetActiveSessionPath are trusted store paths and are
+// intentionally outside that temp root. The check is intentionally conservative:
 // it forbids any path-separator character (forward slash, backslash), NUL, and
 // any control character. Empty parentSession is allowed (the unscoped default);
 // kind must be non-empty.

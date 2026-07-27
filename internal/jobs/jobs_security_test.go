@@ -180,9 +180,9 @@ func TestStartForSession_AcceptsValidInput(t *testing.T) {
 // rejected legitimate artifact directories produced by SetActiveSessionPath.
 // That path resolves to <root>/<id>.jobs (an absolute directory outside the
 // manager's temp root), so a temp-root containment check was a false positive.
-// The fix relies on validatePathSegment rejecting the path-segment components
-// at StartForSession entry, which keeps artifacts inside the temp root for
-// every legal code path. See #6932.
+// validatePathSegment confines only the temp-root fallback; persistent artifact
+// directories come from the trusted transcript path bound by the store layer.
+// See #6932.
 func TestStartForSession_AcceptsSetActiveSessionPathDir(t *testing.T) {
 	root := t.TempDir()
 	sessionPath := filepath.Join(root, "a.jsonl")
