@@ -408,12 +408,13 @@ type SidebarImConnection = {
   allowlistUsers: string[];
   allowlistMatched: boolean;
 };
-type DesktopNavigationInput =
+type DesktopNavigationIntent =
   | { kind: "topic"; scope: string; workspaceRoot: string; topicId: string; sessionPath?: string }
   | { kind: "blank"; scope: string; workspaceRoot: string }
   | { kind: "delivery-worktree"; workspaceRoot: string }
   | { kind: "sidebar-im"; connection: SidebarImConnection }
   | { kind: "resume-session"; session: SessionMeta };
+type DesktopNavigationInput = DesktopNavigationIntent & { navigationIntentSeq: number };
 type PendingDesktopNavigationRequest = PendingNavigationRequest<DesktopNavigationInput>;
 type SidebarImTopicSource = {
   platform: SidebarImPlatform;
@@ -1080,6 +1081,7 @@ export default function App() {
     openTopicSession,
     activateTopic,
     noteNavigationIntent,
+    isNavigationIntentCurrent,
     syncActiveTab,
     ensureBlankTab,
     ensureBlankSurface,
@@ -2148,9 +2150,9 @@ export default function App() {
     await steerForTab(sourceTabId, text.trim());
   }, [activeTabId, steerForTab, t]);
 
-  const refreshTabMetas = useCallback(async (): Promise<TabMeta[]> => {
+  const refreshTabMetas = useCallback(async (apply?: () => boolean): Promise<TabMeta[]> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
-    setTabMetas(tabs);
+    if (!apply || apply()) setTabMetas(tabs);
     return tabs;
   }, []);
   const seedActiveTabMeta = useCallback((tab: TabMeta): void => {
@@ -2750,18 +2752,25 @@ export default function App() {
   // activation around it.
   const tabSwitchSeqRef = useRef(0);
   const tabSwitchRunningRef = useRef(false);
-  const tabSwitchPendingRef = useRef<PendingNavigationRequest<{ tabId: string; optimisticTab?: TabMeta }> | null>(null);
+  const tabSwitchPendingRef = useRef<PendingNavigationRequest<{ tabId: string; optimisticTab?: TabMeta; navigationIntentSeq: number }> | null>(null);
   const enqueueTabSwitch = useCallback(
-    (tabId: string, optimisticTab?: TabMeta): Promise<void> =>
-      enqueueNavigationRequest(
+    (tabId: string, optimisticTab?: TabMeta): Promise<void> => {
+      // Claim the shared navigation epoch at click time, before this request
+      // can wait behind an older tab switch. That immediately invalidates any
+      // in-flight blank/topic completion from a previous user intent.
+      const navigationIntentSeq = noteNavigationIntent();
+      return enqueueNavigationRequest(
         { seqRef: tabSwitchSeqRef, runningRef: tabSwitchRunningRef, pendingRef: tabSwitchPendingRef },
-        { tabId, optimisticTab },
+        { tabId, optimisticTab, navigationIntentSeq },
         async (request) => {
-          await switchTab(request.tabId, request.optimisticTab);
-          await refreshTabMetas();
+          if (!isNavigationIntentCurrent(request.navigationIntentSeq)) return;
+          await switchTab(request.tabId, request.optimisticTab, request.navigationIntentSeq);
+          if (!isNavigationIntentCurrent(request.navigationIntentSeq)) return;
+          await refreshTabMetas(() => isNavigationIntentCurrent(request.navigationIntentSeq));
         },
-      ),
-    [switchTab, refreshTabMetas],
+      );
+    },
+    [isNavigationIntentCurrent, noteNavigationIntent, refreshTabMetas, switchTab],
   );
 
   const handleTabChange = useCallback((id: string) => {
@@ -3081,21 +3090,24 @@ export default function App() {
   const navigationRunningRef = useRef(false);
   const navigationPendingRef = useRef<PendingDesktopNavigationRequest | null>(null);
   const runNavigationRequest = useCallback(async (request: PendingDesktopNavigationRequest) => {
-    const latest = () => request.seq === navigationSeqRef.current;
+    const latest = () => request.seq === navigationSeqRef.current && isNavigationIntentCurrent(request.navigationIntentSeq);
+    if (!latest()) return;
     const refreshLatestTabMetas = async (): Promise<TabMeta[]> => {
       const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
       if (latest()) setTabMetas(tabs);
       return tabs;
     };
     const openTopicTarget = async (scope: string, workspaceRoot: string, topicId: string, sessionPath?: string): Promise<TabMeta> => {
-      if (singleSurfaceLayout) return activateTopic(scope, workspaceRoot, topicId, sessionPath || "");
-      if (sessionPath) return openTopicSession(scope, workspaceRoot, topicId, sessionPath);
-      if (scope === "global") return openGlobalTab(topicId);
-      return openProjectTab(workspaceRoot, topicId);
+      if (singleSurfaceLayout) return activateTopic(scope, workspaceRoot, topicId, sessionPath || "", request.navigationIntentSeq);
+      if (sessionPath) return openTopicSession(scope, workspaceRoot, topicId, sessionPath, request.navigationIntentSeq);
+      if (scope === "global") return openGlobalTab(topicId, request.navigationIntentSeq);
+      return openProjectTab(workspaceRoot, topicId, request.navigationIntentSeq);
     };
     const openBlankTarget = async (scope: string, workspaceRoot: string): Promise<TabMeta> => {
       const root = scope === "project" ? workspaceRoot : "";
-      return singleSurfaceLayout ? ensureBlankSurface(scope, root) : ensureBlankTab(scope, root);
+      return singleSurfaceLayout
+        ? ensureBlankSurface(scope, root, request.navigationIntentSeq)
+        : ensureBlankTab(scope, root, request.navigationIntentSeq);
     };
 
     try {
@@ -3122,7 +3134,7 @@ export default function App() {
       }
 
       if (request.kind === "delivery-worktree") {
-        const result = await createDeliveryWorktree(request.workspaceRoot);
+        const result = await createDeliveryWorktree(request.workspaceRoot, request.navigationIntentSeq);
         if (!latest()) return;
         seedActiveTabMeta(result.tab);
         setProjectRevision((value) => value + 1);
@@ -3151,11 +3163,11 @@ export default function App() {
         if (connection.sessionSource === "auto" && target.kind === "path") {
           openedTab = await openBlankTarget(connection.scope, connection.workspaceRoot);
           if (!latest()) return;
-          await openChannelSession(target.value, openedTab.id);
+          await openChannelSession(target.value, openedTab.id, request.navigationIntentSeq);
         } else if (target.kind === "path") {
           openedTab = await openBlankTarget(connection.scope, connection.workspaceRoot);
           if (!latest()) return;
-          await resumeSession(target.value, openedTab.id);
+          await resumeSession(target.value, openedTab.id, request.navigationIntentSeq);
         } else {
           openedTab = await openTopicTarget(connection.scope, connection.workspaceRoot, target.value);
         }
@@ -3175,7 +3187,7 @@ export default function App() {
       if (isChannelSession(session)) {
         targetTab = await openBlankTarget(scope === "project" ? "project" : "global", scope === "project" ? session.workspaceRoot || "" : "");
         if (!latest()) return;
-        await openChannelSession(session.path, targetTab.id);
+        await openChannelSession(session.path, targetTab.id, request.navigationIntentSeq);
       } else if (scope === "project" && session.workspaceRoot && session.topicId) {
         targetTab = await openTopicTarget("project", session.workspaceRoot, session.topicId, session.path);
       } else if (scope === "global" && session.topicId) {
@@ -3221,19 +3233,19 @@ export default function App() {
         showToast(err?.message || String(err));
       }
     }
-  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
+  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, isNavigationIntentCurrent, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
 
-  const enqueueNavigation = useCallback((input: DesktopNavigationInput): Promise<void> => {
+  const enqueueNavigation = useCallback((input: DesktopNavigationIntent): Promise<void> => {
     // Invalidate any in-flight activation's stale apply at ENQUEUE time. The
     // queue serializes requests, so a click made while another request runs
     // only advances the controller's navigation epoch when it eventually
     // starts — too late: the running request's ActivateTopic would resolve,
     // pass the controller-local guard, flip the visible tab, and prune the
     // newer surface's cached state (#6613 review).
-    noteNavigationIntent();
+    const navigationIntentSeq = noteNavigationIntent();
     return enqueueNavigationRequest(
       { seqRef: navigationSeqRef, runningRef: navigationRunningRef, pendingRef: navigationPendingRef },
-      input,
+      { ...input, navigationIntentSeq } as DesktopNavigationInput,
       runNavigationRequest,
     );
   }, [noteNavigationIntent, runNavigationRequest]);

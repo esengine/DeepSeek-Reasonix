@@ -298,8 +298,16 @@ await waitFor("queued last click applies once it runs", () => controller?.active
 // enqueue time — the queue-based scenario above only proves the mechanism.
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 ok(
-  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationInput\)[\s\S]{0,700}?noteNavigationIntent\(\);[\s\S]{0,700}?enqueueNavigationRequest\(/.test(appSource),
-  "App.enqueueNavigation calls noteNavigationIntent() before enqueueNavigationRequest",
+  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationIntent\)[\s\S]{0,900}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,900}?enqueueNavigationRequest\(/.test(appSource),
+  "App.enqueueNavigation captures a shared navigation intent before enqueueNavigationRequest",
+);
+ok(
+  /const enqueueTabSwitch = useCallback\([\s\S]{0,1400}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,1400}?switchTab\(request\.tabId, request\.optimisticTab, request\.navigationIntentSeq\)/.test(appSource),
+  "App.enqueueTabSwitch invalidates older navigation at enqueue time and forwards the shared intent",
+);
+ok(
+  /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\)/.test(appSource),
+  "App navigation results require both queue ownership and the shared navigation intent",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -335,6 +335,80 @@ await act(async () => {
   reuseRoot.unmount();
 });
 
+// A tab-bar click can overtake EnsureBlankTab while its backend call is still
+// in flight. Its intent must invalidate the older completion immediately, and
+// the stale backend activation must be repaired after it eventually returns.
+const queuedBlank = deferred<TabMeta>();
+const raceTabA = tabMeta({ id: "race-a", active: true, sessionPath: "/sessions/race-a.jsonl" });
+const raceTabB = tabMeta({ id: "race-b", active: false, sessionPath: "/sessions/race-b.jsonl" });
+const raceBlank = tabMeta({ id: "race-blank", active: false, sessionPath: "/sessions/race-blank.jsonl" });
+let raceBackendActiveId = raceTabA.id;
+const raceHistoryCalls: string[] = [];
+const raceSetActiveCalls: string[] = [];
+window.go.main.App = {
+  ListTabs: async () => [raceTabA, raceTabB, raceBlank].map((tab) => ({ ...tab, active: tab.id === raceBackendActiveId })),
+  MetaForTab: async (tabID: string) => meta({ sessionPath: `/sessions/${tabID}.jsonl` }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryPageForTab: async (tabID: string) => {
+    raceHistoryCalls.push(tabID);
+    return reusedEmptyPage;
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankTab: async () => {
+    const tab = await queuedBlank.promise;
+    raceBackendActiveId = tab.id;
+    return tab;
+  },
+  SetActiveTab: async (tabID: string) => {
+    raceSetActiveCalls.push(tabID);
+    raceBackendActiveId = tabID;
+  },
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const queuedRaceRoot = createRoot(rootEl);
+await act(async () => {
+  queuedRaceRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("queued blank race startup", () => controller?.activeTabId === raceTabA.id);
+
+let pendingBlank: Promise<TabMeta> | undefined;
+await act(async () => {
+  pendingBlank = controller?.ensureBlankTab("project", "/repo");
+  await flushPromises();
+});
+const tabClickIntent = controller?.noteNavigationIntent();
+if (tabClickIntent === undefined) throw new Error("missing queued tab intent");
+
+let pendingTabSwitch: Promise<TabMeta[] | undefined> | undefined;
+await act(async () => {
+  pendingTabSwitch = controller?.switchTab(raceTabB.id, raceTabB, tabClickIntent);
+  await pendingTabSwitch;
+  await flushPromises();
+});
+eq(controller?.activeTabId, raceTabB.id, "queued tab click becomes visible before the older blank completion");
+eq(raceBackendActiveId, raceTabB.id, "queued tab click becomes backend-active before the older blank completion");
+
+await act(async () => {
+  queuedBlank.resolve({ ...raceBlank, active: true });
+  await pendingBlank;
+  await flushPromises();
+});
+eq(controller?.activeTabId, raceTabB.id, "late blank completion cannot replace the newer visible tab");
+eq(raceHistoryCalls.includes(raceBlank.id), false, "stale blank completion does not hydrate the abandoned tab");
+eq(raceBackendActiveId, raceTabB.id, "late blank completion reasserts the newer backend-active tab");
+eq(raceSetActiveCalls.join(","), `${raceTabB.id},${raceTabB.id}`, "stale blank completion repairs backend focus exactly once");
+
+await act(async () => {
+  queuedRaceRoot.unmount();
+});
+
 const guardedStartupTabs = deferred<TabMeta[]>();
 const staleProjectA = "/repo/project-a";
 const targetProjectB = "/repo/project-b";

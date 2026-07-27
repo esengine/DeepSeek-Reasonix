@@ -318,11 +318,11 @@ ok(
   /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
     /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
     /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
-    /const latest = \(\) => request\.seq === navigationSeqRef\.current;/.test(appSource) &&
-    /return activateTopic\(scope, workspaceRoot, topicId/.test(appSource) &&
-    /return openTopicSession\(scope, workspaceRoot, topicId/.test(appSource) &&
-    /return openGlobalTab\(topicId\)/.test(appSource) &&
-    /return openProjectTab\(workspaceRoot, topicId\)/.test(appSource) &&
+    /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\);/.test(appSource) &&
+    /return activateTopic\(scope, workspaceRoot, topicId, sessionPath \|\| "", request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openTopicSession\(scope, workspaceRoot, topicId, sessionPath, request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openGlobalTab\(topicId, request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openProjectTab\(workspaceRoot, topicId, request\.navigationIntentSeq\)/.test(appSource) &&
     /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
     !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
     /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
