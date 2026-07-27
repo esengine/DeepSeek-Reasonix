@@ -63,6 +63,8 @@ func runTaskCommand(args []string, out io.Writer) int {
 	}
 	if options.dir == "" {
 		options.dir = resolveCLISessionDir()
+	} else {
+		options.dir = machineProjectSessionDir(options.dir)
 	}
 	identityKey, err := loadMachineIdentityKey()
 	if err != nil {

@@ -107,6 +107,8 @@ func runSessionCommand(args []string, out io.Writer) int {
 	}
 	if options.dir == "" {
 		options.dir = resolveCLISessionDir()
+	} else {
+		options.dir = machineProjectSessionDir(options.dir)
 	}
 	identityKey, err := loadMachineIdentityKey()
 	if err != nil {
@@ -141,6 +143,15 @@ func runSessionCommand(args []string, out io.Writer) int {
 		})
 	}
 	return writeMachineError(out, command, "session_not_found", "session was not found")
+}
+
+// machineProjectSessionDir maps the public --dir project-root argument to the
+// per-project session store used by the machine interface.
+func machineProjectSessionDir(projectRoot string) string {
+	if dir := config.ProjectSessionDir(projectRoot); dir != "" {
+		return dir
+	}
+	return projectRoot
 }
 
 func parseSessionMachineOptions(args []string, operation string) (sessionMachineOptions, string, string) {

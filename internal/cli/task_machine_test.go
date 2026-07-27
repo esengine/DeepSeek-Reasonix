@@ -20,7 +20,8 @@ func TestTaskMachineListUsesContentFreePersistedMetadata(t *testing.T) {
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "session", time.Date(2026, 7, 23, 13, 0, 0, 0, time.UTC))
-	path := filepath.Join(dir, "session.jsonl")
+	sessionDir := machineTestSessionDir(dir)
+	path := filepath.Join(sessionDir, "session.jsonl")
 	manager := jobs.NewManager(event.Discard)
 	manager.SetActiveSessionPath("session", path)
 	job := manager.StartForSession("session", "task", "PRIVATE TASK LABEL", func(context.Context, io.Writer) (string, error) {
@@ -70,7 +71,8 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "session", time.Now())
-	subDir := filepath.Join(dir, "subagents")
+	sessionDir := machineTestSessionDir(dir)
+	subDir := filepath.Join(sessionDir, "subagents")
 	if err := os.MkdirAll(subDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +95,7 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		t.Fatal(err)
 	}
 
-	tasks, err := machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
+	tasks, err := machineTasks(sessionDir, machineSessionIDWithKey("session", identityKey), identityKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,12 +113,12 @@ func TestTaskMachineProjectsSubagentLifecycleAndArtifactCompleteness(t *testing.
 		t.Fatalf("missing artifact projection = %+v", got)
 	}
 
-	lease, err := agent.TryAcquireSessionLease(filepath.Join(dir, "session.jsonl"))
+	lease, err := agent.TryAcquireSessionLease(filepath.Join(sessionDir, "session.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.Release()
-	tasks, err = machineTasks(dir, machineSessionIDWithKey("session", identityKey), identityKey)
+	tasks, err = machineTasks(sessionDir, machineSessionIDWithKey("session", identityKey), identityKey)
 	if err != nil {
 		t.Fatal(err)
 	}

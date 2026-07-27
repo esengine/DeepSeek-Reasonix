@@ -3,12 +3,14 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/provider"
 )
 
@@ -50,7 +52,7 @@ func TestSessionMachineShowAndStatusExposeOnlySafeState(t *testing.T) {
 	identityKey := installMachineTestIdentity(t)
 	dir := t.TempDir()
 	saveMachineTestSession(t, dir, "busy", time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC))
-	path := filepath.Join(dir, "busy.jsonl")
+	path := filepath.Join(machineTestSessionDir(dir), "busy.jsonl")
 	lease, err := agent.TryAcquireSessionLease(path)
 	if err != nil {
 		t.Fatalf("acquire session lease: %v", err)
@@ -129,7 +131,11 @@ func TestSessionMachineErrorsAreJSONAndNonZero(t *testing.T) {
 
 func saveMachineTestSession(t *testing.T, dir, id string, updatedAt time.Time) {
 	t.Helper()
-	path := filepath.Join(dir, id+".jsonl")
+	sessionDir := config.ProjectSessionDir(dir)
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatalf("create project session dir: %v", err)
+	}
+	path := filepath.Join(sessionDir, id+".jsonl")
 	session := agent.NewSession("")
 	session.Add(provider.Message{Role: provider.RoleUser, Content: "private prompt"})
 	session.Add(provider.Message{Role: provider.RoleAssistant, Content: "private answer"})
@@ -147,4 +153,8 @@ func saveMachineTestSession(t *testing.T, dir, id string, updatedAt time.Time) {
 	}); err != nil {
 		t.Fatalf("save branch meta: %v", err)
 	}
+}
+
+func machineTestSessionDir(projectRoot string) string {
+	return config.ProjectSessionDir(projectRoot)
 }
