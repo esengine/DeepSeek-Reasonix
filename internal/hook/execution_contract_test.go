@@ -78,7 +78,7 @@ func TestSpawnCommandExecutionContractMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	literalArgs := []string{"", "$VALUE", "a && b", `nested"quote`}
-	cmd, err := spawnCommand(context.Background(), executable, ExecutionExec, "bash", literalArgs)
+	cmd, err := spawnCommand(context.Background(), executable, ExecutionExec, "bash", literalArgs, RuntimeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,16 +86,16 @@ func TestSpawnCommandExecutionContractMatrix(t *testing.T) {
 		t.Fatalf("exec argv = %#v, want %#v", cmd.Args[1:], literalArgs)
 	}
 
-	if _, err := spawnCommand(context.Background(), "ignored", ExecutionMode("future"), "", nil); err == nil ||
+	if _, err := spawnCommand(context.Background(), "ignored", ExecutionMode("future"), "", nil, RuntimeOptions{}); err == nil ||
 		!strings.Contains(err.Error(), "unsupported hook execution mode") {
 		t.Fatalf("unknown execution mode error = %v", err)
 	}
-	if _, err := spawnCommand(context.Background(), "ignored", ExecutionShell, "fish", nil); err == nil ||
+	if _, err := spawnCommand(context.Background(), "ignored", ExecutionShell, "fish", nil, RuntimeOptions{}); err == nil ||
 		!strings.Contains(err.Error(), "unsupported hook shell") {
 		t.Fatalf("unknown shell error = %v", err)
 	}
 	if runtime.GOOS != "windows" {
-		if _, err := spawnCommand(context.Background(), "echo ok", ExecutionShell, "cmd", nil); err == nil ||
+		if _, err := spawnCommand(context.Background(), "echo ok", ExecutionShell, "cmd", nil, RuntimeOptions{}); err == nil ||
 			!strings.Contains(err.Error(), "only available on Windows") {
 			t.Fatalf("non-Windows cmd error = %v", err)
 		}
@@ -118,7 +118,7 @@ func TestShellSelectionBuildsExactInterpreterArgv(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, err := spawnShellCommand(context.Background(), script, tt.preferred)
+			cmd, err := spawnShellCommand(context.Background(), script, tt.preferred, RuntimeOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +129,7 @@ func TestShellSelectionBuildsExactInterpreterArgv(t *testing.T) {
 	}
 
 	if _, err := exec.LookPath("pwsh"); err != nil {
-		if _, err := spawnShellCommand(context.Background(), script, "pwsh"); err == nil ||
+		if _, err := spawnShellCommand(context.Background(), script, "pwsh", RuntimeOptions{}); err == nil ||
 			!strings.Contains(err.Error(), "no usable PowerShell") {
 			t.Fatalf("missing pwsh error = %v", err)
 		}

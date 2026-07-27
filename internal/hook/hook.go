@@ -315,29 +315,7 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 				continue
 			}
 			for _, h := range pkg.Manifest.Hooks[eventName] {
-				mode := ExecutionLegacy
-				switch {
-				case h.ArgsSet:
-					mode = ExecutionExec
-				case h.ShellCommand:
-					mode = ExecutionShell
-				}
-				command := expandPluginRoot(h.Command, pkg.Root)
-				resolveFromPluginRoot := mode != ExecutionShell &&
-					!(mode == ExecutionExec && h.PayloadFormat == "claude")
-				if command != "" && resolveFromPluginRoot && !filepath.IsAbs(command) {
-					command = filepath.Join(pkg.Root, filepath.FromSlash(command))
-				}
-				if mode == ExecutionLegacy {
-					command = NormalizeCommand(command)
-				}
-				var argv []string
-				if h.ArgsSet {
-					argv = make([]string, 0, len(h.Args))
-				}
-				for _, arg := range h.Args {
-					argv = append(argv, expandPluginRoot(arg, pkg.Root))
-				}
+				execution := pluginHookExecutionConfig(h, pkg.Root)
 				contextFile := expandPluginRoot(h.ContextFile, pkg.Root)
 				if contextFile != "" {
 					contextFile = filepath.FromSlash(contextFile)
@@ -374,9 +352,9 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 				*out = append(*out, ResolvedHook{
 					HookConfig: HookConfig{
 						Match:         h.Match,
-						Command:       command,
-						Argv:          argv,
-						ExecutionMode: mode,
+						Command:       execution.Command,
+						Argv:          execution.Argv,
+						ExecutionMode: execution.ExecutionMode,
 						Shell:         h.Shell,
 						ContextFile:   contextFile,
 						Description:   h.Description,
@@ -392,6 +370,46 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 				})
 			}
 		}
+	}
+}
+
+func pluginHookExecutionConfig(h pluginpkg.Hook, root string) HookConfig {
+	return pluginHookExecutionConfigForPlatform(h, root, runtime.GOOS)
+}
+
+func pluginHookExecutionConfigForPlatform(h pluginpkg.Hook, root, goos string) HookConfig {
+	mode := ExecutionLegacy
+	switch {
+	case h.ArgsSet:
+		mode = ExecutionExec
+	case h.ShellCommand:
+		mode = ExecutionShell
+	}
+	expansionRoot := root
+	if goos == "windows" && mode == ExecutionShell && strings.EqualFold(strings.TrimSpace(h.Shell), "bash") {
+		expansionRoot = strings.ReplaceAll(root, `\`, "/")
+	}
+	command := expandPluginRoot(h.Command, expansionRoot)
+	resolveFromPluginRoot := mode != ExecutionShell &&
+		!(mode == ExecutionExec && h.PayloadFormat == "claude")
+	if command != "" && resolveFromPluginRoot && !filepath.IsAbs(command) {
+		command = filepath.Join(root, filepath.FromSlash(command))
+	}
+	if mode == ExecutionLegacy {
+		command = NormalizeCommand(command)
+	}
+	var argv []string
+	if h.ArgsSet {
+		argv = make([]string, 0, len(h.Args))
+	}
+	for _, arg := range h.Args {
+		argv = append(argv, expandPluginRoot(arg, root))
+	}
+	return HookConfig{
+		Command:       command,
+		Argv:          argv,
+		ExecutionMode: mode,
+		Shell:         h.Shell,
 	}
 }
 
@@ -1052,6 +1070,49 @@ type SpawnInput struct {
 	Timeout time.Duration
 }
 
+// RuntimeOptions carries resolved host dependencies into Hook execution.
+// It is runtime-only and never changes persisted Hook configuration.
+type RuntimeOptions struct {
+	BashPath string
+}
+
+// RuntimeOptionsForShell carries an explicitly configured Bash path into Hook
+// execution while leaving other interpreter preferences independent.
+func RuntimeOptionsForShell(prefer, path string) RuntimeOptions {
+	if !strings.EqualFold(strings.TrimSpace(prefer), "bash") {
+		return RuntimeOptions{}
+	}
+	return RuntimeOptions{BashPath: strings.TrimSpace(path)}
+}
+
+// RuntimeIssue identifies one plugin Hook whose host dependency is unavailable.
+type RuntimeIssue struct {
+	Event       Event
+	Description string
+	Err         error
+}
+
+// CheckPackageRuntime validates every Hook exported by a plugin package without
+// launching commands.
+func CheckPackageRuntime(pkg pluginpkg.Package, options RuntimeOptions) []RuntimeIssue {
+	events := make([]string, 0, len(pkg.Manifest.Hooks))
+	for event := range pkg.Manifest.Hooks {
+		events = append(events, event)
+	}
+	sort.Strings(events)
+	var issues []RuntimeIssue
+	for _, eventName := range events {
+		for _, h := range pkg.Manifest.Hooks[eventName] {
+			if err := CheckRuntime(pluginHookExecutionConfig(h, pkg.Root), options); err != nil {
+				issues = append(issues, RuntimeIssue{
+					Event: Event(eventName), Description: h.Description, Err: err,
+				})
+			}
+		}
+	}
+	return issues
+}
+
 type SpawnResult struct {
 	ExitCode  int
 	Stdout    string
@@ -1222,10 +1283,22 @@ func stderrFor(r SpawnResult, timeout time.Duration) string {
 // contract, with the payload on stdin, capped output, and both per-hook timeout
 // and parent-context cancellation.
 func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
+	return defaultSpawner(ctx, in, RuntimeOptions{})
+}
+
+// NewDefaultSpawner returns the standard Hook spawner with effective host
+// runtime paths supplied by boot configuration.
+func NewDefaultSpawner(options RuntimeOptions) Spawner {
+	return func(ctx context.Context, in SpawnInput) SpawnResult {
+		return defaultSpawner(ctx, in, options)
+	}
+}
+
+func defaultSpawner(ctx context.Context, in SpawnInput, options RuntimeOptions) SpawnResult {
 	cctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
 
-	cmd, spawnErr := spawnCommand(cctx, in.Command, in.Mode, in.Shell, in.Args)
+	cmd, spawnErr := spawnCommand(cctx, in.Command, in.Mode, in.Shell, in.Args, options)
 	if spawnErr != nil {
 		return SpawnResult{ExitCode: -1, SpawnErr: spawnErr}
 	}
@@ -1280,25 +1353,27 @@ func DefaultSpawner(ctx context.Context, in SpawnInput) SpawnResult {
 // Explicit exec-form hooks pass their argv directly to the executable;
 // explicit shell-form hooks pass the raw command to the selected interpreter.
 // Legacy settings retain Reasonix's historical shell behavior and repairs.
-func spawnCommand(ctx context.Context, command string, mode ExecutionMode, shell string, args []string) (*exec.Cmd, error) {
+func spawnCommand(ctx context.Context, command string, mode ExecutionMode, shell string, args []string, options RuntimeOptions) (*exec.Cmd, error) {
 	switch mode {
 	case ExecutionExec:
-		return spawnExecCommand(ctx, command, args)
+		return spawnExecCommand(ctx, command, args, options)
 	case ExecutionShell:
-		return spawnShellCommand(ctx, command, shell)
+		return spawnShellCommand(ctx, command, shell, options)
 	case ExecutionLegacy:
-		return spawnLegacyCommand(ctx, command, args)
+		return spawnLegacyCommand(ctx, command, args, options)
 	default:
 		return nil, fmt.Errorf("unsupported hook execution mode %q", mode)
 	}
 }
 
-func spawnExecCommand(ctx context.Context, command string, args []string) (*exec.Cmd, error) {
+func spawnExecCommand(ctx context.Context, command string, args []string, options RuntimeOptions) (*exec.Cmd, error) {
 	if runtime.GOOS == "windows" {
 		if cmd, matched := windowsBatchArgvCommand(ctx, command, args); matched {
 			return cmd, nil
 		}
-		if resolvedShell, resolvedArgs, matched, err := windowsPOSIXShellArgvInvocation(command, args); matched {
+		if resolvedShell, resolvedArgs, matched, err := windowsPOSIXShellArgvInvocationWith(command, args, func() (string, error) {
+			return resolveWindowsHookBash(options.BashPath)
+		}); matched {
 			if err != nil {
 				return nil, err
 			}
@@ -1320,9 +1395,9 @@ func spawnExecCommand(ctx context.Context, command string, args []string) (*exec
 // POSIX commands that were already well-formed keep their shell semantics
 // verbatim — normalizeStaticNodeEval's rendering escapes $ and backticks, so
 // even repaired commands re-entering here behave identically under sh -c.
-func spawnLegacyCommand(ctx context.Context, command string, args []string) (*exec.Cmd, error) {
+func spawnLegacyCommand(ctx context.Context, command string, args []string, options RuntimeOptions) (*exec.Cmd, error) {
 	if args != nil {
-		return spawnExecCommand(ctx, command, args)
+		return spawnExecCommand(ctx, command, args, options)
 	}
 	if node, flag, script, ok := repairableNodeEvalArgs(command); ok {
 		return exec.CommandContext(ctx, node, flag, script), nil
@@ -1334,7 +1409,9 @@ func spawnLegacyCommand(ctx context.Context, command string, args []string) (*ex
 		if cmd, matched := windowsBatchCommand(ctx, command); matched {
 			return cmd, nil
 		}
-		if shell, args, matched, err := windowsPOSIXShellInvocation(command); matched {
+		if shell, args, matched, err := windowsPOSIXShellInvocationWith(command, func() (string, error) {
+			return resolveWindowsHookBash(options.BashPath)
+		}); matched {
 			if err != nil {
 				return nil, err
 			}
@@ -1351,7 +1428,7 @@ func spawnLegacyCommand(ctx context.Context, command string, args []string) (*ex
 	return exec.CommandContext(ctx, name, args...), nil
 }
 
-func spawnShellCommand(ctx context.Context, command, preferred string) (*exec.Cmd, error) {
+func spawnShellCommand(ctx context.Context, command, preferred string, options RuntimeOptions) (*exec.Cmd, error) {
 	preferred = strings.ToLower(strings.TrimSpace(preferred))
 	switch preferred {
 	case "", "auto":
@@ -1371,7 +1448,7 @@ func spawnShellCommand(ctx context.Context, command, preferred string) (*exec.Cm
 		return exec.CommandContext(ctx, "sh", "-c", command), nil
 	case "bash":
 		if runtime.GOOS == "windows" {
-			path, err := cachedWindowsHookBash()
+			path, err := resolveWindowsHookBash(options.BashPath)
 			if err != nil {
 				return nil, err
 			}
@@ -1395,6 +1472,36 @@ func spawnShellCommand(ctx context.Context, command, preferred string) (*exec.Cm
 		return nil, errors.New("hook shell \"cmd\" is only available on Windows")
 	default:
 		return nil, fmt.Errorf("unsupported hook shell %q", preferred)
+	}
+}
+
+// CheckRuntime reports an unavailable host dependency without running a Hook.
+func CheckRuntime(config HookConfig, options RuntimeOptions) error {
+	return checkRuntimeForPlatform(config, options, runtime.GOOS, resolveWindowsHookBash)
+}
+
+func checkRuntimeForPlatform(config HookConfig, options RuntimeOptions, goos string, resolveBash func(string) (string, error)) error {
+	if goos != "windows" || !requiresWindowsBash(config) {
+		return nil
+	}
+	_, err := resolveBash(options.BashPath)
+	return err
+}
+
+func requiresWindowsBash(config HookConfig) bool {
+	switch config.ExecutionMode {
+	case ExecutionShell:
+		return strings.EqualFold(strings.TrimSpace(config.Shell), "bash")
+	case ExecutionExec:
+		return isBarePOSIXShellWord(config.Command) && hasCommandStringFlag(config.Argv)
+	case ExecutionLegacy:
+		if config.Argv != nil {
+			return isBarePOSIXShellWord(config.Command) && hasCommandStringFlag(config.Argv)
+		}
+		fields, _, _, ok := parseSimpleHookCommandFields(config.Command)
+		return ok && len(fields) >= 3 && isBarePOSIXShellWord(fields[0]) && hasCommandStringFlag(fields[1:])
+	default:
+		return false
 	}
 }
 

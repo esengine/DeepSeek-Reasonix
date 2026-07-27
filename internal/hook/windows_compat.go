@@ -26,18 +26,8 @@ var windowsDefaultHookShell struct {
 	err   error
 }
 
-// windowsPOSIXShellInvocation preserves explicit `sh -c` / `bash -c` hook
-// contracts on Windows. Git for Windows normally ships a real Bash outside the
-// cmd.exe PATH, so reuse the same hardened discovery path as the shell tool
-// instead of asking cmd.exe to find an executable it cannot see.
-func windowsPOSIXShellInvocation(command string) (string, []string, bool, error) {
-	return windowsPOSIXShellInvocationWith(command, cachedWindowsHookBash)
-}
-
-func windowsPOSIXShellArgvInvocation(command string, args []string) (string, []string, bool, error) {
-	return windowsPOSIXShellArgvInvocationWith(command, args, cachedWindowsHookBash)
-}
-
+// These helpers preserve explicit `sh -c` / `bash -c` hook contracts on
+// Windows while allowing the caller to supply the effective configured Bash.
 func windowsPOSIXShellArgvInvocationWith(command string, args []string, resolve func() (string, error)) (string, []string, bool, error) {
 	if !isBarePOSIXShellWord(command) || !hasCommandStringFlag(args) {
 		return "", nil, false, nil
@@ -213,19 +203,28 @@ func bashLongOptionNeedsOperand(name string) bool {
 
 func cachedWindowsHookBash() (string, error) {
 	windowsHookBash.Do(func() {
-		shell := sandbox.ResolveShell("bash", "", nil)
-		if shell.Kind != sandbox.ShellBash {
-			windowsHookBash.err = missingWindowsHookBashError()
-			return
-		}
-		path, err := resolvedHookShellPath(shell)
-		if err != nil {
-			windowsHookBash.err = missingWindowsHookBashError()
-			return
-		}
-		windowsHookBash.path = path
+		windowsHookBash.path, windowsHookBash.err = discoverWindowsHookBash("")
 	})
 	return windowsHookBash.path, windowsHookBash.err
+}
+
+func resolveWindowsHookBash(preferredPath string) (string, error) {
+	if strings.TrimSpace(preferredPath) == "" {
+		return cachedWindowsHookBash()
+	}
+	return discoverWindowsHookBash(preferredPath)
+}
+
+func discoverWindowsHookBash(preferredPath string) (string, error) {
+	shell := sandbox.ResolveShell("bash", preferredPath, nil)
+	if shell.Kind != sandbox.ShellBash {
+		return "", missingWindowsHookBashError()
+	}
+	path, err := resolvedHookShellPath(shell)
+	if err != nil {
+		return "", missingWindowsHookBashError()
+	}
+	return path, nil
 }
 
 func cachedWindowsDefaultHookShell() (sandbox.Shell, error) {

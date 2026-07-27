@@ -741,9 +741,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if !cfg.SafeMode() {
 		resolvedHooks = hook.Load(hook.LoadOptions{ProjectRoot: root})
 	}
+	hookRuntime := hook.RuntimeOptions{}
+	if shell.Kind == sandbox.ShellBash {
+		hookRuntime.BashPath = shell.Path
+	}
 	hookRunner := hook.NewRunner(
-		resolvedHooks,
-		root, nil,
+		resolvedHooks, root, hook.NewDefaultSpawner(hookRuntime),
 		func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg}) },
 	)
 	// The `task` tool spawns sub-agents that reuse the parent's provider and
