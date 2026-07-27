@@ -18,6 +18,70 @@ import (
 var _ tool.SandboxCapabilityTool = bash{}
 var _ tool.DirectSandboxCapabilityInvocation = (*preparedBashInvocation)(nil)
 
+func TestPreparedBashInvocationExposesOnlyStableReusableArgv(t *testing.T) {
+	b := bash{
+		workDir: t.TempDir(),
+		shell:   sandbox.Shell{Kind: sandbox.ShellBash, Path: "bash"},
+	}
+	invocation, err := b.PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": `printf '%s' 'hello world'`,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := invocation.SandboxCapabilityRequest()
+	want := []string{"printf", "%s", "hello world"}
+	if len(request.ReusableArgv) != len(want) {
+		t.Fatalf("reusable argv=%v, want %v", request.ReusableArgv, want)
+	}
+	for index := range want {
+		if request.ReusableArgv[index] != want[index] {
+			t.Fatalf("reusable argv=%v, want %v", request.ReusableArgv, want)
+		}
+	}
+	request.ReusableArgv[0] = "mutated"
+	if got := invocation.SandboxCapabilityRequest().ReusableArgv[0]; got != "printf" {
+		t.Fatalf("request mutation leaked into prepared invocation: %q", got)
+	}
+
+	for _, command := range []string{
+		`printf $(touch denied)`,
+		"printf `touch denied`",
+		`printf <(generate)`,
+		`printf *.pem`,
+		`printf ~/secrets`,
+		`printf {old,backup}`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			invocation, err := b.PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+				"command": command,
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := invocation.SandboxCapabilityRequest().ReusableArgv; got != nil {
+				t.Fatalf("dynamic command reusable argv=%v, want nil", got)
+			}
+		})
+	}
+}
+
+func TestPreparedPowerShellInvocationHasNoReusableArgvWithoutStaticParser(t *testing.T) {
+	b := bash{
+		workDir: t.TempDir(),
+		shell:   sandbox.Shell{Kind: sandbox.ShellPowerShell, Path: "powershell"},
+	}
+	invocation, err := b.PrepareSandboxInvocation(context.Background(), argsJSON(t, map[string]any{
+		"command": `& 'C:\Program Files\tool.exe' status`,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := invocation.SandboxCapabilityRequest().ReusableArgv; got != nil {
+		t.Fatalf("PowerShell reusable argv=%v, want nil until a static parser exists", got)
+	}
+}
+
 func TestPreparedBashGrantReuseExecutesCanonicalWitnessDirectly(t *testing.T) {
 	original := bashPrepareCapabilityDirect
 	defer func() { bashPrepareCapabilityDirect = original }()

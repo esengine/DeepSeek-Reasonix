@@ -16,7 +16,6 @@ import (
 	"sync"
 
 	"reasonix/internal/sandbox"
-	"reasonix/internal/shellparse"
 )
 
 // ApprovalKind is the event kind used by capability approval prompts.
@@ -50,9 +49,12 @@ func (a Action) Valid() bool {
 
 // Request is the complete host identity for one prepared invocation.
 type Request struct {
-	Review                      sandbox.CapabilityReview
-	Workspace                   string
-	Command                     string
+	Review    sandbox.CapabilityReview
+	Workspace string
+	Command   string
+	// ReusableArgv is the tool-validated stable argv for Command. Nil keeps
+	// one-time approval available but disables reusable grant creation/matching.
+	ReusableArgv                []string
 	Background                  bool
 	PreserveBackgroundProcesses bool
 	Subagent                    bool
@@ -465,14 +467,14 @@ func commandIdentity(req Request) (identity, error) {
 	if err != nil {
 		return out, fmt.Errorf("canonical workspace: %w", err)
 	}
-	cmd, err := shellparse.ParseReusableCommand(req.Command)
-	if err != nil || len(cmd.Argv) == 0 {
-		return out, errors.New("reusable grants require one static simple command")
+	argv := append([]string(nil), req.ReusableArgv...)
+	if len(argv) == 0 {
+		return out, errors.New("reusable grants require structured argv")
 	}
-	if reusableCommandWrapper(cmd.Argv[0]) {
-		return out, fmt.Errorf("reusable grants do not support command wrapper %q", cmd.Argv[0])
+	if reusableCommandWrapper(argv[0]) {
+		return out, fmt.Errorf("reusable grants do not support command wrapper %q", argv[0])
 	}
-	executable, err := exec.LookPath(cmd.Argv[0])
+	executable, err := exec.LookPath(argv[0])
 	if err != nil {
 		return out, fmt.Errorf("resolve executable: %w", err)
 	}
@@ -484,10 +486,10 @@ func commandIdentity(req Request) (identity, error) {
 		executable = resolved
 	}
 	prefix := append([]string(nil), req.Review.ArgvPrefix...)
-	if len(prefix) == 0 || !argvHasPrefix(cmd.Argv, prefix) {
-		prefix = append([]string(nil), cmd.Argv...)
+	if len(prefix) == 0 || !argvHasPrefix(argv, prefix) {
+		prefix = append([]string(nil), argv...)
 	}
-	return identity{workspace: workspace, executable: executable, argv: cmd.Argv, prefix: prefix}, nil
+	return identity{workspace: workspace, executable: executable, argv: argv, prefix: prefix}, nil
 }
 
 func buildPrompt(req Request, id identity, identityErr error) Prompt {
@@ -697,6 +699,7 @@ func cloneReview(in sandbox.CapabilityReview) sandbox.CapabilityReview {
 
 func cloneRequest(in Request) Request {
 	in.Review = cloneReview(in.Review)
+	in.ReusableArgv = append([]string(nil), in.ReusableArgv...)
 	in.Delegation.ReadRoots = append([]string(nil), in.Delegation.ReadRoots...)
 	in.Delegation.WriteRoots = append([]string(nil), in.Delegation.WriteRoots...)
 	return in

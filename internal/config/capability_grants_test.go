@@ -52,8 +52,9 @@ network = true
 			EffectiveDelta: sandbox.CapabilitySet{Network: true},
 			Authority:      sandbox.CapabilityAuthorityStatus{Requested: true, Supported: true},
 		},
-		Workspace: workspace,
-		Command:   executable,
+		Workspace:    workspace,
+		Command:      executable,
+		ReusableArgv: []string{executable},
 	})
 	if err != nil {
 		t.Fatal(err)

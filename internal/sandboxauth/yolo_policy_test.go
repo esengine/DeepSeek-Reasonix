@@ -134,7 +134,7 @@ func TestYOLOPolicyWarningDeliveryLifetime(t *testing.T) {
 
 func TestEngineYOLOFallbackSkipsPromptAndAuditsOrigin(t *testing.T) {
 	workspace := t.TempDir()
-	req := Request{Workspace: workspace, Command: "printf ok", Review: sandbox.CapabilityReview{State: sandbox.CapabilityReady, EffectiveDelta: sandbox.CapabilitySet{Network: true}, Authority: sandbox.CapabilityAuthorityStatus{Requested: true, Supported: true}}}
+	req := Request{Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}, Review: sandbox.CapabilityReview{State: sandbox.CapabilityReady, EffectiveDelta: sandbox.CapabilitySet{Network: true}, Authority: sandbox.CapabilityAuthorityStatus{Requested: true, Supported: true}}}
 	approver := &actionApprover{action: AllowOnce}
 	audit := &memoryAudit{}
 	disabled := NewYOLOPolicy(YOLOPolicyConfig{Workspace: workspace})

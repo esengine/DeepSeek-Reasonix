@@ -180,12 +180,13 @@ func (b bash) NormalizePermissionArgs(raw json.RawMessage) json.RawMessage {
 }
 
 type preparedBashInvocation struct {
-	b          bash
-	p          bashParams
-	args       json.RawMessage
-	assessment sandbox.CapabilityAssessment
-	mu         sync.Mutex
-	used       bool
+	b            bash
+	p            bashParams
+	args         json.RawMessage
+	assessment   sandbox.CapabilityAssessment
+	reusableArgv []string
+	mu           sync.Mutex
+	used         bool
 }
 
 // PrepareSandboxInvocation parses one immutable Bash call and evaluates its
@@ -211,16 +212,23 @@ func (b bash) PrepareSandboxInvocation(ctx context.Context, args json.RawMessage
 			"Sequence with ';' (both run regardless of the first's result), use 'if ($?) { ... }' for " +
 			"conditional chaining, or issue the commands as separate calls")
 	}
+	var reusableArgv []string
+	if sh.Kind == sandbox.ShellBash {
+		if command, err := shellparse.ParseReusableCommand(p.Command); err == nil {
+			reusableArgv = append([]string(nil), command.Argv...)
+		}
+	}
 	assessment := sandbox.EvaluateCapability(ctx, sandbox.CapabilityInput{
 		Base:      b.sb,
 		Workspace: b.workDir,
 		Raw:       p.SandboxCapabilities,
 	})
 	return &preparedBashInvocation{
-		b:          b,
-		p:          p,
-		args:       append(json.RawMessage(nil), args...),
-		assessment: assessment,
+		b:            b,
+		p:            p,
+		args:         append(json.RawMessage(nil), args...),
+		assessment:   assessment,
+		reusableArgv: reusableArgv,
 	}, nil
 }
 
@@ -231,6 +239,7 @@ func (i *preparedBashInvocation) Review() sandbox.CapabilityReview {
 func (i *preparedBashInvocation) SandboxCapabilityRequest() tool.SandboxCapabilityRequest {
 	return tool.SandboxCapabilityRequest{
 		Command:                     i.p.Command,
+		ReusableArgv:                append([]string(nil), i.reusableArgv...),
 		RunInBackground:             i.p.RunInBackground,
 		PreserveBackgroundProcesses: i.p.PreserveBackgroundProcesses,
 	}

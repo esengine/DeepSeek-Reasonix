@@ -53,7 +53,7 @@ func (i *capabilityOrderInvocation) Review() sandbox.CapabilityReview {
 	return sandbox.CapabilityReview{State: sandbox.CapabilityReady, EffectiveDelta: sandbox.CapabilitySet{Network: true}, Authority: sandbox.CapabilityAuthorityStatus{Requested: true, Supported: true}}
 }
 func (i *capabilityOrderInvocation) SandboxCapabilityRequest() tool.SandboxCapabilityRequest {
-	return tool.SandboxCapabilityRequest{Command: "sh -c true"}
+	return tool.SandboxCapabilityRequest{Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 }
 func (i *capabilityOrderInvocation) Execute(context.Context, sandbox.CapabilityUse) (string, error) {
 	*i.order = append(*i.order, "execute")
@@ -74,10 +74,16 @@ func (g capabilityOrderPermission) Check(context.Context, string, json.RawMessag
 	return g.allow, "denied", nil
 }
 
-type capabilityOrderGate struct{ order *[]string }
+type capabilityOrderGate struct {
+	order   *[]string
+	request *sandboxauth.Request
+}
 
-func (g capabilityOrderGate) Authorize(context.Context, sandboxauth.Request) (sandboxauth.Decision, error) {
+func (g capabilityOrderGate) Authorize(_ context.Context, req sandboxauth.Request) (sandboxauth.Decision, error) {
 	*g.order = append(*g.order, "capability")
+	if g.request != nil {
+		*g.request = req
+	}
 	return sandboxauth.Decision{Use: sandbox.AuthorizedDelta}, nil
 }
 
@@ -211,8 +217,9 @@ func TestCapabilityGateUsesPreparedInvocationBeforeHooksAndExecute(t *testing.T)
 	}
 	scheduler := NewSubagentScheduler(4, 2)
 	hooks := &capabilityCompleteOrderHooks{order: &order, scheduler: scheduler, probe: probe}
+	var capabilityRequest sandboxauth.Request
 	a := New(nil, reg, NewSession(""), Options{
-		Gate: capabilityOrderPermission{order: &order, allow: true}, SandboxCapabilityGate: capabilityOrderGate{order: &order},
+		Gate: capabilityOrderPermission{order: &order, allow: true}, SandboxCapabilityGate: capabilityOrderGate{order: &order, request: &capabilityRequest},
 		Hooks: hooks, SandboxWorkspace: root,
 		RecoveryGate:    capabilityOrderRecoveryGate{order: &order},
 		DeliveryProfile: true, WorkspaceLease: owner, WriteScheduler: scheduler, WriteWorkspaceRoot: root,
@@ -226,6 +233,9 @@ func TestCapabilityGateUsesPreparedInvocationBeforeHooksAndExecute(t *testing.T)
 	want := []string{"auto_guard", "permission", "prepare", "capability", "hook", "checkpoint", "execute"}
 	if out.blocked || out.errMsg != "" || len(order) != len(want) || !hooks.leaseSeen || !hooks.claimSeen {
 		t.Fatalf("out=%+v order=%v lease_seen=%v claim_seen=%v", out, order, hooks.leaseSeen, hooks.claimSeen)
+	}
+	if got := capabilityRequest.ReusableArgv; len(got) != 2 || got[0] != "printf" || got[1] != "ok" {
+		t.Fatalf("capability reusable argv=%v, want [printf ok]", got)
 	}
 	for i := range want {
 		if order[i] != want[i] {

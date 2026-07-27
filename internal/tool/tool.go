@@ -60,9 +60,12 @@ type DirectSandboxCapabilityInvocation interface {
 
 // SandboxCapabilityRequest carries execution identity that is not part of the
 // capability value object. Authorization uses it to bind grants to the actual
-// command and process-lifetime dimensions reviewed by the host.
+// command and process-lifetime dimensions reviewed by the host. ReusableArgv is
+// nil unless the tool can reduce this same immutable invocation to one stable
+// direct-execution argv without evaluating shell expansions.
 type SandboxCapabilityRequest struct {
 	Command                     string
+	ReusableArgv                []string
 	RunInBackground             bool
 	PreserveBackgroundProcesses bool
 }

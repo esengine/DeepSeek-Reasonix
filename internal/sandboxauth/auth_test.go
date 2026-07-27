@@ -35,6 +35,9 @@ type rewritingHook struct{}
 func (rewritingHook) AllowSandboxCapability(_ context.Context, req Request) (bool, string) {
 	req.Review.EffectiveDelta.Network = true
 	req.Review.EffectiveDelta.Reads = nil
+	if len(req.ReusableArgv) != 0 {
+		req.ReusableArgv[0] = "env"
+	}
 	return true, ""
 }
 
@@ -65,7 +68,7 @@ func TestSessionGrantRequiresOneCompleteMatchingGrant(t *testing.T) {
 	workspace := t.TempDir()
 	approver := &actionApprover{action: AllowSession}
 	engine := &Engine{Approver: approver}
-	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok"}
+	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	first, err := engine.Authorize(context.Background(), req)
 	if err != nil || first.Use != sandbox.AuthorizedDelta || approver.calls != 1 {
 		t.Fatalf("first authorize = %+v err=%v calls=%d", first, err, approver.calls)
@@ -86,9 +89,9 @@ func TestSessionGrantRequiresOneCompleteMatchingGrant(t *testing.T) {
 	}
 }
 
-func TestUnsafeShellExpansionCannotReuseCapabilityGrant(t *testing.T) {
+func TestMissingReusableArgvCannotReuseCapabilityGrant(t *testing.T) {
 	workspace := t.TempDir()
-	safe := Request{Review: readyReview(true), Workspace: workspace, Command: "printf safe"}
+	safe := Request{Review: readyReview(true), Workspace: workspace, Command: "printf safe", ReusableArgv: []string{"printf", "safe"}}
 	id, err := commandIdentity(safe)
 	if err != nil {
 		t.Fatal(err)
@@ -96,32 +99,21 @@ func TestUnsafeShellExpansionCannotReuseCapabilityGrant(t *testing.T) {
 	grant := id.grant(safe)
 	grant.ArgvPrefix = []string{"printf"}
 
-	for _, command := range []string{
-		`printf *`,
-		`printf ~/secrets`,
-		`printf {old,backup}`,
-	} {
-		t.Run(command, func(t *testing.T) {
-			missApprover := &actionApprover{action: RunSandboxed}
-			matcher := &Engine{
-				Approver: missApprover,
-				Source:   memoryGrantSource{grants: []Grant{grant}},
-			}
-			got, err := matcher.Authorize(context.Background(), Request{
-				Review: readyReview(true), Workspace: workspace, Command: command,
-			})
-			if err != nil || got.Use != sandbox.BaseOnly || missApprover.calls != 1 {
-				t.Fatalf("existing grant decision=%+v err=%v approver_calls=%d", got, err, missApprover.calls)
-			}
+	req := Request{Review: readyReview(true), Workspace: workspace, Command: `printf $(touch denied)`}
+	missApprover := &actionApprover{action: RunSandboxed}
+	matcher := &Engine{
+		Approver: missApprover,
+		Source:   memoryGrantSource{grants: []Grant{grant}},
+	}
+	got, err := matcher.Authorize(context.Background(), req)
+	if err != nil || got.Use != sandbox.BaseOnly || missApprover.calls != 1 {
+		t.Fatalf("existing grant decision=%+v err=%v approver_calls=%d", got, err, missApprover.calls)
+	}
 
-			creator := &Engine{Approver: &actionApprover{action: AllowSession}}
-			got, err = creator.Authorize(context.Background(), Request{
-				Review: readyReview(true), Workspace: workspace, Command: command,
-			})
-			if err != nil || got.Use != sandbox.BaseOnly || len(creator.SessionGrants()) != 0 {
-				t.Fatalf("new grant decision=%+v err=%v grants=%+v", got, err, creator.SessionGrants())
-			}
-		})
+	creator := &Engine{Approver: &actionApprover{action: AllowSession}}
+	got, err = creator.Authorize(context.Background(), req)
+	if err != nil || got.Use != sandbox.BaseOnly || len(creator.SessionGrants()) != 0 {
+		t.Fatalf("new grant decision=%+v err=%v grants=%+v", got, err, creator.SessionGrants())
 	}
 }
 
@@ -140,7 +132,7 @@ func TestOneGrantMayCoverANarrowerCompleteBundleButPartialGrantsNeverUnion(t *te
 	request := readyReview(true)
 	request.EffectiveDelta.Reads = []sandbox.CapabilityPath{{Canonical: child, Kind: sandbox.CapabilityFile}}
 	request.EffectiveDelta.Devices = []sandbox.CapabilityDevice{{Canonical: "/dev/example", Kind: sandbox.CapabilityCharacterDevice, Major: 1, Minor: 2}}
-	req := Request{Review: request, Workspace: workspace, Command: "printf ok"}
+	req := Request{Review: request, Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	canonicalWorkspace, _ := filepath.EvalSymlinks(workspace)
 	complete := Grant{
 		Workspace: canonicalWorkspace, CanonicalExecutable: executable, ArgvPrefix: []string{"printf"},
@@ -172,7 +164,7 @@ func TestHookDenialRunsBeforeGrantReuse(t *testing.T) {
 	approver := &actionApprover{action: AllowSession}
 	audit := &memoryAudit{}
 	engine := &Engine{Approver: approver, Audit: audit}
-	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok"}
+	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	if _, err := engine.Authorize(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +195,7 @@ func TestAdaptersCannotRewriteAuthorityOrStoredSessionGrants(t *testing.T) {
 
 	request := readyReview(false)
 	request.EffectiveDelta.Reads = []sandbox.CapabilityPath{{Canonical: original, Kind: sandbox.CapabilityFile}}
-	req := Request{Review: request, Workspace: workspace, Command: "printf ok"}
+	req := Request{Review: request, Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	engine := &Engine{
 		Hook: rewritingHook{},
 		Source: memoryGrantSource{grants: []Grant{{
@@ -214,6 +206,9 @@ func TestAdaptersCannotRewriteAuthorityOrStoredSessionGrants(t *testing.T) {
 	got, err := engine.Authorize(context.Background(), req)
 	if err != nil || got.Use != sandbox.BaseOnly {
 		t.Fatalf("hook manufactured authority: decision=%+v err=%v", got, err)
+	}
+	if req.ReusableArgv[0] != "printf" {
+		t.Fatalf("hook rewrote caller-owned reusable argv: %v", req.ReusableArgv)
 	}
 
 	approver := &actionApprover{action: AllowSession}
@@ -245,7 +240,7 @@ func TestSubagentAndUnsupportedRequestsFallBackWithoutPrompt(t *testing.T) {
 	approver := &actionApprover{action: AllowOnce}
 	engine := &Engine{Approver: approver}
 	workspace := t.TempDir()
-	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", Subagent: true}
+	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}, Subagent: true}
 	got, err := engine.Authorize(context.Background(), req)
 	if err != nil || got.Use != sandbox.BaseOnly || approver.calls != 0 {
 		t.Fatalf("subagent miss = %+v err=%v calls=%d", got, err, approver.calls)
@@ -288,7 +283,7 @@ func (p *allowAutoOnce) DecideSandboxCapabilityAutoOnce(context.Context, Request
 
 func TestSuppliedProjectGrantAndAutoOncePolicy(t *testing.T) {
 	workspace := t.TempDir()
-	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok"}
+	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	id, err := commandIdentity(req)
 	if err != nil {
 		t.Fatal(err)
@@ -313,7 +308,7 @@ func TestSubagentDelegationCeilingAppliesBeforeGrantAndAutoOnce(t *testing.T) {
 	outside := t.TempDir()
 	review := readyReview(false)
 	review.EffectiveDelta.Reads = []sandbox.CapabilityPath{{Canonical: outside, Kind: sandbox.CapabilityDirectory}}
-	req := Request{Review: review, Workspace: workspace, Command: "printf ok", Subagent: true, Delegation: Delegation{ReadRoots: []string{workspace}}}
+	req := Request{Review: review, Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}, Subagent: true, Delegation: Delegation{ReadRoots: []string{workspace}}}
 	auto := &allowAutoOnce{}
 	engine := &Engine{AutoOnce: auto}
 	got, err := engine.Authorize(context.Background(), req)
@@ -326,7 +321,7 @@ func TestPersistentFailureDowngradesToSession(t *testing.T) {
 	workspace := t.TempDir()
 	approver := &actionApprover{action: AllowPersistent}
 	engine := &Engine{Approver: approver, Persister: failingPersister{}}
-	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok"}
+	req := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	got, err := engine.Authorize(context.Background(), req)
 	if err != nil || got.Use != sandbox.AuthorizedDelta || len(engine.SessionGrants()) != 1 {
 		t.Fatalf("persistent fallback = %+v err=%v grants=%d", got, err, len(engine.SessionGrants()))
@@ -351,7 +346,7 @@ func TestCapabilityApprovalActionsHaveDistinctRuntimeSemantics(t *testing.T) {
 			persister := &memoryPersister{}
 			engine := &Engine{Approver: &actionApprover{action: tc.action}, Persister: persister}
 			got, err := engine.Authorize(context.Background(), Request{
-				Review: readyReview(true), Workspace: t.TempDir(), Command: "printf ok",
+				Review: readyReview(true), Workspace: t.TempDir(), Command: "printf ok", ReusableArgv: []string{"printf", "ok"},
 			})
 			if err != nil || got.Use != tc.wantUse || got.Cancel != tc.wantCancel ||
 				len(engine.SessionGrants()) != tc.wantSession || len(persister.grants) != tc.wantPersist {
@@ -376,7 +371,7 @@ func TestSuspectedSecretsAllowOnceWarnForSessionAndDisablePersistence(t *testing
 			persister := &memoryPersister{}
 			engine := &Engine{Approver: approver, Persister: persister}
 			got, err := engine.Authorize(context.Background(), Request{
-				Review: readyReview(true), Workspace: t.TempDir(), Command: "printf token=secret-value",
+				Review: readyReview(true), Workspace: t.TempDir(), Command: "printf token=secret-value", ReusableArgv: []string{"printf", "token=secret-value"},
 			})
 			if err != nil || got.Use != tc.wantUse || len(engine.SessionGrants()) != tc.wantSession || len(persister.grants) != 0 {
 				t.Fatalf("decision=%+v err=%v session=%d persisted=%d", got, err, len(engine.SessionGrants()), len(persister.grants))
@@ -390,7 +385,7 @@ func TestSuspectedSecretsAllowOnceWarnForSessionAndDisablePersistence(t *testing
 
 func TestBackgroundAndPreserveGrantDimensionsMatchMonotonically(t *testing.T) {
 	workspace := t.TempDir()
-	baseReq := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok"}
+	baseReq := Request{Review: readyReview(true), Workspace: workspace, Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	id, err := commandIdentity(baseReq)
 	if err != nil {
 		t.Fatal(err)
@@ -429,7 +424,7 @@ func TestBackgroundAndPreserveGrantDimensionsMatchMonotonically(t *testing.T) {
 func TestReusableGrantsRejectShellAndPrivilegeWrappers(t *testing.T) {
 	for _, command := range []string{"sh -c true", "env printf ok", "sudo printf ok"} {
 		t.Run(strings.Fields(command)[0], func(t *testing.T) {
-			_, err := commandIdentity(Request{Workspace: t.TempDir(), Command: command})
+			_, err := commandIdentity(Request{Workspace: t.TempDir(), Command: command, ReusableArgv: strings.Fields(command)})
 			if err == nil || !strings.Contains(err.Error(), "wrapper") {
 				t.Fatalf("commandIdentity(%q) err=%v", command, err)
 			}
@@ -444,7 +439,7 @@ func (failingApprover) ApproveSandboxCapability(context.Context, Prompt) (Action
 }
 
 func TestApprovalFailureAndInvalidAdapterActionFallBackToBase(t *testing.T) {
-	req := Request{Review: readyReview(true), Workspace: t.TempDir(), Command: "printf ok"}
+	req := Request{Review: readyReview(true), Workspace: t.TempDir(), Command: "printf ok", ReusableArgv: []string{"printf", "ok"}}
 	for name, approver := range map[string]Approver{
 		"failure": failingApprover{},
 		"invalid": &actionApprover{action: Action("future_action")},

@@ -193,7 +193,7 @@ func (*controllerCapabilityInvocation) Review() sandbox.CapabilityReview {
 	}
 }
 func (*controllerCapabilityInvocation) SandboxCapabilityRequest() tool.SandboxCapabilityRequest {
-	return tool.SandboxCapabilityRequest{Command: "printf capability-e2e"}
+	return tool.SandboxCapabilityRequest{Command: "printf capability-e2e", ReusableArgv: []string{"printf", "capability-e2e"}}
 }
 func (i *controllerCapabilityInvocation) Execute(_ context.Context, use sandbox.CapabilityUse) (string, error) {
 	i.tool.mu.Lock()

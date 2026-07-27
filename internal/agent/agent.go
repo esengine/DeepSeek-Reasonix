@@ -3569,7 +3569,8 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 			info := invocation.SandboxCapabilityRequest()
 			decision, authErr := a.sandboxCapabilityGate.Authorize(ctx, sandboxauth.Request{
 				Review: invocation.Review(), Workspace: a.sandboxWorkspace, Command: info.Command,
-				Background: info.RunInBackground, PreserveBackgroundProcesses: info.PreserveBackgroundProcesses,
+				ReusableArgv: info.ReusableArgv,
+				Background:   info.RunInBackground, PreserveBackgroundProcesses: info.PreserveBackgroundProcesses,
 				Subagent: a.subagentDepth > 0, Delegation: a.sandboxDelegation,
 			})
 			if authErr != nil {
