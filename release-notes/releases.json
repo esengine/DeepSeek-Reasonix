@@ -3,19 +3,21 @@
   "releases": [
     {
       "version": "1.18.0",
-      "date": "2026-07-25",
+      "date": "2026-07-27",
       "channel": "stable",
       "title": {
-        "en": "Stable and Preview release channels",
-        "zh": "Stable 与 Preview 双发布渠道"
+        "en": "Stable and Preview channels with hardened Windows release signing",
+        "zh": "Stable 与 Preview 渠道及强化的 Windows 发布签名"
       },
       "summary": {
-        "en": "This release introduces Stable and Preview public product channels for both desktop and native CLI, improving the release and update experience.",
-        "zh": "此版本为桌面和原生 CLI 同时引入 Stable 与 Preview 双公开产品渠道，改进了发布与更新体验。"
+        "en": "This release introduces Stable and Preview public channels for Desktop and native CLI, and hardens the stable Windows signing path with a machine-readable contract, protected workflow checks, and a zero-publication dual-architecture preflight.",
+        "zh": "此版本为桌面和原生 CLI 引入 Stable 与 Preview 双公开渠道，并通过机器可读契约、受保护的工作流检查及双架构零发布预检，强化稳定版 Windows 签名链路。"
       },
       "surfaces": [
         "desktop",
-        "cli"
+        "cli",
+        "security",
+        "updates"
       ],
       "guides": [
         {
@@ -27,7 +29,7 @@
             "en": "Documentation for the release process including Stable and Preview channels.",
             "zh": "包含 Stable 与 Preview 渠道的发布流程文档。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/908ce880e57eb825b3a80edad12c8d86757a86e4/docs/RELEASING.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c846ad5559ca195ec2adbf7105348858c341227e/docs/RELEASING.md"
         },
         {
           "title": {
@@ -38,22 +40,36 @@
             "en": "Procedure for Windows code signing and verification.",
             "zh": "Windows 代码签名与验证程序。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/908ce880e57eb825b3a80edad12c8d86757a86e4/docs/SIGNPATH_WINDOWS_ADMIN_SOP.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c846ad5559ca195ec2adbf7105348858c341227e/docs/SIGNPATH_WINDOWS_ADMIN_SOP.md"
         }
       ],
       "highlights": [
         {
           "kind": "new",
           "title": {
-            "en": "Stable and Preview Release Channels",
+            "en": "Stable and Preview release channels",
             "zh": "Stable 与 Preview 双发布渠道"
           },
           "body": {
-            "en": "Introduced two public product channels: Stable and Preview. Stable remains the weekly release, while Preview provides early access to upcoming features. Both channels are fully supported on desktop and native CLI, with secure update routing and code signing.",
-            "zh": "新增两个公开产品渠道：Stable 与 Preview。Stable 保持每周发布，Preview 提供早期功能体验。两个渠道均完整支持桌面和原生 CLI，并具备安全的更新路由和代码签名。"
+            "en": "Introduced two public product channels: Stable and Preview. Stable remains the weekly release, while Preview provides early access to upcoming features across Desktop and native CLI with channel-aware routing and signing.",
+            "zh": "新增两个公开产品渠道：Stable 与 Preview。Stable 保持每周发布，Preview 为桌面和原生 CLI 提供早期功能体验，并采用渠道感知的路由与签名。"
           },
           "refs": [
             6155
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Protected Windows signing release gate",
+            "zh": "受保护的 Windows 签名发布门禁"
+          },
+          "body": {
+            "en": "Stable Desktop publishing now validates the SignPath contract, workflow call graph, protected fingerprints, CODEOWNERS coverage, and both Windows architectures before any public artifact is published.",
+            "zh": "稳定版桌面发布现在会在发布任何公开产物前，校验 SignPath 契约、工作流调用图、受保护指纹、CODEOWNERS 覆盖范围及两个 Windows 架构。"
+          },
+          "refs": [
+            6944
           ]
         }
       ],
@@ -61,7 +77,7 @@
         "new": [
           {
             "title": {
-              "en": "Dual release channels for desktop and CLI",
+              "en": "Dual release channels for Desktop and CLI",
               "zh": "桌面和 CLI 的双发布渠道"
             },
             "body": {
@@ -71,10 +87,51 @@
             "refs": [
               6155
             ]
+          },
+          {
+            "title": {
+              "en": "Channel-aware Desktop updates",
+              "zh": "支持渠道感知的桌面更新"
+            },
+            "body": {
+              "en": "Desktop now persists Stable or Preview selection, routes manifests and downloads through the selected channel, and keeps legacy Canary settings compatible during migration.",
+              "zh": "桌面现在会持久化 Stable 或 Preview 选择，按所选渠道路由清单与下载，并在迁移期间兼容旧的 Canary 设置。"
+            },
+            "refs": [
+              6155
+            ]
           }
         ],
-        "improved": [],
-        "fixed": []
+        "improved": [
+          {
+            "title": {
+              "en": "Machine-checked stable signing contract",
+              "zh": "机器校验的稳定版签名契约"
+            },
+            "body": {
+              "en": "Release workflows now validate exact SignPath build definitions and the main-v2 origin, while a contract fingerprint replaces the mutable standalone readiness switch.",
+              "zh": "发布工作流现在会校验精确的 SignPath 构建定义和 main-v2 来源，并以契约指纹替代可变的独立就绪开关。"
+            },
+            "refs": [
+              6944
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Stable release SignPath routing",
+              "zh": "稳定版发布的 SignPath 路由"
+            },
+            "body": {
+              "en": "The stable orchestrator now participates in the allowed production signing path instead of reaching a provider policy that only recognized the Desktop workflow.",
+              "zh": "稳定版编排器现在使用获准的生产签名路径，不再落入仅识别桌面工作流的提供商策略。"
+            },
+            "refs": [
+              6944
+            ]
+          }
+        ]
       },
       "upgrade": [],
       "risks": [],
