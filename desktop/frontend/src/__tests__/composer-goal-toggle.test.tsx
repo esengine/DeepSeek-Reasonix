@@ -2118,5 +2118,105 @@ console.log("\ncomposer goal toggle");
   dom.window.close();
 }
 
+{
+  const dom = installDom();
+  mockApp({
+    Commands: async () => [
+      { name: "review", description: "Review the current task", kind: "skill" },
+    ],
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+  });
+  const sessionA = "session:project:/repo:rich-topic-a:rich-session-a";
+  const sessionB = "session:project:/repo:rich-topic-b:rich-session-b";
+  const realRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const queuedComposerFrames: FrameRequestCallback[] = [];
+  globalThis.requestAnimationFrame = (callback) => {
+    queuedComposerFrames.push(callback);
+    return queuedComposerFrames.length;
+  };
+  const { root, rerender } = await renderComposer({ sessionKey: sessionA });
+
+  await replaceComposerDraft(rerender, 6000, "/review");
+  await waitFor("session A first skill menu", () => Boolean(document.querySelector(".slashmenu")));
+  const textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!textarea) throw new Error("session A textarea did not render");
+  await act(async () => {
+    textarea.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+
+  let richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("session A rich input did not render");
+  await appendRichComposerInput(richInput, " /review");
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("session A rich input disappeared");
+  const queryAtEnd = document.createRange();
+  queryAtEnd.selectNodeContents(richInput);
+  queryAtEnd.collapse(false);
+  document.getSelection()?.removeAllRanges();
+  document.getSelection()?.addRange(queryAtEnd);
+  await act(async () => {
+    richInput.dispatchEvent(new window.KeyboardEvent("keyup", { key: "w", bubbles: true }));
+    await flushTimers();
+  });
+  await waitFor("session A second skill menu", () => Boolean(document.querySelector(".slashmenu")));
+
+  await rerender({ sessionKey: sessionB, insertRequest: null });
+  await replaceComposerDraft(rerender, 6001, "b");
+  await rerender({ sessionKey: sessionA, insertRequest: null });
+  await act(async () => {
+    let frameTime = 0;
+    while (queuedComposerFrames.length > 0) {
+      queuedComposerFrames.shift()?.(frameTime += 16);
+    }
+    await flushTimers();
+  });
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  if (!richInput) throw new Error("session A rich input was not restored");
+  eq(richComposerTaskText(richInput), " /review", "switching back restores the rich invocation draft");
+  await waitFor(
+    "restored session A rich slash menu",
+    () => Boolean(document.querySelector(".slashmenu")),
+  );
+  ok(
+    document.querySelector(".slashmenu") !== null,
+    "restoring a rich invocation draft recomputes slash completion from its end caret",
+  );
+
+  await act(async () => {
+    richInput.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+  richInput = document.querySelector(".composer__rich-input") as HTMLDivElement | null;
+  eq(
+    richInput?.querySelectorAll(".composer-invocation-token").length,
+    2,
+    "the restored rich slash query can select a second skill",
+  );
+  eq(richInput ? richComposerTaskText(richInput) : "", " ", "selecting the restored query replaces its slash token");
+
+  await rerender({ sessionKey: sessionB, insertRequest: null });
+  eq(
+    (document.querySelector("textarea") as HTMLTextAreaElement | null)?.value,
+    "b",
+    "switching away again preserves the other session draft",
+  );
+
+  await act(async () => {
+    root.unmount();
+  });
+  globalThis.requestAnimationFrame = realRequestAnimationFrame;
+  dom.window.close();
+}
+
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

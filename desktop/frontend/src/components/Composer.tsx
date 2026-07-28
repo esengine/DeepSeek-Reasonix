@@ -757,6 +757,7 @@ export function Composer({
   const guidanceQueuePreviewKey = (guidanceQueuePreviewItems ?? []).map((item) => item.trim()).filter(Boolean).join("\n");
   const draftsBySessionRef = useRef<Record<string, ComposerDraft>>({});
   const activeDraftKeyRef = useRef(draftKey);
+  const draftActivationEpochRef = useRef(0);
   const textRef = useRef(text);
   const invocationsRef = useRef(invocations);
   const attachmentsRef = useRef(attachments);
@@ -809,7 +810,6 @@ export function Composer({
     selectedTextRefsRef.current = next.selectedTextRefs;
     setText(next.text);
     setInvocations(next.invocations);
-    setRichSlashQuery(null);
     setAttachments(next.attachments);
     setWorkspaceRefs(next.workspaceRefs);
     pastedBlocksRef.current = next.pastedBlocks;
@@ -836,6 +836,12 @@ export function Composer({
     const restoredSelection = { start: next.text.length, end: next.text.length };
     lastSelectionRef.current = restoredSelection;
     setPlainSelection(restoredSelection);
+    setRichSelection(restoredSelection);
+    setRichSlashQuery(
+      next.invocations.length > 0
+        ? slashQueryAt(next.text, restoredSelection)
+        : null,
+    );
     setComposerPrompt(null);
     setShowPastChats(false);
     setDirectPastChats(false);
@@ -1114,6 +1120,7 @@ export function Composer({
     const previousKey = activeDraftKeyRef.current;
     if (previousKey === draftKey) return;
     draftsBySessionRef.current[previousKey] = snapshotComposerDraft();
+    draftActivationEpochRef.current += 1;
     activeDraftKeyRef.current = draftKey;
     setGuidanceDraftKey(draftKey);
     restoreComposerDraft(draftsBySessionRef.current[draftKey] ?? emptyComposerDraft());
@@ -1536,6 +1543,14 @@ export function Composer({
     else taRef.current?.focus();
   };
 
+  const requestActiveDraftFrame = (callback: () => void) => {
+    const activationEpoch = draftActivationEpochRef.current;
+    requestAnimationFrame(() => {
+      if (draftActivationEpochRef.current !== activationEpoch) return;
+      callback();
+    });
+  };
+
   const getComposerSelection = () => {
     if (invocationsRef.current.length > 0) return richInputRef.current?.getSelection() ?? richSelection;
     const ta = taRef.current;
@@ -1548,7 +1563,7 @@ export function Composer({
     const nextSelection = { start, end, afterInvocationId };
     lastSelectionRef.current = { start, end };
     if (invocationsRef.current.length === 0) setPlainSelection(nextSelection);
-    requestAnimationFrame(() => {
+    requestActiveDraftFrame(() => {
       if (invocationsRef.current.length > 0) {
         richInputRef.current?.setSelectionRange(start, end, afterInvocationId);
         return;
@@ -1660,7 +1675,7 @@ export function Composer({
       workspaceRefsRef.current = next;
       return next;
     });
-    requestAnimationFrame(focusComposerInput);
+    requestActiveDraftFrame(focusComposerInput);
   };
 
   useEffect(() => {
@@ -1706,7 +1721,7 @@ export function Composer({
       selectedTextRefsRef.current = next;
       setSelectedTextRefs(next);
     }
-    requestAnimationFrame(focusComposerInput);
+    requestActiveDraftFrame(focusComposerInput);
   }, [draftKey, selectedTextRequest, showToast, t]);
 
   const expandPastedBlocks = (displayText: string, blocks = pastedBlocksRef.current): string => {
@@ -1742,7 +1757,7 @@ export function Composer({
   const removeAttachment = (path: string) => {
     forgetAttachment(path);
     setAttachments(attachmentsRef.current.filter((x) => x.path !== path));
-    requestAnimationFrame(focusComposerInput);
+    requestActiveDraftFrame(focusComposerInput);
   };
 
   const attachmentSeenInDraft = (targetDraftKey: string, key: AttachmentDedupKey): boolean => {
@@ -1939,16 +1954,16 @@ export function Composer({
       // /goal ...), which would swallow entity invocations as goal prose and
       // never run them. Ask for a plain-text goal first.
       setComposerPrompt(t("composer.goalEntityBlocked"));
-      requestAnimationFrame(focusComposerInput);
+      requestActiveDraftFrame(focusComposerInput);
       return;
     }
     if (!trimmedText && currentAttachments.length === 0 && currentWorkspaceRefs.length === 0 && inlineInvocationCount === 0) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
-        requestAnimationFrame(focusComposerInput);
+        requestActiveDraftFrame(focusComposerInput);
       } else if (subagentInvocationCount > 0) {
         setComposerPrompt(t("composer.subagentTaskRequired"));
-        requestAnimationFrame(focusComposerInput);
+        requestActiveDraftFrame(focusComposerInput);
       }
       return;
     }
@@ -2626,7 +2641,7 @@ export function Composer({
         afterInvocationId: invocation.id,
       }),
     );
-    requestAnimationFrame(() => richInputRef.current?.setSelectionRange(
+    requestActiveDraftFrame(() => richInputRef.current?.setSelectionRange(
       query.from,
       query.from,
       invocation.id,
@@ -2639,7 +2654,7 @@ export function Composer({
   const removeWorkspaceReference = (target: WorkspaceReference) => {
     const key = workspaceReferenceKey(target);
     setWorkspaceRefs((prev) => prev.filter((ref) => workspaceReferenceKey(ref) !== key));
-    requestAnimationFrame(focusComposerInput);
+    requestActiveDraftFrame(focusComposerInput);
   };
 
   const togglePastedPreview = (label: string) => {
@@ -2897,7 +2912,7 @@ export function Composer({
     setShowPastChats(false);
     setPastChatQuery("");
     setActive(0);
-    requestAnimationFrame(focusComposerInput);
+    requestActiveDraftFrame(focusComposerInput);
   };
 
   // The typed panel follows the live token: typing in the composer extends
@@ -3377,24 +3392,24 @@ export function Composer({
   void onSetMode;
   const chooseApprovalMode = (nextMode: ToolApprovalMode) => {
     onSetToolApprovalMode(nextMode);
-    requestAnimationFrame(focusComposerInput);
+    requestActiveDraftFrame(focusComposerInput);
   };
   const chooseTaskMode = (nextMode: CollaborationMode) => {
     closeIntentMenu(() => {
       if (nextMode !== collaborationMode) onSetCollaborationMode(nextMode);
-      requestAnimationFrame(focusComposerInput);
+      requestActiveDraftFrame(focusComposerInput);
     });
   };
   const stopGoalMode = () => {
     closeIntentMenu(() => {
       onClearGoal();
-      requestAnimationFrame(focusComposerInput);
+      requestActiveDraftFrame(focusComposerInput);
     });
   };
   const chooseTokenMode = (mode: TokenMode) => {
     closeProfileMenu(() => {
       if (mode !== tokenMode) onSetTokenMode(mode);
-      requestAnimationFrame(focusComposerInput);
+      requestActiveDraftFrame(focusComposerInput);
     });
   };
   const runtimeProfileShortKey = tokenMode === "economy"
@@ -3440,7 +3455,7 @@ export function Composer({
   const chooseEffortLevel = (level: string) => {
     closeMoreMenu(() => {
       if (level !== currentEffort) onSetEffort(level);
-      requestAnimationFrame(focusComposerInput);
+      requestActiveDraftFrame(focusComposerInput);
     });
   };
   // Run-strip state machine: retry > waiting-approval > waiting-ask > streaming.
@@ -3623,7 +3638,7 @@ export function Composer({
           const files = Array.from(event.currentTarget.files ?? []);
           event.currentTarget.value = "";
           if (files.length > 0) attachFiles(files);
-          requestAnimationFrame(() => taRef.current?.focus());
+          requestActiveDraftFrame(() => taRef.current?.focus());
         }}
       />
       <AnchoredPopover
@@ -4083,7 +4098,7 @@ export function Composer({
                 const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
                 selectedTextRefsRef.current = next;
                 setSelectedTextRefs(next);
-                requestAnimationFrame(focusComposerInput);
+                requestActiveDraftFrame(focusComposerInput);
               }}
               name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
               meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
