@@ -463,6 +463,7 @@ func (a *App) Platform() string {
 // off the initialization in a background goroutine so the webview loads immediately.
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	setEmbedBrowserApp(a)
 	a.startWindowsWebView2StartupFallback(ctx)
 	installSystemQuitHook()
 	a.startTray()
@@ -810,6 +811,7 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	a.destroyEmbedBrowser()
 	a.stopDeferredRebuildRetry()
 	a.stopMainThreadWatchdog()
 	if a.heartbeat != nil {
