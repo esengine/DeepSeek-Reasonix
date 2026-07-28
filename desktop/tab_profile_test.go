@@ -404,6 +404,54 @@ func TestToolApprovalModesPreserveCollaborationMode(t *testing.T) {
 	}
 }
 
+func TestSetComposerProfileForTabAppliesAllAxes(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if drained, err := app.SetComposerProfileForTab("missing", "normal", control.ToolApprovalAsk, ""); err == nil || drained == nil {
+		t.Fatal("missing tab returned a nil drained-id slice")
+	}
+	tab := testTab("a", t.TempDir())
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	defer tab.Ctrl.Close()
+
+	if _, err := app.SetComposerProfileForTab(tab.ID, "plan", control.ToolApprovalYolo, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentTabCollaborationMode(tab); got != "plan" {
+		t.Fatalf("collaboration mode = %q, want plan", got)
+	}
+	if !tab.Ctrl.PlanMode() {
+		t.Fatal("controller plan mode is off")
+	}
+	if got := tab.Ctrl.ToolApprovalMode(); got != control.ToolApprovalYolo {
+		t.Fatalf("tool approval mode = %q, want yolo", got)
+	}
+
+	if _, err := app.SetComposerProfileForTab(tab.ID, "goal", control.ToolApprovalAuto, "finish the profile migration"); err != nil {
+		t.Fatal(err)
+	}
+	if got := currentTabCollaborationMode(tab); got != "goal" {
+		t.Fatalf("collaboration mode = %q, want goal", got)
+	}
+	if tab.Ctrl.PlanMode() {
+		t.Fatal("goal profile kept controller plan mode on")
+	}
+	if got := tab.Ctrl.ToolApprovalMode(); got != control.ToolApprovalAuto {
+		t.Fatalf("tool approval mode = %q, want auto", got)
+	}
+	if got := tab.Ctrl.Goal(); got != "finish the profile migration" {
+		t.Fatalf("controller goal = %q", got)
+	}
+
+	got := loadTabsFile()
+	if len(got.Tabs) != 1 || got.Tabs[0].Goal != "finish the profile migration" || got.Tabs[0].ToolApprovalMode != control.ToolApprovalAuto {
+		t.Fatalf("persisted profile = %+v", got.Tabs)
+	}
+}
+
 func TestMetaReportsGoalStatus(t *testing.T) {
 	isolateDesktopUserDirs(t)
 

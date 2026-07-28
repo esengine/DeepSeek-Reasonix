@@ -3117,6 +3117,8 @@ func TestSetModelForTabRefreshesCarriedSystemPromptWithoutChangingDefaults(t *te
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab, sibling.ID: sibling}
 	app.tabOrder = []string{tab.ID, sibling.ID}
 	app.activeTabID = tab.ID
+	var switchTiming modelSwitchTiming
+	app.modelSwitchTimingHook = func(timing modelSwitchTiming) { switchTiming = timing }
 	t.Cleanup(func() {
 		if tab.Ctrl != nil {
 			tab.Ctrl.Close()
@@ -3144,6 +3146,12 @@ func TestSetModelForTabRefreshesCarriedSystemPromptWithoutChangingDefaults(t *te
 	}
 	if sibling.model != "old/old-model" {
 		t.Fatalf("sibling tab model after session switch = %q, want old/old-model", sibling.model)
+	}
+	if switchTiming.Outcome != "ok" || switchTiming.Total <= 0 {
+		t.Fatalf("model switch timing = %+v, want successful non-zero observation", switchTiming)
+	}
+	if switchTiming.Build <= 0 || switchTiming.LeaseAndResume <= 0 || switchTiming.SwapAndPersist <= 0 {
+		t.Fatalf("model switch stage timing incomplete: %+v", switchTiming)
 	}
 }
 

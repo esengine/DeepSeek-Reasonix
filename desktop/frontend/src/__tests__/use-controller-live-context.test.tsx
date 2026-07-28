@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/use-controller-live-context.test.tsx
 
 import { JSDOM } from "jsdom";
-import React, { act } from "react";
+import React, { act, useCallback, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { ContextPanel } from "../components/ContextPanel";
 import { StatusBar } from "../components/StatusBar";
@@ -215,9 +215,24 @@ window.go = {
 
 type Controller = ReturnType<typeof useController>;
 let controller: Controller | undefined;
+let controllerProbeRenders = 0;
+
+function LiveProbe({ value }: { value: Controller }) {
+  const subscribe = useCallback(
+    (listener: () => void) => value.liveStore.subscribe(value.activeTabId, listener),
+    [value.activeTabId, value.liveStore],
+  );
+  const getSnapshot = useCallback(
+    () => value.liveStore.getSnapshot(value.activeTabId)?.text ?? "",
+    [value.activeTabId, value.liveStore],
+  );
+  const text = useSyncExternalStore(subscribe, getSnapshot);
+  return <span data-live-text>{text}</span>;
+}
 
 function Probe() {
   controller = useController();
+  controllerProbeRenders += 1;
   return (
     <LocaleProvider>
       <>
@@ -240,6 +255,7 @@ function Probe() {
           sessionGen={controller.state.sessionGen}
           usageSeq={controller.state.usageSeq}
         />
+        <LiveProbe value={controller} />
       </>
     </LocaleProvider>
   );
@@ -295,6 +311,18 @@ ok(
 eq(renderedAverage(), "90.00%", "status bar renders the live executor-era session average");
 eq(renderedPanelAverage(), "90.00%", "panel ignores its stale private snapshot and matches the status bar");
 ok(contextCalls > initialContextCalls, "usage triggers a new ContextUsageForTab snapshot");
+
+const rendersBeforeTextBurst = controllerProbeRenders;
+await act(async () => {
+  for (const handler of eventHandlers) {
+    handler({ kind: "text", tabId: "tab-live-context", text: "one " });
+    handler({ kind: "text", tabId: "tab-live-context", text: "two " });
+    handler({ kind: "text", tabId: "tab-live-context", text: "three" });
+  }
+  await flushPromises(20);
+});
+eq(document.querySelector("[data-live-text]")?.textContent, "one two three", "live subscriber receives the coalesced text burst");
+eq(controllerProbeRenders, rendersBeforeTextBurst, "pure stream deltas do not re-render the controller owner");
 
 backendContext = {
   used: 960,
@@ -408,11 +436,49 @@ await act(async () => {
 eq(latestSwitchResult, true, "latest model switch owns the completed UI refresh");
 ok(await settleUntil(() => renderedBalance() === "B 25.00"), "latest model switch balance wins");
 
+const coalescedFirstGate = deferred<void>();
+const coalescedLatestGate = deferred<void>();
+modelSwitchSteps.push(
+  { gate: coalescedFirstGate, balance: { available: true, display: "G 20.00" } },
+  { gate: coalescedLatestGate, balance: { available: true, display: "I 15.00" } },
+);
+const coalescedStartCalls = modelSwitchCalls;
+let coalescedFirst: Promise<boolean> | undefined;
+let coalescedMiddle: Promise<boolean> | undefined;
+let coalescedLatest: Promise<boolean> | undefined;
+await act(async () => {
+  coalescedFirst = controller?.setModel("provider-g/model-g");
+  coalescedMiddle = controller?.setModel("provider-h/model-h");
+  coalescedLatest = controller?.setModel("provider-i/model-i");
+  await flushPromises();
+});
+eq(modelSwitchCalls, coalescedStartCalls + 1, "only the active model switch enters the backend immediately");
+eq(await coalescedMiddle, false, "an unstarted intermediate model switch is coalesced");
+
+coalescedFirstGate.resolve();
+await act(async () => {
+  await coalescedFirst;
+  await flushPromises();
+});
+ok(
+  await settleUntil(() => modelSwitchCalls === coalescedStartCalls + 2),
+  "the latest coalesced model switch starts after the active call",
+);
+coalescedLatestGate.resolve();
+let coalescedLatestResult: boolean | undefined;
+await act(async () => {
+  coalescedLatestResult = await coalescedLatest;
+  await flushPromises();
+});
+eq(coalescedLatestResult, true, "the latest coalesced model switch owns reconciliation");
+eq(backendModel, "provider-i/model-i", "the skipped intermediate model never reaches the backend");
+eq(modelSwitchCalls, coalescedStartCalls + 2, "three rapid picks perform only two controller rebuilds");
+
 staleBalance.resolve({ available: true, display: "¥88.00" });
 await act(async () => {
   await flushPromises();
 });
-eq(renderedBalance(), "B 25.00", "late DeepSeek balance response cannot overwrite the switched provider");
+eq(renderedBalance(), "I 15.00", "late DeepSeek balance response cannot overwrite the latest switched provider");
 
 const overlappingSuccessGate = deferred<void>();
 const overlappingFailureGate = deferred<void>();

@@ -429,8 +429,6 @@ await act(async () => {
   searchInput.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   searchInput.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   await flush();
-});
-await act(async () => {
   searchInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   await flush();
 });

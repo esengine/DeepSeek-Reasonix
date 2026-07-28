@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import gsap from "gsap";
 import { ApprovalModal } from "../components/ApprovalModal";
 import { activeFileReferenceToken, pickInlineFileReference } from "../components/FileReferenceMenu";
-import { LocaleProvider } from "../lib/i18n";
+import { LocaleProvider, preloadDetectedLocale } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { WireApproval } from "../lib/types";
 
@@ -95,6 +95,7 @@ function mockApp(methods: Partial<AppBindings>) {
 }
 
 async function renderApproval(props: Partial<Parameters<typeof ApprovalModal>[0]> = {}) {
+  await preloadDetectedLocale();
   const rootEl = document.getElementById("root");
   if (!rootEl) throw new Error("missing root");
   const root = createRoot(rootEl);

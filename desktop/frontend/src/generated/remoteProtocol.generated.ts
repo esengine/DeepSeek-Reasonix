@@ -2,7 +2,7 @@
 
 export const REMOTE_SCHEMA_FORMAT = "reasonix.remote.schema.v1" as const;
 export const REMOTE_PROTOCOL_VERSION = "1" as const;
-export const REMOTE_SCHEMA_HASH = "sha256:0c91e772a17a5acdc8e874c5ddeb15b707e649bb24a40723399ab8d3d6f52e06" as const;
+export const REMOTE_SCHEMA_HASH = "sha256:e526876ae07a34c0c961567057c06a043352f6f25558285a6c9a89c0ab6eb92d" as const;
 
 export const REMOTE_FIXED_RESOURCES = {
   "protocol": {
@@ -3664,6 +3664,7 @@ export type SessionProfileSetParamsRaw = {
   "patch": {
     "collaborationMode"?: "goal" | "normal" | "plan";
     "effort"?: string;
+    "goal"?: string;
     "model"?: string;
     "tokenMode"?: "delivery" | "economy" | "full";
     "toolApprovalMode"?: "ask" | "auto" | "yolo";
@@ -3680,6 +3681,7 @@ export type SessionProfileSetParamsHydrated = {
   "patch": {
     "collaborationMode"?: "goal" | "normal" | "plan";
     "effort"?: string;
+    "goal"?: string;
     "model"?: string;
     "tokenMode"?: "delivery" | "economy" | "full";
     "toolApprovalMode"?: "ask" | "auto" | "yolo";

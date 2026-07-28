@@ -22,6 +22,8 @@ const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
+const i18nSource = readFileSync(resolve(here, "../lib/i18n.tsx"), "utf8");
+const mainSource = readFileSync(resolve(here, "../main.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8");
 
 console.log("\nbundle contract");
@@ -96,6 +98,20 @@ ok(
 ok(
   markdownSource.includes('import("./MarkdownRenderer")'),
   "Markdown wrapper loads markdown renderer on demand",
+);
+ok(
+  !/import\s+\{\s*zh\s*\}\s+from\s+["']\.\.\/locales\/zh["']/.test(i18nSource) &&
+    !/import\s+\{\s*zhTW\s*\}\s+from\s+["']\.\.\/locales\/zh-TW["']/.test(i18nSource),
+  "i18n keeps Chinese dictionaries out of the unconditional initial chunk",
+);
+ok(
+  i18nSource.includes('import("../locales/zh")') &&
+    i18nSource.includes('import("../locales/zh-TW")'),
+  "i18n loads Chinese dictionaries on demand",
+);
+ok(
+  mainSource.includes("await preloadDetectedLocale()"),
+  "main preloads the detected locale before mounting React",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

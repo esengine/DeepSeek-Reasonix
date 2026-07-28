@@ -14,10 +14,18 @@ type Task struct {
 	ID   string
 	Root string
 	Spec TaskSpec
+	// CreateToken is an opaque ownership proof for the directory reserved by
+	// CreateTask. Rollback helpers must pass it to RemoveTask so a failed
+	// transaction cannot delete a task directory another creator reserved.
+	CreateToken string
 }
 
 type CreateOptions struct {
-	Now               func() time.Time
+	Now func() time.Time
+	// CreateToken optionally supplies the ownership proof written during task
+	// reservation. Durable parent transactions persist it before calling
+	// CreateTask so crash recovery can find and remove an uncommitted task.
+	CreateToken       string
 	Scope             []string
 	NonGoals          []string
 	AllowedOperations AllowedOperations

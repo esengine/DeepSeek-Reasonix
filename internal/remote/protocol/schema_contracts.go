@@ -16,7 +16,7 @@ func buildCustomSchemaContracts() map[reflect.Type]SchemaValidation {
 		typeOf[BuildID]():               {Invariants: rules("productVersion:trimmed_nonempty", "sourceRevision:full_lowercase_git_commit_with_optional_dirty", "protocolVersion:trimmed_nonempty", "schemaHash:sha256_prefixed_lowercase_hex")},
 		typeOf[RuntimeTarget]():         {Invariants: rules("workspaceId:trimmed_nonempty", "sessionId:trimmed_nonempty")},
 		typeOf[WorkspaceBrowseParams](): {Invariants: rules("mutually_exclusive(directoryRef,typedPath)")},
-		typeOf[ProfilePatch]():          {Invariants: rules("at_least_one(model,effort,collaborationMode,tokenMode,toolApprovalMode)")},
+		typeOf[ProfilePatch]():          {Invariants: rules("at_least_one(model,effort,collaborationMode,tokenMode,toolApprovalMode,goal)")},
 		typeOf[TopicSelection](): {Discriminator: discriminator("kind",
 			variant([]string{string(TopicExisting)}, []string{"topicId"}, []string{"title"}, nil, nil),
 			variant([]string{string(TopicNew)}, nil, []string{"topicId"}, nil, nil),

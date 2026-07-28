@@ -192,6 +192,9 @@ export interface AppBindings {
   SetToolApprovalMode(mode: string): Promise<void>;
   // Same drained-prompt-id contract as SetModeForTab.
   SetToolApprovalModeForTab(tabID: string, mode: string): Promise<string[] | void>;
+  // Atomically applies the controller-facing composer profile and reports any
+  // approval prompts drained by the resulting tool-approval posture.
+  SetComposerProfileForTab(tabID: string, collaborationMode: string, toolApprovalMode: string, goal: string): Promise<string[] | void>;
   SetGoal(goal: string): Promise<void>;
   SetGoalForTab(tabID: string, goal: string): Promise<void>;
   ResumeGoalForTab(tabID: string): Promise<boolean>;
@@ -2565,6 +2568,26 @@ function makeMockApp(): AppBindings {
               : tab,
           );
           return drainMockApprovalPreviews(next);
+        },
+        async SetComposerProfileForTab(tabID, collaborationMode, toolApprovalMode, goal) {
+          const nextCollaboration = normalizeCollaborationMode(collaborationMode);
+          const nextToolApproval = normalizeToolApprovalMode(toolApprovalMode);
+          const nextGoal = goal.trim();
+          settings.autoApproveTools = nextToolApproval === "yolo";
+          settings.bypass = nextToolApproval === "yolo";
+          mockTabs = mockTabs.map((tab) => {
+            if (tab.id !== tabID) return tab;
+            const plan = !nextGoal && nextCollaboration === "plan";
+            return {
+              ...tab,
+              collaborationMode: nextGoal ? "goal" : plan ? "plan" : "normal",
+              toolApprovalMode: nextToolApproval,
+              goal: nextGoal,
+              goalStatus: nextGoal ? "running" : "stopped",
+              mode: modeWithAutoApproveTools(modeWithPlan(normalizeMode(tab.mode), plan), nextToolApproval === "yolo"),
+            };
+          });
+          return drainMockApprovalPreviews(nextToolApproval);
         },
         async SetGoal(goal) {
           const active = mockTabs.find((tab) => tab.active);

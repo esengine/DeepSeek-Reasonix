@@ -4659,6 +4659,14 @@ a[href] {
   font-family: var(--font-content-family);
   font-weight: var(--font-weight-regular);
 }
+.md--stream-tail {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.md > :where(h1, h2, h3, h4, h5, h6, p, table, ul, ol, blockquote, hr, .code-block, .md-plain-block) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
+}
 .md > :first-child {
   margin-top: 0;
 }

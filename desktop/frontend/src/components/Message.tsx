@@ -972,7 +972,7 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
       {hasText && (
         <div className="msg__body">
-          <Markdown text={item.text} plainStatusBlocks={creationMode} />
+          <Markdown text={item.text} plainStatusBlocks={creationMode} streaming={item.streaming} />
         </div>
       )}
       <MemoryCitations citations={item.memoryCitations} />

@@ -7,6 +7,9 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
+import { splitStableMarkdownSections, streamingMarkdownCommitInterval, useRenderedMarkdownText } from "../components/Markdown";
 import MermaidDiagram from "../components/MermaidDiagram";
 import {
   __setMermaidPanZoomFactoryForTest,
@@ -23,6 +26,8 @@ import { REMOTE_MARKDOWN_IMAGE_PATH } from "../lib/markdownImage";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const markdownRendererSource = readFileSync(resolve(testDir, "../components/MarkdownRenderer.tsx"), "utf8");
+const markdownSource = readFileSync(resolve(testDir, "../components/Markdown.tsx"), "utf8");
+const messageSource = readFileSync(resolve(testDir, "../components/Message.tsx"), "utf8");
 
 let passed = 0;
 let failed = 0;
@@ -133,6 +138,19 @@ function parseSvg(svg: string): Document {
 console.log("\nmermaid rendering");
 
 {
+  ok(markdownSource.includes("requestAnimationFrame"), "streaming markdown commits on an animation frame");
+  ok(markdownSource.includes("streamingMarkdownCommitInterval"), "streaming markdown applies an adaptive parse budget");
+  ok(markdownSource.includes('className="md md--stream-tail"'), "streaming markdown exposes an immediate lightweight tail");
+  ok(markdownSource.includes("requestIdleCallback"), "large Markdown finalization waits for browser idle time");
+  ok(markdownSource.includes("reasonix:markdown-finalize"), "large Markdown finalization emits a performance measure");
+  ok(markdownSource.includes("splitStableMarkdownSections"), "large Markdown retains completed top-level sections");
+  ok(markdownRendererSource.includes("bare = false"), "stable Markdown sections share one semantic container");
+  ok(
+    styles.includes(".md > :where(") && styles.includes("contain-intrinsic-size: auto 72px"),
+    "Markdown blocks skip offscreen layout while preserving learned intrinsic sizes",
+  );
+  ok(markdownSource.includes("streaming?: boolean"), "Markdown exposes an explicit streaming state");
+  ok(messageSource.includes("streaming={item.streaming}"), "assistant messages pass streaming state to Markdown");
   ok(
     markdownRendererSource.includes('lazy(() => import("./MermaidDiagram"))'),
     "MarkdownRenderer lazy-loads the Mermaid renderer",
@@ -141,6 +159,152 @@ console.log("\nmermaid rendering");
     markdownRendererSource.includes('lang === "mermaid"'),
     "MarkdownRenderer routes mermaid fenced code blocks to the Mermaid renderer",
   );
+}
+
+{
+  const section = (index: number) => `# Section ${index}\n\n${`paragraph-${index} `.repeat(700)}\n\n`;
+  const document = Array.from({ length: 8 }, (_, index) => section(index)).join("");
+  const chunks = splitStableMarkdownSections(document);
+  ok(chunks.length >= 4, "large headed Markdown is divided into bounded stable chunks");
+  eq(chunks.join(""), document, "stable Markdown chunking preserves every source byte");
+
+  const appended = splitStableMarkdownSections(document + section(8));
+  eq(appended.slice(0, chunks.length).join(""), document, "appending a section leaves all completed chunks unchanged");
+
+  const fenced = `${section(0)}\`\`\`text\n# not a heading\n${"fenced content\n".repeat(900)}\`\`\`\n\n${section(1)}`;
+  const fencedChunks = splitStableMarkdownSections(fenced);
+  eq(fencedChunks.join(""), fenced, "fenced Markdown chunking preserves source bytes");
+  ok(!fencedChunks.some((chunk) => chunk.startsWith("# not a heading")), "headings inside fenced code never become section boundaries");
+
+  const referenced = `${document}\n[shared]: https://example.com\n\nUse [shared].\n`;
+  eq(splitStableMarkdownSections(referenced).length, 1, "cross-section references use one semantic Markdown renderer");
+
+  const nestedFence = `1. item\n\n   ${"long paragraph ".repeat(1_000)}\n\n   \`\`\`text\n   code\n   \`\`\`\n\n2. next\n`;
+  const nestedChunks = splitStableMarkdownSections(nestedFence);
+  eq(nestedChunks.length, 1, "list containers stay in one semantic Markdown renderer");
+  const renderMarkdown = (source: string) => renderToStaticMarkup(<ReactMarkdown>{source}</ReactMarkdown>);
+  eq(
+    nestedChunks.map(renderMarkdown).join(""),
+    renderMarkdown(nestedFence),
+    "stable Markdown optimization preserves nested list and fence DOM semantics",
+  );
+}
+
+{
+  eq(streamingMarkdownCommitInterval(1_000), 50, "short streaming Markdown uses the 50ms parse budget");
+  eq(streamingMarkdownCommitInterval(8_000), 150, "medium streaming Markdown uses the 150ms parse budget");
+  eq(streamingMarkdownCommitInterval(32_000), 300, "long streaming Markdown uses the 300ms parse budget");
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  let nextFrameID = 1;
+  let pendingFrame: FrameRequestCallback | undefined;
+  globalThis.requestAnimationFrame = ((callback: FrameRequestCallback) => {
+    pendingFrame = callback;
+    return nextFrameID++;
+  }) as typeof requestAnimationFrame;
+  globalThis.cancelAnimationFrame = (() => {
+    pendingFrame = undefined;
+  }) as typeof cancelAnimationFrame;
+
+  const root = createRoot(rootEl);
+  function MarkdownTextProbe({ text, streaming }: { text: string; streaming: boolean }) {
+    return <div>{useRenderedMarkdownText(text, streaming)}</div>;
+  }
+  await act(async () => {
+    root.render(<MarkdownTextProbe text="start" streaming />);
+    await flushTimers();
+  });
+  eq(rootEl.textContent, "start", "streaming Markdown starts from the current text");
+
+  await act(async () => {
+    root.render(<MarkdownTextProbe text="start middle" streaming />);
+    await flushTimers();
+    root.render(<MarkdownTextProbe text="start middle end" streaming />);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
+  eq(rootEl.textContent, "start", "streaming Markdown holds intermediate text until the animation frame");
+  const frame = pendingFrame;
+  await act(async () => {
+    frame?.(performance.now());
+    await flushTimers();
+  });
+  eq(rootEl.textContent, "start middle end", "one animation frame commits the latest streamed text");
+
+  pendingFrame = undefined;
+  await act(async () => {
+    root.render(<MarkdownTextProbe text="start middle end later" streaming />);
+    await flushTimers();
+  });
+  eq(pendingFrame, undefined, "streaming Markdown waits for a fresh budget after the previous DOM commit");
+
+  await act(async () => {
+    root.render(<MarkdownTextProbe text="complete" streaming={false} />);
+  });
+  eq(rootEl.textContent, "complete", "short stream finalization still commits immediately");
+
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  let pendingIdle: (() => void) | undefined;
+  Object.defineProperty(dom.window, "requestIdleCallback", {
+    configurable: true,
+    value: (callback: () => void) => {
+      pendingIdle = callback;
+      return 1;
+    },
+  });
+  Object.defineProperty(dom.window, "cancelIdleCallback", {
+    configurable: true,
+    value: () => {
+      pendingIdle = undefined;
+    },
+  });
+  Object.defineProperty(dom.window, "setTimeout", {
+    configurable: true,
+    value: (callback: TimerHandler) => {
+      if (typeof callback === "function") callback();
+      return 1;
+    },
+  });
+  Object.defineProperty(dom.window, "clearTimeout", {
+    configurable: true,
+    value: () => undefined,
+  });
+
+  const root = createRoot(rootEl);
+  const streamed = "a".repeat(8_100);
+  const finalText = `${streamed} final`;
+  function MarkdownTextProbe({ text, streaming }: { text: string; streaming: boolean }) {
+    return <div>{useRenderedMarkdownText(text, streaming)}</div>;
+  }
+  await act(async () => {
+    root.render(<MarkdownTextProbe text={streamed} streaming />);
+    await flushTimers();
+  });
+  await act(async () => {
+    root.render(<MarkdownTextProbe text={finalText} streaming={false} />);
+    await flushTimers();
+  });
+  eq(rootEl.textContent, streamed, "large Markdown keeps its committed content while finalization waits for idle");
+  ok(Boolean(pendingIdle), "large Markdown schedules one idle finalization callback");
+
+  await act(async () => {
+    pendingIdle?.();
+    await flushTimers();
+  });
+  eq(rootEl.textContent, finalText, "idle finalization commits the complete large Markdown text");
+
+  await act(async () => root.unmount());
+  dom.window.close();
 }
 
 {

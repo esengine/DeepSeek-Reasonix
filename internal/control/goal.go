@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
@@ -73,6 +74,25 @@ type goalState struct {
 	Todos              []evidence.TodoItem         `json:"todos,omitempty"`
 }
 
+// goalMachineSnapshot is an in-memory rollback point for durable Goal updates.
+// Persistence paths and mutexes are deliberately excluded.
+type goalMachineSnapshot struct {
+	goal               string
+	status             string
+	researchMode       GoalResearchMode
+	autoResearchTaskID string
+	scopeID            string
+	deliveryCheckpoint evidence.DeliveryCheckpoint
+	turns              int
+	blocks             int
+	block              string
+	interceptMsg       string
+	intercepts         int
+	strict             bool
+	selfCheckDone      bool
+	idleTurns          int
+}
+
 // goalAdvanceInput carries everything the FSM needs for one continuation step,
 // gathered by the caller off the machine's lock.
 type goalAdvanceInput struct {
@@ -102,6 +122,30 @@ func goalStatePath(sessionPath string) string {
 func (g *goalMachine) setStatePath(path string) {
 	g.mu.Lock()
 	g.statePath = path
+	g.mu.Unlock()
+}
+
+func (g *goalMachine) capture() goalMachineSnapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return goalMachineSnapshot{
+		goal: g.goal, status: g.status, researchMode: g.researchMode,
+		autoResearchTaskID: g.autoResearchTaskID, scopeID: g.scopeID,
+		deliveryCheckpoint: g.deliveryCheckpoint, turns: g.turns,
+		blocks: g.blocks, block: g.block, interceptMsg: g.interceptMsg,
+		intercepts: g.intercepts, strict: g.strict,
+		selfCheckDone: g.selfCheckDone, idleTurns: g.idleTurns,
+	}
+}
+
+func (g *goalMachine) restore(snapshot goalMachineSnapshot) {
+	g.mu.Lock()
+	g.goal, g.status, g.researchMode = snapshot.goal, snapshot.status, snapshot.researchMode
+	g.autoResearchTaskID, g.scopeID = snapshot.autoResearchTaskID, snapshot.scopeID
+	g.deliveryCheckpoint, g.turns = snapshot.deliveryCheckpoint, snapshot.turns
+	g.blocks, g.block = snapshot.blocks, snapshot.block
+	g.interceptMsg, g.intercepts = snapshot.interceptMsg, snapshot.intercepts
+	g.strict, g.selfCheckDone, g.idleTurns = snapshot.strict, snapshot.selfCheckDone, snapshot.idleTurns
 	g.mu.Unlock()
 }
 
@@ -374,20 +418,25 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 	return g.statePath, b, true
 }
 
-// writeState persists pre-marshaled goal-state bytes to disk, OFF mu and
+// writeStateErr persists pre-marshaled goal-state bytes to disk, OFF mu and
 // serialized by writeMu so concurrent saves don't interleave or land out of
-// order. Best-effort: failures are logged, not surfaced.
-func (g *goalMachine) writeState(path string, data []byte) {
+// order. Atomic replacement keeps the prior state intact when a write fails.
+func (g *goalMachine) writeStateErr(path string, data []byte) error {
 	if path == "" || data == nil {
-		return
+		return nil
 	}
 	g.writeMu.Lock()
 	defer g.writeMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		slog.Warn("controller: goal state dir", "err", err)
-		return
+		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	return fileutil.AtomicWriteFile(path, data, 0o644)
+}
+
+// writeState preserves the existing best-effort behavior for background Goal
+// progress. Callers that need transactional persistence use writeStateErr.
+func (g *goalMachine) writeState(path string, data []byte) {
+	if err := g.writeStateErr(path, data); err != nil {
 		slog.Warn("controller: write goal state", "err", err)
 	}
 }

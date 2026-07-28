@@ -854,11 +854,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// so task tools created later still receive the session-shared substrate.
 	var capRuntime *agent.MCPCapabilityRuntime
 	newTaskTool := func() *agent.TaskTool {
-		return agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
-			entry.ContextWindow, cfg.Agent.RecentKeep, cfg.Agent.SoftCompactRatio, cfg.Agent.ToolResultSnipRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-			cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
-			keepPolicy,
-			taskModel, taskEffort, resolveSubagentProvider).
+		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
+			Provider:            execProv,
+			Pricing:             entry.Price,
+			ParentRegistry:      reg,
+			MaxSteps:            maxSteps,
+			ContextWindow:       entry.ContextWindow,
+			RecentKeep:          cfg.Agent.RecentKeep,
+			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:        cfg.Agent.CompactRatio,
+			CompactForceRatio:   cfg.Agent.CompactForceRatio,
+			Temperature:         cfg.Agent.Temperature,
+			ArchiveDir:          config.ArchiveDir(),
+			SysPrompt:           "",
+			Gate:                headlessGate,
+			KeepPolicy:          keepPolicy,
+			SubagentModel:       taskModel,
+			SubagentEffort:      taskEffort,
+			ResolveProvider:     resolveSubagentProvider,
+		}).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
 			WithMaxSubagentDepth(maxSubagentDepth).

@@ -2183,14 +2183,47 @@ func (c *Controller) SetGoal(goal string) {
 	c.SetGoalWithResearchMode(goal, GoalResearchAuto)
 }
 
+// SetGoalDurable updates the Goal only when its sidecar can be replaced
+// atomically. Remote Profile transactions persist autoResearchCreateToken
+// before calling this method so crash recovery owns any newly-created task.
+func (c *Controller) SetGoalDurable(goal, autoResearchCreateToken string) error {
+	snapshot := c.goals.capture()
+	setup := c.prepareAutoResearchTask(goal, GoalResearchAuto, autoResearchCreateToken)
+	path, data, persist := c.goals.set(goal, GoalResearchAuto, setup.taskID, c.goalTodos())
+	if setup.blockReason != "" {
+		path, data, persist = c.goals.stop(GoalStatusBlocked, c.goalTodos())
+	}
+	if persist {
+		if err := c.goals.writeStateErr(path, data); err != nil {
+			c.goals.restore(snapshot)
+			if setup.created && c.autoResearch != nil {
+				if removeErr := c.autoResearch.RemoveTask(setup.taskID, setup.createToken); removeErr != nil {
+					slog.Warn("controller: rollback autoresearch task", "task_id", setup.taskID, "err", removeErr)
+				}
+			}
+			return err
+		}
+	}
+	if setup.notice != "" {
+		c.notice(setup.notice)
+	}
+	if setup.blockReason != "" {
+		c.notice("autoresearch resume failed: " + setup.blockReason)
+	}
+	return nil
+}
+
 func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResearchMode) {
-	taskID, blockReason := c.ensureAutoResearchTask(goal, researchMode)
-	path, data, ok := c.goals.set(goal, researchMode, taskID, c.goalTodos())
+	setup := c.prepareAutoResearchTask(goal, researchMode, "")
+	if setup.notice != "" {
+		c.notice(setup.notice)
+	}
+	path, data, ok := c.goals.set(goal, researchMode, setup.taskID, c.goalTodos())
 	c.persistGoalState(path, data, ok)
-	if blockReason != "" {
+	if setup.blockReason != "" {
 		path, data, ok := c.goals.stop(GoalStatusBlocked, c.goalTodos())
 		c.persistGoalState(path, data, ok)
-		c.notice("autoresearch resume failed: " + blockReason)
+		c.notice("autoresearch resume failed: " + setup.blockReason)
 	}
 }
 
@@ -2217,25 +2250,33 @@ func (c *Controller) persistGoalDeliveryCheckpoint() {
 	c.persistGoalState(path, data, ok)
 }
 
-func (c *Controller) ensureAutoResearchTask(goal string, researchMode GoalResearchMode) (string, string) {
+type autoResearchSetup struct {
+	taskID      string
+	createToken string
+	blockReason string
+	notice      string
+	created     bool
+}
+
+func (c *Controller) prepareAutoResearchTask(goal string, researchMode GoalResearchMode, createToken string) autoResearchSetup {
 	goal = strings.TrimSpace(goal)
 	if goal == "" || c.autoResearch == nil || !shouldUseAutoResearch(goal, researchMode) {
-		return "", ""
+		return autoResearchSetup{}
 	}
 	currentGoal, currentStatus, _, currentTaskID := c.goals.snapshot()
 	if strings.TrimSpace(currentGoal) == goal && currentStatus == GoalStatusRunning && strings.TrimSpace(currentTaskID) != "" {
-		return currentTaskID, ""
+		return autoResearchSetup{taskID: currentTaskID}
 	}
 	if task, ok, err := c.autoResearch.ResumeFromGoalText(goal); err != nil {
 		slog.Warn("controller: resume autoresearch task", "err", err)
 		if ok {
-			return "", err.Error()
+			return autoResearchSetup{blockReason: err.Error()}
 		}
 	} else if ok {
-		c.notice("autoresearch task resumed: " + task.ID)
-		return task.ID, ""
+		return autoResearchSetup{taskID: task.ID, notice: "autoresearch task resumed: " + task.ID}
 	}
 	task, err := c.autoResearch.CreateTask(goal, autoresearch.CreateOptions{
+		CreateToken: createToken,
 		AllowedOperations: autoresearch.AllowedOperations{
 			Write:   true,
 			Network: false,
@@ -2245,10 +2286,14 @@ func (c *Controller) ensureAutoResearchTask(goal string, researchMode GoalResear
 	})
 	if err != nil {
 		slog.Warn("controller: create autoresearch task", "err", err)
-		return "", ""
+		return autoResearchSetup{}
 	}
-	c.notice("autoresearch task created: " + task.ID)
-	return task.ID, ""
+	return autoResearchSetup{
+		taskID:      task.ID,
+		createToken: task.CreateToken,
+		notice:      "autoresearch task created: " + task.ID,
+		created:     true,
+	}
 }
 
 func defaultAutoResearchSuccessCriteria() []autoresearch.SuccessCriterion {
