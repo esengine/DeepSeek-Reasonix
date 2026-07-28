@@ -458,16 +458,13 @@ func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) err
 			if explicit == "" {
 				explicit = strings.TrimSpace(cfg.Agent.SubagentModel)
 			}
-			// explicit stays empty when both per-subagent and global
-			// subagent_model are unset, so resolveModelForCLI applies
-			// the keyless-default fallback (issue #6996). A user-set
-			// subagent_model is treated as an explicit choice: the
-			// helper fails fast on keyless rather than silently
-			// rerouting to a different provider.
-			model, _, err := resolveModelForCLI(explicit, cfg)
-			if err != nil {
-				return err
+			model := explicit
+			if model == "" {
+				model, _, _ = cfg.ResolveNewSessionChatModel()
 			}
+			// Profile editing is an offline configuration operation. The model
+			// must resolve so effort capabilities can be validated, but it does
+			// not need a credential until the profile is actually run.
 			entry, ok := cfg.ResolveModel(model)
 			if !ok {
 				return fmt.Errorf("unknown subagent model %q", model)

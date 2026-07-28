@@ -107,6 +107,11 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
+	// AutoPricingCurrency supplies a frontend-resolved pricing region when the
+	// persisted desktop currency and language settings are all automatic. It is
+	// applied to the in-memory config only and never turns Auto into a persisted
+	// CNY/USD choice.
+	AutoPricingCurrency string
 	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
@@ -197,6 +202,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	applyRuntimeAutoPricingCurrency(cfg, opts.AutoPricingCurrency)
 	// Arm the credential-protection layers from the user-global [secrets]
 	// section before any tool, hook, or plugin subprocess can spawn. Package
 	// globals are correct here because [secrets] is user-global (project
@@ -204,19 +210,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	secrets.SetFilterSubprocessEnv(cfg.Secrets.FilterSubprocessEnv)
 	secrets.SetProtectSensitiveFiles(cfg.Secrets.ProtectSensitiveFiles)
 	secrets.RegisterCredentialEnvKeys(cfg.CredentialEnvNames())
-	// Fall through a keyless default_model to the next provider with a
-	// configured API key instead of hard-failing every command on
-	// "missing env X_API_KEY" (issue #6996). The fallback only kicks in
-	// when the caller did NOT pass an explicit opts.Model — explicit
-	// choices (--model, ACP session params) still fail loudly if they
-	// point at a keyless ref, so we never silently reroute a model the
-	// user asked for by name.
+	// Fall through a keyless default_model to the next configured chat model
+	// instead of hard-failing every command on "missing env X_API_KEY" (issue
+	// #6996). The fallback only kicks in when the caller did not pass an
+	// explicit opts.Model; explicit choices still fail loudly.
 	modelName := opts.Model
 	if modelName == "" {
-		if resolved, _, ok := cfg.ResolveModelWithFallback(""); ok {
+		if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
 			modelName = resolved
-		} else {
-			modelName = cfg.DefaultModel
 		}
 	}
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, modelName)
@@ -752,9 +753,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if !cfg.SafeMode() {
 		resolvedHooks = hook.Load(hook.LoadOptions{ProjectRoot: root})
 	}
+	hookRuntime := hook.RuntimeOptions{}
+	if shell.Kind == sandbox.ShellBash {
+		hookRuntime.BashPath = shell.Path
+	}
 	hookRunner := hook.NewRunner(
-		resolvedHooks,
-		root, nil,
+		resolvedHooks, root, hook.NewDefaultSpawner(hookRuntime),
 		func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg}) },
 	)
 	// The `task` tool spawns sub-agents that reuse the parent's provider and
@@ -1765,6 +1769,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	return ctrl, nil
 }
 
+func applyRuntimeAutoPricingCurrency(cfg *config.Config, currency string) {
+	if cfg != nil {
+		cfg.ApplyRuntimeAutoPricingCurrency(currency)
+	}
+}
+
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 	path := rememberPermissionConfigPath(workspaceRoot)
 	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
@@ -2179,6 +2189,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"api_key_source":     e.APIKeySourceLabel(),
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
+			"supported_efforts":  e.SupportedEfforts,
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"chat_url":           e.ChatURL,
 			"headers":            e.Headers,

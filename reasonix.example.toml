@@ -14,6 +14,8 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # cursor_shape = "bar"   # block|underline|bar; text input cursor shape; slim default avoids covering CJK characters
 
 [desktop]
+# language = "auto"   # auto|en|zh; auto follows the browser/OS locale
+# currency = "auto"   # auto|CNY|USD; explicitly set it independently from language
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
 # theme = "auto"   # desktop only: auto|dark|light
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
@@ -62,8 +64,9 @@ api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
 # Optional per-model context budgets. Omitted models inherit context_window.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
-# Official DeepSeek providers seed RMB prices by default.
-# Set prices explicitly only when you want to pin a currency/rate.
+# Official DeepSeek providers use CNY or USD regional prices from
+# [desktop].currency; auto follows the selected language and defaults to USD.
+# Set prices explicitly only when you want to pin custom rates.
 # prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
 # DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
 effort      = "high"

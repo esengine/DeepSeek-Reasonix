@@ -90,7 +90,8 @@ cannot claim that it already passed the approval job.
 Repository `write` access remains a privileged role because repository-level
 Actions secrets are available to workflows on repository branches. Production
 Windows signing has an additional provider-side boundary: SignPath accepts the
-trusted `.github/workflows/release-desktop.yml` build definition only when its
+trusted `.github/workflows/release-stable.yml` and
+`.github/workflows/release-desktop.yml` build definitions only when their
 origin branch is exactly `main-v2`. Never broaden that policy to `**` or a
 tag-shaped wildcard. Other publication credentials should move to protected
 environment secrets or provider-side OIDC/trusted-publishing policies when
@@ -151,8 +152,10 @@ strict separation from repository writers is required.
    exact current `main-v2` commit, renders the reviewed release notes, and runs
    the cache guard. It then **waits once for a configured reviewer to approve the
    GitHub `release` environment** before invoking all three publishers. The
-   approval records the immutable release commit; every publisher checks out
-   that SHA and fails if its remote tag moves afterward.
+   approval records the immutable release commit. Before any publisher starts,
+   **Release stable** runs a zero-publication AMD64/ARM64 SignPath preflight for
+   both the payload and installer stages. Every publisher checks out that SHA
+   and fails if its remote tag moves afterward.
    Windows signing then runs automatically under SignPath trusted-build and
    origin verification: each architecture signs its installed executable
    payload first, rebuilds the portable archive and NSIS package, and finally
@@ -213,12 +216,17 @@ strict separation from repository writers is required.
   request through the SignPath API. Human SignPath approvers remain available
   for emergency recovery, but normal releases do not require additional
   SignPath clicks. SignPath must restrict `release-signing` to the trusted
-  `.github/workflows/release-desktop.yml` build definition and exact `main-v2`
+  `.github/workflows/release-stable.yml` and
+  `.github/workflows/release-desktop.yml` build definitions and exact `main-v2`
   branch. Stable and prerelease tag events are relayed to that protected control
-  plane; do not replace the exact branch match with `**`, `v*`, or
-  `desktop-v*`. Set `SIGNPATH_RELEASE_SIGNING_READY=true` only after AMD64 and
-  ARM64 pass a production certificate smoke run; Preview and Stable both fail
-  closed while the production signing path is not ready.
+  plane; do not replace exact matches with wildcards. The machine-readable
+  `.signpath/contracts/release-signing.yml` policy is checked against the parsed
+  workflow call graph in CI. Standalone Desktop releases require
+  `SIGNPATH_RELEASE_SIGNING_ATTESTATION` to match the current contract hash;
+  `signing_preflight=true` refreshes it only after both architectures complete
+  both signing stages. Stable performs the same live preflight in its approved
+  run before CLI, npm, or Desktop publication, so a provider-side policy drift
+  fails before any public channel starts.
 - Desktop in-app updates use R2 first, then the `crash.reasonix.io` desktop release
   gateway. The gateway resolves the `desktop-v*` release line directly and never uses
   GitHub's repository-wide `/releases/latest`, because plain `v*` tags are the CLI

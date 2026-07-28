@@ -92,7 +92,7 @@ func BuildHeadlessApprovalGate(policy permission.Policy, mode string) *freshHuma
 	switch normalizeToolApprovalMode(mode) {
 	case ToolApprovalYolo:
 		policy.Mode = permission.Allow
-		return NewHeadlessPermissionGate(policy)
+		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, nil), dynamicBashBypass: true}
 	case ToolApprovalAuto:
 		policy.Mode = permission.Allow
 		return &freshHumanHeadlessGate{gate: permission.NewGate(policy, denyPermissionApprover{})}
@@ -156,12 +156,18 @@ func (g *SharedHeadlessGate) ExplicitlyDenies(toolName string, args json.RawMess
 }
 
 type freshHumanHeadlessGate struct {
-	gate *permission.Gate
+	gate              *permission.Gate
+	dynamicBashBypass bool
 }
 
 func (g *freshHumanHeadlessGate) Check(ctx context.Context, toolName string, args json.RawMessage, readOnly bool) (bool, string, error) {
 	if RequiresFreshHumanApprovalTool(toolName) {
 		return false, "this tool requires fresh human approval and cannot run in a non-interactive session. Use an interactive session or a user-initiated memory command.", nil
+	}
+	if strings.EqualFold(toolName, "bash") && permission.BashSubjectRequiresExplicitApproval(permission.Subject(args)) {
+		if g.gate.Policy.Decide(toolName, readOnly, args) != permission.Allow && !g.dynamicBashBypass {
+			return false, "this dynamic shell command requires human approval and cannot run in a non-interactive session. Use an interactive session or YOLO mode.", nil
+		}
 	}
 	return g.gate.Check(ctx, toolName, args, readOnly)
 }
@@ -183,41 +189,54 @@ func (a *approvalManager) preApproved(tool, subject string, args json.RawMessage
 // class. Fresh user decisions may reuse an explicit session grant, but they are
 // never answered by YOLO/full-access or the approved-plan execution window.
 func (a *approvalManager) preApprovedForDecision(tool, subject string, args json.RawMessage, fresh bool) bool {
+	return a.preApprovedForDecisionOptions(tool, subject, args, fresh, false)
+}
+
+func (a *approvalManager) preApprovedForDecisionOptions(tool, subject string, args json.RawMessage, fresh, requireHuman bool) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if fresh {
 		return a.sessionGrantAllowsLocked(tool, subject)
 	}
+	if requireHuman {
+		return a.toolApprovalMode == ToolApprovalYolo || a.sessionGrantAllowsLocked(tool, subject)
+	}
 	return a.bypassAllowsLocked(tool, subject, args) || a.sessionGrantAllowsLocked(tool, subject)
+}
+
+func (a *approvalManager) preApprovedForRequiredHuman(tool, subject string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.toolApprovalMode == ToolApprovalYolo || a.sessionGrantAllowsLocked(tool, subject)
 }
 
 // register allocates an approval ID, records the pending prompt, and returns the
 // reply channel the resolve path will signal.
 func (a *approvalManager) register(tool, subject, reason string) (string, chan approvalReply) {
-	return a.registerDecision(tool, subject, reason, false)
+	return a.registerDecision(tool, subject, reason, false, false)
 }
 
 // registerDecision allocates an approval ID for either an ordinary tool
 // permission or a fresh user decision. Fresh decisions are not auto-drained when
 // the user switches to auto/yolo tool approval while the prompt is visible.
-func (a *approvalManager) registerDecision(tool, subject, reason string, fresh bool) (string, chan approvalReply) {
-	return a.registerDecisionKind(tool, subject, reason, fresh, "", nil)
+func (a *approvalManager) registerDecision(tool, subject, reason string, fresh, requireHuman bool) (string, chan approvalReply) {
+	return a.registerDecisionKind(tool, subject, reason, fresh, requireHuman, "", nil)
 }
 
 // registerDecisionKind is registerDecision with optional Kind/Recovery payload
 // so Auto Guard cards survive ReplayPendingPrompts.
-func (a *approvalManager) registerDecisionKind(tool, subject, reason string, fresh bool, kind string, rec *event.RecoveryApproval) (string, chan approvalReply) {
+func (a *approvalManager) registerDecisionKind(tool, subject, reason string, fresh, requireHuman bool, kind string, rec *event.RecoveryApproval) (string, chan approvalReply) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.nextID++
 	id := strconv.Itoa(a.nextID)
 	reply := make(chan approvalReply, 1)
 	autoDrain := false
-	if !fresh {
+	if !fresh && !requireHuman {
 		autoDrain = a.autoApprovalWouldAllowLocked(tool, subject)
 	}
 	a.approvals[id] = pendingApproval{
-		tool: tool, subject: subject, reason: reason, fresh: fresh,
+		tool: tool, subject: subject, reason: reason, fresh: fresh, requireHuman: requireHuman,
 		autoDrain: autoDrain, kind: kind, recovery: rec, reply: reply,
 	}
 	return id, reply
@@ -475,6 +494,9 @@ func (a *approvalManager) drainLocked(includeExplicitAsk bool) []drainedApproval
 	pending := make([]drainedApproval, 0, len(a.approvals))
 	for id, approval := range a.approvals {
 		if approval.fresh || requiresFreshApprovalTool(approval.tool) {
+			continue
+		}
+		if approval.requireHuman && !includeExplicitAsk {
 			continue
 		}
 		if !includeExplicitAsk && !approval.autoDrain {

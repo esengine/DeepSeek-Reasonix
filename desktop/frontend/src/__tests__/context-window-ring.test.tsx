@@ -148,6 +148,31 @@ console.log("\ncontext window ring");
 
 {
   const dom = installDom();
+  installContextPanelMock(async () => contextPanelInfo(0));
+
+  const { root } = await renderRing({ turnCost: 0.125, currency: "$" });
+  const button = document.querySelector(".context-ring") as HTMLButtonElement | null;
+  if (!button) throw new Error("missing context ring button");
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+    await wait(220);
+  });
+  const turnCostRow = [...document.querySelectorAll(".context-ring-popover__row")]
+    .find((row) => row.querySelector(".context-ring-popover__label")?.textContent === "turn cost");
+  eq(
+    turnCostRow?.querySelector(".context-ring-popover__value")?.textContent,
+    "$0.1250",
+    "turn cost uses the session currency before panel info is available",
+  );
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
   const calls: string[] = [];
   const resolvers = new Map<string, (value: ContextPanelInfo) => void>();
   installContextPanelMock((tabId) => {

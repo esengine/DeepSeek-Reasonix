@@ -169,6 +169,33 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	}
 }
 
+func TestDesktopCurrencyNormalizesAndRefreshesOfficialPricing(t *testing.T) {
+	c := Default()
+	c.Desktop.Language = "zh"
+	if err := c.SetDesktopCurrency("usd"); err != nil {
+		t.Fatalf("SetDesktopCurrency USD: %v", err)
+	}
+	if got := c.DesktopCurrency(); got != "USD" {
+		t.Fatalf("desktop currency = %q, want USD", got)
+	}
+	flash, _ := c.Provider("deepseek-flash")
+	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+		t.Fatalf("USD flash price = %+v", flash.Price)
+	}
+	if err := c.SetDesktopCurrency("auto"); err != nil {
+		t.Fatalf("SetDesktopCurrency auto: %v", err)
+	}
+	if got := c.DesktopCurrency(); got != "" {
+		t.Fatalf("auto desktop currency = %q, want empty", got)
+	}
+	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
+		t.Fatalf("auto Chinese flash price = %+v", flash.Price)
+	}
+	if err := c.SetDesktopCurrency("EUR"); err == nil {
+		t.Fatal("SetDesktopCurrency accepted unsupported EUR")
+	}
+}
+
 func TestDesktopLayoutStyleNormalizes(t *testing.T) {
 	if got := Default().DesktopLayoutStyle(); got != "workbench" {
 		t.Fatalf("default desktop layout style = %q, want workbench", got)
@@ -1982,23 +2009,24 @@ legacy_preference = "keep"
 	}
 }
 
-func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) {
+func TestProviderEntriesConfigEqualIgnoresRuntimeState(t *testing.T) {
 	a := ProviderEntry{Name: "relay", Kind: "openai", BaseURL: "https://relay.example/v1", Model: "m", APIKeyEnv: "RELAY_API_KEY"}
 	b := a
 	a.resolvedAPIKey = "old-secret"
 	a.resolvedSource = CredentialSource{Kind: CredentialSourceCredentials, Label: "old"}
+	a.persistedOfficialCurrency = "USD"
 	b.resolvedAPIKey = "new-secret"
 	b.resolvedSource = CredentialSource{Kind: CredentialSourceEnvironment, Label: "new"}
 	if !ProviderEntriesConfigEqual(a, b) {
-		t.Fatal("runtime-only credential state caused a persisted provider conflict")
+		t.Fatal("runtime-only provider state caused a persisted provider conflict")
 	}
 	b.Headers = map[string]string{"X-External": "changed"}
 	if ProviderEntriesConfigEqual(a, b) {
 		t.Fatal("persisted provider field change was ignored")
 	}
 	snapshot := ProviderEntryConfigSnapshot(a)
-	if snapshot.resolvedAPIKey != "" || snapshot.resolvedSource != (CredentialSource{}) {
-		t.Fatal("provider config snapshot retained runtime credential state")
+	if snapshot.resolvedAPIKey != "" || snapshot.resolvedSource != (CredentialSource{}) || snapshot.persistedOfficialCurrency != "" {
+		t.Fatal("provider config snapshot retained runtime state")
 	}
 	cfg := &Config{Providers: []ProviderEntry{a}}
 	updated := a
@@ -2009,7 +2037,7 @@ func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) 
 		t.Fatal(err)
 	}
 	got, _ := cfg.Provider("relay")
-	if got.APIKey() != "old-secret" || got.Headers["X-Replayed"] != "yes" {
+	if got.APIKey() != "old-secret" || got.Headers["X-Replayed"] != "yes" || got.persistedOfficialCurrency != "USD" {
 		t.Fatalf("runtime-preserving upsert = %+v", got)
 	}
 	updated.APIKeyEnv = "NEW_RELAY_API_KEY"
@@ -2019,6 +2047,9 @@ func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) 
 	got, _ = cfg.Provider("relay")
 	if got.resolvedAPIKey != "" || got.resolvedSource != (CredentialSource{}) {
 		t.Fatal("runtime credential survived an api_key_env change")
+	}
+	if got.persistedOfficialCurrency != "USD" {
+		t.Fatal("pricing provenance was lost after an api_key_env change")
 	}
 }
 
@@ -2050,6 +2081,85 @@ func TestSaveToExistingProjectRemovesPluginDelta(t *testing.T) {
 	}
 	if len(got.Plugins) != 0 {
 		t.Fatalf("plugins = %+v, want none", got.Plugins)
+	}
+}
+
+func TestSaveToNewProjectKeepsPluginSourcesSeparate(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "unknown", Command: "unknown-mcp"},
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, name := range []string{"unknown", "project"} {
+		if !strings.Contains(text, `name    = "`+name+`"`) {
+			t.Fatalf("new project config missing plugin %q:\n%s", name, text)
+		}
+	}
+	for _, name := range []string{"user", "mcp-json", "legacy", "package"} {
+		if strings.Contains(text, `name    = "`+name+`"`) {
+			t.Fatalf("new project config leaked plugin %q:\n%s", name, text)
+		}
+	}
+}
+
+func TestSaveToExistingProjectKeepsPluginSourcesSeparate(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("# keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `name    = "project"`) || strings.Contains(text, `name    = "user"`) || strings.Contains(text, `name    = "mcp-json"`) {
+		t.Fatalf("existing project config crossed plugin source boundaries:\n%s", text)
+	}
+}
+
+func TestSaveToExistingProjectRemovesPluginDeltaWithOnlyForeignSources(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[[plugins]]\nname = \"old\"\ncommand = \"old-mcp\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "[[plugins]]") {
+		t.Fatalf("project plugin block remained after its last owned entry was removed:\n%s", body)
 	}
 }
 

@@ -1352,6 +1352,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
     bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopCurrency: normalizeDesktopCurrency(view.desktopCurrency),
     desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
@@ -1363,6 +1364,12 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     checkUpdates: view.checkUpdates !== false,
     updateChannel: view.updateChannel === "preview" ? "preview" : "stable",
   };
+}
+
+type DesktopCurrency = "" | "CNY" | "USD";
+
+function normalizeDesktopCurrency(currency: string | undefined): DesktopCurrency {
+  return currency === "CNY" || currency === "USD" ? currency : "";
 }
 
 type CloseBehavior = "background" | "quit";
@@ -1509,6 +1516,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const desktopCurrency = normalizeDesktopCurrency(s.desktopCurrency);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
@@ -1676,6 +1684,20 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               onClick={() => setLanguage(pref)}
             >
               {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.currency")}>
+        <div className="set-seg">
+          {(["", "CNY", "USD"] as DesktopCurrency[]).map((currency) => (
+            <button
+              key={currency || "auto"}
+              className={`set-seg__btn${desktopCurrency === currency ? " set-seg__btn--on" : ""}`}
+              disabled={busy || agentRunning}
+              onClick={() => void apply(() => app.SetDesktopCurrency(currency))}
+            >
+              {currency === "" ? t("settings.currencyAuto") : currency}
             </button>
           ))}
         </div>

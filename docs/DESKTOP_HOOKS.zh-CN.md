@@ -105,7 +105,8 @@ Hooks 让 Reasonix 在会话、用户输入、工具调用、模型返回、压�
 `command` 默认通过平台 shell 执行：macOS/Linux 使用 `sh -c`，Windows 使用
 `cmd /c`。如果 Windows hook 自己显式写了裸命令 `sh -c` 或 `bash -c`，Reasonix
 会查找 Git for Windows 自带的 Bash 并直接使用它；带目录的显式解释器路径保持不变。
-找不到 Git Bash 时会返回可操作的依赖提示。Hook stdout/stderr 中的 Windows 旧代码页
+通过 `[tools.shell]` 配置的自定义 Bash 路径同样会被 Hook 复用；找不到 Git Bash 时，
+插件 Doctor 和能力诊断会提前显示可操作的依赖提示。Hook stdout/stderr 中的 Windows 旧代码页
 文本会转换为 UTF-8，避免中文错误信息显示成乱码。stdin 是 Reasonix 写入的一行 JSON，
 见下面的 payload 表。
 

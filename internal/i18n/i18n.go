@@ -160,16 +160,21 @@ type Messages struct {
 	AskSubmitHint      string // submit-tab keyboard hint
 
 	// output style listing (/output-style).
-	OutputStyleNone    string // no styles available
-	OutputStyleHeader  string // header above the listing
-	OutputStyleHint    string // how to select one
-	ThemeHeader        string // header above the /theme listing
-	ThemeHint          string // how to select a theme
-	ThemeChangedFmt    string // "/theme <name>" succeeded
-	ThemeUnknownFmt    string // "/theme <name>" unknown
-	LanguageHeader     string // header above the /language listing
-	LanguageHint       string // how to select a language
-	LanguageChangedFmt string // "/language <tag>" succeeded, %s = saved tag, %s = resolved tag
+	OutputStyleNone           string // no styles available
+	OutputStyleHeader         string // header above the listing
+	OutputStyleHint           string // how to select one
+	ThemeHeader               string // header above the /theme listing
+	ThemeHint                 string // how to select a theme
+	ThemeChangedFmt           string // "/theme <name>" succeeded
+	ThemeUnknownFmt           string // "/theme <name>" unknown
+	LanguageHeader            string // header above the /language listing
+	LanguageHint              string // how to select a language
+	LanguageChangedFmt        string // "/language <tag>" succeeded, %s = saved tag, %s = resolved tag
+	CurrencyHeader            string // header above the /currency listing
+	CurrencyHint              string // how to select a pricing currency
+	CurrencyChangedFmt        string // "/currency <mode>" succeeded, %s = saved mode, %s = resolved currency
+	RuntimeRefreshBusy        string // runtime-affecting setting cannot change while work is active
+	RuntimeRefreshUnavailable string // current session cannot rebuild after a runtime-affecting setting change
 
 	// context compaction card (CompactionStarted / CompactionDone events).
 	CompactionWorking string // shown while the summarizer runs
@@ -241,6 +246,7 @@ type Messages struct {
 	CmdOutputStyle      string // /output-style
 	CmdTheme            string // /theme
 	CmdLanguage         string // /language
+	CmdCurrency         string // /currency
 	CmdSkill            string // /skills
 	CmdVerbose          string // /verbose
 	CmdReloadCmd        string // /reload-cmd
@@ -547,6 +553,28 @@ type Messages struct {
 	UpgradeApplyFailed         string // "failed to apply update: %v"
 	UpgradeSuccessFmt          string // "Updated %s → %s"
 
+	// `reasonix report` — local CLI crash review and explicit upload
+	ReportNoPending           string
+	ReportHeaderFmt           string
+	ReportCapturedFmt         string
+	ReportPreviewOnlyFmt      string
+	ReportSendPrompt          string
+	ReportKept                string
+	ReportDeletedFmt          string
+	ReportSentFmt             string
+	ReportSafeModeBlocked     string
+	ReportConfigFailedFmt     string
+	ReportUploadFailedFmt     string
+	ReportSentDeleteFailedFmt string
+	ReportUsageBody           string
+
+	// First eligible interactive CLI telemetry consent.
+	CLITelemetryConsentNotice           string
+	CLITelemetryConsentPrompt           string
+	CLITelemetryConsentInvalid          string
+	CLITelemetryConsentSaveFailedFmt    string
+	CLITelemetryConsentCleanupFailedFmt string
+
 	// usage / help
 	UsageBody string // full multi-line help text
 }
@@ -575,7 +603,17 @@ func (m Messages) ProviderStatusMessage(status int) string {
 
 // M is the active catalogue. DetectLanguage replaces it; English is the
 // default so any code path that runs before detection still has text.
-var M = English
+var (
+	M               = English
+	currentLanguage = "en"
+)
+
+// CurrentLanguage returns the language tag installed by the latest
+// DetectLanguage call. It lets frontends reuse the resolved locale without
+// re-reading the environment and accidentally ignoring an explicit override.
+func CurrentLanguage() string {
+	return currentLanguage
+}
 
 // DetectLanguage selects a catalogue from override (e.g. cfg.Language) or the
 // environment and installs it as M. Returns the resolved tag ("en", "zh") so
@@ -604,14 +642,15 @@ func setLanguage(tag string) string {
 	switch tag {
 	case "zh-tw", "zh-TW":
 		M = ChineseTraditional
-		return "zh-TW"
+		currentLanguage = "zh-TW"
 	case "zh":
 		M = Chinese
-		return "zh"
+		currentLanguage = "zh"
 	default:
 		M = English
-		return "en"
+		currentLanguage = "en"
 	}
+	return currentLanguage
 }
 
 // normalize maps a locale string (e.g. "zh_CN.UTF-8", "zh-Hans-CN", "Chinese

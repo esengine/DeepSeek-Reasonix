@@ -689,11 +689,10 @@ func localProviderRefs(cfg *config.Config) []string {
 	if cfg == nil {
 		return nil
 	}
-	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	refs := make([]string, 0, len(cfg.Providers))
 	for i := range cfg.Providers {
 		pe := &cfg.Providers[i]
-		if !modelProviderAccessAllowed(access, pe.Name) || !pe.Configured() {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, pe.Name) || !pe.Configured() {
 			continue
 		}
 		models := pe.ChatModelList()

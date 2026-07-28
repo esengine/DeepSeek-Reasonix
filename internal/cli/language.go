@@ -6,32 +6,37 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
 )
 
-func (m *chatTUI) runLanguageSubcommand(input string) {
+func (m *chatTUI) runLanguageSubcommand(input string) tea.Cmd {
 	args := tokenizeArgs(input)
 	if len(args) < 2 {
 		cfg, err := config.Load()
 		if err != nil {
 			m.notice("language: " + err.Error())
-			return
+			return nil
 		}
 		saved := languageDisplay(cfg.Language)
 		resolved := i18n.DetectLanguage(cfg.Language)
 		m.notice(i18n.M.LanguageHeader + "\n" + describeLanguages(saved, resolved) + "\n" + i18n.M.LanguageHint)
-		return
+		return nil
 	}
 	if len(args) > 2 {
 		m.notice(i18n.M.LanguageHint)
-		return
+		return nil
 	}
 
 	lang, err := normalizeLanguageArg(args[1])
 	if err != nil {
 		m.notice(err.Error())
-		return
+		return nil
+	}
+	if !m.runtimeSettingChangeReady() {
+		return nil
 	}
 	path := config.SourcePath()
 	if path == "" {
@@ -39,7 +44,7 @@ func (m *chatTUI) runLanguageSubcommand(input string) {
 	}
 	if path == "" {
 		m.notice("language: cannot resolve config path")
-		return
+		return nil
 	}
 	// Lock the whole load-modify-save cycle, including the user-scope override
 	// cleanup — its own read-modify-write on the user config. path may be a
@@ -61,7 +66,7 @@ func (m *chatTUI) runLanguageSubcommand(input string) {
 		return nil
 	}(); err != nil {
 		m.notice("language: " + err.Error())
-		return
+		return nil
 	}
 
 	resolved := i18n.DetectLanguage(lang)
@@ -69,7 +74,12 @@ func (m *chatTUI) runLanguageSubcommand(input string) {
 	if m.ctrl != nil {
 		m.ctrl.SetResponseLanguage(lang)
 	}
-	m.notice(fmt.Sprintf(i18n.M.LanguageChangedFmt, languageDisplay(lang), resolved))
+	success := fmt.Sprintf(i18n.M.LanguageChangedFmt, languageDisplay(lang), resolved)
+	if m.ctrl == nil {
+		m.notice(success)
+		return nil
+	}
+	return m.scheduleCurrentControllerRebuild("language", success)
 }
 
 // clearUserLanguageOverride drops a stale user-level language override after a

@@ -36,7 +36,12 @@ on:
         required: false
         type: string
       production_signing_smoke:
-        description: "Sign with the production certificate, verify trust, and do not publish"
+        description: "Wait for external SignPath approval, verify trust, and do not publish"
+        required: false
+        default: false
+        type: boolean
+      signing_preflight:
+        description: "Auto-approve through CI, verify the full signing path, attest it, and do not publish"
         required: false
         default: false
         type: boolean
@@ -66,6 +71,16 @@ on:
         type: string
       orchestrated:
         description: "True only when called by release-stable.yml after approval"
+        required: false
+        default: false
+        type: boolean
+      signing_preflight:
+        description: "Verify both Windows signing stages without publishing"
+        required: false
+        default: false
+        type: boolean
+      signing_preflight_verified:
+        description: "The approved stable caller completed signing_preflight in this run"
         required: false
         default: false
         type: boolean
@@ -106,6 +121,8 @@ jobs:
     name: approve standalone desktop release
     if: ${{ !inputs.orchestrated }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     # Keep Preview fast, but do not make its public, formally signed binaries an
     # unreviewed path. The `canary` environment must use the same required
     # reviewers as `release`.
@@ -115,11 +132,65 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: echo "Approved standalone desktop release $RELEASE_TAG"
 
-  cache-guard:
-    name: cache hit guard
+  signing-contract:
+    name: validate SignPath release contract
     needs: [orchestration-guard, release-gate]
     if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      fingerprint: ${{ steps.contract.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Validate the protected control-plane files that GitHub and SignPath
+          # execute, including during recovery of an older candidate.
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Validate signing mode
+        run: |
+          if [ "${{ inputs.production_signing_smoke }}" = "true" ] && [ "${{ inputs.signing_preflight }}" = "true" ]; then
+            echo "::error::production_signing_smoke and signing_preflight are mutually exclusive"
+            exit 1
+          fi
+          if [ "${{ inputs.signing_preflight_verified }}" = "true" ] && [ "${{ inputs.orchestrated }}" != "true" ]; then
+            echo "::error::only the approved stable orchestrator can assert signing_preflight_verified"
+            exit 1
+          fi
+
+      - name: Validate and fingerprint SignPath contract
+        id: contract
+        run: |
+          go run ./cmd/signpath-contract validate
+          fingerprint="$(go run ./cmd/signpath-contract fingerprint)"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Require current standalone signing attestation
+        if: ${{ github.repository == 'esengine/DeepSeek-Reasonix' && !inputs.signing_preflight && !inputs.production_signing_smoke && !(inputs.orchestrated && inputs.signing_preflight_verified) }}
+        env:
+          ACTUAL: ${{ vars.SIGNPATH_RELEASE_SIGNING_ATTESTATION }}
+          EXPECTED: ${{ steps.contract.outputs.fingerprint }}
+        run: |
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::SIGNPATH_RELEASE_SIGNING_ATTESTATION does not match the current protected signing contract"
+            echo "::error::Run release-desktop.yml with signing_preflight=true before publishing"
+            echo "expected=$EXPECTED"
+            exit 1
+          fi
+
+  cache-guard:
+    name: cache hit guard
+    needs: signing-contract
+    if: ${{ always() && !cancelled() && needs.signing-contract.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -144,8 +215,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One universal macOS build (Intel + Apple Silicon) on a single arm64
-          # runner — avoids the scarce/slow macos-13 Intel runner.
+          # Keep preflight on the same complete native matrix as publication so
+          # it cannot attest a release whose adjacent platform build is broken.
           - { runner: macos-14, platform: darwin/universal, name: darwin-universal }
           - { runner: windows-latest, platform: windows/amd64, name: windows-amd64 }
           - { runner: windows-11-arm, platform: windows/arm64, name: windows-arm64 }
@@ -250,15 +321,9 @@ jobs:
       # may never publish an unsigned payload or installer.
       - name: Require Windows Authenticode signing
         if: runner.os == 'Windows' && github.repository == 'esengine/DeepSeek-Reasonix'
-        env:
-          RELEASE_SIGNING_READY: ${{ vars.SIGNPATH_RELEASE_SIGNING_READY }}
         run: |
           if [ "$HAS_SIGNPATH" != "true" ]; then
             echo "::error::SIGNPATH_API_TOKEN is required for public Windows Preview and Stable releases"
-            exit 1
-          fi
-          if [ "${{ inputs.production_signing_smoke }}" != "true" ] && [ "$RELEASE_SIGNING_READY" != "true" ]; then
-            echo "::error::SIGNPATH_RELEASE_SIGNING_READY must be true before publishing public Windows artifacts"
             exit 1
           fi
 
@@ -278,7 +343,7 @@ jobs:
       # container leaves reasonix-desktop.exe and its sidecars unsigned after
       # installation, which can trigger Defender reputation/ML quarantine.
       - name: Upload unsigned Windows payload for SignPath
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         id: unsigned-windows-payload
         uses: actions/upload-artifact@v7
         with:
@@ -288,7 +353,7 @@ jobs:
           retention-days: 1
 
       - name: Submit Windows payload for Authenticode signing
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         id: submit-windows-payload
         uses: signpath/github-action-submit-signing-request@v2
         with:
@@ -306,7 +371,7 @@ jobs:
       # approved; the dedicated SignPath CI identity records the corresponding
       # request approval without adding another human gate.
       - name: Approve and download signed Windows payload
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -321,13 +386,13 @@ jobs:
             -WaitForExternalApproval:$waitForExternalApproval
 
       - name: Rebuild Windows packages from signed payload
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         run: scripts/package-windows-desktop.sh "${{ matrix.platform == 'windows/arm64' && 'arm64' || 'amd64' }}" signed-payload
 
       # The second request signs the rebuilt NSIS container. Release signing
       # also verifies every payload signature against a Windows trusted root.
       - name: Upload unsigned installer for SignPath
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         id: unsigned-installer
         uses: actions/upload-artifact@v7
         with:
@@ -337,7 +402,7 @@ jobs:
           retention-days: 1
 
       - name: Submit installer for Authenticode signing
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         id: submit-windows-installer
         uses: signpath/github-action-submit-signing-request@v2
         with:
@@ -351,7 +416,7 @@ jobs:
           wait-for-completion: false
 
       - name: Approve and download signed Windows installer
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         env:
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -366,11 +431,11 @@ jobs:
             -WaitForExternalApproval:$waitForExternalApproval
 
       - name: Replace installer with signed build
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         run: cp signed-installer/*installer*.exe dist/
 
       - name: Verify Windows Authenticode release contract
-        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true' && (inputs.production_signing_smoke || vars.SIGNPATH_RELEASE_SIGNING_READY == 'true')
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         run: |
           $arch = if ("${{ matrix.platform }}" -eq "windows/arm64") { "arm64" } else { "amd64" }
@@ -396,8 +461,10 @@ jobs:
   publish:
     name: publish release
     needs: build
-    if: ${{ always() && !cancelled() && needs.build.result == 'success' && !inputs.production_signing_smoke }}
+    if: ${{ always() && !cancelled() && needs.build.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     # The stable caller has already passed the single GitHub release approval.
     # Direct prereleases, manual stable recovery, and Preview all pass the
     # appropriate release gate. The SignPath CI identity records each payload
@@ -489,6 +556,30 @@ jobs:
           name: preview-dist
           path: dist/*
           if-no-files-found: error
+
+  attest-signing-contract:
+    name: record standalone SignPath attestation
+    needs: [signing-contract, build]
+    if: ${{ always() && !cancelled() && inputs.signing_preflight && !inputs.orchestrated && github.repository == 'esengine/DeepSeek-Reasonix' && needs.signing-contract.result == 'success' && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VARIABLE_NAME: SIGNPATH_RELEASE_SIGNING_ATTESTATION
+      VARIABLE_VALUE: ${{ needs.signing-contract.outputs.fingerprint }}
+    steps:
+      - name: Record verified signing contract
+        run: |
+          endpoint="repos/$GITHUB_REPOSITORY/actions/variables/$VARIABLE_NAME"
+          if gh api "$endpoint" >/dev/null 2>&1; then
+            gh api --method PATCH "$endpoint" -f value="$VARIABLE_VALUE" >/dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/variables" \
+              -f name="$VARIABLE_NAME" -f value="$VARIABLE_VALUE" >/dev/null
+          fi
+          echo "Recorded $VARIABLE_NAME=$VARIABLE_VALUE"
 
   mirror:
     name: mirror to R2

@@ -680,6 +680,93 @@ func TestBuildRequestTemperatureSerialization(t *testing.T) {
 	}
 }
 
+func TestBuildRequestKimiK3OfficialWireShape(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "kimi-cn",
+		BaseURL: "https://api.moonshot.cn/v1",
+		Model:   "kimi-k3",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":             "max",
+			"supported_efforts":  []string{"low", "high", "max"},
+			"reasoning_protocol": "openai",
+			"extra_body": map[string]any{
+				"top_p":                 0.5,
+				"n":                     2,
+				"presence_penalty":      1,
+				"frequency_penalty":     1,
+				"max_completion_tokens": 99,
+				"trace_id":              "keep-me",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !provider.RequiresReasoningRoundTrip(p) {
+		t.Fatal("official Kimi K3 must retain raw reasoning for complete assistant-message replay")
+	}
+	req := p.(*client).buildRequest(provider.Request{
+		Temperature: provider.TemperaturePtr(0),
+		MaxTokens:   2000,
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "first"},
+			{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "provider reasoning"},
+			{Role: provider.RoleUser, Content: "use a tool"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{}`}}},
+			{Role: provider.RoleTool, ToolCallID: "call-1", Name: "lookup", Content: "result"},
+		},
+	})
+	if req.Temperature != nil || req.MaxTokens != 0 || req.MaxCompletionTokens != 2000 {
+		t.Fatalf("Kimi K3 request limits = temperature %v, max_tokens %d, max_completion_tokens %d", req.Temperature, req.MaxTokens, req.MaxCompletionTokens)
+	}
+	if req.ReasoningEffort != "max" {
+		t.Fatalf("reasoning_effort = %q, want max", req.ReasoningEffort)
+	}
+	if got := req.Messages[1].ReasoningContent; got == nil || *got != "provider reasoning" {
+		t.Fatalf("plain assistant reasoning_content = %v, want provider reasoning", got)
+	}
+	if got := req.Messages[3].ReasoningContent; got == nil || *got != "" {
+		t.Fatalf("tool-call assistant reasoning_content = %v, want explicit empty string", got)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, field := range []string{"temperature", "max_tokens", "top_p", "n", "presence_penalty", "frequency_penalty"} {
+		if _, ok := wire[field]; ok {
+			t.Fatalf("official Kimi K3 payload must omit %q: %s", field, body)
+		}
+	}
+	if wire["max_completion_tokens"] != float64(2000) || wire["trace_id"] != "keep-me" {
+		t.Fatalf("Kimi K3 payload lost output budget or unrelated extra body: %s", body)
+	}
+
+	gateway, err := New(provider.Config{
+		Name:    "opencode-go",
+		BaseURL: "https://opencode.ai/zen/go/v1",
+		Model:   "kimi-k3",
+		Extra: map[string]any{
+			"effort":            "max",
+			"supported_efforts": []string{"high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New gateway: %v", err)
+	}
+	if provider.RequiresReasoningRoundTrip(gateway) {
+		t.Fatal("Kimi-specific wire policy must not be inferred for a relay")
+	}
+	gatewayReq := gateway.(*client).buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0), MaxTokens: 77})
+	if gatewayReq.Temperature == nil || gatewayReq.MaxTokens != 77 || gatewayReq.MaxCompletionTokens != 0 {
+		t.Fatalf("relay request was changed by official Kimi compatibility: %+v", gatewayReq)
+	}
+}
+
 func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

@@ -333,8 +333,10 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   Bash and file mutation approvals use Claude Code-style families such as
   `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Built-in
   file mutations include writes, edits, notebook edits, symbol/range deletes,
-  and `move_file` renames/moves. Legacy
-  lowercase tool IDs and `tool=literal` rules still load for compatibility. The
+  and `move_file` renames/moves. Legacy lowercase tool IDs still load for
+  compatibility. `Bash=<literal>` is the exact-command form: metacharacters in
+  the literal are ordinary characters and only the identical complete command
+  matches. The
   `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
   reject later commands that introduce shell operators, so `Bash(go test:*)`
   does not cover `go test ./... && rm -rf tmp`.
@@ -344,6 +346,16 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
   (grep/glob) — so tools need not change. A rule whose subject the args don't
   expose only matches in its bare `Tool` form.
+- **Dynamic Bash.** Parameter/arithmetic expansions, assignments, heredocs, unproved
+  redirects, and shell globs cannot reuse bare Bash, prefix, or glob allows;
+  remembered approvals are exact `Bash=<literal>` rules. They still follow the
+  normal posture fallback, so Auto and an approved-plan window may execute them
+  without prompting. Nested or indirect execution is stricter: command and
+  process substitution, a dynamic command name, parse failures, `eval`,
+  `source`, shell `-c`, PowerShell/cmd command strings, and runtime inline-code
+  flags require a human in interactive Ask/Auto. Guardian, allowing hooks, and
+  the approved-plan window cannot answer that decision; only an identical exact
+  grant or YOLO can bypass it.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
   a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
@@ -359,7 +371,9 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   built-in file-mutating tools share it. A
   non-interactive run
   (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt, so
-  it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
+  ordinary `Ask` resolves to **allow** — preserving autonomous behaviour. Nested
+  or indirect Bash is the exception: headless Ask/Auto/DontAsk reject it unless
+  an identical literal grant exists; only YOLO may bypass that human requirement. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
   "blocked" result it can adapt to (the same shape as a plan-mode refusal).
 - **MCP authorization.** Installing an MCP server authorizes all of its tools;
@@ -406,7 +420,12 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
   fallback while preserving explicit ask/deny rules; `yolo` skips ordinary tool
   permission prompts for approval-gated tools such as writers and Bash. Explicit
-  deny rules and forced fresh reviews still apply.
+  deny rules and forced fresh reviews still apply. Nested or indirect Bash
+  commands require a human in interactive Ask/Auto even during the approved-plan
+  window; ordinary expansions, assignments, redirects, and globs continue under
+  Auto fallback but cannot inherit reusable Bash rules. YOLO is the sole mode
+  bypass for the human-required class, while an identical exact literal remains
+  an ordinary explicit authorization.
   Neither posture answers `ask` questions or approves `exit_plan_mode` plans.
   Plan Mode is entered only through an explicit user choice and remains
   independent of the active tool-approval posture. After a user approves a

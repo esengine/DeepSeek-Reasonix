@@ -1310,9 +1310,8 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		}
 
 		// Keep reasoning_content on the assistant turn for display and session
-		// archive. It is NOT re-uploaded to the API: the openai provider drops it
-		// when building the request, since re-sent reasoning is billable prompt
-		// input for no cache or coherence gain.
+		// archive. Most OpenAI-compatible backends do not replay it; providers
+		// with an explicit round-trip contract retain the raw provider text.
 		calls = a.withPreviewFileDiffs(calls)
 		a.warnMissingToolCallReasoning(calls, reasoning)
 		a.session.Add(provider.Message{
@@ -2425,7 +2424,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			}
 		}
 		stored = display
-		if signature != "" || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
+		if signature != "" || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
 			stored = original
 		}
 		return stored, display

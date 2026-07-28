@@ -151,4 +151,10 @@ func TestDetectLanguagePriority(t *testing.T) {
 	if got := DetectLanguage("zh"); got != "zh" {
 		t.Errorf("override=zh: got %q, want zh", got)
 	}
+	if got := CurrentLanguage(); got != "zh" {
+		t.Errorf("current language = %q, want zh", got)
+	}
+	if got := DetectLanguage("zh-TW"); got != "zh-TW" || CurrentLanguage() != "zh-TW" {
+		t.Errorf("traditional Chinese current language = %q/%q, want zh-TW", got, CurrentLanguage())
+	}
 }

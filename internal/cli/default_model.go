@@ -7,21 +7,15 @@ import (
 	"reasonix/internal/config"
 )
 
-// resolveModelForCLI picks the model a CLI subcommand should boot on. It
-// mirrors desktopNewSessionModel on the desktop side (#6999) so a
-// default_model that resolves but has no API key in the current environment
-// no longer hard-fails every command on "missing env X_API_KEY" (issue
-// #6996). A keyless default silently falls through to the first provider
-// with a configured key, matching the runtime chat path's behavior.
+// resolveModelForCLI picks the chat model a CLI subcommand should boot on. A
+// keyless default falls through to the first configured chat provider, while
+// explicit model choices remain strict.
 //
 // Semantics:
 //
-//   - explicitRef == "": the caller is using the configured default. If the
-//     default resolves and is configured, it wins. Otherwise the first
-//     provider with a configured key wins. When no provider is configured
-//     at all the raw default is returned with fallback=false so the
-//     existing missing-key banner / boot-time error still tells the user
-//     which API key to set.
+//   - explicitRef == "": Config.ResolveNewSessionChatModel supplies the shared
+//     default/fallback policy used by boot and desktop. Non-chat models are
+//     never selected as a fallback.
 //
 //   - explicitRef != "": the caller asked for this exact ref (--model flag,
 //     ACP session param, etc.). The ref must resolve AND be configured.
@@ -40,23 +34,20 @@ func resolveModelForCLI(explicitRef string, cfg *config.Config) (ref string, fal
 		}
 		return entry.Name + "/" + entry.Model, false, nil
 	}
-	def := strings.TrimSpace(cfg.DefaultModel)
-	if def != "" {
-		if entry, ok := cfg.ResolveModel(def); ok && entry.Configured() {
-			return def, false, nil
-		}
+	ref, fallback, _ = cfg.ResolveNewSessionChatModel()
+	return ref, fallback, nil
+}
+
+// resolveServeModel keeps serve's implicit model scoped to the user config.
+// A project reasonix.toml may configure the served workspace, but it must not
+// replace the account-level model used for new serve sessions.
+func resolveServeModel(modelName string) string {
+	if strings.TrimSpace(modelName) != "" {
+		return modelName
 	}
-	for i := range cfg.Providers {
-		p := &cfg.Providers[i]
-		if len(p.ModelList()) == 0 || !p.Configured() {
-			continue
-		}
-		return p.Name + "/" + p.DefaultModel(), true, nil
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
+		return resolved
 	}
-	// No configured provider and no configured default: hand the raw default
-	// back unchanged. Downstream code (boot.Build or the TUI banner) surfaces
-	// the missing-key message from this ref, so the user still gets a useful
-	// hint about what to fix. An empty default is also returned so callers
-	// that distinguish "no model" from "keyless model" keep working.
-	return def, false, nil
+	return modelName
 }

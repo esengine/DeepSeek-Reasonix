@@ -134,23 +134,27 @@ func (c *Config) UpsertProvider(e ProviderEntry) error {
 }
 
 // UpsertProviderPreservingRuntime applies persisted provider fields while
-// retaining credentials and capability state resolved by the latest config
-// load. It is used when replaying an optimistic edit log onto fresh state.
+// retaining process-only state derived by the latest config load. It is used
+// when replaying an optimistic edit log onto fresh state.
 func (c *Config) UpsertProviderPreservingRuntime(e ProviderEntry) error {
-	if current, ok := c.Provider(e.Name); ok && strings.TrimSpace(current.APIKeyEnv) == strings.TrimSpace(e.APIKeyEnv) {
-		e.resolvedAPIKey = current.resolvedAPIKey
-		e.resolvedSource = current.resolvedSource
-		e.visionOverride = current.visionOverride
+	if current, ok := c.Provider(e.Name); ok {
+		e.persistedOfficialCurrency = current.persistedOfficialCurrency
+		if strings.TrimSpace(current.APIKeyEnv) == strings.TrimSpace(e.APIKeyEnv) {
+			e.resolvedAPIKey = current.resolvedAPIKey
+			e.resolvedSource = current.resolvedSource
+			e.visionOverride = current.visionOverride
+		}
 	}
 	return c.UpsertProvider(e)
 }
 
 // ProviderEntryConfigSnapshot strips process-only state from a provider copy so
-// optimistic edit logs never retain resolved credential values.
+// optimistic edit logs contain only persisted configuration.
 func ProviderEntryConfigSnapshot(entry ProviderEntry) ProviderEntry {
 	entry.resolvedAPIKey = ""
 	entry.resolvedSource = CredentialSource{}
 	entry.visionOverride = nil
+	entry.persistedOfficialCurrency = ""
 	return entry
 }
 
@@ -218,6 +222,27 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 		return fmt.Errorf("desktop language %q: must be auto|en|zh", lang)
 	}
 	c.ApplyDeepSeekOfficialDefaultPricing()
+	return nil
+}
+
+// SetDesktopCurrency pins the user-global official pricing region independently
+// from language. The name is retained for persisted-schema compatibility.
+// Empty/auto follows the language preference.
+func (c *Config) SetDesktopCurrency(currency string) error {
+	overridePersisted := false
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "", "AUTO":
+		c.Desktop.Currency = ""
+	case "CNY", "RMB", "CNH":
+		c.Desktop.Currency = "CNY"
+		overridePersisted = true
+	case "USD":
+		c.Desktop.Currency = "USD"
+		overridePersisted = true
+	default:
+		return fmt.Errorf("desktop currency %q: must be auto|CNY|USD", currency)
+	}
+	applyDeepSeekOfficialDefaultPricingWithOverride(c, overridePersisted)
 	return nil
 }
 
@@ -372,6 +397,21 @@ func (c *Config) SetDesktopTelemetry(enabled bool) error {
 // SetDesktopMetrics sets whether the desktop sends aggregate desktop metrics.
 func (c *Config) SetDesktopMetrics(enabled bool) error {
 	c.Desktop.Metrics = &enabled
+	return nil
+}
+
+// SetCLITelemetryMode sets the user-global content-free CLI metrics policy.
+func (c *Config) SetCLITelemetryMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		c.Telemetry.CLIMetrics = "auto"
+	case "on":
+		c.Telemetry.CLIMetrics = "on"
+	case "off":
+		c.Telemetry.CLIMetrics = "off"
+	default:
+		return fmt.Errorf("cli_metrics %q: must be auto|on|off", mode)
+	}
 	return nil
 }
 
@@ -1307,7 +1347,7 @@ func (c *Config) saveProjectIncremental(path string) error {
 	if tomlBodyHasTopLevelKey(body, "config_version") && !tomlBodyHasTopLevelKey(delta, "config_version") {
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
-	removePlugins := len(c.Plugins) == 0 && tomlBodyHasSection(body, "plugins")
+	removePlugins := len(tomlPluginsForScope(c.Plugins, RenderScopeProject)) == 0 && tomlBodyHasSection(body, "plugins")
 	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
 	_, hasLegacyDesktopAutoGuard := tomlSectionKeyValue(body, "desktop", "default_auto_recovery_checkpoint")
 	_, hasRetiredAgentAutoGuard := tomlSectionKeyValue(body, "agent", "auto_recovery_checkpoint")

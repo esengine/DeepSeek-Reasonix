@@ -152,6 +152,11 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "auto") || !has(items, "zh") || !has(items, "en") || has(items, "中文") {
 		t.Errorf("/reasoning-language should offer only auto/zh/en; got %v", labelsOf(items))
 	}
+	// /currency
+	items, _ = SlashArgItems("/currency ", data)
+	if !has(items, "auto") || !has(items, "CNY") || !has(items, "USD") {
+		t.Errorf("/currency should offer only auto/CNY/USD; got %v", labelsOf(items))
+	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
 	if !has(items, "auto") || !has(items, "light") || !has(items, "graphite") || !has(items, "glacier") {

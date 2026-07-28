@@ -221,6 +221,13 @@ model = "deepseek-v4-flash"
 api_key_env = "`+keylessEnv+`"
 
 [[providers]]
+name = "audio"
+kind = "openai"
+base_url = "https://audio.example.com/v1"
+model = "tts-1"
+api_key_env = "`+configuredEnv+`"
+
+[[providers]]
 name = "minimax"
 kind = "openai"
 base_url = "https://api.MiniMax.chat/v1"

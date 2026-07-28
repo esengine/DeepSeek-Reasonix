@@ -2,7 +2,7 @@
 
 export const REMOTE_SCHEMA_FORMAT = "reasonix.remote.schema.v1" as const;
 export const REMOTE_PROTOCOL_VERSION = "1" as const;
-export const REMOTE_SCHEMA_HASH = "sha256:d54a081817469abfad9b84c82d908a9480e083b6832727f0d35cc13f83c8cd12" as const;
+export const REMOTE_SCHEMA_HASH = "sha256:0c91e772a17a5acdc8e874c5ddeb15b707e649bb24a40723399ab8d3d6f52e06" as const;
 
 export const REMOTE_FIXED_RESOURCES = {
   "protocol": {
@@ -858,6 +858,7 @@ export type BrokerCatalogResultRaw = {
     "model"?: string;
     "outputPerMillion"?: number;
     "pricingCurrency"?: string;
+    "reasoningRoundTrip"?: boolean;
     "ref": string;
     "supportedEfforts"?: Array<string>;
     "supportsVision"?: boolean;
@@ -875,6 +876,7 @@ export type BrokerCatalogResultHydrated = {
     "model"?: string;
     "outputPerMillion"?: number;
     "pricingCurrency"?: string;
+    "reasoningRoundTrip"?: boolean;
     "ref": string;
     "supportedEfforts"?: Array<string>;
     "supportsVision"?: boolean;

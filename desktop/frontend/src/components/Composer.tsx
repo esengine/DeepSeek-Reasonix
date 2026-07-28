@@ -7,7 +7,7 @@ import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
-import { SPINNER_WORDS, useI18n } from "../lib/i18n";
+import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
@@ -440,12 +440,10 @@ function isImeKeyEvent(
 // --- past:chats session reference → prompt context (PR-B) ---
 // Send-side helpers for "@past:chats" session references. PR-A wired the menu and
 // the composer-context card; this layer reads each referenced session through the
-// existing PreviewSession API and prepends a compact "user / 助手" transcript to
+// existing PreviewSession API and prepends a compact user/assistant transcript to
 // submitText so the model sees the referenced chat as background context.
 const SESSION_REF_MAX_MESSAGES = 30;
 const SESSION_REF_MAX_CHARS = 20_000;
-const SESSION_CONTEXT_HEADER = "以下是用户引用的历史会话上下文：";
-const SESSION_CONTEXT_FOOTER = "当前用户问题：";
 const PAST_CHATS_MENU_ITEM = "past:chats";
 
 // limitSessionMessages keeps the most recent useful messages within a char budget.
@@ -488,14 +486,15 @@ function formatSessionContext(
   ref: SessionReference,
   messages: HistoryMessage[],
   truncated: boolean,
+  t: Translator,
 ): string {
   const body = messages
-    .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.content.trim()}`)
+    .map((m) => `${m.role === "user" ? t("composer.sessionContextUser") : t("composer.sessionContextAssistant")}: ${m.content.trim()}`)
     .join("\n\n");
   return [
-    `[会话：${ref.title}]`,
-    truncated ? "注意：该会话内容较长，以下只包含最近部分内容。" : "",
-    body || "注意：该会话没有可引用的用户/助手消息。",
+    `[${t("composer.sessionContextSession", { title: ref.title })}]`,
+    truncated ? t("composer.sessionContextTruncated") : "",
+    body || t("composer.sessionContextEmpty"),
   ]
     .filter(Boolean)
     .join("\n");
@@ -503,22 +502,22 @@ function formatSessionContext(
 
 // buildSessionContext reads each referenced session, formats the most recent
 // slice, and joins them with a separator. A single failed read must not block
-// the others; the user gets a clear "读取失败" note for the bad one and the
+// the others; a localized read-failure note marks the bad one and the
 // remaining refs still flow through.
-async function buildSessionContext(refs: SessionReference[]): Promise<string> {
+async function buildSessionContext(refs: SessionReference[], t: Translator): Promise<string> {
   if (refs.length === 0) return "";
-  let context = `${SESSION_CONTEXT_HEADER}\n\n`;
+  let context = `${t("composer.sessionContextHeader")}\n\n`;
   for (const ref of refs) {
     try {
       const raw = await app.PreviewSession(ref.path);
       const limited = limitSessionMessages(asArray(raw));
-      context += `${formatSessionContext(ref, limited.messages, limited.truncated)}\n\n---\n\n`;
+      context += `${formatSessionContext(ref, limited.messages, limited.truncated, t)}\n\n---\n\n`;
     } catch (error) {
       console.error("[past:chats] failed to preview session", ref.path, error);
-      context += `[会话：${ref.title}]\n注意：该会话读取失败，已跳过。\n\n---\n\n`;
+      context += `[${t("composer.sessionContextSession", { title: ref.title })}]\n${t("composer.sessionContextReadFailed")}\n\n---\n\n`;
     }
   }
-  context += `${SESSION_CONTEXT_FOOTER}\n`;
+  context += `${t("composer.sessionContextFooter")}\n`;
   return context;
 }
 
@@ -571,6 +570,7 @@ export function Composer({
   showContextWindowRing = false,
   context,
   turnCost,
+  currency,
   cacheHitTokens,
   cacheMissTokens,
   balance,
@@ -641,6 +641,7 @@ export function Composer({
   showContextWindowRing?: boolean;
   context?: ContextInfo;
   turnCost?: number;
+  currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
   balance?: BalanceInfo;
@@ -1947,7 +1948,7 @@ export function Composer({
       const currentSessionRefs = sessionRefsRef.current;
       const currentSelectedTextRefs = selectedTextRefsRef.current;
       const currentPastedBlocks = [...pastedBlocksRef.current];
-      const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs);
+      const sessionContext = currentSessionRefs.length === 0 ? "" : await buildSessionContext(currentSessionRefs, t);
       const selectedTextContext = formatSelectedTextContext(currentSelectedTextRefs);
       const invocationText = serializeInvocationSubmit(trimmedText, trimmedDraft.invocations);
       const baseSubmitText = [expandPastedBlocks(invocationText, currentPastedBlocks), refs].filter(Boolean).join(" ");
@@ -3729,11 +3730,11 @@ export function Composer({
           <div className="slashmenu" role="listbox">
             {loadingPastChats ? (
               <div className="slashmenu__item slashmenu__item--empty">
-                <span className="slashmenu__name">正在加载历史会话...</span>
+                <span className="slashmenu__name">{t("composer.pastChatsLoading")}</span>
               </div>
             ) : pastChats.length === 0 ? (
               <div className="slashmenu__item slashmenu__item--empty">
-                <span className="slashmenu__name">暂无历史会话</span>
+                <span className="slashmenu__name">{t("composer.pastChatsEmpty")}</span>
               </div>
             ) : (
               <>
@@ -3742,7 +3743,7 @@ export function Composer({
                   <input
                     className="slashmenu__search"
                     type="text"
-                    placeholder="搜索历史会话…"
+                    placeholder={t("composer.pastChatsSearch")}
                     value={pastChatQuery}
                     // In the token-driven flows (typed "#" or the content-menu
                     // action) focus must stay in the composer: typing there
@@ -3760,7 +3761,7 @@ export function Composer({
                 </div>
                 {filteredPastChats.length === 0 ? (
                   <div className="slashmenu__item slashmenu__item--empty">
-                    <span className="slashmenu__name">没有匹配的历史会话</span>
+                    <span className="slashmenu__name">{t("composer.pastChatsNoMatches")}</span>
                   </div>
                 ) : (
                   filteredPastChats.map((session, i) => {
@@ -3778,7 +3779,7 @@ export function Composer({
                           {preview && <div className="past-chat-hover__preview">{preview}</div>}
                           {(turns || ts) && (
                             <div className="past-chat-hover__meta">
-                              {turns && <span>{session.turns} 轮</span>}
+                              {turns && <span>{t("composer.sessionTurns", { n: session.turns })}</span>}
                               {ts && <span>· {fmtSessionTime(ts)}</span>}
                             </div>
                           )}
@@ -3798,7 +3799,7 @@ export function Composer({
                           <MessageSquare size={13} className="filemenu__icon" />
                           <span className="slashmenu__name slashmenu__name--file">
                             {pastChatTitle(session)}
-                            {turns ? ` (${session.turns} 轮)` : ""}
+                            {turns ? ` (${t("composer.sessionTurns", { n: session.turns })})` : ""}
                           </span>
                         </button>
                       </Tooltip>
@@ -3820,7 +3821,7 @@ export function Composer({
               }}
             >
               <span className="slashmenu__name">
-                {menuMode === "pastChats" ? t("composer.contentCloseSessions") : "← 返回文件列表"}
+                {menuMode === "pastChats" ? t("composer.contentCloseSessions") : t("composer.backToFiles")}
               </span>
             </button>
           </div>
@@ -3963,11 +3964,11 @@ export function Composer({
                   <MessageSquare size={15} />
                   <span>
                     {ref.title}
-                    {typeof ref.turns === "number" ? ` (${ref.turns} 轮)` : ""}
+                    {typeof ref.turns === "number" ? ` (${t("composer.sessionTurns", { n: ref.turns })})` : ""}
                   </span>
                 </span>
               </Tooltip>
-              <Tooltip label="移除引用会话">
+              <Tooltip label={t("composer.removeSessionReference")}>
                 <button
                   type="button"
                   onClick={() => removeSessionRef(ref.path)}
@@ -4336,6 +4337,7 @@ export function Composer({
                   context={context}
                   tabId={tabId}
                   turnCost={turnCost}
+                  currency={currency}
                   cacheHitTokens={cacheHitTokens}
                   cacheMissTokens={cacheMissTokens}
                   balance={balance}

@@ -40,6 +40,24 @@ api_key_env = "X_KEY"
 	}
 }
 
+func TestMergeTOMLProviderAccessPreservesExplicitEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(path, []byte("[desktop]\nprovider_access = []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	access, declared, err := mergeTOMLProviderAccess([]string{path})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if !declared {
+		t.Fatal("provider_access declaration was not detected")
+	}
+	if access == nil || len(access) != 0 {
+		t.Fatalf("provider_access = %#v, want a non-nil empty slice", access)
+	}
+}
+
 func TestLoadForEditDecodesGB18030TOML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

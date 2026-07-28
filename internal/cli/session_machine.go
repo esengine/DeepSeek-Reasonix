@@ -79,9 +79,10 @@ type machineErrorResponse struct {
 }
 
 type sessionMachineOptions struct {
-	dir    string
-	target string
-	json   bool
+	dir         string
+	projectRoot string
+	target      string
+	json        bool
 }
 
 func sessionCommand(args []string) int {
@@ -105,9 +106,7 @@ func runSessionCommand(args []string, out io.Writer) int {
 	if !options.json {
 		return writeMachineError(out, command, "invalid_argument", "--json is required")
 	}
-	if options.dir == "" {
-		options.dir = resolveCLISessionDir()
-	}
+	options.dir = resolveMachineSessionDir(options.dir, options.projectRoot)
 	identityKey, err := loadMachineIdentityKey()
 	if err != nil {
 		return writeMachineError(out, command, "machine_identity_unavailable", "machine identity is unavailable")
@@ -143,6 +142,24 @@ func runSessionCommand(args []string, out io.Writer) int {
 	return writeMachineError(out, command, "session_not_found", "session was not found")
 }
 
+func resolveMachineSessionDir(sessionDir, projectRoot string) string {
+	if projectRoot != "" {
+		return machineProjectSessionDir(projectRoot)
+	}
+	if sessionDir != "" {
+		return sessionDir
+	}
+	return resolveCLISessionDir()
+}
+
+// machineProjectSessionDir maps a project root to its per-project session store.
+func machineProjectSessionDir(projectRoot string) string {
+	if dir := config.ProjectSessionDir(projectRoot); dir != "" {
+		return dir
+	}
+	return projectRoot
+}
+
 func parseSessionMachineOptions(args []string, operation string) (sessionMachineOptions, string, string) {
 	var options sessionMachineOptions
 	for i := 0; i < len(args); i++ {
@@ -155,6 +172,12 @@ func parseSessionMachineOptions(args []string, operation string) (sessionMachine
 			}
 			i++
 			options.dir = args[i]
+		case "--project-root":
+			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+				return options, "invalid_argument", "--project-root requires a value"
+			}
+			i++
+			options.projectRoot = args[i]
 		case "--help", "-h":
 			return options, "invalid_argument", "use the documented machine interface"
 		default:
@@ -167,6 +190,9 @@ func parseSessionMachineOptions(args []string, operation string) (sessionMachine
 			}
 			options.target = arg
 		}
+	}
+	if options.dir != "" && options.projectRoot != "" {
+		return options, "invalid_argument", "--dir and --project-root cannot be combined"
 	}
 	if operation != "list" && operation != "recovery" && options.target == "" {
 		return options, "invalid_argument", "a session identifier is required"

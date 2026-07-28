@@ -18,6 +18,8 @@ func newDefaultModelTestConfig() *config.Config {
 	return &config.Config{
 		Providers: []config.ProviderEntry{
 			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: defaultModelTestKeylessEnv},
+			{Name: "audio", Kind: "openai", BaseURL: "https://audio.example.com", Model: "tts-1", APIKeyEnv: defaultModelTestConfiguredEnv},
+			{Name: "embedding", Kind: "openai", BaseURL: "https://embedding.example.com", Model: "text-embedding-3-small", APIKeyEnv: defaultModelTestConfiguredEnv},
 			{Name: "minimax", Kind: "openai", BaseURL: "https://api.MiniMax.chat/v1", Model: "MiniMax-M3", APIKeyEnv: defaultModelTestConfiguredEnv},
 		},
 	}
@@ -78,13 +80,13 @@ func TestResolveModelForCLI(t *testing.T) {
 			wantFallback: true,
 		},
 		{
-			name:         "empty default with no providers returns empty",
+			name:         "empty default with all keyless providers keeps chat candidate",
 			explicitRef:  "",
 			defaultModel: "",
 			configured:   false,
 			keyless:      false,
-			wantRef:      "",
-			wantFallback: false,
+			wantRef:      "deepseek-flash/deepseek-v4-flash",
+			wantFallback: true,
 		},
 		{
 			name:         "explicit unknown ref errors",
@@ -118,7 +120,7 @@ func TestResolveModelForCLI(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			isolateDefaultModelTestHome(t)
+			isolateCLIConfigHome(t)
 			setCredential(t, defaultModelTestConfiguredEnv, tc.configured)
 			setCredential(t, defaultModelTestKeylessEnv, tc.keyless)
 
@@ -148,19 +150,35 @@ func TestResolveModelForCLI(t *testing.T) {
 	}
 }
 
-// isolateDefaultModelTestHome redirects Reasonix's user-config and credentials
-// paths to a temp dir so credential writes from one subtest cannot bleed into
-// another. Mirrors desktop/isolateDesktopUserDirs.
-func isolateDefaultModelTestHome(t *testing.T) {
-	t.Helper()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("REASONIX_STATE_HOME", filepath.Join(home, "state"))
-	t.Setenv("REASONIX_CACHE_HOME", filepath.Join(home, "cache"))
-	t.Setenv("AppData", filepath.Join(home, "AppData"))
+func TestResolveServeModelUsesGlobalChatFallback(t *testing.T) {
+	isolateCLIConfigHome(t)
+	setCredential(t, defaultModelTestConfiguredEnv, true)
+	setCredential(t, defaultModelTestKeylessEnv, false)
+
+	cfg := newDefaultModelTestConfig()
+	cfg.DefaultModel = "deepseek-flash/deepseek-v4-flash"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("reasonix.toml", []byte(`
+default_model = "project/project-chat"
+
+[[providers]]
+name = "project"
+kind = "openai"
+base_url = "https://project.example.com"
+model = "project-chat"
+api_key_env = "`+defaultModelTestConfiguredEnv+`"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := resolveServeModel(""); got != "minimax/MiniMax-M3" {
+		t.Fatalf("resolveServeModel(\"\") = %q, want global chat fallback", got)
+	}
+	if got := resolveServeModel("explicit/chat"); got != "explicit/chat" {
+		t.Fatalf("resolveServeModel(explicit) = %q, want explicit model preserved", got)
+	}
 }
 
 // setCredential writes a "configured" sentinel key into Reasonix's user

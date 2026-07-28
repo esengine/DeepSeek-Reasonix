@@ -723,20 +723,30 @@ func TestOfficialMimoAPITemplateRemoved(t *testing.T) {
 	}
 }
 
-func TestOfficialDeepSeekTemplateDefaultsToRMBPricing(t *testing.T) {
-	entries, keyEnv, err := officialProviderTemplate("deepseek", "en")
-	if err != nil {
-		t.Fatalf("officialProviderTemplate: %v", err)
-	}
-	if keyEnv != "DEEPSEEK_API_KEY" || len(entries) != 1 {
-		t.Fatalf("template = %v/%q, want one DEEPSEEK_API_KEY entry", entries, keyEnv)
-	}
-	got := entries[0]
-	if got.Prices["deepseek-v4-flash"] == nil || got.Prices["deepseek-v4-flash"].Currency != "¥" || got.Prices["deepseek-v4-flash"].Output != 2 {
-		t.Fatalf("deepseek-v4-flash price = %+v, want RMB pricing", got.Prices["deepseek-v4-flash"])
-	}
-	if got.Prices["deepseek-v4-pro"] == nil || got.Prices["deepseek-v4-pro"].Currency != "¥" || got.Prices["deepseek-v4-pro"].Output != 6 {
-		t.Fatalf("deepseek-v4-pro price = %+v, want RMB pricing", got.Prices["deepseek-v4-pro"])
+func TestOfficialDeepSeekTemplateUsesRegionalPricing(t *testing.T) {
+	for _, tt := range []struct {
+		language    string
+		currency    string
+		flashOutput float64
+		proOutput   float64
+	}{
+		{language: "en", currency: "$", flashOutput: 0.28, proOutput: 0.87},
+		{language: "zh", currency: "¥", flashOutput: 2, proOutput: 6},
+	} {
+		entries, keyEnv, err := officialProviderTemplate("deepseek", tt.language)
+		if err != nil {
+			t.Fatalf("officialProviderTemplate(%s): %v", tt.language, err)
+		}
+		if keyEnv != "DEEPSEEK_API_KEY" || len(entries) != 1 {
+			t.Fatalf("template = %v/%q, want one DEEPSEEK_API_KEY entry", entries, keyEnv)
+		}
+		got := entries[0]
+		if price := got.Prices["deepseek-v4-flash"]; price == nil || price.Currency != tt.currency || price.Output != tt.flashOutput {
+			t.Fatalf("%s deepseek-v4-flash price = %+v", tt.language, price)
+		}
+		if price := got.Prices["deepseek-v4-pro"]; price == nil || price.Currency != tt.currency || price.Output != tt.proOutput {
+			t.Fatalf("%s deepseek-v4-pro price = %+v", tt.language, price)
+		}
 	}
 }
 
@@ -828,6 +838,25 @@ func TestSetDesktopLanguagePersistsResponseLanguageAndUpdatesLiveTabs(t *testing
 	projectComposed := projectCtrl.Compose("explain this function")
 	if !strings.Contains(projectComposed, "use Simplified Chinese") {
 		t.Fatalf("project controller Compose = %q, want project zh response language", projectComposed)
+	}
+}
+
+func TestSetDesktopCurrencyPersistsRegionalOfficialPricing(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	app := NewApp()
+	if err := app.SetDesktopCurrency("CNY"); err != nil {
+		t.Fatalf("SetDesktopCurrency: %v", err)
+	}
+
+	view := app.Settings()
+	if view.DesktopCurrency != "CNY" {
+		t.Fatalf("Settings().DesktopCurrency = %q, want CNY", view.DesktopCurrency)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	flash, ok := cfg.Provider("deepseek-flash")
+	if !ok || flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
+		t.Fatalf("saved DeepSeek flash price = %+v, want CNY official price", flash)
 	}
 }
 

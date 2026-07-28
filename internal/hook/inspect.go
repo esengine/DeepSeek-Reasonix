@@ -24,15 +24,16 @@ type SourceStatus struct {
 
 // Entry is one configured hook with diagnostic annotations.
 type Entry struct {
-	Event       Event
-	Match       string
-	Command     string
-	ContextFile string
-	Description string
-	Timeout     int
-	Scope       Scope
-	Source      string
-	Issues      []string // stable codes attached at collect time (optional)
+	Event         Event
+	Match         string
+	Command       string
+	ContextFile   string
+	Description   string
+	Timeout       int
+	Scope         Scope
+	Source        string
+	Issues        []string // stable codes attached at collect time (optional)
+	runtimeConfig HookConfig
 }
 
 // Inspection is a read-only hook configuration snapshot. It does not execute
@@ -138,14 +139,15 @@ func appendInspectEntries(out *Inspection, s *Settings, scope Scope, source stri
 			seen[event] = true
 			for _, cfg := range hooks {
 				out.Entries = append(out.Entries, Entry{
-					Event:       event,
-					Match:       cfg.Match,
-					Command:     cfg.Command,
-					ContextFile: cfg.ContextFile,
-					Description: cfg.Description,
-					Timeout:     cfg.Timeout,
-					Scope:       scope,
-					Source:      source,
+					Event:         event,
+					Match:         cfg.Match,
+					Command:       cfg.Command,
+					ContextFile:   cfg.ContextFile,
+					Description:   cfg.Description,
+					Timeout:       cfg.Timeout,
+					Scope:         scope,
+					Source:        source,
+					runtimeConfig: cfg,
 				})
 			}
 		}
@@ -160,14 +162,15 @@ func appendInspectEntries(out *Inspection, s *Settings, scope Scope, source stri
 	for _, event := range unknown {
 		for _, cfg := range s.Hooks[event] {
 			out.Entries = append(out.Entries, Entry{
-				Event:       event,
-				Match:       cfg.Match,
-				Command:     cfg.Command,
-				ContextFile: cfg.ContextFile,
-				Description: cfg.Description,
-				Timeout:     cfg.Timeout,
-				Scope:       scope,
-				Source:      source,
+				Event:         event,
+				Match:         cfg.Match,
+				Command:       cfg.Command,
+				ContextFile:   cfg.ContextFile,
+				Description:   cfg.Description,
+				Timeout:       cfg.Timeout,
+				Scope:         scope,
+				Source:        source,
+				runtimeConfig: cfg,
 			})
 		}
 	}
@@ -192,10 +195,7 @@ func appendPluginInspect(out *Inspection, reasonixHomeDir, projectRoot string) {
 			// Keep unknown event names so diagnostics can report them.
 			for _, h := range pkg.Manifest.Hooks[eventName] {
 				count++
-				command := expandPluginRoot(h.Command, pkg.Root)
-				if command != "" && !h.ShellCommand && !filepath.IsAbs(command) {
-					command = filepath.Join(pkg.Root, filepath.FromSlash(command))
-				}
+				execution := pluginHookExecutionConfig(h, pkg.Root)
 				contextFile := expandPluginRoot(h.ContextFile, pkg.Root)
 				if contextFile != "" {
 					contextFile = filepath.FromSlash(contextFile)
@@ -206,14 +206,15 @@ func appendPluginInspect(out *Inspection, reasonixHomeDir, projectRoot string) {
 					}
 				}
 				out.Entries = append(out.Entries, Entry{
-					Event:       event,
-					Match:       h.Match,
-					Command:     command,
-					ContextFile: contextFile,
-					Description: h.Description,
-					Timeout:     h.Timeout,
-					Scope:       ScopePlugin,
-					Source:      src,
+					Event:         event,
+					Match:         h.Match,
+					Command:       execution.Command,
+					ContextFile:   contextFile,
+					Description:   h.Description,
+					Timeout:       h.Timeout,
+					Scope:         ScopePlugin,
+					Source:        src,
+					runtimeConfig: execution,
 				})
 			}
 		}
@@ -229,6 +230,12 @@ func appendPluginInspect(out *Inspection, reasonixHomeDir, projectRoot string) {
 		})
 		_ = projectRoot
 	}
+}
+
+// CheckEntryRuntime validates the host dependencies required by an inspected
+// Hook without executing the command.
+func CheckEntryRuntime(entry Entry, options RuntimeOptions) error {
+	return CheckRuntime(entry.runtimeConfig, options)
 }
 
 // ValidateMatcher returns an error string when match is an invalid anchored regex.

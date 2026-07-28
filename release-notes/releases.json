@@ -2,6 +2,225 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.18.0",
+      "date": "2026-07-27",
+      "channel": "stable",
+      "title": {
+        "en": "Kimi K3 Support, Preview & Stable Channels, and Signing Integrity",
+        "zh": "新增 Kimi K3 支持、预览与稳定发布渠道、签名完整性保障"
+      },
+      "summary": {
+        "en": "This release adds Kimi K3 support to the official Kimi APIs and OpenCode Go, introduces Preview and Stable channels for Desktop and native CLI, and hardens the Windows release signing process.",
+        "zh": "本次发布为官方 Kimi API 与 OpenCode Go 新增 Kimi K3 支持，为桌面版和原生 CLI 推出 Preview 与 Stable 双渠道，并强化 Windows 发布签名流程。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "desktop",
+        "provider",
+        "remote",
+        "security",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Reasonix User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Comprehensive guide for using Reasonix.",
+            "zh": "Reasonix 使用综合指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Reasonix User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Comprehensive guide for using Reasonix in Chinese.",
+            "zh": "Reasonix 使用综合指南（中文版）。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers Configuration",
+            "zh": "推理提供商配置"
+          },
+          "body": {
+            "en": "How to configure AI model providers in Reasonix.",
+            "zh": "如何在 Reasonix 中配置 AI 模型提供商。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/REASONING_PROVIDERS.md"
+        },
+        {
+          "title": {
+            "en": "Release Process",
+            "zh": "发布流程"
+          },
+          "body": {
+            "en": "Details on Reasonix release channels and process.",
+            "zh": "Reasonix 发布渠道与流程详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/RELEASING.md"
+        },
+        {
+          "title": {
+            "en": "Windows Signing Admin SOP",
+            "zh": "Windows 签名管理 SOP"
+          },
+          "body": {
+            "en": "Standard operating procedure for Windows code signing.",
+            "zh": "Windows 代码签名标准操作流程。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/acc4c54009e34c4b08e971a29710426ce4db1dae/docs/SIGNPATH_WINDOWS_ADMIN_SOP.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Kimi K3 model support",
+            "zh": "支持 Kimi K3 模型"
+          },
+          "body": {
+            "en": "Kimi K3 is now available through the official Kimi CN and Global direct APIs and OpenCode Go. Official APIs support native vision, a 1,048,576-token context window, and low/high/max reasoning; OpenCode Go keeps its relay-specific high/max scale.",
+            "zh": "Kimi K3 现已支持官方 Kimi 国内版、全球版直接 API 及 OpenCode Go。官方 API 支持原生视觉、1,048,576 token 上下文窗口和低/高/最高推理等级；OpenCode Go 保留其专用的高/最高等级。"
+          },
+          "refs": [
+            6921
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Preview and Stable release channels",
+            "zh": "预览版与稳定版发布渠道"
+          },
+          "body": {
+            "en": "Reasonix Desktop and native CLI now expose two public product channels: Preview for early access and Stable for production use. Desktop users can switch channels in Settings.",
+            "zh": "Reasonix 桌面版和原生 CLI 现提供两个公开产品渠道：Preview 用于抢先体验，Stable 用于正式使用。桌面用户可在设置中切换渠道。"
+          },
+          "refs": [
+            6155
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Release signing integrity hardening",
+            "zh": "加强发布签名完整性"
+          },
+          "body": {
+            "en": "We fixed a signing configuration that blocked the v1.17.21 Desktop release and added automated checks to verify the signing contract for all future releases.",
+            "zh": "我们修复了导致 v1.17.21 桌面版发布受阻的签名配置，并增加了自动化检查以验证所有未来发布的签名合约。"
+          },
+          "refs": [
+            6944
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Kimi K3 model available in official providers",
+              "zh": "官方提供商支持 Kimi K3 模型"
+            },
+            "body": {
+              "en": "The Kimi K3 model is now available in the Kimi CN and Kimi Global providers.",
+              "zh": "Kimi K3 模型现已在 Kimi 国内版和全球版提供商中可用。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Kimi K3 support in OpenCode Go",
+              "zh": "OpenCode Go 支持 Kimi K3"
+            },
+            "body": {
+              "en": "OpenCode Go now exposes Kimi K3 with its relay-specific high/max reasoning scale and existing OpenAI-compatible request behavior.",
+              "zh": "OpenCode Go 现支持 Kimi K3，并保留中继专用的高/最高推理等级及现有 OpenAI 兼容请求行为。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Native vision and 1M context for Kimi K3",
+              "zh": "Kimi K3 支持原生视觉和百万级上下文"
+            },
+            "body": {
+              "en": "Kimi K3 comes with native vision support, a 1,048,576-token context window, and low/high/max reasoning scale.",
+              "zh": "Kimi K3 具备原生视觉支持、1,048,576 token 上下文窗口以及低/高/最高推理等级。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop and native CLI release channels",
+              "zh": "桌面版和原生 CLI 发布渠道"
+            },
+            "body": {
+              "en": "Introduced Preview and Stable channels for Desktop updates and native CLI archives; Desktop users can select their channel in Settings.",
+              "zh": "为桌面更新和原生 CLI 归档推出 Preview 与 Stable 渠道；桌面用户可在设置中选择渠道。"
+            },
+            "refs": [
+              6155
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Signing contract automated validation",
+              "zh": "签名合约自动验证"
+            },
+            "body": {
+              "en": "The release process now validates the signing contract automatically to prevent misconfigurations.",
+              "zh": "发布流程现自动验证签名合约，防止配置错误。"
+            },
+            "refs": [
+              6944
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Fixed v1.17.21 Desktop release signing",
+              "zh": "修复 v1.17.21 桌面版发布签名"
+            },
+            "body": {
+              "en": "Resolved a signing issue that prevented the previous Desktop release from being published.",
+              "zh": "解决了导致前一个桌面版发布未能发布的签名问题。"
+            },
+            "refs": [
+              6944
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.18.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.21...desktop-v1.18.0",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.21",
       "date": "2026-07-25",
       "channel": "stable",

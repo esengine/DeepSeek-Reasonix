@@ -1638,6 +1638,7 @@ export interface SettingsView {
   agent: AgentView;
   bot: BotSettingsView;
   desktopLanguage: string; // "" | "en" | "zh"; empty = auto
+  desktopCurrency?: string; // "" | "CNY" | "USD"; absent/empty = follow language
   desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;

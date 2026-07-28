@@ -8,18 +8,18 @@ import (
 	"reasonix/internal/provider"
 )
 
-func deepSeekV4FlashPrice() *provider.Pricing {
+func deepSeekV4FlashPriceCNY() *provider.Pricing {
 	return &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}
 }
 
-func deepSeekV4ProPrice() *provider.Pricing {
+func deepSeekV4ProPriceCNY() *provider.Pricing {
 	return &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}
 }
 
-func deepSeekV4Prices() map[string]*provider.Pricing {
+func deepSeekV4PricesCNY() map[string]*provider.Pricing {
 	return map[string]*provider.Pricing{
-		"deepseek-v4-flash": deepSeekV4FlashPrice(),
-		"deepseek-v4-pro":   deepSeekV4ProPrice(),
+		"deepseek-v4-flash": deepSeekV4FlashPriceCNY(),
+		"deepseek-v4-pro":   deepSeekV4ProPriceCNY(),
 	}
 }
 
@@ -38,30 +38,105 @@ func deepSeekV4PricesUSD() map[string]*provider.Pricing {
 	}
 }
 
-// DeepSeekV4PricesForLanguage keeps the settings/template call site stable while
-// official DeepSeek defaults move to RMB. Persisted prices still win; this is
-// only used for templates and missing-default backfills.
+// DeepSeekV4PricesForCurrency returns the official regional price table.
+// Persisted custom prices still win; this is only used for built-in templates
+// and known-default refreshes.
+func DeepSeekV4PricesForCurrency(currency string) map[string]*provider.Pricing {
+	if normalizeDeepSeekPricingCurrency(currency) == "CNY" {
+		return deepSeekV4PricesCNY()
+	}
+	return deepSeekV4PricesUSD()
+}
+
+// DeepSeekV4PricesForLanguage is retained for compatibility with older call
+// sites. New desktop code should pass an explicit pricing currency.
 func DeepSeekV4PricesForLanguage(lang string) map[string]*provider.Pricing {
-	_ = lang
-	return deepSeekV4Prices()
+	if normalizeDeepSeekPricingLanguage(lang) == "zh" {
+		return DeepSeekV4PricesForCurrency("CNY")
+	}
+	return DeepSeekV4PricesForCurrency("USD")
 }
 
 func deepSeekV4PricesForConfig(c *Config) map[string]*provider.Pricing {
-	_ = c
-	return deepSeekV4Prices()
+	return DeepSeekV4PricesForCurrency(c.DeepSeekOfficialPricingCurrency())
 }
 
-func deepSeekV4PriceForModel(lang, model string) *provider.Pricing {
-	_ = lang
-	return clonePricing(deepSeekV4Prices()[strings.TrimSpace(model)])
+func deepSeekV4PriceForModel(currency, model string) *provider.Pricing {
+	return clonePricing(DeepSeekV4PricesForCurrency(currency)[strings.TrimSpace(model)])
 }
 
-// DeepSeekOfficialPricingLanguage is retained for settings/template compatibility.
-// Official DeepSeek providers now seed RMB prices by default; explicit user
-// prices in config still override these defaults.
+// DeepSeekOfficialPricingCurrency resolves the regional pricing table used for
+// official DeepSeek defaults. An explicit desktop currency wins; auto follows
+// desktop language, then CLI language, and finally defaults to USD.
+func (c *Config) DeepSeekOfficialPricingCurrency() string {
+	if c != nil {
+		if currency := c.DesktopCurrency(); currency != "" {
+			return currency
+		}
+		if normalizeDeepSeekPricingLanguage(c.Desktop.Language) == "zh" {
+			return "CNY"
+		}
+		if normalizeDeepSeekPricingLanguage(c.Desktop.Language) == "en" {
+			return "USD"
+		}
+		if normalizeDeepSeekPricingLanguage(c.Language) == "zh" {
+			return "CNY"
+		}
+	}
+	return "USD"
+}
+
+// DesktopPricingFollowsDetectedLocale reports whether the desktop may supply
+// its browser/OS locale as the official pricing region. Explicit currency or
+// language preferences always win.
+func (c *Config) DesktopPricingFollowsDetectedLocale() bool {
+	return c != nil && c.DesktopCurrency() == "" && c.DesktopLanguage() == "" && c.ResponseLanguage() == "auto"
+}
+
+// ApplyRuntimeAutoPricingCurrency applies a frontend-detected pricing region
+// to this in-memory config only. Callers must not persist the resulting copy,
+// because doing so would turn the user's Auto choice into an explicit region.
+func (c *Config) ApplyRuntimeAutoPricingCurrency(currency string) {
+	if !c.DesktopPricingFollowsDetectedLocale() {
+		return
+	}
+	normalized := normalizeDeepSeekPricingCurrency(currency)
+	if normalized == "" {
+		return
+	}
+	c.Desktop.Currency = normalized
+	applyDeepSeekOfficialDefaultPricingWithOverride(c, false)
+}
+
+// DeepSeekOfficialPricingLanguage is retained for older settings/template call
+// sites that still express the pricing region as a language.
 func (c *Config) DeepSeekOfficialPricingLanguage() string {
-	_ = c
-	return "zh"
+	if c.DeepSeekOfficialPricingCurrency() == "CNY" {
+		return "zh"
+	}
+	return "en"
+}
+
+func normalizeDeepSeekPricingCurrency(currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "CNY", "RMB", "CNH", "¥", "￥":
+		return "CNY"
+	case "USD", "$", "US$":
+		return "USD"
+	default:
+		return ""
+	}
+}
+
+func normalizeDeepSeekPricingLanguage(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "zh", "zh-cn", "zh-hans", "cn", "chinese", "中文", "zh-tw", "zh-hant", "zh-hk", "zh-mo":
+		return "zh"
+	case "en", "en-us", "en-gb", "english":
+		return "en"
+	default:
+		return ""
+	}
 }
 
 // ApplyDeepSeekOfficialDefaultPricing refreshes built-in/official DeepSeek
@@ -72,24 +147,86 @@ func (c *Config) ApplyDeepSeekOfficialDefaultPricing() {
 }
 
 func applyDeepSeekOfficialDefaultPricing(c *Config) {
+	applyDeepSeekOfficialDefaultPricingWithOverride(c, c != nil && c.DesktopCurrency() != "")
+}
+
+func applyDeepSeekOfficialDefaultPricingWithOverride(c *Config, overridePersisted bool) {
 	if c == nil {
 		return
 	}
-	lang := c.DeepSeekOfficialPricingLanguage()
+	currency := c.DeepSeekOfficialPricingCurrency()
 	for i := range c.Providers {
 		p := &c.Providers[i]
 		if officialProviderKind(p) != "deepseek" {
 			continue
 		}
-		if isKnownDeepSeekOfficialPricing(p.Model, p.Price) {
-			p.Price = deepSeekV4PriceForModel(lang, p.Model)
+		if isKnownDeepSeekOfficialPricing(p.Model, p.Price) && (overridePersisted || p.persistedOfficialCurrency == "") {
+			p.Price = deepSeekV4PriceForModel(currency, p.Model)
 		}
 		for model, price := range p.Prices {
-			if isKnownDeepSeekOfficialPricing(model, price) {
-				p.Prices[model] = deepSeekV4PriceForModel(lang, model)
+			if isKnownDeepSeekOfficialPricing(model, price) && (overridePersisted || p.persistedOfficialCurrency == "") {
+				p.Prices[model] = deepSeekV4PriceForModel(currency, model)
 			}
 		}
 	}
+}
+
+// markPersistedDeepSeekOfficialPricing records which recognized regional
+// prices came from TOML. Auto locale refreshes preserve those values, while an
+// explicit currency choice can still replace them with the selected table.
+func markPersistedDeepSeekOfficialPricing(c *Config) {
+	if c == nil {
+		return
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if officialProviderKind(p) != "deepseek" {
+			continue
+		}
+		p.persistedOfficialCurrency = completeDeepSeekOfficialPricingCurrency(p)
+		if c.ConfigVersion >= Default().ConfigVersion && isStandardDeepSeekProviderTemplate(p) {
+			p.persistedOfficialCurrency = ""
+		}
+	}
+}
+
+func isStandardDeepSeekProviderTemplate(p *ProviderEntry) bool {
+	if p == nil || officialProviderKind(p) != "deepseek" {
+		return false
+	}
+	return strings.TrimSpace(p.APIKeyEnv) == "DEEPSEEK_API_KEY" &&
+		strings.TrimSpace(p.BalanceURL) == "https://api.deepseek.com/user/balance" &&
+		p.ContextWindow == 1_000_000
+}
+
+func completeDeepSeekOfficialPricingCurrency(p *ProviderEntry) string {
+	if p == nil {
+		return ""
+	}
+	models := p.ModelList()
+	if len(models) == 1 && isKnownDeepSeekOfficialPricing(models[0], p.Price) {
+		return normalizeDeepSeekPricingCurrency(p.Price.Currency)
+	}
+	if len(models) == 0 || p.Price != nil {
+		return ""
+	}
+	currency := ""
+	for _, model := range models {
+		price := p.Prices[strings.TrimSpace(model)]
+		if !isKnownDeepSeekOfficialPricing(model, price) {
+			return ""
+		}
+		nextCurrency := normalizeDeepSeekPricingCurrency(price.Currency)
+		if nextCurrency == "" {
+			return ""
+		}
+		if currency == "" {
+			currency = nextCurrency
+		} else if currency != nextCurrency {
+			return ""
+		}
+	}
+	return currency
 }
 
 func mimoV25ProPrice() *provider.Pricing {
@@ -217,16 +354,15 @@ func resetOfficialProviderPricingDefaults(c *Config) {
 		p := &c.Providers[i]
 		switch {
 		case officialProviderKind(p) == "deepseek":
-			resetDeepSeekOfficialPricing(p)
+			resetDeepSeekOfficialPricing(p, deepSeekV4PricesForConfig(c))
 		}
 	}
 }
 
-func resetDeepSeekOfficialPricing(p *ProviderEntry) {
+func resetDeepSeekOfficialPricing(p *ProviderEntry, defaults map[string]*provider.Pricing) {
 	if p == nil {
 		return
 	}
-	defaults := deepSeekV4Prices()
 	p.Price = nil
 	if strings.TrimSpace(p.Model) != "" && len(p.Models) == 0 {
 		if price := defaults[strings.TrimSpace(p.Model)]; price != nil {
@@ -250,12 +386,25 @@ func isKnownDeepSeekOfficialPricing(model string, price *provider.Pricing) bool 
 	if model == "" || price == nil {
 		return false
 	}
-	for _, prices := range []map[string]*provider.Pricing{deepSeekV4Prices(), deepSeekV4PricesUSD()} {
+	for _, prices := range []map[string]*provider.Pricing{deepSeekV4PricesCNY(), deepSeekV4PricesUSD()} {
 		if samePricing(price, prices[model]) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsOfficialDeepSeekProvider reports whether an entry targets DeepSeek's
+// official API endpoint. Desktop telemetry uses this after a regional-currency
+// change so custom endpoints and rates stay untouched.
+func IsOfficialDeepSeekProvider(p *ProviderEntry) bool {
+	return officialProviderKind(p) == "deepseek"
+}
+
+// IsKnownDeepSeekOfficialPricing reports whether price is one of Reasonix's
+// built-in DeepSeek regional defaults for model.
+func IsKnownDeepSeekOfficialPricing(model string, price *provider.Pricing) bool {
+	return isKnownDeepSeekOfficialPricing(model, price)
 }
 
 func samePricing(a, b *provider.Pricing) bool {

@@ -4049,7 +4049,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.runThemeSubcommand(input)
 	case "/language":
 		m.echoLocalCommand(input)
-		m.runLanguageSubcommand(input)
+		return m.runLanguageSubcommand(input)
+	case "/currency":
+		m.echoLocalCommand(input)
+		return m.runCurrencySubcommand(input)
 	case "/help":
 		m.echoLocalCommand(input)
 		m.showHelp()

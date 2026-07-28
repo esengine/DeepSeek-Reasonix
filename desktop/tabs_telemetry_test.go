@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -86,6 +87,64 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	}
 	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 {
 		t.Fatalf("context panel total tokens = %d, want 140", panel.TotalTokens)
+	}
+}
+
+func TestWorkspaceTabRepricesUsageWithoutMixingCurrencies(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 1_000_000, CompletionTokens: 100_000, TotalTokens: 1_100_000},
+		UsageSource: event.UsageSourceExecutor,
+		Pricing:     &provider.Pricing{Input: 1, Output: 2, Currency: "CNY"},
+	})
+	if ok := tab.repriceUsage(map[string]*provider.Pricing{
+		event.UsageSourceExecutor: {Input: 0.14, Output: 0.28, Currency: "USD"},
+	}); !ok {
+		t.Fatal("repriceUsage rejected a complete source mapping")
+	}
+	got := tab.telemetrySnapshot().Usage
+	want := 0.14 + 0.1*0.28
+	if got.SessionCurrency != "$" || got.SessionCost != want {
+		t.Fatalf("repriced usage = %f %q, want %f USD", got.SessionCost, got.SessionCurrency, want)
+	}
+}
+
+func TestRepriceTabUsageUsesDetectedLocaleForAutoCurrency(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.Default()
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save auto config: %v", err)
+	}
+	tab := &WorkspaceTab{WorkspaceRoot: t.TempDir(), model: "deepseek-flash/deepseek-v4-flash"}
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		UsageSource: event.UsageSourceExecutor,
+		Pricing:     &provider.Pricing{Input: 0.14, Currency: "USD"},
+	})
+	app := NewApp()
+	app.setDesktopLocale("zh-CN")
+
+	app.repriceTabUsageForCurrentCurrency(tab)
+
+	got := tab.telemetrySnapshot().Usage
+	if got.SessionCurrency != "¥" || got.SessionCost != 1 {
+		t.Fatalf("auto-locale repriced usage = %f %q, want 1 CNY", got.SessionCost, got.SessionCurrency)
+	}
+}
+
+func TestWorkspaceTabDoesNotAddDifferentCurrencies(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage:   &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		Pricing: &provider.Pricing{Input: 1, Currency: "CNY"},
+	})
+	tab.recordUsage(event.Event{
+		Usage:   &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		Pricing: &provider.Pricing{Input: 0.14, Currency: "USD"},
+	})
+	got := tab.telemetrySnapshot().Usage
+	if got.SessionCurrency != "$" || got.SessionCost != 0.14 {
+		t.Fatalf("mixed-currency usage = %f %q, want only the current USD bucket", got.SessionCost, got.SessionCurrency)
 	}
 }
 

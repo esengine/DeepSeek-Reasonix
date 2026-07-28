@@ -319,10 +319,81 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	return m.StartForSession("", kind, label, run)
 }
 
+// validatePathSegment rejects values that would let parentSession or kind
+// escape the temp-root fallback built by artifactDirLocked. Persistent artifact
+// directories bound by SetActiveSessionPath are trusted store paths and are
+// intentionally outside that temp root. The check is intentionally conservative:
+// it forbids any path-separator character (forward slash, backslash), NUL, and
+// any control character. Empty parentSession is allowed (the unscoped default);
+// kind must be non-empty.
+//
+// See #6932. Before this check existed, a malicious or malformed parentSession
+// such as "../../etc" combined with filepath.Join(tempRoot, parentSession, id)
+// resolved to a directory outside the manager's temp root, allowing the
+// subsequent os.MkdirAll + os.OpenFile to create files at locations controlled
+// by the caller (subject to the running process's filesystem permissions).
+func validatePathSegment(name, field string) error {
+	if field == "kind" && name == "" {
+		return fmt.Errorf("jobs: %s must not be empty", field)
+	}
+	for i, r := range name {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			return fmt.Errorf("jobs: %s contains control character 0x%02x at index %d", field, r, i)
+		case r == '/' || r == '\\':
+			return fmt.Errorf("jobs: %s contains path separator %q at index %d", field, r, i)
+		}
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("jobs: %s is reserved (%q)", field, name)
+	}
+	return nil
+}
+
+// startInvalid registers a job that failed validation BEFORE any goroutine or
+// artifact was created. The job is observable to Wait / list calls as Failed
+// with the validation error recorded in artifactErr, and no run goroutine is
+// started so the manager's wg is unaffected.
+func (m *Manager) startInvalid(parentSession, kind, label string, validationErr error) *Job {
+	finishedAt := nowMs()
+	m.mu.Lock()
+	m.seq++
+	id := fmt.Sprintf("invalid-%d", m.seq)
+	j := &Job{
+		ID:               id,
+		Kind:             kind,
+		Label:            label,
+		SessionID:        parentSession,
+		status:           Failed,
+		startedAt:        finishedAt,
+		activityAt:       finishedAt,
+		finishedAt:       finishedAt,
+		runReturned:      true,
+		cancel:           func() {},
+		done:             make(chan struct{}),
+		artifactComplete: false,
+		artifactErr:      validationErr.Error(),
+	}
+	key := jobKey(parentSession, id)
+	m.jobs[key] = j
+	m.order = append(m.order, key)
+	m.mu.Unlock()
+	close(j.done)
+	m.recordCompletion(parentSession, id, kind, label, Failed, validationErr)
+	return j
+}
+
 // StartForSession launches a job owned by parentSession. Session-scoped readers
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
+	kind = strings.TrimSpace(kind)
+	if err := validatePathSegment(parentSession, "parentSession"); err != nil {
+		return m.startInvalid(parentSession, kind, label, err)
+	}
+	if err := validatePathSegment(kind, "kind"); err != nil {
+		return m.startInvalid(parentSession, kind, label, err)
+	}
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
@@ -1104,18 +1175,58 @@ func (m *Manager) SetActiveSession(parentSession string) {
 	m.mu.Unlock()
 }
 
+// validateTrustedSessionPath performs defense-in-depth syntax validation on a
+// transcript path already trusted by the store/controller layer. It rejects
+// control characters, but deliberately preserves separators and `..`: those are
+// valid host-path syntax, and rejecting them without a trusted root would break
+// legitimate relative paths without establishing filesystem containment.
+func validateTrustedSessionPath(sessionPath string) error {
+	if sessionPath == "" {
+		return fmt.Errorf("jobs: sessionPath must not be empty")
+	}
+	for i, r := range sessionPath {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("jobs: sessionPath contains control character 0x%02x at index %d", r, i)
+		}
+	}
+	return nil
+}
+
 // SetActiveSessionPath binds a parent session id to its persistent transcript
 // path, migrates any temporary artifacts, and loads completed job tombstones from
-// the session sidecar.
+// the session sidecar. sessionPath must come from the trusted store/controller
+// path; this method does not establish filesystem containment on its own.
 func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 	parentSession = strings.TrimSpace(parentSession)
 	sessionPath = strings.TrimSpace(sessionPath)
-	m.mu.Lock()
-	m.active = parentSession
+	// Preserve the legacy active-only behavior for calls without a complete
+	// binding. In particular, an empty path is not an error or filesystem input.
 	if parentSession == "" || sessionPath == "" {
+		m.mu.Lock()
+		m.active = parentSession
 		m.mu.Unlock()
 		return
 	}
+	// Reject malformed trusted paths before any filesystem side effect. This is
+	// syntax hardening, not a boundary for arbitrary caller-controlled paths.
+	if err := validateTrustedSessionPath(sessionPath); err != nil {
+		m.mu.Lock()
+		m.active = parentSession
+		// A rejected rebinding must not leave future jobs writing to a stale
+		// transcript that happened to use the same parent session id.
+		delete(m.artifactDirs, parentSession)
+		delete(m.loaded, parentSession)
+		m.mu.Unlock()
+		m.sink.Emit(event.Event{
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Text:   "Ignoring SetActiveSessionPath with invalid session path",
+			Detail: fmt.Sprintf("session %q: %v", parentSession, err),
+		})
+		return
+	}
+	m.mu.Lock()
+	m.active = parentSession
 	oldDir := m.artifactDirLocked(parentSession)
 	adoptDefault := false
 	if _, hasDir := m.artifactDirs[parentSession]; !hasDir && m.hasUnscopedJobsLocked() {

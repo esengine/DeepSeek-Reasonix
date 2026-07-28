@@ -2847,6 +2847,21 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestModelsForTabListsNothingWhenProviderAccessExplicitlyEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.Desktop.ProviderAccess = []string{}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if models := NewApp().Models(); len(models) != 0 {
+		t.Fatalf("Models() = %+v, want no models when provider access is explicitly empty", models)
+	}
+}
+
 func TestModelsForTabListsCustomMultiModelProviderWithoutMetadata(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "LOCAL_API_KEY", "sk-test")

@@ -292,8 +292,8 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   if (!open) return null;
 
   const scopeFilterLabel = (filter: string, map: Record<string, string>): string => {
-    if (filter === "all") return "全部项目";
-    if (filter === "global") return "全局";
+    if (filter === "all") return t("heartbeat.filterAllProjects");
+    if (filter === "global") return t("heartbeat.scopeGlobal");
     return map[filter] || filter.split("/").pop() || filter;
   };
 
@@ -314,7 +314,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           ) : (
             <Activity size={16} />
           )}
-          <span>{editing ? t("heartbeat.editTask") : "自动化任务"}</span>
+          <span>{editing ? t("heartbeat.editTask") : t("heartbeat.scheduler")}</span>
           <button
             className="heartbeat-modal__close"
             onClick={onClose}
@@ -402,7 +402,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                       type="button"
                       onClick={() => { setScopeFilter("all"); setScopeFilterOpen(false); }}
                     >
-                      <span>全部项目</span>
+                      <span>{t("heartbeat.filterAllProjects")}</span>
                       {scopeFilter === "all" && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
                     <button
@@ -412,7 +412,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                       type="button"
                       onClick={() => { setScopeFilter("global"); setScopeFilterOpen(false); }}
                     >
-                      <span>全局</span>
+                      <span>{t("heartbeat.scopeGlobal")}</span>
                       {scopeFilter === "global" && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
                     {(() => {
@@ -483,7 +483,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
               ) : filtered.length === 0 ? (
                 <div className="heartbeat-empty">
                   <Heart size={24} />
-                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : "没有匹配的任务"}</span>
+                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : t("heartbeat.noMatchingTasks")}</span>
                 </div>
               ) : (
                 <ul className="heartbeat-tasklist">
@@ -621,13 +621,13 @@ function TaskCard({
 // ── Cycle Editor ──────────────────────────────────────────────────────────────
 
 const WEEKDAYS = [
-  { key: "mon", label: "周一" },
-  { key: "tue", label: "周二" },
-  { key: "wed", label: "周三" },
-  { key: "thu", label: "周四" },
-  { key: "fri", label: "周五" },
-  { key: "sat", label: "周六" },
-  { key: "sun", label: "周日" },
+  { key: "mon", labelKey: "heartbeat.weekdayMon" },
+  { key: "tue", labelKey: "heartbeat.weekdayTue" },
+  { key: "wed", labelKey: "heartbeat.weekdayWed" },
+  { key: "thu", labelKey: "heartbeat.weekdayThu" },
+  { key: "fri", labelKey: "heartbeat.weekdayFri" },
+  { key: "sat", labelKey: "heartbeat.weekdaySat" },
+  { key: "sun", labelKey: "heartbeat.weekdaySun" },
 ] as const;
 
 const ALL_WEEKDAYS = WEEKDAYS.map(w => w.key);
@@ -741,11 +741,11 @@ function CycleEditor({
 
   const MONTHS = Array.from({ length: 12 }, (_, i) => ({
     value: String(i + 1),
-    label: `${i + 1}月`,
+    label: t("heartbeat.monthOption", { n: i + 1 }),
   }));
   const DAYS = Array.from({ length: 31 }, (_, i) => ({
     value: String(i + 1),
-    label: `${i + 1}日`,
+    label: t("heartbeat.dayOption", { n: i + 1 }),
   }));
 
   return (
@@ -815,7 +815,7 @@ function CycleEditor({
                 onClick={() => onDayToggle(wd.key)}
                 aria-pressed={selectedDays.includes(wd.key)}
               >
-                {wd.label}
+                {t(wd.labelKey)}
               </button>
             ))}
           </div>
@@ -1200,7 +1200,7 @@ function TaskEditor({
           className="heartbeat-btn heartbeat-btn--primary"
           onClick={() => onSave(draft)}
           disabled={!draft.title.trim() || !draft.prompt.trim() || !isDirty}
-          title={!draft.title.trim() || !draft.prompt.trim() ? "请填写标题和提示词" : !isDirty ? "无修改内容" : undefined}
+          title={!draft.title.trim() || !draft.prompt.trim() ? t("heartbeat.requiredFields") : !isDirty ? t("heartbeat.noChanges") : undefined}
         >
           {isNew ? t("heartbeat.add") : t("heartbeat.save")}
         </button>

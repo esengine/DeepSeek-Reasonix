@@ -65,6 +65,24 @@ setup 会询问是否共享该凭据；两个 provider 使用不同 Key 时，�
 setup 添加或删除 provider 时，也会同步维护桌面端 provider access，因此相同模型可以
 直接在桌面端使用。
 
+### 配置区域定价货币
+
+使用用户全局货币命令查看或选择 DeepSeek 官方区域价格表：
+
+```sh
+reasonix config currency             # 显示已保存值和最终解析结果
+reasonix config currency auto        # 跟随解析后的 locale
+reasonix config currency CNY
+reasonix config currency USD
+```
+
+`auto` 会把简体或繁体中文 locale 解析为 CNY，把英文及其他 locale 解析为 USD。显式
+选择 `CNY` 或 `USD` 后，货币不再跟随界面语言。该偏好只保存在用户全局配置中，项目
+`reasonix.toml` 无法覆盖，因此不支持 `--local`。自定义 provider 价格不会被修改。
+
+在交互式会话中，`/currency` 显示已保存值和最终解析结果；
+`/currency auto|CNY|USD` 会修改偏好并刷新当前运行时，同时保留当前对话。
+
 ## 一次性运行与自动化
 
 脚本只需要最终回答时，使用 `-p` / `--print`：
@@ -106,6 +124,8 @@ reasonix run "运行测试" --output-format stream-json
   "num_turns": 1,
   "result": "...",
   "session_id": "...",
+  "total_cost": 0,
+  "currency": "CNY",
   "total_cost_usd": 0,
   "usage": {
     "input_tokens": 0,
@@ -115,6 +135,12 @@ reasonix run "运行测试" --output-format stream-json
   }
 }
 ```
+
+`total_cost` 使用 `currency` 给出的 ISO 货币代码计价；DeepSeek 官方价格目前会输出
+`CNY` 或 `USD`。`total_cost_usd` 作为数字兼容别名继续保留，并与 `total_cost` 数值
+相同；即使 `currency` 为 `CNY`，它也不会按旧字段名自动换算为美元。新接入必须同时读取
+`total_cost` 和 `currency`。如果一次结构化运行包含多种货币，Reasonix 会直接报错，
+不会输出容易误解的合计金额。
 
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。
 结构化模式会把运行时错误保留在 JSON 中，不再额外重复输出一份人类可读错误。
@@ -138,18 +164,19 @@ PID 或 hostname。这里的“只读”是指不会修改 transcript、runtime�
 状态；首次使用脱敏机器接口时，Reasonix 可能会在用户状态目录初始化一个私有身份密钥：
 
 ```sh
-reasonix session list --json [--dir SESSION_DIR]
-reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
-reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
-reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix session list --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
+reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
 
-对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录；未指定时，Reasonix
-选择当前项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
+对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录，`--project-root`
+则解析指定项目的 session store；两者不能同时使用。都未指定时，Reasonix 选择当前
+项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
 `hook list` 的状态值为 `active` 或 `invalid`；`invalid` 表示配置的
 event 因事件名、命令/context 来源或工具事件 matcher 无效而无法执行。非工具事件
 会忽略 matcher。
@@ -279,6 +306,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/status` | 显示模型、effort、cache、Git、后台任务，以及工作模式或余额信息。 |
 | `/work-mode [economy\|balanced\|delivery]` | 查看或切换运行时工作模式；`/profile` 是别名。 |
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
+| `/currency [auto\|CNY\|USD]` | 查看或切换用户全局官方定价货币，并刷新当前运行时。 |
 | `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
 | `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理。 |
 | `/effort` | 查看或切换 reasoning effort。 |

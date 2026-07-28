@@ -46,7 +46,7 @@ type ArgData struct {
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
 // /skills /plugins /hooks /effort /goal /reasoning-language
-// /theme /language);
+// /theme /language /currency);
 // others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
@@ -80,6 +80,8 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = themeArgItems(prior)
 	case "/language":
 		raw = languageArgItems(prior)
+	case "/currency":
+		raw = currencyArgItems(prior)
 	default:
 		return nil, from
 	}
@@ -117,6 +119,17 @@ func languageArgItems(prior []string) []SlashItem {
 		{Label: "auto", Insert: "auto", Hint: i18n.M.ArgLanguageAuto},
 		{Label: "en", Insert: "en", Hint: i18n.M.ArgLanguageEn},
 		{Label: "zh", Insert: "zh", Hint: i18n.M.ArgLanguageZh},
+	}
+}
+
+func currencyArgItems(prior []string) []SlashItem {
+	if len(prior) != 1 {
+		return nil
+	}
+	return []SlashItem{
+		{Label: "auto", Insert: "auto", Hint: "follow the resolved CLI locale"},
+		{Label: "CNY", Insert: "CNY", Hint: "Chinese yuan pricing"},
+		{Label: "USD", Insert: "USD", Hint: "US dollar pricing"},
 	}
 }
 

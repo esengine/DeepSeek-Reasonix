@@ -266,6 +266,7 @@ type SettingsView struct {
 	Agent                   AgentView            `json:"agent"`
 	Bot                     BotSettingsView      `json:"bot"`
 	DesktopLanguage         string               `json:"desktopLanguage"`
+	DesktopCurrency         string               `json:"desktopCurrency"`
 	DesktopLayoutStyle      string               `json:"desktopLayoutStyle"`
 	DesktopTheme            string               `json:"desktopTheme"`
 	DesktopThemeStyle       string               `json:"desktopThemeStyle"`
@@ -902,6 +903,7 @@ func (a *App) Settings() SettingsView {
 		},
 		Bot:                     botSettingsView(cfg.Bot),
 		DesktopLanguage:         cfg.DesktopLanguage(),
+		DesktopCurrency:         cfg.DesktopCurrency(),
 		DesktopLayoutStyle:      cfg.DesktopLayoutStyle(),
 		DesktopTheme:            cfg.DesktopTheme(),
 		DesktopThemeStyle:       cfg.DesktopThemeStyle(),
@@ -923,7 +925,7 @@ func (a *App) Settings() SettingsView {
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	resolver := config.NewCredentialResolverForRoot(root)
-	v.OfficialProviders = officialProviderViewsForRootWithResolver(officialProviderAddedSet(cfg), cfg.DeepSeekOfficialPricingLanguage(), root, resolver)
+	v.OfficialProviders = officialProviderViewsForRootWithResolver(officialProviderAddedSet(cfg), a.desktopOfficialPricingLanguage(cfg), root, resolver)
 	v.ProviderPresets = providerPresetViewsForRootWithResolver(cfg, root, resolver)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
@@ -1630,6 +1632,7 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -1693,6 +1696,9 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
+	if setting == "currency" {
+		a.repriceTabUsageForCurrentCurrency(tab)
+	}
 	a.clearDeferredRebuild(tab.ID)
 	a.notifyTabRuntimeRebuilt(tab)
 	a.emitReady(a.ctx)
@@ -1766,7 +1772,7 @@ func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown model %q", ref)
 	}
-	if !modelProviderAccessAllowed(providerAccessSet(c.Desktop.ProviderAccess), entry.Name) {
+	if !modelProviderAccessAllowed(c.Desktop.ProviderAccess, entry.Name) {
 		return "", fmt.Errorf("model %q is not available because provider %q is not added", ref, entry.Name)
 	}
 	if !entry.Configured() {
@@ -2999,7 +3005,18 @@ func (a *App) SetStatusBarItems(items []string) error {
 // language preference used by model-facing desktop sessions.
 func (a *App) SetDesktopLanguage(lang string) error {
 	responseLanguage := ""
-	if err := a.applyConfigOnly(func(c *config.Config) error {
+	pricingChanged := false
+	if cfg, _, err := a.loadDesktopUserConfigForView(); err == nil && cfg.DesktopCurrency() == "" {
+		targetCurrency := a.desktopAutoPricingCurrency()
+		switch strings.ToLower(strings.TrimSpace(lang)) {
+		case "zh":
+			targetCurrency = "CNY"
+		case "en":
+			targetCurrency = "USD"
+		}
+		pricingChanged = a.desktopEffectivePricingCurrency(cfg) != targetCurrency
+	}
+	mutate := func(c *config.Config) error {
 		if err := c.SetDesktopLanguage(lang); err != nil {
 			return err
 		}
@@ -3008,21 +3025,113 @@ func (a *App) SetDesktopLanguage(lang string) error {
 		}
 		responseLanguage = c.ResponseLanguage()
 		return nil
-	}); err != nil {
+	}
+	var err error
+	if pricingChanged {
+		_, err = a.applyConfigChangeWithWarning("currency", mutate)
+	} else {
+		err = a.applyConfigOnly(mutate)
+	}
+	if err != nil {
 		return err
+	}
+	if pricingChanged {
+		a.scheduleCurrencyRefreshForOtherTabs()
+	}
+	if strings.TrimSpace(lang) != "" && !strings.EqualFold(strings.TrimSpace(lang), "auto") {
+		a.setDesktopLocale(lang)
 	}
 	a.updateTrayLocale(lang)
 	a.applyResponseLanguageToLiveControllers(responseLanguage)
 	return nil
 }
 
+// SetDesktopCurrency updates the official pricing region independently from UI
+// language. Rebuild the active controller so subsequent usage carries the new
+// currency and regional rates through the existing structured cost fields.
+func (a *App) SetDesktopCurrency(currency string) error {
+	_, err := a.applyConfigChangeWithWarning("currency", func(c *config.Config) error {
+		return c.SetDesktopCurrency(currency)
+	})
+	if err == nil {
+		a.scheduleCurrencyRefreshForOtherTabs()
+	}
+	return err
+}
+
+func (a *App) scheduleCurrencyRefreshForOtherTabs() {
+	if a == nil || a.ctx == nil {
+		return
+	}
+	a.mu.RLock()
+	activeID := a.activeTabID
+	tabIDs := make([]string, 0, len(a.tabs))
+	for id, tab := range a.tabs {
+		if id != activeID && tab != nil && tab.Ctrl != nil && !tab.removed {
+			tabIDs = append(tabIDs, id)
+		}
+	}
+	a.mu.RUnlock()
+	for _, id := range tabIDs {
+		a.scheduleDeferredRebuild(id, "currency")
+	}
+}
+
+func (a *App) scheduleCurrencyRefreshForAllTabs() {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	tabIDs := make([]string, 0, len(a.tabs))
+	for id, tab := range a.tabs {
+		if tab != nil && tab.Ctrl != nil && !tab.removed {
+			tabIDs = append(tabIDs, id)
+		}
+	}
+	a.mu.RUnlock()
+	for _, id := range tabIDs {
+		a.scheduleDeferredRebuild(id, "currency")
+	}
+}
+
+func (a *App) desktopPricingFollowsDetectedLocale() bool {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	return err == nil && cfg.DesktopPricingFollowsDetectedLocale()
+}
+
+func (a *App) desktopEffectivePricingCurrency(cfg *config.Config) string {
+	if cfg == nil {
+		return a.desktopAutoPricingCurrency()
+	}
+	if cfg.DesktopPricingFollowsDetectedLocale() {
+		return a.desktopAutoPricingCurrency()
+	}
+	return cfg.DeepSeekOfficialPricingCurrency()
+}
+
+func (a *App) desktopOfficialPricingLanguage(cfg *config.Config) string {
+	if a.desktopEffectivePricingCurrency(cfg) == "CNY" {
+		return "zh"
+	}
+	return "en"
+}
+
 // SetTrayLocale mirrors the resolved desktop UI language into the native tray
 // menu. It is runtime-only; the persisted preference remains [desktop].language.
 func (a *App) SetTrayLocale(locale string) error {
-	if locale != "zh" {
-		locale = "en"
+	previousCurrency := a.desktopAutoPricingCurrency()
+	a.setDesktopLocale(locale)
+	pricingCurrencyChanged := previousCurrency != a.desktopAutoPricingCurrency()
+	trayLocale := "en"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "zh") {
+		trayLocale = "zh"
 	}
-	a.updateTrayLocale(locale)
+	a.updateTrayLocale(trayLocale)
+	if pricingCurrencyChanged && a.desktopPricingFollowsDetectedLocale() {
+		a.scheduleCurrencyRefreshForAllTabs()
+		a.kickDeferredRebuildRetry()
+	}
+	a.emitProjectTreeChanged()
 	return nil
 }
 

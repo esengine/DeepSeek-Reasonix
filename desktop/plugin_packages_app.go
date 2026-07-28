@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/command"
 	"reasonix/internal/config"
+	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
 	"reasonix/internal/pluginpkg"
 )
@@ -313,6 +314,22 @@ func (a *App) PluginDoctor(name string) PluginView {
 		if _, err := os.Stat(p.Root); err != nil {
 			p.Error = err.Error()
 			return p
+		}
+		pkg, _, err := pluginpkg.ParseDir(p.Root)
+		if err != nil {
+			p.Error = err.Error()
+			return p
+		}
+		cfg, _ := config.LoadForRootReadOnly(a.activeWorkspaceRoot())
+		runtimeOptions := hook.RuntimeOptions{}
+		if cfg != nil {
+			runtimeOptions = hook.RuntimeOptionsForShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path)
+		}
+		for _, issue := range hook.CheckPackageRuntime(pkg, runtimeOptions) {
+			p.Warnings = append(p.Warnings, fmt.Sprintf(
+				"%s hook is unavailable: %v; install Git for Windows or configure a usable Bash path",
+				issue.Event, issue.Err,
+			))
 		}
 		return p
 	}

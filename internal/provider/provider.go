@@ -720,6 +720,24 @@ func RequiresToolCallReasoning(p Provider) bool {
 	return ok && policy.RequiresToolCallReasoning()
 }
 
+// ReasoningRoundTripPolicy is optionally implemented by providers that require
+// every assistant message to preserve provider-issued reasoning in later
+// requests. This is broader than ToolCallReasoningPolicy, which covers only
+// assistant tool_calls turns.
+type ReasoningRoundTripPolicy interface {
+	RequiresReasoningRoundTrip() bool
+}
+
+// RequiresReasoningRoundTrip reports whether raw provider reasoning must be
+// retained and replayed on all assistant messages.
+func RequiresReasoningRoundTrip(p Provider) bool {
+	if nilutil.IsNil(p) {
+		return false
+	}
+	policy, ok := p.(ReasoningRoundTripPolicy)
+	return ok && policy.RequiresReasoningRoundTrip()
+}
+
 // MissingToolCallReasoningWarningPolicy is optionally implemented by providers
 // whose replay protocol requires reasoning_content, but whose active model may
 // not reliably emit it. Request serialization should stay conservative while

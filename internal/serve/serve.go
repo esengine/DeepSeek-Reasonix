@@ -1190,7 +1190,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, sess)
 }
 
-const titlePrompt = `Generate a very short title (3-5 words max) for this conversation based on the user's first message. Reply with ONLY the title, no quotes, no punctuation at the end.`
+const titlePrompt = `Generate a very short title (3-5 words max) for this conversation based on the user's first message. Use the same language as the user's message. Reply with ONLY the title, no quotes, no punctuation at the end.`
 
 // generateTitle calls a lightweight LLM to produce a short session title.
 // Returns empty string on any error — callers should fall back to a preview.

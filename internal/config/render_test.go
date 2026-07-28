@@ -760,6 +760,7 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c := Default()
 	c.Language = "zh"
 	c.Desktop.Language = "zh"
+	c.Desktop.Currency = "CNY"
 	c.Desktop.Theme = "dark"
 	c.Desktop.ThemeStyle = "graphite"
 	c.Desktop.CloseBehavior = "background"
@@ -771,7 +772,7 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Agent.RecoveryTemperature = 0.2
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 5", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `update_channel = "preview"`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 5", "[desktop]", `currency = "CNY"`, `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `update_channel = "preview"`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
@@ -804,6 +805,44 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	}
 	if strings.Contains(user, "recovery_temperature") || strings.Contains(project, "recovery_temperature") {
 		t.Fatalf("deprecated recovery_temperature must not be rendered:\nuser:\n%s\nproject:\n%s", user, project)
+	}
+}
+
+func TestScopedRenderKeepsPluginsInTheirOwningConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "unknown", Command: "unknown-mcp"},
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+
+	tests := []struct {
+		name  string
+		body  string
+		want  []string
+		avoid []string
+	}{
+		{name: "full", body: RenderTOMLForScope(cfg, RenderScopeFull), want: []string{"unknown", "user", "project", "mcp-json", "legacy", "package"}},
+		{name: "user", body: RenderTOMLForScope(cfg, RenderScopeUser), want: []string{"unknown", "user"}, avoid: []string{"project", "mcp-json", "legacy", "package"}},
+		{name: "project", body: RenderTOMLForScope(cfg, RenderScopeProject), want: []string{"unknown", "project"}, avoid: []string{"user", "mcp-json", "legacy", "package"}},
+		{name: "project delta", body: RenderTOMLProjectDelta(cfg), want: []string{"unknown", "project"}, avoid: []string{"user", "mcp-json", "legacy", "package"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, name := range tt.want {
+				if !strings.Contains(tt.body, `name    = "`+name+`"`) {
+					t.Fatalf("render missing plugin %q:\n%s", name, tt.body)
+				}
+			}
+			for _, name := range tt.avoid {
+				if strings.Contains(tt.body, `name    = "`+name+`"`) {
+					t.Fatalf("render leaked plugin %q:\n%s", name, tt.body)
+				}
+			}
+		})
 	}
 }
 
@@ -892,7 +931,7 @@ func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
 		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
 		Default:   "deepseek-v4-flash",
 		APIKeyEnv: "DEEPSEEK_API_KEY",
-		Prices:    deepSeekV4Prices(),
+		Prices:    DeepSeekV4PricesForCurrency("CNY"),
 	}}
 
 	var got Config

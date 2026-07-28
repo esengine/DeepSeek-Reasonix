@@ -200,6 +200,7 @@ type App struct {
 
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
+	desktopLocale       atomic.Int32
 	trayReady           bool
 	tray                *desktopTray
 	hangWatchdogMu      sync.Mutex
@@ -697,7 +698,7 @@ func (a *App) restoreOrBuildTabs() {
 		if lang == "" {
 			lang = cfg.Language
 		}
-		i18n.DetectLanguage(lang)
+		a.setDesktopLocale(i18n.DetectLanguage(lang))
 	}
 	if cfgErr != nil || singleSurfaceLayoutStyle(startupCfg.DesktopLayoutStyle()) {
 		f = singleSurfaceTabsFile(f)
@@ -774,19 +775,44 @@ func (a *App) createTabEntry(scope, workspaceRoot, topicID string) *WorkspaceTab
 	return a.createTabEntryWithID(scope, workspaceRoot, topicID, newTabID())
 }
 
-func desktopNewSessionDefaults() (string, string) {
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	return strings.TrimSpace(cfg.DefaultModel), normalizeToolApprovalMode(cfg.DesktopDefaultToolApprovalMode())
+func desktopNewSessionDefaults(scope, workspaceRoot string) (string, string) {
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	modelCfg := userCfg
+	if strings.TrimSpace(scope) == "project" && strings.TrimSpace(workspaceRoot) != "" {
+		if cfg, err := config.LoadForRootReadOnly(workspaceRoot); err == nil {
+			modelCfg = cfg
+		}
+	}
+	return resolveNewSessionModel(modelCfg), normalizeToolApprovalMode(userCfg.DesktopDefaultToolApprovalMode())
+}
+
+// resolveNewSessionModel picks the model a fresh session starts on. A
+// default_model that resolves but has no API key in the current environment
+// would boot every new tab straight into the missing-key notice, so fall
+// through to the first provider that is actually configured, mirroring the
+// Configured() gate in Config.ResolveModelWithFallback's fallback chain. An
+// allowed chat default is preserved when every eligible provider is keyless so
+// the existing missing-key notice still tells the user what to fix. When no
+// desktop-accessible chat model exists, the empty result lets tab startup show
+// an actionable setup error instead of re-admitting an ineligible default.
+func resolveNewSessionModel(cfg *config.Config) string {
+	def := strings.TrimSpace(cfg.DefaultModel)
+	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, def)
+	if resolved, _, ok := cfg.ResolveDesktopNewSessionModel(); ok {
+		return resolved
+	}
+	return ""
 }
 
 func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *WorkspaceTab {
-	model, toolApprovalMode := desktopNewSessionDefaults()
+	model, toolApprovalMode := desktopNewSessionDefaults(scope, workspaceRoot)
 	return &WorkspaceTab{
 		ID:               id,
 		Scope:            scope,
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
 		model:            model,
 		tokenMode:        boot.TokenModeFull,
 		mode:             tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo),
@@ -2032,6 +2058,7 @@ func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
 	workspaceRoot := tab.WorkspaceRoot
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
+	tab.topicTitleSource = topicTitleSourceAuto
 	if current := a.tabs[tab.ID]; current == tab {
 		a.saveTabsLocked()
 	}
@@ -2063,6 +2090,7 @@ func (a *App) ensureTabTopicIndexedForUserTurn(tab *WorkspaceTab) {
 	workspaceRoot := tab.WorkspaceRoot
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
+	tab.topicTitleSource = topicTitleSourceAuto
 	if current := a.tabs[tab.ID]; current == tab {
 		a.saveTabsLocked()
 	}
@@ -2202,6 +2230,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    snap.model,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     newSink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -2558,7 +2587,7 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 		return TabMeta{}, err
 	}
 	topicID := newTopicID()
-	topicTitle := forkTopicTitle(sourceTitle)
+	topicTitle := a.forkTopicTitle(sourceTitle)
 	titleRoot := workspaceRoot
 	if scope == "global" {
 		titleRoot = ""
@@ -2584,6 +2613,7 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
+		topicTitleSource: topicTitleSourceManual,
 		SessionPath:      newPath,
 		model:            model,
 		effort:           effort,
@@ -3403,7 +3433,7 @@ func (a *App) openTransientBlankRuntime(scope, workspaceRoot string) error {
 		}
 	}
 
-	model, toolApprovalMode := desktopNewSessionDefaults()
+	model, toolApprovalMode := desktopNewSessionDefaults(scope, actualRoot)
 	sessionPath, err := createEmptySessionFile(desktopSessionDir(actualRoot), model)
 	if err != nil {
 		return err
@@ -3412,6 +3442,7 @@ func (a *App) openTransientBlankRuntime(scope, workspaceRoot string) error {
 		Scope:            scope,
 		WorkspaceRoot:    actualRoot,
 		TopicTitle:       defaultTopicTitle,
+		topicTitleSource: topicTitleSourceAuto,
 		SessionPath:      sessionPath,
 		model:            model,
 		tokenMode:        boot.TokenModeFull,
@@ -4053,6 +4084,7 @@ func (a *App) buildSessionRebindCandidate(
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    model,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     a.desktopControllerSink(sink, cfg.Notifications),
 		WorkspaceRoot:            root,
 		SessionDir:               sessionDir,
@@ -8954,11 +8986,10 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	if entry, ok := cfg.ResolveModel(curModel); ok {
 		curModel = entry.Name + "/" + entry.Model
 	}
-	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	out := []ModelInfo{}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, p.Name) || !p.Configured() {
 			continue
 		}
 		for _, m := range p.ChatModelList() {
@@ -8969,11 +9000,17 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	return out
 }
 
-func modelProviderAccessAllowed(access map[string]bool, name string) bool {
-	if len(access) == 0 {
+func modelProviderAccessAllowed(access []string, name string) bool {
+	if access == nil {
 		return true
 	}
-	return access[strings.TrimSpace(name)]
+	name = strings.TrimSpace(name)
+	for _, candidate := range access {
+		if strings.TrimSpace(candidate) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
@@ -9178,7 +9215,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if !ok {
 		return fmt.Errorf("unknown model %q", name)
 	}
-	if !modelProviderAccessAllowed(providerAccessSet(cfg.Desktop.ProviderAccess), entry.Name) {
+	if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, entry.Name) {
 		return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
 	}
 	name = entry.Name + "/" + entry.Model
@@ -9215,6 +9252,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    name,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -9390,6 +9428,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -9529,6 +9568,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -11020,10 +11060,9 @@ func (a *App) NeedsOnboarding() bool {
 		// Do not cover their recovery path with an onboarding gate.
 		return false
 	}
-	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() || len(p.ChatModelList()) == 0 {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, p.Name) || !p.Configured() || len(p.ChatModelList()) == 0 {
 			continue
 		}
 		return false
