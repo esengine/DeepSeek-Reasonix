@@ -45,6 +45,7 @@ export const en = {
   "tabBar.tabActions": "Tab actions",
   "tabBar.commandSearch": "Search · Command · Open file",
   "tabBar.commandSearchCompact": "Search",
+  "tabBar.forkSession": "Forked session",
 
   // sidebar
   "sidebar.conversations": "Chats",
