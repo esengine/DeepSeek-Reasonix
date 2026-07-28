@@ -76,8 +76,10 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`path: desktop/build/windows/installer-signing-bundle/*.exe`,
 		`github.repository == 'esengine/DeepSeek-Reasonix'`,
 		`SIGNPATH_API_TOKEN is required for public Windows Preview and Stable releases`,
+		`SIGNPATH_RELEASE_SIGNING_ATTESTATION does not match the current protected signing contract`,
 		`signing-policy-slug: release-signing`,
-		`needs.build.result == 'success' && !inputs.production_signing_smoke`,
+		`needs.build.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight`,
+		`go run ./cmd/signpath-contract fingerprint`,
 		`wait-for-completion: false`,
 		`steps.submit-windows-payload.outputs.signing-request-id`,
 		`steps.submit-windows-installer.outputs.signing-request-id`,
@@ -167,6 +169,9 @@ func TestProductionSigningRunsOnlyFromProtectedControlPlane(t *testing.T) {
 	for _, want := range []string{
 		`ALLOW_STABLE_RECOVERY: ${{ inputs.allow_recovery }}`,
 		`allow_recovery: 'false'`,
+		`signing_preflight: true`,
+		`signing_preflight_verified: true`,
+		`needs: [authorize, signpath-preflight]`,
 	} {
 		if !strings.Contains(stable+"\n"+readTestFile(t, "../.github/workflows/release-stable-trigger.yml"), want) {
 			t.Errorf("stable relay is missing normal-release recovery guard %q", want)

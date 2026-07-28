@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	_ "reasonix/internal/provider/anthropic"
 	_ "reasonix/internal/provider/openai"
@@ -140,15 +141,7 @@ func requestRepairPlan(ctx context.Context, root, modelRef string, report repair
 	if entry.RequiresAPIKey() && entry.APIKey() == "" {
 		return repair.RepairPlan{}, fmt.Errorf("AI assistance provider %q has no configured API key", entry.Name)
 	}
-	p, err := provider.New(entry.Kind, provider.Config{
-		Name: entry.Name, BaseURL: entry.BaseURL, Model: entry.Model, APIKey: entry.APIKey(),
-		Extra: map[string]any{
-			"api_key_env": entry.APIKeyEnv, "api_key_source": entry.APIKeySourceLabel(),
-			"thinking": entry.Thinking, "effort": entry.Effort, "reasoning_protocol": entry.ReasoningProtocol,
-			"chat_url": entry.ChatURL, "headers": entry.Headers, "extra_body": entry.ExtraBody,
-			"auth_header": entry.AuthHeader, "proxy_spec": cfg.NetworkProxySpec(),
-		},
-	})
+	p, err := provider.New(entry.Kind, repairPlanProviderConfig(entry, cfg.NetworkProxySpec()))
 	if err != nil {
 		return repair.RepairPlan{}, err
 	}
@@ -184,6 +177,20 @@ func requestRepairPlan(ctx context.Context, root, modelRef string, report repair
 		return repair.RepairPlan{}, err
 	}
 	return resolveProviderSnapshotAliases(plan, snapshotAliases)
+}
+
+func repairPlanProviderConfig(entry *config.ProviderEntry, proxy netclient.ProxySpec) provider.Config {
+	return provider.Config{
+		Name: entry.Name, BaseURL: entry.BaseURL, Model: entry.Model, APIKey: entry.APIKey(),
+		Extra: map[string]any{
+			"api_key_env": entry.APIKeyEnv, "api_key_source": entry.APIKeySourceLabel(),
+			"thinking": entry.Thinking, "effort": config.EffectiveEffort(entry), "supported_efforts": entry.SupportedEfforts,
+			"reasoning_protocol": config.ReasoningProtocolForEntry(entry),
+			"chat_url":           entry.ChatURL, "headers": entry.Headers, "extra_body": entry.ExtraBody,
+			"auth_header": entry.AuthHeader, "proxy_spec": proxy,
+			"vision": config.EffectiveVision(entry), "vision_detail": entry.VisionDetail,
+		},
+	}
 }
 
 func loadAIProviderConfig(root string) (*config.Config, error) {

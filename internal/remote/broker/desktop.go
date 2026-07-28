@@ -309,6 +309,7 @@ func DescriptorFromProvider(ref, display, model string, p provider.Provider, eff
 		SupportedEfforts:               append([]string(nil), efforts...),
 		DefaultEffort:                  defaultEffort,
 		ToolCallReasoning:              provider.RequiresToolCallReasoning(p),
+		ReasoningRoundTrip:             provider.RequiresReasoningRoundTrip(p),
 		WarnOnMissingToolCallReasoning: provider.WarnOnMissingToolCallReasoning(p),
 		ContextWindow:                  contextWindow,
 	}

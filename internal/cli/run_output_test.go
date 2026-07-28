@@ -142,7 +142,7 @@ func TestEventsJSONLHasOneCanonicalFlag(t *testing.T) {
 	}
 	var code int
 	stderr := captureStderr(t, func() {
-		code = runAgent([]string{"--events-jsonl", "--output-format", "json", "task"})
+		code = runAgent([]string{"--events-jsonl", "--output-format", "json", "task"}, "dev")
 	})
 	if code != 2 || !strings.Contains(stderr, "cannot be combined") {
 		t.Fatalf("exit=%d stderr=%q", code, stderr)

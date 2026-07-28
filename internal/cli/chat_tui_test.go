@@ -3281,6 +3281,22 @@ func TestDynamicMCPFreshApprovalHidesRememberedChoices(t *testing.T) {
 	}
 }
 
+func TestDynamicBashApprovalChoicesUseExactLiteralRules(t *testing.T) {
+	const command = "git status $(touch /tmp/reasonix-dynamic-approval)"
+	approval := &event.Approval{Tool: "bash", Subject: command}
+	choices := approvalChoices(approval)
+	if len(choices) != 4 {
+		t.Fatalf("dynamic Bash choices = %+v, want ordinary four-choice approval", choices)
+	}
+	want := "Bash=" + command
+	if !strings.Contains(choices[1].label, want) {
+		t.Fatalf("session choice = %q, want exact rule %q", choices[1].label, want)
+	}
+	if !strings.Contains(choices[2].label, want) {
+		t.Fatalf("persistent choice = %q, want exact rule %q", choices[2].label, want)
+	}
+}
+
 func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
 	if !freshApprovalAllowsSession(control.SandboxEscapeApprovalTool) {
 		t.Fatal("sandbox escape should allow an explicit session choice")

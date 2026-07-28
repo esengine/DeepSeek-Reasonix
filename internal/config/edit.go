@@ -375,6 +375,21 @@ func (c *Config) SetDesktopMetrics(enabled bool) error {
 	return nil
 }
 
+// SetCLITelemetryMode sets the user-global content-free CLI metrics policy.
+func (c *Config) SetCLITelemetryMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		c.Telemetry.CLIMetrics = "auto"
+	case "on":
+		c.Telemetry.CLIMetrics = "on"
+	case "off":
+		c.Telemetry.CLIMetrics = "off"
+	default:
+		return fmt.Errorf("cli_metrics %q: must be auto|on|off", mode)
+	}
+	return nil
+}
+
 // SetDesktopConversationWidth sets the max transcript width preference.
 // standard = 960px fixed; full = 90% of the parent, with a 960px floor.
 // An empty value resets to standard.
@@ -1307,7 +1322,7 @@ func (c *Config) saveProjectIncremental(path string) error {
 	if tomlBodyHasTopLevelKey(body, "config_version") && !tomlBodyHasTopLevelKey(delta, "config_version") {
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
-	removePlugins := len(c.Plugins) == 0 && tomlBodyHasSection(body, "plugins")
+	removePlugins := len(tomlPluginsForScope(c.Plugins, RenderScopeProject)) == 0 && tomlBodyHasSection(body, "plugins")
 	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
 	_, hasLegacyDesktopAutoGuard := tomlSectionKeyValue(body, "desktop", "default_auto_recovery_checkpoint")
 	_, hasRetiredAgentAutoGuard := tomlSectionKeyValue(body, "agent", "auto_recovery_checkpoint")

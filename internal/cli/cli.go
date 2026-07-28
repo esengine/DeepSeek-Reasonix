@@ -35,6 +35,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
+	"reasonix/internal/telemetry"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/pflag"
@@ -83,7 +84,7 @@ func Run(args []string, version string) int {
 	}
 
 	if len(args) == 0 && cliIsInteractive() {
-		return runInteractiveSession(nil)
+		return runInteractiveSession(nil, version)
 	}
 	if len(args) == 0 {
 		configureCLIThemeFromConfigForTTYOutput()
@@ -91,15 +92,15 @@ func Run(args []string, version string) int {
 		return 0
 	}
 	if cmd == "" {
-		return runInteractiveSession(args)
+		return runInteractiveSession(args, version)
 	}
 
 	rest := args[1:]
 	switch cmd {
 	case "run":
-		return runAgent(rest)
+		return runAgent(rest, version)
 	case "chat", "code": // "code" is the v0.x name for the interactive session
-		return runInteractiveSession(rest)
+		return runInteractiveSession(rest, version)
 	case "serve":
 		return runServe(rest)
 	case "setup":
@@ -134,6 +135,9 @@ func Run(args []string, version string) int {
 			configureCLIThemeFromConfigNoProbe()
 		}
 		return doctorCommand(rest, version)
+	case "report":
+		configureCLIThemeFromConfigNoProbe()
+		return reportCommand(rest)
 	case "session":
 		configureCLIThemeFromConfigNoProbe()
 		return sessionCommand(rest)
@@ -415,7 +419,7 @@ func withNotifications(sink event.Sink, cfg *config.Config) event.Sink {
 	return notify.NewSink(sink, newNotificationSender(), cfg.Notifications)
 }
 
-func runAgent(args []string) int {
+func runAgent(args []string, version string) int {
 	fs := pflag.NewFlagSet("run", pflag.ContinueOnError)
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
@@ -533,6 +537,11 @@ func runAgent(args []string) int {
 		}
 		resumePath = copied
 	}
+	sessionMode := cliTelemetrySessionMode(*cont, strings.TrimSpace(*resume) != "", *copySession)
+	reporter := startCLITelemetry(cfg, telemetry.Options{
+		Version: version, Interactive: false, CLIMode: "run", Profile: profile,
+		PermissionMode: *permissionMode, SessionMode: sessionMode,
+	})
 
 	// Own the session file for the lifetime of this run so a desktop window (or
 	// another CLI) writing the same session is refused up front instead of
@@ -588,6 +597,7 @@ func runAgent(args []string) int {
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
+	sink = reporter.Wrap(sink)
 	if resumePath != "" {
 		*model = modelForResumePath(*model, resumePath, cfg)
 	}
@@ -647,6 +657,7 @@ func runAgent(args []string) int {
 	}
 
 	runErr := ctrl.Run(ctx, prompt)
+	reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
 	completion := classifyRunCompletion(runErr)
 	if cfg != nil {
 		notify.SendEvent(newNotificationSender(), cfg.Notifications, event.Event{
@@ -920,7 +931,7 @@ func runServe(args []string) int {
 // chatREPL is an interactive session: a single persistent agent/session and a
 // prompt loop that keeps conversation context across turns. Exit with
 // 'exit'/'quit' or Ctrl-D.
-func chatREPL(args []string) int {
+func chatREPL(args []string, version string) int {
 	fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
 	fs.SetInterspersed(true)
 	model := fs.String("model", "", "provider name (default: config default_model)")
@@ -1024,6 +1035,11 @@ func chatREPL(args []string) int {
 		fmt.Printf("continuing in a session copy: %s\n", copied)
 		resumePath = copied
 	}
+	sessionMode := cliTelemetrySessionMode(*cont, resumeValue != "", *copySession)
+	reporter := startCLITelemetry(cfg, telemetry.Options{
+		Version: version, Interactive: isInteractive(), CLIMode: "tui", Profile: profile,
+		PermissionMode: *permissionMode, SessionMode: sessionMode,
+	})
 
 	// Own the active session file for the TUI's lifetime; in-TUI switches
 	// (/resume, /switch, /new, ...) move the lease with the active path.
@@ -1053,6 +1069,7 @@ func chatREPL(args []string) int {
 
 	var sink event.Sink = &eventSink{ch: eventCh}
 	sink = withNotifications(sink, cfg)
+	sink = reporter.Wrap(sink)
 	var effortOverride *string
 	if strings.TrimSpace(*effort) != "" {
 		effortOverride = effort
@@ -1215,14 +1232,22 @@ func chatREPL(args []string) int {
 	// when executed while the TUI is alive.
 	if fm, ok := final.(chatTUI); ok {
 		for _, oc := range fm.oldControllers {
+			if c, ok := oc.(*control.Controller); ok {
+				reporter.RecordRecovery(c.DrainRecoveryMetrics())
+			}
 			oc.Close()
 		}
 		if fm.ctrl != nil {
+			if c, ok := fm.ctrl.(*control.Controller); ok {
+				reporter.RecordRecovery(c.DrainRecoveryMetrics())
+			}
 			fm.ctrl.Close()
 		} else {
+			reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
 			ctrl.Close()
 		}
 	} else {
+		reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
 		ctrl.Close()
 	}
 	if runErr != nil {
@@ -2195,10 +2220,78 @@ func configCommand(args []string) int {
 		return configAutoPlanCompatibilityCommand(args[1:])
 	case "reasoning-language":
 		return configReasoningLanguageCommand(args[1:])
+	case "telemetry":
+		return configTelemetryCommand(args[1:])
 	default:
 		configUsage()
 		return 2
 	}
+}
+
+var (
+	cleanupCLITelemetry        = telemetry.Cleanup
+	startCLITelemetryReporter  = telemetry.Start
+	persistCLITelemetryConsent = func(mode string) error {
+		path := config.UserConfigPath()
+		if strings.TrimSpace(path) == "" {
+			return errors.New("cannot resolve config path")
+		}
+		unlock := config.LockUserConfigEdits()
+		defer unlock()
+		cfg, err := config.LoadForEditReadOnlyStrict(path)
+		if err != nil {
+			return err
+		}
+		if err := cfg.SetCLITelemetryMode(mode); err != nil {
+			return err
+		}
+		return cfg.SaveTo(path)
+	}
+)
+
+func configTelemetryCommand(args []string) int {
+	fs := flag.NewFlagSet("config telemetry", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		configTelemetryUsage()
+		return 2
+	}
+	if len(rest) == 0 {
+		cfg, err := config.Load()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		fmt.Printf("cli_metrics = %q\n", cfg.CLITelemetryMode())
+		return 0
+	}
+	path := config.UserConfigPath()
+	if path == "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "cannot resolve config path")
+		return 1
+	}
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
+	cfg := config.LoadForEdit(path)
+	if err := cfg.SetCLITelemetryMode(rest[0]); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	if cfg.CLITelemetryMode() == "off" {
+		if err := cleanupCLITelemetry(config.ReasonixHomeDir()); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "telemetry disabled, but pending metrics could not be deleted:", err)
+			return 1
+		}
+	}
+	fmt.Printf("cli_metrics = %q (%s)\n", cfg.CLITelemetryMode(), displayPath(path))
+	return 0
 }
 
 // configAutoPlanCompatibilityCommand preserves the released shell interface
@@ -2302,7 +2395,75 @@ func configReasoningLanguageCommand(args []string) int {
 func configUsage() {
 	fmt.Print(`Usage:
   reasonix config reasoning-language [--local] [auto|zh|en]
+  reasonix config telemetry [auto|on|off]
 `)
+}
+
+func configTelemetryUsage() {
+	fmt.Print(`Usage:
+  reasonix config telemetry [auto|on|off]
+`)
+}
+
+func startCLITelemetry(cfg *config.Config, opts telemetry.Options) *telemetry.Reporter {
+	return startCLITelemetryWithIO(cfg, opts, os.Stdin, os.Stdout, os.Stderr)
+}
+
+func startCLITelemetryWithIO(cfg *config.Config, opts telemetry.Options, in io.Reader, out, errOut io.Writer) *telemetry.Reporter {
+	if cfg == nil {
+		cfg = config.Default()
+	}
+	opts.Mode = cfg.CLITelemetryMode()
+	opts.HomeDir = config.ReasonixHomeDir()
+	opts.SafeMode = cfg.SafeMode()
+	opts.Proxy = cfg.NetworkProxySpec()
+	opts.Language = cfg.Language
+
+	if cfg.CLITelemetryConfigured() || !telemetry.Enabled(opts.Mode, opts.Version, opts.Interactive, opts.SafeMode) {
+		return startCLITelemetryReporter(opts)
+	}
+
+	fmt.Fprintln(out, i18n.M.CLITelemetryConsentNotice)
+	scanner := bufio.NewScanner(in)
+	mode := ""
+	for mode == "" {
+		answer := strings.ToLower(strings.TrimSpace(ask(scanner, out, i18n.M.CLITelemetryConsentPrompt, "Y/n")))
+		switch answer {
+		case "y", "yes", "y/n":
+			mode = "auto"
+		case "n", "no":
+			mode = "off"
+		default:
+			fmt.Fprintln(out, i18n.M.CLITelemetryConsentInvalid)
+		}
+	}
+
+	if err := persistCLITelemetryConsent(mode); err != nil {
+		fmt.Fprintf(errOut, i18n.M.CLITelemetryConsentSaveFailedFmt+"\n", err)
+		return nil
+	}
+	cfg.Telemetry.CLIMetrics = mode
+	opts.Mode = mode
+	if mode == "off" {
+		if err := cleanupCLITelemetry(opts.HomeDir); err != nil {
+			fmt.Fprintf(errOut, i18n.M.CLITelemetryConsentCleanupFailedFmt+"\n", err)
+		}
+		return nil
+	}
+	return startCLITelemetryReporter(opts)
+}
+
+func cliTelemetrySessionMode(cont, resume, copySession bool) string {
+	switch {
+	case copySession:
+		return "copy"
+	case resume:
+		return "resume"
+	case cont:
+		return "continue"
+	default:
+		return "fresh"
+	}
 }
 
 func configAutoPlanCompatibilityUsage() {

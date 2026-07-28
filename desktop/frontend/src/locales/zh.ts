@@ -2325,7 +2325,7 @@ export const zh: Record<DictKey, string> = {
   "settings.addProvider.preset.glmCodingPlanCnAnthropicDesc": "智谱 GLM 国内 Anthropic-compatible coding plan 端点，默认 GLM-5.2[1m]。",
   "settings.addProvider.preset.zaiCodingPlanGlobalDesc": "Z.AI 国际 coding plan 端点，默认 GLM-5.2。",
   "settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc": "Z.AI 国际 Anthropic-compatible coding plan 端点，默认 GLM-5.2[1m]。",
-  "settings.addProvider.preset.opencodeGoDesc": "OpenCode Go 混合模型网关，内置每模型能力覆盖。",
+  "settings.addProvider.preset.opencodeGoDesc": "OpenCode Go 混合模型网关，原生预置 Kimi K3 与每模型能力覆盖。",
   "settings.addProvider.preset.opencodeGoAnthropicDesc": "OpenCode Go Anthropic 线路，预置 Qwen 与 MiniMax 模型。",
   "settings.addProvider.preset.opencodeZenAnthropicDesc": "OpenCode Zen Anthropic 线路，预置 Claude 与 Qwen 模型。",
   "settings.addProvider.preset.qwenCnDesc": "Qwen/DashScope 国内标准 API 端点。",

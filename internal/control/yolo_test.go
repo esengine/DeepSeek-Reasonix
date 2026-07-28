@@ -1188,7 +1188,7 @@ func TestApplyToolApprovalModeReportsDrainedIDs(t *testing.T) {
 
 	autoOKID, autoOKReply := c.approval.register("bash", "go test ./...", "")
 	askRuleID, askRuleReply := c.approval.register("bash", "git commit -m x", "")
-	planID, planReply := c.approval.registerDecision(planApprovalTool, "", "", true)
+	planID, planReply := c.approval.registerDecision(planApprovalTool, "", "", true, false)
 
 	drained := c.ApplyToolApprovalMode(ToolApprovalAuto)
 	if len(drained) != 1 || drained[0] != autoOKID {

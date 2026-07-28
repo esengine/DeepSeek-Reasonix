@@ -23,6 +23,7 @@ type Descriptor struct {
 	Efforts                        []string `json:"efforts,omitempty"`
 	DefaultEffort                  string   `json:"defaultEffort,omitempty"`
 	ToolCallReasoning              bool     `json:"toolCallReasoning,omitempty"`
+	ReasoningRoundTrip             bool     `json:"reasoningRoundTrip,omitempty"`
 	WarnOnMissingToolCallReasoning bool     `json:"warnOnMissingToolCallReasoning,omitempty"`
 }
 

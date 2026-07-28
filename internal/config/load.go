@@ -74,6 +74,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	userDefaultModel := cfg.DefaultModel
 	globalSecrets := cfg.Secrets
 	globalRemote := cfg.Remote.Clone()
+	globalTelemetry := cfg.Telemetry
 
 	tomlSources = append(tomlSources, projectTOML)
 	if err := mergeTOML(cfg, projectTOML); err != nil {
@@ -87,6 +88,9 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// must not be able to inject hosts, jump chains, or port forwards that
 	// steer where Reasonix opens connections.
 	cfg.Remote = globalRemote
+	// CLI telemetry is an explicit user-global privacy choice. Project config
+	// cannot opt a user in or out, including when the global value is absent.
+	cfg.Telemetry = globalTelemetry
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
@@ -138,6 +142,8 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyStepFunBaseURLs(cfg)
 	normalizeLegacyLongCatContextWindows(cfg)
+	normalizeLegacyKimiK3Catalog(cfg)
+	normalizeLegacyOpenCodeGoKimiK3Catalog(cfg)
 	normalizeLegacyMimoCustomProviders(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -183,6 +189,7 @@ func loadSafeModeForRoot(root string) *Config {
 	// every reporting path off instead of inheriting the enabled defaults.
 	cfg.Desktop.Telemetry = safeModeBoolPtr(false)
 	cfg.Desktop.Metrics = safeModeBoolPtr(false)
+	cfg.Telemetry.CLIMetrics = "off"
 	cfg.setExpansionEnv(nil)
 	cfg.CredentialsStore = credentialsStoreMode()
 	resolveProviderCredentialsForRoot(root, cfg)
@@ -616,6 +623,8 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	normalizeLegacyMCPTiers(cfg)
 	changed = normalizeLegacyStepFunBaseURLs(cfg) || changed
 	changed = normalizeLegacyLongCatContextWindows(cfg) || changed
+	changed = normalizeLegacyKimiK3Catalog(cfg) || changed
+	changed = normalizeLegacyOpenCodeGoKimiK3Catalog(cfg) || changed
 	changed = normalizeLegacyMimoCustomProviders(cfg) || changed
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -1140,6 +1149,109 @@ func normalizeLegacyLongCatContextWindows(c *Config) bool {
 		changed = true
 	}
 	return changed
+}
+
+// normalizeLegacyKimiK3Catalog upgrades only untouched Kimi direct-API model
+// catalogs on the official regional endpoints. Custom model lists, endpoints,
+// defaults, credentials, and provider-wide settings remain user-owned.
+func normalizeLegacyKimiK3Catalog(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := false
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		name := strings.TrimSpace(p.Name)
+		var baseURL string
+		switch {
+		case presetID == "kimi-cn" || (presetID == "" && name == "kimi-cn"):
+			baseURL = "https://api.moonshot.cn/v1"
+		case presetID == "kimi-global" || (presetID == "" && name == "kimi-global"):
+			baseURL = "https://api.moonshot.ai/v1"
+		default:
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != baseURL ||
+			!stringSlicesEqual(p.Models, legacyKimiAPIModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), kimiAPIModels...)
+		p.VisionModels = migrateKimiK3VisionModels(p.VisionModels, legacyKimiAPIModels)
+		mergeMissingKimiK3Override(p, kimiK3DirectOverride())
+		changed = true
+	}
+	return changed
+}
+
+// migrateKimiK3VisionModels preserves explicit provider-level vision choices.
+// A nil list or an exact copy of the old preset list indicates that the user
+// has not customized vision support and should receive Kimi K3's capability.
+func migrateKimiK3VisionModels(current, legacy []string) []string {
+	if current != nil && (legacy == nil || !stringSlicesEqual(current, legacy)) {
+		return current
+	}
+	return mergeModelLists([]string{"kimi-k3"}, current)
+}
+
+func mergeMissingKimiK3Override(p *ProviderEntry, defaults ProviderModelOverride) {
+	if p.ModelOverrides == nil {
+		p.ModelOverrides = map[string]ProviderModelOverride{}
+	}
+	overrideKey := "kimi-k3"
+	for key := range p.ModelOverrides {
+		if strings.EqualFold(strings.TrimSpace(key), overrideKey) {
+			overrideKey = key
+			break
+		}
+	}
+	kimiK3 := p.ModelOverrides[overrideKey]
+	if strings.TrimSpace(kimiK3.ReasoningProtocol) == "" {
+		kimiK3.ReasoningProtocol = defaults.ReasoningProtocol
+	}
+	if kimiK3.SupportedEfforts == nil {
+		kimiK3.SupportedEfforts = append([]string(nil), defaults.SupportedEfforts...)
+	}
+	if strings.TrimSpace(kimiK3.DefaultEffort) == "" && containsString(normalizedEffortLevels(kimiK3.SupportedEfforts), defaults.DefaultEffort) {
+		kimiK3.DefaultEffort = defaults.DefaultEffort
+	}
+	if kimiK3.ContextWindow <= 0 {
+		kimiK3.ContextWindow = defaults.ContextWindow
+	}
+	p.ModelOverrides[overrideKey] = kimiK3
+}
+
+// normalizeLegacyOpenCodeGoKimiK3Catalog upgrades only the untouched model
+// catalog from the original editable OpenCode Go preset. A user-curated model
+// list or custom endpoint is left alone, while other provider edits (headers,
+// key env, provider-wide context) survive the additive K3 capability update.
+func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		if (presetID != "opencode-go" && (presetID != "" || strings.TrimSpace(p.Name) != "opencode-go")) ||
+			!strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != "https://opencode.ai/zen/go/v1" ||
+			!stringSlicesEqual(p.Models, legacyOpenCodeGoModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), opencodeGoModels...)
+		p.VisionModels = migrateKimiK3VisionModels(p.VisionModels, nil)
+		mergeMissingKimiK3Override(p, ProviderModelOverride{
+			ReasoningProtocol: ReasoningProtocolOpenAI,
+			SupportedEfforts:  []string{"high", "max"},
+			DefaultEffort:     "max",
+			ContextWindow:     1_048_576,
+		})
+		return true
+	}
+	return false
 }
 
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {

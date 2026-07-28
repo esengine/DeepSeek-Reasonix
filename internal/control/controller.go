@@ -257,14 +257,15 @@ type approvalReply struct {
 }
 
 type pendingApproval struct {
-	tool      string
-	subject   string
-	reason    string
-	fresh     bool
-	autoDrain bool
-	kind      string // tool | plan | recovery; empty = tool
-	recovery  *event.RecoveryApproval
-	reply     chan approvalReply
+	tool         string
+	subject      string
+	reason       string
+	fresh        bool
+	requireHuman bool
+	autoDrain    bool
+	kind         string // tool | plan | recovery; empty = tool
+	recovery     *event.RecoveryApproval
+	reply        chan approvalReply
 }
 
 // pendingAsk is an in-flight ask question batch. questions is retained so the
@@ -5291,13 +5292,18 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 
 func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, string, error) {
 	subject = approvalDisplaySubject(tool, subject, args)
-	// Check pre-approval first — YOLO mode, the just-approved-plan window, and
-	// session grants all short-circuit here, before any prompt or guardian
-	// review. Deny rules already bit at the policy level before this point.
-	if g.c.approval.preApproved(tool, subject, args) {
+	requireHuman := strings.EqualFold(tool, "bash") && permission.BashSubjectRequiresExplicitApproval(subject)
+	// Check pre-approval first, before any prompt or Guardian review. Dynamic
+	// Bash accepts only YOLO or an exact session grant here; ordinary calls also
+	// accept the just-approved-plan window. Deny rules already bit at the policy
+	// level before this point.
+	if requireHuman && g.c.approval.preApprovedForRequiredHuman(tool, subject) {
 		return true, false, "", nil
 	}
-	if g.c.guardianSess != nil {
+	if !requireHuman && g.c.approval.preApproved(tool, subject, args) {
+		return true, false, "", nil
+	}
+	if g.c.guardianSess != nil && !requireHuman {
 		allow, reason, reviewErr := g.c.guardianSess.Review(ctx, tool, args, g.c.executor.Session())
 		if reviewErr != nil {
 			return false, false, "", reviewErr
@@ -5313,6 +5319,10 @@ func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject strin
 			return false, false, reason, nil
 		}
 		return true, remember, "", nil
+	}
+	if requireHuman {
+		allow, remember, err := g.c.requestApprovalWithReasonOptions(ctx, tool, subject, args, "", approvalDecisionOptions{requireHuman: true})
+		return allow, remember, "", err
 	}
 	allow, remember, err := g.c.requestApproval(ctx, tool, subject, args)
 	return allow, remember, "", err
@@ -5842,7 +5852,11 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string, 
 }
 
 func (c *Controller) requestApprovalWithReason(ctx context.Context, tool, subject string, args json.RawMessage, reason string) (bool, bool, error) {
-	r, err := c.requestApprovalDecision(ctx, tool, subject, args, reason)
+	return c.requestApprovalWithReasonOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{})
+}
+
+func (c *Controller) requestApprovalWithReasonOptions(ctx context.Context, tool, subject string, args json.RawMessage, reason string, opts approvalDecisionOptions) (bool, bool, error) {
+	r, err := c.requestApprovalDecisionWithOptions(ctx, tool, subject, args, reason, opts)
 	if err != nil {
 		return false, false, err
 	}
@@ -5857,10 +5871,6 @@ func (c *Controller) requestApprovalWithReason(ctx context.Context, tool, subjec
 	return r.allow, false, nil
 }
 
-func (c *Controller) requestApprovalDecision(ctx context.Context, tool, subject string, args json.RawMessage, reason string) (approvalReply, error) {
-	return c.requestApprovalDecisionWithOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{})
-}
-
 func (c *Controller) requestFreshApprovalDecision(ctx context.Context, tool, subject string, args json.RawMessage, reason string) (approvalReply, error) {
 	return c.requestApprovalDecisionWithOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{fresh: true})
 }
@@ -5870,13 +5880,17 @@ type approvalDecisionOptions struct {
 	// permission. It may reuse an explicit session grant, but YOLO/auto approval
 	// must not answer or drain the prompt.
 	fresh bool
+	// requireHuman marks an ordinary tool approval that Auto, an approved-plan
+	// window, Guardian, or an allowing hook must not answer. Unlike fresh it
+	// retains the ordinary four-choice UI and YOLO remains an explicit bypass.
+	requireHuman bool
 }
 
 func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, tool, subject string, args json.RawMessage, reason string, opts approvalDecisionOptions) (approvalReply, error) {
 	// YOLO/full access and the just-approved-plan execution window auto-allow
 	// approval-gated tools without prompting. Plan approval is a user decision,
 	// not a tool permission, so it deliberately stays interactive.
-	if c.approval.preApprovedForDecision(tool, subject, args, opts.fresh) {
+	if c.approval.preApprovedForDecisionOptions(tool, subject, args, opts.fresh, opts.requireHuman) {
 		return approvalReply{allow: true}, nil
 	}
 
@@ -5885,7 +5899,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 
 	// Re-check: a session grant may have landed while we queued behind another
 	// prompt for the same subject.
-	if c.approval.preApprovedForDecision(tool, subject, args, opts.fresh) {
+	if c.approval.preApprovedForDecisionOptions(tool, subject, args, opts.fresh, opts.requireHuman) {
 		return approvalReply{allow: true}, nil
 	}
 
@@ -5895,7 +5909,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 	// runs synchronously and before the dialog is shown. Native Reasonix
 	// PermissionRequest hooks stay advisory-only (see claudePermissionBlocking).
 	//
-	// A hook's auto-allow must never stand in for a fresh human decision:
+	// A hook's auto-allow must never stand in for a human-required decision:
 	// sandbox escapes, Reasonix config writes, memory remember/forget, and
 	// plan approval (RequiresFreshHumanApprovalTool) are deliberately excluded
 	// from YOLO/auto-approval and Guardian too, so a broadly-matched plugin
@@ -5906,7 +5920,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 			switch {
 			case !*decision:
 				return approvalReply{}, nil
-			case !opts.fresh && !requiresFreshApprovalTool(tool):
+			case !opts.fresh && !opts.requireHuman && !requiresFreshApprovalTool(tool):
 				return approvalReply{allow: true}, nil
 			}
 			// An "allow" opinion on a fresh-human-required decision is
@@ -5916,8 +5930,8 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 
 	var id string
 	var reply chan approvalReply
-	if opts.fresh {
-		id, reply = c.approval.registerDecision(tool, subject, reason, true)
+	if opts.fresh || opts.requireHuman {
+		id, reply = c.approval.registerDecision(tool, subject, reason, opts.fresh, opts.requireHuman)
 	} else {
 		id, reply = c.approval.register(tool, subject, reason)
 	}

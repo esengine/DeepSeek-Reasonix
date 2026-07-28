@@ -542,6 +542,18 @@ func TestApprovalOptionsFreshDynamicToolOnlyAllowOnceOrReject(t *testing.T) {
 	}
 }
 
+func TestDynamicBashApprovalOptionsUseExactSessionLiteral(t *testing.T) {
+	const command = "git status $(touch /tmp/reasonix-dynamic-approval)"
+	options := approvalOptions("bash", command, false)
+	if len(options) != 3 || options[1].Kind != OptAllowAlways {
+		t.Fatalf("dynamic Bash options = %+v, want ordinary options with session grant", options)
+	}
+	want := "Bash=" + command
+	if !strings.Contains(options[1].Name, want) {
+		t.Fatalf("dynamic Bash session option = %q, want exact rule %q", options[1].Name, want)
+	}
+}
+
 func TestClipKeepsValidUTF8(t *testing.T) {
 	text := strings.Repeat("a", maxResultChars-1) + "界" + strings.Repeat("b", 20)
 	got := clip(text)

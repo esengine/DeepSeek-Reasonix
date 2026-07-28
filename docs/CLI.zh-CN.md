@@ -138,18 +138,19 @@ PID 或 hostname。这里的“只读”是指不会修改 transcript、runtime�
 状态；首次使用脱敏机器接口时，Reasonix 可能会在用户状态目录初始化一个私有身份密钥：
 
 ```sh
-reasonix session list --json [--dir SESSION_DIR]
-reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
-reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
-reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix session list --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
+reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
 
-对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录；未指定时，Reasonix
-选择当前项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
+对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录，`--project-root`
+则解析指定项目的 session store；两者不能同时使用。都未指定时，Reasonix 选择当前
+项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
 `hook list` 的状态值为 `active` 或 `invalid`；`invalid` 表示配置的
 event 因事件名、命令/context 来源或工具事件 matcher 无效而无法执行。非工具事件
 会忽略 matcher。

@@ -182,12 +182,30 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if kimiCN.DefaultModel() != "kimi-k2.7-code" || !kimiCN.HasVisionModel("kimi-k2.7-code-highspeed") || kimiCN.BalanceURL == "" {
 		t.Fatalf("kimi-cn capability mismatch: %+v", kimiCN)
 	}
+	kimiCNK3, ok := cfg.ResolveModel("kimi-cn/kimi-k3")
+	if !ok {
+		t.Fatal("kimi-cn/kimi-k3 did not resolve")
+	}
+	if !EffectiveVision(kimiCNK3) || kimiCNK3.ContextWindow != 1_048_576 ||
+		ReasoningProtocolForEntry(kimiCNK3) != ReasoningProtocolOpenAI ||
+		!stringSlicesEqual(kimiCNK3.SupportedEfforts, []string{"low", "high", "max"}) ||
+		EffectiveEffort(kimiCNK3) != "max" {
+		t.Fatalf("kimi-cn/kimi-k3 capability mismatch: %+v", kimiCNK3)
+	}
+	kimiCNK27, ok := cfg.ResolveModel("kimi-cn/kimi-k2.7-code")
+	if !ok || ReasoningProtocolForEntry(kimiCNK27) != ReasoningProtocolNone {
+		t.Fatalf("kimi-cn K2.7 reasoning protocol changed: %+v", kimiCNK27)
+	}
 	kimiGlobal, ok := cfg.Provider("kimi-global")
 	if !ok {
 		t.Fatal("kimi-global provider missing")
 	}
 	if kimiGlobal.BaseURL != "https://api.moonshot.ai/v1" || kimiGlobal.APIKeyEnv != "MOONSHOT_API_KEY" {
 		t.Fatalf("kimi-global endpoint/key mismatch: %+v", kimiGlobal)
+	}
+	kimiGlobalK3, ok := cfg.ResolveModel("kimi-global/kimi-k3")
+	if !ok || !EffectiveVision(kimiGlobalK3) || kimiGlobalK3.ContextWindow != 1_048_576 || EffectiveEffort(kimiGlobalK3) != "max" {
+		t.Fatalf("kimi-global/kimi-k3 capability mismatch: %+v", kimiGlobalK3)
 	}
 	kimiPlan, ok := cfg.Provider("kimi-coding-plan")
 	if !ok {
@@ -361,6 +379,24 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if cap := EffortCapabilityForEntry(kimi); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "medium") {
 		t.Fatalf("opencode kimi effort capability = %+v, want low/medium/high", cap)
+	}
+	kimiK3, ok := cfg.ResolveModel("opencode-go/kimi-k3")
+	if !ok {
+		t.Fatal("opencode-go/kimi-k3 did not resolve")
+	}
+	if protocol := ReasoningProtocolForEntry(kimiK3); protocol != ReasoningProtocolOpenAI {
+		t.Fatalf("opencode Kimi K3 protocol = %q, want openai", protocol)
+	}
+	if cap := EffortCapabilityForEntry(kimiK3); !cap.Supported || cap.Default != "max" || !containsString(cap.Levels, "high") || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode Kimi K3 effort capability = %+v, want high/max", cap)
+	}
+	for _, level := range []string{"high", "max"} {
+		if got, err := NormalizeEffort(kimiK3, level); err != nil || got != level {
+			t.Fatalf("opencode Kimi K3 /effort %s = %q, %v; want %s", level, got, err, level)
+		}
+	}
+	if kimiK3.ContextWindow != 1_048_576 || !EffectiveVision(kimiK3) {
+		t.Fatalf("opencode Kimi K3 context/vision capability mismatch: %+v", kimiK3)
 	}
 
 	plain, ok := cfg.ResolveModel("opencode-go/glm-5.2")

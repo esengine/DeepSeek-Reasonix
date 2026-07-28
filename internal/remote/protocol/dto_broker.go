@@ -33,6 +33,7 @@ type BrokerProviderDescriptor struct {
 	SupportedEfforts               []string `json:"supportedEfforts,omitempty"`
 	DefaultEffort                  string   `json:"defaultEffort,omitempty"`
 	ToolCallReasoning              bool     `json:"toolCallReasoning,omitempty"`
+	ReasoningRoundTrip             bool     `json:"reasoningRoundTrip,omitempty"`
 	WarnOnMissingToolCallReasoning bool     `json:"warnOnMissingToolCallReasoning,omitempty"`
 }
 

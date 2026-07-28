@@ -88,6 +88,12 @@ func TestBrokerSchemaUsesTypedRequestChunkAndJSONValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	catalog := findSchemaMethod(t, document, MethodBrokerCatalog)
+	providers := findProperty(t, catalog.Result, "providers").Schema
+	reasoningRoundTrip := findProperty(t, *providers.Items, "reasoningRoundTrip")
+	if reasoningRoundTrip.Required || reasoningRoundTrip.Schema.Type != "boolean" {
+		t.Fatalf("reasoningRoundTrip schema = %#v, want optional boolean", reasoningRoundTrip)
+	}
 	open := findSchemaMethod(t, document, MethodBrokerStreamOpen)
 	request := findProperty(t, open.Params, "request").Schema
 	if request.Type != "object" {

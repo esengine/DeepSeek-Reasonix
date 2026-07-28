@@ -1596,7 +1596,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.addProvider.preset.glmCodingPlanCnAnthropicDesc": "智譜 GLM 中國 Anthropic-compatible coding plan 端點，預設 GLM-5.2[1m]。",
   "settings.addProvider.preset.zaiCodingPlanGlobalDesc": "Z.AI 國際 coding plan 端點，預設 GLM-5.2。",
   "settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc": "Z.AI 國際 Anthropic-compatible coding plan 端點，預設 GLM-5.2[1m]。",
-  "settings.addProvider.preset.opencodeGoDesc": "OpenCode Go 混合模型閘道，內建每模型能力覆蓋。",
+  "settings.addProvider.preset.opencodeGoDesc": "OpenCode Go 混合模型閘道，原生預置 Kimi K3 與每模型能力覆蓋。",
   "settings.addProvider.preset.opencodeGoAnthropicDesc": "OpenCode Go Anthropic 線路，預置 Qwen 與 MiniMax 模型。",
   "settings.addProvider.preset.opencodeZenAnthropicDesc": "OpenCode Zen Anthropic 線路，預置 Claude 與 Qwen 模型。",
   "settings.addProvider.preset.qwenCnDesc": "Qwen/DashScope 中國標準 API 端點。",

@@ -63,6 +63,19 @@ CREATE TABLE IF NOT EXISTS pings (
   PRIMARY KEY (date, install_id)
 );
 
+-- CLI telemetry stays in additive tables so either the schema migration or the
+-- Worker deployment can happen first without changing the Desktop contract.
+CREATE TABLE IF NOT EXISTS cli_pings (
+  date TEXT NOT NULL,
+  install_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  os TEXT NOT NULL,
+  arch TEXT NOT NULL,
+  os_version TEXT NOT NULL DEFAULT '',
+  opens INTEGER NOT NULL DEFAULT 1,
+  PRIMARY KEY (date, install_id)
+);
+
 -- Single-row checkpoint used by the scheduled ingest sentinel to detect when
 -- launch totals stop advancing between runs. The worker also creates this
 -- table at runtime so existing databases need no manual migration.
@@ -74,8 +87,8 @@ CREATE TABLE IF NOT EXISTS ingest_sentinel_state (
   checked_at TEXT NOT NULL
 );
 
--- Opt-in aggregate desktop metrics: anonymous per-day (signal, bucket) counters,
--- no content. Generic shape so a new signal is just new rows.
+-- Opt-in aggregate Desktop metrics: anonymous per-day (signal, bucket)
+-- counters, no content. Generic shape so a new signal is just new rows.
 CREATE TABLE IF NOT EXISTS metrics (
   date TEXT NOT NULL,
   version TEXT NOT NULL,
@@ -86,9 +99,29 @@ CREATE TABLE IF NOT EXISTS metrics (
   PRIMARY KEY (date, version, os, signal, bucket)
 );
 
--- Deduplicated DAU for opt-in metric buckets. install_id is the same random
--- anonymous desktop install id used by launch pings; it is not an account id.
+CREATE TABLE IF NOT EXISTS cli_metrics (
+  date TEXT NOT NULL,
+  version TEXT NOT NULL,
+  os TEXT NOT NULL,
+  signal TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (date, version, os, signal, bucket)
+);
+
+-- Deduplicated Desktop DAU for opt-in metric buckets. install_id is the same
+-- random anonymous install id used by launch pings; it is not an account id.
 CREATE TABLE IF NOT EXISTS metric_users (
+  date TEXT NOT NULL,
+  signal TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  install_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  os TEXT NOT NULL,
+  PRIMARY KEY (date, signal, bucket, install_id)
+);
+
+CREATE TABLE IF NOT EXISTS cli_metric_users (
   date TEXT NOT NULL,
   signal TEXT NOT NULL,
   bucket TEXT NOT NULL,

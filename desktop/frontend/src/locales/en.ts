@@ -2322,7 +2322,7 @@ export const en = {
   "settings.addProvider.preset.glmCodingPlanCnAnthropicDesc": "Zhipu GLM China Anthropic-compatible coding-plan endpoint with GLM-5.2[1m] default.",
   "settings.addProvider.preset.zaiCodingPlanGlobalDesc": "Z.AI international coding-plan endpoint with GLM-5.2 default.",
   "settings.addProvider.preset.zaiCodingPlanGlobalAnthropicDesc": "Z.AI international Anthropic-compatible coding-plan endpoint with GLM-5.2[1m] default.",
-  "settings.addProvider.preset.opencodeGoDesc": "OpenCode Go relay with mixed-model capability overrides.",
+  "settings.addProvider.preset.opencodeGoDesc": "OpenCode Go relay with native Kimi K3 and mixed-model capability overrides.",
   "settings.addProvider.preset.opencodeGoAnthropicDesc": "OpenCode Go Anthropic route for Qwen and MiniMax models.",
   "settings.addProvider.preset.opencodeZenAnthropicDesc": "OpenCode Zen Anthropic route for Claude and Qwen models.",
   "settings.addProvider.preset.qwenCnDesc": "Qwen/DashScope China standard API endpoint.",

@@ -361,8 +361,12 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   for Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
   interpreter path remains untouched. If no usable Bash is installed, the hook
   reports a clear prerequisite error instead of the localized `sh is not
-  recognized` output. Captured legacy-code-page output is normalized to UTF-8
-  before it reaches the UI. A `PreToolUse` or
+  recognized` output. A non-standard or portable Bash configured with
+  `[tools.shell] prefer = "bash"` and `path = ".../bash.exe"` is reused by
+  explicit Bash hooks. `reasonix plugin doctor <name>` and
+  `reasonix doctor capabilities` report a missing required shell before the
+  first hook invocation. Captured legacy-code-page output is normalized to
+  UTF-8 before it reaches the UI. A `PreToolUse` or
   `UserPromptSubmit` hook can still deny via exit code 2 or its JSON deny
   shape on exit 0 (`hookSpecificOutput.permissionDecision` for `PreToolUse`,
   top-level `decision:"block"` for `UserPromptSubmit`); an imported

@@ -319,10 +319,81 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	return m.StartForSession("", kind, label, run)
 }
 
+// validatePathSegment rejects values that would let parentSession or kind
+// escape the temp-root fallback built by artifactDirLocked. Persistent artifact
+// directories bound by SetActiveSessionPath are trusted store paths and are
+// intentionally outside that temp root. The check is intentionally conservative:
+// it forbids any path-separator character (forward slash, backslash), NUL, and
+// any control character. Empty parentSession is allowed (the unscoped default);
+// kind must be non-empty.
+//
+// See #6932. Before this check existed, a malicious or malformed parentSession
+// such as "../../etc" combined with filepath.Join(tempRoot, parentSession, id)
+// resolved to a directory outside the manager's temp root, allowing the
+// subsequent os.MkdirAll + os.OpenFile to create files at locations controlled
+// by the caller (subject to the running process's filesystem permissions).
+func validatePathSegment(name, field string) error {
+	if field == "kind" && name == "" {
+		return fmt.Errorf("jobs: %s must not be empty", field)
+	}
+	for i, r := range name {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			return fmt.Errorf("jobs: %s contains control character 0x%02x at index %d", field, r, i)
+		case r == '/' || r == '\\':
+			return fmt.Errorf("jobs: %s contains path separator %q at index %d", field, r, i)
+		}
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("jobs: %s is reserved (%q)", field, name)
+	}
+	return nil
+}
+
+// startInvalid registers a job that failed validation BEFORE any goroutine or
+// artifact was created. The job is observable to Wait / list calls as Failed
+// with the validation error recorded in artifactErr, and no run goroutine is
+// started so the manager's wg is unaffected.
+func (m *Manager) startInvalid(parentSession, kind, label string, validationErr error) *Job {
+	finishedAt := nowMs()
+	m.mu.Lock()
+	m.seq++
+	id := fmt.Sprintf("invalid-%d", m.seq)
+	j := &Job{
+		ID:               id,
+		Kind:             kind,
+		Label:            label,
+		SessionID:        parentSession,
+		status:           Failed,
+		startedAt:        finishedAt,
+		activityAt:       finishedAt,
+		finishedAt:       finishedAt,
+		runReturned:      true,
+		cancel:           func() {},
+		done:             make(chan struct{}),
+		artifactComplete: false,
+		artifactErr:      validationErr.Error(),
+	}
+	key := jobKey(parentSession, id)
+	m.jobs[key] = j
+	m.order = append(m.order, key)
+	m.mu.Unlock()
+	close(j.done)
+	m.recordCompletion(parentSession, id, kind, label, Failed, validationErr)
+	return j
+}
+
 // StartForSession launches a job owned by parentSession. Session-scoped readers
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
+	kind = strings.TrimSpace(kind)
+	if err := validatePathSegment(parentSession, "parentSession"); err != nil {
+		return m.startInvalid(parentSession, kind, label, err)
+	}
+	if err := validatePathSegment(kind, "kind"); err != nil {
+		return m.startInvalid(parentSession, kind, label, err)
+	}
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)

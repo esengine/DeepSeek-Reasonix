@@ -48,6 +48,7 @@ func TestMatchGlob(t *testing.T) {
 	}{
 		{"rm -rf*", "rm -rf /tmp/x", true}, // '*' crosses '/'
 		{"go test*", "go test ./...", true},
+		{"rm *", "rm *.log", true},
 		{"go test*", "go build", false},
 		{"*", "anything at all", true},
 		{"git ?ush", "git push", true},

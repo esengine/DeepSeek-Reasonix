@@ -66,11 +66,15 @@ if grep -Eq 'signing-policy-slug:.*test-signing' "$repo_root/.github/workflows/r
 	echo "public desktop workflow must not use the SignPath test certificate" >&2
 	exit 1
 fi
-grep -Eq 'SIGNPATH_RELEASE_SIGNING_READY must be true' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq 'SIGNPATH_RELEASE_SIGNING_ATTESTATION does not match' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq '^      signing_preflight:$' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq '^      signing_preflight_verified:$' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq '^  signing-contract:$' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq '^  attest-signing-contract:$' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'R2_BUCKET.*/preview/' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'R2_BUCKET.*/canary/' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq '^      production_signing_smoke:$' "$repo_root/.github/workflows/release-desktop.yml"
-grep -Eq "needs\.build\.result == 'success'.*!inputs\.production_signing_smoke" \
+grep -Eq "needs\.build\.result == 'success'.*!inputs\.production_signing_smoke.*!inputs\.signing_preflight" \
 	"$repo_root/.github/workflows/release-desktop.yml"
 [ "$(grep -Ec 'wait-for-completion: false' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
 [ "$(grep -Ec 'complete-signpath-request\.ps1' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
@@ -83,6 +87,10 @@ grep -Eq 'steps\.submit-windows-installer\.outputs\.signing-request-id' \
 grep -Eq 'artifact-configuration-slug: windows-payload' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'artifact-configuration-slug: windows-installer-v2' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq -- '-RequireTrusted:$true' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq '^  signpath-preflight:$' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'signing_preflight: true' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'signing_preflight_verified: true' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'needs: \[authorize, signpath-preflight\]' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'name: Require R2 for Preview' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq "channel == 'preview'.*HAS_R2 != 'true'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq '^  postflight:$' "$repo_root/.github/workflows/release-stable.yml"
@@ -93,6 +101,12 @@ for channel in cli npm desktop; do
 	grep -Eq '^      publish_'"$channel"':' "$repo_root/.github/workflows/release-stable.yml"
 	grep -Eq "inputs\.publish_$channel" "$repo_root/.github/workflows/release-stable.yml"
 done
+
+# The checked-in SignPath policy contract is the single source of truth for the
+# provider allowlist and every top-level workflow that can reach signing.
+go run ./cmd/signpath-contract validate
+contract_fingerprint="$(go run ./cmd/signpath-contract fingerprint)"
+grep -Eq '^v1:[0-9a-f]{64}$' <<<"$contract_fingerprint"
 grep -Eq 'public postflight will still verify it' "$repo_root/.github/workflows/release-stable.yml"
 for workflow in release.yml release-desktop.yml; do
 	grep -Eq 'name: Download orchestrator-reviewed release notes' "$repo_root/.github/workflows/$workflow"

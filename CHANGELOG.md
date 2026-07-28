@@ -69,6 +69,14 @@ branch.
 
 ### Fixed
 
+- Hardened Bash permission reuse for dynamic and indirect execution. Parameter/arithmetic expansions,
+  assignments, redirects, heredocs, and globs can only be remembered as exact
+  `Bash=<literal>` rules, while still using Auto's normal fallback. Nested or
+  indirect execution now requires a human in interactive Ask/Auto and fails
+  closed in headless Ask/Auto/DontAsk. Broad Bash rules, Guardian/hook allows,
+  and the approved-plan window can no longer silently authorize that stricter
+  class; YOLO remains the explicit full-access bypass and sandbox enforcement
+  is unchanged.
 - Fixed Desktop sessions incorrectly locking themselves during Goal + Delivery
   mode changes, controller rebuilds, duplicate-tab restore, and background
   reattachment. Desktop now keeps one process-local runtime owner per canonical

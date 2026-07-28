@@ -237,6 +237,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 			if name == "" || have[name] || validatePlugin(entry) != nil {
 				continue
 			}
+			entry.Source = MCPSourceUserConfig
 			userCfg.Plugins = append(userCfg.Plugins, entry)
 			have[name] = true
 			result.Added++

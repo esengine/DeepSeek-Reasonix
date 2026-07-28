@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
 	"reasonix/internal/pluginpkg"
 )
@@ -335,6 +336,20 @@ func pluginDoctorCommand(args []string) int {
 	}
 	for _, warning := range warnings {
 		fmt.Println("warning:", warning)
+	}
+	workspaceRoot, _ := os.Getwd()
+	cfg, _ := config.LoadForRootReadOnly(workspaceRoot)
+	runtimeOptions := hook.RuntimeOptions{}
+	if cfg != nil {
+		runtimeOptions = hook.RuntimeOptionsForShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path)
+	}
+	runtimeIssues := hook.CheckPackageRuntime(pkg, runtimeOptions)
+	for _, issue := range runtimeIssues {
+		fmt.Fprintf(os.Stderr, "unavailable %s hook: %v\n", issue.Event, issue.Err)
+	}
+	if len(runtimeIssues) > 0 {
+		fmt.Fprintln(os.Stderr, "remediation: install Git for Windows, or configure [tools.shell] prefer=\"bash\" and path to a usable bash.exe")
+		return 1
 	}
 	fmt.Printf("ok: %s (%s)\n", p.Name, filepath.Clean(root))
 	return 0

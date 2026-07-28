@@ -72,6 +72,22 @@ func IsLongCat(baseURL string) bool {
 	return matchesVendorHost(baseURL, "longcat.chat", "api.longcat.chat")
 }
 
+// IsKimiAPI reports whether baseURL is one of Moonshot's official Kimi direct
+// API endpoints. Gate Kimi-specific wire compatibility on the exact API hosts
+// so OpenAI-compatible relays carrying the same model ID remain untouched.
+func IsKimiAPI(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "api.moonshot.cn", "api.moonshot.ai":
+		return true
+	default:
+		return false
+	}
+}
+
 // IsOllamaCloud reports whether baseURL points at Ollama Cloud's hosted
 // OpenAI-compatible endpoint. Local Ollama servers intentionally do not match:
 // the hosted API accepts the reasoning_effort=max extension, while localhost

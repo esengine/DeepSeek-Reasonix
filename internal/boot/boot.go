@@ -741,9 +741,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if !cfg.SafeMode() {
 		resolvedHooks = hook.Load(hook.LoadOptions{ProjectRoot: root})
 	}
+	hookRuntime := hook.RuntimeOptions{}
+	if shell.Kind == sandbox.ShellBash {
+		hookRuntime.BashPath = shell.Path
+	}
 	hookRunner := hook.NewRunner(
-		resolvedHooks,
-		root, nil,
+		resolvedHooks, root, hook.NewDefaultSpawner(hookRuntime),
 		func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg}) },
 	)
 	// The `task` tool spawns sub-agents that reuse the parent's provider and
@@ -2168,6 +2171,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"api_key_source":     e.APIKeySourceLabel(),
 			"thinking":           e.Thinking,
 			"effort":             config.EffectiveEffort(e),
+			"supported_efforts":  e.SupportedEfforts,
 			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
 			"chat_url":           e.ChatURL,
 			"headers":            e.Headers,

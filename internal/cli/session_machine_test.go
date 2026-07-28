@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/provider"
 )
 
@@ -43,6 +44,37 @@ func TestSessionMachineListIsStableAndRedacted(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "PRIVATE") || strings.Contains(out.String(), dir) {
 		t.Fatalf("machine output leaked private content or path: %s", out.String())
+	}
+}
+
+func TestMachineProjectSessionDirUsesProjectStore(t *testing.T) {
+	projectRoot := t.TempDir()
+	got := machineProjectSessionDir(projectRoot)
+	want := config.ProjectSessionDir(projectRoot)
+	if got != want {
+		t.Fatalf("machine project session dir = %q, want %q", got, want)
+	}
+	if got == projectRoot {
+		t.Fatalf("machine project session dir must not use the project root directly: %q", got)
+	}
+}
+
+func TestSessionMachineProjectRootUsesProjectStore(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	projectRoot := t.TempDir()
+	sessionDir := config.ProjectSessionDir(projectRoot)
+	saveMachineTestSession(t, sessionDir, "project", time.Date(2026, 7, 23, 11, 30, 0, 0, time.UTC))
+
+	var out bytes.Buffer
+	if code := runSessionCommand([]string{"list", "--json", "--project-root", projectRoot}, &out); code != 0 {
+		t.Fatalf("list exit code = %d, output = %s", code, out.String())
+	}
+	var response machineSessionList
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(response.Sessions) != 1 || response.Sessions[0].ID != machineSessionIDWithKey("project", identityKey) {
+		t.Fatalf("sessions = %+v, want project session", response.Sessions)
 	}
 }
 
@@ -106,6 +138,7 @@ func TestSessionMachineErrorsAreJSONAndNonZero(t *testing.T) {
 	}{
 		{name: "missing json", args: []string{"list", "--dir", dir}, code: 2, err: "invalid_argument"},
 		{name: "missing session", args: []string{"show", "--json", "missing", "--dir", dir}, code: 1, err: "session_not_found"},
+		{name: "conflicting session sources", args: []string{"list", "--json", "--dir", dir, "--project-root", dir}, code: 2, err: "invalid_argument"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

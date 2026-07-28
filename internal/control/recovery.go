@@ -275,6 +275,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		recoveryFirstNonEmpty(pending.Subject, pending.Tool),
 		recoveryFirstNonEmpty(pending.Rationale, "Auto Guard"),
 		true,
+		false,
 		recovery.ApprovalKindRecovery,
 		ev.Recovery,
 	)

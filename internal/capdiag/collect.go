@@ -67,7 +67,7 @@ func Collect(opts Options) Report {
 	instr := collectInstructions(root, home, disp)
 	skillsR, skillIssues := collectSkills(root, home, reasonixHome, cfg, disp)
 	cmdsR, cmdIssues := collectCommands(root, disp)
-	hooksR, hookIssues := collectHooks(root, home, reasonixHome, disp)
+	hooksR, hookIssues := collectHooks(root, home, reasonixHome, cfg, disp)
 	pluginsR, pluginIssues := collectPlugins(reasonixHome, disp)
 	mcpR, mcpIssues := collectMCP(cfg, root, home, disp)
 
@@ -272,7 +272,7 @@ func collectCommands(root string, disp func(string) string) (AssetReport, []Issu
 	return rep, issues
 }
 
-func collectHooks(root, home, reasonixHome string, disp func(string) string) (HookReport, []Issue) {
+func collectHooks(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (HookReport, []Issue) {
 	var issues []Issue
 	// Prefer explicit home for settings when tests isolate HOME.
 	homeDir := home
@@ -283,6 +283,10 @@ func collectHooks(root, home, reasonixHome string, disp func(string) string) (Ho
 		ProjectRoot: root,
 		HomeDir:     homeDir,
 	})
+	runtimeOptions := hook.RuntimeOptions{}
+	if cfg != nil {
+		runtimeOptions = hook.RuntimeOptionsForShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path)
+	}
 	rep := HookReport{
 		// Retained in schema v1 for compatibility; project hooks are enabled by
 		// default whenever a project root is present.
@@ -321,6 +325,9 @@ func collectHooks(root, home, reasonixHome string, disp func(string) string) (Ho
 				SettingsTab: "hooks",
 			})
 		}
+		if issue, ok := hookRuntimeIssue(e, hook.CheckEntryRuntime(e, runtimeOptions), disp); ok {
+			issues = append(issues, issue)
+		}
 		if e.ContextFile != "" {
 			if !hook.ContextFileUsable(e.ContextFile) {
 				issues = append(issues, Issue{
@@ -352,6 +359,19 @@ func collectHooks(root, home, reasonixHome string, disp func(string) string) (Ho
 		}
 	}
 	return rep, issues
+}
+
+func hookRuntimeIssue(entry hook.Entry, err error, disp func(string) string) (Issue, bool) {
+	if err == nil {
+		return Issue{}, false
+	}
+	return Issue{
+		Severity: "error", Code: "hook.shell_unavailable", Subsystem: "hooks",
+		Name: string(entry.Event), Source: disp(entry.Source),
+		Message:     sanitizeErrText(err.Error()),
+		Remediation: "Install Git for Windows, or configure [tools.shell] prefer=\"bash\" and path to a usable bash.exe, then re-run doctor capabilities",
+		SettingsTab: "hooks",
+	}, true
 }
 
 func collectPlugins(reasonixHome string, disp func(string) string) (PluginPackageReport, []Issue) {

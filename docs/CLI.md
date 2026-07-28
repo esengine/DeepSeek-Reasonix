@@ -146,18 +146,20 @@ first redacted-machine invocation may initialize a private identity key in the
 Reasonix user-state directory:
 
 ```sh
-reasonix session list --json [--dir SESSION_DIR]
-reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
-reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
-reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix session list --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
+reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
 
 For `session` and `task`, `--dir` explicitly selects the session storage
-directory; without it, Reasonix selects the current project's session store.
+directory, while `--project-root` resolves the selected project's session
+store. The two options cannot be combined. Without either option, Reasonix
+selects the current project's session store.
 For `hook`, `--dir` is an alias for `--project-root`.
 `hook list` reports `active` or `invalid`; `invalid` means the
 configured event cannot execute because its event, command/context source, or

@@ -2,11 +2,36 @@ package main
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	"reasonix/internal/config"
+	"reasonix/internal/netclient"
 	"reasonix/internal/repair"
 )
+
+func TestRepairPlanProviderConfigPreservesKimiK3Efforts(t *testing.T) {
+	entry := &config.ProviderEntry{
+		Name:              "opencode-go",
+		Kind:              "openai",
+		BaseURL:           "https://opencode.ai/zen/go/v1",
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	}
+	got := repairPlanProviderConfig(entry, netclient.ProxySpec{})
+	if effort := got.Extra["effort"]; effort != "max" {
+		t.Fatalf("effort = %#v, want max", effort)
+	}
+	if efforts, ok := got.Extra["supported_efforts"].([]string); !ok || !reflect.DeepEqual(efforts, []string{"high", "max"}) {
+		t.Fatalf("supported_efforts = %#v, want [high max]", got.Extra["supported_efforts"])
+	}
+	if protocol := got.Extra["reasoning_protocol"]; protocol != config.ReasoningProtocolOpenAI {
+		t.Fatalf("reasoning_protocol = %#v, want openai", protocol)
+	}
+}
 
 // TestProviderSafeReportDropsUserControlledContent pins the outbound-privacy
 // contract: the payload sent to the AI provider must carry only allowlisted

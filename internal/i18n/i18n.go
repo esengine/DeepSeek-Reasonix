@@ -547,6 +547,28 @@ type Messages struct {
 	UpgradeApplyFailed         string // "failed to apply update: %v"
 	UpgradeSuccessFmt          string // "Updated %s → %s"
 
+	// `reasonix report` — local CLI crash review and explicit upload
+	ReportNoPending           string
+	ReportHeaderFmt           string
+	ReportCapturedFmt         string
+	ReportPreviewOnlyFmt      string
+	ReportSendPrompt          string
+	ReportKept                string
+	ReportDeletedFmt          string
+	ReportSentFmt             string
+	ReportSafeModeBlocked     string
+	ReportConfigFailedFmt     string
+	ReportUploadFailedFmt     string
+	ReportSentDeleteFailedFmt string
+	ReportUsageBody           string
+
+	// First eligible interactive CLI telemetry consent.
+	CLITelemetryConsentNotice           string
+	CLITelemetryConsentPrompt           string
+	CLITelemetryConsentInvalid          string
+	CLITelemetryConsentSaveFailedFmt    string
+	CLITelemetryConsentCleanupFailedFmt string
+
 	// usage / help
 	UsageBody string // full multi-line help text
 }

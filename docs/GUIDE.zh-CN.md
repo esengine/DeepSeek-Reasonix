@@ -124,6 +124,60 @@ bash allowlist 或信任提示。Plan 与常规模式使用相同的 Permissions
 多数日常设置应写在 `config.toml` 或前文提到的 Reasonix 全局 `.env` 中。下面这些变量是进程级高级开关；
 需要在启动 Reasonix 之前设置。项目 `.env` 不是 Reasonix 控制变量的运行时来源。
 
+### CLI 上报统计
+
+CLI 可以向 `https://crash.reasonix.io` 发送每日最多一次的匿名活跃安装 ping，
+以及有界、完全不含内容的事件计数。使用以下用户全局命令配置：
+
+```bash
+reasonix config telemetry          # 查看当前生效模式
+reasonix config telemetry auto     # 默认：仅本机交互式 TTY
+reasonix config telemetry on       # 也允许本机 headless `reasonix run`
+reasonix config telemetry off      # 关闭并删除待发送计数文件
+```
+
+正式版 CLI 第一次在符合条件的交互式终端启动时，会先明确说明数据边界，并在任何
+telemetry 请求之前只询问一次。提示为 `[Y/n]`：直接回车、输入 `y` 或 `yes` 会保存为
+`auto`；输入 `n` 或 `no` 会保存为 `off` 并删除待发送计数。选择保存后不再提示，允许的
+后续上报保持静默。如果偏好设置保存失败，则不会上传任何内容。
+
+在 CI、Safe Mode、开发构建中始终关闭；设置 `DO_NOT_TRACK` 或
+`REASONIX_TELEMETRY=0` 也会关闭。`auto` 模式下，重定向、pipe 或其他非交互会话
+不会上报。尚未保存选择时，这些不符合条件的会话既不会提示，也不会上报。授权后的
+网络失败完全静默，不会改变 stdout、stderr 或进程退出码；未发送计数只会保存在有
+数量和时效上限的本地队列中，等待后续启动重试。
+
+ping 包含一个 CLI 专用的随机 128-bit 安装 ID、CLI 版本、OS、架构和 `cli` surface
+标记。计数批次使用同一个 ID 做每日活跃安装去重，只包含固定 bucket，例如 CLI 模式、
+运行配置档、权限/会话模式、turn 延迟、finish reason、cache hit 区间、通用
+Provider/工具错误分类、compaction、恢复计数和归一化界面语言。这个 ID 与桌面端安装
+ID 分离，不是账号、硬件、仓库或 session 标识。
+
+Reasonix 绝不会上传 prompt、回答、reasoning、工具名/参数/输出、路径、仓库/分支、
+session ID、精确 token/费用、Provider/model 名称、base URL 或环境变量。
+
+### CLI 崩溃报告
+
+当未处理的 Go panic 到达 CLI 入口调用栈时，Reasonix 会把脱敏报告保存在
+`<Reasonix home>/cli-crash-reports`。最多保留 10 份，文件权限仅限当前用户读取。
+panic 原文绝不会被序列化；绝对源码路径会变成 `<path>/<file>.go:<line>`，函数参数会被
+移除，并且在本地保存和实际发送前都会再次清理密钥、token、邮箱及长标识符。
+
+崩溃报告绝不会自动上传。使用以下命令审阅和管理：
+
+```bash
+reasonix report                 # 预览最新报告；TTY 中询问后才发送
+reasonix report list            # 列出本地报告
+reasonix report show [ID]       # 仅预览，不发送
+reasonix report send [ID]       # 明确发送；成功后才删除本地副本
+reasonix report delete [ID]     # 不发送，直接删除
+```
+
+通过 pipe 或重定向运行 `reasonix report` 时只会预览，不会询问或发送。Safe Mode 也会
+禁止发送，但仍允许审阅或删除本地报告。CLI telemetry 设置不会自动发送或自动删除这些
+需要单独审阅的报告。Go 无法恢复 runtime fatal throw、操作系统强制终止，以及未包装
+后台 goroutine 中的 panic，因此这些情况不会生成本地报告。
+
 ## Serve Web 前端
 
 `reasonix serve` 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、
@@ -249,8 +303,15 @@ Gateway、HuggingFace Router、NVIDIA NIM、KiloCode 和 Ollama Cloud。Plan 表
 `config.toml` 只保存端点、模型列表、key 环境变量名、上下文窗口、视觉模型元数据、
 中国区端点直连、MiniMax `reasoning_split`、GLM/MiniMax thinking heuristic、
 Anthropic-compatible 网关需要的 Bearer 认证、Ollama Cloud max-effort 支持，
-以及 OpenCode Go 的每模型 reasoning 覆盖。添加后仍然可以打开 provider 卡片，
-继续修改模型、请求头、端点或兼容设置。
+以及 OpenCode Go 的每模型 reasoning 覆盖。OpenCode Go 预设原生包含订阅线路的
+`kimi-k3`，并配置图像输入、`high`/`max` 推理强度和 1,048,576 token 上下文窗口。未修改过
+模型目录的既有 OpenCode Go 预设会自动升级；用户编辑过的模型目录保持不变。
+Kimi CN 和 Kimi Global 直连 API 预设也包含 `kimi-k3`，支持图像输入、1,048,576 token
+上下文窗口以及官方 `low`/`high`/`max` 推理强度（默认 `max`）。对官方 K3 端点，Reasonix
+会在多轮请求中保留完整 assistant message，使用 `max_completion_tokens` 传递输出上限，
+并省略 K3 的固定采样参数。未修改过的旧版 Kimi 直连模型目录会自动升级且不会改变默认模型；
+自定义模型目录和端点保持不变。添加后仍然可以打开 provider 卡片，继续修改模型、请求头、
+端点或兼容设置。
 
 **API 地址** 填写服务端点。默认模式下，Reasonix 会预览并把聊天请求发送到：
 
@@ -456,9 +517,10 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 `Bash(npm run build)`、`Bash(npm run test:*)`、`Edit(docs/**)` 这种形式。
 `reasonix` 会在 writer 调用前征求同意（普通工具为 `1` 本次 · `2` 本会话允许此范围 · `3` 总是允许此范围（保存） · `4` 拒绝；Bash 可额外选择命令前缀授权）；
 其中 Bash 默认按具体命令记，也可按安全推导出的命令前缀记（如 `Bash(go test:*)`）；文件编辑类工具的本会话授权按编辑能力记，持久授权则写入 `Edit(<path>)` 文件路径规则；
-`reasonix run` 保持自主运行但仍然遵守 `deny`。
+参数/算术展开、赋值、不含嵌套执行的 heredoc、文件重定向和 glob 不能复用裸 `Bash`、前缀或 glob Allow；用户保存时写入整条 `Bash=<literal>`，但它们仍按普通 fallback 执行，因此 Auto 不会额外询问。命令/进程替换、动态命令名、`eval`、`source`、Shell `-c`、运行时内联代码和无法解析的结构才强制人工；无头 Ask/Auto/DontAsk 会拒绝这类未精确授权的命令，只有 YOLO 可以绕过。除此之外 `reasonix run` 保持自主运行并始终遵守 `deny`。
 
 Ask 不是只读模式：writer 获得批准后仍会执行。Permissions 决定放行或询问，Sandbox 才是强制能力边界。
+Sandbox 是授权之后的第二层边界，不能替代命令解析，也不能把无法证明静态安全的命令变成可自动授权命令。
 
 权限是**策略**（哪些调用放行/询问），**沙盒**是**强制**：文件写工具
 （`write_file` / `edit_file` / `multi_edit` / `move_file`）拒绝 `[sandbox] workspace_root`

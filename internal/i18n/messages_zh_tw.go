@@ -454,6 +454,31 @@ var ChineseTraditional = Messages{
 	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
 	SelectManyHint: "(↑/↓ · Space · Enter · q)",
 
+	ReportNoPending:           "沒有待處理的 CLI 當機報告。",
+	ReportHeaderFmt:           "CLI 當機報告 %s",
+	ReportCapturedFmt:         "擷取時間：%s",
+	ReportPreviewOnlyFmt:      "目前僅預覽。執行 `reasonix report send %s` 可傳送這份報告。",
+	ReportSendPrompt:          "將這份已脫敏報告傳送到 crash.reasonix.io？",
+	ReportKept:                "報告已保留在本機。",
+	ReportDeletedFmt:          "已刪除 CLI 當機報告 %s。",
+	ReportSentFmt:             "已傳送 CLI 當機報告 %s。",
+	ReportSafeModeBlocked:     "Safe Mode 下不能傳送當機報告；本機報告已保留",
+	ReportConfigFailedFmt:     "無法載入網路設定：%v",
+	ReportUploadFailedFmt:     "報告上傳失敗；本機報告已保留：%v",
+	ReportSentDeleteFailedFmt: "報告已傳送，但無法刪除本機副本：%v",
+	ReportUsageBody: `用法：
+  reasonix report                 預覽最新本機報告並確認是否傳送
+  reasonix report list            列出本機 CLI 當機報告
+  reasonix report show [ID]       預覽報告（省略 ID 時使用最新一份）
+  reasonix report send [ID]       傳送已審閱報告，成功後刪除本機副本
+  reasonix report delete [ID]     不傳送，直接刪除本機報告`,
+
+	CLITelemetryConsentNotice:           "Reasonix 可以向 crash.reasonix.io 傳送匿名、完全不含內容的 CLI 使用統計：隨機安裝 ID、版本、作業系統和固定品質分桶。絕不會傳送 prompt、回答、程式碼、路徑、模型或工具內容、環境變數。之後可執行 `reasonix config telemetry off` 關閉。",
+	CLITelemetryConsentPrompt:           "允許傳送匿名 CLI 使用統計嗎？",
+	CLITelemetryConsentInvalid:          "請輸入 y 或 n。",
+	CLITelemetryConsentSaveFailedFmt:    "由於無法儲存偏好設定，CLI 使用統計仍維持關閉：%v",
+	CLITelemetryConsentCleanupFailedFmt: "CLI 使用統計已關閉，但無法刪除待傳送統計：%v",
+
 	UsageBody: `reasonix — 由設定和插件驅動的 coding agent（多模型）
 
 用法：
@@ -466,6 +491,8 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
+  reasonix config telemetry [auto|on|off]                設定不含內容的 CLI 使用統計
+  reasonix report [list|show|send|delete] [ID]           審閱並明確傳送本機 CLI 當機報告
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
   reasonix subagent <list|create|edit|delete|try|run>   管理和執行隔離子智慧體 profile
   reasonix init                                         查看如何產生專案記憶（AGENTS.md）

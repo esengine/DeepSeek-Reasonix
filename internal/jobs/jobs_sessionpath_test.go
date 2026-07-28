@@ -225,11 +225,15 @@ func TestSetActiveSessionPath_AcceptsValidInput(t *testing.T) {
 		close(done)
 		return "ok", nil
 	})
-	if j.artifactErr != "" {
-		t.Fatalf("artifactErr = %q, want empty", j.artifactErr)
+	j.mu.Lock()
+	artifactErr := j.artifactErr
+	artifactPath := j.artifactPath
+	j.mu.Unlock()
+	if artifactErr != "" {
+		t.Fatalf("artifactErr = %q, want empty", artifactErr)
 	}
-	if !strings.HasPrefix(j.artifactPath, want) {
-		t.Fatalf("artifactPath = %q, want prefix %q", j.artifactPath, want)
+	if !strings.HasPrefix(artifactPath, want) {
+		t.Fatalf("artifactPath = %q, want prefix %q", artifactPath, want)
 	}
 	<-done
 	if !ran {

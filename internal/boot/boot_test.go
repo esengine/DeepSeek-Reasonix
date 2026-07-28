@@ -1287,6 +1287,92 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderPreservesExplicitlySupportedKimiK3Efforts(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "opencode-go",
+		Kind:              "openai",
+		BaseURL:           srv.URL,
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "max" {
+		t.Fatalf("reasoning_effort = %#v, want explicitly supported max", got)
+	}
+}
+
+func TestNewProviderAppliesOfficialKimiK3RequestContract(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "kimi-cn",
+		Kind:              "openai",
+		BaseURL:           "https://api.moonshot.cn/v1",
+		ChatURL:           srv.URL,
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"low", "high", "max"},
+		DefaultEffort:     "max",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages:    []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Temperature: provider.TemperaturePtr(0),
+		MaxTokens:   2000,
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if gotReq["reasoning_effort"] != "max" || gotReq["max_completion_tokens"] != float64(2000) {
+		t.Fatalf("official Kimi K3 request = %+v, want max effort and max_completion_tokens", gotReq)
+	}
+	for _, field := range []string{"temperature", "max_tokens"} {
+		if _, ok := gotReq[field]; ok {
+			t.Fatalf("official Kimi K3 request must omit %q: %+v", field, gotReq)
+		}
+	}
+}
+
 func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3660,6 +3746,39 @@ allow = ["Bash(go test:*)"]
 	}
 }
 
+func TestRememberDynamicBashLiteralIsNotCoveredByBroadRule(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["Bash(git*)"]
+`)
+
+	const literal = "Bash=git status $(touch /tmp/reasonix-dynamic-approval)"
+	res := rememberPermissionRule(workspace, literal)
+	if !res.Saved || res.CoveredBy != "" || res.Err != nil {
+		t.Fatalf("remember dynamic literal = %+v, want newly saved rule", res)
+	}
+	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if !hasPermissionRule(cfg.Permissions.Allow, "Bash(git*)") || !hasPermissionRule(cfg.Permissions.Allow, literal) {
+		t.Fatalf("allow rules = %v, want broad rule and dynamic literal", cfg.Permissions.Allow)
+	}
+
+	res = rememberPermissionRule(workspace, literal)
+	if res.Saved || res.CoveredBy != literal || res.Err != nil {
+		t.Fatalf("remember duplicate dynamic literal = %+v, want exact deduplication", res)
+	}
+	cfg = config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	count := 0
+	for _, rule := range cfg.Permissions.Allow {
+		if rule == literal {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("dynamic literal count = %d in %v, want 1", count, cfg.Permissions.Allow)
+	}
+}
+
 func TestRememberPermissionRulePrunesNarrowRulesWhenSavingBroaderRule(t *testing.T) {
 	workspace := robustTempDir(t)
 	writeFile(t, workspace, "reasonix.toml", `
@@ -4586,7 +4705,11 @@ model = "x"
 		testutil.Turn{Text: "done"},
 	)
 	setBootTokenProfileTestProvider(t, prov)
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, AdditionalDirs: []string{extra}})
+	ctrl, err := Build(context.Background(), Options{
+		Sink:                 event.Discard,
+		AdditionalDirs:       []string{extra},
+		HeadlessApprovalMode: control.ToolApprovalYolo,
+	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

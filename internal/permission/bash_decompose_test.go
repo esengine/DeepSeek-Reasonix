@@ -255,9 +255,9 @@ func TestPolicyDecideCompoundBashUsesWriterFallback(t *testing.T) {
 		want Decision
 	}{
 		{
-			name: "auto writer fallback allows uncovered compound bash segments",
+			name: "auto writer fallback asks for dynamic compound bash segments",
 			mode: "allow",
-			want: Allow,
+			want: Ask,
 		},
 		{
 			name: "ask writer fallback still prompts for uncovered compound bash segments",
@@ -265,7 +265,7 @@ func TestPolicyDecideCompoundBashUsesWriterFallback(t *testing.T) {
 			want: Ask,
 		},
 		{
-			name: "deny writer fallback still blocks uncovered compound bash segments",
+			name: "deny writer fallback blocks dynamic compound bash segments",
 			mode: "deny",
 			want: Deny,
 		},
@@ -311,4 +311,42 @@ func TestPolicyDecideCompoundBashPreservesWholeCommandRules(t *testing.T) {
 			t.Fatalf("DecideSubject(%q) = %v, want %v", subject, got, Ask)
 		}
 	})
+}
+
+func TestPolicyDecideDynamicCompoundPreservesSegmentDenyAndAsk(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+		ask     []string
+		deny    []string
+		want    Decision
+	}{
+		{
+			name:    "glob segment deny beats auto fallback",
+			subject: "git status && rm *.log",
+			deny:    []string{"Bash(rm *)"},
+			want:    Deny,
+		},
+		{
+			name:    "redirect segment ask beats auto fallback",
+			subject: "git status && printf result > output.txt",
+			ask:     []string{"Bash(printf *)"},
+			want:    Ask,
+		},
+		{
+			name:    "indirect execution segment deny beats required human ask",
+			subject: `git status && eval "touch /tmp/x"`,
+			deny:    []string{"Bash(eval *)"},
+			want:    Deny,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New("allow", []string{"Bash"}, tt.ask, tt.deny)
+			if got := p.DecideSubject("bash", false, tt.subject); got != tt.want {
+				t.Fatalf("DecideSubject(%q) = %v, want %v", tt.subject, got, tt.want)
+			}
+		})
+	}
 }

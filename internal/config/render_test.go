@@ -807,6 +807,44 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	}
 }
 
+func TestScopedRenderKeepsPluginsInTheirOwningConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "unknown", Command: "unknown-mcp"},
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+
+	tests := []struct {
+		name  string
+		body  string
+		want  []string
+		avoid []string
+	}{
+		{name: "full", body: RenderTOMLForScope(cfg, RenderScopeFull), want: []string{"unknown", "user", "project", "mcp-json", "legacy", "package"}},
+		{name: "user", body: RenderTOMLForScope(cfg, RenderScopeUser), want: []string{"unknown", "user"}, avoid: []string{"project", "mcp-json", "legacy", "package"}},
+		{name: "project", body: RenderTOMLForScope(cfg, RenderScopeProject), want: []string{"unknown", "project"}, avoid: []string{"user", "mcp-json", "legacy", "package"}},
+		{name: "project delta", body: RenderTOMLProjectDelta(cfg), want: []string{"unknown", "project"}, avoid: []string{"user", "mcp-json", "legacy", "package"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, name := range tt.want {
+				if !strings.Contains(tt.body, `name    = "`+name+`"`) {
+					t.Fatalf("render missing plugin %q:\n%s", name, tt.body)
+				}
+			}
+			for _, name := range tt.avoid {
+				if strings.Contains(tt.body, `name    = "`+name+`"`) {
+					t.Fatalf("render leaked plugin %q:\n%s", name, tt.body)
+				}
+			}
+		})
+	}
+}
+
 func TestProjectDeltaRendersRecoveryReviewerOverride(t *testing.T) {
 	c := Default()
 	c.Agent.RecoveryModel = "deepseek-pro"

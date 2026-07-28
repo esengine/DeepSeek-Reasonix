@@ -165,12 +165,13 @@ type Policy struct { Mode Decision; Allow, Ask, Deny []Rule }
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision
 ```
 
-- rule 可以是 `Tool` 或 `Tool(specifier)`，例如 `Bash(go test:*)`、`Edit(docs/**)`。
+- rule 可以是 `Tool` 或 `Tool(specifier)`，例如 `Bash(go test:*)`、`Edit(docs/**)`；`Bash=<literal>` 是整条 Bash 命令的精确授权格式，其中 glob 与 Shell 元字符都按普通字符匹配。
 - 优先级为 `deny > ask > allow > fallback`；只读工具 fallback 为 Allow，写工具 fallback 使用 `Mode`。
 - 交互模式中的 Ask 由用户选择单次允许、session scope 允许、持久允许或拒绝；显式 Deny 在所有模式下都不可绕过。
+- 动态 Bash 分两级：参数/算术展开、赋值、不含嵌套执行的 heredoc、普通文件重定向与 Shell glob 不能复用裸 `Bash`、前缀或 glob Allow，保存时只生成 `Bash=<literal>`，但仍遵循普通 fallback，因此 Auto 与获批计划窗口可无提示执行。命令/进程替换、动态命令名、无法解析结构，以及 `eval`、`source`、Shell `-c`、PowerShell/cmd 命令字符串、运行时内联代码参数属于嵌套/间接执行；交互 Ask/Auto 必须人工批准，Guardian 与 hook allow 不能代替，无头 Ask/Auto/DontAsk 直接拒绝，只有完全相同的 literal 或 YOLO 可以绕过。
 - 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
-- Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划。
+- Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
 - 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、同一阻塞状态重复三次、用户停止或达到安全续跑边界。只有用户在输入框中选择 Goal 或运行 `/goal` 显式启动后，长周期研究、调试、优化或实现目标才可启用 AutoResearch；普通聊天不会隐式切换协作模式，也不会创建持久化 AutoResearch 状态。动态状态保存在 `.reasonix/autoresearch/.../`。
 
 ### 3.8 Slash command
