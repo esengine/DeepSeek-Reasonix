@@ -151,8 +151,8 @@ func TestStartForSession_AcceptsValidInput(t *testing.T) {
 		close(done)
 		return "ok", nil
 	})
-	if j.status != Running {
-		t.Fatalf("job status = %q, want Running (artifactErr=%q)", j.status, j.artifactErr)
+	if j.Status() != Running {
+		t.Fatalf("job status = %q, want Running (artifactErr=%q)", j.Status(), j.artifactErr)
 	}
 	if j.artifactPath == "" {
 		t.Fatal("artifactPath empty; expected a path under the temp root")

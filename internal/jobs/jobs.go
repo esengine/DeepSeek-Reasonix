@@ -147,6 +147,17 @@ type Job struct {
 	evidenceCommitted bool
 }
 
+// Status returns the current job lifecycle status under the job's mutex.
+// Use this when reading j.status from outside the goroutine that wrote it
+// (for example, from a test that observes a job returned by StartForSession
+// before the run goroutine has finished). Reading j.status directly is a
+// data race and triggers `go test -race`.
+func (j *Job) Status() Status {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.status
+}
+
 // Manager is the session's background-job table. It is safe for concurrent use.
 type Manager struct {
 	sink       event.Sink
