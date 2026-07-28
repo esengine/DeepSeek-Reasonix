@@ -24,6 +24,7 @@ export function VirtualMenu<T>({
     count: items.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => estimateSize?.(items[index], index) ?? 34,
+    getItemKey: (index) => itemKey(items[index], index),
     overscan: 10,
     // Measurement callbacks can arrive during React's commit phase. Let the
     // virtualizer update stable row positions directly instead of dispatching a
