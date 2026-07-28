@@ -145,8 +145,12 @@ const contextDGate = deferred<ContextInfo>();
 const setActiveBGate = deferred<void>();
 const setActiveEGate = deferred<void>();
 const setActiveFGate = deferred<void>();
+const staleSwitchFGate = deferred<void>();
+const staleSwitchReassertGGate = deferred<void>();
 const submitTabCGate = deferred<void>();
 const forkResultGate = deferred<void>();
+const staleForkResultGate = deferred<void>();
+const staleForkReassertGGate = deferred<void>();
 const historyCalls: string[] = [];
 const cancelCalls: string[] = [];
 let contextDCalls = 0;
@@ -161,6 +165,13 @@ let replayPendingPromptCalls = 0;
 let failSetActiveFor = "";
 let holdNextForkResult = false;
 let forkStarted = false;
+let holdStaleSwitchF = false;
+let holdStaleSwitchReassertG = false;
+let staleSwitchReassertGStarted = false;
+let holdStaleForkResult = false;
+let staleForkStarted = false;
+let holdStaleForkReassertG = false;
+let staleForkReassertGStarted = false;
 const runningTabs = new Set<string>();
 const tabsById = new Map([tabA, tabB, tabC, tabD, tabE, tabF, tabG, tabH, tabI].map((tab) => [tab.id, tab]));
 const eventHandlers: Array<(e: WireEvent) => void> = [];
@@ -250,7 +261,7 @@ window.go = {
         return { ...tabE, active: true, running: true };
       },
       ForkForTab: async () => {
-        const fork = holdNextForkResult ? tabJ : tabE;
+        const fork = holdNextForkResult || holdStaleForkResult ? tabJ : tabE;
         tabsById.set(fork.id, fork);
         backendActiveId = fork.id;
         runningTabs.add(fork.id);
@@ -258,6 +269,11 @@ window.go = {
           holdNextForkResult = false;
           forkStarted = true;
           await forkResultGate.promise;
+        }
+        if (holdStaleForkResult) {
+          holdStaleForkResult = false;
+          staleForkStarted = true;
+          await staleForkResultGate.promise;
         }
         return { ...fork, active: true, running: true };
       },
@@ -278,6 +294,20 @@ window.go = {
         if (tabID === "tab-b") await setActiveBGate.promise;
         if (tabID === "tab-e") await setActiveEGate.promise;
         if (tabID === "tab-f") await setActiveFGate.promise;
+        if (tabID === "tab-f" && holdStaleSwitchF) {
+          holdStaleSwitchF = false;
+          await staleSwitchFGate.promise;
+        }
+        if (tabID === "tab-g" && holdStaleSwitchReassertG) {
+          holdStaleSwitchReassertG = false;
+          staleSwitchReassertGStarted = true;
+          await staleSwitchReassertGGate.promise;
+        }
+        if (tabID === "tab-g" && holdStaleForkReassertG) {
+          holdStaleForkReassertG = false;
+          staleForkReassertGStarted = true;
+          await staleForkReassertGGate.promise;
+        }
         if (tabID === failSetActiveFor) throw new Error("persist failed");
         backendActiveId = tabID;
       },
@@ -697,6 +727,52 @@ await waitFor("reopened tab-h finishes after stale meta discard", () =>
   controller?.state.hydrating === false &&
   (controller.state.items.some((item) => item.kind === "user" && item.text === "history H after stale meta") ?? false)
 );
+
+// A stale repair is itself asynchronous. Force a third navigation to complete
+// while that repair is pending and verify the repair follows the newest tab.
+holdStaleSwitchF = true;
+holdStaleSwitchReassertG = true;
+let threeWaySwitchToF: Promise<TabMeta[] | undefined> | undefined;
+await act(async () => {
+  threeWaySwitchToF = controller?.switchTab("tab-f", tabF);
+  await flushPromises();
+  await controller?.openProjectTab(tabG.workspaceRoot, tabG.topicId || "");
+  staleSwitchFGate.resolve();
+  await flushPromises();
+});
+await waitFor("stale switch reassert G starts", () => staleSwitchReassertGStarted);
+await act(async () => {
+  await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
+  staleSwitchReassertGGate.resolve();
+  await threeWaySwitchToF;
+  await flushPromises();
+});
+eq(controller?.activeTabId, "tab-h", "third navigation remains visible after stale switch repair");
+eq(backendActiveId, "tab-h", "third navigation remains backend-active after stale switch repair");
+
+holdStaleForkResult = true;
+holdStaleForkReassertG = true;
+let threeWayFork: Promise<boolean> | undefined;
+await act(async () => {
+  threeWayFork = controller?.rewindForTab("tab-h", 0, "fork");
+  await flushPromises();
+});
+await waitFor("stale fork result", () => staleForkStarted && backendActiveId === "tab-j");
+await act(async () => {
+  await controller?.openProjectTab(tabG.workspaceRoot, tabG.topicId || "");
+  staleForkResultGate.resolve();
+  await flushPromises();
+});
+await waitFor("stale fork reassert G starts", () => staleForkReassertGStarted);
+await act(async () => {
+  await controller?.openProjectTab(tabH.workspaceRoot, tabH.topicId || "");
+  staleForkReassertGGate.resolve();
+  await threeWayFork;
+  await flushPromises();
+});
+eq(controller?.activeTabId, "tab-h", "third navigation remains visible after stale fork repair");
+eq(backendActiveId, "tab-h", "third navigation remains backend-active after stale fork repair");
+runningTabs.delete("tab-j");
 
 await act(async () => {
   root.unmount();
