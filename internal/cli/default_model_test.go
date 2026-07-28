@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/event"
 )
 
 const (
@@ -178,6 +180,30 @@ api_key_env = "`+defaultModelTestConfiguredEnv+`"
 	}
 	if got := resolveServeModel("explicit/chat"); got != "explicit/chat" {
 		t.Fatalf("resolveServeModel(explicit) = %q, want explicit model preserved", got)
+	}
+}
+
+func TestNewChatTUIKeepsExplicitKeylessControllerModel(t *testing.T) {
+	isolateCLIConfigHome(t)
+	setCredential(t, defaultModelTestConfiguredEnv, true)
+	setCredential(t, defaultModelTestKeylessEnv, false)
+
+	cfg := newDefaultModelTestConfig()
+	cfg.DefaultModel = "minimax/MiniMax-M3"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+
+	const explicit = "deepseek-flash/deepseek-v4-flash"
+	ctrl, err := setupProfile(context.Background(), explicit, 0, false, event.Discard, "balanced", "")
+	if err != nil {
+		t.Fatalf("interactive build should remain reachable for missing-key recovery: %v", err)
+	}
+	defer ctrl.Close()
+
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	if got := m.modelRef; got != explicit {
+		t.Fatalf("TUI modelRef = %q, want explicit controller model %q", got, explicit)
 	}
 }
 

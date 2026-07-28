@@ -539,8 +539,9 @@ type clipboardImageMsg struct {
 
 // newChatTUI assembles the initial model. The controller has already been wired
 // with an event sink that feeds eventCh; the TUI issues commands to it and
-// renders the events it emits. Label, history, host, and commands are read from
-// the controller, so a resumed session pre-populates scrollback.
+// renders the events it emits. Model identity, label, history, host, and commands
+// are read from the controller, so explicit selections and resumed sessions stay
+// authoritative.
 func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Event, termW int) chatTUI {
 	ti := textarea.New()
 	configureChatTextarea(&ti)
@@ -554,6 +555,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 	return chatTUI{
 		ctrl:                 ctrl,
 		label:                ctrl.Label(),
+		modelRef:             ctrl.ModelRef(),
 		missing:              missing,
 		nativeScrollback:     nativeScrollback,
 		mouseCaptureOff:      mouseCaptureOffByDefault(),

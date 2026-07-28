@@ -1202,16 +1202,6 @@ func chatREPL(args []string, version string) int {
 	if effortOverride != nil {
 		m.effortLevel = *effortOverride
 	}
-	if cfg, e := config.Load(); e == nil {
-		// Keyless default falls through to a configured provider
-		// (issue #6996); a hard failure here means the user passed
-		// --model with something that does not resolve.
-		if name, _, err := resolveModelForCLI(*model, cfg); err == nil && name != "" {
-			if entry, ok := cfg.ResolveModel(name); ok {
-				m.modelRef = entry.Name + "/" + entry.Model
-			}
-		}
-	}
 	if effortOverride == nil {
 		m.refreshEffortStatus()
 	}
