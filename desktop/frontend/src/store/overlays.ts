@@ -32,6 +32,8 @@ export type OverlayState = {
   transientOverlayDismissSignal: number;
   startupSplashVisible: boolean;
   needsOnboarding: boolean | null;
+  /** Nested ImageViewer portals; >0 means native embed must hide. */
+  imageViewerOpenCount: number;
   setSettingsTarget: Dispatch<SetStateAction<SettingsTab | null>>;
   setSettingsFocus: Dispatch<SetStateAction<SettingsInitialFocus | null>>;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
@@ -44,6 +46,8 @@ export type OverlayState = {
   setTransientOverlayDismissSignal: Dispatch<SetStateAction<number>>;
   setStartupSplashVisible: Dispatch<SetStateAction<boolean>>;
   setNeedsOnboarding: Dispatch<SetStateAction<boolean | null>>;
+  retainImageViewer: () => void;
+  releaseImageViewer: () => void;
 };
 
 export const useOverlayStore = create<OverlayState>((set) => ({
@@ -59,6 +63,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   transientOverlayDismissSignal: 0,
   startupSplashVisible: shouldShowStartupSplash(),
   needsOnboarding: null,
+  imageViewerOpenCount: 0,
   setSettingsTarget: (update) => set((s) => ({ settingsTarget: applySetState(s.settingsTarget, update) })),
   setSettingsFocus: (update) => set((s) => ({ settingsFocus: applySetState(s.settingsFocus, update) })),
   setPaletteOpen: (update) => set((s) => ({ paletteOpen: applySetState(s.paletteOpen, update) })),
@@ -71,4 +76,6 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   setTransientOverlayDismissSignal: (update) => set((s) => ({ transientOverlayDismissSignal: applySetState(s.transientOverlayDismissSignal, update) })),
   setStartupSplashVisible: (update) => set((s) => ({ startupSplashVisible: applySetState(s.startupSplashVisible, update) })),
   setNeedsOnboarding: (update) => set((s) => ({ needsOnboarding: applySetState(s.needsOnboarding, update) })),
+  retainImageViewer: () => set((s) => ({ imageViewerOpenCount: s.imageViewerOpenCount + 1 })),
+  releaseImageViewer: () => set((s) => ({ imageViewerOpenCount: Math.max(0, s.imageViewerOpenCount - 1) })),
 }));
