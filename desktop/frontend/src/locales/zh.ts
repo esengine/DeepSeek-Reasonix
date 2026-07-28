@@ -46,6 +46,7 @@ export const zh: Record<DictKey, string> = {
   "tabBar.tabActions": "标签页操作",
   "tabBar.commandSearch": "搜索 · 命令 · 打开文件",
   "tabBar.commandSearchCompact": "搜索",
+  "tabBar.forkSession": "分叉会话",
 
   // 侧边栏
   "sidebar.conversations": "会话",

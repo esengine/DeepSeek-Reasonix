@@ -19,6 +19,20 @@ import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type Cont
 import { Tooltip } from "./Tooltip";
 import { WorktreeBadge } from "./WorktreeBadge";
 
+
+/**
+ * Return a localized display title for a project tree node.
+ * When the backend sets titleKind, it indicates the label is a 
+ * locale-agnostic default that should be translated.
+ */
+function nodeDisplayTitle(node: ProjectNode, t: Translator): string {
+  switch (node.titleKind) {
+    case "new_session": return t("topbar.newSession");
+    case "forked":      return t("tabBar.forkSession");
+    default:            return node.label || t("topbar.newSession");
+  }
+}
+
 type ProjectTreeVariant = "classic" | "workbench" | "creation";
 
 interface ProjectTreeProps {
@@ -161,7 +175,7 @@ export function projectTreeTopicHoverCardModel(node: ProjectNode, t: Translator,
   const metaLine = projectTreeTopicMetaLine(node, t);
   const exactTime = activityAt ? topicActivityDateLabel(activityAt) : "";
   return {
-    title: (node.label || node.topicId || "Untitled").replace(/^●\s*/, ""),
+    title: nodeDisplayTitle(node, t).replace(/^●\s*/, ""),
     statusLabel: topicStatusLabel(node, t),
     metaLine,
     exactTime: projectTreeDedupedExactTime(metaLine, exactTime),
@@ -1301,7 +1315,7 @@ export function ProjectTree({
       const scopeClass = scope === "global" ? " project-tree__topic--global" : " project-tree__topic--project";
       const accentStyle = projectAccentStyle(node.projectColor, scope === "global" ? "var(--project-tree-global-accent)" : undefined);
       const active = topicIsActive(node, activeScope, activeWorkspaceRoot, activeTopicId, activeSessionPath);
-      const label = (node.label || node.topicId || "Untitled").replace(/^●\s*/, "");
+      const label = nodeDisplayTitle(node, t).replace(/^●\s*/, "");
       const conflictCopyLabel = isSessionNode && node.recovered ? t("recovery.badge") : "";
       const activityAt = node.lastActivityAt || node.createdAt || 0;
       // Every variant is a single-line row with the activity time on the right;

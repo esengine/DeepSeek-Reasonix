@@ -5939,6 +5939,7 @@ type ProjectNode struct {
 	RecoveryParentID string        `json:"recoveryParentId,omitempty"`
 	IsolatedWorktree bool          `json:"isolatedWorktree,omitempty"`
 	Children         []ProjectNode `json:"children,omitempty"`
+	TitleKind        string        `json:"titleKind,omitempty"`
 }
 
 func normalizeTopicStatus(status string) string {
@@ -7240,6 +7241,7 @@ type runtimeSessionStatus struct {
 	recoveryReason   string
 	recoveryDigest   string
 	recoveryParentID string
+	titleKind        string
 }
 
 // topicHiddenAsRecoveryOnly hides topics whose only on-disk sessions are
@@ -7359,6 +7361,15 @@ func (a *App) ListProjectTree() []ProjectNode {
 		info := sessionInfos[sessionPath]
 		recovered := sessionInfoIsAutomaticRecovery(info) || isAutomaticRecoverySessionPath(sessionPath)
 		label := runtimeSessionTreeLabel(tab, info, sessionTitles[sessionPath])
+		titleKind := ""
+		switch {
+		case label == defaultTopicTitle || label == "New Session":
+			titleKind = "new_session"
+		case strings.HasPrefix(label, "分叉会话") || strings.HasPrefix(label, "Forked Session") || strings.HasSuffix(label, " · 分叉"):
+			titleKind = "forked"
+		case strings.HasPrefix(label, "历史会话") || strings.HasPrefix(label, "History Session"):
+			titleKind = "history"
+		}
 		status := activityStatusForTab(tab)
 		runtimeStatus := control.RuntimeStatus{}
 		if tab.Ctrl != nil {
@@ -7368,6 +7379,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 		runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)] = append(runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)], runtimeSessionStatus{
 			sessionPath:      sessionPath,
 			label:            label,
+			titleKind:        titleKind,
 			turns:            info.Turns,
 			createdAt:        unixMilliOrZero(info.CreatedAt),
 			lastActivityAt:   unixMilliOrZero(info.LastActivityAt),
@@ -7421,6 +7433,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 				Key:              projectSessionNodeKey(scope, session.sessionPath),
 				Kind:             kind,
 				Label:            session.label,
+				TitleKind:        session.titleKind,
 				Root:             workspaceRoot,
 				TopicID:          topicID,
 				SessionPath:      session.sessionPath,
