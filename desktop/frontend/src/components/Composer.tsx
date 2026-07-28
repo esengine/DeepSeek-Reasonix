@@ -833,7 +833,9 @@ export function Composer({
     setPendingPaste(next.pendingPaste);
     setSubmitting(next.submitting);
     setHistoryIndex(next.historyIndex);
-    lastSelectionRef.current = { start: next.text.length, end: next.text.length };
+    const restoredSelection = { start: next.text.length, end: next.text.length };
+    lastSelectionRef.current = restoredSelection;
+    setPlainSelection(restoredSelection);
     setComposerPrompt(null);
     setShowPastChats(false);
     setDirectPastChats(false);

@@ -476,7 +476,9 @@ export function slashQueryAt(text: string, selection: RichComposerSelection): Ri
   const match = /\/([A-Za-z0-9_.:-]*)$/.exec(before);
   if (!match) return null;
   const slashOffset = before.length - match[1].length - 1;
-  return { from: slashOffset, to: selection.start, query: match[1].toLowerCase() };
+  let tokenEnd = selection.start;
+  while (tokenEnd < text.length && /[A-Za-z0-9_.:-]/.test(text[tokenEnd])) tokenEnd += 1;
+  return { from: slashOffset, to: tokenEnd, query: match[1].toLowerCase() };
 }
 
 let nextInvocationID = 1;
@@ -875,6 +877,18 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
           invocation={invocation}
           kind={invocation.kind}
           description={item.command.description}
+          onRemove={() => {
+            const current = known.get(item.id);
+            const currentOffset = current?.offset ?? offset;
+            const afterSelection = { start: currentOffset, end: currentOffset };
+            pendingSelectionRef.current = afterSelection;
+            onSelectionChange(afterSelection, null);
+            onChange(text, invocations.filter((candidate) => candidate.id !== item.id), {
+              source: "programmatic",
+              beforeSelection: lastValidSelectionRef.current,
+              afterSelection,
+            });
+          }}
           variant="composer"
         />
       </span>,

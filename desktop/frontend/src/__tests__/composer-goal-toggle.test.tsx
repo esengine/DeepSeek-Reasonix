@@ -1386,11 +1386,15 @@ console.log("\ncomposer goal toggle");
   });
   const { root, calls, rerender } = await renderComposer();
 
-  const initialText = "请用/检查";
+  const initialText = "请用/writing-plans检查";
   await replaceComposerDraft(rerender, 1900, initialText);
   let textarea = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!textarea) throw new Error("composer textarea did not render for middle slash completion");
-  const slashCaret = "请用/".length;
+  const slashCaret = "请用/writ".length;
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await flushTimers();
+  });
   await act(async () => {
     textarea!.focus();
     textarea!.setSelectionRange(slashCaret, slashCaret);
@@ -2059,6 +2063,54 @@ console.log("\ncomposer goal toggle");
     await flushTimers();
   });
   eq(calls.structured[0]?.input, "拼", "compositionend commits the composed text to the model exactly once");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  mockApp({
+    Commands: async () => [
+      { name: "review", description: "Review the current task", kind: "skill" },
+    ],
+    ListDirForTab: async () => [],
+    SearchFileRefsForTab: async () => [],
+  });
+  const sessionA = "session:project:/repo:topic-a:session-a";
+  const sessionB = "session:project:/repo:topic-b:session-b";
+  const { root, rerender } = await renderComposer({ sessionKey: sessionA });
+
+  await replaceComposerDraft(rerender, 5000, "x/review");
+  await waitFor("session A slash menu", () => Boolean(document.querySelector(".slashmenu")));
+
+  await rerender({ sessionKey: sessionB, insertRequest: null });
+  await replaceComposerDraft(rerender, 5001, "b");
+  const sessionBInput = document.querySelector("textarea") as HTMLTextAreaElement | null;
+  if (!sessionBInput) throw new Error("session B textarea did not render");
+  await act(async () => {
+    sessionBInput.focus();
+    sessionBInput.setSelectionRange(1, 1);
+    sessionBInput.dispatchEvent(new window.KeyboardEvent("keyup", { key: "b", bubbles: true }));
+    await flushTimers();
+  });
+
+  await rerender({ sessionKey: sessionA, insertRequest: null });
+  eq(
+    (document.querySelector("textarea") as HTMLTextAreaElement | null)?.value,
+    "x/review",
+    "switching back restores session A slash draft",
+  );
+  await waitFor(
+    "restored session A slash menu",
+    () => Boolean(document.querySelector(".slashmenu")),
+  );
+  ok(
+    document.querySelector(".slashmenu") !== null,
+    "restoring a draft recomputes slash completion from its end caret",
+  );
 
   await act(async () => {
     root.unmount();

@@ -184,6 +184,11 @@ console.log("\nrich composer slash queries");
   eq(middle?.to, 9, "slash query ends at the middle caret");
   eq(middle?.query, "review", "slash query after adjacent Chinese text captures its filter");
 
+  const insideToken = slashQueryAt("/review", { start: 4, end: 4 });
+  eq(insideToken?.from, 0, "slash query inside a token starts at its slash");
+  eq(insideToken?.to, 7, "slash query inside a token replaces the full command token");
+  eq(insideToken?.query, "rev", "slash query inside a token filters by text before the caret");
+
   const end = slashQueryAt("please inspect /", { start: 16, end: 16 });
   eq(end?.from, 15, "trailing slash opens a query at the end");
   eq(end?.query, "", "bare trailing slash exposes the full command menu");
@@ -753,6 +758,52 @@ function Harness({
     const remaining = document.querySelectorAll("[data-invocation-id]").length;
     eq(remaining, 0, "Backspace after skill tag removes the invocation");
   }
+
+  // The inline remove button is the pointer/touch-accessible counterpart to
+  // Backspace and must preserve the surrounding task text.
+  let clickRemovalSelection: RichComposerSelection | null = null;
+  let clickRemovalText = "";
+  function ClickRemoveHarness() {
+    const [invocations, setInvocations] = useState([
+      invocation("click-remove-target", 2, skillCommand),
+    ]);
+    return (
+      <LocaleProvider>
+        <RichComposerInput
+          text="task"
+          invocations={invocations}
+          placeholder="Message"
+          disabled={false}
+          onChange={(nextText, nextInvocations, origin) => {
+            clickRemovalText = nextText;
+            clickRemovalSelection = origin.afterSelection;
+            setInvocations(nextInvocations);
+          }}
+          onSelectionChange={() => {}}
+          onKeyDown={() => {}}
+          onPaste={() => {}}
+          onCompositionStart={() => {}}
+          onCompositionEnd={() => {}}
+        />
+      </LocaleProvider>
+    );
+  }
+
+  await act(async () => {
+    root.render(<ClickRemoveHarness />);
+    await flushTimers();
+  });
+  const removeInvocation = document.querySelector(
+    ".composer-invocation-token .invocation-display__remove",
+  ) as HTMLButtonElement | null;
+  ok(removeInvocation !== null, "inline invocation exposes an accessible remove button");
+  await act(async () => {
+    removeInvocation?.click();
+    await flushTimers();
+  });
+  eq(document.querySelectorAll("[data-invocation-id]").length, 0, "clicking remove deletes the invocation");
+  eq(clickRemovalText, "task", "clicking remove preserves surrounding task text");
+  eq(clickRemovalSelection?.start, 2, "clicking remove places the caret at the invocation offset");
 
   // External draft replacement rebuilds DOM; only explicit pending selection is restored.
   let externalSel: RichComposerSelection = { start: 0, end: 0 };

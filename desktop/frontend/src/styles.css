@@ -6304,10 +6304,8 @@ body > .mermaid-diagram--fullscreen {
 }
 .composer-invocation-caret-anchor {
   display: inline-block;
-  width: 1px;
   min-width: 1px;
   min-height: 1em;
-  overflow: hidden;
   vertical-align: text-bottom;
 }
 .composer-card--resized .composer__rich-input {
