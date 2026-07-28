@@ -204,9 +204,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	secrets.SetFilterSubprocessEnv(cfg.Secrets.FilterSubprocessEnv)
 	secrets.SetProtectSensitiveFiles(cfg.Secrets.ProtectSensitiveFiles)
 	secrets.RegisterCredentialEnvKeys(cfg.CredentialEnvNames())
+	// Fall through a keyless default_model to the next provider with a
+	// configured API key instead of hard-failing every command on
+	// "missing env X_API_KEY" (issue #6996). The fallback only kicks in
+	// when the caller did NOT pass an explicit opts.Model — explicit
+	// choices (--model, ACP session params) still fail loudly if they
+	// point at a keyless ref, so we never silently reroute a model the
+	// user asked for by name.
 	modelName := opts.Model
 	if modelName == "" {
-		modelName = cfg.DefaultModel
+		if resolved, _, ok := cfg.ResolveModelWithFallback(""); ok {
+			modelName = resolved
+		} else {
+			modelName = cfg.DefaultModel
+		}
 	}
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, modelName)
 	tokenMode := NormalizeTokenMode(opts.TokenMode)

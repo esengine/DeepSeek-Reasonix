@@ -113,7 +113,17 @@ func (f *acpFactory) SessionConfigState(_ context.Context, p acp.SessionConfigSt
 		return acp.SessionConfigState{}, err
 	}
 
-	ref := firstNonEmpty(p.Model, f.model, cfg.DefaultModel)
+	// explicit wins over the configured default: p.Model is the session
+	// override requested by the ACP client, f.model is the factory-level
+	// override. Either being non-empty is an explicit choice that the
+	// helper treats as strict (no silent fallback). Only when both are
+	// empty do we let resolveModelForCLI apply the keyless-default
+	// fallback to the next configured provider (issue #6996).
+	explicit := firstNonEmpty(p.Model, f.model)
+	ref, _, err := resolveModelForCLI(explicit, cfg)
+	if err != nil {
+		return acp.SessionConfigState{}, err
+	}
 	if strings.TrimSpace(ref) == "" {
 		return acp.SessionConfigState{}, fmt.Errorf("no default_model configured")
 	}

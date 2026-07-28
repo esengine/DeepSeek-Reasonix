@@ -1102,14 +1102,20 @@ func chatREPL(args []string) int {
 
 	// Surface a missing-key warning inside the TUI banner so the first message
 	// failing is at least pre-announced; the user can still enter chat.
+	// resolveModelForCLI transparently falls through a keyless default to the
+	// next configured provider (issue #6996), so we only warn when we end
+	// up on a ref that is still broken — i.e. the explicit ref was bad, or
+	// nothing is configured at all and the raw keyless default is being kept.
 	missing := ""
 	if cfg, loadErr := config.Load(); loadErr == nil {
-		name := *model
-		if name == "" {
-			name = cfg.DefaultModel
-		}
-		if vErr := cfg.Validate(name); vErr != nil {
-			missing = vErr.Error()
+		name, fallback, err := resolveModelForCLI(*model, cfg)
+		switch {
+		case err != nil:
+			missing = err.Error()
+		case !fallback && name != "":
+			if vErr := cfg.Validate(name); vErr != nil {
+				missing = vErr.Error()
+			}
 		}
 	}
 
@@ -1176,12 +1182,13 @@ func chatREPL(args []string) int {
 		m.effortLevel = *effortOverride
 	}
 	if cfg, e := config.Load(); e == nil {
-		name := *model
-		if name == "" {
-			name = cfg.DefaultModel
-		}
-		if entry, ok := cfg.ResolveModel(name); ok {
-			m.modelRef = entry.Name + "/" + entry.Model
+		// Keyless default falls through to a configured provider
+		// (issue #6996); a hard failure here means the user passed
+		// --model with something that does not resolve.
+		if name, _, err := resolveModelForCLI(*model, cfg); err == nil && name != "" {
+			if entry, ok := cfg.ResolveModel(name); ok {
+				m.modelRef = entry.Name + "/" + entry.Model
+			}
 		}
 	}
 	if effortOverride == nil {

@@ -38,15 +38,20 @@ func reviewCommand(args []string) int {
 		return 0
 	}
 
-	// 2. Load config and resolve model.
+	// 2. Load config and resolve model. resolveModelForCLI transparently
+	// falls through a keyless default to the next configured provider
+	// (issue #6996), so a user whose default_model no longer has a key
+	// (e.g. they migrated providers) does not have to add --model to
+	// every `reasonix review` invocation.
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: failed to load config:", err)
 		return 1
 	}
-	modelName := *model
-	if modelName == "" {
-		modelName = cfg.DefaultModel
+	modelName, _, err := resolveModelForCLI(*model, cfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
 	}
 	entry, ok := cfg.ResolveModel(modelName)
 	if !ok {
