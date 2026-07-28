@@ -316,6 +316,25 @@ export interface AppBindings {
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
+  EmbedBrowserAvailable(): Promise<boolean>;
+  EmbedBrowserShow(): Promise<void>;
+  EmbedBrowserHide(): Promise<void>;
+  EmbedBrowserDestroy(): Promise<void>;
+  EmbedBrowserSetBounds(bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    screenX: number;
+    screenY: number;
+  }): Promise<void>;
+  EmbedBrowserNavigate(url: string): Promise<void>;
+  EmbedBrowserReload(): Promise<void>;
+  EmbedBrowserGoBack(): Promise<void>;
+  EmbedBrowserGoForward(): Promise<void>;
+  EmbedBrowserSetZoom(factor: number): Promise<void>;
+  EmbedBrowserSnapshotPNG(): Promise<string>;
+  EmbedBrowserSetPickMode(enabled: boolean, accent?: string, accentFg?: string): Promise<void>;
   PickExportFile(defaultFilename: string, mimeType: string): Promise<string>;
   SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
   SaveExportImageFiles(path: string, payloads: string[]): Promise<void>;
@@ -3513,6 +3532,29 @@ function makeMockApp(): AppBindings {
       mockAttachmentDataURLs.set(path, dataUrl);
       return path;
     },
+    async EmbedBrowserAvailable() {
+      return false;
+    },
+    async EmbedBrowserShow() {},
+    async EmbedBrowserHide() {},
+    async EmbedBrowserDestroy() {},
+    async EmbedBrowserSetBounds(_bounds: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      screenX: number;
+      screenY: number;
+    }) {},
+    async EmbedBrowserNavigate(_url: string) {},
+    async EmbedBrowserReload() {},
+    async EmbedBrowserGoBack() {},
+    async EmbedBrowserGoForward() {},
+    async EmbedBrowserSetZoom(_factor: number) {},
+    async EmbedBrowserSnapshotPNG() {
+      return "";
+    },
+    async EmbedBrowserSetPickMode(_enabled: boolean, _accent?: string, _accentFg?: string) {},
     async PickExportFile(defaultFilename: string, _mimeType: string) {
       return defaultFilename;
     },

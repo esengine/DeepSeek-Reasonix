@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useT } from "../lib/i18n";
+import { useOverlayStore } from "../store/overlays";
 
 export interface ImageViewerProps {
   open: boolean;
@@ -21,8 +22,19 @@ export interface ImageViewerProps {
  */
 export function ImageViewer({ open, imageUrl, imageName, onClose }: ImageViewerProps) {
   const t = useT();
+  const retainImageViewer = useOverlayStore((s) => s.retainImageViewer);
+  const releaseImageViewer = useOverlayStore((s) => s.releaseImageViewer);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   const [visible, setVisible] = useState(false);
+
+  // Native WKWebView sits above the Wails layer — hide it while the lightbox is open.
+  useEffect(() => {
+    if (!open) return;
+    retainImageViewer();
+    return () => {
+      releaseImageViewer();
+    };
+  }, [open, retainImageViewer, releaseImageViewer]);
 
   // Resolve portal target when opening.
   useEffect(() => {

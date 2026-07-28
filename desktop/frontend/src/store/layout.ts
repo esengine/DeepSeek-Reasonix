@@ -36,6 +36,10 @@ export const CREATION_RIGHT_DOCK_TREE_DEFAULT_WIDTH = CREATION_RIGHT_DOCK_TREE_M
 export const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
 export const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 export const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
+/** Browser tab prefers a wider dock than file-tree / file-preview. */
+export const RIGHT_DOCK_BROWSER_DEFAULT_WIDTH = 860;
+export const RIGHT_DOCK_BROWSER_MIN_WIDTH = 520;
+export const RIGHT_DOCK_BROWSER_MAX_WIDTH = 1200;
 export const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 // Creation tree mode may render below the classic 280 floor when the viewport squeezes.
 export const CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH = 236;
@@ -58,6 +62,10 @@ function clampStoredSidebarWidth(width: number): number {
 
 export function clampRightDockPreviewWidth(width: number): number {
   return Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
+}
+
+export function clampRightDockBrowserWidth(width: number): number {
+  return Math.min(RIGHT_DOCK_BROWSER_MAX_WIDTH, Math.max(RIGHT_DOCK_BROWSER_MIN_WIDTH, Math.round(width)));
 }
 
 export function clampRightDockTreeWidth(width: number): number {
@@ -133,12 +141,20 @@ export function saveRightDockPreviewWidth(width: number): void {
   saveLayoutSize("rightDockPreviewWidth", width, clampRightDockPreviewWidth);
 }
 
+function loadRightDockBrowserWidth(): number {
+  return loadLayoutSize("rightDockBrowserWidth", RIGHT_DOCK_BROWSER_DEFAULT_WIDTH, clampRightDockBrowserWidth);
+}
+
+export function saveRightDockBrowserWidth(width: number): void {
+  saveLayoutSize("rightDockBrowserWidth", width, clampRightDockBrowserWidth);
+}
+
 // rightDockMode selects what the right dock shows. workspacePanelOpen is
 // restored from localStorage (same pattern as sidebarCollapsed) so a collapsed
 // dock survives restart. maximized/preview stay session-local — they are view
 // layout, not a durable preference. (Resize drag flags, button-press animation
 // flags, measured footer height, and viewport width stay as useState in App.tsx.)
-export type RightDockMode = "context" | "files" | "changed" | "remote";
+export type RightDockMode = "context" | "files" | "changed" | "remote" | "browser";
 
 function loadWorkspacePanelOpen(): boolean {
   if (typeof window === "undefined") return WORKSPACE_PANEL_DEFAULT_OPEN;
@@ -165,6 +181,7 @@ export type LayoutState = {
   sidebarWidth: number;
   rightDockTreeWidth: number;
   rightDockPreviewWidth: number;
+  rightDockBrowserWidth: number;
   workspacePanelOpen: boolean;
   workspacePanelMaximized: boolean;
   workspacePreviewActive: boolean;
@@ -173,6 +190,7 @@ export type LayoutState = {
   setSidebarWidth: (width: number) => void;
   setRightDockTreeWidth: (width: number) => void;
   setRightDockPreviewWidth: (width: number) => void;
+  setRightDockBrowserWidth: (width: number) => void;
   setWorkspacePanelOpen: Dispatch<SetStateAction<boolean>>;
   setWorkspacePanelMaximized: Dispatch<SetStateAction<boolean>>;
   setWorkspacePreviewActive: Dispatch<SetStateAction<boolean>>;
@@ -184,6 +202,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   sidebarWidth: loadSidebarWidth(),
   rightDockTreeWidth: loadRightDockTreeWidth(),
   rightDockPreviewWidth: loadRightDockPreviewWidth(),
+  rightDockBrowserWidth: loadRightDockBrowserWidth(),
   workspacePanelOpen: loadWorkspacePanelOpen(),
   workspacePanelMaximized: false,
   workspacePreviewActive: false,
@@ -192,6 +211,7 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
   setRightDockTreeWidth: (width) => set({ rightDockTreeWidth: width }),
   setRightDockPreviewWidth: (width) => set({ rightDockPreviewWidth: width }),
+  setRightDockBrowserWidth: (width) => set({ rightDockBrowserWidth: width }),
   setWorkspacePanelOpen: (update) => set((s) => ({ workspacePanelOpen: applySetState(s.workspacePanelOpen, update) })),
   setWorkspacePanelMaximized: (update) => set((s) => ({ workspacePanelMaximized: applySetState(s.workspacePanelMaximized, update) })),
   setWorkspacePreviewActive: (update) => set((s) => ({ workspacePreviewActive: applySetState(s.workspacePreviewActive, update) })),

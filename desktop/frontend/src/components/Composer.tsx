@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Globe, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
@@ -60,6 +60,7 @@ import {
   type SelectedTextInsertRequest,
   type SelectedTextReference,
 } from "../lib/selectedTextContext";
+import { browserPageUrlFromPath, isBrowserReferencePath } from "../lib/browserUrl";
 interface Attachment {
   path: string;
   previewUrl?: string;
@@ -1742,6 +1743,27 @@ export function Composer({
     draftsBySessionRef.current[targetDraftKey] = draft;
     return true;
   };
+
+  const consumedBrowserImageIdByDraftRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!selectedTextRequest?.imageDataUrl?.startsWith("data:image/")) return;
+    if (selectedTextRequest.id === consumedBrowserImageIdByDraftRef.current[draftKey]) return;
+    consumedBrowserImageIdByDraftRef.current[draftKey] = selectedTextRequest.id;
+    const imageDataUrl = selectedTextRequest.imageDataUrl;
+    const sourceDraftKey = activeDraftKeyRef.current;
+    void (async () => {
+      try {
+        const key = { hash: await sha256(new Blob([imageDataUrl])), source: "browser-annotation" };
+        if (attachmentSeenInDraft(sourceDraftKey, key)) return;
+        const saved = await app.SavePastedImage(imageDataUrl);
+        if (!saved) return;
+        const previewUrl = await app.AttachmentDataURL(saved).catch(() => imageDataUrl);
+        addAttachmentToDraft(sourceDraftKey, { path: saved, previewUrl }, key);
+      } catch {
+        /* text chip still lands */
+      }
+    })();
+  }, [draftKey, selectedTextRequest]);
 
   const addWorkspaceReferenceToDraft = (targetDraftKey: string, ref: WorkspaceReference) => {
     if (targetDraftKey === activeDraftKeyRef.current) {
@@ -3978,25 +4000,47 @@ export function Composer({
               </Tooltip>
             </div>
           ))}
-          {selectedTextRefs.map((reference) => (
-            <ComposerContextCard
-              key={reference.id}
-              variant="selection"
-              tooltipLabel={reference.path
-                ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
-                : <Markdown text={reference.text} />}
-              removeLabel={t("composer.removeSelectedText")}
-              onRemove={() => {
-                const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
-                selectedTextRefsRef.current = next;
-                setSelectedTextRefs(next);
-                requestAnimationFrame(focusComposerInput);
-              }}
-              name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
-              meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
-              icon={reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
-            />
-          ))}
+          {selectedTextRefs.map((reference) => {
+            const browserRef = isBrowserReferencePath(reference.path);
+            const browserHost = browserRef && reference.path
+              ? (() => {
+                try {
+                  return new URL(browserPageUrlFromPath(reference.path!)).host;
+                } catch {
+                  return browserPageUrlFromPath(reference.path!);
+                }
+              })()
+              : "";
+            return (
+              <ComposerContextCard
+                key={reference.id}
+                variant="selection"
+                tooltipLabel={browserRef
+                  ? <Markdown text={reference.text} />
+                  : reference.path
+                    ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
+                    : <Markdown text={reference.text} />}
+                removeLabel={browserRef ? t("composer.removeBrowserAnnotation") : t("composer.removeSelectedText")}
+                onRemove={() => {
+                  const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
+                  selectedTextRefsRef.current = next;
+                  setSelectedTextRefs(next);
+                  requestAnimationFrame(focusComposerInput);
+                }}
+                name={browserRef
+                  ? browserHost || selectedTextSnippet(reference.text)
+                  : reference.path
+                    ? reference.path.split("/").filter(Boolean).pop() ?? reference.path
+                    : selectedTextSnippet(reference.text)}
+                meta={browserRef
+                  ? t("composer.browserAnnotation")
+                  : reference.path
+                    ? t("composer.selectedCode")
+                    : t("composer.selectedText")}
+                icon={browserRef ? <Globe size={20} /> : reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
+              />
+            );
+          })}
         </div>
       )}
       <ImageViewer

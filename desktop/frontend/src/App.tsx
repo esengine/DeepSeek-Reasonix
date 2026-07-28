@@ -12,6 +12,7 @@ import {
   Command,
   Copy as RestoreIcon,
   Download,
+  Globe,
   Minus,
   Search,
   Server,
@@ -107,6 +108,9 @@ import {
 } from "./lib/types";
 import type { InvocationMetadataMap, StructuredInvocationSubmit } from "./lib/invocationDisplay";
 import { formatSelectionReference, type SelectedTextInsertRequest } from "./lib/selectedTextContext";
+import type { BrowserAnnotationPayload } from "./lib/browserAnnotation";
+import { toBrowserSelectedTextReference } from "./lib/browserAnnotation";
+import { clearBrowserUrlForSession } from "./lib/browserUrl";
 import { workspaceTreeVisitId } from "./lib/workspaceTreeMemory";
 import {
   composerProfileFromMeta,
@@ -136,6 +140,9 @@ import {
   CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH,
   CREATION_RIGHT_DOCK_TREE_MIN_WIDTH,
   CREATION_SIDEBAR_MIN_WIDTH,
+  RIGHT_DOCK_BROWSER_DEFAULT_WIDTH,
+  RIGHT_DOCK_BROWSER_MAX_WIDTH,
+  RIGHT_DOCK_BROWSER_MIN_WIDTH,
   RIGHT_DOCK_MAX_WIDTH,
   RIGHT_DOCK_MIN_RENDER_WIDTH,
   RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH,
@@ -148,6 +155,7 @@ import {
   applyLayoutStyleDefaults,
   clampCreationRightDockTreeWidth,
   clampCreationSidebarWidth,
+  clampRightDockBrowserWidth,
   clampRightDockPreviewWidth,
   clampRightDockTreeWidth,
   clampSidebarWidth,
@@ -155,6 +163,7 @@ import {
   defaultCreationSidebarWidth,
   defaultRightDockTreeWidth,
   defaultSidebarWidth,
+  saveRightDockBrowserWidth,
   saveRightDockPreviewWidth,
   saveRightDockTreeWidth,
   saveSidebarCollapsed,
@@ -264,6 +273,7 @@ function NoticePreviewPanel() {
 const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module) => ({ default: module.HistoryPanel })));
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
 const RemotePanel = lazy(() => import("./components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
+const BrowserPanel = lazy(() => import("./components/BrowserPanel").then((module) => ({ default: module.BrowserPanel })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -1181,6 +1191,8 @@ export default function App() {
   const setRightDockTreeWidth = useLayoutStore((s) => s.setRightDockTreeWidth);
   const rightDockPreviewWidth = useLayoutStore((s) => s.rightDockPreviewWidth);
   const setRightDockPreviewWidth = useLayoutStore((s) => s.setRightDockPreviewWidth);
+  const rightDockBrowserWidth = useLayoutStore((s) => s.rightDockBrowserWidth);
+  const setRightDockBrowserWidth = useLayoutStore((s) => s.setRightDockBrowserWidth);
   const workspacePreviewActive = useLayoutStore((s) => s.workspacePreviewActive);
   const setWorkspacePreviewActive = useLayoutStore((s) => s.setWorkspacePreviewActive);
   const attentionChimeEvents = useRef(new Set<string>());
@@ -1494,14 +1506,22 @@ export default function App() {
       return { ...current, [sourceTabId]: metadata };
     });
   }, []);
-  const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
-  const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
+  const rightDockDetailActive = rightDockMode === "browser" || (rightDockMode !== "context" && workspacePreviewActive);
+  const preferredWorkspacePanelWidth = rightDockMode === "browser"
+    ? rightDockBrowserWidth
+    : rightDockDetailActive
+      ? rightDockPreviewWidth
+      : rightDockTreeWidth;
   const rightDockTreeMinWidth = desktopLayoutStyle === "creation" ? CREATION_RIGHT_DOCK_TREE_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
   const rightDockTreeWidthClamp = desktopLayoutStyle === "creation" ? clampCreationRightDockTreeWidth : clampRightDockTreeWidth;
   const rightDockMinRenderWidth = desktopLayoutStyle === "creation" && !rightDockDetailActive
     ? CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH
     : RIGHT_DOCK_MIN_RENDER_WIDTH;
-  const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : rightDockTreeMinWidth;
+  const workspacePanelMinWidth = rightDockMode === "browser"
+    ? RIGHT_DOCK_BROWSER_MIN_WIDTH
+    : rightDockDetailActive
+      ? RIGHT_DOCK_PREVIEW_MIN_WIDTH
+      : rightDockTreeMinWidth;
   const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
@@ -2444,6 +2464,12 @@ export default function App() {
   const setSavedWorkspacePanelWidth = useCallback(
     (width: number) => {
       closeTransientOverlays();
+      if (rightDockMode === "browser") {
+        const next = clampRightDockBrowserWidth(width);
+        setRightDockBrowserWidth(next);
+        saveRightDockBrowserWidth(next);
+        return;
+      }
       if (rightDockDetailActive) {
         const next = clampRightDockPreviewWidth(width);
         setRightDockPreviewWidth(next);
@@ -2454,7 +2480,7 @@ export default function App() {
       setRightDockTreeWidth(next);
       saveRightDockTreeWidth(next);
     },
-    [closeTransientOverlays, rightDockDetailActive, rightDockTreeWidthClamp],
+    [closeTransientOverlays, rightDockDetailActive, rightDockMode, rightDockTreeWidthClamp],
   );
 
   const ensureWorkspacePanelWidth = useCallback(
@@ -2488,7 +2514,9 @@ export default function App() {
       const onMove = (moveEvent: PointerEvent) => {
         const delta = moveEvent.clientX - startX;
         nextDockWidth = startDockWidth - delta;
-        if (rightDockDetailActive) {
+        if (rightDockMode === "browser") {
+          nextDockWidth = clampRightDockBrowserWidth(nextDockWidth);
+        } else if (rightDockDetailActive) {
           nextDockWidth = clampRightDockPreviewWidth(nextDockWidth);
         } else {
           nextDockWidth = rightDockTreeWidthClamp(nextDockWidth);
@@ -2512,7 +2540,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, resolveLiveWorkspacePanelRenderWidth, rightDockDetailActive, rightDockTreeWidthClamp, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
+    [closeTransientOverlays, resolveLiveWorkspacePanelRenderWidth, rightDockDetailActive, rightDockMode, rightDockTreeWidthClamp, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
@@ -2522,19 +2550,39 @@ export default function App() {
         setSavedWorkspacePanelWidth(workspacePanelRenderWidth + (event.key === "ArrowLeft" ? 16 : -16));
       } else if (event.key === "Home") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : rightDockTreeMinWidth);
+        setSavedWorkspacePanelWidth(
+          rightDockMode === "browser"
+            ? RIGHT_DOCK_BROWSER_MIN_WIDTH
+            : rightDockDetailActive
+              ? RIGHT_DOCK_PREVIEW_MIN_WIDTH
+              : rightDockTreeMinWidth,
+        );
       } else if (event.key === "End") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
+        setSavedWorkspacePanelWidth(
+          rightDockMode === "browser"
+            ? RIGHT_DOCK_BROWSER_MAX_WIDTH
+            : rightDockDetailActive
+              ? RIGHT_DOCK_MAX_WIDTH
+              : RIGHT_DOCK_TREE_MAX_WIDTH,
+        );
       }
     },
-    [rightDockDetailActive, rightDockTreeMinWidth, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
+    [rightDockDetailActive, rightDockMode, rightDockTreeMinWidth, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
   );
 
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
-      if (mode === "context" || mode !== rightDockMode) {
+      if (mode === "browser") {
+        // Browser has its own persisted width; leave file-preview active state alone
+        // so leaving the tab restores the previous dock width/mode.
+      } else if (rightDockMode === "browser") {
+        // Leaving browser: only clear preview when returning to overview.
+        if (mode === "context") {
+          setWorkspacePreviewActive(false);
+        }
+      } else if (mode === "context" || mode !== rightDockMode) {
         setWorkspacePreviewActive(false);
       }
       setRightDockMode(mode);
@@ -2543,7 +2591,7 @@ export default function App() {
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
       } else {
-        // Keep file/change views docked; the rendered dock width is clamped to
+        // Keep file/change/browser views docked; the rendered dock width is clamped to
         // the viewport so opening it reflows instead of forcing maximize.
         nextMaximized = false;
         setWorkspacePanelMaximized(false);
@@ -2748,6 +2796,32 @@ export default function App() {
     }));
   }, [activeTabId, state.approval, workspaceInsertTarget]);
 
+  const addBrowserAnnotationToComposer = useCallback((payload: BrowserAnnotationPayload) => {
+    if (!activeTabId) return;
+    const ref = toBrowserSelectedTextReference(payload, `browser-${Date.now()}`);
+    if (!ref.text.trim()) return;
+    if (workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
+      setPlanRevisionInsertRequest({
+        tabId: activeTabId,
+        approvalId: state.approval.id,
+        request: { id: Date.now(), text: `${payload.note.trim()}\n\n${ref.text}` },
+      });
+      return;
+    }
+    selectedTextRequestIdRef.current += 1;
+    setSelectedTextRequestsByTab((current) => ({
+      ...current,
+      [activeTabId]: {
+        id: selectedTextRequestIdRef.current,
+        text: ref.text,
+        path: ref.path,
+        ...(payload.screenshotDataUrl?.startsWith("data:image/")
+          ? { imageDataUrl: payload.screenshotDataUrl }
+          : {}),
+      },
+    }));
+  }, [activeTabId, state.approval, workspaceInsertTarget]);
+
   // Coalesce tab-bar switches through the same last-click-wins scheduler that
   // openTopic/blank/resume navigation uses, so rapidly clicking between two
   // running sessions can't run two switchTab() calls concurrently. Concurrent
@@ -2788,6 +2862,7 @@ export default function App() {
 
   const handleTabClose = useCallback(async (id: string) => {
     closeTransientOverlays();
+    clearBrowserUrlForSession(id);
     setComposerProfilesByTab((current) => {
       if (!(id in current)) return current;
       const next = { ...current };
@@ -2816,6 +2891,7 @@ export default function App() {
     const targets = ids.filter((id, index) => currentIds.includes(id) && ids.indexOf(id) === index);
     if (targets.length === 0) return;
     for (const id of targets) {
+      clearBrowserUrlForSession(id);
       await closeTab(id);
     }
     if (nextActiveTabId && currentIds.includes(nextActiveTabId)) {
@@ -3571,13 +3647,19 @@ export default function App() {
   const browserPreviewChrome = typeof window !== "undefined" && !window.runtime;
   const browserMockScenario = browserPreviewChrome ? browserMockScenarioParam() : "";
   const guidanceQueueMockItems = isGuidanceMockScenario(browserMockScenario) ? GUIDANCE_QUEUE_MOCK_ITEMS : undefined;
-  const workspacePanelResetWidth = rightDockDetailActive
-    ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
-    : desktopLayoutStyle === "creation"
-      ? defaultCreationRightDockTreeWidth()
-      : defaultRightDockTreeWidth();
+  const workspacePanelResetWidth = rightDockMode === "browser"
+    ? RIGHT_DOCK_BROWSER_DEFAULT_WIDTH
+    : rightDockDetailActive
+      ? RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH
+      : desktopLayoutStyle === "creation"
+        ? defaultCreationRightDockTreeWidth()
+        : defaultRightDockTreeWidth();
   const workspacePanelResizeMinWidth = workspacePanelAriaMinWidth(workspacePanelMinWidth, workspacePanelRenderWidth);
-  const workspacePanelMaxWidth = rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
+  const workspacePanelMaxWidth = rightDockMode === "browser"
+    ? RIGHT_DOCK_BROWSER_MAX_WIDTH
+    : rightDockDetailActive
+      ? RIGHT_DOCK_MAX_WIDTH
+      : RIGHT_DOCK_TREE_MAX_WIDTH;
   const sidebarCreation = desktopLayoutStyle === "creation";
   const topicbarTitle = sidebarImDetailConnection ? t("botDetail.title", { name: sidebarImDetailConnection.title }) : topicDisplayTitle(activeTab);
   const topicbarWorkspaceLabel = sidebarImDetailConnection ? t("botDetail.subtitle") : activeTab ? tabWorkspaceTitle(activeTab) : "";
@@ -4443,6 +4525,16 @@ export default function App() {
                   <GitBranch size={13} />
                   <span className="workbench-dock__tab-label">{t("workspace.changedTab")}</span>
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={rightDockMode === "browser"}
+                  className={`workbench-dock__tab${rightDockMode === "browser" ? " workbench-dock__tab--active" : ""}`}
+                  onClick={() => openRightDockMode("browser")}
+                >
+                  <Globe size={13} />
+                  <span className="workbench-dock__tab-label">{t("rightDock.browser")}</span>
+                </button>
                 {remoteHosts.length > 0 && (
                   <button
                     type="button"
@@ -4461,6 +4553,14 @@ export default function App() {
               {rightDockMode === "remote" ? (
                 <Suspense fallback={null}>
                   <RemotePanel onClose={() => setWorkspacePanel(false)} />
+                </Suspense>
+              ) : rightDockMode === "browser" ? (
+                <Suspense fallback={null}>
+                  <BrowserPanel
+                    key={activeTabId ?? "no-session"}
+                    sessionKey={activeTabId ?? ""}
+                    onAddAnnotation={addBrowserAnnotationToComposer}
+                  />
                 </Suspense>
               ) : rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
                 <ContextPanel
