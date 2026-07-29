@@ -4,6 +4,18 @@ on:
   pull_request_target:
     branches: [main-v2]
     types: [opened, synchronize, reopened, edited, ready_for_review]
+    # The guard only cares about the prompt/tool surfaces listed in
+    # scripts/check-cache-impact.sh; PRs confined to clearly unrelated paths
+    # can never trip it, so skip the run entirely. Keep the ignore list
+    # conservative: when in doubt, run.
+    paths-ignore:
+      - 'docs/**'
+      - 'site/**'
+      - 'release-notes/**'
+      - 'workers/**'
+      - 'benchmarks/**'
+      - 'npm/**'
+      - '*.md'
 
 permissions:
   contents: read

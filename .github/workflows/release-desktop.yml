@@ -457,6 +457,8 @@ jobs:
           name: dist-${{ matrix.name }}
           path: dist/*
           if-no-files-found: error
+          # Same-run handoff to the publish job only; 7 days covers debugging.
+          retention-days: 7
 
   publish:
     name: publish release
@@ -556,6 +558,8 @@ jobs:
           name: preview-dist
           path: dist/*
           if-no-files-found: error
+          # Same-run handoff to the mirror step only; 7 days covers debugging.
+          retention-days: 7
 
   attest-signing-contract:
     name: record standalone SignPath attestation

@@ -14,7 +14,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Cheap path gate for pull requests. PRs confined to docs/site/release-notes
+  # (or top-level Markdown) skip the heavy Go jobs, and PRs that cannot affect
+  # the desktop module skip the desktop jobs. Job-level `if` reports skipped,
+  # which satisfies the required status checks (lint, race, test) — a
+  # workflow-level paths-ignore would leave required checks pending and block
+  # merges. Detection fails open: any doubt means run everything. Pushes to
+  # main-v2 always run everything.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+      site: ${{ steps.filter.outputs.site }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          code=true; desktop=true; site=true
+          base=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            base="${{ github.event.before }}"
+          fi
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            files=$(git diff --name-only "$base" HEAD)
+            if [ -n "$files" ]; then
+              code=false; desktop=false; site=false
+              # Root-module CI: desktop/ is a separate module, so only the
+              # clearly unrelated paths below can skip it.
+              if echo "$files" | grep -qvE '^(docs/|site/|release-notes/|desktop/|workers/|[^/]+\.md$)'; then code=true; fi
+              # desktop/ imports the root kernel via `replace reasonix => ../`,
+              # so only this clearly-unrelated set is safe to skip.
+              if echo "$files" | grep -qvE '^(docs/|site/|release-notes/|workers/|benchmarks/|npm/|[^/]+\.md$)'; then desktop=true; fi
+              if echo "$files" | grep -q '^site/'; then site=true; fi
+            fi
+          fi
+          { echo "code=$code"; echo "desktop=$desktop"; echo "site=$site"; } >> "$GITHUB_OUTPUT"
+
   test:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -84,6 +127,8 @@ jobs:
         run: go test -p 4 -timeout=3m ./...
 
   race:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -115,6 +160,8 @@ jobs:
         run: go test -race ./...
 
   desktop:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.desktop == 'true'
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -196,6 +243,8 @@ jobs:
   # desktop/ is a separate module, so the root macOS matrix above does not
   # compile or exercise the native PTY implementation.
   desktop-macos:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.desktop == 'true'
     runs-on: macos-latest
     defaults:
       run:
@@ -217,6 +266,8 @@ jobs:
   # regression tests for that contract are named *OnWindows and can never
   # run on the ubuntu leg above.
   desktop-windows:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.desktop == 'true'
     runs-on: windows-latest
     defaults:
       run:
@@ -267,6 +318,8 @@ jobs:
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
 
   lint:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -316,6 +369,8 @@ jobs:
   # builtins, so no `npm install` is needed — run them directly on every PR so
   # a regression in redirect validation fails the build instead of shipping.
   site:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.site == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -331,6 +386,8 @@ jobs:
         run: npm test
 
   govulncheck:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     continue-on-error: true # informational — stdlib vulns need a Go patch release
     steps:
@@ -348,6 +405,8 @@ jobs:
         run: govulncheck ./...
 
   coverage:
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
