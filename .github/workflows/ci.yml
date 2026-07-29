@@ -113,8 +113,19 @@ jobs:
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test ./...
 
-      - name: test
-        if: runner.os == 'Windows'
+      # Pull requests run a Windows smoke suite: the packages that actually
+      # carry *_windows.go code, plus cmd/. The full ./... sweep stays on
+      # pushes to main-v2; the Unix legs always run the full suite.
+      - name: test (Windows smoke)
+        if: runner.os == 'Windows' && github.event_name == 'pull_request'
+        timeout-minutes: 10
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+          WINDOWS_SANDBOX_WAIT_MS: "20000"
+        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/cli/... ./internal/control/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+
+      - name: test (full)
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
         timeout-minutes: 10
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
@@ -153,8 +164,17 @@ jobs:
 
       # The matrix never runs -race (it needs cgo); the project's concurrency
       # (plugin fan-out, background phase B, jobs Kill/Wait) would otherwise
-      # ship without race coverage.
-      - name: test -race
+      # ship without race coverage. Pull requests sweep only the
+      # concurrency-heavy packages so this required check stays fast; pushes
+      # to main-v2 keep the full ./... sweep as the safety net.
+      - name: test -race (concurrency packages)
+        if: github.event_name == 'pull_request'
+        env:
+          REASONIX_RELEASE_CACHE_GUARD: "1"
+        run: go test -race ./internal/agent/... ./internal/plugin/... ./internal/jobs/... ./internal/proc/... ./internal/sandbox/... ./internal/filelock/... ./internal/eventwire/... ./internal/remote/...
+
+      - name: test -race (full)
+        if: github.event_name != 'pull_request'
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
         run: go test -race ./...
@@ -310,10 +330,15 @@ jobs:
         timeout-minutes: 15
         run: go test ./...
 
+      # Installer packaging is packaging validation, not a code gate: run it
+      # on pushes to main-v2 (the release pipeline builds installers again
+      # anyway), but let pull requests stop after the test step.
       - name: Install NSIS
+        if: github.event_name != 'pull_request'
         run: pwsh -NoProfile -File ../scripts/install-nsis.ps1
 
       - name: Build Windows installer and portable archive
+        if: github.event_name != 'pull_request'
         timeout-minutes: 20
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
 
