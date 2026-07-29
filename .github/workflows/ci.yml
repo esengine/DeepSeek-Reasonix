@@ -57,24 +57,35 @@ jobs:
           fi
           { echo "code=$code"; echo "desktop=$desktop"; echo "site=$site"; } >> "$GITHUB_OUTPUT"
 
+  # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
+  # A matrix job skipped at job level reports no per-leg checks at all, so
+  # those required checks would stay "Expected" and block merging. The job
+  # therefore always runs and the steps do the gating: when the changes
+  # detector reports the diff is unrelated, every step skips and each leg
+  # reports success in seconds. `always()` also keeps the legs alive when
+  # the changes job itself fails (fail-open: an empty output != 'false').
   test:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: always()
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' }}
     steps:
-      - uses: actions/checkout@v7
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Install and verify Linux sandbox backend
-        if: runner.os == 'Linux'
+        if: env.RUN_STEPS == 'true' && runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap
@@ -90,7 +101,7 @@ jobs:
       # Skipped on Windows: the runner checks out CRLF, so gofmt -l flags every
       # file. gofmt output is OS-independent, so the Unix legs already cover it.
       - name: gofmt
-        if: runner.os != 'Windows'
+        if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
         run: |
           # Root module only — desktop/ is a separate module with its own tooling.
           unformatted=$(gofmt -l . | grep -v '^desktop/' || true)
@@ -101,13 +112,15 @@ jobs:
           fi
 
       - name: vet
+        if: env.RUN_STEPS == 'true'
         run: go vet ./...
 
       - name: build
+        if: env.RUN_STEPS == 'true'
         run: go build ./...
 
       - name: test
-        if: runner.os != 'Windows'
+        if: env.RUN_STEPS == 'true' && runner.os != 'Windows'
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
           # regression there silently tanks the cache hit rate the project is
@@ -119,7 +132,7 @@ jobs:
       # carry *_windows.go code, plus cmd/. The full ./... sweep stays on
       # pushes to main-v2; the Unix legs always run the full suite.
       - name: test (Windows smoke)
-        if: runner.os == 'Windows' && github.event_name == 'pull_request'
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 10
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
@@ -127,7 +140,7 @@ jobs:
         run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/cli/... ./internal/control/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       - name: test (full)
-        if: runner.os == 'Windows' && github.event_name != 'pull_request'
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
         timeout-minutes: 10
         env:
           # Run the prompt-cache prefix-stability guard (TestCacheHit*) in CI: a
