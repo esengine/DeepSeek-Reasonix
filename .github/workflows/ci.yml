@@ -19,8 +19,10 @@ jobs:
   # the desktop module skip the desktop jobs. Job-level `if` reports skipped,
   # which satisfies the required status checks (lint, race, test) — a
   # workflow-level paths-ignore would leave required checks pending and block
-  # merges. Detection fails open: any doubt means run everything. Pushes to
-  # main-v2 always run everything.
+  # merges. Gated jobs skip only on an explicit `false` output: wrapped in
+  # `always()`, a failed `changes` job (or a missing output) makes them run
+  # the full matrix instead of silently passing required checks as skipped.
+  # Pushes to main-v2 always run everything.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -57,7 +59,7 @@ jobs:
 
   test:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
     strategy:
       fail-fast: false
       matrix:
@@ -128,7 +130,7 @@ jobs:
 
   race:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -161,7 +163,7 @@ jobs:
 
   desktop:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.desktop == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -244,7 +246,7 @@ jobs:
   # compile or exercise the native PTY implementation.
   desktop-macos:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.desktop == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
     runs-on: macos-latest
     defaults:
       run:
@@ -267,7 +269,7 @@ jobs:
   # run on the ubuntu leg above.
   desktop-windows:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.desktop == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.desktop != 'false')
     runs-on: windows-latest
     defaults:
       run:
@@ -319,7 +321,7 @@ jobs:
 
   lint:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -370,7 +372,7 @@ jobs:
   # a regression in redirect validation fails the build instead of shipping.
   site:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.site == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.site != 'false')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -387,7 +389,7 @@ jobs:
 
   govulncheck:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
     runs-on: ubuntu-latest
     continue-on-error: true # informational — stdlib vulns need a Go patch release
     steps:
@@ -406,7 +408,7 @@ jobs:
 
   coverage:
     needs: changes
-    if: github.event_name != 'pull_request' || needs.changes.outputs.code == 'true'
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
