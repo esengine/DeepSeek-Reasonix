@@ -317,14 +317,7 @@ func restoreConfigSnapshotBoundUnlocked(
 			}
 		}
 	} else if os.IsNotExist(err) {
-		createdStateID := repairPlanReadStateIDFor(
-			dest,
-			os.FileMode(0o600),
-			"file",
-			"",
-			b,
-			true,
-		)
+		createdStateID := repairPlanPreparedCreateStateID(dest, b, 0o600)
 		tx.Changes = append(tx.Changes, preparedRepairChangeForCreate("global", dest, createdStateID))
 	} else {
 		return nil, err
@@ -340,6 +333,11 @@ func restoreConfigSnapshotBoundUnlocked(
 			prepared.Changes = append([]RepairChange(nil), tx.Changes...)
 			clearErr := clearPreparedRepairTransaction(&prepared)
 			return nil, errors.Join(err, clearErr)
+		}
+		// Rebind ownership to the exact published node before any post-create
+		// work. A crash after this point must still remove this file on undo.
+		if err := rebindPreparedCreateOwnership(tx, changeIndex, dest); err != nil {
+			return nil, fmt.Errorf("bind snapshot create ownership: %w", err)
 		}
 		repairSnapshotAfterCreate(dest)
 		if err := verifyConfigSnapshotFile(dest, b); err != nil {

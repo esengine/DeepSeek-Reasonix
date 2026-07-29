@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -172,6 +173,35 @@ func repairPlanReadStateIDFor(
 		state.Kind += "-unreadable"
 	}
 	return repairPlanStateID(state)
+}
+
+// repairPlanPublishedFileMode returns the FileMode that Lstat will report after
+// publishing a regular file with the requested permission bits. Windows only
+// honors the write bit and surfaces regular files as 0444 or 0666; pre-create
+// ownership bindings must use that observed mode or undo will refuse to remove
+// a file this repair just created.
+func repairPlanPublishedFileMode(perm os.FileMode) os.FileMode {
+	perm &= os.ModePerm
+	if runtime.GOOS == "windows" {
+		if perm&0o222 == 0 {
+			return 0o444
+		}
+		return 0o666
+	}
+	return perm
+}
+
+// repairPlanPreparedCreateStateID binds a remove-on-undo create intent to the
+// node that AtomicCreateFile will publish for the given content and mode.
+func repairPlanPreparedCreateStateID(identityPath string, content []byte, perm os.FileMode) string {
+	return repairPlanReadStateIDFor(
+		identityPath,
+		repairPlanPublishedFileMode(perm),
+		"file",
+		"",
+		content,
+		true,
+	)
 }
 
 func repairPlanFileState(path string) string {

@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"reasonix/internal/fileutil"
 )
 
 func repairMutationTestKey(path string) string {
@@ -946,6 +948,19 @@ func TestApplyRepairPlanPersistsMissingSnapshotTargetBeforeCreate(t *testing.T) 
 	}
 	if got, err := os.ReadFile(tabs); err != nil || string(got) != "bad-tabs" {
 		t.Fatalf("derived state not restored after crash: %q, %v", got, err)
+	}
+}
+
+func TestPreparedCreateStateIDMatchesAtomicCreate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := []byte("default_model = \"known-good\"\n")
+	predicted := repairPlanPreparedCreateStateID(path, content, 0o600)
+	if err := fileutil.AtomicCreateFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyRepairPlanReleaseNodeStateFor(path, path, predicted); err != nil {
+		t.Fatalf("prepared create ownership drifted from published node: %v", err)
 	}
 }
 

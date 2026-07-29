@@ -180,6 +180,55 @@ func persistPreparedRepairTransaction(tx *RepairTransaction) error {
 	return nil
 }
 
+// rewritePreparedRepairTransaction updates an already-published pending journal
+// under the repair transaction lock. It is used after a create publishes so the
+// durable intent binds the exact on-disk node before later crash points.
+func rewritePreparedRepairTransaction(tx *RepairTransaction) error {
+	if tx == nil || len(tx.Changes) == 0 || !tx.Changes[len(tx.Changes)-1].Prepared {
+		return fmt.Errorf("pending repair transaction is incomplete")
+	}
+	if strings.TrimSpace(tx.PreparedLastRepairStateID) == "" {
+		return fmt.Errorf("pending repair transaction is incomplete")
+	}
+	path := pendingRepairTransactionPath()
+	if path == "" {
+		return fmt.Errorf("pending repair state path is unavailable")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		return fmt.Errorf("rewrite pending repair transaction: %w", err)
+	}
+	b, err := json.MarshalIndent(tx, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := fileutil.AtomicWriteFile(path, append(b, '\n'), 0o600); err != nil {
+		return fmt.Errorf("rewrite pending repair transaction: %w", err)
+	}
+	return nil
+}
+
+// rebindPreparedCreateOwnership replaces a predicted create-state binding with
+// the exact published node identity. When prediction already matches, the
+// pending journal is left unchanged.
+func rebindPreparedCreateOwnership(tx *RepairTransaction, changeIndex int, path string) error {
+	if tx == nil || changeIndex < 0 || changeIndex >= len(tx.Changes) {
+		return fmt.Errorf("prepared create ownership is incomplete")
+	}
+	change := tx.Changes[changeIndex]
+	if !change.Prepared || !change.RemoveOnUndo {
+		return fmt.Errorf("prepared create ownership is incomplete")
+	}
+	actual := repairPlanReleaseNodeState(path)
+	if !validRepairStateID(actual) {
+		return fmt.Errorf("published create state is invalid")
+	}
+	if actual == strings.TrimSpace(change.CreatedStateID) {
+		return nil
+	}
+	tx.Changes[changeIndex].CreatedStateID = actual
+	return rewritePreparedRepairTransaction(tx)
+}
+
 func clearPreparedRepairTransaction(expected *RepairTransaction) error {
 	if expected == nil {
 		return fmt.Errorf("pending repair transaction identity is incomplete")

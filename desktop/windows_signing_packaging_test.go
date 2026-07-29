@@ -87,7 +87,7 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`steps.submit-windows-installer.outputs.signing-request-id`,
 		`scripts/complete-signpath-request.ps1`,
 		`-WaitForExternalApproval:$waitForExternalApproval`,
-		`go run ./cmd/sign windows-payload ../signed-payload "${{ steps.ver.outputs.version }}"`,
+		`go run ./cmd/sign windows-payload ../signed-payload "${{ needs.resolve.outputs.version }}"`,
 		`go run ./cmd/sign sign ../signed-payload/reasonix-payload.json`,
 		`go run ./cmd/sign verify ../signed-payload/reasonix-payload.json`,
 		`REASONIX_REQUIRE_PAYLOAD_MANIFEST: "1"`,
