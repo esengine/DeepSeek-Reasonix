@@ -334,12 +334,10 @@ func restoreConfigSnapshotBoundUnlocked(
 			clearErr := clearPreparedRepairTransaction(&prepared)
 			return nil, errors.Join(err, clearErr)
 		}
-		// Rebind ownership to the exact published node before any post-create
-		// work. A crash after this point must still remove this file on undo.
-		if err := rebindPreparedCreateOwnership(tx, changeIndex, dest); err != nil {
-			return nil, fmt.Errorf("bind snapshot create ownership: %w", err)
-		}
 		repairSnapshotAfterCreate(dest)
+		if err := verifyPreparedCreateOwnership(tx, changeIndex, dest); err != nil {
+			return nil, fmt.Errorf("verify snapshot create ownership: %w", err)
+		}
 		if err := verifyConfigSnapshotFile(dest, b); err != nil {
 			return nil, fmt.Errorf("restored config changed during publish: %w", err)
 		}

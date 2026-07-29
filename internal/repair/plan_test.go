@@ -1291,6 +1291,54 @@ func TestUndoPreparedSnapshotCreatePreservesConcurrentReplacement(t *testing.T) 
 	}
 }
 
+func TestSnapshotCreateDoesNotClaimConcurrentReplacementBeforeOwnershipCheck(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	global := filepath.Join(home, "config.toml")
+	snapshot := []byte("default_model = \"known-good\"\n")
+	if err := os.WriteFile(global, snapshot, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordHealthyConfig("v1"); err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := ListConfigSnapshots()
+	if err != nil || len(snapshots) != 1 {
+		t.Fatalf("snapshots = %+v, err = %v", snapshots, err)
+	}
+	if err := os.Remove(global); err != nil {
+		t.Fatal(err)
+	}
+	plan := RepairPlan{SchemaVersion: 1, Summary: "snapshot create", Actions: []RepairPlanAction{{
+		Type: "restore_snapshot", SnapshotID: snapshots[0].ID, Reason: "known good",
+	}}}
+	preview, err := PreviewRepairPlan(plan, ApplyPlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concurrent := []byte("default_model = \"concurrent\"\n")
+	originalHook := repairSnapshotAfterCreate
+	t.Cleanup(func() { repairSnapshotAfterCreate = originalHook })
+	repairSnapshotAfterCreate = func(path string) {
+		if err := fileutil.AtomicWriteFile(path, concurrent, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err = ApplyRepairPlan(plan, ApplyPlanOptions{
+		ExpectedPreviewID: RepairPlanPreviewID(plan, preview),
+	})
+	repairSnapshotAfterCreate = originalHook
+	if err == nil || !strings.Contains(err.Error(), "published create ownership changed") {
+		t.Fatalf("concurrent replacement error = %v", err)
+	}
+	if _, err := UndoLastRepair(); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(global); err != nil || string(got) != string(concurrent) {
+		t.Fatalf("undo consumed concurrent replacement: %q, %v", got, err)
+	}
+}
+
 func TestProjectRepairPlanDoesNotRepairGlobalConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
