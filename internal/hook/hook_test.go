@@ -70,7 +70,12 @@ func requireNode(t *testing.T) {
 // built test binary can stall for seconds on a loaded machine, and these
 // tests assert behavior, not latency. Tests asserting the timeout path keep
 // their own tight budgets — that direction cannot flake under load.
-const realSpawnTimeout = 15 * time.Second
+//
+// 15s proved insufficient on a loaded Windows GitHub runner
+// (TestLoadNormalizesQuotedNodeEvalHooksPerProject timed out at 15.03s in
+// CI), so the budget is 60s; the ceiling only fires on a genuine hang, so
+// a larger value costs nothing when children exit normally.
+const realSpawnTimeout = 60 * time.Second
 
 const sampleSettings = `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}],"Stop":[{"command":"echo stop"}]}}`
 
