@@ -5,10 +5,16 @@ export function isLikelyInlineMath(math: string): boolean {
   if (/^\d+(?:\.\d+)?[A-Za-z](?:[A-Za-z0-9^_{}]*)?$/.test(math)) return true;
   // Number with LaTeX escape: 10\%, 5\cdot3
   if (/^\d+(?:\.\d+)?\\(?:%|[A-Za-z]+)(?:\{[^{}]*\})?(?:[A-Za-z0-9\\{}^_+\-*/=<>.()]*)$/.test(math)) return true;
-  // Pure numbers, decimals, and percentages are too often currency or
-  // prose percentages to parse as math. More explicit numeric math
-  // forms are accepted above/below: 2.5x, 10\%, +2, x=50%, etc.
-  if (/^\d+(?:\.\d+)?%?$/.test(math)) return false;
+  // Pure numbers (single/multi-digit, optional decimal/percentage). By the
+  // time the classifier runs, the content was extracted from a PAIRED
+  // $...$ span (the Step 6 regex in normalizeMath only matches paired
+  // dollars). Currency in prose is written WITHOUT a closing $ (costs $5,
+  // $4 and $5), so a cleanly-paired $N$ almost always means math — a
+  // physics value (mass $0$, $42$ elements, 10–$20$ MeV). Even-count
+  // currency like "$4 and $5" pairs as "$4 and $" whose inner content
+  // "4 and" contains a space and is rejected by the word rule below, so
+  // it stays literal. Unpaired currency never reaches the classifier.
+  if (/^\d+(?:\.\d+)?%?$/.test(math)) return true;
 
   // Unary plus/minus: +2, -x, +\alpha, - 3.14
   if (/^[+\-]\s*(?:\d+(?:\.\d+)?|[A-Za-z\\])/.test(math)) return true;

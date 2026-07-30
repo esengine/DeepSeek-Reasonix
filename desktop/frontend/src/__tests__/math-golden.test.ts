@@ -133,22 +133,55 @@ check("$\\frac{a}{b}$", () => isLikelyInlineMath("\\frac{a}{b}") === true);
 check("$f(x)$", () => isLikelyInlineMath("f(x)") === true);
 check("$x+1$", () => isLikelyInlineMath("x+1") === true);
 
-console.log("\nisLikelyInlineMath — classifier gaps from PR #4543");
+console.log("\nisLikelyInlineMath — LaTeX command followed by a digit (math)");
 check("$\\tfrac12$", () => isLikelyInlineMath("\\tfrac12") === true);
+check("$\\frac12$", () => isLikelyInlineMath("\\frac12") === true);
 check("$\\sqrt2$", () => isLikelyInlineMath("\\sqrt2") === true);
+check("$\\log3$", () => isLikelyInlineMath("\\log3") === true);
+check("$\\overline3$", () => isLikelyInlineMath("\\overline3") === true);
+
+console.log("\nisLikelyInlineMath — multi-letter group notation (math)");
 check("$SO(3,1)$", () => isLikelyInlineMath("SO(3,1)") === true);
 check("$SU(2)$", () => isLikelyInlineMath("SU(2)") === true);
+check("$SU(3)$", () => isLikelyInlineMath("SU(3)") === true);
+check("$SL(2)$", () => isLikelyInlineMath("SL(2)") === true);
 check("$GL(n)$", () => isLikelyInlineMath("GL(n)") === true);
+check("$Sp(2n)$", () => isLikelyInlineMath("Sp(2n)") === true);
+check("$SO(3)$", () => isLikelyInlineMath("SO(3)") === true);
+check("$Spin(3)$", () => isLikelyInlineMath("Spin(3)") === true);
+check("$Diff(M)$", () => isLikelyInlineMath("Diff(M)") === true);
+
+console.log("\nisLikelyInlineMath — binary operators with signed RHS / lone operators (math)");
 check("$K = -iJ$", () => isLikelyInlineMath("K = -iJ") === true);
+check("$K = +iJ$", () => isLikelyInlineMath("K = +iJ") === true);
 check("$p = +\\alpha$", () => isLikelyInlineMath("p = +\\alpha") === true);
+check("$a = -b$", () => isLikelyInlineMath("a = -b") === true);
 check("$+$", () => isLikelyInlineMath("+") === true);
+check("$-$", () => isLikelyInlineMath("-") === true);
 check("$=$", () => isLikelyInlineMath("=") === true);
+check("$<$", () => isLikelyInlineMath("<") === true);
 
 console.log("\nisLikelyInlineMath — currency/link (NOT math)");
-check("$5", () => isLikelyInlineMath("5") === false);
-check("$10", () => isLikelyInlineMath("10") === false);
-check("$10.50", () => isLikelyInlineMath("10.50") === false);
-check("$100%", () => isLikelyInlineMath("100%") === false);
+check("$5", () => isLikelyInlineMath("5") === true);
+check("$10", () => isLikelyInlineMath("10") === true);
+check("$10.50", () => isLikelyInlineMath("10.50") === true);
+check("$100%", () => isLikelyInlineMath("100%") === true);
+
+console.log("\nnormalizeMath — paired $N$ is math; even-count currency stays literal");
+// Regression (user-reported): "10–$20$ MeV" must render 20 as math, not a
+// literal "$20$". A cleanly-paired $N$ is math intent — currency is written
+// without a closing $.
+check("10–$20$ MeV renders 20 as math", () => normalizeMath("10–$20$ MeV") === "10–$20$ MeV");
+check("mass range $10$–$20$ MeV", () => normalizeMath("$10$–$20$ MeV") === "$10$–$20$ MeV");
+check("mass is $20$ MeV", () => normalizeMath("mass is $20$ MeV") === "mass is $20$ MeV");
+check("$42$ elements", () => normalizeMath("it is $42$ elements") === "it is $42$ elements");
+// Even-count currency: "$4 and $5" pairs as "$4 and $" whose inner content
+// "4 and" has a space → rejected → both $ stay literal. The flip must NOT
+// regress this.
+check("cost $4 and $5 stays literal (space rule)", () => normalizeMath("cost $4 and $5") === "cost &#36;4 and &#36;5");
+check("price is $5 and $10 stays literal", () => normalizeMath("price is $5 and $10") === "price is &#36;5 and &#36;10");
+// Odd-count currency: a lone $ never pairs, stays literal regardless.
+check("costs $20 today (no closing $) stays literal", () => normalizeMath("costs $20 today") === "costs $20 today");
 check("URL", () => isLikelyInlineMath("https://example.com") === false);
 check("prose text", () => isLikelyInlineMath("hello world today") === false);
 check("prose $x y z$ (spaces)", () => isLikelyInlineMath("x y z") === false);
@@ -164,22 +197,53 @@ check("uppercase $I$ → math (math name in non-English prose)", () => isLikelyI
 check("uppercase $A$ → math", () => isLikelyInlineMath("A") === true);
 check("uppercase $V$ → math", () => isLikelyInlineMath("V") === true);
 
-console.log("\nisLikelyInlineMath — primed letters and bracketed labels");
+console.log("\nisLikelyInlineMath — permutation cycle notation (regression)");
+// (12), (123), (12)(34): one or more parenthesised digit groups with no
+// separating commas. Without an explicit rule these fall through every
+// accept path and render as literal dollar spans.
+check("$(12)$ → math (2-cycle)", () => isLikelyInlineMath("(12)") === true);
+check("$(123)$ → math (3-cycle)", () => isLikelyInlineMath("(123)") === true);
+check("$(12)(34)$ → math (two cycles)", () => isLikelyInlineMath("(12)(34)") === true);
+
+console.log("\nisLikelyInlineMath — primed letters (regression)");
+// A letter followed by primes (') is the LaTeX prime symbol — ubiquitous
+// in math for derivatives (x', f'), transformed/labelled states (S', T'),
+// and second derivatives (y''). The classifier used to reject these as
+// non-math, so $S'$ was escaped to a literal dollar entity and never
+// reached KaTeX.
 check("$S'$ → math (primed letter)", () => isLikelyInlineMath("S'") === true);
-check("$y''$ → math (double prime)", () => isLikelyInlineMath("y''") === true);
-check("$f'(x)$ → math (primed function)", () => isLikelyInlineMath("f'(x)") === true);
+check("$S''$ → math (double prime)", () => isLikelyInlineMath("S''") === true);
+check("$x'$ → math (derivative)", () => isLikelyInlineMath("x'") === true);
+check("$y''$ → math (second derivative)", () => isLikelyInlineMath("y''") === true);
+check("$a'$ → math", () => isLikelyInlineMath("a'") === true);
+check("$T'$ → math", () => isLikelyInlineMath("T'") === true);
 check("$\\psi'$ → math (Greek with prime)", () => isLikelyInlineMath("\\psi'") === true);
-check("$[56]$ → math (irrep label)", () => isLikelyInlineMath("[56]") === true);
+check("$f'(x)$ → math (primed function call)", () => isLikelyInlineMath("f'(x)") === true);
+check("$S'$ in prose stays math", () => normalizeMath("the $S'$ admixture") === "the $S'$ admixture");
+
+console.log("\nisLikelyInlineMath — bracketed labels (regression)");
+// Square brackets in a $...$ context denote group-theory irrep labels
+// ([56], [8], [70] for SU(6) multiplets), array subscripts, and interval
+// notation. The classifier used to reject pure bracketed numbers/letters,
+// so $[56]$ was escaped to a literal dollar entity and never reached KaTeX.
+// Markdown link syntax [text](url) is rejected separately upstream.
+check("$[56]$ → math (SU(6) irrep label)", () => isLikelyInlineMath("[56]") === true);
+check("$[70]$ → math", () => isLikelyInlineMath("[70]") === true);
+check("$[8]$ → math (octet label)", () => isLikelyInlineMath("[8]") === true);
+check("$[1]$ → math (singlet label)", () => isLikelyInlineMath("[1]") === true);
+check("$[x]$ → math (bracketed variable)", () => isLikelyInlineMath("[x]") === true);
+check("$[N]$ → math", () => isLikelyInlineMath("[N]") === true);
 check("$[56,0^+]$ → math", () => isLikelyInlineMath("[56,0^+]") === true);
-check("$[\\mathbf{56}]$ → math", () => isLikelyInlineMath("[\\mathbf{56}]") === true);
+check("$[\\mathbf{56}]$ → math (bold command)", () => isLikelyInlineMath("[\\mathbf{56}]") === true);
+check("$[56]$ in prose stays math", () => normalizeMath("the $[56]$ multiplet") === "the $[56]$ multiplet");
 
 console.log("\nisLikelyInlineMath — minimal LaTeX patterns (regression)");
 // LLMs frequently emit minimal LaTeX in math contexts that the older
 // classifier rejected as currency / word tokens. These tests pin down the
 // deliberately-permissive rules for common math patterns while keeping pure
 // numeric dollar pairs literal because they are common in prose prices.
-check("single-digit $1$, $2$, $5$ → NOT math (currency-shaped)", () => isLikelyInlineMath("1") === false);
-check("multi-digit $42$ → NOT math (currency-shaped)", () => isLikelyInlineMath("42") === false);
+check("single-digit $1$, $2$, $5$ → math (paired $N$ is math, currency has no closing $)", () => isLikelyInlineMath("1") === true);
+check("multi-digit $42$ → math (paired $N$ is math)", () => isLikelyInlineMath("42") === true);
 check("$2.5x$ is math (number with variable)", () => isLikelyInlineMath("2.5x") === true);
 check("$10\%$ is math (percentage with LaTeX)", () => isLikelyInlineMath("10\\%") === true);
 check("$2.5x dollars$ → NOT math (prefix-only numeric variable)", () => isLikelyInlineMath("2.5x dollars") === false);
@@ -308,11 +372,11 @@ eq(
 );
 
 console.log("\nnormalizeMath — non-math dollar filtering");
-eq(normalizeMath("costs $1$ today"), "costs &#36;1&#36; today", "$1$ not math");
+eq(normalizeMath("costs $1$ today"), "costs $1$ today", "$1$ is math (paired $N$)");
 eq(normalizeMath("env $PATH$ here"), "env &#36;PATH&#36; here", "$PATH$ not math (env var → &#36; entities so remark-math leaves it literal)");
 eq(normalizeMath("solve $x^2 + y^2 = z^2$ please"), "solve $x^2 + y^2 = z^2$ please", "$x^2+y^2$ is math");
 eq(normalizeMath("$\\alpha + \\beta$"), "$\\alpha + \\beta$", "$\\alpha+\\beta$ is math");
-eq(normalizeMath("price is $10.50$ each"), "price is &#36;10.50&#36; each", "$10.50$ not math");
+eq(normalizeMath("price is $10.50$ each"), "price is $10.50$ each", "$10.50$ is math (paired $N$, decimal)");
 eq(normalizeMath("$I$ think"), "$I$ think", "$I$ is math (uppercase single letter)");
 eq(normalizeMath("it costs $5 and $10 total"), "it costs &#36;5 and &#36;10 total", "multiple prose $ → &#36; entities (dollars preserved, not parsed as math)");
 
@@ -384,7 +448,7 @@ check("$\\|x\\|$ norm preserved (no \\vert mangling)", () => {
 
 console.log("\nnormalizeMath — % in math");
 eq(normalizeMath("$x = 50%$"), "$x = 50\\%$", "trailing % escaped");
-eq(normalizeMath("$100%$"), "&#36;100%&#36;", "pure percentage stays literal");
+eq(normalizeMath("$100%$"), "$100\\%$", "pure percentage is math (% escaped)");
 eq(normalizeMath("$10\\%$"), "$10\\%$", "already-escaped \\% left alone");
 
 // ── normalizeMath — end-to-end KaTeX render of common LLM outputs ──────────────
@@ -435,10 +499,21 @@ const e2e: Array<[string, string]> = [
   ["$\\frac{1}{\\sqrt{2}}\\|uud\\rangle$", "ket in fraction with \\|"],
   ["$\\|x\\|$", "norm \\|x\\| → double bar (regression)"],
   ["$\\langle\\psi\\|$", "bra closer \\| → single bar (regression)"],
-  ["$S'$", "primed letter S'"],
-  ["$f'(x)$", "primed function call"],
-  ["$[56]$", "bracketed irrep label"],
-  ["$[56,0^+]$", "bracketed irrep label with charge"],
+  // Permutation cycle notation.
+  ["$(12)$", "2-cycle (12) (regression)"],
+  ["$(123)$", "3-cycle (123)"],
+  ["$(12)(34)$", "two cycles (12)(34)"],
+  // Primed letters — KaTeX renders ' natively as a prime symbol.
+  ["$S'$", "primed letter S' (regression)"],
+  ["$x'$", "derivative x'"],
+  ["$y''$", "second derivative y''"],
+  ["$f'(x)$", "primed function call f'(x)"],
+  ["$\\psi'$", "Greek letter with prime"],
+  // Bracketed irrep labels — common in SU(6) baryon physics.
+  ["$[56]$", "SU(6) [56] multiplet (regression)"],
+  ["$[8]$", "[8] octet label"],
+  ["$[56,0^+]$", "[56,0^+] labelled irrep"],
+  ["$[\\mathbf{56}]$", "[\\mathbf{56}] bold command in brackets"],
 ];
 for (const [src, label] of e2e) {
   check(`${label}: ${src}`, () => katexOf(normalizeMath(src), false));
@@ -449,7 +524,7 @@ for (const [src, label] of e2e) {
 console.log("\nnormalizeMath — non-math inputs pass through");
 type Passthrough = { src: string; expected: string; label: string };
 const passthrough: Passthrough[] = [
-  { src: "costs $100$ today", expected: "costs &#36;100&#36; today", label: "multi-digit currency stays literal" },
+  { src: "costs $100$ today", expected: "costs $100$ today", label: "multi-digit number is math (paired $N$)" },
   { src: "line break \\\\[4pt] here", expected: "line break \\\\[4pt] here", label: "LaTeX line-break spacing" },
   { src: "hello world", expected: "hello world", label: "plain text" },
 ];
