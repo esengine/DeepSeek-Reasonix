@@ -570,17 +570,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				cm.ReasoningContent = &m.ReasoningContent
 			}
 		}
-		// DashScope Qwen3 multi-turn thinking continuity: mirror
-		// reasoning_content → reasoning on assistant turns. The DashScope API
-		// with preserve_thinking expects both fields present.
-		if c.dashscope && m.Role == provider.RoleAssistant && m.ReasoningContent != "" {
-			model := strings.ToLower(c.model)
-			if strings.Contains(model, "qwen3") {
-				rc := m.ReasoningContent
-				cm.ReasoningContent = &rc
-				cm.Reasoning = &rc
-			}
-		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
 			wire.Function.Name = tc.Name
