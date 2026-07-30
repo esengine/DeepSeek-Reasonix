@@ -38,9 +38,11 @@ export function isLikelyInlineMath(math: string): boolean {
   // Binary operator between operands. The RHS may start with a unary sign:
   // K = -iJ, p = +\alpha, a = -b.
   if (/[A-Za-z0-9)\]}]\s*[+\-*/=<>]\s*[+\-]?\s*[A-Za-z0-9([{\\]/.test(math)) return true;
-  // One-sided comparison: < B, > 0, B < — comparison against an implicit
-  // operand is common in prose.
-  if (/^(?:<=?|>=?|≠|≤|≥)\s*[A-Za-z0-9]|[A-Za-z0-9]\s*(?:<=?|>=?|≠|≤|≥)$/.test(math)) return true;
+  // One-sided comparison/relation: < B, > 0, B <, = 1, x = — a comparison or
+  // equality against an implicit operand is common in prose (e.g. "set $=1$").
+  // The leading side allows a signed operand ($=-1$, $=+x$); the trailing side
+  // covers B < / x = / N =.
+  if (/^(?:<=?|>=?|=|≠|≤|≥)\s*[+\-]?\s*[A-Za-z0-9]|[A-Za-z0-9]\s*(?:<=?|>=?|=|≠|≤|≥)$/.test(math)) return true;
   // Comma-separated tokens: ordered pairs, tuples, sets (A, B), 1, 2, 3,
   // \alpha, \beta. Currency/env-var usage never looks like this.
   if (/^\(?(?:[A-Za-z0-9]|\\[A-Za-z]+)(?:\s*,\s*(?:[A-Za-z0-9]|\\[A-Za-z]+)){1,10}\)?$/.test(math)) return true;

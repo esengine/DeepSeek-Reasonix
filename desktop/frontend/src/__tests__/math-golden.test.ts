@@ -182,6 +182,17 @@ check("cost $4 and $5 stays literal (space rule)", () => normalizeMath("cost $4 
 check("price is $5 and $10 stays literal", () => normalizeMath("price is $5 and $10") === "price is &#36;5 and &#36;10");
 // Odd-count currency: a lone $ never pairs, stays literal regardless.
 check("costs $20 today (no closing $) stays literal", () => normalizeMath("costs $20 today") === "costs $20 today");
+
+console.log("\nisLikelyInlineMath — one-sided equality (=1, x =) is math");
+// Regression (user-reported): "$=1$" rendered as a literal "$=1$" because the
+// one-sided relation rule covered <, >, ≠, ≤, ≥ but not =.
+check("$=1$ → math", () => isLikelyInlineMath("=1") === true);
+check("$= 1$ → math", () => isLikelyInlineMath("= 1") === true);
+check("$=-1$ → math (signed operand)", () => isLikelyInlineMath("=-1") === true);
+check("$=x$ → math", () => isLikelyInlineMath("=x") === true);
+check("$=1.5$ → math", () => isLikelyInlineMath("=1.5") === true);
+check("$x =$ → math (trailing)", () => isLikelyInlineMath("x =") === true);
+check("$=1$ in prose stays math", () => normalizeMath("set $=1$ here") === "set $=1$ here");
 check("URL", () => isLikelyInlineMath("https://example.com") === false);
 check("prose text", () => isLikelyInlineMath("hello world today") === false);
 check("prose $x y z$ (spaces)", () => isLikelyInlineMath("x y z") === false);
