@@ -43,10 +43,14 @@ func (k ShellKind) String() string {
 }
 
 // Shell is the resolved interpreter the bash tool executes commands with: a kind
-// (so callers can adapt prompts) and the executable to invoke.
+// (so callers can adapt prompts) and the executable to invoke. MajorVersion is
+// the interpreter's major version when resolution could determine it (a
+// versioned install layout or a version probe); 0 means unknown, in which case
+// callers fall back to filename heuristics.
 type Shell struct {
-	Kind ShellKind
-	Path string
+	Kind         ShellKind
+	Path         string
+	MajorVersion int
 }
 
 // ResolveShell picks the interpreter the shell tool runs commands under. With
@@ -370,9 +374,14 @@ func (s Shell) argv(command string) []string {
 
 // SupportsChaining reports whether the shell parses '&&' / '||'. bash does;
 // Windows PowerShell 5.1 (powershell.exe) does not — only PowerShell 7+ (pwsh).
+// A probed MajorVersion settles the question even for a renamed executable;
+// with the version unknown (0) the filename heuristic decides.
 func (s Shell) SupportsChaining() bool {
 	if s.Kind != ShellPowerShell {
 		return true
+	}
+	if s.MajorVersion > 0 {
+		return s.MajorVersion >= 7
 	}
 	base := strings.ToLower(pathBase(s.Path))
 	return base == "pwsh" || base == "pwsh.exe"

@@ -45,6 +45,13 @@ type Workspace struct {
 	// sandbox is not enforcing. Both are nil outside host transports like ACP.
 	FileOverlay FileOverlay
 	Terminal    TerminalRunner
+	// PowerShellEnabled gates the opt-in powershell tool: unless true, the
+	// tool is excluded from Tools() even when named explicitly, so the default
+	// tool list (and the system-prompt prefix built from it) is unchanged.
+	// PowerShell is the resolved interpreter bound to the tool (see
+	// sandbox.ResolvePowerShell); empty resolves lazily.
+	PowerShellEnabled bool
+	PowerShell        sandbox.Shell
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -75,15 +82,21 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"glob":          globTool{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
 		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash},
 		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
+		"powershell":    powershell{workDir: w.Dir, sb: w.Bash, shell: w.PowerShell, timeout: w.BashTimeout, guard: w.SessionGuard},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {
-		for i, t := range all {
-			if bound, ok := overrides[t.Name()]; ok {
-				all[i] = bound
+		out := all[:0]
+		for _, t := range all {
+			if t.Name() == "powershell" && !w.PowerShellEnabled {
+				continue
 			}
+			if bound, ok := overrides[t.Name()]; ok {
+				t = bound
+			}
+			out = append(out, t)
 		}
-		return all
+		return out
 	}
 	want := make(map[string]bool, len(enabled))
 	for _, n := range enabled {
@@ -91,6 +104,9 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 	}
 	out := make([]tool.Tool, 0, len(enabled))
 	for _, t := range all {
+		if t.Name() == "powershell" && !w.PowerShellEnabled {
+			continue
+		}
 		if want[t.Name()] {
 			if bound, ok := overrides[t.Name()]; ok {
 				t = bound

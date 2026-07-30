@@ -32,6 +32,21 @@ func ConfineBash(spec sandbox.Spec, guard SessionDataGuard, timeout ...time.Dura
 	return b
 }
 
+// ConfinePowerShell returns the opt-in powershell built-in bound to an
+// OS-sandbox spec and a resolved PowerShell interpreter (see
+// sandbox.ResolvePowerShell), overriding the lookup-only zero value registered
+// at init. spec.Shell is the BASH interpreter and is deliberately not used as
+// the fallback — the powershell tool must never run under a different shell
+// than its name promises; an unresolved shell surfaces the tool's actionable
+// not-found error instead. guard and timeout mirror ConfineBash.
+func ConfinePowerShell(spec sandbox.Spec, shell sandbox.Shell, guard SessionDataGuard, timeout ...time.Duration) tool.Tool {
+	p := powershell{sb: spec, shell: shell, guard: guard}
+	if len(timeout) > 0 {
+		p.timeout = timeout[0]
+	}
+	return p
+}
+
 // RebindBashWriteRoots returns a copy of bash with its complete write surface
 // narrowed to roots. ok is false when tl is not a confined bash tool, when the
 // sandbox is not enforcing (cannot honour narrower roots), or when roots is empty.

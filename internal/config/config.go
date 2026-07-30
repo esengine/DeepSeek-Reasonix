@@ -1474,6 +1474,7 @@ type ToolsConfig struct {
 	BackgroundJobs        BackgroundJobsConfig `toml:"background_jobs"`
 	Search                SearchConfig         `toml:"search"`
 	Shell                 ShellConfig          `toml:"shell"`
+	PowerShell            PowerShellConfig     `toml:"powershell"`
 }
 
 const (
@@ -1539,6 +1540,30 @@ type SearchConfig struct {
 type ShellConfig struct {
 	Prefer string `toml:"prefer"`
 	Path   string `toml:"path"`
+}
+
+// PowerShellConfig gates and tunes the dedicated powershell tool. The tool is
+// opt-in: Enabled omitted/false keeps it out of the per-run registry, so the
+// default tool list (and the cache-stable system-prompt prefix built from it)
+// is byte-identical to a config without this section. Prefer is "pwsh"
+// (default — PowerShell 7+) or "powershell" (Windows PowerShell 5.1); Path
+// optionally points at a specific executable, bypassing discovery.
+type PowerShellConfig struct {
+	Enabled *bool  `toml:"enabled"`
+	Prefer  string `toml:"prefer"`
+	Path    string `toml:"path"`
+}
+
+// PowerShellToolEnabled reports whether the dedicated powershell tool is
+// registered for a run. The default is false — an omitted [tools.powershell]
+// section (or a nil Config) leaves the tool unregistered. An explicit
+// [tools].enabled allow-list must additionally name "powershell" for the tool
+// to appear (defense in depth against accidental prefix changes).
+func (c *Config) PowerShellToolEnabled() bool {
+	if c == nil || c.Tools.PowerShell.Enabled == nil {
+		return false
+	}
+	return *c.Tools.PowerShell.Enabled
 }
 
 // PermissionsConfig declares the per-call permission policy (see
