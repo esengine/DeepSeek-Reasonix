@@ -223,6 +223,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Auto-detect context window from model name when the preset/config does not
+	// declare one. Mirrors qwen-code's tokenLimits.ts regex-based inference so
+	// new models (qwen3.8, glm-5.2, etc.) get correct compaction budgets without
+	// a preset update.
+	if entry.ContextWindow == 0 {
+		if auto := config.AutoContextWindow(entry.Model); auto > 0 {
+			entry.ContextWindow = auto
+		}
+	}
 	if opts.EffortOverride != nil {
 		entry.Effort = *opts.EffortOverride
 		if entry.Kind == "anthropic" && strings.TrimSpace(entry.Effort) != "" && strings.TrimSpace(entry.Thinking) == "" {

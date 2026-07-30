@@ -134,6 +134,39 @@ func longCat20Prices(models []string) map[string]*provider.Pricing {
 	return prices
 }
 
+// DashScope per-model pricing (¥/1M tokens). Cache hit is 10% of input price
+// per Alibaba's billing docs. Prices sourced from help.aliyun.com/zh/model-studio/model-pricing.
+func dashScopePrices(models []string) map[string]*provider.Pricing {
+	prices := map[string]*provider.Pricing{}
+	for _, model := range models {
+		switch strings.TrimSpace(model) {
+		case "qwen3.8-max-preview":
+			prices[model] = &provider.Pricing{CacheHit: 1.2, Input: 12, Output: 36, Currency: "¥"}
+		case "qwen3.7-max":
+			prices[model] = &provider.Pricing{CacheHit: 1.2, Input: 12, Output: 36, Currency: "¥"}
+		case "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus":
+			prices[model] = &provider.Pricing{CacheHit: 0.2, Input: 2, Output: 8, Currency: "¥"}
+		case "qwen3.6-flash":
+			prices[model] = &provider.Pricing{CacheHit: 0.08, Input: 0.8, Output: 2, Currency: "¥"}
+		case "qwen3-coder-plus", "qwen3-coder-next":
+			prices[model] = &provider.Pricing{CacheHit: 0.2, Input: 2, Output: 8, Currency: "¥"}
+		case "qwen3-max-2026-01-23":
+			prices[model] = &provider.Pricing{CacheHit: 1.2, Input: 12, Output: 36, Currency: "¥"}
+		case "deepseek-v4-pro":
+			prices[model] = &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}
+		case "glm-5.2":
+			prices[model] = &provider.Pricing{CacheHit: 0.1, Input: 1, Output: 4, Currency: "¥"}
+		case "glm-5", "glm-4.7":
+			prices[model] = &provider.Pricing{CacheHit: 0.1, Input: 1, Output: 4, Currency: "¥"}
+		case "MiniMax-M2.5":
+			prices[model] = &provider.Pricing{CacheHit: 0.1, Input: 1, Output: 4, Currency: "¥"}
+		case "kimi-k2.5":
+			prices[model] = &provider.Pricing{CacheHit: 0.2, Input: 2, Output: 8, Currency: "¥"}
+		}
+	}
+	return prices
+}
+
 const (
 	deepSeekPricingResetConfigVersion      = 3
 	windowsBashSandboxDefaultConfigVersion = 4

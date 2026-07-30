@@ -287,6 +287,16 @@ type Agent struct {
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
 
+	// cacheDeferCompacts counts consecutive turns where compaction was deferred
+	// because the cache hit rate was high. Capped at 3 to avoid unbounded growth.
+	cacheDeferCompacts int
+
+	// lastAPICallAt records when the last provider API call completed. Used to
+	// detect DashScope's 5-minute explicit cache TTL expiry: if the gap between
+	// turns exceeds 5 minutes, the server-side cache is cold and the next turn
+	// will pay full input price regardless of prefix stability.
+	lastAPICallAt time.Time
+
 	// lastPrefixShape records the previous provider request's cacheable prefix
 	// so usage events can explain prefix churn on the next request.
 	lastPrefixShape     PrefixShape
@@ -2502,6 +2512,7 @@ func (a *Agent) stream(ctx context.Context, turn int) (string, string, string, [
 			a.lastUsage.Store(chunk.Usage)
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
+			a.lastAPICallAt = time.Now()
 		case provider.ChunkError:
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()

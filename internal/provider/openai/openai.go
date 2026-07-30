@@ -85,6 +85,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	zhipu := protocol == "" && IsZhipu(cfg.BaseURL)
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
+	dashscope := protocol == "" && IsDashScope(cfg.BaseURL)
 	// Optional explicit `thinking` config field — a vendor-agnostic escape hatch
 	// (credit @eghrhegpe, #5063) for OpenAI-compatible providers we don't
 	// auto-detect (e.g. opencode.ai). "enabled"/"disabled" drive thinking.type;
@@ -160,6 +161,18 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		default:
 			return nil, fmt.Errorf("openai: provider %q uses Ollama Cloud thinking; effort must be none, low, medium, high, or max", name)
 		}
+	case dashscope:
+		// DashScope serves multiple model families under one endpoint. Thinking
+		// protocol varies per model (qwen: enable_thinking + reasoning_effort,
+		// deepseek: thinking.type, glm: thinking.type). Qwen3.x supports tiered
+		// effort: low/medium/high/xhigh/max (server maps to thinking_budget).
+		switch effort {
+		case "", "enabled", "disabled", "low", "medium", "high", "xhigh", "max":
+		case "auto", "off":
+			effort = ""
+		default:
+			return nil, fmt.Errorf("openai: provider %q uses DashScope multi-model thinking; effort must be disabled, low, medium, high, xhigh, or max", name)
+		}
 	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
 		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
@@ -190,6 +203,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		minimax:      minimax,
 		zhipu:        zhipu,
 		longcat:      longcat,
+		dashscope:    dashscope,
 		mimo:         IsMiMo(cfg.BaseURL),
 		thinkingType: thinkingType,
 		vision:       vision,
@@ -225,6 +239,7 @@ type client struct {
 	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
 	zhipu        bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
 	longcat      bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	dashscope    bool          // true for DashScope (aliyuncs.com) — multi-model endpoint; thinking protocol varies per model name
 	mimo         bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
 	thinkingType string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision       bool          // model accepts image input — embed attached images as image_url parts
@@ -339,6 +354,60 @@ func cleanExtraBody(in map[string]any) map[string]any {
 	return out
 }
 
+// mergeExtraBody returns a copy of m with key=value set. A nil m allocates a
+// fresh map. User-configured extra_body values always win over vendor defaults,
+// so this only sets the key when it is absent.
+func mergeExtraBody(m map[string]any, key string, value any) map[string]any {
+	if m == nil {
+		m = make(map[string]any, 2)
+	}
+	if _, exists := m[key]; !exists {
+		m[key] = value
+	}
+	return m
+}
+
+// applyDashScopeCacheControl marks the system message, the final message (when
+// markLast is true), and the final tool with cache_control: {type: "ephemeral"}
+// so DashScope's server-side prefix cache engages on all three prefix segments.
+// Content that is already a []chatContentPart gets the marker on its last text
+// part; string content is promoted to a single-element part array. Mirrors
+// qwen-code's addDashScopeCacheControl in 'all' mode for streaming requests.
+func applyDashScopeCacheControl(msgs []chatMessage, tools []chatTool, markLast bool) {
+	if len(msgs) == 0 {
+		return
+	}
+	markMsg := func(m *chatMessage) {
+		switch content := m.Content.(type) {
+		case string:
+			m.Content = []chatContentPart{{
+				Type:         "text",
+				Text:         content,
+				CacheControl: &cacheControl{Type: "ephemeral"},
+			}}
+		case []chatContentPart:
+			if len(content) > 0 {
+				content[len(content)-1].CacheControl = &cacheControl{Type: "ephemeral"}
+			}
+		}
+	}
+	// Always mark the system message.
+	for i := range msgs {
+		if msgs[i].Role == "system" {
+			markMsg(&msgs[i])
+			break
+		}
+	}
+	// In streaming (markLast=true), also mark the last message and last tool
+	// for full prefix cache coverage across all three segments.
+	if markLast {
+		markMsg(&msgs[len(msgs)-1])
+		if len(tools) > 0 {
+			tools[len(tools)-1].CacheControl = &cacheControl{Type: "ephemeral"}
+		}
+	}
+}
+
 func reservedExtraBodyField(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "model", "messages", "tools", "stream", "stream_options", "temperature", "max_tokens", "reasoning_effort", "thinking":
@@ -385,6 +454,11 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		applyAPIKeyHeader(httpReq.Header, c.baseURL, c.apiKey)
 		httpReq.Header.Set("Accept", "text/event-stream")
 		applyCustomHeaders(httpReq.Header, c.headers)
+		if c.dashscope {
+			// DashScope's server-side prefix cache is opt-in via this header.
+			// qwen-code sends it unconditionally; we follow suit.
+			httpReq.Header.Set("X-DashScope-CacheControl", "enable")
+		}
 		return httpReq, nil
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
@@ -496,6 +570,17 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				cm.ReasoningContent = &m.ReasoningContent
 			}
 		}
+		// DashScope Qwen3 multi-turn thinking continuity: mirror
+		// reasoning_content → reasoning on assistant turns. The DashScope API
+		// with preserve_thinking expects both fields present.
+		if c.dashscope && m.Role == provider.RoleAssistant && m.ReasoningContent != "" {
+			model := strings.ToLower(c.model)
+			if strings.Contains(model, "qwen3") {
+				rc := m.ReasoningContent
+				cm.ReasoningContent = &rc
+				cm.Reasoning = &rc
+			}
+		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
 			wire.Function.Name = tc.Name
@@ -587,6 +672,67 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		}
 		out.Thinking = &thinkingMode{Type: t}
 		out.ReasoningEffort = ""
+	case c.dashscope:
+		// DashScope serves multiple model families under one endpoint. Thinking
+		// protocol varies per model:
+		//   qwen*        → enable_thinking + reasoning_effort (tiered)
+		//   deepseek-v4* → thinking: {type: "enabled"} (DeepSeek protocol)
+		//   glm*         → thinking: {type: "enabled|disabled"} (Zhipu protocol)
+		//   other        → no thinking field (generic OpenAI-compatible)
+		model := strings.ToLower(c.model)
+		switch {
+		case strings.HasPrefix(model, "qwen") || model == "coder-model":
+			// Qwen3.x uses top-level enable_thinking (boolean) plus the
+			// standard reasoning_effort field for depth. The server maps
+			// reasoning_effort → thinking_budget (low→4096, medium→16384,
+			// xhigh→262144). reasoning_effort and thinking_budget must not
+			// be set simultaneously (qwen3.8-max-preview rejects it).
+			if c.effort == "disabled" {
+				out.ExtraBody = mergeExtraBody(out.ExtraBody, "enable_thinking", false)
+				out.ReasoningEffort = ""
+			} else {
+				out.ExtraBody = mergeExtraBody(out.ExtraBody, "enable_thinking", true)
+				out.ExtraBody = mergeExtraBody(out.ExtraBody, "preserve_thinking", true)
+				// out.ReasoningEffort already carries c.effort from struct
+				// init; normalize max→xhigh for DashScope's accepted ladder.
+				// "enabled" (bare on) and "" (auto) omit the depth hint.
+				switch out.ReasoningEffort {
+				case "max":
+					out.ReasoningEffort = "xhigh"
+				case "enabled", "disabled":
+					out.ReasoningEffort = ""
+				}
+			}
+		case strings.HasPrefix(model, "deepseek"):
+			// DeepSeek models on DashScope use the same thinking.type
+			// protocol as api.deepseek.com.
+			if c.effort == "disabled" || c.thinkingType == "disabled" {
+				out.Thinking = &thinkingMode{Type: "disabled"}
+			} else {
+				out.Thinking = &thinkingMode{Type: "enabled"}
+			}
+			out.ReasoningEffort = ""
+		case strings.HasPrefix(model, "glm"):
+			// GLM on DashScope uses thinking.type (Zhipu protocol).
+			t := "enabled"
+			if c.effort == "disabled" || c.thinkingType == "disabled" {
+				t = "disabled"
+			}
+			out.Thinking = &thinkingMode{Type: t}
+			out.ReasoningEffort = ""
+		default:
+			out.ReasoningEffort = ""
+		}
+		// DashScope cache_control: mark system message, last message, and last
+		// tool with ephemeral cache hints so the server-side prefix cache
+		// engages. GLM models without tools skip this (their server drops array
+		// content in tool-less requests). Mirrors qwen-code's
+		// addDashScopeCacheControl with 'all' mode for streaming.
+		isGlm := strings.HasPrefix(model, "glm")
+		hasTools := len(out.Tools) > 0
+		if !(isGlm && !hasTools) {
+			applyDashScopeCacheControl(out.Messages, out.Tools, hasTools)
+		}
 	case c.thinkingType != "":
 		// Generic OpenAI-compatible provider with an explicit `thinking` config
 		// field (e.g. opencode.ai) — emit thinking.type; reasoning_effort, if any,
@@ -816,6 +962,11 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	if hit == 0 && u.PromptTokensDetails != nil {
 		hit = u.PromptTokensDetails.CachedTokens
 	}
+	// DashScope top-level cached_tokens fallback (some models report here
+	// instead of nested prompt_tokens_details).
+	if hit == 0 && u.CachedTokens > 0 {
+		hit = u.CachedTokens
+	}
 	if miss == 0 && hit > 0 && u.PromptTokens > hit {
 		miss = u.PromptTokens - hit
 	}
@@ -890,15 +1041,25 @@ type chatMessage struct {
 	// tool_calls turns (an empty value passes; a missing key 400s), while every
 	// other message must keep omitting it.
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	// Reasoning mirrors ReasoningContent for Qwen3 models on DashScope. Qwen3's
+	// multi-turn API expects both fields present on assistant turns for thinking
+	// continuity (preserve_thinking). Mirrors qwen-code's
+	// mirrorReasoningContentToReasoning.
+	Reasoning        *string        `json:"reasoning,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	Name             string         `json:"name,omitempty"`
 }
 
 type chatContentPart struct {
-	Type     string        `json:"type"`
-	Text     string        `json:"text,omitempty"`
-	ImageURL *chatImageURL `json:"image_url,omitempty"`
+	Type         string        `json:"type"`
+	Text         string        `json:"text,omitempty"`
+	ImageURL     *chatImageURL `json:"image_url,omitempty"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+type cacheControl struct {
+	Type string `json:"type"`
 }
 
 type chatImageURL struct {
@@ -918,8 +1079,9 @@ func imageContentParts(text string, images []string, detail string) []chatConten
 }
 
 type chatTool struct {
-	Type     string       `json:"type"`
-	Function chatFunction `json:"function"`
+	Type         string        `json:"type"`
+	Function     chatFunction  `json:"function"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 type chatFunction struct {
@@ -963,6 +1125,10 @@ type wireUsage struct {
 	TotalTokens           int `json:"total_tokens"`
 	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
 	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+	// DashScope returns cached_tokens at the top level (not nested under
+	// prompt_tokens_details) on some models. Mirrors qwen-code's
+	// extendedUsage.cached_tokens fallback.
+	CachedTokens int `json:"cached_tokens"`
 	PromptTokensDetails   *struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`

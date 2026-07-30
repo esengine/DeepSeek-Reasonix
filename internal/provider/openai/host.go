@@ -79,3 +79,14 @@ func IsLongCat(baseURL string) bool {
 func IsOllamaCloud(baseURL string) bool {
 	return matchesVendorHost(baseURL, "ollama.com", "ollama.com")
 }
+
+// IsDashScope reports whether baseURL points at Alibaba DashScope's
+// OpenAI-compatible endpoint — the China host (dashscope.aliyuncs.com),
+// the international host (dashscope-intl.aliyuncs.com), or the Coding Plan
+// endpoints (coding.dashscope.aliyuncs.com, coding-intl.dashscope.aliyuncs.com).
+// DashScope serves multiple model families (Qwen, DeepSeek, GLM, Kimi, MiniMax)
+// under one API; thinking protocol varies per model, so the client routes
+// reasoning control by model name rather than a single vendor flag.
+func IsDashScope(baseURL string) bool {
+	return matchesVendorHost(baseURL, "aliyuncs.com", "dashscope.aliyuncs.com")
+}

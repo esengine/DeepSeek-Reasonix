@@ -89,6 +89,39 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	high := int(float64(a.contextWindow) * a.compactRatio)
 	snip := int(float64(a.contextWindow) * a.toolResultSnipRatio)
 	soft := int(float64(a.contextWindow) * a.softCompactRatio)
+
+	// Cache-aware compaction deferral: when the recent turn's cache hit rate is
+	// high (≥70%) and we haven't hit the force ratio, delay compaction by one
+	// turn. Compaction rewrites the prefix and craters the server-side cache;
+	// deferring while the cache is hot saves real money (DashScope cache hit is
+	// 10% of input price). The force ratio always overrides — we never OOM the
+	// context window for cache savings.
+	//
+	// TTL awareness: DashScope's explicit cache expires after 5 minutes of no
+	// hits. If the gap since the last API call exceeds 5 minutes, the cache is
+	// already cold — deferring compaction no longer saves money, so compact
+	// immediately to free context budget for the (now full-price) next turn.
+	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	if !force && u.PromptTokens >= high {
+		cacheCold := !a.lastAPICallAt.IsZero() && time.Since(a.lastAPICallAt) > 5*time.Minute
+		if !cacheCold {
+			if hitRate := a.recentCacheHitRate(u); hitRate >= 0.70 {
+				a.cacheDeferCompacts++
+				if a.cacheDeferCompacts <= 3 {
+					// Defer: the cache is hot, let it ride one more turn.
+					return
+				}
+				// Deferred 3 times already; compact now regardless.
+				a.cacheDeferCompacts = 0
+			} else {
+				a.cacheDeferCompacts = 0
+			}
+		} else {
+			// Cache expired (idle > 5min); no benefit to deferring.
+			a.cacheDeferCompacts = 0
+		}
+	}
+
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
 	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
@@ -116,7 +149,6 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.compactStuck {
 		return
 	}
-	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
 	// Prune before folding: when eliding stale tool results alone clears the
 	// trigger, this turn's (paid) summarize call is skipped entirely.
 	ratio := a.tokPerChar()
@@ -144,6 +176,21 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 			"context_window=%d is too small for compaction to help (the system prompt plus one turn already exceeds %.0f%% of it); raise context_window or shrink tool output. Auto-compaction paused until the prompt drops.",
 			a.contextWindow, a.compactRatio*100)})
 	}
+}
+
+// recentCacheHitRate returns the cache hit rate for the most recent turn's
+// usage. Returns 0 when no cache tokens are reported (provider doesn't support
+// cache reporting). Used by maybeCompact to defer compaction while the cache
+// is hot — compaction rewrites the prefix and craters the server-side cache.
+func (a *Agent) recentCacheHitRate(u *provider.Usage) float64 {
+	if u == nil {
+		return 0
+	}
+	total := u.CacheHitTokens + u.CacheMissTokens
+	if total == 0 {
+		return 0
+	}
+	return float64(u.CacheHitTokens) / float64(total)
 }
 
 // foldEconomics estimates whether compacting the given region saves enough

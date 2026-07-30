@@ -81,10 +81,10 @@ var (
 	glmCodingModels    = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7"}
 	glmAnthropicModels = []string{"glm-5.2[1m]", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7", "glm-4.5-air"}
 
-	qwenAPIModels        = []string{"qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "MiniMax-M2.5", "glm-5", "glm-4.7", "kimi-k2.5"}
-	qwenAPIVisionModels  = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
-	qwenPlanModels       = []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
-	qwenPlanVisionModels = []string{"qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
+	qwenAPIModels        = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "deepseek-v4-pro", "MiniMax-M2.5", "glm-5.2", "glm-5", "glm-4.7", "kimi-k2.5"}
+	qwenAPIVisionModels  = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
+	qwenPlanModels       = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.5", "deepseek-v4-pro", "glm-5.2", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
+	qwenPlanVisionModels = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
 
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
 
@@ -591,6 +591,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "qwen3.7-plus",
 			APIKeyEnv:     "QWEN_API_KEY",
 			ContextWindow: 1_000_000,
+			Prices:        dashScopePrices(qwenAPIModels),
 			NoProxy:       true,
 		}},
 	},
@@ -608,6 +609,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "qwen3.7-plus",
 			APIKeyEnv:     "QWEN_API_KEY",
 			ContextWindow: 1_000_000,
+			Prices:        dashScopePrices(qwenAPIModels),
 		}},
 	},
 	{
@@ -624,6 +626,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "qwen3.7-plus",
 			APIKeyEnv:     "QWEN_CODING_API_KEY",
 			ContextWindow: 1_000_000,
+			Prices:        dashScopePrices(qwenPlanModels),
 			NoProxy:       true,
 		}},
 	},
@@ -641,6 +644,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "qwen3.7-plus",
 			APIKeyEnv:     "QWEN_CODING_API_KEY",
 			ContextWindow: 1_000_000,
+			Prices:        dashScopePrices(qwenPlanModels),
 			Thinking:      "adaptive",
 			NoProxy:       true,
 		}},
@@ -659,6 +663,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "qwen3.7-plus",
 			APIKeyEnv:     "QWEN_CODING_API_KEY",
 			ContextWindow: 1_000_000,
+			Prices:        dashScopePrices(qwenPlanModels),
 		}},
 	},
 	{
@@ -675,6 +680,7 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "qwen3.7-plus",
 			APIKeyEnv:     "QWEN_CODING_API_KEY",
 			ContextWindow: 1_000_000,
+			Prices:        dashScopePrices(qwenPlanModels),
 			Thinking:      "adaptive",
 		}},
 	},
