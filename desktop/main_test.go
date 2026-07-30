@@ -1,12 +1,22 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 )
+
+func TestParseDesktopLaunchArgsSafeMode(t *testing.T) {
+	if !parseDesktopLaunchArgs([]string{"--safe-mode"}).SafeMode {
+		t.Fatal("--safe-mode was not recognized")
+	}
+	if parseDesktopLaunchArgs([]string{"--other"}).SafeMode {
+		t.Fatal("unrelated argument enabled safe mode")
+	}
+}
 
 // TestMain isolates user config/state/cache dirs for the whole package. Without
 // this, tests that persist desktop state, sessions, cache, or CLI-style config
@@ -23,6 +33,12 @@ func TestMain(m *testing.M) {
 	os.Setenv("REASONIX_STATE_HOME", dir+"/state")
 	os.Setenv("REASONIX_CACHE_HOME", dir+"/cache")
 	os.Setenv("AppData", dir)
+	// Neutralize the Wails runtime-event bridge for the whole test binary:
+	// outside a running Wails app, runtime.EventsEmit log.Fatals on the plain
+	// contexts tests use, killing the process from any emitting code path.
+	// Tests that assert on runtime events install their own capture through
+	// the per-instance runtimeEvents.emit hook, which takes precedence.
+	runtimeEventsEmitFallback = func(context.Context, string, ...interface{}) {}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -42,7 +58,8 @@ func TestWindowsWebview2GPUDisabled(t *testing.T) {
 		want    bool
 	}{
 		{name: "stable default keeps gpu", channel: "stable", want: false},
-		{name: "canary default disables gpu", channel: "canary", want: true},
+		{name: "preview default disables gpu", channel: "preview", want: true},
+		{name: "legacy canary default disables gpu", channel: "canary", want: true},
 		{name: "env enables fallback", channel: "stable", env: "1", want: true},
 		{name: "env disables canary fallback", channel: "canary", env: "0", want: false},
 		{name: "truthy env", channel: "stable", env: "yes", want: true},

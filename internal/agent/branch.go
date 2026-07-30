@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
 
@@ -37,9 +38,15 @@ type BranchMeta struct {
 	Recovered        bool      `json:"recovered,omitempty"`
 	RecoveryReason   string    `json:"recovery_reason,omitempty"`
 	RecoveryDigest   string    `json:"recovery_digest,omitempty"`
-	Revision         int64     `json:"revision,omitempty"`
-	ContentDigest    string    `json:"content_digest,omitempty"`
-	WriterID         string    `json:"writer_id,omitempty"`
+	// RecoveryDepth counts how many recovery forks separate this branch from a
+	// normal session (1 = forked from a normal session). SaveRecoveryBranch
+	// refuses to fork past SessionRecoveryMaxDepth so a conflict loop cannot
+	// spawn unbounded nested recovery chains (#5993 reached 8 levels). Legacy
+	// recovery metas without the field are treated as depth 1.
+	RecoveryDepth int    `json:"recovery_depth,omitempty"`
+	Revision      int64  `json:"revision,omitempty"`
+	ContentDigest string `json:"content_digest,omitempty"`
+	WriterID      string `json:"writer_id,omitempty"`
 	// SchemaVersion records the BranchMeta version that last wrote the listing
 	// fields (Turns/Preview) FROM the session's content. It is stamped only by the
 	// writers that actually derive those counts — Controller.snapshot's
@@ -114,7 +121,7 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 	if metaPath == "" {
 		return BranchMeta{}, false, nil
 	}
-	b, err := os.ReadFile(metaPath)
+	b, err := fileencoding.ReadFileUTF8(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return BranchMeta{}, false, nil
@@ -263,6 +270,19 @@ func TouchBranchMeta(sessionPath string) error {
 }
 
 func MarkSessionInFlightTurn(sessionPath string, startMessageIndex int, preserveUser bool) error {
+	return SetSessionInFlightTurn(sessionPath, InFlightTurnMeta{
+		StartMessageIndex: startMessageIndex,
+		PreserveUser:      preserveUser,
+		StartedAt:         time.Now().UTC(),
+	})
+}
+
+// SetSessionInFlightTurn writes an existing in-flight marker verbatim. It is
+// used when a running turn moves to a recovery branch: preserving StartedAt is
+// what lets crash recovery relocate the turn after an in-turn compaction has
+// rewritten its original message index.
+func SetSessionInFlightTurn(sessionPath string, marker InFlightTurnMeta) error {
+	startMessageIndex := marker.StartMessageIndex
 	if startMessageIndex < 0 {
 		startMessageIndex = 0
 	}
@@ -275,11 +295,11 @@ func MarkSessionInFlightTurn(sessionPath string, startMessageIndex int, preserve
 	if err != nil {
 		return err
 	}
-	m.InFlightTurn = &InFlightTurnMeta{
-		StartMessageIndex: startMessageIndex,
-		PreserveUser:      preserveUser,
-		StartedAt:         time.Now().UTC(),
+	marker.StartMessageIndex = startMessageIndex
+	if marker.StartedAt.IsZero() {
+		marker.StartedAt = time.Now().UTC()
 	}
+	m.InFlightTurn = &marker
 	return SaveBranchMetaPreserveUpdated(sessionPath, m)
 }
 

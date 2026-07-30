@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 func TestHeartbeatConfigPathUsesReasonixUserStateDir(t *testing.T) {
@@ -17,6 +19,23 @@ func TestHeartbeatConfigPathUsesReasonixUserStateDir(t *testing.T) {
 
 	if got := engine.configPath(); got != want {
 		t.Fatalf("configPath = %q, want %q", got, want)
+	}
+}
+
+func TestHeartbeatLoadTasksDecodesGB18030Config(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{}
+	body := `{"tasks":[{"id":"daily","title":"每日检查","prompt":"总结中文状态","interval":"1h","enabled":true}]}`
+	if err := os.MkdirAll(filepath.Dir(engine.configPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine.configPath(), fileencoding.Encode(body, fileencoding.GB18030), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks := engine.loadTasks()
+	if len(tasks) != 1 || tasks[0].Title != "每日检查" || tasks[0].Prompt != "总结中文状态" {
+		t.Fatalf("loadTasks = %+v, want decoded Chinese task", tasks)
 	}
 }
 
@@ -84,6 +103,7 @@ func (s *heartbeatExecuteTaskCtrlStub) RuntimeStatus() control.RuntimeStatus {
 
 func (s *heartbeatExecuteTaskCtrlStub) SubmitUserTurn(input, display string) {
 	s.submitted = append(s.submitted, input)
+	s.status.Running = true
 }
 
 func (s *heartbeatExecuteTaskCtrlStub) SetToolApprovalMode(mode string) {
@@ -175,6 +195,7 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 					tabToInject.Ctrl = ctrl
 					tabToInject.Ready = true
 					tabToInject.StartupErr = ""
+					app.advanceSessionRuntimeEpochLocked(tabToInject)
 					app.mu.Unlock()
 					close(injected)
 					return
@@ -207,6 +228,80 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 	pending := engine.pendingTopics["fresh"]
 	if pending.TopicID != got.TopicID || !pending.Submitted {
 		t.Fatalf("pending topic = %+v, want submitted %q", pending, got.TopicID)
+	}
+}
+
+func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	engine := &HeartbeatEngine{
+		app:           app,
+		pendingTopics: map[string]heartbeatPendingTopic{},
+	}
+	ctrl := &heartbeatExecuteTaskCtrlStub{status: control.RuntimeStatus{PendingPrompt: true}}
+	injected := make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-injected:
+				return
+			case <-ticker.C:
+				var cancel context.CancelFunc
+				var tabToInject *WorkspaceTab
+				app.mu.Lock()
+				for _, tab := range app.tabs {
+					if tab == nil {
+						continue
+					}
+					tab.removed = true
+					cancel = tab.buildCancel
+					tabToInject = tab
+					break
+				}
+				app.mu.Unlock()
+				if tabToInject == nil {
+					continue
+				}
+				if cancel != nil {
+					cancel()
+				}
+				app.mu.Lock()
+				if tabToInject.Ctrl == nil {
+					tabToInject.Ctrl = ctrl
+					tabToInject.Ready = true
+					tabToInject.StartupErr = ""
+					app.advanceSessionRuntimeEpochLocked(tabToInject)
+					app.mu.Unlock()
+					close(injected)
+					return
+				}
+				app.mu.Unlock()
+			}
+		}
+	}()
+
+	got := engine.executeTask(HeartbeatTask{
+		ID:                     "fresh",
+		Title:                  "Fresh",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	})
+
+	if got.LastRunAt != 0 {
+		t.Fatalf("pending prompt should not mark heartbeat run complete, LastRunAt=%d", got.LastRunAt)
+	}
+	if len(ctrl.submitted) != 0 {
+		t.Fatalf("submitted prompts = %v, want none while prompt is pending", ctrl.submitted)
+	}
+	if ctrl.approvalMode != "" {
+		t.Fatalf("approval mode = %q, want unchanged while prompt is pending", ctrl.approvalMode)
 	}
 }
 
@@ -360,5 +455,75 @@ func TestHeartbeatInactiveOpenDoesNotChangeActiveTab(t *testing.T) {
 	}
 	if meta.ID != "heartbeat" || meta.Active {
 		t.Fatalf("inactive open meta = %+v, want heartbeat and inactive", meta)
+	}
+}
+
+func TestHeartbeatMergeRunUpdatesAdoptsExternalFileEdits(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := &HeartbeatEngine{
+		tasks: []HeartbeatTask{
+			{ID: "a", Title: "stale title", Prompt: "stale", Interval: "1h", Enabled: true},
+		},
+	}
+	// An external editor (the documented human/AI flow) rewrote the file after
+	// the engine's in-memory snapshot: task a was edited and task b was added.
+	external := []HeartbeatTask{
+		{ID: "a", Title: "edited externally", Prompt: "new prompt", Interval: "2h", Enabled: true},
+		{ID: "b", Title: "added externally", Prompt: "hello", Interval: "1h", Enabled: false},
+	}
+	if err := engine.saveTasks(external); err != nil {
+		t.Fatalf("seed external file: %v", err)
+	}
+
+	engine.mergeRunUpdatesLocked(map[string]HeartbeatTask{
+		"a": {ID: "a", TopicID: "topic-a", LastRunAt: 4242},
+	})
+
+	if len(engine.tasks) != 2 {
+		t.Fatalf("tasks len = %d, want 2 (external addition adopted): %+v", len(engine.tasks), engine.tasks)
+	}
+	got := engine.tasks[0]
+	if got.Title != "edited externally" || got.Prompt != "new prompt" || got.Interval != "2h" {
+		t.Fatalf("external edit was rolled back by the run-state save: %+v", got)
+	}
+	if got.TopicID != "topic-a" || got.LastRunAt != 4242 {
+		t.Fatalf("run state was not merged onto the disk copy: %+v", got)
+	}
+	// The full-list save must have preserved the externally added task on disk.
+	onDisk := engine.loadTasks()
+	if len(onDisk) != 2 || onDisk[1].ID != "b" || onDisk[1].Title != "added externally" {
+		t.Fatalf("externally added task was lost on save: %+v", onDisk)
+	}
+}
+
+func TestHeartbeatTickAdoptsExternalFileEdits(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	engine := newHeartbeatEngine(nil)
+	if err := engine.saveTasks([]HeartbeatTask{{ID: "a", Title: "A", Interval: "1h", Enabled: false}}); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	engine.mu.Lock()
+	engine.tasks = engine.loadTasks()
+	engine.noteConfigModLocked()
+	engine.mu.Unlock()
+
+	// External edit lands after the engine last touched the file. Force the
+	// mtime forward so coarse filesystem timestamps cannot make this flaky.
+	if err := engine.saveTasks([]HeartbeatTask{
+		{ID: "a", Title: "A", Interval: "1h", Enabled: false},
+		{ID: "b", Title: "added externally", Interval: "1h", Enabled: false},
+	}); err != nil {
+		t.Fatalf("external edit: %v", err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(engine.configPath(), future, future); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	engine.tick() // disabled tasks only: adoption runs, nothing executes
+
+	tasks := engine.ListTasks()
+	if len(tasks) != 2 || tasks[1].ID != "b" {
+		t.Fatalf("tick did not adopt the external edit: %+v", tasks)
 	}
 }

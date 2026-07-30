@@ -40,7 +40,17 @@ func indexBlockWithHeader(header string, skills []Skill) string {
 	}
 	lines := make([]string, 0, len(skills))
 	for _, sk := range skills {
+		// Manual-invocation skills (e.g. user-authored subagent profiles) stay
+		// invocable by name (/<name>, run_skill) but must never enter the
+		// pinned index the model scans for candidates to call on its own
+		// initiative.
+		if sk.Invocation == "manual" {
+			continue
+		}
 		lines = append(lines, indexLine(sk))
+	}
+	if len(lines) == 0 {
+		return ""
 	}
 	joined := strings.Join(lines, "\n")
 	if r := []rune(joined); len(r) > IndexMaxChars {

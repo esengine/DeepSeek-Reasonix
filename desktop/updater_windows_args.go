@@ -6,17 +6,24 @@ import (
 )
 
 func installerCommandLine(installer, dir string) string {
-	line := fmt.Sprintf(`"%s" /S`, installer)
+	// Keep this in sync with cmd/update-helper/args.go. The desktop uses it for
+	// its Windows command invariant tests; the copied helper extracts to a
+	// transaction-owned staging directory after the desktop exits.
+	line := fmt.Sprintf(`"%s" /REASONIXUPDATE=1 /REASONIXSTAGE=1`, installer)
 	if dir != "" {
 		line += " /D=" + dir
 	}
 	return line
 }
 
-func windowsUpdateHandoffArgs(parentPID int, installer, installDir, relaunch string) []string {
+func windowsUpdateHandoffArgs(parentPID int, installer, installerSHA256, installDir, relaunch, toVersion, createdAt, transactionID string) []string {
 	args := []string{
 		"--parent-pid", strconv.Itoa(parentPID),
 		"--installer", installer,
+		"--installer-sha256", installerSHA256,
+		"--to-version", toVersion,
+		"--created-at", createdAt,
+		"--transaction-id", transactionID,
 	}
 	if installDir != "" {
 		args = append(args, "--install-dir", installDir)

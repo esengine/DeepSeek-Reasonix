@@ -266,6 +266,27 @@ func TestListExposesCurrentTurnFiles(t *testing.T) {
 	}
 }
 
+func TestFileStateReturnsEarliestSnapshotAcrossPathForms(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested", "file.txt")
+	s := New("", root)
+	s.Begin(0, "first", 0)
+	s.Snapshot(diff.Change{Path: path, Kind: diff.Modify, OldText: "original"})
+	s.Begin(1, "second", 2)
+	s.Snapshot(diff.Change{Path: filepath.Join("nested", "file.txt"), Kind: diff.Modify, OldText: "after first edit"})
+
+	state, ok := s.FileState(filepath.Join("nested", "file.txt"))
+	if !ok || state.Content == nil {
+		t.Fatalf("FileState = %+v, %v; want earliest content", state, ok)
+	}
+	if got := *state.Content; got != "original" {
+		t.Fatalf("FileState content = %q, want original", got)
+	}
+	if _, ok := s.FileState(filepath.Join("..", "outside.txt")); ok {
+		t.Fatal("FileState accepted a path outside the workspace")
+	}
+}
+
 func TestTruncateFromDropsFutureCheckpointsAndFiles(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(t.TempDir(), "sess.ckpt")

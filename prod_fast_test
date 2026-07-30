@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Fast local production-style desktop package from this checkout.
+#
+# This is a convenience wrapper around ./prod_test for iteration builds:
+# native host architecture, no Wails clean, and no macOS DMG unless explicitly
+# overridden.
+set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+	cat <<'EOF'
+Usage:
+  ./prod_fast_test [platform] [version] [channel]
+
+Examples:
+  ./prod_fast_test
+  ./prod_fast_test darwin/arm64
+  ./prod_fast_test darwin/arm64 v0.0.0-fast stable
+
+Fast defaults:
+  platform  native host architecture; macOS uses darwin/arm64 or darwin/amd64
+  clean     skipped by default; set DESKTOP_BUILD_CLEAN=1 to force Wails -clean
+  dmg       skipped by default; set DESKTOP_BUILD_SKIP_DMG=0 to create it
+
+This delegates to ./prod_test with PROD_TEST_FAST=1.
+EOF
+	exit 0
+fi
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export PROD_TEST_FAST="${PROD_TEST_FAST:-1}"
+exec "$SCRIPT_DIR/prod_test" "$@"

@@ -85,6 +85,17 @@ func TestPruneStaleToolResults(t *testing.T) {
 	}
 }
 
+func TestPruneNeverRewritesLocalInterruptedDisplay(t *testing.T) {
+	m := provider.Message{
+		Role: provider.RoleTool, LocalOnly: true,
+		ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
+		Content: strings.Repeat("partial output", 1024),
+	}
+	if shouldMaintainToolResult(m, toolResultSnip) || shouldMaintainToolResult(m, toolResultPrune) {
+		t.Fatal("local interrupted display must remain verbatim across tool-result maintenance")
+	}
+}
+
 func TestSnipStaleToolResults(t *testing.T) {
 	var lines []string
 	for i := 0; i < 1000; i++ {

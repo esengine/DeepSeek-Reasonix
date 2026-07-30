@@ -24,6 +24,27 @@ func (t builtinTestTool) Execute(context.Context, json.RawMessage) (string, erro
 }
 func (t builtinTestTool) ReadOnly() bool { return t.readOnly }
 
+// TestBuiltinReviewSkillsDeclareReadOnly pins the tool-boundary contract behind
+// the review/security-review "Read-only" promise: runners select the read-only
+// subagent registry from this flag, so losing it silently re-opens writer bash.
+func TestBuiltinReviewSkillsDeclareReadOnly(t *testing.T) {
+	want := map[string]bool{
+		"explore":         false,
+		"research":        false,
+		"review":          true,
+		"security-review": true,
+	}
+	for _, sk := range builtinSkills() {
+		expected, tracked := want[sk.Name]
+		if !tracked {
+			continue
+		}
+		if sk.ReadOnly != expected {
+			t.Errorf("builtin %q ReadOnly = %v, want %v", sk.Name, sk.ReadOnly, expected)
+		}
+	}
+}
+
 func TestCodeGraphReadToolsRequireKnownNameAndReadOnly(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(builtinTestTool{name: "mcp__codegraph__symbols", readOnly: true})

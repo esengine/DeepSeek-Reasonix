@@ -93,7 +93,8 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
 	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
 		a.softCompactNoticed = true
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)})
+		detail := fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context is getting large; preserving cache until cleanup is needed.", Detail: detail})
 		return
 	}
 	if u.PromptTokens >= snip && u.PromptTokens < high {
@@ -128,7 +129,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		}
 	}
 	if err := a.compact(ctx, "auto", "", force); err != nil {
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf("compaction skipped: %v", err)})
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context cleanup skipped for now.", Detail: fmt.Sprintf("compaction skipped: %v", err)})
 		return
 	}
 	// A healthy compaction drops the prompt under the trigger, so the next turn
@@ -139,7 +140,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	a.consecutiveCompacts++
 	if a.consecutiveCompacts >= 2 {
 		a.compactStuck = true
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: fmt.Sprintf(
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Automatic context cleanup paused because the context window is too small.", Detail: fmt.Sprintf(
 			"context_window=%d is too small for compaction to help (the system prompt plus one turn already exceeds %.0f%% of it); raise context_window or shrink tool output. Auto-compaction paused until the prompt drops.",
 			a.contextWindow, a.compactRatio*100)})
 	}
@@ -157,6 +158,9 @@ func foldEconomics(region []provider.Message) bool {
 func estimateMessagesTokens(msgs []provider.Message) int {
 	total := 0
 	for _, m := range msgs {
+		if m.LocalOnly {
+			continue
+		}
 		total += 4 // chat-message framing overhead
 		total += estimateTextTokens(m.Content)
 		total += estimateTextTokens(m.ReasoningContent)
@@ -209,6 +213,17 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	if !ok {
 		return nil // recent tail already covers everything worth keeping
 	}
+	// A controller in-flight marker records the pre-turn message count, but a
+	// compaction rewrites message indexes. Keep the entire active turn outside
+	// the fold so completed tool call/result pairs remain available for a later
+	// cancellation or crash recovery instead of surviving only as prose in a
+	// summary.
+	if active := a.activeTurnStart(msgs); active >= head && active < start {
+		start = active
+		if start <= head {
+			return nil
+		}
+	}
 	region := msgs[head:start]
 
 	// Base layer: every small user turn in the region is kept verbatim (the
@@ -258,7 +273,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		// deterministic marker rather than aborting. /compact then always frees
 		// context (and auto-compaction can't loop on a still-full window); the
 		// verbatim user turns kept above are untouched.
-		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "compaction summary unavailable (" + err.Error() + "); folded mechanically"})
+		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context was compacted without a generated summary.", Detail: "compaction summary unavailable (" + err.Error() + "); folded mechanically"})
 		summary = mechanicalFoldDigest(len(fold), archived)
 	}
 
@@ -273,8 +288,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			summaryTagClose,
 	})
 	compacted = append(compacted, msgs[start:]...)
-	a.session.Replace(compacted)
-	a.session.IncrementRewrite()
+	a.session.Rewrite(compacted)
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
@@ -299,7 +313,10 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 	if fromIdx < 0 || fromIdx >= len(msgs) {
 		return nil
 	}
-	region := msgs[fromIdx:]
+	region, localOnly := splitLocalOnlyMessages(msgs[fromIdx:])
+	if len(region) == 0 {
+		return nil
+	}
 	if a.archiveDir != "" {
 		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
 	}
@@ -307,14 +324,14 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 	if err != nil {
 		return err
 	}
-	next := make([]provider.Message, 0, fromIdx+1)
+	next := make([]provider.Message, 0, fromIdx+1+len(localOnly))
 	next = append(next, msgs[:fromIdx]...)
 	next = append(next, provider.Message{
 		Role:    provider.RoleUser,
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
-	a.session.Replace(next)
-	a.session.IncrementRewrite()
+	next = append(next, localOnly...)
+	a.session.Rewrite(next)
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -332,7 +349,10 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	if toIdx <= head || toIdx > len(msgs) {
 		return nil
 	}
-	region := msgs[head:toIdx]
+	region, localOnly := splitLocalOnlyMessages(msgs[head:toIdx])
+	if len(region) == 0 {
+		return nil
+	}
 	if a.archiveDir != "" {
 		_, _ = archiveMessages(a.archiveDir, region)
 	}
@@ -340,18 +360,52 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	if err != nil {
 		return err
 	}
-	next := make([]provider.Message, 0, head+1+len(msgs)-toIdx)
+	next := make([]provider.Message, 0, head+1+len(localOnly)+len(msgs)-toIdx)
 	next = append(next, msgs[:head]...)
 	next = append(next, provider.Message{
 		Role:    provider.RoleUser,
 		Content: "Summary of earlier conversation (compacted up to here):\n" + summary,
 	})
+	next = append(next, localOnly...)
 	next = append(next, msgs[toIdx:]...)
-	a.session.Replace(next)
-	a.session.IncrementRewrite()
+	a.session.Rewrite(next)
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil
+}
+
+// IsCompactionSummary reports whether m is a rolling digest inserted by a
+// prior compaction fold. Exported for session owners outside this package
+// (e.g. the guardian) whose turn rollback must not treat a digest as a
+// disposable user message.
+func IsCompactionSummary(m provider.Message) bool { return isCompactionSummary(m) }
+
+func (a *Agent) activeTurnStart(msgs []provider.Message) int {
+	createdAt := a.activeTurnCreatedAt.Load()
+	if createdAt == 0 {
+		return -1
+	}
+	for i, m := range msgs {
+		if m.Role == provider.RoleUser && m.CreatedAt == createdAt {
+			return i
+		}
+	}
+	return -1
+}
+
+// splitLocalOnlyMessages removes display-only interrupted output from the
+// summarizer/archive input while returning it in transcript order for durable
+// reattachment. Explicit range summaries are user-requested rewrites, but they
+// must not erase visible output or expose private partial reasoning to a model.
+func splitLocalOnlyMessages(msgs []provider.Message) (model, localOnly []provider.Message) {
+	for _, m := range msgs {
+		if m.LocalOnly {
+			localOnly = append(localOnly, m)
+			continue
+		}
+		model = append(model, m)
+	}
+	return model, localOnly
 }
 
 // isCompactionSummary reports whether m is a rolling summary from a prior fold.
@@ -401,7 +455,7 @@ func (a *Agent) pinnableUserTurn(m provider.Message) bool {
 func (a *Agent) partitionFold(region []provider.Message) (kept, fold []provider.Message) {
 	policyKeep := keepIndexes(region, a.keepPolicy)
 	for i, m := range region {
-		if policyKeep[i] || isCompactionSummary(m) || (m.Role == provider.RoleUser && a.pinnableUserTurn(m)) {
+		if m.LocalOnly || policyKeep[i] || isCompactionSummary(m) || (m.Role == provider.RoleUser && a.pinnableUserTurn(m)) {
 			kept = append(kept, m)
 		} else {
 			fold = append(fold, m)
@@ -592,6 +646,9 @@ func (a *Agent) tokPerChar() float64 {
 // content plus tool-call names and arguments, but not reasoning (stripped on
 // send).
 func msgChars(m provider.Message) int {
+	if m.LocalOnly {
+		return 0
+	}
 	n := len(m.Content)
 	for _, tc := range m.ToolCalls {
 		n += len(tc.Name) + len(tc.Arguments)
@@ -689,6 +746,9 @@ func mechanicalFoldDigest(n int, archive string) string {
 func renderTranscript(msgs []provider.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
+		if m.LocalOnly {
+			continue
+		}
 		switch m.Role {
 		case provider.RoleUser:
 			fmt.Fprintf(&b, "[user]\n%s\n\n", m.Content)

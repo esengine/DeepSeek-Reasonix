@@ -7,6 +7,17 @@ import { JSDOM } from "jsdom";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const appGo = readFileSync(resolve(testDir, "../../../app.go"), "utf8");
+const localeNotices = [
+  [readFileSync(resolve(testDir, "../locales/en.ts"), "utf8"), '"workspace.truncated": "Preview truncated to the first 2 MiB."'],
+  [readFileSync(resolve(testDir, "../locales/zh.ts"), "utf8"), '"workspace.truncated": "预览已截断到前 2 MiB。"'],
+  [readFileSync(resolve(testDir, "../locales/zh-TW.ts"), "utf8"), '"workspace.truncated": "預覽已截斷到前 2 MiB。"'],
+];
+const localeSearchLabels = [
+  [readFileSync(resolve(testDir, "../locales/en.ts"), "utf8"), '"workspace.searchPlaceholder": "Find"'],
+  [readFileSync(resolve(testDir, "../locales/zh.ts"), "utf8"), '"workspace.searchPlaceholder": "查找"'],
+  [readFileSync(resolve(testDir, "../locales/zh-TW.ts"), "utf8"), '"workspace.searchPlaceholder": "尋找"'],
+];
 
 let passed = 0;
 let failed = 0;
@@ -72,10 +83,30 @@ eq(finalDeclaration(".workspace-preview__body--code .workspace-note", "flex"), "
 eq(finalDeclaration(".workspace-preview__body--code .code-block", "display"), "flex", "code block fills the preview viewport");
 eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "display"), "flex", "code wrapper keeps the preview viewport height");
 eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "flex"), "1 1 auto", "code wrapper participates in the preview flex height");
+eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "flex-direction"), "column", "search toolbar stacks above the code viewport");
 eq(finalDeclaration(".workspace-preview__body--code .code-block__wrap", "min-height"), "0", "code wrapper can shrink around the scrollable code viewport");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "position"), "static", "workspace search toolbar participates in layout");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "z-index"), "var(--z-local-handle)", "workspace search toolbar stays clickable above the copy affordance");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "flex"), "0 0 auto", "workspace search toolbar keeps a dedicated row");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "flex-wrap"), "wrap", "narrow workspace search toolbars can form a second control row");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "width"), "100%", "workspace search toolbar spans the code viewport");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "border-width"), "0 0 1px", "workspace search toolbar uses a divider instead of a floating card");
+eq(finalDeclaration(".workspace-preview__body--code .code-search", "box-shadow"), "none", "workspace search toolbar does not retain popup elevation");
+eq(finalDeclaration(".code-search__actions", "display"), "flex", "search actions remain one coherent wrapping group");
+eq(finalDeclaration(".code-search__actions", "margin-left"), "auto", "wrapped search actions stay aligned to the toolbar edge");
 eq(finalDeclaration(".workspace-preview__body--code .code", "overflow"), "auto", "code viewport owns horizontal and vertical scrolling");
 eq(finalDeclaration(".workspace-preview__body--code .code", "min-height"), "0", "code viewport can shrink inside the preview pane");
 eq(finalDeclaration(".workspace-preview__body--code .code", "margin"), "0", "code viewport scrollbar sits at the visible pane bottom");
+eq(finalDeclaration(".code-search__input", "min-width"), "60px", "search input reserves a minimum readable width");
+eq(
+  computedDeclaration(
+    `<html data-theme-style="default"><head></head><body><div class="workspace-preview__body workspace-preview__body--code"><div class="code code--lines"></div></div></body></html>`,
+    ".code--lines",
+    "padding",
+  ),
+  "0px",
+  "themed workspace code keeps the line-number gutter flush",
+);
 eq(
   finalDeclaration(".workspace-panel--with-tree-rail:not(.workspace-panel--tree-hidden)", "grid-template-columns"),
   "var(--workspace-tree-rail-width) var(--workspace-tree-width) minmax(var(--workspace-preview-min-width), 1fr)",
@@ -94,6 +125,26 @@ eq(
   "preview-only mode keeps a narrow tree toggle rail",
 );
 eq(finalDeclaration(".workspace-panel--tree-hidden .workspace-preview", "grid-column"), "2", "preview sits beside the rail");
+eq(
+  /const filePreviewLimit = 2 \* 1024 \* 1024/.test(appGo),
+  true,
+  "backend workspace preview limit remains 2 MiB",
+);
+eq(
+  localeNotices.every(([source, expected]) => source.includes(expected)),
+  true,
+  "all locale truncation notices match the 2 MiB backend limit",
+);
+eq(
+  localeNotices.every(([source]) => !source.includes("256 KB")),
+  true,
+  "locale truncation notices do not retain the previous 256 KB limit",
+);
+eq(
+  localeSearchLabels.every(([source, expected]) => source.includes(expected)),
+  true,
+  "all locales provide workspace search labels",
+);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

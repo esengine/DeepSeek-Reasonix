@@ -18,7 +18,15 @@ type Session struct {
 	Messages       []provider.Message
 	version        uint64
 	rewriteVersion int // bumped each time the log is rewritten (compact/fold)
-	persisted      sessionPersistState
+	// persistedRewriteVersion is the highest rewriteVersion whose transcript
+	// has fully reached disk. It lives on the Session — not on the controller
+	// — so swapping session objects can never orphan or misattribute the
+	// baseline: NeedsRewriteSave always compares a session against its own
+	// save history. Save paths advance it under s.mu with the rewriteVersion
+	// captured alongside the message snapshot, never a re-read one, so a
+	// compaction landing mid-save stays unpersisted.
+	persistedRewriteVersion int
+	persisted               sessionPersistState
 	// normalizedDirty is set when LoadSession repaired the history on the way in
 	// (empty tool-call names, dangling calls, truncated args, …). The repair
 	// already lives in Messages, so the next Save persists it automatically as
@@ -29,6 +37,12 @@ type Session struct {
 	// or corrupt and returned the replayable prefix (or the .jsonl checkpoint).
 	// The next save heals the log with a rewrite-and-compact.
 	eventLogDamaged bool
+	// rawMessages preserves the pre-normalization transcript when the load-time
+	// repairs changed it (normalizedDirty). It is only meaningful on a freshly
+	// loaded Session: checkSnapshotWrite compares a pending snapshot against
+	// what is actually on disk, and the repaired view no longer represents
+	// those bytes — a session that kept running extends the raw transcript.
+	rawMessages []provider.Message
 }
 
 // NewSession initializes a session with an optional system prompt.
@@ -48,8 +62,82 @@ func (s *Session) Add(m provider.Message) {
 	s.version++
 }
 
-// Replace swaps the whole message log — used by compaction, which rewrites the
-// middle of the history.
+// UpdateToolCallPreview replaces the preview fields of the newest matching
+// assistant tool call. A dependent writer can only be previewed after an
+// earlier writer in the same model batch succeeds; updating under the session
+// lock keeps live History/Snapshot readers race-free and ensures the refreshed
+// preview is what a resumed session archives.
+func (s *Session) UpdateToolCallPreview(call provider.ToolCall) bool {
+	if call.ID == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		if s.Messages[i].Role != provider.RoleAssistant {
+			continue
+		}
+		calls := s.Messages[i].ToolCalls
+		for j := range calls {
+			if calls[j].ID != call.ID {
+				continue
+			}
+			cloned := append([]provider.ToolCall(nil), calls...)
+			cloned[j].Diff = call.Diff
+			cloned[j].Added = call.Added
+			cloned[j].Removed = call.Removed
+			s.Messages[i].ToolCalls = cloned
+			// A snapshot may have persisted the original assistant message while
+			// its tools were still running. Mark this as a rewrite so a later
+			// autosave replaces that message instead of misclassifying the tool
+			// results as an append-only suffix.
+			s.rewriteVersion++
+			s.version++
+			return true
+		}
+	}
+	return false
+}
+
+// UpdateToolCallResolution persists the host-resolved target metadata for the
+// newest matching stable proxy call. The model-visible Name/Arguments remain
+// unchanged; this metadata exists only so live and reloaded frontends classify
+// MCP readers and writers accurately.
+func (s *Session) UpdateToolCallResolution(call provider.ToolCall) bool {
+	if call.ID == "" || call.ResolvedReadOnly == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.Messages) - 1; i >= 0; i-- {
+		if s.Messages[i].Role != provider.RoleAssistant {
+			continue
+		}
+		calls := s.Messages[i].ToolCalls
+		for j := range calls {
+			if calls[j].ID != call.ID {
+				continue
+			}
+			cloned := append([]provider.ToolCall(nil), calls...)
+			readOnly := *call.ResolvedReadOnly
+			cloned[j].ResolvedName = call.ResolvedName
+			cloned[j].CapabilityID = call.CapabilityID
+			cloned[j].ResolvedReadOnly = &readOnly
+			s.Messages[i].ToolCalls = cloned
+			// A mid-turn snapshot may already contain the unresolved proxy call.
+			// Force the next save to rewrite that assistant message with its
+			// resolved local metadata.
+			s.rewriteVersion++
+			s.version++
+			return true
+		}
+	}
+	return false
+}
+
+// Replace swaps the whole message log without classifying the change as a
+// persisted-history rewrite. Call Rewrite when a live session changes messages
+// that a mid-turn snapshot may already have written.
 func (s *Session) Replace(msgs []provider.Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -57,11 +145,23 @@ func (s *Session) Replace(msgs []provider.Message) {
 	s.version++
 }
 
+// Rewrite atomically replaces the message log and marks it as a rewrite. The
+// atomic classification matters when a periodic snapshot races compaction,
+// pruning, or local metadata edits: a later autosave must use owned-rewrite
+// conflict checks instead of mistaking the modified prefix for another writer.
+func (s *Session) Rewrite(msgs []provider.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Messages = msgs
+	s.rewriteVersion++
+	s.version++
+}
+
 // Snapshot returns a copy of the messages, safe to read from another goroutine
 // while a turn appends. Frontends (History, Save) use it instead of touching the
 // live slice.
 func (s *Session) Snapshot() []provider.Message {
-	msgs, _ := s.snapshotWithVersion()
+	msgs, _, _ := s.snapshotWithVersion()
 	return msgs
 }
 
@@ -91,12 +191,13 @@ func (s *Session) CloneWithMessages(msgs []provider.Message) *Session {
 		version++
 	}
 	return &Session{
-		Messages:        append([]provider.Message(nil), msgs...),
-		version:         version,
-		rewriteVersion:  s.rewriteVersion,
-		persisted:       s.persisted,
-		normalizedDirty: s.normalizedDirty,
-		eventLogDamaged: s.eventLogDamaged,
+		Messages:                append([]provider.Message(nil), msgs...),
+		version:                 version,
+		rewriteVersion:          s.rewriteVersion,
+		persistedRewriteVersion: s.persistedRewriteVersion,
+		persisted:               s.persisted,
+		normalizedDirty:         s.normalizedDirty,
+		eventLogDamaged:         s.eventLogDamaged,
 	}
 }
 
@@ -118,19 +219,24 @@ func (s *Session) CloneWithMessagesIfCompatible(msgs []provider.Message) (*Sessi
 		version++
 	}
 	return &Session{
-		Messages:        append([]provider.Message(nil), msgs...),
-		version:         version,
-		rewriteVersion:  s.rewriteVersion,
-		persisted:       s.persisted,
-		normalizedDirty: s.normalizedDirty,
-		eventLogDamaged: s.eventLogDamaged,
+		Messages:                append([]provider.Message(nil), msgs...),
+		version:                 version,
+		rewriteVersion:          s.rewriteVersion,
+		persistedRewriteVersion: s.persistedRewriteVersion,
+		persisted:               s.persisted,
+		normalizedDirty:         s.normalizedDirty,
+		eventLogDamaged:         s.eventLogDamaged,
 	}, true
 }
 
-func (s *Session) snapshotWithVersion() ([]provider.Message, uint64) {
+// snapshotWithVersion returns the messages together with the version and
+// rewriteVersion they were captured under, in one lock window: save paths
+// persist exactly this rewriteVersion as the new baseline, so a rewrite that
+// lands after the capture cannot be misrecorded as saved.
+func (s *Session) snapshotWithVersion() ([]provider.Message, uint64, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]provider.Message(nil), s.Messages...), s.version
+	return append([]provider.Message(nil), s.Messages...), s.version, s.rewriteVersion
 }
 
 // RewriteVersion returns the current rewrite version.
@@ -138,6 +244,16 @@ func (s *Session) RewriteVersion() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rewriteVersion
+}
+
+// NeedsRewriteSave reports whether the history has been rewritten in memory
+// (compaction, prune) since the last successful full save of this session.
+// Snapshot paths use it to decide that the next write must be an owned
+// rewrite instead of an append.
+func (s *Session) NeedsRewriteSave() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rewriteVersion > s.persistedRewriteVersion
 }
 
 // IncrementRewrite bumps the rewrite version by 1.

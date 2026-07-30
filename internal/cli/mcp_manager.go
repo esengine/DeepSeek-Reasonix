@@ -65,6 +65,8 @@ type mcpServerView struct {
 	ToolList   []plugin.ToolInfo
 	AuthStatus string
 	AuthURL    string
+	Source     config.MCPConfigSource
+	ConfigPath string
 
 	authConfigured bool
 }
@@ -297,8 +299,9 @@ func (p *mcpManager) selectedServer() (mcpServerView, bool) {
 }
 
 func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
-	snap := mcpSnapshot{configPath: mcpConfigLocation()}
-	cfg, err := config.Load()
+	workspace := m.mcpWorkspaceRoot()
+	snap := mcpSnapshot{configPath: config.UserConfigPath()}
+	cfg, err := config.LoadForRoot(workspace)
 	if err != nil {
 		snap.err = err.Error()
 	}
@@ -320,7 +323,7 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 				ToolList: append([]plugin.ToolInfo(nil), s.ToolList...),
 			}
 			if p, ok := configured[s.Name]; ok {
-				v = withMCPPluginConfig(v, p)
+				v = withMCPPluginConfig(v, p, workspace)
 			}
 			snap.servers = append(snap.servers, v)
 			seen[s.Name] = true
@@ -331,7 +334,7 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 				Error: f.Error,
 			}
 			if p, ok := configured[f.Name]; ok {
-				v = withMCPPluginConfig(v, p)
+				v = withMCPPluginConfig(v, p, workspace)
 			}
 			snap.servers = append(snap.servers, v)
 			seen[f.Name] = true
@@ -342,7 +345,7 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 			}
 			v := mcpServerView{Name: name, Status: "initializing"}
 			if p, ok := configured[name]; ok {
-				v = withMCPPluginConfig(v, p)
+				v = withMCPPluginConfig(v, p, workspace)
 			}
 			snap.servers = append(snap.servers, v)
 			seen[name] = true
@@ -359,14 +362,24 @@ func (m chatTUI) buildMCPSnapshot() mcpSnapshot {
 		default:
 			v.Status = "deferred"
 		}
-		v = withMCPPluginConfig(v, p)
+		v = withMCPPluginConfig(v, p, workspace)
 		snap.servers = append(snap.servers, v)
 		seen[p.Name] = true
 	}
+	sort.SliceStable(snap.servers, func(i, j int) bool {
+		return mcpServerGroupRank(snap.servers[i]) < mcpServerGroupRank(snap.servers[j])
+	})
 	return snap
 }
 
-func withMCPPluginConfig(v mcpServerView, p config.PluginEntry) mcpServerView {
+func (m chatTUI) mcpWorkspaceRoot() string {
+	if m.ctrl != nil && strings.TrimSpace(m.ctrl.WorkspaceRoot()) != "" {
+		return m.ctrl.WorkspaceRoot()
+	}
+	return mcpCLIWorkspaceRoot()
+}
+
+func withMCPPluginConfig(v mcpServerView, p config.PluginEntry, workspace string) mcpServerView {
 	transport := strings.ToLower(strings.TrimSpace(p.Type))
 	if transport == "" {
 		transport = "stdio"
@@ -378,6 +391,8 @@ func withMCPPluginConfig(v mcpServerView, p config.PluginEntry) mcpServerView {
 	v.Command = p.Command
 	v.Args = append([]string(nil), p.Args...)
 	v.URL = p.URL
+	v.Source = p.Source
+	v.ConfigPath = config.MCPConfigPathForEntry(workspace, p)
 	v.authConfigured = mcpdiag.HasAuthConfig(p.Headers, p.Env, p.URL)
 	if len(p.Env) > 0 {
 		v.EnvKeys = make([]string, 0, len(p.Env))
@@ -390,6 +405,17 @@ func withMCPPluginConfig(v mcpServerView, p config.PluginEntry) mcpServerView {
 	v.AuthStatus = auth.Status
 	v.AuthURL = auth.URL
 	return v
+}
+
+func mcpServerGroupRank(v mcpServerView) int {
+	switch {
+	case v.BuiltIn || v.Source == config.MCPSourcePluginPackage:
+		return 0
+	case v.Source.ProjectScoped():
+		return 1
+	default:
+		return 2
+	}
 }
 
 func visibleRange(total, sel, limit int) (int, int) {

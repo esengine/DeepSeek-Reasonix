@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 )
 
@@ -629,7 +630,7 @@ func transformAndCopyJsonl(src, dst string) error {
 // sidecars yield the zero value (session routes to the global dir, untitled).
 func readLegacyMeta(srcDir, base string) legacyMeta {
 	var m legacyMeta
-	b, err := os.ReadFile(filepath.Join(srcDir, base+".meta.json"))
+	b, err := fileencoding.ReadFileUTF8(filepath.Join(srcDir, base+".meta.json"))
 	if err != nil {
 		return m
 	}
@@ -674,7 +675,7 @@ func recordImportedTitle(destDir, base, summary string) {
 	}
 	path := filepath.Join(destDir, ".titles.json")
 	titles := map[string]string{}
-	if b, err := os.ReadFile(path); err == nil {
+	if b, err := fileencoding.ReadFileUTF8(path); err == nil {
 		_ = json.Unmarshal(b, &titles)
 	}
 	key := base + ".jsonl"

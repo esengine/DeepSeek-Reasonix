@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/context-panel-breakdown.test.ts
 
-import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
+import { cacheHitTone, contextBreakdown, contextCostDisplay, contextSessionCache, contextSourceRows, contextUsageRefreshKey, contextWindowStatus, formatCacheHitRate, formatMetricTokens } from "../components/ContextPanel";
 import { currencySymbol, formatMoney, formatMoneyLocalized } from "../lib/money";
 
 let passed = 0;
@@ -109,6 +109,59 @@ const infoCost = contextCostDisplay({
   usage: { cost: 0, costUsd: 0, currency: "¥" },
 });
 eq(infoCost, { amount: 0.1759, currency: "$" }, "panel cost keeps the panel currency instead of state default");
+const singleRequestOnly = contextCostDisplay({
+  info: { sessionCost: 0, sessionCurrency: "", sessionCostUsd: 0 },
+  sessionCost: 0,
+  sessionCurrency: "¥",
+  usage: { cost: 0.42, costUsd: 0.42, currency: "¥" },
+});
+eq(
+  singleRequestOnly,
+  { amount: 0, currency: "¥" },
+  "a single request's cost never renders under the session-cost label",
+);
+const localAccumulated = contextCostDisplay({
+  info: { sessionCost: 0, sessionCurrency: "", sessionCostUsd: 0 },
+  sessionCost: 1.5,
+  sessionCurrency: "¥",
+  usage: { cost: 0.42, costUsd: 0.42, currency: "$" },
+});
+eq(localAccumulated, { amount: 1.5, currency: "¥" }, "locally accumulated session cost still renders");
+
+console.log("\ncontext panel session cache scope");
+
+eq(
+  contextSessionCache(
+    { sessionCacheHitTokens: 900, sessionCacheMissTokens: 100 },
+    { cacheHitTokens: 800, cacheMissTokens: 200 },
+    { sessionCacheHitTokens: 700, sessionCacheMissTokens: 300 },
+  ),
+  { hit: 800, miss: 200 },
+  "live shared ContextInfo beats a stale all-sources panel snapshot",
+);
+eq(
+  contextSessionCache(
+    { sessionCacheHitTokens: 900, sessionCacheMissTokens: 100 },
+    { cacheHitTokens: 0, cacheMissTokens: 0 },
+    { sessionCacheHitTokens: 700, sessionCacheMissTokens: 300 },
+  ),
+  { hit: 900, miss: 100 },
+  "panel telemetry remains the all-sources fallback without live ContextInfo",
+);
+eq(
+  contextSessionCache(
+    { sessionCacheHitTokens: 0, sessionCacheMissTokens: 0 },
+    { cacheHitTokens: 0, cacheMissTokens: 0 },
+    { sessionCacheHitTokens: 700, sessionCacheMissTokens: 300 },
+  ),
+  { hit: 700, miss: 300 },
+  "executor-only wire counters only bridge the pre-refresh gap",
+);
+eq(
+  contextSessionCache(null, undefined, undefined),
+  { hit: 0, miss: 0 },
+  "no data renders as empty, not NaN",
+);
 eq(formatMoney(infoCost.amount, infoCost.currency, "dash"), "$0.1759", "USD panel cost renders with dollar sign");
 eq(currencySymbol("楼"), "¥", "unexpected currency text does not leak into money values");
 eq(currencySymbol("aud"), "AUD ", "unknown ISO currency codes stay readable");

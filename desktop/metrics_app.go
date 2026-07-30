@@ -16,6 +16,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/recovery"
 )
 
 // metrics_app.go is the aggregate desktop-metrics flush: anonymous (signal,
@@ -30,6 +31,7 @@ const metricsPendingFile = "metrics-pending.json"
 const metricsPostTimeout = 8 * time.Second
 
 var statusCodePattern = regexp.MustCompile(`status (\d{3})`)
+var metricsPendingMu sync.Mutex
 
 type counters map[string]map[string]int // signal -> bucket -> count
 
@@ -230,8 +232,6 @@ func (m *metricsAggregator) observeSettingsSnapshot(c *config.Config) {
 	m.inc("settings_theme_style", themeStyle)
 	m.inc("settings_close_behavior", c.DesktopCloseBehavior())
 	m.inc("settings_display_mode", c.DesktopDisplayMode())
-	m.inc("settings_auto_plan", desktopAutoPlanMode(c.Agent.AutoPlan))
-	m.inc("settings_memory_compiler", boolBucket(c.MemoryCompilerEnabled()))
 	m.inc("settings_status_bar_style", c.DesktopStatusBarStyle())
 	m.inc("settings_status_bar_items_count", statusBarItemsCountBucket(len(c.DesktopStatusBarItems())))
 	m.inc("settings_check_updates", boolBucket(c.DesktopCheckUpdates()))
@@ -281,6 +281,24 @@ func (a *App) recordSettingsMetricsSnapshot(c *config.Config) {
 	m.persist()
 }
 
+// recordDiagnosticMetric persists one bounded operational signal even when the
+// native event arrives before Wails OnStartup installs the session aggregator.
+func (a *App) recordDiagnosticMetric(signal, bucket string) {
+	if version == "dev" {
+		return
+	}
+	m := a.metrics.Load()
+	if m == nil {
+		cfg, err := config.Load()
+		if err != nil || !cfg.DesktopMetrics() {
+			return
+		}
+		m = newMetricsAggregator(config.MemoryUserDir())
+	}
+	m.inc(signal, metricBucket(bucket))
+	m.persist()
+}
+
 // observe maps one event to counter increments, reading only enumerated facts
 // (finish reason, error class, cache-hit bucket) — never message text.
 func (m *metricsAggregator) observe(e event.Event) {
@@ -297,7 +315,7 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.TurnDone:
 		m.inc("turns", "total")
-		if e.Err != nil {
+		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused {
 			m.inc("provider_error", errorClass(e.Err.Error()))
 		}
 	case event.ToolResult:
@@ -306,71 +324,10 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.CompactionDone:
 		m.inc("compaction", "total")
-	case event.MemoryCompilerStatsEvent:
-		m.observeMemoryCompilerStats(e.MemoryCompiler)
 	case event.Notice:
-		if strings.HasPrefix(e.Text, "empty final answer blocked") {
+		if e.Text == "No visible answer was produced; asking the assistant to respond again." || strings.HasPrefix(e.Detail, "empty final answer blocked") {
 			m.inc("empty_final", "total")
 		}
-	}
-}
-
-func (m *metricsAggregator) observeMemoryCompilerStats(s *event.MemoryCompilerStats) {
-	if s == nil {
-		return
-	}
-	m.inc("memory_compiler_turn", "total")
-	m.inc("memory_compiler_injected", boolBucket(s.Injected))
-	m.inc("memory_compiler_useful_ir", boolBucket(s.UsefulIR))
-	m.inc("memory_compiler_compiled_tokens", tokenSizeBucket(s.CompiledTokens))
-	m.inc("memory_compiler_ir_overhead_tokens", tokenSizeBucket(s.IROverheadTokens))
-	m.inc("memory_compiler_memory_refs", countBucket(s.MemoryReferences))
-	m.inc("memory_compiler_constraints", countBucket(s.Constraints))
-	m.inc("memory_compiler_risk_notes", countBucket(s.RiskNotes))
-	m.inc("memory_compiler_execution_steps", countBucket(s.ExecutionSteps))
-	m.inc("memory_compiler_nodes", memorySizeBucket(s.TotalNodes))
-	m.inc("memory_compiler_high_signal_nodes", memorySizeBucket(s.HighSignalNodes))
-	m.inc("memory_compiler_tool_result_nodes", memorySizeBucket(s.ToolResultNodes))
-	m.inc("memory_compiler_decisions", memorySizeBucket(s.DecisionNodes))
-	m.inc("memory_compiler_strategies", memorySizeBucket(s.StrategyCount))
-	m.inc("memory_compiler_learnings", memorySizeBucket(s.LearningCount))
-}
-
-func tokenSizeBucket(n int) string {
-	if n <= 0 {
-		return "t_0"
-	}
-	switch {
-	case n <= 250:
-		return "t_1_250"
-	case n <= 750:
-		return "t_251_750"
-	case n <= 1500:
-		return "t_751_1500"
-	case n <= 3000:
-		return "t_1501_3000"
-	default:
-		return "t_3001_plus"
-	}
-}
-
-func memorySizeBucket(n int) string {
-	if n <= 0 {
-		return "n_0"
-	}
-	switch {
-	case n <= 5:
-		return "n_1_5"
-	case n <= 20:
-		return "n_6_20"
-	case n <= 50:
-		return "n_21_50"
-	case n <= 100:
-		return "n_51_100"
-	case n <= 300:
-		return "n_101_300"
-	default:
-		return "n_301_plus"
 	}
 }
 
@@ -407,6 +364,16 @@ func errorClass(msg string) string {
 	}
 	low := strings.ToLower(msg)
 	switch {
+	case strings.Contains(low, "authorization cancelled"):
+		return "authorization_cancelled"
+	case strings.Contains(low, "authorization failed"):
+		return "authorization_failed"
+	case strings.Contains(low, "package manager busy"):
+		return "package_manager_busy"
+	case strings.Contains(low, "package install failed"):
+		return "package_install_failed"
+	case strings.Contains(low, "package verify failed"), strings.Contains(low, "signature verification failed"):
+		return "package_verify_failed"
 	case strings.Contains(low, "reset"), strings.Contains(low, "interrupt"), strings.Contains(low, "eof"):
 		return "stream_interrupted"
 	case strings.Contains(low, "timeout"), strings.Contains(low, "deadline"):
@@ -423,12 +390,59 @@ func toolErrorClass(msg string) string {
 		return "permission"
 	case strings.Contains(low, "plan mode"):
 		return "planmode"
+	case strings.Contains(low, "recovery"):
+		return "recovery"
 	case strings.Contains(low, "hook"):
 		return "hook"
 	case strings.Contains(low, "timeout"), strings.Contains(low, "deadline"):
 		return "timeout"
 	default:
 		return "exec"
+	}
+}
+
+// observeRecoveryMetrics merges content-free recovery counters from a controller
+// (failure events, rule/review continues, human prompts/actions, reviewer errors).
+func (m *metricsAggregator) observeRecoveryMetrics(stats recovery.Metrics) {
+	if m == nil {
+		return
+	}
+	add := func(signal string, n int64) {
+		for i := int64(0); i < n; i++ {
+			m.inc(signal, "total")
+		}
+	}
+	add("recovery_failure", stats.FailureEvents)
+	add("recovery_rule_continue", stats.RuleContinues)
+	add("recovery_review_continue", stats.ReviewContinues)
+	add("recovery_human_prompt", stats.HumanPrompts)
+	add("recovery_human_continue", stats.HumanContinues)
+	add("recovery_human_revise", stats.HumanRevises)
+	add("recovery_review_error", stats.ReviewErrors)
+	add("recovery_repeat_prompt", stats.RepeatPrompts)
+	if stats.ReviewLatencyCount > 0 {
+		avg := stats.ReviewLatencyMsSum / stats.ReviewLatencyCount
+		switch {
+		case avg < 500:
+			m.inc("recovery_review_latency", "lt_500ms")
+		case avg < 2000:
+			m.inc("recovery_review_latency", "lt_2s")
+		case avg < 10000:
+			m.inc("recovery_review_latency", "lt_10s")
+		default:
+			m.inc("recovery_review_latency", "gte_10s")
+		}
+	}
+}
+
+func observeControllerRecoveryMetrics(m *metricsAggregator, ctrl any) {
+	if m == nil || ctrl == nil {
+		return
+	}
+	if drainer, ok := ctrl.(interface {
+		DrainRecoveryMetrics() recovery.Metrics
+	}); ok {
+		m.observeRecoveryMetrics(drainer.DrainRecoveryMetrics())
 	}
 }
 
@@ -444,13 +458,15 @@ func (m *metricsAggregator) persist() {
 	m.c = counters{}
 	m.mu.Unlock()
 
+	metricsPendingMu.Lock()
 	pending := readCounters(m.path)
 	pending.merge(delta)
 	writeCounters(m.path, pending)
+	metricsPendingMu.Unlock()
 }
 
 func readCounters(path string) counters {
-	b, err := os.ReadFile(path)
+	b, err := readFileUTF8(path)
 	if err != nil {
 		return counters{}
 	}
@@ -505,9 +521,12 @@ func (a *App) flushMetrics() {
 	}
 	path := filepath.Join(config.MemoryUserDir(), metricsPendingFile)
 	temp := path + ".sending"
+	metricsPendingMu.Lock()
 	if os.Rename(path, temp) != nil {
+		metricsPendingMu.Unlock()
 		return // nothing pending
 	}
+	metricsPendingMu.Unlock()
 	flat := flatten(readCounters(temp))
 	payload := metricsPayload{Version: version, OS: runtime.GOOS, Counters: flat}
 	if id, err := installID(); err == nil {
@@ -517,9 +536,11 @@ func (a *App) flushMetrics() {
 		_ = os.Remove(temp)
 		return
 	}
+	metricsPendingMu.Lock()
 	pending := readCounters(path)
 	pending.merge(readCounters(temp))
 	writeCounters(path, pending)
+	metricsPendingMu.Unlock()
 	_ = os.Remove(temp)
 }
 

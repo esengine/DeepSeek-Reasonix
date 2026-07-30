@@ -63,6 +63,10 @@ func writeMCPServer(b *strings.Builder, width int, s plugin.ServerStatus, prompt
 		transport = "unknown"
 	}
 	meta := fmt.Sprintf("(%s)  %s · %s · %s", transport, countText(s.Tools, "tool"), countText(len(prompts), "prompt"), countText(len(resources), "resource"))
+	invalidTools := invalidMCPTools(s.ToolList)
+	if len(invalidTools) > 0 {
+		meta += " · " + countText(len(invalidTools), "unavailable tool")
+	}
 	name := viewCompactText(s.Name, viewBudget(width, 4+2+1+visibleWidth(meta)))
 	fmt.Fprintf(b, "    %s %s %s\n", accent("✓"), bold(name), viewMeta(meta))
 	if len(prompts) > 0 {
@@ -71,6 +75,29 @@ func writeMCPServer(b *strings.Builder, width int, s plugin.ServerStatus, prompt
 	if len(resources) > 0 {
 		writeMCPResourceList(b, width, resources)
 	}
+	if len(invalidTools) > 0 {
+		b.WriteString(viewSubhead("    unavailable tools") + "\n")
+		limit := len(invalidTools)
+		if limit > mcpMaxItemsPerSection {
+			limit = mcpMaxItemsPerSection
+		}
+		for _, t := range invalidTools[:limit] {
+			writeMCPItem(b, width, "      ", t.Name, t.SchemaError)
+		}
+		if extra := len(invalidTools) - limit; extra > 0 {
+			fmt.Fprintf(b, "    %s\n", viewMore(extra, "unavailable tools"))
+		}
+	}
+}
+
+func invalidMCPTools(tools []plugin.ToolInfo) []plugin.ToolInfo {
+	out := make([]plugin.ToolInfo, 0)
+	for _, t := range tools {
+		if t.SchemaError != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func writeMCPFailure(b *strings.Builder, width int, f plugin.Failure) {

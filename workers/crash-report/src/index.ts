@@ -1,6 +1,7 @@
 // Ingest + dashboard for desktop crash/feedback/performance reports and the
-// anonymous launch ping. Reports are user-initiated; pings are opt-out
-// (desktop.telemetry).
+// anonymous launch ping. Frontend reports are user-initiated; native fatal and
+// lifecycle reports are sent on the next launch under the same opt-out desktop
+// telemetry gate as pings.
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
@@ -22,10 +23,18 @@ import type { Bindings as RegistryBindings } from "./registry/env";
 import { PackageRepo } from "./registry/db/packages";
 import { EventRepo } from "./registry/db/events";
 import { renderCommunity } from "./community";
-import { desktopReleaseChannel, handleDesktopReleaseManifest } from "./desktop_release";
+import {
+  cliReleaseChannel,
+  desktopReleaseChannel,
+  handleCLIRelease,
+  handleDesktopReleaseManifest,
+  handleReleaseGatewayRequest,
+} from "./desktop_release";
 
 const MAX_BODY_BYTES = 96 * 1024;
 const LATEST_SAMPLES_PER_GROUP = 5;
+const DEVELOPMENT_FINGERPRINT_PREFIX = "dev:";
+const GROUP_PATH_RE = /^\/stats\/group\/((?:dev:)?[0-9a-f]{64})$/;
 
 const Device = z
   .object({
@@ -51,6 +60,7 @@ const Report = z.object({
   stack: z.string().max(16 * 1024).optional(),
   componentStack: z.string().max(16 * 1024).optional(),
   topFrame: z.string().max(300).optional(),
+  fingerprintHint: z.string().max(300).optional(),
   buildCommit: z.string().max(64).optional(),
   channel: z.string().max(32).optional(),
   language: z.string().max(64).optional(),
@@ -69,17 +79,88 @@ const Report = z.object({
 });
 type ReportPayload = z.infer<typeof Report>;
 
-const Ping = z.object({
+const ClientSurface = z.enum(["desktop", "cli"]);
+type ClientSurfaceName = z.infer<typeof ClientSurface>;
+
+type TelemetryTableNames = {
+  pings: "pings" | "cli_pings";
+  metrics: "metrics" | "cli_metrics";
+  metricUsers: "metric_users" | "cli_metric_users";
+};
+
+const TELEMETRY_TABLES: Record<ClientSurfaceName, TelemetryTableNames> = {
+  desktop: { pings: "pings", metrics: "metrics", metricUsers: "metric_users" },
+  cli: { pings: "cli_pings", metrics: "cli_metrics", metricUsers: "cli_metric_users" },
+};
+
+export function telemetryTableNames(surface: ClientSurfaceName): TelemetryTableNames {
+  return TELEMETRY_TABLES[surface];
+}
+
+export const CLI_TELEMETRY_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS cli_pings (
+     date TEXT NOT NULL,
+     install_id TEXT NOT NULL,
+     version TEXT NOT NULL,
+     os TEXT NOT NULL,
+     arch TEXT NOT NULL,
+     os_version TEXT NOT NULL DEFAULT '',
+     opens INTEGER NOT NULL DEFAULT 1,
+     PRIMARY KEY (date, install_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS cli_metrics (
+     date TEXT NOT NULL,
+     version TEXT NOT NULL,
+     os TEXT NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     count INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (date, version, os, signal, bucket)
+   )`,
+  `CREATE TABLE IF NOT EXISTS cli_metric_users (
+     date TEXT NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     install_id TEXT NOT NULL,
+     version TEXT NOT NULL,
+     os TEXT NOT NULL,
+     PRIMARY KEY (date, signal, bucket, install_id)
+   )`,
+  "CREATE INDEX IF NOT EXISTS cli_pings_version ON cli_pings (version)",
+  "CREATE INDEX IF NOT EXISTS cli_metrics_signal_bucket ON cli_metrics (signal, bucket)",
+  "CREATE INDEX IF NOT EXISTS cli_metric_users_signal_bucket ON cli_metric_users (signal, bucket)",
+] as const;
+
+const cliTelemetrySchemaPromises = new WeakMap<object, Promise<void>>();
+
+export function ensureCLITelemetrySchema(env: Pick<Env, "DB">): Promise<void> {
+  const key = env.DB as unknown as object;
+  const existing = cliTelemetrySchemaPromises.get(key);
+  if (existing) return existing;
+  const creation = env.DB
+    .batch(CLI_TELEMETRY_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)))
+    .then(() => undefined)
+    .catch((err) => {
+      cliTelemetrySchemaPromises.delete(key);
+      throw err;
+    });
+  cliTelemetrySchemaPromises.set(key, creation);
+  return creation;
+}
+
+export const Ping = z.object({
   installId: z.string().regex(/^[0-9a-f]{32}$/),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
   arch: z.string().min(1).max(32),
   osVersion: z.string().max(128).optional(),
+  surface: ClientSurface.default("desktop"),
 });
 
-// Opt-in aggregate desktop metrics: a per-launch snapshot of (signal, bucket)
-// counters. No install id, no content — just enumerated signals and bounded
-// buckets so the worker table can never be polluted with arbitrary keys.
+// Opt-in aggregate client metrics: a per-launch snapshot of (signal, bucket)
+// counters. The optional surface-specific random install id deduplicates DAU;
+// there is no user content. Unknown signals are discarded before storage so
+// older workers can accept batches from newer clients safely.
 const METRIC_SIGNALS = [
   "finish_reason",
   "empty_final",
@@ -87,10 +168,33 @@ const METRIC_SIGNALS = [
   "cache_hit",
   "tool_error",
   "updater_error",
+  "updater_event",
   "compaction",
   "turns",
   "desktop_hang",
   "desktop_hang_age",
+  "desktop_exit",
+  "desktop_exit_phase",
+  "desktop_uptime",
+  "desktop_install",
+  "desktop_update_transition",
+  "desktop_restore",
+  "desktop_webview2_failure",
+  "cli_mode",
+  "cli_profile",
+  "cli_permission_mode",
+  "cli_session_mode",
+  "cli_turn_latency",
+  "cli_exit",
+  "recovery_failure",
+  "recovery_rule_continue",
+  "recovery_review_continue",
+  "recovery_human_prompt",
+  "recovery_human_continue",
+  "recovery_human_revise",
+  "recovery_review_error",
+  "recovery_repeat_prompt",
+  "recovery_review_latency",
   "client_surface",
   "client_version",
   "settings_language",
@@ -99,7 +203,6 @@ const METRIC_SIGNALS = [
   "settings_theme_style",
   "settings_close_behavior",
   "settings_display_mode",
-  "settings_auto_plan",
   "settings_status_bar_style",
   "settings_status_bar_items_count",
   "settings_check_updates",
@@ -127,27 +230,48 @@ const METRIC_SIGNALS = [
   "settings_bot_connection_approval",
 ] as const;
 
-const Metrics = z.object({
+type MetricSignal = (typeof METRIC_SIGNALS)[number];
+
+const METRIC_SIGNAL_SET: ReadonlySet<string> = new Set(METRIC_SIGNALS);
+
+const KnownMetricCounter = z.object({
+  signal: z.enum(METRIC_SIGNALS),
+  bucket: z
+    .string()
+    .min(1)
+    .max(96)
+    .regex(/^[a-z0-9_]+$/),
+  count: z.number().int().min(1).max(1_000_000),
+});
+
+const UnknownMetricCounter = z
+  .object({
+    signal: z
+      .string()
+      .min(1)
+      .max(96)
+      .refine((signal) => !METRIC_SIGNAL_SET.has(signal)),
+  })
+  .passthrough()
+  .transform(() => null);
+
+export const Metrics = z.object({
   installId: z
     .string()
     .regex(/^[0-9a-f]{32}$/)
     .optional(),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
+  surface: ClientSurface.default("desktop"),
   counters: z
-    .array(
-      z.object({
-        signal: z.enum(METRIC_SIGNALS),
-        bucket: z
-          .string()
-          .min(1)
-          .max(96)
-          .regex(/^[a-z0-9_]+$/),
-        count: z.number().int().min(1).max(1_000_000),
-      }),
-    )
+    .array(z.union([KnownMetricCounter, UnknownMetricCounter]))
     .min(1)
-    .max(128),
+    .max(128)
+    .transform((counters) =>
+      counters.filter(
+        (counter): counter is z.infer<typeof KnownMetricCounter> & { signal: MetricSignal } => counter !== null,
+      ),
+    ),
 });
 
 type FingerprintInput = {
@@ -158,6 +282,7 @@ type FingerprintInput = {
   errorType?: string;
   errorMessage?: string;
   topFrame?: string;
+  fingerprintHint?: string;
 };
 
 export function scrubSensitiveText(input: string): string {
@@ -214,6 +339,7 @@ export function normalizeForFingerprint(inputOrKind: FingerprintInput | string, 
     "\n" +
     normalizeStackFrame(input.topFrame || "") +
     "\n" +
+    (input.fingerprintHint ? `${input.fingerprintHint}\n` : "") +
     normalizeFingerprintText(head)
   );
 }
@@ -228,6 +354,7 @@ function hasStructuredCrashFields(r: ReportPayload): boolean {
       r.stack ||
       r.componentStack ||
       r.topFrame ||
+      r.fingerprintHint ||
       r.buildCommit ||
       r.channel ||
       r.language ||
@@ -251,12 +378,37 @@ export function crashTitle(message: string): string {
 
 type SeverityInput = {
   kind: string;
+  version?: string;
   source: string;
   label: string;
   errorType: string;
   errorMessage: string;
   topFrame: string;
+  channel?: string;
 };
+
+const RESIZE_OBSERVER_NOTICE_RE = /^ResizeObserver loop (?:limit exceeded|completed with undelivered notifications\.?)$/;
+
+export function isDevelopmentReport(input: SeverityInput): boolean {
+  return input.channel?.trim().toLowerCase() === "dev" || input.version?.trim().toLowerCase().startsWith("dev") === true;
+}
+
+export function namespaceReportFingerprint(hash: string, development: boolean): string {
+  return development ? `${DEVELOPMENT_FINGERPRINT_PREFIX}${hash}` : hash;
+}
+
+export function groupFingerprintFromPath(path: string): string | null {
+  return path.match(GROUP_PATH_RE)?.[1] ?? null;
+}
+
+export function isKnownNonCrashDiagnostic(input: SeverityInput): boolean {
+  const message = input.errorMessage.trim();
+  return (
+    RESIZE_OBSERVER_NOTICE_RE.test(message) ||
+    /Minified React error #520\b/.test(message) ||
+    message.includes("additional File object is not a file on the disk")
+  );
+}
 
 export function isOpaqueScriptErrorReport(input: SeverityInput): boolean {
   return (
@@ -278,7 +430,7 @@ function severityForKind(kind: string): string {
 }
 
 export function severityForReport(input: SeverityInput): string {
-  if (isOpaqueScriptErrorReport(input)) return "low";
+  if (isDevelopmentReport(input) || isOpaqueScriptErrorReport(input) || isKnownNonCrashDiagnostic(input)) return "low";
   return severityForKind(input.kind);
 }
 
@@ -297,6 +449,16 @@ async function readJSON(request: Request): Promise<unknown | Response> {
   }
 }
 
+// Ingest writes fail together when the database is unhealthy (e.g. the D1
+// size cap: every INSERT throws while reads stay fine). Surface that as a
+// deliberate 503 with a loud log instead of an opaque worker exception, so
+// `wrangler tail` / observability show the root cause and clients see a
+// retryable status.
+function storageUnavailable(op: string, err: unknown): Response {
+  console.error(`${op}: D1 write failed`, err);
+  return new Response("storage unavailable", { status: 503 });
+}
+
 async function handleReport(request: Request, env: Env): Promise<Response> {
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   const { success } = await env.RATE_LIMITER.limit({ key: ip });
@@ -312,6 +474,7 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
   const stack = scrubSensitiveText(r.stack ?? "");
   const componentStack = scrubSensitiveText(r.componentStack ?? "");
   const topFrame = scrubSensitiveText(r.topFrame ?? "");
+  const fingerprintHint = scrubSensitiveText(r.fingerprintHint ?? "");
   const view = scrubSensitiveText(r.view ?? "");
   const breadcrumbs = (r.breadcrumbs ?? []).map((b) => ({
     ...b,
@@ -327,9 +490,9 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
         errorType: r.errorType,
         errorMessage,
         topFrame,
+        fingerprintHint,
       })
     : normalizeForFingerprint(r.kind, message);
-  const fingerprint = await sha256Hex(fingerprintBasis);
   const now = new Date().toISOString();
   const title = crashTitle(message);
   const source = r.source ?? "legacy";
@@ -337,83 +500,100 @@ async function handleReport(request: Request, env: Env): Promise<Response> {
   const errorType = r.errorType ?? "";
   const buildCommit = r.buildCommit ?? "";
   const channel = r.channel ?? "";
-  const severity = severityForReport({ kind: r.kind, source, label, errorType, errorMessage, topFrame });
-  const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
-    .bind(fingerprint)
-    .first<{ status: string }>();
-  const regressedAt = prior?.status === "resolved" ? now : "";
+  const severityInput = {
+    kind: r.kind,
+    version: r.version,
+    source,
+    label,
+    errorType,
+    errorMessage,
+    topFrame,
+    channel,
+  };
+  const development = isDevelopmentReport(severityInput);
+  const fingerprint = namespaceReportFingerprint(await sha256Hex(fingerprintBasis), development);
+  const severity = severityForReport(severityInput);
+  try {
+    const prior = await env.DB.prepare("SELECT status FROM groups WHERE fingerprint = ?1")
+      .bind(fingerprint)
+      .first<{ status: string }>();
+    const regressedAt = prior?.status === "resolved" ? now : "";
 
-  await env.DB.prepare(
-    `INSERT INTO groups (
-       fingerprint, kind, count, first_seen, last_seen, first_version, last_version,
-       status, title, source, label, error_type, top_frame, severity,
-       last_os, last_arch, last_build_commit, last_channel, last_sample_at, regressed_at
-     )
-     VALUES (?1, ?2, 1, ?3, ?3, ?4, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?3, ?15)
-     ON CONFLICT (fingerprint) DO UPDATE SET
-       count = count + 1,
-       last_seen = ?3,
-       last_version = ?4,
-       title = ?5,
-       source = ?6,
-       label = ?7,
-       error_type = ?8,
-       top_frame = ?9,
-       last_os = ?11,
-       last_arch = ?12,
-       last_build_commit = ?13,
-       last_channel = ?14,
-       last_sample_at = ?3,
-       status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
-       regressed_at = CASE WHEN status = 'resolved' THEN ?3 ELSE regressed_at END`,
-  )
-    .bind(fingerprint, r.kind, now, r.version, title, source, label, errorType, topFrame, severity, r.os, r.arch, buildCommit, channel, regressedAt)
-    .run();
-
-  await env.DB.prepare(
-    `INSERT INTO reports (
-       fingerprint, kind, version, os, arch, message, device, created_at,
-       source, label, error_type, error_message, top_frame, build_commit, channel,
-       language, view, breadcrumbs, component_stack, stack, occurred_at
-     )
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)`,
-  )
-    .bind(
-      fingerprint,
-      r.kind,
-      r.version,
-      r.os,
-      r.arch,
-      message,
-      JSON.stringify(r.device ?? {}),
-      now,
-      source,
-      label,
-      errorType,
-      errorMessage,
-      topFrame,
-      buildCommit,
-      channel,
-      r.language ?? "",
-      view,
-      JSON.stringify(breadcrumbs),
-      componentStack,
-      stack,
-      r.occurredAt ?? "",
+    await env.DB.prepare(
+      `INSERT INTO groups (
+         fingerprint, kind, count, first_seen, last_seen, first_version, last_version,
+         status, title, source, label, error_type, top_frame, severity,
+         last_os, last_arch, last_build_commit, last_channel, last_sample_at, regressed_at
+       )
+       VALUES (?1, ?2, 1, ?3, ?3, ?4, ?4, 'open', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?3, ?15)
+       ON CONFLICT (fingerprint) DO UPDATE SET
+         count = count + 1,
+         last_seen = ?3,
+         last_version = ?4,
+         title = ?5,
+         source = ?6,
+         label = ?7,
+         error_type = ?8,
+         top_frame = ?9,
+         severity = CASE WHEN severity = 'critical' THEN severity WHEN ?10 = 'low' THEN 'low' ELSE severity END,
+         last_os = ?11,
+         last_arch = ?12,
+         last_build_commit = ?13,
+         last_channel = ?14,
+         last_sample_at = ?3,
+         status = CASE WHEN status = 'resolved' THEN 'open' ELSE status END,
+         regressed_at = CASE WHEN status = 'resolved' THEN ?3 ELSE regressed_at END`,
     )
-    .run();
+      .bind(fingerprint, r.kind, now, r.version, title, source, label, errorType, topFrame, severity, r.os, r.arch, buildCommit, channel, regressedAt)
+      .run();
 
-  await env.DB.prepare(
-    `DELETE FROM reports
-     WHERE fingerprint = ?1
-       AND id NOT IN (
-         SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id ASC LIMIT 1)
-         UNION
-         SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id DESC LIMIT ?2)
-       )`,
-  )
-    .bind(fingerprint, LATEST_SAMPLES_PER_GROUP)
-    .run();
+    await env.DB.prepare(
+      `INSERT INTO reports (
+         fingerprint, kind, version, os, arch, message, device, created_at,
+         source, label, error_type, error_message, top_frame, build_commit, channel,
+         language, view, breadcrumbs, component_stack, stack, occurred_at
+       )
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)`,
+    )
+      .bind(
+        fingerprint,
+        r.kind,
+        r.version,
+        r.os,
+        r.arch,
+        message,
+        JSON.stringify(r.device ?? {}),
+        now,
+        source,
+        label,
+        errorType,
+        errorMessage,
+        topFrame,
+        buildCommit,
+        channel,
+        r.language ?? "",
+        view,
+        JSON.stringify(breadcrumbs),
+        componentStack,
+        stack,
+        r.occurredAt ?? "",
+      )
+      .run();
+
+    await env.DB.prepare(
+      `DELETE FROM reports
+       WHERE fingerprint = ?1
+         AND id NOT IN (
+           SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id ASC LIMIT 1)
+           UNION
+           SELECT id FROM (SELECT id FROM reports WHERE fingerprint = ?1 ORDER BY id DESC LIMIT ?2)
+         )`,
+    )
+      .bind(fingerprint, LATEST_SAMPLES_PER_GROUP)
+      .run();
+  } catch (err) {
+    return storageUnavailable("report", err);
+  }
 
   return new Response("ok", { status: 202 });
 }
@@ -428,15 +608,21 @@ async function handlePing(request: Request, env: Env): Promise<Response> {
   const parsed = Ping.safeParse(raw);
   if (!parsed.success) return new Response("bad request", { status: 400 });
   const p = parsed.data;
+  const tables = telemetryTableNames(p.surface);
 
-  await env.DB.prepare(
-    `INSERT INTO pings (date, install_id, version, os, arch, os_version, opens)
-     VALUES (date('now'), ?1, ?2, ?3, ?4, ?5, 1)
-     ON CONFLICT (date, install_id) DO UPDATE SET
-       opens = opens + 1, version = ?2, os_version = ?5`,
-  )
-    .bind(p.installId, p.version, p.os, p.arch, p.osVersion ?? "")
-    .run();
+  try {
+    if (p.surface === "cli") await ensureCLITelemetrySchema(env);
+    await env.DB.prepare(
+      `INSERT INTO ${tables.pings} (date, install_id, version, os, arch, os_version, opens)
+       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5, 1)
+       ON CONFLICT (date, install_id) DO UPDATE SET
+         opens = opens + 1, version = ?2, os_version = ?5`,
+    )
+      .bind(p.installId, p.version, p.os, p.arch, p.osVersion ?? "")
+      .run();
+  } catch (err) {
+    return storageUnavailable("ping", err);
+  }
 
   return new Response("ok", { status: 202 });
 }
@@ -451,17 +637,24 @@ async function handleMetrics(request: Request, env: Env): Promise<Response> {
   const parsed = Metrics.safeParse(raw);
   if (!parsed.success) return new Response("bad request", { status: 400 });
   const m = parsed.data;
+  if (m.counters.length === 0) return new Response("ok", { status: 202 });
+  const tables = telemetryTableNames(m.surface);
 
-  const upsert = env.DB.prepare(
-    `INSERT INTO metrics (date, version, os, signal, bucket, count)
-     VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
-     ON CONFLICT (date, version, os, signal, bucket) DO UPDATE SET
-       count = count + ?5`,
-  );
-  await env.DB.batch(m.counters.map((c) => upsert.bind(m.version, m.os, c.signal, c.bucket, c.count)));
+  try {
+    if (m.surface === "cli") await ensureCLITelemetrySchema(env);
+    const upsert = env.DB.prepare(
+      `INSERT INTO ${tables.metrics} (date, version, os, signal, bucket, count)
+       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT (date, version, os, signal, bucket) DO UPDATE SET
+         count = count + ?5`,
+    );
+    await env.DB.batch(m.counters.map((c) => upsert.bind(m.version, m.os, c.signal, c.bucket, c.count)));
+  } catch (err) {
+    return storageUnavailable("metrics", err);
+  }
   if (m.installId) {
     const userUpsert = env.DB.prepare(
-      `INSERT INTO metric_users (date, version, os, signal, bucket, install_id)
+      `INSERT INTO ${tables.metricUsers} (date, version, os, signal, bucket, install_id)
        VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
        ON CONFLICT (date, signal, bucket, install_id) DO UPDATE SET
          version = ?1, os = ?2`,
@@ -498,6 +691,7 @@ async function formObject(request: Request): Promise<Record<string, string>> {
 }
 
 type StatsFilters = {
+  surface: "desktop" | "cli";
   status: string;
   source: string;
   version: string;
@@ -511,8 +705,10 @@ type StatsFilters = {
 
 function statsFilters(url: URL): StatsFilters {
   const status = url.searchParams.get("status") ?? "";
+  const surface = url.searchParams.get("surface") ?? "desktop";
   const windowParam = url.searchParams.get("window") ?? "";
   return {
+    surface: surface === "cli" ? "cli" : "desktop",
     status: ["open", "resolved", "ignored"].includes(status) ? status : "",
     source: (url.searchParams.get("source") ?? "").slice(0, 32),
     version: (url.searchParams.get("version") ?? "").slice(0, 64),
@@ -545,19 +741,30 @@ async function crashGroups(env: Env, filters: StatsFilters, latestVersion: strin
     binds.push(latestVersion);
   }
   const sql = `SELECT fingerprint, kind, count, first_version, last_version, substr(last_seen, 1, 10) AS seen,
-      status, title, source, label, error_type, top_frame, severity, last_os, last_arch, regressed_at
+      status, title, source, label, error_type, top_frame, severity, last_os, last_arch, last_channel, regressed_at
     FROM groups ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY
       CASE WHEN status = 'open' THEN 0 ELSE 1 END,
-      CASE WHEN regressed_at <> '' THEN 0 ELSE 1 END,
+      CASE
+        WHEN severity = 'critical' THEN 0
+        WHEN ${developmentGroupSQL}
+          OR title = '[window.error] Script error.'
+          OR title LIKE '%ResizeObserver loop %'
+          OR title LIKE '%Minified React error #520%'
+          OR title LIKE '%additional File object is not a file on the disk%'
+          THEN 3
+        WHEN severity = 'high' THEN 1
+        WHEN severity = 'medium' THEN 2
+        ELSE 3
+      END,
       ${latestOrder}
-      CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+      CASE WHEN regressed_at <> '' THEN 0 ELSE 1 END,
       count DESC,
       last_seen DESC
     LIMIT 50`;
   const stmt = env.DB.prepare(sql);
   const query = binds.length ? stmt.bind(...binds) : stmt;
-  return query.all<{
+  const result = await query.all<{
     fingerprint: string;
     kind: string;
     count: number;
@@ -573,8 +780,63 @@ async function crashGroups(env: Env, filters: StatsFilters, latestVersion: strin
     severity: string;
     last_os: string;
     last_arch: string;
+    last_channel: string;
     regressed_at: string;
   }>();
+  result.results = result.results
+    .map((row) => ({ ...row, severity: effectiveGroupSeverity(row), development: isDevelopmentGroup(row) }))
+    .sort((a, b) => compareDiagnosticPriority(a, b, latestVersion));
+  return result;
+}
+
+type GroupPriorityRow = {
+  fingerprint: string;
+  status: string;
+  severity: string;
+  regressed_at: string;
+  first_version: string;
+  count: number;
+  seen: string;
+  title: string;
+  last_version: string;
+  last_channel: string;
+};
+
+const developmentGroupSQL = `fingerprint LIKE 'dev:%'`;
+
+export function isDevelopmentGroup(row: Pick<GroupPriorityRow, "fingerprint">): boolean {
+  // Legacy hashes can contain release observations between retained development
+  // samples, so only the explicit namespace proves that a group is dev-only.
+  return row.fingerprint.startsWith(DEVELOPMENT_FINGERPRINT_PREFIX);
+}
+
+export function effectiveGroupSeverity(
+  row: Pick<GroupPriorityRow, "fingerprint" | "severity" | "title">,
+): string {
+  if (row.severity === "critical") return row.severity;
+  if (isDevelopmentGroup(row)) return "low";
+  if (
+    row.title === "[window.error] Script error." ||
+    row.title.includes("ResizeObserver loop ") ||
+    row.title.includes("Minified React error #520") ||
+    row.title.includes("additional File object is not a file on the disk")
+  ) {
+    return "low";
+  }
+  return row.severity;
+}
+
+function compareDiagnosticPriority(a: GroupPriorityRow, b: GroupPriorityRow, latestVersion: string): number {
+  const statusRank = (value: string) => (value === "open" ? 0 : 1);
+  const severityRank = (value: string) => ({ critical: 0, high: 1, medium: 2, low: 3 })[value] ?? 4;
+  return (
+    statusRank(a.status) - statusRank(b.status) ||
+    severityRank(a.severity) - severityRank(b.severity) ||
+    Number(b.first_version === latestVersion) - Number(a.first_version === latestVersion) ||
+    Number(Boolean(b.regressed_at)) - Number(Boolean(a.regressed_at)) ||
+    b.count - a.count ||
+    b.seen.localeCompare(a.seen)
+  );
 }
 
 type ParsedVersion = {
@@ -610,14 +872,16 @@ function newestReleaseVersion(versions: string[]): string {
   return parsed[0]?.version ?? "";
 }
 
-async function latestObservedVersion(env: Env): Promise<string> {
-  const rows = await env.DB.prepare(
-    `SELECT version FROM (
-       SELECT version FROM pings WHERE date >= date('now', '-29 day')
-       UNION
-       SELECT last_version AS version FROM groups
-     ) AS versions WHERE version <> ''`,
-  ).all<{ version: string }>();
+async function latestObservedVersion(env: Env, surface: ClientSurfaceName): Promise<string> {
+  const table = telemetryTableNames(surface).pings;
+  const sql = surface === "desktop"
+    ? `SELECT version FROM (
+         SELECT version FROM ${table} WHERE date >= date('now', '-29 day')
+         UNION
+         SELECT last_version AS version FROM groups
+       ) AS versions WHERE version <> ''`
+    : `SELECT version FROM ${table} WHERE date >= date('now', '-29 day') AND version <> ''`;
+  const rows = await env.DB.prepare(sql).all<{ version: string }>();
   return newestReleaseVersion(rows.results.map((r) => r.version));
 }
 
@@ -629,13 +893,14 @@ type OverviewCounts = {
   criticalOpenReports: number;
 };
 
-async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30): Promise<number | null> {
+async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30, surface: ClientSurfaceName): Promise<number | null> {
   if (!latestVersion) return null;
+  const table = telemetryTableNames(surface).pings;
   const row = await env.DB.prepare(
     `SELECT
       COUNT(DISTINCT install_id) AS total_installs,
       COUNT(DISTINCT CASE WHEN version = ?1 THEN install_id END) AS latest_installs
-    FROM pings WHERE date >= date('now', '${currentWindowSince(days)}')`,
+    FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}')`,
   )
     .bind(latestVersion)
     .first<{ total_installs: number; latest_installs: number }>();
@@ -644,14 +909,35 @@ async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30):
   return (Number(row?.latest_installs ?? 0) / total) * 100;
 }
 
-async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30): Promise<OverviewCounts> {
+async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30, surface: ClientSurfaceName): Promise<OverviewCounts> {
+  if (surface === "cli") {
+    return {
+      latestAdoptionPct: await latestAdoptionPct(env, latestVersion, days, surface),
+      openReports: 0,
+      newLatestReports: 0,
+      regressedReports: 0,
+      criticalOpenReports: 0,
+    };
+  }
+  // Keep the overview's red state aligned with the effective severity used by
+  // the diagnostics list. Historical rows retain their stored severity, so
+  // known browser notices and development builds must be discounted here too.
+  const criticalActionable = `(severity = 'critical' OR (
+    severity = 'high'
+    AND kind <> 'performance'
+    AND NOT ${developmentGroupSQL}
+    AND title <> '[window.error] Script error.'
+    AND title NOT LIKE '%ResizeObserver loop %'
+    AND title NOT LIKE '%Minified React error #520%'
+    AND title NOT LIKE '%additional File object is not a file on the disk%'
+  ))`;
   const diagnosticCounts = latestVersion
     ? env.DB.prepare(
         `SELECT
           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_reports,
           SUM(CASE WHEN first_version = ?1 THEN 1 ELSE 0 END) AS new_latest_reports,
           SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
-          SUM(CASE WHEN status = 'open' AND severity IN ('critical', 'high') THEN 1 ELSE 0 END) AS critical_open_reports
+          SUM(CASE WHEN status = 'open' AND ${criticalActionable} THEN 1 ELSE 0 END) AS critical_open_reports
         FROM groups`,
       )
         .bind(latestVersion)
@@ -661,12 +947,12 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30)
           SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_reports,
           0 AS new_latest_reports,
           SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
-          SUM(CASE WHEN status = 'open' AND severity IN ('critical', 'high') THEN 1 ELSE 0 END) AS critical_open_reports
+          SUM(CASE WHEN status = 'open' AND ${criticalActionable} THEN 1 ELSE 0 END) AS critical_open_reports
         FROM groups`,
       ).first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>();
   const [row, adoptionPct] = await Promise.all([
     diagnosticCounts,
-    latestAdoptionPct(env, latestVersion, days),
+    latestAdoptionPct(env, latestVersion, days, surface),
   ]);
   return {
     latestAdoptionPct: adoptionPct,
@@ -689,20 +975,22 @@ function previousWindowUntil(days: 7 | 30): string {
   return currentWindowSince(days);
 }
 
-async function metricRows(env: Env, days: 7 | 30, previous = false): Promise<{ signal: string; bucket: string; total: number }[]> {
+async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, previous = false): Promise<{ signal: string; bucket: string; total: number }[]> {
   const where = previous
     ? `date >= date('now', '${previousWindowSince(days)}') AND date < date('now', '${previousWindowUntil(days)}')`
     : `date >= date('now', '${currentWindowSince(days)}')`;
+  const table = telemetryTableNames(surface).metrics;
   const rows = await env.DB.prepare(
-    `SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE ${where} GROUP BY signal, bucket ORDER BY signal, total DESC`,
+    `SELECT signal, bucket, SUM(count) AS total FROM ${table} WHERE ${where} GROUP BY signal, bucket ORDER BY signal, total DESC`,
   ).all<{ signal: string; bucket: string; total: number }>();
   return rows.results;
 }
 
-async function metricUserRows(env: Env, days: 7 | 30): Promise<{ signal: string; bucket: string; total: number }[]> {
+async function metricUserRows(env: Env, days: 7 | 30, surface: ClientSurfaceName): Promise<{ signal: string; bucket: string; total: number }[]> {
   try {
+    const table = telemetryTableNames(surface).metricUsers;
     const rows = await env.DB.prepare(
-      `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM metric_users WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
+      `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
     ).all<{ signal: string; bucket: string; total: number }>();
     return rows.results;
   } catch (err) {
@@ -722,11 +1010,15 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   const filters = statsFilters(url);
   const days = filters.windowDays;
   const since = currentWindowSince(days);
+  const surface = activeModule === "diagnostics" ? "desktop" : filters.surface;
+  if (activeModule === "diagnostics") filters.surface = "desktop";
+  if (surface === "cli") await ensureCLITelemetrySchema(env);
+  const pingsTable = telemetryTableNames(surface).pings;
   const bars = (sql: string) => env.DB.prepare(sql).all<Bar>().then((r) => r.results);
   const pingVersions = () =>
-    bars(`SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC LIMIT 15`);
+    bars(`SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM ${pingsTable} WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC LIMIT 15`);
   const pingPlatforms = () =>
-    bars(`SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC`);
+    bars(`SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM ${pingsTable} WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC`);
 
   let daily: { date: string; users: number; opens: number }[] = [];
   let versions: Bar[] = [];
@@ -746,15 +1038,15 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let latestVersion = "";
 
   if (activeModule === "usage") {
-    latestVersion = await latestObservedVersion(env);
+    latestVersion = await latestObservedVersion(env, surface);
     const [dailyR, versionsR, platformsR, metricsR, overviewR] = await Promise.all([
       env.DB.prepare(
-        `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '${since}') GROUP BY date`,
+        `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM ${pingsTable} WHERE date >= date('now', '${since}') GROUP BY date`,
       ).all<{ date: string; users: number; opens: number }>(),
       pingVersions(),
       pingPlatforms(),
-      metricRows(env, days),
-      diagnosticOverview(env, latestVersion, days),
+      metricRows(env, days, surface),
+      diagnosticOverview(env, latestVersion, days, surface),
     ]);
     daily = dailyR.results;
     versions = versionsR;
@@ -762,7 +1054,7 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     metrics = metricsR;
     overview = overviewR;
   } else if (activeModule === "diagnostics") {
-    latestVersion = await latestObservedVersion(env);
+    latestVersion = await latestObservedVersion(env, "desktop");
     const [crashesR, sourcesR, versionsR, platformsR] = await Promise.all([
       crashGroups(env, filters, latestVersion),
       bars("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC"),
@@ -774,9 +1066,9 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     versions = versionsR;
     platforms = platformsR;
   } else if (activeModule === "preferences") {
-    [metrics, metricUsers] = await Promise.all([metricRows(env, days), metricUserRows(env, days)]);
+    [metrics, metricUsers] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
   } else {
-    [metrics, previousMetrics] = await Promise.all([metricRows(env, days), metricRows(env, days, true)]);
+    [metrics, previousMetrics] = await Promise.all([metricRows(env, days, surface), metricRows(env, days, surface, true)]);
   }
 
   return html(
@@ -791,6 +1083,7 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
 async function handleGroup(env: Env, fingerprint: string, user: User): Promise<Response> {
   const group = await env.DB.prepare("SELECT * FROM groups WHERE fingerprint = ?1").bind(fingerprint).first<Group>();
   if (!group) return new Response("not found", { status: 404 });
+  group.severity = effectiveGroupSeverity(group);
   const reports = await env.DB.prepare(
     `SELECT version, os, arch, message, device, created_at, source, label, error_type, error_message,
       top_frame, build_commit, channel, language, view, breadcrumbs, component_stack, stack, occurred_at
@@ -955,25 +1248,207 @@ async function handleCommunityAction(
     return back;
   }
   if (action === "approve") {
-    const before = await repo.bySlug(slug);
-    const row = await repo.setStatus(slug, "active", now);
-    // Emit the publish event on first approval so the feed only announces
-    // packages that actually went public.
-    if (row && before && before.status !== "active") {
-      await new EventRepo(env.REGISTRY_DB).log({
-        type: "publish",
-        packageId: row.id,
-        actorHandle: row.scope_handle,
-        summary: `published ${row.slug}@${row.latest_version}`,
-        now,
+    const expectedStatus = ["pending", "hidden", "rejected"].includes(form.expectedStatus)
+      ? form.expectedStatus
+      : "";
+    if (!form.expectedVersion || !form.expectedUpdatedAt || !expectedStatus) {
+      return new Response("Package review revision is missing. Refresh the review page and try again.", {
+        status: 409,
       });
     }
+    const row = await repo.setStatusIfCurrent(
+      slug,
+      "active",
+      form.expectedVersion,
+      form.expectedUpdatedAt,
+      expectedStatus,
+      now,
+    );
+    if (!row) {
+      return new Response("Package changed since it was reviewed. Refresh and review the latest version.", {
+        status: 409,
+      });
+    }
+    // Emit the publish event only after the reviewed revision becomes public.
+    await new EventRepo(env.REGISTRY_DB).log({
+      type: "publish",
+      packageId: row.id,
+      actorHandle: row.scope_handle,
+      summary: `published ${row.slug}@${row.latest_version}`,
+      now,
+    });
     await logAction(env, admin, "pkg_approve", slug);
     return back;
   }
   await repo.setStatus(slug, action === "reject" ? "rejected" : "hidden", now);
   await logAction(env, admin, `pkg_${action}`, slug);
   return back;
+}
+
+// Time-series retention, run by the daily cron trigger. Every dashboard query
+// against the per-install tables reads at most the current window (-29 day),
+// while the aggregate `metrics` table also serves the 30d view's
+// previous-window delta (back to -59 day), so it keeps a doubled horizon.
+// `reports`/`groups` are excluded on purpose: they are the triage queue and
+// the regression baseline, are not date-partitioned, and their growth is
+// already bounded by per-group sampling. Without this purge the database
+// grows until D1's size cap, at which point every ingest write starts
+// throwing (all of /v1/ping, /v1/metrics and /v1/report 500 while reads keep
+// working — exactly the 2026-07-03 stats blackout).
+const RETENTION = [
+  { table: "pings", keepDays: 30 },
+  { table: "metrics", keepDays: 60 },
+  { table: "metric_users", keepDays: 30 },
+  { table: "cli_pings", keepDays: 30 },
+  { table: "cli_metrics", keepDays: 60 },
+  { table: "cli_metric_users", keepDays: 30 },
+] as const;
+// Deletes run in rowid chunks so a run never holds one giant transaction.
+// Steady state is one expired day per table; the chunk cap is a backstop that
+// still drains ~2M rows per table per run after an ingest outage or backlog.
+const RETENTION_CHUNK_ROWS = 10_000;
+const RETENTION_MAX_CHUNKS = 200;
+
+// Must match the sentinel entry in wrangler.toml [triggers] exactly — the
+// scheduled handler dispatches on controller.cron; every other trigger
+// (the retention cron, manual runs) falls through to the purge.
+const SENTINEL_CRON = "17 1,7,13,19 * * *";
+
+// Ingest sentinel. The 2026-07-03 blackout went unnoticed for ten days because
+// clients swallow ping failures by design and nothing watched the write path.
+// Four times a day (hours chosen so the UTC day always has >1h of traffic;
+// ~14k DAU means a healthy hour is never empty) this probes the two failure
+// shapes independently:
+//   1. canary write into `pings` (immediately deleted) — catches writes
+//      throwing, e.g. the D1 size cap, regardless of traffic;
+//   2. today's real ping and open totals compared with the previous run —
+//      catches ingest dying upstream of the worker (edge blocking, client
+//      regression) even after the UTC day already has traffic.
+// Alerts go to the optional ALERT_WEBHOOK secret; without it they still land
+// in the worker logs. While broken this fires at most 4 alerts/day.
+const CANARY_INSTALL_ID = "ffffffffffffffffffffffffffffffff";
+
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function sendAlert(env: Env, text: string): Promise<void> {
+  if (!env.ALERT_WEBHOOK) return;
+  try {
+    const webhook = new URL(env.ALERT_WEBHOOK);
+    const feishu = webhook.hostname === "open.feishu.cn" || webhook.hostname === "open.larksuite.com";
+    const body = feishu ? { msg_type: "text", content: { text } } : { text };
+    const res = await fetch(webhook.toString(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) console.error(`alert webhook responded ${res.status}`);
+  } catch (err) {
+    console.error("alert webhook unreachable", err);
+  }
+}
+
+async function runIngestSentinel(env: Env): Promise<void> {
+  const problems: string[] = [];
+  try {
+    await env.DB.prepare(
+      `INSERT INTO pings (date, install_id, version, os, arch, opens)
+       VALUES (date('now'), ?1, 'canary', 'canary', 'canary', 0)
+       ON CONFLICT (date, install_id) DO NOTHING`,
+    )
+      .bind(CANARY_INSTALL_ID)
+      .run();
+    // Also removes any leftover canary from a run that died mid-way.
+    await env.DB.prepare("DELETE FROM pings WHERE install_id = ?1").bind(CANARY_INSTALL_ID).run();
+  } catch (err) {
+    problems.push(`canary write failed: ${errText(err)}`);
+  }
+  try {
+    // Auto-create the one-row checkpoint so existing databases do not need a
+    // manual migration before this worker version is deployed.
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ingest_sentinel_state (
+         id INTEGER PRIMARY KEY CHECK (id = 1),
+         day TEXT NOT NULL,
+         ping_count INTEGER NOT NULL,
+         open_count INTEGER NOT NULL,
+         checked_at TEXT NOT NULL
+       )`,
+    ).run();
+    const row = await env.DB.prepare(
+      `SELECT date('now') AS day,
+              COUNT(*) AS ping_count,
+              COALESCE(SUM(opens), 0) AS open_count
+       FROM pings
+       WHERE date = date('now') AND install_id <> ?1`,
+    )
+      .bind(CANARY_INSTALL_ID)
+      .first<{ day: string; ping_count: number; open_count: number }>();
+    const day = row?.day ?? "";
+    const pingCount = Number(row?.ping_count ?? 0);
+    const openCount = Number(row?.open_count ?? 0);
+    const previous = await env.DB.prepare(
+      "SELECT day, ping_count, open_count, checked_at FROM ingest_sentinel_state WHERE id = 1",
+    ).first<{ day: string; ping_count: number; open_count: number; checked_at: string }>();
+    if (!pingCount) {
+      problems.push("no launch pings recorded today (UTC)");
+    } else if (
+      previous?.day === day &&
+      pingCount <= Number(previous.ping_count) &&
+      openCount <= Number(previous.open_count)
+    ) {
+      problems.push(
+        `launch ping totals unchanged since ${previous.checked_at} UTC (${pingCount} install rows, ${openCount} opens)`,
+      );
+    }
+    await env.DB.prepare(
+      `INSERT INTO ingest_sentinel_state (id, day, ping_count, open_count, checked_at)
+       VALUES (1, ?1, ?2, ?3, datetime('now'))
+       ON CONFLICT (id) DO UPDATE SET
+         day = ?1, ping_count = ?2, open_count = ?3, checked_at = datetime('now')`,
+    )
+      .bind(day, pingCount, openCount)
+      .run();
+  } catch (err) {
+    problems.push(`ping progress check failed: ${errText(err)}`);
+  }
+  if (!problems.length) return;
+  const message = `crash.reasonix.io ingest sentinel: ${problems.join("; ")} — https://crash.reasonix.io/stats`;
+  console.error(message);
+  await sendAlert(env, message);
+}
+
+async function purgeExpiredStatsRows(env: Env): Promise<void> {
+  try {
+    await ensureCLITelemetrySchema(env);
+  } catch (err) {
+    console.error("retention: CLI telemetry schema unavailable", err);
+  }
+  for (const { table, keepDays } of RETENTION) {
+    // Keep exactly the newest `keepDays` dates: today plus keepDays-1 back,
+    // matching the `date >= date('now', '-{keepDays-1} day')` reads.
+    const cutoff = `-${keepDays - 1} day`;
+    let purged = 0;
+    try {
+      for (let i = 0; i < RETENTION_MAX_CHUNKS; i++) {
+        const res = await env.DB.prepare(
+          `DELETE FROM ${table} WHERE rowid IN (
+             SELECT rowid FROM ${table} WHERE date < date('now', ?1) LIMIT ${RETENTION_CHUNK_ROWS}
+           )`,
+        )
+          .bind(cutoff)
+          .run();
+        const changes = res.meta.changes ?? 0;
+        purged += changes;
+        if (changes < RETENTION_CHUNK_ROWS) break;
+      }
+      console.log(`retention: purged ${purged} rows from ${table} (keep ${keepDays}d)`);
+    } catch (err) {
+      // One broken table must not stop the others; the cron retries tomorrow.
+      console.error(`retention: purge failed for ${table} after ${purged} rows`, err);
+    }
+  }
 }
 
 export default {
@@ -983,7 +1458,13 @@ export default {
     const method = request.method;
 
     const desktopRelease = desktopReleaseChannel(path);
-    if (desktopRelease && method === "GET") return handleDesktopReleaseManifest(desktopRelease);
+    if (desktopRelease) {
+      return handleReleaseGatewayRequest(method, () => handleDesktopReleaseManifest(desktopRelease));
+    }
+    const cliRelease = cliReleaseChannel(path);
+    if (cliRelease) {
+      return handleReleaseGatewayRequest(method, () => handleCLIRelease(cliRelease));
+    }
 
     if (path === "/v1/report" && method === "POST") return handleReport(request, env);
     if (path === "/v1/ping" && method === "POST") return handlePing(request, env);
@@ -1008,14 +1489,14 @@ export default {
 
     if (path === "/account" && method === "GET") return user ? html(renderAccount(user)) : redirect(login);
 
-    const groupMatch = path.match(/^\/stats\/group\/([0-9a-f]{64})$/);
+    const groupFingerprint = groupFingerprintFromPath(path);
     const statsModuleMatch = path.match(/^\/stats\/(diagnostics|usage|preferences|health)$/);
     if ((path === "/stats" || statsModuleMatch) && method === "GET")
       return requireViewer(user, login) ?? handleStats(request, env, user as User, (statsModuleMatch?.[1] as StatsModule | undefined) ?? "usage");
-    if (groupMatch && method === "GET") return requireViewer(user, login) ?? handleGroup(env, groupMatch[1], user as User);
-    if (groupMatch && method === "POST") {
+    if (groupFingerprint && method === "GET") return requireViewer(user, login) ?? handleGroup(env, groupFingerprint, user as User);
+    if (groupFingerprint && method === "POST") {
       if (user?.role !== "admin") return new Response("forbidden", { status: 403 });
-      return handleGroupAction(request, env, user, groupMatch[1]);
+      return handleGroupAction(request, env, user, groupFingerprint);
     }
 
     if (path === "/admin" && method === "GET") {
@@ -1045,7 +1526,6 @@ export default {
       path === "/v1/report" ||
       path === "/v1/ping" ||
       path === "/v1/metrics" ||
-      desktopReleaseChannel(path) ||
       path === "/login" ||
       path === "/register" ||
       path === "/logout" ||
@@ -1057,5 +1537,13 @@ export default {
       return new Response("method not allowed", { status: 405 });
     }
     return new Response("not found", { status: 404 });
+  },
+
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (controller.cron === SENTINEL_CRON) {
+      ctx.waitUntil(runIngestSentinel(env));
+      return;
+    }
+    ctx.waitUntil(purgeExpiredStatsRows(env));
   },
 };

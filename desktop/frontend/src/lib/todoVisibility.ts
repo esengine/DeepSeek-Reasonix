@@ -12,6 +12,24 @@ export interface TodoPanelScopeInput {
   eventChannel?: string | null;
 }
 
+export function resolveTodoPanelTodos(canonical: Todo[] | null | undefined, fallback: Todo[]): Todo[] {
+  return Array.isArray(canonical) ? canonical : fallback;
+}
+
+export function sameTodoList(a: Todo[] | null | undefined, b: Todo[] | null | undefined): boolean {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  return a.every((todo, index) => {
+    const other = b[index];
+    return (
+      todo.content === other.content &&
+      todo.status === other.status &&
+      todo.activeForm === other.activeForm &&
+      todo.level === other.level
+    );
+  });
+}
+
 export function todoDismissalKey(todos: Todo[]): string {
   if (todos.length === 0) return "";
   return JSON.stringify(todos.map((todo) => ({
@@ -76,8 +94,8 @@ export function shouldShowTodoPanel(
   return todoKey !== dismissedTodoKey;
 }
 
-export function shouldOpenTodoPanelByDefault(todos: Todo[]): boolean {
-  return hasIncompleteTodos(todos);
+export function shouldOpenTodoPanelByDefault(): boolean {
+  return false;
 }
 
 function todoStatus(status: unknown): string {

@@ -2,10 +2,12 @@ package serve
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
 	"reasonix/internal/control"
+	"reasonix/internal/jobs"
 )
 
 // lockProbeController wraps a real controller but intercepts the two blocking
@@ -155,6 +157,31 @@ func TestSwitchModelRejectsWhileRunning(t *testing.T) {
 	}
 	ctrl.Cancel()
 	waitNotRunning(t, ctrl)
+}
+
+func TestSwitchModelRejectsWhileBackgroundJobRunning(t *testing.T) {
+	bc := NewBroadcaster()
+	manager := jobs.NewManager(bc)
+	ctrl := control.New(control.Options{Sink: bc, Jobs: manager})
+	defer ctrl.Close()
+	manager.Start("task", "running", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+
+	s := &Server{ctrl: ctrl, bc: bc}
+	built := false
+	s.buildController = func(_ context.Context, _ string) (*control.Controller, error) {
+		built = true
+		return control.New(control.Options{Sink: bc}), nil
+	}
+
+	if err := s.switchModel(context.Background(), "next-model"); err == nil {
+		t.Fatal("expected switchModel to refuse while a background job is running")
+	}
+	if built {
+		t.Fatal("switchModel built a controller despite a running background job")
+	}
 }
 
 // blockingRunner keeps a turn "running" until its context is cancelled, so tests

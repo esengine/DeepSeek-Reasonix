@@ -193,6 +193,126 @@ func ContainsShellSyntax(command string) bool {
 	return malformed != ""
 }
 
+// ApprovalFeatures describes Bash syntax that affects whether a permission can
+// be reused. CommandPrefix contains the leading static argv fields up to the
+// first runtime expansion; it lets callers recognize a static eval/-c command
+// even when its payload is dynamic.
+type ApprovalFeatures struct {
+	CommandPrefix      []string
+	DynamicCommandName bool
+	NestedExecution    bool
+	Expansion          bool
+	Assignment         bool
+	Redirection        bool
+}
+
+// AnalyzeApprovalFeatures inspects one simple Bash command without evaluating
+// expansions. ok is false for compound or otherwise unsupported statements.
+func AnalyzeApprovalFeatures(command string) (features ApprovalFeatures, ok bool) {
+	file, err := ParseBash(command)
+	if err != nil || len(file.Stmts) != 1 {
+		return features, false
+	}
+	stmt := file.Stmts[0]
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || stmt.Disown {
+		return features, false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok {
+		return features, false
+	}
+	syntax.Walk(file, func(node syntax.Node) bool {
+		switch node.(type) {
+		case *syntax.CmdSubst, *syntax.ProcSubst:
+			features.NestedExecution = true
+		case *syntax.ParamExp, *syntax.ArithmExp, *syntax.ExtGlob:
+			features.Expansion = true
+		case *syntax.Assign:
+			features.Assignment = true
+		case *syntax.Redirect:
+			features.Redirection = true
+		}
+		return true
+	})
+	for _, arg := range call.Args {
+		if wordHasUnescapedBrace(arg) {
+			syntax.SplitBraces(arg)
+		}
+	}
+	for i, arg := range call.Args {
+		field, static := StaticWord(arg)
+		if !static {
+			features.Expansion = true
+			if i == 0 {
+				features.DynamicCommandName = true
+			}
+			break
+		}
+		features.CommandPrefix = append(features.CommandPrefix, field)
+	}
+	return features, true
+}
+
+// ContainsUnquotedGlob reports whether command contains an unquoted shell glob
+// token. StaticFields deliberately returns argv without expanding globs, so
+// permission callers use this additional check before reusing broad rules.
+func ContainsUnquotedGlob(command string) bool {
+	file, err := ParseBash(command)
+	if err != nil {
+		return true
+	}
+	found := false
+	syntax.Walk(file, func(node syntax.Node) bool {
+		word, ok := node.(*syntax.Word)
+		if !ok {
+			return !found
+		}
+		for _, part := range word.Parts {
+			lit, ok := part.(*syntax.Lit)
+			if ok && hasUnescapedGlobMeta(lit.Value) {
+				found = true
+				return false
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+func hasUnescapedGlobMeta(value string) bool {
+	return hasUnescapedMeta(value, "*?[")
+}
+
+func wordHasUnescapedBrace(word *syntax.Word) bool {
+	if word == nil {
+		return false
+	}
+	for _, part := range word.Parts {
+		if lit, ok := part.(*syntax.Lit); ok && hasUnescapedMeta(lit.Value, "{") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasUnescapedMeta(value, meta string) bool {
+	escaped := false
+	for i := 0; i < len(value); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if value[i] == '\\' {
+			escaped = true
+			continue
+		}
+		if strings.ContainsRune(meta, rune(value[i])) {
+			return true
+		}
+	}
+	return false
+}
+
 // SplitTopLevel returns simple command segments split at top-level shell
 // control operators. It preserves each segment's original source text. ok is
 // false when the command cannot be decomposed without losing safety.

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { FileText, Folder, MessageSquare, X } from "lucide-react";
 import { Tooltip } from "./Tooltip";
 
-type ComposerContextCardVariant = "attachment" | "workspace" | "session";
+type ComposerContextCardVariant = "attachment" | "workspace" | "session" | "selection";
 
 export function ComposerContextCard({
   variant,
@@ -21,7 +21,7 @@ export function ComposerContextCard({
   icon,
 }: {
   variant: ComposerContextCardVariant;
-  tooltipLabel: string;
+  tooltipLabel: ReactNode;
   removeLabel: string;
   onRemove: () => void;
   removeDisabled?: boolean;
@@ -42,6 +42,8 @@ export function ComposerContextCard({
       ? `composer-context__item--workspace composer-context__item--${folder ? "folder" : "file"}`
       : variant === "session"
         ? "composer-context__item--session"
+        : variant === "selection"
+          ? "composer-context__item--selection composer-context__item--attachment"
         : "composer-context__item--attachment";
   const iconNode = icon ?? (variant === "session" ? <MessageSquare size={15} /> : folder ? <Folder size={15} /> : <FileText size={15} />);
   return (
@@ -58,7 +60,7 @@ export function ComposerContextCard({
             >
               <img src={previewUrl} alt="" draggable={false} />
             </span>
-          ) : variant === "attachment" ? (
+          ) : variant === "attachment" || variant === "selection" ? (
             <>
               <span className="composer-context__fileicon">
                 {icon ?? <FileText size={20} />}
@@ -77,8 +79,14 @@ export function ComposerContextCard({
         </span>
       </Tooltip>
       <Tooltip label={removeLabel} className="composer-context__remove-trigger">
-        <button className="composer-context__remove" type="button" disabled={removeDisabled} onClick={onRemove}>
-          <X size={removeIconSize ?? (variant === "attachment" ? 14 : 13)} />
+        <button
+          className="composer-context__remove"
+          type="button"
+          aria-label={removeLabel}
+          disabled={removeDisabled}
+          onClick={onRemove}
+        >
+          <X size={removeIconSize ?? (variant === "attachment" ? 14 : 13)} aria-hidden="true" />
         </button>
       </Tooltip>
     </div>

@@ -181,6 +181,75 @@ func TestCompleteStepAllowsManualAsUnverified(t *testing.T) {
 	}
 }
 
+func TestCompleteStepExplainsRenewalAgainstCompletedTodoList(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("todo_write", json.RawMessage(`{"todos":[{"content":"Implement","status":"completed"},{"content":"Final review","status":"completed"}]}`), true, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review and verify again",
+		"result":"ready",
+		"evidence":[{"kind":"manual","summary":"reviewed"}]
+	}`))
+	if err == nil {
+		t.Fatal("invented renewal step should not bypass the canonical todo list")
+	}
+	for _, want := range []string{"renewal sign-off", "step_index 2", "Final review", "do not invent a new step"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("renewal error %q missing %q", err, want)
+		}
+	}
+}
+
+func TestCompleteStepDeliveryRejectsOpaqueEvalVerification(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"node -e 'console.log(1)'"}`), true, false))
+	ctx := evidence.WithDeliveryProfile(evidence.WithLedger(context.Background(), ledger))
+
+	_, err := completeStep{}.Execute(ctx, json.RawMessage(`{
+		"step":"Check JavaScript",
+		"result":"syntax valid",
+		"evidence":[{"kind":"verification","summary":"syntax valid","command":"node -e 'console.log(1)'"}]
+	}`))
+	if err == nil {
+		t.Fatal("delivery complete_step should reject a command the final gate cannot recognize")
+	}
+	for _, want := range []string{"not a recognized delivery verification", "node --check"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing recovery hint %q", err, want)
+		}
+	}
+}
+
+func TestCompleteStepDeliveryAcceptsNodeSyntaxCheck(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"app.js"}`), true, false))
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"node --check app.js"}`), true, false))
+	ctx := evidence.WithDeliveryProfile(evidence.WithLedger(context.Background(), ledger))
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Check JavaScript",
+		"result":"syntax valid",
+		"evidence":[{"kind":"verification","summary":"syntax valid","command":"node --check app.js"}]
+	}`)); err != nil {
+		t.Fatalf("delivery complete_step rejected node --check: %v", err)
+	}
+}
+
+func TestCompleteStepDeliveryKeepsReadOnlyEvidenceCompatibility(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"grep -n TODO app.js"}`), true, false))
+	ctx := evidence.WithDeliveryProfile(evidence.WithLedger(context.Background(), ledger))
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Inspect JavaScript",
+		"result":"TODOs inspected",
+		"evidence":[{"kind":"verification","summary":"inspection completed","command":"grep -n TODO app.js"}]
+	}`)); err != nil {
+		t.Fatalf("read-only delivery evidence regressed: %v", err)
+	}
+}
+
 func TestCompleteStepRejectsMissingProjectCheckAfterWrite(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{ToolName: "write_file", Success: true, Paths: []string{"changed.go"}, Write: true})
@@ -352,12 +421,13 @@ func TestCompleteStepRejectsTodoMismatch(t *testing.T) {
 	}
 }
 
-func TestCompleteStepAcceptsPendingTodo(t *testing.T) {
+func TestCompleteStepRejectsPendingTodo(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{
 		ToolName: "todo_write",
 		Success:  true,
 		Todos: []evidence.TodoItem{
+			{Content: "Inspect environment", Status: "in_progress"},
 			{Content: "Add parser", Status: "pending"},
 		},
 	})
@@ -367,11 +437,31 @@ func TestCompleteStepAcceptsPendingTodo(t *testing.T) {
 		"step":"Add parser",
 		"result":"parser added",
 		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
-	if err != nil {
-		t.Fatalf("pending todo should be signable with evidence: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "only signs the current in_progress item") {
+		t.Fatalf("pending todo should be rejected, out=%q err=%v", out, err)
 	}
-	if !strings.Contains(out, "todo-matched") {
-		t.Fatalf("ack should mention todo match, got %q", out)
+	if !strings.Contains(err.Error(), "Inspect environment") {
+		t.Fatalf("pending rejection should name the current todo, got %v", err)
+	}
+}
+
+func TestCompleteStepRejectsPendingCanonicalTodoAcrossTurns(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ctx := evidence.WithLedger(context.Background(), ledger)
+	ctx = evidence.WithTodoState(ctx, []evidence.TodoItem{
+		{Content: "Inspect environment", Status: "in_progress"},
+		{Content: "Add parser", Status: "pending"},
+	})
+
+	_, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Add parser",
+		"result":"parser added",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "only signs the current in_progress item") {
+		t.Fatalf("cross-turn pending todo should be rejected, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Inspect environment") {
+		t.Fatalf("cross-turn rejection should name the current todo, got %v", err)
 	}
 }
 
@@ -435,6 +525,62 @@ func TestCompleteStepMatchesParaphrasedCommands(t *testing.T) {
 				t.Fatalf("paraphrased citation of a ran command rejected: %v", err)
 			}
 		})
+	}
+}
+
+func TestCompleteStepAcceptsSuccessfulReviewEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review completed",
+		"evidence":[{"kind":"review","summary":"the built-in review completed"}]}`)); err != nil {
+		t.Fatalf("successful review evidence rejected: %v", err)
+	}
+}
+
+func TestCompleteStepRejectsFailedReviewEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), false, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review completed",
+		"evidence":[{"kind":"review","summary":"the built-in review completed"}]}`)); err == nil {
+		t.Fatal("failed review task must not satisfy review evidence")
+	}
+}
+
+func TestCompleteStepRejectsReviewEvidenceBeforeLatestMutation(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review completed",
+		"evidence":[{"kind":"review","summary":"the built-in review completed"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "review must be newer and cover the changed result") {
+		t.Fatalf("stale review evidence should be rejected with recovery guidance, got %v", err)
+	}
+}
+
+func TestCompleteStepAcceptsStructuredReviewWithBlockingFindings(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+		"kind":"review",
+		"verdict":"block",
+		"reviewed_paths":["changed.go"],
+		"findings":[{"severity":"critical","summary":"must fix","path":"changed.go"}]
+	}`)})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review found blocking follow-up",
+		"evidence":[{"kind":"review","summary":"structured review completed with a blocking finding"}]}`)); err != nil {
+		t.Fatalf("a blocking verdict should complete the review activity while remaining enforceable by delivery gates: %v", err)
 	}
 }
 
@@ -572,5 +718,77 @@ func TestCompleteStepSessionFallbackSkipsFailedWrite(t *testing.T) {
 		"step":"x","result":"y",
 		"evidence":[{"kind":"diff","summary":"added bar","paths":["internal/foo/bar.go"]}]}`)); err == nil {
 		t.Fatal("a failed write must not satisfy cross-turn diff evidence")
+	}
+}
+
+func TestCompleteStepRejectsPhaseWithUnfinishedSubSteps(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Port the parser", Status: "in_progress"},
+			{Content: "move files", Status: "completed", Level: 1},
+			{Content: "fix imports", Status: "in_progress", Level: 1},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Port the parser",
+		"result":"parser ported",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "sub-steps are unfinished") {
+		t.Fatalf("phase with unfinished sub-steps should be rejected, got %v", err)
+	}
+	if !strings.Contains(err.Error(), `sub-step 3 "fix imports"`) {
+		t.Fatalf("phase rejection should name the first unfinished sub-step, got %v", err)
+	}
+}
+
+func TestCompleteStepSignsPhaseAfterSubStepsComplete(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Port the parser", Status: "in_progress"},
+			{Content: "move files", Status: "completed", Level: 1},
+			{Content: "fix imports", Status: "completed", Level: 1},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	out, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Port the parser",
+		"result":"parser ported",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err != nil {
+		t.Fatalf("phase with completed sub-steps should sign off: %v", err)
+	}
+	if !strings.Contains(out, "signed off") {
+		t.Fatalf("phase sign-off output = %q, want signed off", out)
+	}
+}
+
+func TestCompleteStepPendingHintNamesActiveSubStep(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{
+		ToolName: "todo_write",
+		Success:  true,
+		Todos: []evidence.TodoItem{
+			{Content: "Port the parser", Status: "pending"},
+			{Content: "move files", Status: "in_progress", Level: 1},
+			{Content: "fix imports", Status: "pending", Level: 1},
+		},
+	})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"fix imports",
+		"result":"imports fixed",
+		"evidence":[{"kind":"manual","summary":"checked manually"}]}`))
+	if err == nil || !strings.Contains(err.Error(), `finish todo 2 "move files" first`) {
+		t.Fatalf("pending hint should point at the active sub-step, got %v", err)
 	}
 }

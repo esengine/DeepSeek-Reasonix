@@ -8,6 +8,25 @@
     mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true;
   }, { passive: true });
 
+  /* run a rAF loop only while `el` is on screen — no idle spinning */
+  const rafWhileVisible = (el, fn) => {
+    let rafId = 0, running = false;
+    const loop = () => {
+      if (!running) return;
+      fn();
+      rafId = requestAnimationFrame(loop);
+    };
+    const setRunning = (on) => {
+      if (on === running) return;
+      running = on;
+      if (on) rafId = requestAnimationFrame(loop);
+      else cancelAnimationFrame(rafId);
+    };
+    new IntersectionObserver((entries) => {
+      setRunning(entries[entries.length - 1].isIntersecting);
+    }).observe(el);
+  };
+
   /* particle grid (hero canvas) */
   const canvas = document.querySelector(".hero-dots");
   if (canvas) {
@@ -32,10 +51,8 @@
     let mx = -9999, my = -9999;
     const accent = () =>
       getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#3a5fd0";
-    const tick = () => {
-      requestAnimationFrame(tick);
+    rafWhileVisible(hero, () => {
       const r = hero.getBoundingClientRect();
-      if (r.bottom < 0) return;
       ctx.clearRect(0, 0, w, h);
       if (!rich()) return;
       const tx = mouse.active ? mouse.x - r.left : -9999;
@@ -55,61 +72,8 @@
         ctx.fill();
       }
       ctx.globalAlpha = 1;
-    };
-    tick();
-  }
-
-  /* cursor glow */
-  const glowEl = document.querySelector(".cursor-glow");
-  if (glowEl && matchMedia("(pointer: fine)").matches) {
-    let gx = mouse.x, gy = mouse.y;
-    const move = () => {
-      requestAnimationFrame(move);
-      if (!rich() || !mouse.active) { glowEl.style.opacity = 0; return; }
-      glowEl.style.opacity = 1;
-      gx = lerp(gx, mouse.x, 0.09);
-      gy = lerp(gy, mouse.y, 0.09);
-      glowEl.style.transform = `translate(${gx}px, ${gy}px) translate(-50%, -50%)`;
-    };
-    move();
-  }
-
-  /* typewriter headline (re-runs per language) */
-  const typeH1 = () => {
-    const lang = document.body.dataset.lang || "en";
-    const span = document.querySelector(`.hero h1 .l-${lang}`);
-    if (!span || span.dataset.typed || !rich()) return;
-    span.dataset.typed = "1";
-    const walker = document.createTreeWalker(span, NodeFilter.SHOW_TEXT);
-    const texts = [];
-    while (walker.nextNode()) texts.push(walker.currentNode);
-    const chars = [];
-    texts.forEach((node) => {
-      const frag = document.createDocumentFragment();
-      for (const ch of node.textContent) {
-        const s = document.createElement("span");
-        s.className = "ch";
-        s.textContent = ch;
-        frag.appendChild(s);
-        chars.push(s);
-      }
-      node.parentNode.replaceChild(frag, node);
     });
-    const caret = document.createElement("span");
-    caret.className = "type-caret";
-    let i = 0;
-    const step = () => {
-      if (i >= chars.length) { setTimeout(() => caret.remove(), 900); return; }
-      const c = chars[i++];
-      c.classList.add("on");
-      c.after(caret);
-      setTimeout(step, c.textContent.trim() ? 34 : 10);
-    };
-    setTimeout(step, 250);
-  };
-  typeH1();
-  new MutationObserver(() => typeH1())
-    .observe(document.body, { attributes: true, attributeFilter: ["data-lang"] });
+  }
 
   /* terminal 3D tilt toward cursor */
   const term = document.querySelector(".term");
@@ -122,27 +86,11 @@
       trx = (0.5 - (e.clientY - r.top) / r.height) * 4;
     });
     stage.addEventListener("mouseleave", () => { trx = 0; try_ = 0; });
-    const tilt = () => {
-      requestAnimationFrame(tilt);
+    rafWhileVisible(stage, () => {
       if (!rich()) { term.style.transform = ""; return; }
       rx = lerp(rx, trx, 0.08);
       ry = lerp(ry, try_, 0.08);
       term.style.transform = `rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
-    };
-    tilt();
-  }
-
-  /* magnetic buttons */
-  if (matchMedia("(pointer: fine)").matches) {
-    document.querySelectorAll(".btn").forEach((btn) => {
-      btn.addEventListener("mousemove", (e) => {
-        if (!rich()) return;
-        const r = btn.getBoundingClientRect();
-        const dx = (e.clientX - r.left - r.width / 2) / r.width;
-        const dy = (e.clientY - r.top - r.height / 2) / r.height;
-        btn.style.transform = `translate(${dx * 5}px, ${dy * 4 - 1}px)`;
-      });
-      btn.addEventListener("mouseleave", () => { btn.style.transform = ""; });
     });
   }
 

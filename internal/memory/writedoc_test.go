@@ -3,6 +3,7 @@ package memory
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -59,5 +60,31 @@ func TestWriteDocAllowsDiscoveredDoc(t *testing.T) {
 	b, _ := os.ReadFile(agents)
 	if strings.TrimSpace(string(b)) != "edited" {
 		t.Fatalf("AGENTS.md not updated: %q", b)
+	}
+}
+
+func TestWriteDocRejectsInstructionSymlinkOutsideWorkspace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on common Windows setups")
+	}
+	proj := t.TempDir()
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	mustWrite(t, outside, "keep me")
+	agents := filepath.Join(proj, "AGENTS.md")
+	if err := os.Symlink(outside, agents); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj})
+	if _, err := set.WriteDoc(agents, "overwritten"); err == nil {
+		t.Fatal("WriteDoc followed an instruction symlink outside the workspace")
+	}
+	body, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "keep me" {
+		t.Fatalf("outside target changed to %q", body)
 	}
 }

@@ -8,9 +8,18 @@ import (
 	"unicode"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
 	"reasonix/internal/skill"
 )
+
+// InvocationRequest is an explicit user-selected Skill or Subagent entity.
+// Offset is used only to preserve the visual order chosen in the composer.
+type InvocationRequest struct {
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Offset int    `json:"offset"`
+}
 
 // PlanModeMarker is prepended to every user turn while plan mode is on. It rides
 // in the user message (not the system prompt or tools), so the cache-stable
@@ -112,39 +121,13 @@ func StripReferencedContextPrefix(content string) string {
 // approval, stream recovery, readiness retry, etc.). These should not be shown
 // in the chat UI.
 func IsSyntheticUserMessage(content string) bool {
-	trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content))
-	if trimmed == planApprovedMessage {
+	if trimmed := strings.TrimSpace(agent.StripTransientUserBlocks(content)); trimmed == planApprovedMessage {
 		return true
 	}
-	for _, prefix := range syntheticPrefixes {
-		if strings.HasPrefix(trimmed, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// syntheticPrefixes must be kept in sync with the synthetic user messages
-// injected by the controller (planApprovedMessage, goal loop turns), agent loop
-// (streamRecoveryMessage, finalReadinessRetryMessage, emptyFinalRetryMessage,
-// executorHandoffRetryMessage in internal/agent/agent.go), and compaction
-// folds (internal/agent/compact.go), which store summaries as user-role
-// messages the chat UI must never render as user bubbles (#3653).
-var syntheticPrefixes = []string{
-	"Plan approved — plan mode is off",
-	"Host final-answer readiness check failed",
-	"You are already in the executor phase",
-	"The previous assistant response was interrupted while a tool call",
-	"The previous assistant response was interrupted during streaming",
-	"The previous assistant response was interrupted before visible",
-	"The previous assistant response finished without any visible answer",
-	"<compaction-summary>",
-	"Summary of the later conversation (compacted from here on):",
-	"Summary of earlier conversation (compacted up to here):",
-	"Continue pursuing the active goal",
-	"The agent signaled goal completion and all tasks are marked done.",
-	"Goal signaled complete but issues remain:",
-	"No tool calls in recent turns.",
+	// The prefix list lives in internal/agent (agent.SyntheticUserPrefixes) so
+	// preview/title/turn-count derivations there share the exact same filter
+	// (#3653).
+	return agent.IsSyntheticUserText(content)
 }
 
 // Compose applies the plan-mode marker to a turn's text when plan mode is on,
@@ -202,8 +185,27 @@ func (c *Controller) compose(text, source string, includeHookContext bool) strin
 		if block := c.drainHookContextBlock(); block != "" {
 			text = block + "\n\n" + text
 		}
+		// Relevant facts ride only the real user-turn tail. This preserves the
+		// stable system/tool prefix and keeps synthetic recovery turns free of
+		// accidental recall. A just-written fact already arrives in memory-update.
+		if len(notes) == 0 {
+			if block := c.memory.recall(source).Block(); block != "" {
+				text = strings.TrimRight(text, "\n") + "\n\n" + block
+			}
+		} else {
+			c.memory.recordRecall(memory.RecallResult{
+				Query:      strings.TrimSpace(source),
+				Suppressed: "memory update already supplies the new fact",
+			})
+		}
 	}
 	return text
+}
+
+// LastMemoryRecall returns the last real turn's automatic-recall decision for
+// diagnostics and context-management surfaces.
+func (c *Controller) LastMemoryRecall() memory.RecallResult {
+	return c.memory.lastRecallResult()
 }
 
 func (c *Controller) enqueueHookContexts(contexts []string) {
@@ -379,36 +381,6 @@ func shouldUseAutoResearch(goal string, mode GoalResearchMode) bool {
 	return isAutoResearchGoal(goal)
 }
 
-func shouldAutoStartResearchGoal(input string) bool {
-	trimmed := strings.TrimSpace(input)
-	if trimmed == "" || strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "!") {
-		return false
-	}
-	lower := strings.ToLower(trimmed)
-	if strings.Contains(lower, ".reasonix/autoresearch/") {
-		return true
-	}
-	for _, phrase := range autoResearchAutoStartPhrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	categories := autoResearchPhaseCount(lower)
-	switch {
-	case strings.Contains(lower, "彻底") && categories >= 3:
-		return true
-	case strings.Contains(lower, "完整") && categories >= 3:
-		return true
-	case strings.Contains(lower, "长期") && categories >= 2 && containsAnyGoalKeyword(lower, []string{"实验", "验证", "修复", "排查", "优化"}):
-		return true
-	case strings.Contains(lower, "thoroughly") && categories >= 3:
-		return true
-	case strings.Contains(lower, "complete") && categories >= 3:
-		return true
-	}
-	return false
-}
-
 func isAutoResearchGoal(goal string) bool {
 	trimmed := strings.TrimSpace(goal)
 	if trimmed == "" {
@@ -434,32 +406,6 @@ func autoResearchPhaseCount(lower string) int {
 		}
 	}
 	return categories
-}
-
-var autoResearchAutoStartPhrases = []string{
-	"直到根因",
-	"根因明确",
-	"多轮排查",
-	"不要原地打转",
-	"别原地打转",
-	"完整做成方案",
-	"完整方案并验证",
-	"跑实验",
-	"反复验证",
-	"系统性研究",
-	"持续研究",
-	"持续排查",
-	"持续推进",
-	"长期跑",
-	"until the root cause",
-	"root cause is clear",
-	"debug until",
-	"do not spin",
-	"don't spin",
-	"keep researching",
-	"long-horizon",
-	"long horizon",
-	"long-running",
 }
 
 var autoResearchStrongKeywords = []string{
@@ -622,22 +568,33 @@ func (c *Controller) CustomCommand(input string) (sent string, found bool) {
 	return "", false
 }
 
-// RunSkill resolves a "/<name> args…" line against the loaded skills, returning
-// the skill's rendered body to send as a turn (found=false when no skill
-// matches). Invoking a skill by slash always inlines its body — the model reads
-// and follows the playbook in the main loop; a subagent skill's isolation is
-// only engaged when the model calls it via run_skill / the dedicated tool. The
-// caller applies Compose for plan-mode/memory framing.
-func (c *Controller) RunSkill(input string) (sent string, found bool) {
+// resolveSkillInvocation resolves a "/<name> args…" line to its live Skill and
+// task text. Submit uses RunAs to choose inline main-loop execution or isolated
+// subagent execution; RunSkill remains the compatibility renderer used by
+// management/existence checks and callers that explicitly need the body.
+func (c *Controller) resolveSkillInvocation(input string) (skill.Skill, string, bool) {
 	fields := strings.Fields(input)
 	if len(fields) == 0 {
-		return "", false
+		return skill.Skill{}, "", false
 	}
 	name := strings.TrimPrefix(fields[0], "/")
-	if sk, ok := c.skills.byName(name); ok {
-		return skill.Render(sk, strings.Join(fields[1:], " ")), true
+	sk, ok := c.skills.bySlashName(name)
+	if !ok {
+		return skill.Skill{}, "", false
 	}
-	return "", false
+	return sk, strings.Join(fields[1:], " "), true
+}
+
+// RunSkill resolves a "/<name> args…" line against the loaded skills and
+// renders its body. Controller.Submit does not use this renderer for
+// runAs=subagent skills: direct slash invocation executes those through the
+// isolated SkillRunner instead.
+func (c *Controller) RunSkill(input string) (sent string, found bool) {
+	sk, task, ok := c.resolveSkillInvocation(input)
+	if !ok {
+		return "", false
+	}
+	return c.skills.render(sk, task), true
 }
 
 // MCPPrompt resolves a "/mcp__server__prompt args…" line: it maps the positional

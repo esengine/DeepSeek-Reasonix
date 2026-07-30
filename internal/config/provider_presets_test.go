@@ -104,6 +104,43 @@ func TestCuratedProviderPresetsDisplayOrder(t *testing.T) {
 	}
 }
 
+func TestCuratedProviderPresetsStepFunUsesOfficialBaseURLs(t *testing.T) {
+	tests := []struct {
+		id      string
+		kind    string
+		baseURL string
+	}{
+		{
+			id:      "stepfun",
+			kind:    "openai",
+			baseURL: "https://api.stepfun.com/step_plan/v1",
+		},
+		{
+			id:      "stepfun-anthropic",
+			kind:    "anthropic",
+			baseURL: "https://api.stepfun.com/step_plan",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.id, func(t *testing.T) {
+			preset, ok := CuratedProviderPreset(tt.id)
+			if !ok {
+				t.Fatalf("missing preset %q", tt.id)
+			}
+			if len(preset.Entries) != 1 {
+				t.Fatalf("preset %q has %d entries, want 1", tt.id, len(preset.Entries))
+			}
+			entry := preset.Entries[0]
+			if entry.Kind != tt.kind {
+				t.Fatalf("preset %q kind = %q, want %q", tt.id, entry.Kind, tt.kind)
+			}
+			if entry.BaseURL != tt.baseURL {
+				t.Fatalf("preset %q base_url = %q, want %q", tt.id, entry.BaseURL, tt.baseURL)
+			}
+		})
+	}
+}
+
 func TestCuratedProviderPresetReturnsDeepCopy(t *testing.T) {
 	preset, ok := CuratedProviderPreset("minimax-cn-api")
 	if !ok {
@@ -145,12 +182,30 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if kimiCN.DefaultModel() != "kimi-k2.7-code" || !kimiCN.HasVisionModel("kimi-k2.7-code-highspeed") || kimiCN.BalanceURL == "" {
 		t.Fatalf("kimi-cn capability mismatch: %+v", kimiCN)
 	}
+	kimiCNK3, ok := cfg.ResolveModel("kimi-cn/kimi-k3")
+	if !ok {
+		t.Fatal("kimi-cn/kimi-k3 did not resolve")
+	}
+	if !EffectiveVision(kimiCNK3) || kimiCNK3.ContextWindow != 1_048_576 ||
+		ReasoningProtocolForEntry(kimiCNK3) != ReasoningProtocolOpenAI ||
+		!stringSlicesEqual(kimiCNK3.SupportedEfforts, []string{"low", "high", "max"}) ||
+		EffectiveEffort(kimiCNK3) != "max" {
+		t.Fatalf("kimi-cn/kimi-k3 capability mismatch: %+v", kimiCNK3)
+	}
+	kimiCNK27, ok := cfg.ResolveModel("kimi-cn/kimi-k2.7-code")
+	if !ok || ReasoningProtocolForEntry(kimiCNK27) != ReasoningProtocolNone {
+		t.Fatalf("kimi-cn K2.7 reasoning protocol changed: %+v", kimiCNK27)
+	}
 	kimiGlobal, ok := cfg.Provider("kimi-global")
 	if !ok {
 		t.Fatal("kimi-global provider missing")
 	}
 	if kimiGlobal.BaseURL != "https://api.moonshot.ai/v1" || kimiGlobal.APIKeyEnv != "MOONSHOT_API_KEY" {
 		t.Fatalf("kimi-global endpoint/key mismatch: %+v", kimiGlobal)
+	}
+	kimiGlobalK3, ok := cfg.ResolveModel("kimi-global/kimi-k3")
+	if !ok || !EffectiveVision(kimiGlobalK3) || kimiGlobalK3.ContextWindow != 1_048_576 || EffectiveEffort(kimiGlobalK3) != "max" {
+		t.Fatalf("kimi-global/kimi-k3 capability mismatch: %+v", kimiGlobalK3)
 	}
 	kimiPlan, ok := cfg.Provider("kimi-coding-plan")
 	if !ok {
@@ -167,6 +222,9 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if longcat.BaseURL != "https://api.longcat.chat/openai/v1" || longcat.ModelsURL != "https://api.longcat.chat/openai/v1/models" || longcat.APIKeyEnv != "LONGCAT_API_KEY" {
 		t.Fatalf("longcat-openai endpoint/key mismatch: %+v", longcat)
 	}
+	if longcat.ContextWindow != longCat20ContextWindow {
+		t.Fatalf("longcat-openai context_window = %d, want %d", longcat.ContextWindow, longCat20ContextWindow)
+	}
 	if cap := EffortCapabilityForEntry(longcat); !cap.Supported || cap.Default != "enabled" || !containsString(cap.Levels, "disabled") {
 		t.Fatalf("longcat-openai effort capability = %+v, want enabled/disabled", cap)
 	}
@@ -179,6 +237,9 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if longcatAnthropic.Kind != "anthropic" || longcatAnthropic.BaseURL != "https://api.longcat.chat/anthropic" || longcatAnthropic.ModelsURL != "https://api.longcat.chat/anthropic/v1/models" || !longcatAnthropic.AuthHeader || longcatAnthropic.Thinking != "enabled" {
 		t.Fatalf("longcat-anthropic capability mismatch: %+v", longcatAnthropic)
+	}
+	if longcatAnthropic.ContextWindow != longCat20ContextWindow {
+		t.Fatalf("longcat-anthropic context_window = %d, want %d", longcatAnthropic.ContextWindow, longCat20ContextWindow)
 	}
 
 	mimo, ok := cfg.Provider("mimo-api")
@@ -319,6 +380,24 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	if cap := EffortCapabilityForEntry(kimi); !cap.Supported || cap.Default != "high" || !containsString(cap.Levels, "medium") {
 		t.Fatalf("opencode kimi effort capability = %+v, want low/medium/high", cap)
 	}
+	kimiK3, ok := cfg.ResolveModel("opencode-go/kimi-k3")
+	if !ok {
+		t.Fatal("opencode-go/kimi-k3 did not resolve")
+	}
+	if protocol := ReasoningProtocolForEntry(kimiK3); protocol != ReasoningProtocolOpenAI {
+		t.Fatalf("opencode Kimi K3 protocol = %q, want openai", protocol)
+	}
+	if cap := EffortCapabilityForEntry(kimiK3); !cap.Supported || cap.Default != "max" || !containsString(cap.Levels, "high") || !containsString(cap.Levels, "max") {
+		t.Fatalf("opencode Kimi K3 effort capability = %+v, want high/max", cap)
+	}
+	for _, level := range []string{"high", "max"} {
+		if got, err := NormalizeEffort(kimiK3, level); err != nil || got != level {
+			t.Fatalf("opencode Kimi K3 /effort %s = %q, %v; want %s", level, got, err, level)
+		}
+	}
+	if kimiK3.ContextWindow != 1_048_576 || !EffectiveVision(kimiK3) {
+		t.Fatalf("opencode Kimi K3 context/vision capability mismatch: %+v", kimiK3)
+	}
 
 	plain, ok := cfg.ResolveModel("opencode-go/glm-5.2")
 	if !ok {
@@ -400,5 +479,43 @@ func TestCuratedProviderPresetCapabilities(t *testing.T) {
 	}
 	if cap := EffortCapabilityForEntry(ollama); !cap.Supported || cap.Default != "auto" || !containsString(cap.Levels, "max") || !containsString(cap.Levels, "none") {
 		t.Fatalf("ollama-cloud effort capability = %+v, want none/max", cap)
+	}
+}
+
+func TestCuratedProviderPresetDeepSeekReasoningProtocolScope(t *testing.T) {
+	var cfg Config
+	for _, preset := range CuratedProviderPresets() {
+		for _, entry := range preset.Entries {
+			if err := cfg.UpsertProvider(entry); err != nil {
+				t.Fatalf("upsert preset %q: %v", preset.ID, err)
+			}
+		}
+	}
+
+	tests := []struct {
+		ref  string
+		want string
+	}{
+		{ref: "opencode-go/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
+		{ref: "opencode-go/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
+		{ref: "ollama-cloud/deepseek-v4-pro", want: ReasoningProtocolDeepSeek},
+		{ref: "ollama-cloud/deepseek-v4-flash", want: ReasoningProtocolDeepSeek},
+		{ref: "novita/deepseek/deepseek-v4-pro"},
+		{ref: "novita/deepseek/deepseek-v4-flash"},
+		{ref: "gmi/deepseek-ai/DeepSeek-V4-Pro"},
+		{ref: "gmi/deepseek-ai/DeepSeek-V4-Flash"},
+		{ref: "nvidia/deepseek-ai/deepseek-v4-pro"},
+		{ref: "vercel-ai-gateway/deepseek/deepseek-v4-pro"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.ref, func(t *testing.T) {
+			entry, ok := cfg.ResolveModel(tc.ref)
+			if !ok {
+				t.Fatalf("ResolveModel(%q) failed", tc.ref)
+			}
+			if got := ReasoningProtocolForEntry(entry); got != tc.want {
+				t.Fatalf("ReasoningProtocolForEntry(%q) = %q, want %q", tc.ref, got, tc.want)
+			}
+		})
 	}
 }

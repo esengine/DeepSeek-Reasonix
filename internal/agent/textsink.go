@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -80,18 +81,23 @@ func (s *TextSink) Emit(e event.Event) {
 
 	case event.ToolDispatch:
 		// The early (Partial) dispatch carries no args — the full one prints the
-		// line. Without this the headless stream shows every call twice.
-		if e.Tool.Partial {
+		// line. A same-ID preview refresh is for upsert-capable frontends; this
+		// append-only stream ignores it so every tool still prints exactly once.
+		if e.Tool.Partial || e.Tool.Refreshed {
 			break
 		}
-		fmt.Fprintf(s.out, "  -> %s %s\n", e.Tool.Name, CompactArgs(e.Tool.Args))
+		fmt.Fprintf(s.out, "  -> %s\n", textSinkToolHead(e.Tool.Name, e.Tool.Args))
 		s.wroteAnything = true
 
 	case event.ToolResult:
 		// A successful result is silent (it only feeds the model); a blocked
 		// call surfaces the same "⊘ name <reason>" line the agent used to print.
 		if e.Tool.Err != "" {
-			fmt.Fprintf(s.out, "  ⊘ %s %s\n", e.Tool.Name, e.Tool.Err)
+			name := e.Tool.Name
+			if e.Tool.Name == "use_capability" {
+				name = textSinkToolHead(e.Tool.Name, e.Tool.Args)
+			}
+			fmt.Fprintf(s.out, "  ⊘ %s %s\n", name, e.Tool.Err)
 			s.wroteAnything = true
 		}
 
@@ -134,6 +140,27 @@ func (s *TextSink) Emit(e event.Event) {
 		}
 		s.wroteAnything = true
 	}
+}
+
+func textSinkToolHead(name, args string) string {
+	if name != "use_capability" {
+		return name + " " + CompactArgs(args)
+	}
+	var call struct {
+		Action       string `json:"action"`
+		CapabilityID string `json:"capability_id"`
+	}
+	if json.Unmarshal([]byte(args), &call) != nil {
+		return "MCP"
+	}
+	subject := strings.TrimSpace(call.CapabilityID)
+	if subject == "" {
+		subject = strings.TrimSpace(call.Action)
+	}
+	if subject == "" {
+		return "MCP"
+	}
+	return "MCP(" + subject + ")"
 }
 
 // closeTextStream ends the streamed answer. With a renderer wired in and the

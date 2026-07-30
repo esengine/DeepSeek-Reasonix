@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reasonix.dev/schemas/theme-pack-v2.json",
+  "title": "Reasonix Theme Pack V2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "name", "baseStyle"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "enum": [1, 2] },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z]([a-z0-9-]{0,62}[a-z0-9])?$"
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "author": { "type": "string", "maxLength": 240 },
+    "description": { "type": "string", "maxLength": 240 },
+    "license": { "type": "string", "maxLength": 240 },
+    "baseStyle": {
+      "type": "string",
+      "enum": ["graphite", "aurora", "slate", "carbon", "nocturne", "amber"]
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "light": { "$ref": "#/$defs/tokenMap" },
+        "dark": { "$ref": "#/$defs/tokenMap" }
+      }
+    },
+    "recipes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "density": { "type": "string", "enum": ["compact", "comfortable"] },
+        "corners": { "type": "string", "enum": ["square", "soft", "round"] }
+      }
+    },
+    "background": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}\\.(png|jpe?g|webp)$"
+        },
+        "focusX": { "type": "number", "minimum": 0, "maximum": 1 },
+        "focusY": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safeArea": { "type": "string", "enum": ["left", "right", "center"] },
+        "homeOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "taskOpacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 },
+        "paneOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "taskBackground": { "$ref": "#/$defs/sceneBackground" }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["taskBackground"] },
+      "then": { "properties": { "schemaVersion": { "const": 2 } } }
+    }
+  ],
+  "$defs": {
+    "hexColor": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+    },
+    "sceneBackground": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,120}\\.(png|jpe?g|webp)$"
+        },
+        "focusX": { "type": "number", "minimum": 0, "maximum": 1 },
+        "focusY": { "type": "number", "minimum": 0, "maximum": 1 },
+        "safeArea": { "type": "string", "enum": ["left", "right", "center"] },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "overlayStrength": { "type": "number", "minimum": 0, "maximum": 1 },
+        "paneOpacity": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "tokenMap": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bg": { "$ref": "#/$defs/hexColor" },
+        "bgSoft": { "$ref": "#/$defs/hexColor" },
+        "bgElev": { "$ref": "#/$defs/hexColor" },
+        "panel": { "$ref": "#/$defs/hexColor" },
+        "sidebar": { "$ref": "#/$defs/hexColor" },
+        "chat": { "$ref": "#/$defs/hexColor" },
+        "workspace": { "$ref": "#/$defs/hexColor" },
+        "workspaceFiles": { "$ref": "#/$defs/hexColor" },
+        "border": { "$ref": "#/$defs/hexColor" },
+        "borderSoft": { "$ref": "#/$defs/hexColor" },
+        "fg": { "$ref": "#/$defs/hexColor" },
+        "fgDim": { "$ref": "#/$defs/hexColor" },
+        "fgFaint": { "$ref": "#/$defs/hexColor" },
+        "accent": { "$ref": "#/$defs/hexColor" },
+        "accentFg": { "$ref": "#/$defs/hexColor" },
+        "ok": { "$ref": "#/$defs/hexColor" },
+        "warn": { "$ref": "#/$defs/hexColor" },
+        "err": { "$ref": "#/$defs/hexColor" }
+      }
+    }
+  }
+}

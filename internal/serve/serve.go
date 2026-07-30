@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -33,6 +34,9 @@ import (
 
 //go:embed index.html
 var indexHTML []byte
+
+//go:embed logo-wordmark.svg
+var logoWordmarkSVG []byte
 
 // Server wires a controller to its HTTP surface. The Broadcaster must be the
 // same sink the controller was constructed with, so events reach SSE clients.
@@ -91,6 +95,16 @@ func (s *Server) ctl() control.SessionAPI {
 // Call it before serving; a nil keeper leaves lease gating off.
 func (s *Server) SetSessionLeases(k *control.SessionLeaseKeeper) {
 	s.leases = k
+	if ctrl, ok := s.ctl().(*control.Controller); ok {
+		ctrl.SetOnSessionRecovered(sessionLeaseRecoveryHandler(k))
+	}
+}
+
+func sessionLeaseRecoveryHandler(k *control.SessionLeaseKeeper) func(control.SessionRecoveryInfo) error {
+	if k == nil {
+		return nil
+	}
+	return k.HandleSessionRecovered
 }
 
 // rebindSessionLease moves the server's session lease to path. A nil keeper
@@ -172,8 +186,8 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 
 	// Snapshot the current controller under a short read of s.mu only.
 	cur := s.ctl()
-	if cur.Running() {
-		return fmt.Errorf("cannot switch model while a turn is running")
+	if controllerHasActiveRuntimeWork(cur) {
+		return fmt.Errorf("cannot switch model while active work or background jobs are running")
 	}
 
 	// Off-lock: snapshot, carry history, and build the replacement. None of these
@@ -195,7 +209,48 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	// Keep the carried conversation in its existing file so the switch doesn't
 	// orphan a duplicate (#2807).
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
+	// The freshly built controller's own leading system message carries the
+	// target profile's contract; AdoptHistory below replaces the whole
+	// history with carried, so splice that message in first or the model
+	// keeps seeing the outgoing profile's contract after every switch.
+	if fresh := newCtrl.History(); len(fresh) > 0 && fresh[0].Role == provider.RoleSystem {
+		if len(carried) > 0 && carried[0].Role == provider.RoleSystem {
+			carried[0] = fresh[0]
+		} else {
+			carried = append([]provider.Message{fresh[0]}, carried...)
+		}
+	}
 	newCtrl.AdoptHistory(carried, newPath)
+	// A rebuild must not force the user to re-approve tools already granted
+	// this session, or re-trust Plan-mode read-only commands already trusted
+	// this session.
+	if prev, ok := cur.(*control.Controller); ok {
+		newCtrl.RestoreSessionAuthorizations(prev.SessionAuthorizations())
+	}
+	// Persist before publishing the replacement. A failed write leaves cur and
+	// the on-disk transcript coherent and lets the caller retry; publishing first
+	// would report a successful switch whose refreshed system contract disappears
+	// on restart. AdoptHistory retained the loaded CAS baseline for this rewrite.
+	if newPath != "" {
+		if err := newCtrl.Snapshot(); err != nil {
+			newCtrl.Close()
+			return fmt.Errorf("switch model: snapshot adopted history: %w", err)
+		}
+	}
+
+	// Acquire the replacement controller's actual post-snapshot path before
+	// publishing it. Its initial snapshot can itself recover onto a new branch;
+	// binding the pre-snapshot newPath would leave that branch unguarded.
+	activePath := newCtrl.SessionPath()
+	if err := s.rebindSessionLease(activePath); err != nil {
+		newCtrl.Close()
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			return fmt.Errorf("switch model: %s", sessionInUseError(err))
+		}
+		slog.Error("serve: bind replacement session lease", "err", err)
+		return fmt.Errorf("switch model: unable to secure replacement session")
+	}
+	newCtrl.SetOnSessionRecovered(sessionLeaseRecoveryHandler(s.leases))
 
 	// Publish the swap under a short write lock. bindMu already serializes
 	// switches — today the only writer of s.ctrl — so the identity re-check is
@@ -205,20 +260,16 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	s.mu.Lock()
 	if s.ctrl != cur {
 		s.mu.Unlock()
+		if restoreErr := s.rebindSessionLease(cur.SessionPath()); restoreErr != nil {
+			newCtrl.Close()
+			slog.Error("serve: restore outgoing session lease after aborted model switch", "err", restoreErr)
+			return fmt.Errorf("switch model: session changed during switch; unable to restore outgoing session ownership")
+		}
 		newCtrl.Close()
 		return fmt.Errorf("switch model: session changed during switch")
 	}
 	s.ctrl = newCtrl
 	s.mu.Unlock()
-
-	// The lease follows the active session file. Rebind is a no-op for the
-	// common carried case (newPath == held path); it moves when a previously
-	// file-less session got a fresh path here, or when the pre-switch snapshot
-	// recovered onto a recovery branch. Both targets are fresh files created
-	// by this process, so failure is theoretical.
-	if err := s.rebindSessionLease(newPath); err != nil {
-		slog.Warn("serve: session lease after model switch", "err", err)
-	}
 
 	// Off-lock: tear down the old controller. Close can block up to 15s.
 	cur.Close()
@@ -242,14 +293,14 @@ func (s *Server) build(ctx context.Context, ref string) (*control.Controller, er
 // rebuilds via switchModel (which serializes on bindMu).
 func (s *Server) switchEffort(ctx context.Context, level string) error {
 	cur := s.ctl()
-	if cur.Running() {
-		return fmt.Errorf("cannot change effort while a turn is running")
+	if controllerHasActiveRuntimeWork(cur) {
+		return fmt.Errorf("cannot change effort while active work or background jobs are running")
 	}
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
-	ref := cur.Label()
+	ref := currentModelRef(cur)
 	entry, ok := cfg.ResolveModel(ref)
 	if !ok {
 		return fmt.Errorf("cannot resolve current provider %q", ref)
@@ -282,6 +333,14 @@ func (s *Server) switchEffort(ctx context.Context, level string) error {
 		return err
 	}
 	return s.switchModel(ctx, entry.Name+"/"+entry.Model)
+}
+
+func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
+	if ctrl == nil {
+		return false
+	}
+	status := ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 }
 
 // applyEffortEdit writes effort onto entry within edit, mirroring CLI/desktop
@@ -319,6 +378,7 @@ func (s *Server) HandlerWithCORS(origin string) http.Handler {
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.index)
+	mux.HandleFunc("GET /assets/logo-wordmark.svg", s.logoWordmark)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /history", s.history)
 	mux.HandleFunc("GET /context", s.context)
@@ -340,6 +400,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("POST /forget", s.forget)
 	mux.HandleFunc("GET /checkpoints", s.checkpoints)
 	mux.HandleFunc("GET /branches", s.branches)
+	mux.HandleFunc("GET /models", s.models)
 	mux.HandleFunc("GET /status", s.status)
 	mux.HandleFunc("GET /sessions", s.sessions)
 	mux.HandleFunc("GET /skills", s.skills)
@@ -382,19 +443,32 @@ func (s *Server) Run(addr string) error {
 // the provided context and drains active connections for up to 10 seconds
 // before returning.
 func (s *Server) RunGraceful(ctx context.Context, addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.RunGracefulListener(ctx, ln)
+}
+
+// RunGracefulListener is RunGraceful over a caller-supplied listener. Callers
+// that need the real bound address (e.g. --addr 127.0.0.1:0 with --port-file)
+// listen first, record ln.Addr(), then hand the listener here.
+func (s *Server) RunGracefulListener(ctx context.Context, ln net.Listener) error {
 	s.ctl().EnableInteractiveApproval()
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- srv.ListenAndServe()
+		errCh <- srv.Serve(ln)
 	}()
 	select {
 	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
 		return err
 	case <-ctx.Done():
 		slog.Info("serve: shutting down gracefully")
@@ -403,7 +477,11 @@ func (s *Server) RunGraceful(ctx context.Context, addr string) error {
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Warn("serve: graceful shutdown failed", "err", err)
 		}
-		return <-errCh
+		err := <-errCh
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
 	}
 }
 
@@ -419,6 +497,12 @@ func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	html := string(indexHTML)
 	html = strings.ReplaceAll(html, "__LANG__", lang)
 	_, _ = w.Write([]byte(html))
+}
+
+func (s *Server) logoWordmark(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	_, _ = w.Write(logoWordmarkSVG)
 }
 
 // sseKeepaliveInterval is how often the /events handler emits a `: ping`
@@ -814,7 +898,7 @@ func (s *Server) autoApproveTools(w http.ResponseWriter, r *http.Request) {
 }
 
 // toolApprovalMode selects ask, auto, or yolo approval behavior for interactive
-// frontends. Plan remains a separate read-only gate.
+// frontends. Plan remains a separate workflow governed by the selected mode.
 func (s *Server) toolApprovalMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Mode string `json:"mode"`
@@ -994,6 +1078,81 @@ func (s *Server) branches(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"branches": branches, "tree": tree})
 }
 
+// models lists configured chat models for the browser model picker.
+func (s *Server) models(w http.ResponseWriter, _ *http.Request) {
+	cfg, err := config.Load()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type modelEntry struct {
+		Ref      string `json:"ref"`
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+		Kind     string `json:"kind,omitempty"`
+		Active   bool   `json:"active,omitempty"`
+		Default  bool   `json:"default,omitempty"`
+	}
+	current := currentModelRef(s.ctl())
+	label := s.ctl().Label()
+	modelCounts := make(map[string]int)
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		models := p.ChatModelList()
+		if len(models) == 0 {
+			models = p.ModelList()
+		}
+		for _, model := range models {
+			modelCounts[model]++
+		}
+	}
+	var out []modelEntry
+	for i := range cfg.Providers {
+		p := &cfg.Providers[i]
+		if !p.Configured() {
+			continue
+		}
+		models := p.ChatModelList()
+		if len(models) == 0 {
+			models = p.ModelList()
+		}
+		for _, model := range models {
+			ref := p.Name + "/" + model
+			active := ref == current || p.Name == current
+			if !active && current == label && model == label {
+				if modelCounts[model] == 1 {
+					active = true
+				} else {
+					active = ref == cfg.DefaultModel
+				}
+			}
+			out = append(out, modelEntry{
+				Ref:      ref,
+				Provider: p.Name,
+				Model:    model,
+				Kind:     p.Kind,
+				Active:   active,
+				Default:  ref == cfg.DefaultModel || p.Name == cfg.DefaultModel,
+			})
+		}
+	}
+	if out == nil {
+		out = []modelEntry{}
+	}
+	writeJSON(w, map[string]any{"current": current, "label": label, "default": cfg.DefaultModel, "models": out})
+}
+
+func currentModelRef(c control.SessionAPI) string {
+	ref := strings.TrimSpace(c.ModelRef())
+	if ref != "" {
+		return ref
+	}
+	return strings.TrimSpace(c.Label())
+}
+
 // status returns a combined status snapshot.
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	used, window := s.ctl().ContextSnapshot()
@@ -1031,7 +1190,7 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, sess)
 }
 
-const titlePrompt = `Generate a very short title (3-5 words max) for this conversation based on the user's first message. Reply with ONLY the title, no quotes, no punctuation at the end.`
+const titlePrompt = `Generate a very short title (3-5 words max) for this conversation based on the user's first message. Use the same language as the user's message. Reply with ONLY the title, no quotes, no punctuation at the end.`
 
 // generateTitle calls a lightweight LLM to produce a short session title.
 // Returns empty string on any error — callers should fall back to a preview.

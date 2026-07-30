@@ -3,14 +3,12 @@ package instruction
 import (
 	"strings"
 	"testing"
-
-	"reasonix/internal/memory"
 )
 
 func TestExtractHostChecksFromStructuredSection(t *testing.T) {
-	docs := []memory.Source{{
+	docs := []Document{{
 		Path:  "AGENTS.md",
-		Scope: memory.ScopeProject,
+		Scope: ScopeProject,
 		Body: strings.Join([]string{
 			"# Project rules",
 			"## Reasonix host checks",
@@ -36,7 +34,7 @@ func TestExtractHostChecksFromStructuredSection(t *testing.T) {
 }
 
 func TestExtractHostChecksIgnoresOrdinaryGuidance(t *testing.T) {
-	docs := []memory.Source{{
+	docs := []Document{{
 		Path: "REASONIX.md",
 		Body: "Always run go test before committing.\n\n- verify: go test ./...",
 	}}
@@ -47,7 +45,7 @@ func TestExtractHostChecksIgnoresOrdinaryGuidance(t *testing.T) {
 }
 
 func TestExtractHostChecksIsCaseInsensitive(t *testing.T) {
-	docs := []memory.Source{{
+	docs := []Document{{
 		Path: "REASONIX.md",
 		Body: "## reasonix HOST checks\n- verify: go test ./...",
 	}}

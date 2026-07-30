@@ -19,12 +19,15 @@ func init() { tool.RegisterBuiltin(notebookEdit{}) }
 // replaces, inserts, or deletes it, re-serialising so the JSON stays valid and
 // unrelated cells, outputs, and top-level metadata are preserved.
 //
-// roots, when non-empty, confines the target to the workspace (see confine); the
+// roots, when non-empty, confines the target to the workspace (see confine);
+// guard rejects Reasonix session-data targets (see SessionDataGuard); the
 // zero value registered at init is unconfined and is overridden per run by
 // ConfineWriters. workDir, when non-empty, is the directory a relative path
 // resolves against (see resolveIn).
 type notebookEdit struct {
 	roots   []string
+	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -79,7 +82,7 @@ func (n notebookEdit) Execute(ctx context.Context, raw json.RawMessage) (string,
 		return "", err
 	}
 	a.Path = resolveIn(n.workDir, a.Path)
-	if err := confine(n.roots, a.Path); err != nil {
+	if err := confineWrite(ctx, n.roots, n.guard, n.managed, a.Path); err != nil {
 		return "", err
 	}
 	data, err := os.ReadFile(a.Path)

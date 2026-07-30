@@ -29,14 +29,15 @@ func TestReportTabSnapshotErrorDebouncesAutosave(t *testing.T) {
 	}
 
 	// Window expired: warns again.
+	aged := time.Now().Add(-autosaveWarnInterval - time.Second)
 	tab.saveMu.Lock()
-	tab.lastAutosaveWarnAt = time.Now().Add(-autosaveWarnInterval - time.Second)
+	tab.lastAutosaveWarnAt = aged
 	tab.saveMu.Unlock()
 	app.reportTabSnapshotError(tab, "autosave", failure)
 	tab.saveMu.Lock()
 	third := tab.lastAutosaveWarnAt
 	tab.saveMu.Unlock()
-	if !third.After(first) {
+	if !third.After(aged) {
 		t.Fatal("expired window did not re-arm the autosave warning")
 	}
 

@@ -1,13 +1,12 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, GripVertical, KeyRound, Loader2, MessageCircle, Minus, Play, Plus, QrCode, RefreshCw, RotateCcw, Send } from "lucide-react";
+import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
-import { app } from "../lib/bridge";
+import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
-import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerRequiresKey } from "../lib/providerModels";
-import { useUpdater } from "../lib/useUpdater";
+import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
+import { switchUpdaterChannel, useUpdater } from "../lib/useUpdater";
 import {
-  THEME_STYLES,
   applyTheme,
   getTheme,
   getThemeStyle,
@@ -16,8 +15,14 @@ import {
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
-import { TEXT_SIZES, applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
-import { DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
+import {
+  applyConversationWidth,
+  getCachedConversationWidth,
+  normalizeConversationWidth,
+  type ConversationWidth,
+} from "../lib/conversationWidth";
+import { applyTextSize, getTextSize, type TextSize } from "../lib/textSize";
+import { snapZoom, zoomToPercent, saveRestartZoom, getRestartZoom, type ZoomLevel } from "../lib/dpiScale";
 import {
   applyFontFamily,
   applyMonoFontFamily,
@@ -30,8 +35,8 @@ import {
   type FontFamily,
   type MonoFontFamily,
 } from "../lib/fontFamily";
-import { getAvailableFontFamilies, getAvailableMonoFontFamilies } from "../lib/fontAvailability";
 import { getDisplayMode, onDisplayModeChange, setDisplayMode as setLocalDisplayMode } from "../lib/displayMode";
+import { getProcessFoldPreference, onProcessFoldPreferenceChange, setProcessFoldPreference, type ProcessFoldPreference } from "../lib/processFoldPreference";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { normalizeToolApprovalMode } from "../lib/types";
 import {
@@ -42,11 +47,14 @@ import {
   resetCustomShortcuts,
   resolvedShortcutCombo,
   saveCustomShortcut,
+  shortcutAcceptsCombo,
   shortcutConflict,
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
 import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import { AppearanceOverview } from "./AppearanceOverview";
+import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -56,14 +64,19 @@ import { getSuccessPreference, setSuccessPreference, getAttentionPreference, set
 import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
-const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "skills", "plugins", "memory", "hooks", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
-export type SettingsInitialFocus = { target: "bot-allowlist"; connectionId?: string };
+const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "remote", "skills", "subagents", "plugins", "memory", "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
+export type SettingsInitialFocus =
+  | { target: "bot-allowlist"; connectionId?: string }
+  | { target: "model-access" };
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
 const MCPServersSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.MCPServersSettingsPage })));
+const RemoteHostsPage = lazy(() => import("./RemoteHostsPage").then((module) => ({ default: module.RemoteHostsPage })));
 const SkillsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.SkillsSettingsPage })));
 const PluginsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.PluginsSettingsPage })));
 const MemorySettingsPage = lazy(() => import("./MemoryPanel").then((module) => ({ default: module.MemorySettingsPage })));
+const SubagentsSettingsPage = lazy(() => import("./SubagentsPanel").then((module) => ({ default: module.SubagentsSettingsPage })));
+const DiagnosticsSettingsPage = lazy(() => import("./DiagnosticsSettingsPage").then((module) => ({ default: module.DiagnosticsSettingsPage })));
 const QRCodeSVG = lazy(() => import("qrcode.react").then((module) => ({ default: module.QRCodeSVG })));
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -76,6 +89,7 @@ export function SettingsPanel({
   initialFocus,
   agentRunning = false,
   desktopPlatform,
+  onUseSubagent,
 }: {
   onClose: () => void;
   onChanged: (settings?: SettingsView | null) => void;
@@ -83,6 +97,7 @@ export function SettingsPanel({
   initialFocus?: SettingsInitialFocus;
   agentRunning?: boolean;
   desktopPlatform: DesktopPlatform;
+  onUseSubagent: (command: string) => void;
 }) {
   const t = useT();
   const [s, setS] = useState<SettingsView | null>(null);
@@ -93,6 +108,7 @@ export function SettingsPanel({
   const [warning, setWarning] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
+  const [conversationWidth, setConversationWidth] = useState<ConversationWidth>(() => getCachedConversationWidth());
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [zoomPct, setZoomPct] = useState<number>(zoomToPercent(getRestartZoom()));
   const [fontFamily, setFontFamilyState] = useState<FontFamily>(getFontFamily());
@@ -100,8 +116,15 @@ export function SettingsPanel({
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [customMonoFontName, setCustomMonoFontNameState] = useState<string>(getCustomMonoFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
-  // Play the modal exit animation, then let the parent unmount us.
-  const { status, requestClose } = useDeferredClose(onClose, 240);
+  const pendingSubagentCommandRef = useRef<string | null>(null);
+  // Play the modal exit animation, then let the parent unmount us and focus
+  // the composer with the selected slash command.
+  const { status, requestClose } = useDeferredClose(() => {
+    const command = pendingSubagentCommandRef.current;
+    pendingSubagentCommandRef.current = null;
+    onClose();
+    if (command) onUseSubagent(command);
+  }, 240);
   const zoomSaveSeq = useRef(0);
 
   const reload = useCallback(async () => {
@@ -129,7 +152,8 @@ export function SettingsPanel({
     const nextStyle = normalizeThemeStyleForTheme(s.desktopThemeStyle, nextTheme);
     setThemeState(nextTheme);
     setThemeStyleState(nextStyle);
-  }, [s?.desktopTheme, s?.desktopThemeStyle]);
+    setConversationWidth(applyConversationWidth(s.conversationWidth));
+  }, [s?.conversationWidth, s?.desktopTheme, s?.desktopThemeStyle]);
   useEffect(() => {
     if (desktopPlatform !== "windows") return;
     let cancelled = false;
@@ -158,15 +182,18 @@ export function SettingsPanel({
       const result = await fn();
       const next = await reload();
       onChanged(next);
+      window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
       if (typeof result === "string" && result.trim()) {
         setWarning(result.trim());
       }
+      return true;
     } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
+      setErr(formatSettingsError(e, t));
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [reload, onChanged]);
+  }, [reload, onChanged, t]);
   const backgroundApply = useCallback(async (fn: () => Promise<void>) => {
     setErr(null);
     setWarning(null);
@@ -174,10 +201,11 @@ export function SettingsPanel({
       await fn();
       const next = await reload();
       onChanged(next);
+      window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
     } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
+      setErr(formatSettingsError(e, t));
     }
-  }, [reload, onChanged]);
+  }, [reload, onChanged, t]);
   const setRestartZoom = useCallback(async (zoom: ZoomLevel) => {
     const snapped = snapZoom(zoom);
     const seq = ++zoomSaveSeq.current;
@@ -189,10 +217,10 @@ export function SettingsPanel({
       if (seq === zoomSaveSeq.current) saveRestartZoom(snapped);
     } catch (e) {
       if (seq !== zoomSaveSeq.current) return;
-      setErr(String((e as Error)?.message ?? e));
+      setErr(formatSettingsError(e, t));
       setZoomPct(zoomToPercent(getRestartZoom()));
     }
-  }, []);
+  }, [t]);
 
   // Close on Esc
   useEffect(() => {
@@ -207,11 +235,11 @@ export function SettingsPanel({
   // sandbox, appearance, updates) need SettingsView loaded. MCP, Skills, Plugins,
   // and Memory
   // load their own data and render regardless.
-  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
+  const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
 
   return (
-    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onClick={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
       <div className="management-modal settings-modal" data-state={status}>
         <header className="management-modal__head settings-modal__head">
           <div className="management-modal__title settings-modal__title">{t("settings.title")}</div>
@@ -245,22 +273,29 @@ export function SettingsPanel({
             ) : (
               <>
                 {tab === "general" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><GeneralSection s={s} busy={busy} apply={apply} agentRunning={agentRunning} /></SettingsPageShell>}
-                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} /></SettingsPageShell>}
+                {tab === "models" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><ModelsSection s={s} busy={busy} apply={apply} backgroundApply={backgroundApply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "bots" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><BotsSection s={s} busy={busy} apply={apply} initialFocus={initialFocus} /></SettingsPageShell>}
                 {tab === "mcp" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MCPServersSettingsPage /></Suspense></SettingsPageShell>}
+                {tab === "remote" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><RemoteHostsPage /></Suspense></SettingsPageShell>}
                 {tab === "skills" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SkillsSettingsPage /></Suspense></SettingsPageShell>}
+                {tab === "subagents" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><Suspense fallback={lazySettingsPageFallback}><SubagentsSettingsPage s={s} onUseInChat={(command) => {
+                  pendingSubagentCommandRef.current = command;
+                  requestClose();
+                }} /></Suspense></SettingsPageShell>}
                 {tab === "plugins" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><PluginsSettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MemorySettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
+                {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
                 {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
-                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
+                {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "appearance" && s && (
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
-                    <AppearanceSection
+                    <AppearanceOverview
                       theme={theme}
                       themeStyle={themeStyle}
+                      conversationWidth={conversationWidth}
                       textSize={textSize}
                       showDisplayZoom={desktopPlatform === "windows"}
                       zoomPct={zoomPct}
@@ -269,14 +304,21 @@ export function SettingsPanel({
                       customFontName={customFontName}
                       customMonoFontName={customMonoFontName}
                       onTheme={(nextTheme) => {
-                        applyTheme(nextTheme, themeStyle, { persist: false });
+                        applyConfiguredBaseAppearance(nextTheme, themeStyle);
                         setThemeState(nextTheme);
                         void apply(() => app.SetDesktopAppearance(nextTheme, themeStyle));
                       }}
+                      onConversationWidth={(width) => {
+                        applyConversationWidth(width);
+                        setConversationWidth(width);
+                        void apply(() => app.SetDesktopConversationWidth(width));
+                      }}
                       onThemeStyle={(style) => {
-                        applyTheme(theme, style, { persist: false });
+                        // AppearanceOverview already persists via ActivateBaseStyle /
+                        // experience APIs. Parent only mirrors React + DOM state.
+                        applyTheme(getTheme(), style, { persist: false });
                         setThemeStyleState(style);
-                        void apply(() => app.SetDesktopAppearance(theme, style));
+                        setBaseAppearance(getTheme(), style);
                       }}
                       onTextSize={(size) => {
                         applyTextSize(size);
@@ -309,6 +351,7 @@ export function SettingsPanel({
                     <UpdatesSection
                       configPath={s.configPath}
                       checkUpdates={s.checkUpdates}
+                      updateChannel={s.updateChannel}
                       telemetry={s.telemetry !== false}
                       metrics={s.metrics !== false}
                       settingsBusy={busy}
@@ -325,16 +368,18 @@ export function SettingsPanel({
   );
 }
 
-function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<void>; children: ReactNode }) {
+function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<boolean>; children: ReactNode }) {
   const t = useT();
   const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
   const desc = t(descKey as any);
   return (
     <div className={`settings-page settings-page--${settingsPageKind(tab)} settings-page--${tab}`}>
-      <div className="settings-page__header">
-        <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
-        {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
-      </div>
+      {tab !== "appearance" ? (
+        <div className="settings-page__header">
+          <h2 className="settings-page__title">{settingsTabPageTitle(tab, t)}</h2>
+          {typeof desc === "string" && desc !== `settings.pageDesc.${tab}` && <p className="settings-page__desc">{desc}</p>}
+        </div>
+      ) : null}
       {children}
     </div>
   );
@@ -344,9 +389,12 @@ function settingsPageKind(tab: SettingsTab): "form" | "manager" {
   switch (tab) {
     case "models":
     case "mcp":
+    case "remote":
     case "skills":
+    case "subagents":
     case "plugins":
     case "memory":
+    case "appearance":
       return "manager";
     default:
       return "form";
@@ -431,6 +479,7 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
     case "skills": return t("settings.tab.skills");
     case "plugins": return t("settings.tab.plugins");
     case "memory": return t("settings.tab.memory");
+    case "diagnostics": return t("settings.tab.diagnostics");
     case "shortcuts": return t("settings.tab.shortcuts");
     default: return settingsTabLabel(id, t);
   }
@@ -439,11 +488,12 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
 type SectionProps = {
   s: SettingsView;
   busy: boolean;
-  apply: (fn: () => Promise<unknown>) => Promise<void>;
+  apply: (fn: () => Promise<unknown>) => Promise<boolean>;
 };
 
 type ModelsSectionProps = SectionProps & {
   backgroundApply: (fn: () => Promise<void>) => Promise<void>;
+  initialFocus?: SettingsInitialFocus;
 };
 
 function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
@@ -458,14 +508,20 @@ function settingsTabLabel(id: SettingsTab, t: ReturnType<typeof useT>): string {
       return t("settings.tab.bots");
     case "mcp":
       return t("settings.tab.mcp");
+    case "remote":
+      return t("settings.tab.remote");
     case "skills":
       return t("settings.tab.skills");
+    case "subagents":
+      return t("settings.tab.subagents");
     case "plugins":
       return t("settings.tab.plugins");
     case "memory":
       return t("settings.tab.memory");
     case "hooks":
       return t("settings.tab.hooks");
+    case "diagnostics":
+      return t("settings.tab.diagnostics");
     case "shortcuts":
       return t("settings.tab.shortcuts");
     case "network":
@@ -493,14 +549,20 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
       return botSettingsMeta(s.bot, t);
     case "mcp":
       return t("caps.connectorsTab");
+    case "remote":
+      return t("remote.tabHint");
     case "skills":
       return t("caps.skillsTab");
+    case "subagents":
+      return t("subagents.tabHint");
     case "plugins":
       return t("settings.tabSub.plugins");
     case "memory":
       return t("settings.tabSub.memory");
     case "hooks":
       return t("settings.tabSub.hooks");
+    case "diagnostics":
+      return t("settings.tabSub.diagnostics");
     case "shortcuts":
       return t("settings.tabSub.shortcuts");
     case "network":
@@ -534,28 +596,58 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   return t("settings.botConnectionCount", { n: connections });
 }
 
-function ShortcutsSection() {
+export function ShortcutsSection() {
   const t = useT();
   const [platform] = useState(() => detectShortcutPlatform());
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
+  const [unsupportedAction, setUnsupportedAction] = useState<ShortcutAction | null>(null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
 
   const definitions = shortcutDefinitions();
   const commitShortcut = (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setConflict(null);
+      setUnsupportedAction(null);
+      setRecording(null);
+      return;
+    }
     const combo = comboFromKeyboardEvent(event.nativeEvent);
     if (!combo) return;
+    if (!shortcutAcceptsCombo(action, combo)) {
+      // Let the browser move focus before onBlur cancels recording. Updating
+      // recording state synchronously here can keep focus on the re-rendered
+      // button in WebKit.
+      if (event.key === "Tab") {
+        const recorder = event.currentTarget;
+        queueMicrotask(() => {
+          // Native Tab normally moves focus first. If this WebView does not,
+          // release focus so the recorder cannot become a keyboard trap.
+          if (document.activeElement === recorder) recorder.blur();
+        });
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setConflict(null);
+      setUnsupportedAction(action);
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const conflictDefinition = shortcutConflict(action, combo, platform);
     if (conflictDefinition) {
+      setUnsupportedAction(null);
       setConflict({ action, conflictAction: conflictDefinition.action });
       return;
     }
     saveCustomShortcut(action, combo);
     setConflict(null);
+    setUnsupportedAction(null);
     setRecording(null);
     setRevision((value) => value + 1);
   };
@@ -573,6 +665,7 @@ function ShortcutsSection() {
           onClick={() => {
             resetCustomShortcuts();
             setConflict(null);
+            setUnsupportedAction(null);
             setRecording(null);
             setRevision((value) => value + 1);
           }}
@@ -587,6 +680,13 @@ function ShortcutsSection() {
             {t("settings.shortcutsConflict", {
               action: t(definitions.find((definition) => definition.action === conflict.action)?.labelKey ?? "settings.tab.shortcuts"),
               conflict: t(definitions.find((definition) => definition.action === conflict.conflictAction)?.labelKey ?? "settings.tab.shortcuts"),
+            })}
+          </div>
+        )}
+        {unsupportedAction && (
+          <div className="shortcuts-settings__conflict" role="alert">
+            {t("settings.shortcutsEnterOnly", {
+              action: t(definitions.find((definition) => definition.action === unsupportedAction)?.labelKey ?? "settings.tab.shortcuts"),
             })}
           </div>
         )}
@@ -606,12 +706,24 @@ function ShortcutsSection() {
                 <button
                   className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}${definition.configurable === false ? " shortcuts-settings__key--locked" : ""}`}
                   type="button"
+                  data-shortcut-action={definition.action}
                   disabled={definition.configurable === false}
                   aria-label={isRecording ? t("settings.shortcutsRecording") : display}
                   aria-pressed={isRecording}
-                  onClick={() => {
+                  onClick={(event) => {
                     setRecording(definition.action);
                     setConflict(null);
+                    setUnsupportedAction(null);
+                    // WebKit (the desktop WKWebView) does not focus buttons on
+                    // click, and the recorder listens for keys on the button —
+                    // without this the recorder never receives any keydown.
+                    event.currentTarget.focus();
+                  }}
+                  onBlur={() => {
+                    if (!isRecording) return;
+                    setConflict(null);
+                    setUnsupportedAction(null);
+                    setRecording(null);
                   }}
                   onKeyDown={(event) => isRecording && commitShortcut(definition.action, event)}
                 >
@@ -624,6 +736,7 @@ function ShortcutsSection() {
                   onClick={() => {
                     saveCustomShortcut(definition.action, null);
                     setConflict(null);
+                    setUnsupportedAction(null);
                     setRecording(null);
                     setRevision((value) => value + 1);
                   }}
@@ -640,7 +753,7 @@ function ShortcutsSection() {
 }
 
 // allRefs flattens providers into "provider/model" refs for the model selectors.
-function allRefs(s: SettingsView): string[] {
+export function allRefs(s: SettingsView): string[] {
   const out: string[] = [];
   for (const p of s.providers) {
     if (!p.added || !providerIsConfigured(p)) continue;
@@ -651,7 +764,7 @@ function allRefs(s: SettingsView): string[] {
 
 // toRef normalises a stored model id (a provider name, a bare model, or a ref) to
 // a "provider/model" ref so a <select> of refs can show it selected.
-function toRef(model: string, s: SettingsView): string {
+export function toRef(model: string, s: SettingsView): string {
   if (!model) return "";
   if (model.includes("/")) return model;
   const byName = s.providers.find((p) => p.name === model);
@@ -666,12 +779,11 @@ const PROXY_MODES = ["auto", "custom", "off"] as const;
 // EFFORT_PRESETS is the canonical union of /effort levels the kernel recognises.
 // The settings UI uses it for subagent defaults; provider-specific levels are
 // inferred by the backend or edited in TOML for rare gateways.
-const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
+export const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
 const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "openai", "none"];
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
-const AUTO_PLAN_MODES = ["off", "on"] as const;
 const TOOL_APPROVAL_MODES = ["ask", "auto", "yolo"] as const;
 const BOT_TOOL_APPROVAL_MODES = ["", "ask", "auto", "yolo"] as const;
 const BOT_QUEUE_MODES = ["steer", "followup", "collect", "interrupt"] as const;
@@ -679,7 +791,6 @@ const BOT_QUEUE_DROPS = ["summarize", "old", "new"] as const;
 const BOT_ROUTE_CHAT_TYPES = ["", "dm", "group", "guild", "direct", "thread"] as const;
 
 type ProxyMode = (typeof PROXY_MODES)[number];
-type AutoPlanMode = (typeof AUTO_PLAN_MODES)[number];
 
 function normalizeProxyMode(mode: string): ProxyMode {
   switch (mode) {
@@ -694,10 +805,6 @@ function normalizeProxyMode(mode: string): ProxyMode {
 
 function normalizeNetworkView(network: NetworkView): NetworkView {
   return { ...network, proxyMode: normalizeProxyMode(network.proxyMode) };
-}
-
-function normalizeAutoPlan(mode: string | undefined): AutoPlanMode {
-  return mode === "ask" || mode === "on" ? "on" : "off";
 }
 
 function normalizeReasoningProtocol(protocol: string | undefined): string {
@@ -769,17 +876,38 @@ function sortedJSONValue(value: unknown): unknown {
   return value;
 }
 
-function validateProviderExtraBodyValue(value: unknown, path = "extra_body"): void {
+function formatSettingsError(error: unknown, t: ReturnType<typeof useT>): string {
+  const msg = String((error as Error)?.message ?? error ?? "").trim();
+  const unknownModel = /^unknown model (.+)$/i.exec(msg);
+  if (unknownModel) return t("settings.errorUnknownModel", { model: unknownModel[1] });
+  const providerNotAdded = /^model (.+) is not available because provider (.+) is not added$/i.exec(msg);
+  if (providerNotAdded) return t("settings.errorModelProviderMissing", { model: providerNotAdded[1], provider: providerNotAdded[2] });
+  const providerNoKey = /^model (.+) is not available because provider (.+) has no key$/i.exec(msg);
+  if (providerNoKey) return t("settings.errorModelProviderNoKey", { model: providerNoKey[1], provider: providerNoKey[2] });
+  const removeAccessBusy = /^finish or cancel active work using (.+) before removing the provider access$/i.exec(msg);
+  if (removeAccessBusy) return t("settings.errorRemoveAccessBusy", { provider: removeAccessBusy[1] });
+  const deleteProviderBusy = /^finish or cancel active work using (.+) before deleting the provider$/i.exec(msg);
+  if (deleteProviderBusy) return t("settings.errorDeleteProviderBusy", { provider: deleteProviderBusy[1] });
+  const saveBeforeRemoveAccess = /^save current session before removing provider access: (.+)$/is.exec(msg);
+  if (saveBeforeRemoveAccess) return t("settings.errorSaveBeforeRemoveAccess", { err: saveBeforeRemoveAccess[1] });
+  const saveBeforeDeleteProvider = /^save current session before deleting provider: (.+)$/is.exec(msg);
+  if (saveBeforeDeleteProvider) return t("settings.errorSaveBeforeDeleteProvider", { err: saveBeforeDeleteProvider[1] });
+  const removeProviderUsed = /^remove provider: (.+) is used by open tabs and no other configured provider exists$/i.exec(msg);
+  if (removeProviderUsed) return t("settings.errorRemoveProviderNoFallback", { provider: removeProviderUsed[1] });
+  return msg || t("settings.errorUnknown");
+}
+
+function validateProviderExtraBodyValue(value: unknown, path = "extra_body", t?: ReturnType<typeof useT>): void {
   if (value === null) {
-    throw new Error(`${path} cannot contain null`);
+    throw new Error(t ? t("settings.providerExtraBodyNull", { path }) : `${path} cannot contain null`);
   }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => validateProviderExtraBodyValue(item, `${path}[${index}]`));
+    value.forEach((item, index) => validateProviderExtraBodyValue(item, `${path}[${index}]`, t));
     return;
   }
   if (typeof value === "object") {
     for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      validateProviderExtraBodyValue(child, `${path}.${key}`);
+      validateProviderExtraBodyValue(child, `${path}.${key}`, t);
     }
   }
 }
@@ -795,20 +923,26 @@ export function formatProviderExtraBody(extraBody: Record<string, unknown> | nul
   return JSON.stringify(sortedJSONValue(cleaned), null, 2);
 }
 
-export function parseProviderExtraBody(raw: string): Record<string, unknown> {
+export function parseProviderExtraBody(raw: string, t?: ReturnType<typeof useT>): Record<string, unknown> {
   const trimmed = raw.trim();
   if (!trimmed) return {};
   const parsed = JSON.parse(trimmed) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("extra body must be a JSON object");
+    throw new Error(t ? t("settings.providerExtraBodyObjectRequired") : "extra body must be a JSON object");
   }
-  validateProviderExtraBodyValue(parsed);
+  validateProviderExtraBodyValue(parsed, "extra_body", t);
   const out: Record<string, unknown> = {};
   for (const [rawKey, value] of Object.entries(parsed as Record<string, unknown>)) {
     const key = rawKey.trim();
     if (key) out[key] = value;
   }
   return out;
+}
+
+export function providerExtraBodyParseError(error: unknown, t: ReturnType<typeof useT>): string {
+  if (error instanceof SyntaxError) return t("settings.providerExtraBodyError");
+  const message = String((error as Error)?.message ?? error ?? "").trim();
+  return message || t("settings.providerExtraBodyError");
 }
 
 function providerModelFetchFallbackMessage(error: unknown, t: ReturnType<typeof useT>): string {
@@ -1178,14 +1312,14 @@ function normalizeProviderPresetView(p: ProviderPresetView): ProviderPresetView 
 function normalizeSettingsView(view: SettingsView | null | undefined): SettingsView | null {
   if (!view) return null;
   const permissions = view.permissions ?? { mode: "ask", allow: [], ask: [], deny: [] };
-  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "", effectiveWriteRoots: [], shell: "auto" };
+  const sandbox = view.sandbox ?? { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "", effectiveWriteRoots: [], shell: "auto", effectiveShell: "" };
   const network = view.network ?? {
     proxyMode: "auto",
     proxyUrl: "",
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 0;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   agent.maxSubagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
@@ -1207,6 +1341,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
       allowWrite: asArray(sandbox.allowWrite),
       effectiveWorkspaceRoot: String(sandbox.effectiveWorkspaceRoot ?? ""),
       effectiveWriteRoots: asArray(sandbox.effectiveWriteRoots),
+      effectiveShell: String(sandbox.effectiveShell ?? sandbox.shell ?? ""),
     },
     network: {
       ...network,
@@ -1214,11 +1349,12 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     },
     agent,
     bot: normalizeBotSettings(view.bot),
-    autoPlan: normalizeAutoPlan(view.autoPlan),
+    autoPlan: "off",
     defaultToolApprovalMode: normalizeToolApprovalMode(view.defaultToolApprovalMode),
     autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
     bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopCurrency: normalizeDesktopCurrency(view.desktopCurrency),
     desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
@@ -1226,9 +1362,16 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     displayMode: normalizeDisplayMode(view.displayMode),
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
+    conversationWidth: normalizeConversationWidth(view.conversationWidth),
     checkUpdates: view.checkUpdates !== false,
-    memoryCompilerEnabled: view.memoryCompilerEnabled !== false,
+    updateChannel: view.updateChannel === "preview" ? "preview" : "stable",
   };
+}
+
+type DesktopCurrency = "" | "CNY" | "USD";
+
+function normalizeDesktopCurrency(currency: string | undefined): DesktopCurrency {
+  return currency === "CNY" || currency === "USD" ? currency : "";
 }
 
 type CloseBehavior = "background" | "quit";
@@ -1361,6 +1504,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const { t, setPref } = useI18n();
   const closeBehavior = normalizeCloseBehavior(s.closeBehavior);
   const [displayMode, setDisplayMode] = useState<DisplayMode>(() => normalizeDisplayMode(getDisplayMode()));
+  const [processFold, setProcessFold] = useState<ProcessFoldPreference>(getProcessFoldPreference);
   const [statusBarItemsExpanded, setStatusBarItemsExpanded] = useState(false);
   const [draggingStatusBarItem, setDraggingStatusBarItem] = useState<StatusBarItemId | null>(null);
   const [statusBarDragTarget, setStatusBarDragTargetState] = useState<StatusBarDragTarget | null>(null);
@@ -1370,11 +1514,11 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   const soundPanelId = useId();
   const statusBarItemsPanelId = useId();
   useEffect(() => onDisplayModeChange((mode) => setDisplayMode(mode)), []);
+  useEffect(() => onProcessFoldPreferenceChange((pref) => setProcessFold(pref)), []);
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
-  const autoPlan = normalizeAutoPlan(s.autoPlan);
   const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
-  const memoryCompilerEnabled = s.memoryCompilerEnabled !== false;
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const desktopCurrency = normalizeDesktopCurrency(s.desktopCurrency);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
@@ -1546,6 +1690,20 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.currency")}>
+        <div className="set-seg">
+          {(["", "CNY", "USD"] as DesktopCurrency[]).map((currency) => (
+            <button
+              key={currency || "auto"}
+              className={`set-seg__btn${desktopCurrency === currency ? " set-seg__btn--on" : ""}`}
+              disabled={busy || agentRunning}
+              onClick={() => void apply(() => app.SetDesktopCurrency(currency))}
+            >
+              {currency === "" ? t("settings.currencyAuto") : currency}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
       <SettingsField label={t("settings.desktopLayoutStyle")}>
         <div className="set-seg">
           {(["classic", "workbench", "creation"] as const).map((style) => (
@@ -1591,6 +1749,19 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")}>
+        <div className="set-seg">
+          {(["auto", "expanded"] as const).map((pref) => (
+            <button
+              key={pref}
+              className={`set-seg__btn${processFold === pref ? " set-seg__btn--on" : ""}`}
+              onClick={() => setProcessFoldPreference(pref)}
+            >
+              {t(`settings.processFold.${pref}`)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
       <SettingsField label={t("settings.defaultToolApprovalMode")} hint={t("settings.defaultToolApprovalModeHint")}>
         <div className="set-seg">
           {TOOL_APPROVAL_MODES.map((mode) => (
@@ -1604,27 +1775,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
             </button>
           ))}
         </div>
-      </SettingsField>
-      <SettingsField label={t("settings.autoPlan")}>
-        <div className="set-seg">
-          {AUTO_PLAN_MODES.map((mode) => (
-            <button
-              key={mode}
-              className={`set-seg__btn${autoPlan === mode ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => void apply(() => app.SetAutoPlan(mode))}
-            >
-              {t(`settings.autoPlan.${mode}`)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.memoryCompiler")} hint={t("settings.memoryCompilerHint")}>
-        <ToggleSegment
-          value={memoryCompilerEnabled}
-          disabled={busy}
-          onChange={(enabled) => void apply(() => app.SetMemoryCompilerEnabled(enabled))}
-        />
       </SettingsField>
       <SettingsField label={t("settings.sound")} hint={t("settings.soundHint")} stacked>
         <div className={`settings-sound-editor${soundExpanded ? " settings-sound-editor--expanded" : ""}`}>
@@ -1901,80 +2051,6 @@ function GenMusicSelect({
       </AnchoredPopover>
     </div>
   );
-}
-
-function StepLimitControl({
-  value,
-  presets,
-  busy,
-  onChange,
-}: {
-  value: number;
-  presets: number[];
-  busy: boolean;
-  onChange: (value: number) => void;
-}) {
-  const t = useT();
-  const normalized = normalizeStepLimit(value);
-  const presetSet = new Set(presets.map(normalizeStepLimit));
-  const [custom, setCustom] = useState(String(normalized));
-  useEffect(() => setCustom(String(normalized)), [normalized]);
-  const isCustom = !presetSet.has(normalized);
-  const commitCustom = () => {
-    const next = normalizeStepLimit(Number(custom));
-    setCustom(String(next));
-    if (next !== normalized) onChange(next);
-  };
-  return (
-    <div className="step-limit-control">
-      <div className="set-seg">
-        {presets.map((preset) => {
-          const n = normalizeStepLimit(preset);
-          return (
-            <button
-              key={n}
-              type="button"
-              className={`set-seg__btn${normalized === n ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => n !== normalized && onChange(n)}
-            >
-              {stepLimitLabel(n, t)}
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={`set-seg__btn${isCustom ? " set-seg__btn--on" : ""}`}
-          disabled={busy}
-          onClick={() => {
-            if (!isCustom) setCustom(String(normalized || 12));
-          }}
-        >
-          {t("settings.stepLimit.custom")}
-        </button>
-      </div>
-      <input
-        className="mem-input step-limit-control__custom"
-        value={custom}
-        disabled={busy}
-        inputMode="numeric"
-        aria-label={t("settings.stepLimit.custom")}
-        onChange={(e) => setCustom(e.target.value.replace(/[^\d]/g, ""))}
-        onBlur={commitCustom}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-        }}
-      />
-    </div>
-  );
-}
-
-function normalizeStepLimit(value: number): number {
-  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
-}
-
-function stepLimitLabel(value: number, t: ReturnType<typeof useT>): string {
-  return value === 0 ? t("settings.stepLimit.unlimited") : String(value);
 }
 
 function NetworkSection({ s, busy, apply }: SectionProps) {
@@ -3940,9 +4016,11 @@ function botDraftWithDerivedGatewayState(draft: BotSettingsView): BotSettingsVie
   };
 }
 
-function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) {
+function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: ModelsSectionProps) {
   const t = useT();
-  const [subtab, setSubtab] = useState<"usage" | "access">("usage");
+  const [subtab, setSubtab] = useState<"usage" | "access">(
+    initialFocus?.target === "model-access" ? "access" : "usage",
+  );
   const autoRefreshKeyRef = useRef("");
   const refs = useMemo(() => allRefs(s), [s.providers]);
   const defaultRef = toRef(s.defaultModel, s);
@@ -3956,11 +4034,14 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
     : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
   const subagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
-  const setAgentSteps = (maxSteps: number, plannerMaxSteps: number) => (
-    app.SetAgentParams(agent.temperature, maxSteps, plannerMaxSteps, agent.systemPrompt)
-  );
+  const subagentConcurrency = Number.isFinite(agent.maxSubagentConcurrency) && agent.maxSubagentConcurrency > 0
+    ? Math.max(1, Math.min(32, Math.floor(agent.maxSubagentConcurrency)))
+    : 6;
+  const parallelWriters = Number.isFinite(agent.maxParallelWriters) && agent.maxParallelWriters > 0
+    ? Math.max(1, Math.min(subagentConcurrency, Math.floor(agent.maxParallelWriters)))
+    : Math.min(3, subagentConcurrency);
 
   useEffect(() => {
     if (subtab !== "usage") return;
@@ -4086,25 +4167,41 @@ function ModelsSection({ s, busy, apply, backgroundApply }: ModelsSectionProps) 
               </div>
             </SettingsField>
 
+            <SettingsField label={t("settings.subagentConcurrency")} hint={t("settings.subagentConcurrencyHint")}>
+              <input
+                className="mem-input"
+                type="number"
+                min={1}
+                max={32}
+                value={subagentConcurrency}
+                disabled={busy}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  void apply(() => app.SetMaxSubagentConcurrency(n));
+                }}
+              />
+            </SettingsField>
+
+            <SettingsField label={t("settings.parallelWriters")} hint={t("settings.parallelWritersHint")}>
+              <input
+                className="mem-input"
+                type="number"
+                min={1}
+                max={subagentConcurrency}
+                value={parallelWriters}
+                disabled={busy}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n)) return;
+                  void apply(() => app.SetMaxParallelWriters(n));
+                }}
+              />
+            </SettingsField>
+
             {modelIssue && <div className="provider-fetch-banner provider-fetch-banner--warn">{modelIssue}</div>}
           </SettingsSection>
           <SettingsSection title={t("settings.agentRuntime")} description={t("settings.agentRuntimeHint")}>
-            <SettingsField label={t("settings.executorMaxSteps")} hint={t("settings.executorMaxStepsHint")}>
-              <StepLimitControl
-                value={agent.maxSteps}
-                presets={[10, 25, 50, 0]}
-                busy={busy}
-                onChange={(next) => void apply(() => setAgentSteps(next, agent.plannerMaxSteps))}
-              />
-            </SettingsField>
-            <SettingsField label={t("settings.plannerMaxSteps")} hint={plannerSelectRef ? t("settings.plannerMaxStepsHint") : t("settings.plannerMaxStepsDisabledHint")}>
-              <StepLimitControl
-                value={agent.plannerMaxSteps}
-                presets={[6, 12, 25, 0]}
-                busy={busy}
-                onChange={(next) => void apply(() => setAgentSteps(agent.maxSteps, next))}
-              />
-            </SettingsField>
             <SettingsField label={t("settings.coldResumePrune")} hint={t("settings.coldResumePruneHint")}>
               <div className="set-seg">
                 {([true, false] as const).map((on) => (
@@ -4149,12 +4246,13 @@ type ModelPickerOption = {
   providerView?: ProviderView;
 };
 
-function ModelPicker({
+export function ModelPicker({
   s,
   refs,
   value,
   disabled,
   includeSameDefault = false,
+  ariaLabel,
   emptyOptionLabel,
   emptyOptionHint,
   onPick,
@@ -4164,6 +4262,7 @@ function ModelPicker({
   value: string;
   disabled: boolean;
   includeSameDefault?: boolean;
+  ariaLabel?: string;
   emptyOptionLabel?: string;
   emptyOptionHint?: string;
   onPick: (ref: string) => void;
@@ -4245,6 +4344,7 @@ function ModelPicker({
         type="button"
         className="settings-model-picker__trigger"
         disabled={disabled || (!includeSameDefault && !emptyOptionLabel && refs.length === 0)}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((next) => !next)}
@@ -5444,18 +5544,22 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   candidates,
   selectedModels,
   visionModels,
+  contextWindows,
   disabled,
   onToggleModel,
   onToggleVision,
+  onContextWindowChange,
   onSelectAll,
   onClear,
 }: {
   candidates: string[];
   selectedModels: string[];
   visionModels: string[];
+  contextWindows: Record<string, string>;
   disabled: boolean;
   onToggleModel: (model: string) => void;
   onToggleVision: (model: string) => void;
+  onContextWindowChange: (model: string, value: string) => void;
   onSelectAll: () => void;
   onClear: () => void;
 }) {
@@ -5489,6 +5593,7 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
           </button>
         </div>
       </div>
+      <div className="provider-model-draft__context-guide">{t("settings.modelContextWindowGuide")}</div>
       {candidates.length > 8 && (
         <input
           className="mem-input provider-model-draft__search"
@@ -5521,6 +5626,28 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
                 />
                 <span>{t("settings.visionModel")}</span>
               </label>
+              <div className="provider-model-draft__context-field">
+                <label className="provider-model-draft__context">
+                  <span>{t("settings.modelContextWindow")}</span>
+                  <input
+                    className="mem-input provider-model-draft__context-input"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    disabled={disabled || !enabled}
+                    placeholder={t("settings.modelContextWindowPlaceholder")}
+                    title={t("settings.modelContextWindowHint")}
+                    aria-label={t("settings.modelContextWindowAria", { model })}
+                    value={contextWindows[model] ?? ""}
+                    onChange={(event) => onContextWindowChange(model, event.target.value)}
+                  />
+                </label>
+                {enabled && providerModelContextWindowIsSmall(contextWindows[model]) && (
+                  <div className="provider-model-draft__context-warning" role="status">
+                    {t("settings.modelContextWindowSmallWarning")}
+                  </div>
+                )}
+              </div>
             </div>
           );
         }) : (
@@ -5567,9 +5694,12 @@ function ProviderEditor({
   const [authHeader, setAuthHeader] = useState(Boolean(initial?.authHeader));
   const [keyDraft, setKeyDraft] = useState("");
   const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
-  // Empty when unset so the placeholder (and its "0 = default" hint) reads instead
+  // Empty when unset so the placeholder (and its "0 = disabled" hint) reads instead
   // of a bare "0"; saved back as 0.
   const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, string>>(
+    () => providerModelContextWindowDrafts(initial?.modelOverrides),
+  );
   const [reasoningProtocol, setReasoningProtocol] = useState(normalizeReasoningProtocol(initial?.reasoningProtocol));
   const [thinking, setThinking] = useState(normalizeThinkingMode(initial?.thinking));
   const [supportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
@@ -5591,9 +5721,9 @@ function ProviderEditor({
   const effectiveHeaders = parseProviderHeaders(headersDraft);
   const extraBodyParse = useMemo(() => {
     try {
-      return { value: parseProviderExtraBody(extraBodyDraft), error: "" };
-    } catch {
-      return { value: {}, error: t("settings.providerExtraBodyError") };
+      return { value: parseProviderExtraBody(extraBodyDraft, t), error: "" };
+    } catch (e) {
+      return { value: {}, error: providerExtraBodyParseError(e, t) };
     }
   }, [extraBodyDraft, t]);
   const effectiveExtraBody = extraBodyParse.value;
@@ -5645,7 +5775,7 @@ function ProviderEditor({
         thinking,
         supportedEfforts: cleanedSupportedEfforts,
         defaultEffort: cleanDefaultEffort,
-        modelOverrides: initial?.modelOverrides ?? [],
+        modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, parseProviderListInput(models), modelContextWindows),
       });
       if (fetched.length === 0) {
         setFetchFallback(t("settings.fetchModelsManualFallbackEmpty"));
@@ -5699,7 +5829,7 @@ function ProviderEditor({
       // Clear the stored default if no levels are selected; the backend's
       // NormalizeEffort would otherwise silently ignore an unsupported value.
       defaultEffort: cleanedSupportedEfforts.length > 0 ? cleanDefaultEffort : "",
-      modelOverrides: initial?.modelOverrides ?? [],
+      modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, ms, modelContextWindows),
     };
     try {
       await onSave(provider, keyDraft.trim() || undefined);
@@ -5787,6 +5917,10 @@ function ProviderEditor({
     else vision.add(model);
     setVisionModels(modelCandidateNames.filter((candidate) => vision.has(candidate)).join(", "));
     setVisionModelsConfigured(true);
+  };
+
+  const updateEditorModelContextWindow = (model: string, value: string) => {
+    setModelContextWindows((current) => ({ ...current, [model]: value }));
   };
 
   const selectAllEditorModels = () => {
@@ -5998,9 +6132,11 @@ function ProviderEditor({
         candidates={modelCandidateNames}
         selectedModels={modelNames}
         visionModels={visionModelNames}
+        contextWindows={modelContextWindows}
         disabled={busy || fetchingModels}
         onToggleModel={toggleEditorModel}
         onToggleVision={toggleEditorVisionModel}
+        onContextWindowChange={updateEditorModelContextWindow}
         onSelectAll={selectAllEditorModels}
         onClear={clearEditorModels}
       />
@@ -6080,8 +6216,8 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
             list={list}
             rules={s.permissions[list]}
             busy={busy}
-            onAdd={(rule) => apply(() => app.AddPermissionRule(list, rule))}
-            onRemove={(rule) => apply(() => app.RemovePermissionRule(list, rule))}
+            onAdd={async (rule) => { await apply(() => app.AddPermissionRule(list, rule)); }}
+            onRemove={async (rule) => { await apply(() => app.RemovePermissionRule(list, rule)); }}
           />
         ))}
       </div>
@@ -6218,7 +6354,7 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
 
   const parseHooksEditorJSON = (raw = jsonText): { hooks: HookConfigView[]; text: string } | null => {
     try {
-      const hooks = parseHooksJSON(raw, view?.events ?? []);
+      const hooks = parseHooksJSON(raw, view?.events ?? [], t);
       const text = formatHooksJSON(hooks, view?.events ?? []);
       setJsonText(text);
       setJsonError(null);
@@ -6282,31 +6418,12 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
       setBusy(false);
     }
   };
-  const trustProject = async () => {
-    const projectRoot = view?.projectRoot?.trim() ?? "";
-    if (!projectRoot) {
-      setErr(t("settings.hooksProjectRootUnavailable"));
-      return;
-    }
-    setBusy(true);
-    setErr(null);
-    try {
-      await app.TrustProjectHooksForRoot(projectRoot);
-      await load("project");
-      onChanged();
-    } catch (e) {
-      setErr(String((e as Error)?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <>
       {err && <div className="banner banner--error">{err}</div>}
       <SettingsSection title={t("settings.hooksScopeSection")} description={t("settings.hooksScopeHint")}>
         <SettingsField label={t("settings.hooksScopeField")}>
-          <select className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
+          <select name="hooks-scope" className="mem-select set-grow" value={scope} disabled={busy} onChange={(e) => setScope(e.target.value === "project" ? "project" : "global")}>
             <option value="global">{t("settings.hooksGlobal")}</option>
             <option value="project">{t("settings.hooksProject")}</option>
           </select>
@@ -6322,19 +6439,6 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
             {pathMessage && <div className="hooks-path-display__message">{pathMessage}</div>}
           </div>
         </SettingsField>
-        {scope === "project" && (
-          <SettingsField label={t("settings.hooksTrust")} hint={t("settings.hooksTrustHint")}>
-            <div className="hooks-trust-stack">
-              <div className="hooks-trust-row">
-                <span className={`set-rule${view?.trusted ? "" : " set-rule--warn"}`}>{view?.trusted ? t("settings.hooksTrusted") : t("settings.hooksUntrusted")}</span>
-                <button className="btn btn--small" disabled={busy || view?.trusted || !view?.projectRoot} onClick={() => void trustProject()}>{t("settings.hooksTrustProject")}</button>
-              </div>
-              <code className={`hooks-trust-root${view?.projectRoot ? "" : " hooks-trust-root--empty"}`} title={view?.projectRoot || t("settings.hooksProjectRootUnavailable")}>
-                {view?.projectRoot || t("settings.hooksProjectRootUnavailable")}
-              </code>
-            </div>
-          </SettingsField>
-        )}
       </SettingsSection>
 
       <SettingsSection
@@ -6358,6 +6462,7 @@ function HooksSection({ onChanged }: { onChanged: (settings?: SettingsView | nul
               </div>
             </div>
             <textarea
+              name="hooks-json"
               className="mem-textarea hooks-json-panel__textarea"
               value={jsonText}
               disabled={busy}
@@ -6409,7 +6514,7 @@ function formatHooksJSON(hooks: HookConfigView[], eventOrder: string[]): string 
   return JSON.stringify({ hooks: ordered }, null, 2);
 }
 
-function parseHooksJSON(raw: string, validEvents: string[]): HookConfigView[] {
+function parseHooksJSON(raw: string, validEvents: string[], t: ReturnType<typeof useT>): HookConfigView[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
   let parsed: unknown;
@@ -6419,21 +6524,21 @@ function parseHooksJSON(raw: string, validEvents: string[]): HookConfigView[] {
     throw new Error(String((e as Error)?.message ?? e));
   }
   if (Array.isArray(parsed)) {
-    return parsed.map((item) => normalizeHookConfig(parseHookArrayItem(item, validEvents))).filter((h) => h.event);
+    return parsed.map((item) => normalizeHookConfig(parseHookArrayItem(item, validEvents, t))).filter((h) => h.event);
   }
   if (!parsed || typeof parsed !== "object") {
-    throw new Error("expected an object or array");
+    throw new Error(t("settings.hooksJsonExpectedObjectArray"));
   }
   const obj = parsed as Record<string, unknown>;
   const hooksValue = obj.hooks && typeof obj.hooks === "object" && !Array.isArray(obj.hooks) ? obj.hooks : obj;
-  return flattenHooksMap(hooksValue as Record<string, unknown>, validEvents);
+  return flattenHooksMap(hooksValue as Record<string, unknown>, validEvents, t);
 }
 
-function parseHookArrayItem(item: unknown, validEvents: string[]): HookConfigView {
-  if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("hook item must be an object");
+function parseHookArrayItem(item: unknown, validEvents: string[], t: ReturnType<typeof useT>): HookConfigView {
+  if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(t("settings.hooksJsonItemObject"));
   const obj = item as Record<string, unknown>;
   const event = stringField(obj, "event") || "PreToolUse";
-  if (validEvents.length > 0 && !validEvents.includes(event)) throw new Error(`unknown hook event ${event}`);
+  if (validEvents.length > 0 && !validEvents.includes(event)) throw new Error(t("settings.hooksJsonUnknownEvent", { event }));
   return {
     event,
     match: stringField(obj, "match"),
@@ -6444,14 +6549,14 @@ function parseHookArrayItem(item: unknown, validEvents: string[]): HookConfigVie
   };
 }
 
-function flattenHooksMap(hooks: Record<string, unknown>, validEvents: string[]): HookConfigView[] {
+function flattenHooksMap(hooks: Record<string, unknown>, validEvents: string[], t: ReturnType<typeof useT>): HookConfigView[] {
   const valid = new Set(validEvents);
   const out: HookConfigView[] = [];
   for (const [event, value] of Object.entries(hooks)) {
-    if (valid.size > 0 && !valid.has(event)) throw new Error(`unknown hook event ${event}`);
+    if (valid.size > 0 && !valid.has(event)) throw new Error(t("settings.hooksJsonUnknownEvent", { event }));
     const items = Array.isArray(value) ? value : [value];
     for (const item of items) {
-      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`hook ${event} item must be an object`);
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(t("settings.hooksJsonEventItemObject", { event }));
       const obj = item as Record<string, unknown>;
       out.push(normalizeHookConfig({
         event,
@@ -6487,11 +6592,23 @@ function normalizeHookConfig(h: HookConfigView): HookConfigView {
   };
 }
 
-function SandboxSection({ s, busy, apply }: SectionProps) {
+function effectiveShellLabel(value: string, t: ReturnType<typeof useT>): string {
+  switch (value) {
+    case "git-bash": return t("settings.effectiveShellGitBash");
+    case "pwsh": return t("settings.effectiveShellPwsh");
+    case "powershell": return t("settings.effectiveShellPowershell");
+    case "bash": return t("settings.effectiveShellBash");
+    case "auto": return t("common.auto");
+    default: return value.trim() || t("common.none");
+  }
+}
+
+function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: boolean }) {
   const t = useT();
   const sb = s.sandbox;
   const [root, setRoot] = useState(sb.workspaceRoot);
   const effectiveWriteRoots = asArray(sb.effectiveWriteRoots).filter((path) => String(path).trim());
+  const effectiveShell = effectiveShellLabel(String(sb.effectiveShell || sb.shell || ""), t);
   const set = (next: Partial<typeof sb>) =>
     apply(() => app.SetSandbox(next.bash ?? sb.bash, next.network ?? sb.network, next.workspaceRoot ?? sb.workspaceRoot, next.allowWrite ?? sb.allowWrite, next.shell ?? sb.shell));
   const reload = () => apply(() => app.ReloadSettings());
@@ -6511,15 +6628,21 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
     >
       <SettingsField label={t("settings.shellInterpreter")}>
         <select className="mem-select set-grow" value={sb.shell || "auto"} disabled={busy} onChange={(e) => void set({ shell: e.target.value })}>
-          <option value="auto">{t("settings.shellAuto")}</option>
+          <option value="auto">{windows ? t("settings.shellAutoWindows") : t("settings.shellAuto")}</option>
           <option value="bash">{t("settings.shellBash")}</option>
           <option value="powershell">{t("settings.shellPowershell")}</option>
           <option value="pwsh">{t("settings.shellPwsh")}</option>
         </select>
       </SettingsField>
-      <SettingsField label={t("settings.bashSandbox")}>
-        <select className="mem-select set-grow" value={sb.bash} disabled={busy} onChange={(e) => void set({ bash: e.target.value })}>
-          <option value="enforce">{t("settings.bashEnforce")}</option>
+      <SettingsField label={t("settings.effectiveShell")}>
+        <div className="settings-readonly-field">{effectiveShell}</div>
+      </SettingsField>
+      <SettingsField label={t("settings.bashSandbox")} hint={windows ? t("settings.bashUnavailableWindows") : undefined}>
+        {/* Windows has no OS-level Bash backend and config.BashModeForGOOS fixes
+            the effective value to off. Keep the control visibly immutable and
+            omit enforce so the UI cannot imply a dormant capability. */}
+        <select className="mem-select set-grow" value={windows ? "off" : sb.bash} disabled={busy || windows} onChange={(e) => void set({ bash: e.target.value })}>
+          {!windows && <option value="enforce">{t("settings.bashEnforce")}</option>}
           <option value="off">{t("settings.bashOff")}</option>
         </select>
       </SettingsField>
@@ -6555,308 +6678,11 @@ function SandboxSection({ s, busy, apply }: SectionProps) {
         list="allow_write"
         rules={sb.allowWrite}
         busy={busy}
-        onAdd={(d) => set({ allowWrite: [...sb.allowWrite, d] })}
-        onRemove={(d) => set({ allowWrite: sb.allowWrite.filter((x) => x !== d) })}
+        onAdd={async (d) => { await set({ allowWrite: [...sb.allowWrite, d] }); }}
+        onRemove={async (d) => { await set({ allowWrite: sb.allowWrite.filter((x) => x !== d) }); }}
       />
     </SettingsSection>
   );
-}
-
-// Visual-style metadata for the appearance theme cards. The two surface
-// swatches + accent are read from CSS variables at render time so they always
-// reflect the live token values for the currently-resolved light/dark mode.
-const THEME_STYLE_META: Record<ThemeStyle, { name: string; zh: DictKey; note: DictKey; desc: DictKey }> = {
-  graphite: { name: "Graphite", zh: "settings.style.graphite.zh", note: "settings.style.graphite.note", desc: "settings.style.graphite.desc" },
-  aurora: { name: "Aurora", zh: "settings.style.aurora.zh", note: "settings.style.aurora.note", desc: "settings.style.aurora.desc" },
-  slate: { name: "Slate", zh: "settings.style.slate.zh", note: "settings.style.slate.note", desc: "settings.style.slate.desc" },
-  carbon: { name: "Carbon", zh: "settings.style.carbon.zh", note: "settings.style.carbon.note", desc: "settings.style.carbon.desc" },
-  nocturne: { name: "Nocturne", zh: "settings.style.nocturne.zh", note: "settings.style.nocturne.note", desc: "settings.style.nocturne.desc" },
-  amber: { name: "Amber", zh: "settings.style.amber.zh", note: "settings.style.amber.note", desc: "settings.style.amber.desc" },
-};
-
-function AppearanceSection({
-  theme,
-  themeStyle,
-  textSize,
-  showDisplayZoom,
-  zoomPct,
-  fontFamily,
-  monoFontFamily,
-  customFontName,
-  customMonoFontName,
-  onTheme,
-  onThemeStyle,
-  onTextSize,
-  onRestartZoom,
-  onFontFamily,
-  onMonoFontFamily,
-  onCustomFontNameChange,
-  onCustomMonoFontNameChange,
-}: {
-  theme: Theme;
-  themeStyle: ThemeStyle;
-  textSize: TextSize;
-  showDisplayZoom: boolean;
-  zoomPct: number;
-  fontFamily: FontFamily;
-  monoFontFamily: MonoFontFamily;
-  customFontName: string;
-  customMonoFontName: string;
-  onTheme: (t: Theme) => void;
-  onThemeStyle: (style: ThemeStyle) => void;
-  onTextSize: (size: TextSize) => void;
-  onRestartZoom: (zoom: ZoomLevel) => Promise<void>;
-  onFontFamily: (font: FontFamily) => void;
-  onMonoFontFamily: (font: MonoFontFamily) => void;
-  onCustomFontNameChange: (name: string) => void;
-  onCustomMonoFontNameChange: (name: string) => void;
-}) {
-  const t = useT();
-  const themeOptions: Theme[] = ["auto", "light", "dark"];
-  const availableFontFamilies = useMemo(() => getAvailableFontFamilies(fontFamily), [fontFamily]);
-  const availableMonoFontFamilies = useMemo(() => getAvailableMonoFontFamilies(monoFontFamily), [monoFontFamily]);
-  const zoomMinPct = zoomToPercent(MIN_ZOOM);
-  const zoomMaxPct = zoomToPercent(MAX_ZOOM);
-  const zoomStepPct = Math.round(ZOOM_STEP * 100);
-  const zoomProgressPct = Math.min(100, Math.max(0, ((zoomPct - zoomMinPct) / (zoomMaxPct - zoomMinPct)) * 100));
-  const canDecreaseZoom = zoomPct > zoomMinPct;
-  const canIncreaseZoom = zoomPct < zoomMaxPct;
-  const setZoomPercent = (pct: number) => {
-    void onRestartZoom(pct / 100);
-  };
-  return (
-    <SettingsSection title={t("settings.appearance")}>
-      <SettingsField label={t("settings.theme")}>
-        <div className="set-seg">
-          {themeOptions.map((opt) => (
-            <button
-              key={opt}
-              className={`set-seg__btn${theme === opt ? " set-seg__btn--on" : ""}`}
-              onClick={() => onTheme(opt)}
-            >
-              {themeName(opt, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.themeStyle")} stacked>
-        <div className="theme-card-grid">
-          {THEME_STYLES.map((opt) => {
-            const meta = THEME_STYLE_META[opt];
-            const selected = themeStyle === opt;
-            return (
-              <button
-                key={opt}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                className={`theme-card${selected ? " theme-card--on" : ""}`}
-                onClick={() => onThemeStyle(opt)}
-              >
-                <span className="theme-card__head">
-                  <span className="theme-card__name">
-                    {meta.name} <span className="theme-card__zh">{t(meta.zh)}</span>
-                  </span>
-                  <span className="theme-card__tag">{t(meta.note)}</span>
-                </span>
-                <span className="theme-card__swatches" data-theme-style-card={opt}>
-                  <span className="theme-card__swatch theme-card__swatch--bg" />
-                  <span className="theme-card__swatch theme-card__swatch--surface" />
-                  <span className="theme-card__swatch theme-card__swatch--accent" />
-                </span>
-                <span className="theme-card__desc">{t(meta.desc)}</span>
-                <span className="theme-card__check" aria-hidden="true">
-                  <Check size={13} strokeWidth={3} />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.textSize")}>
-        <div className="set-seg">
-          {TEXT_SIZES.map((size) => (
-            <button
-              key={size}
-              className={`set-seg__btn${textSize === size ? " set-seg__btn--on" : ""}`}
-              onClick={() => onTextSize(size)}
-            >
-              {textSizeName(size, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      {showDisplayZoom && (
-        <SettingsField label={t("settings.displayZoom")}>
-          <div className="zoom-slider-wrap">
-            <div className="zoom-slider__head">
-              <div className="zoom-slider__value">{zoomPct}%</div>
-              <div className="zoom-stepper">
-                <button
-                  type="button"
-                  className="zoom-stepper__btn"
-                  aria-label={t("settings.displayZoomDecrease")}
-                  title={t("settings.displayZoomDecrease")}
-                  disabled={!canDecreaseZoom}
-                  onClick={() => setZoomPercent(zoomPct - zoomStepPct)}
-                >
-                  <Minus size={13} aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  className="zoom-stepper__reset"
-                  aria-label={t("settings.displayZoomReset")}
-                  title={t("settings.displayZoomReset")}
-                  disabled={zoomPct === zoomToPercent(DEFAULT_ZOOM)}
-                  onClick={() => { void onRestartZoom(DEFAULT_ZOOM); }}
-                >
-                  <RotateCcw size={12} aria-hidden="true" />
-                  <span>100%</span>
-                </button>
-                <button
-                  type="button"
-                  className="zoom-stepper__btn"
-                  aria-label={t("settings.displayZoomIncrease")}
-                  title={t("settings.displayZoomIncrease")}
-                  disabled={!canIncreaseZoom}
-                  onClick={() => setZoomPercent(zoomPct + zoomStepPct)}
-                >
-                  <Plus size={13} aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-            <div className="zoom-slider-row">
-              <span className="zoom-slider__label">{zoomMinPct}%</span>
-              <div className="slider-track">
-                <div className="slider-track__bg" />
-                <div
-                  className="slider-track__fill"
-                  style={{ width: `calc(${zoomProgressPct}% + 15px)` }}
-                />
-                <div className="slider-thumb" style={{ left: `${zoomProgressPct}%` }} />
-                <input
-                  aria-label={t("settings.displayZoom")}
-                  type="range"
-                  min={zoomMinPct}
-                  max={zoomMaxPct}
-                  step={zoomStepPct}
-                  value={zoomPct}
-                  onChange={(e) => setZoomPercent(Number(e.target.value))}
-                />
-              </div>
-              <span className="zoom-slider__label">{zoomMaxPct}%</span>
-            </div>
-          </div>
-        </SettingsField>
-      )}
-      <SettingsField label={t("settings.fontFamily")}>
-        <div className="set-seg">
-          {availableFontFamilies.map((font) => (
-            <button
-              key={font}
-              className={`set-seg__btn${fontFamily === font ? " set-seg__btn--on" : ""}`}
-              onClick={() => onFontFamily(font)}
-            >
-              {fontFamilyName(font, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      {fontFamily === "custom" && (
-        <SettingsField label={t("settings.fontFamilyCustomName")}>
-          <textarea
-            className="mem-input"
-            style={{ width: "100%", resize: "vertical" }}
-            rows={2}
-            placeholder={t("settings.fontFamilyCustomPlaceholder")}
-            value={customFontName}
-            onChange={(e) => onCustomFontNameChange(e.target.value)}
-          />
-        </SettingsField>
-      )}
-      <SettingsField label={t("settings.monoFontFamily")}>
-        <div className="set-seg">
-          {availableMonoFontFamilies.map((font) => (
-            <button
-              key={font}
-              className={`set-seg__btn${monoFontFamily === font ? " set-seg__btn--on" : ""}`}
-              onClick={() => onMonoFontFamily(font)}
-            >
-              {monoFontFamilyName(font, t)}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      {monoFontFamily === "custom" && (
-        <SettingsField label={t("settings.monoFontFamilyCustomName")}>
-          <textarea
-            className="mem-input"
-            style={{ width: "100%", resize: "vertical" }}
-            rows={2}
-            placeholder={t("settings.monoFontFamilyCustomPlaceholder")}
-            value={customMonoFontName}
-            onChange={(e) => onCustomMonoFontNameChange(e.target.value)}
-          />
-        </SettingsField>
-      )}
-    </SettingsSection>
-  );
-}
-
-function themeName(theme: Theme, t: ReturnType<typeof useT>): string {
-  switch (theme) {
-    case "auto":
-      return t("settings.themeAuto");
-    case "light":
-      return t("settings.themeLight");
-    case "dark":
-      return t("settings.themeDark");
-  }
-}
-
-function textSizeName(size: TextSize, t: ReturnType<typeof useT>): string {
-  switch (size) {
-    case "small":
-      return t("settings.textSizeSmall");
-    case "default":
-      return t("settings.textSizeDefault");
-    case "large":
-      return t("settings.textSizeLarge");
-    case "xlarge":
-      return t("settings.textSizeXLarge");
-    case "xxlarge":
-      return t("settings.textSizeXXLarge");
-  }
-}
-
-function fontFamilyName(font: FontFamily, t: ReturnType<typeof useT>): string {
-  switch (font) {
-    case "system":
-      return t("settings.fontFamilySystem");
-    case "yahei":
-      return t("settings.fontFamilyYaHei");
-    case "pingfang":
-      return t("settings.fontFamilyPingFang");
-    case "noto":
-      return t("settings.fontFamilyNoto");
-    case "custom":
-      return t("settings.fontFamilyCustom");
-  }
-}
-
-function monoFontFamilyName(font: MonoFontFamily, t: ReturnType<typeof useT>): string {
-  switch (font) {
-    case "system":
-      return t("settings.monoFontFamilySystem");
-    case "cascadia":
-      return t("settings.monoFontFamilyCascadia");
-    case "jetbrains":
-      return t("settings.monoFontFamilyJetBrains");
-    case "sfmono":
-      return t("settings.monoFontFamilySFMono");
-    case "custom":
-      return t("settings.monoFontFamilyCustom");
-  }
 }
 
 const MB = 1024 * 1024;
@@ -6869,6 +6695,7 @@ const mb = (n: number) => (n / MB).toFixed(1);
 function UpdatesSection({
   configPath,
   checkUpdates,
+  updateChannel,
   telemetry,
   metrics,
   settingsBusy,
@@ -6876,23 +6703,148 @@ function UpdatesSection({
 }: {
   configPath: string;
   checkUpdates: boolean;
+  updateChannel: string;
   telemetry: boolean;
   metrics: boolean;
   settingsBusy: boolean;
-  applySettings: (fn: () => Promise<void>) => Promise<void>;
+  applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, download: downloadUpdate, install: installUpdate } = useUpdater();
+  const { status, check, download: downloadUpdate, install: installUpdate, openDownload, reset: resetUpdater } = useUpdater();
+  const selectedChannel = updateChannel === "preview" ? "preview" : "stable";
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
   }, []);
 
   const updaterBusy =
-    status.kind === "checking" || status.kind === "downloading" || status.kind === "verifying" || status.kind === "installing";
+    status.kind === "checking" ||
+    status.kind === "downloading" ||
+    status.kind === "verifying" ||
+    status.kind === "authorizing" ||
+    status.kind === "installing";
+  const updateStatus =
+    status.kind === "checking" ? t("updater.checking") :
+    status.kind === "upToDate" ? t("updater.upToDate") :
+    status.kind === "available" ? t("updater.available", { v: status.info.latest }) :
+    status.kind === "downloading" ? t("updater.downloading", {
+      done: mb(status.received),
+      total: mb(status.total),
+      pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
+    }) :
+    status.kind === "verifying" ? t("updater.verifying") :
+    status.kind === "downloaded" ? t("updater.downloaded", { v: status.info.latest }) :
+    status.kind === "authorizing" ? t("updater.authorizing") :
+    status.kind === "installing" ? (
+      status.info?.requiresElevation || status.info?.installMode === "deb"
+        ? t("updater.installingPackage")
+        : t("updater.installing")
+    ) :
+    status.kind === "done" ? t("updater.done") :
+    status.kind === "error" ? t("updater.failed", { msg: status.message }) :
+    "";
+  const updateStatusTone =
+    status.kind === "error" ? "error" :
+    status.kind === "available" ? "available" :
+    status.kind === "checking" || updaterBusy ? "busy" :
+    status.kind === "upToDate" || status.kind === "done" ? "success" :
+    "neutral";
 
   return (
     <SettingsSection title={t("updater.title")}>
+      <SettingsField
+        className="settings-field--wide-copy updates-control"
+        label={
+          <div className="updates-control__summary">
+            <div className="updates-control__version">
+              {t("updater.currentVersion", { v: version || "…" })}
+            </div>
+            <div className={`updates-control__status updates-control__status--${updateStatusTone}`} role="status" aria-live="polite">
+              {updateStatus && (
+                <>
+                  {updateStatusTone === "success" && <CheckCircle2 size={14} aria-hidden="true" />}
+                  {updateStatusTone === "busy" && <Loader2 className="updates-control__spinner" size={14} aria-hidden="true" />}
+                  <span>{updateStatus}</span>
+                </>
+              )}
+            </div>
+          </div>
+        }
+      >
+        <div className="updates-control__controls">
+          <div className="provider-add-segmented" role="group" aria-label={t("updater.channelSettingLabel")}>
+            {(["stable", "preview"] as const).map((nextChannel) => (
+              <button
+                key={nextChannel}
+                type="button"
+                disabled={settingsBusy || updaterBusy}
+                className={selectedChannel === nextChannel ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                aria-pressed={selectedChannel === nextChannel}
+                onClick={() => {
+                  if (nextChannel === selectedChannel) return;
+                  void switchUpdaterChannel(
+                    nextChannel,
+                    resetUpdater,
+                    () => applySettings(() => app.SetDesktopUpdateChannel(nextChannel)),
+                    check,
+                  );
+                }}
+              >
+                {nextChannel === "stable" ? t("updater.channelStable") : t("updater.channelPreview")}
+              </button>
+            ))}
+          </div>
+          <Tooltip label={t("updater.checkButton")}>
+            <button
+              className="chip chip--icon"
+              type="button"
+              disabled={settingsBusy || updaterBusy}
+              aria-label={t("updater.checkButton")}
+              onClick={() => void check(selectedChannel)}
+            >
+              <RefreshCw className={status.kind === "checking" ? "updates-control__spinner" : undefined} size={14} aria-hidden="true" />
+            </button>
+          </Tooltip>
+        </div>
+      </SettingsField>
+      <div className="updates-control__hint">
+        <div>{t("updater.channelSettingHint")}</div>
+        <div>{t("updater.channelAutoCheckHint")}</div>
+      </div>
+      {(status.kind === "available" || status.kind === "downloaded") && (
+        <div className="updates-control__action">
+          <div className="updates-control__action-copy">
+            {status.kind === "available" && (
+              <div>
+                {t("updater.channelLabel", {
+                  channel: status.info.channel === "preview" ? t("updater.channelPreview") : t("updater.channelStable"),
+                })}
+              </div>
+            )}
+            {status.kind === "available" && !status.info.canSelfUpdate && <div>{status.info.manualReason || t("updater.macHint")}</div>}
+          </div>
+          {status.kind === "available" && (
+            <button
+              className="btn btn--primary btn--small"
+              disabled={settingsBusy || updaterBusy}
+              onClick={() => downloadUpdate(status.info)}
+            >
+              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
+            </button>
+          )}
+          {status.kind === "downloaded" && (
+            <button
+              className="btn btn--primary btn--small"
+              disabled={settingsBusy || updaterBusy}
+              onClick={installUpdate}
+            >
+              {status.info.requiresElevation || status.info.installMode === "deb"
+                ? t("updater.authorizeInstall")
+                : t("updater.restartInstall")}
+            </button>
+          )}
+        </div>
+      )}
       <SettingsField
         className="settings-field--wide-copy"
         label={t("updater.autoCheckLabel")}
@@ -6926,50 +6878,33 @@ function UpdatesSection({
           onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
         />
       </SettingsField>
-      <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
-        <button className="btn btn--small" disabled={updaterBusy} onClick={() => void check()}>
-          {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}
-        </button>
-      </SettingsField>
-      {status.kind === "available" && (
-        <div className="mem-hint">{t("updater.channelLabel", { channel: status.info.channel || "stable" })}</div>
-      )}
-      {status.kind === "upToDate" && <div className="mem-hint">{t("updater.upToDate")}</div>}
-      {status.kind === "available" && (
-        <>
-          <SettingsField label={t("updater.available", { v: status.info.latest })}>
-            <button className="btn btn--primary btn--small" onClick={() => downloadUpdate(status.info)}>
-              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
-            </button>
-          </SettingsField>
-          {!status.info.canSelfUpdate && <div className="mem-hint">{status.info.manualReason || t("updater.macHint")}</div>}
-        </>
-      )}
-      {status.kind === "downloading" && (
-        <div className="mem-hint">
-          {t("updater.downloading", {
-            done: mb(status.received),
-            total: mb(status.total),
-            pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
-          })}
+      {status.kind === "error" && (
+        <div className="banner banner--error">
+          {updateStatus}
+          {status.manualHint && (
+            <div className="mem-hint">
+              <button className="btn btn--small" onClick={openDownload}>
+                {t("updater.goToDownload")}
+              </button>
+            </div>
+          )}
         </div>
       )}
-      {status.kind === "verifying" && <div className="mem-hint">{t("updater.verifying")}</div>}
-      {status.kind === "downloaded" && (
-        <SettingsField label={t("updater.downloaded", { v: status.info.latest })}>
-          <button className="btn btn--primary btn--small" onClick={installUpdate}>
-            {t("updater.restartInstall")}
-          </button>
-        </SettingsField>
-      )}
-      {status.kind === "installing" && <div className="mem-hint">{t("updater.installing")}</div>}
-      {status.kind === "done" && <div className="mem-hint">{t("updater.done")}</div>}
-      {status.kind === "error" && <div className="banner banner--error">{t("updater.failed", { msg: status.message })}</div>}
       {configPath && (
         <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
           {t("settings.config", { path: configPath })}
         </Tooltip>
       )}
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("changelog.title")}
+        hint={t("changelog.subtitle")}
+      >
+        <button className="btn btn--small" onClick={() => void openExternal("https://reasonix.io/changelog/")}>
+          {t("changelog.openWeb")}
+          <ExternalLink size={14} aria-hidden="true" />
+        </button>
+      </SettingsField>
     </SettingsSection>
   );
 }

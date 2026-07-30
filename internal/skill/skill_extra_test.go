@@ -266,6 +266,204 @@ func TestCreateDirectoryLayoutSkill(t *testing.T) {
 	}
 }
 
+func TestUpdateContentOverwritesExistingSkill(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, err := st.CreateWithContent("editable", ScopeGlobal, "---\ndescription: v1\n---\nold body"); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	if err := st.UpdateContent("editable", ScopeGlobal, "---\ndescription: v2\n---\nnew body"); err != nil {
+		t.Fatalf("UpdateContent: %v", err)
+	}
+	sk, ok := st.Read("editable")
+	if !ok {
+		t.Fatal("skill missing after update")
+	}
+	if sk.Description != "v2" || sk.Body != "new body" {
+		t.Fatalf("update did not apply: description=%q body=%q", sk.Description, sk.Body)
+	}
+}
+
+func TestUpdateContentRefusesBuiltin(t *testing.T) {
+	st := New(Options{HomeDir: t.TempDir()})
+	if err := st.UpdateContent("explore", ScopeBuiltin, "---\ndescription: x\n---\nbody"); err == nil {
+		t.Error("updating a builtin should error")
+	}
+}
+
+func TestUpdateContentRefusesMissingSkill(t *testing.T) {
+	st := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	if err := st.UpdateContent("does-not-exist", ScopeGlobal, "---\ndescription: x\n---\nbody"); err == nil {
+		t.Error("updating a nonexistent skill should error")
+	}
+}
+
+func TestUpdateContentRefusesScopeMismatch(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, err := st.CreateWithContent("scoped2", ScopeGlobal, "---\ndescription: v1\n---\nbody"); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	if err := st.UpdateContent("scoped2", ScopeProject, "---\ndescription: v2\n---\nbody"); err == nil {
+		t.Error("updating with the wrong scope should error")
+	}
+	sk, ok := st.Read("scoped2")
+	if !ok || sk.Description != "v1" {
+		t.Fatalf("skill should be unchanged after a refused scope-mismatched update, got description=%q ok=%v", sk.Description, ok)
+	}
+}
+
+func TestUpdateContentRefusesSymlinkedFlatSkill(t *testing.T) {
+	home := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside.md")
+	original := "---\ndescription: outside\nrunAs: subagent\ninvocation: manual\n---\noriginal"
+	if err := os.WriteFile(outside, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(home, ".reasonix", SkillsDirname)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "linked.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, ok := st.Read("linked"); !ok {
+		t.Fatal("symlinked flat skill should remain readable")
+	}
+	if err := st.UpdateContent("linked", ScopeGlobal, "changed"); err == nil {
+		t.Fatal("updating a symlinked flat skill should fail")
+	}
+	got, err := os.ReadFile(outside)
+	if err != nil || string(got) != original {
+		t.Fatalf("outside target changed: content=%q err=%v", got, err)
+	}
+}
+
+func TestUpdateContentRefusesSymlinkedDirectorySkill(t *testing.T) {
+	home := t.TempDir()
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, SkillFile)
+	original := "---\ndescription: outside\nrunAs: subagent\ninvocation: manual\n---\noriginal"
+	if err := os.WriteFile(outside, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(home, ".reasonix", SkillsDirname)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(root, "linked-dir")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, ok := st.Read("linked-dir"); !ok {
+		t.Fatal("symlinked directory skill should remain readable")
+	}
+	if err := st.UpdateContent("linked-dir", ScopeGlobal, "changed"); err == nil {
+		t.Fatal("updating a symlinked directory skill should fail")
+	}
+	got, err := os.ReadFile(outside)
+	if err != nil || string(got) != original {
+		t.Fatalf("outside target changed: content=%q err=%v", got, err)
+	}
+}
+
+func TestDeleteSymlinkedSkillsRemovesLinksNotTargets(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".reasonix", SkillsDirname)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	flatTarget := filepath.Join(outsideDir, "flat-target.md")
+	dirTarget := filepath.Join(outsideDir, "directory-target")
+	if err := os.MkdirAll(dirTarget, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("---\ndescription: linked\nrunAs: subagent\ninvocation: manual\n---\nbody")
+	if err := os.WriteFile(flatTarget, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirTarget, SkillFile), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	flatLink := filepath.Join(root, "flat-link.md")
+	dirLink := filepath.Join(root, "dir-link")
+	if err := os.Symlink(flatTarget, flatLink); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(dirTarget, dirLink); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	for _, name := range []string{"flat-link", "dir-link"} {
+		if err := st.Delete(name, ScopeGlobal); err != nil {
+			t.Fatalf("Delete(%q): %v", name, err)
+		}
+	}
+	if _, err := os.Lstat(flatLink); !os.IsNotExist(err) {
+		t.Fatalf("flat link still exists: %v", err)
+	}
+	if _, err := os.Lstat(dirLink); !os.IsNotExist(err) {
+		t.Fatalf("directory link still exists: %v", err)
+	}
+	if got, err := os.ReadFile(flatTarget); err != nil || string(got) != string(content) {
+		t.Fatalf("flat target changed: content=%q err=%v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dirTarget, SkillFile)); err != nil || string(got) != string(content) {
+		t.Fatalf("directory target changed: content=%q err=%v", got, err)
+	}
+}
+
+func TestDeleteRemovesDirectoryLayoutSkill(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	path, err := st.CreateWithContent("throwaway", ScopeGlobal, "---\ndescription: x\n---\nbody")
+	if err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	if err := st.Delete("throwaway", ScopeGlobal); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok := st.Read("throwaway"); ok {
+		t.Fatal("skill should be gone after Delete")
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("skill directory should be removed, stat err=%v", err)
+	}
+}
+
+func TestDeleteRefusesBuiltin(t *testing.T) {
+	st := New(Options{HomeDir: t.TempDir()})
+	if err := st.Delete("explore", ScopeBuiltin); err == nil {
+		t.Error("deleting a builtin should error")
+	}
+}
+
+func TestDeleteRefusesMissingSkill(t *testing.T) {
+	st := New(Options{HomeDir: t.TempDir(), DisableBuiltins: true})
+	if err := st.Delete("does-not-exist", ScopeGlobal); err == nil {
+		t.Error("deleting a nonexistent skill should error")
+	}
+}
+
+func TestDeleteRefusesScopeMismatch(t *testing.T) {
+	home := t.TempDir()
+	st := New(Options{HomeDir: home, DisableBuiltins: true})
+	if _, err := st.CreateWithContent("scoped", ScopeGlobal, "---\ndescription: x\n---\nbody"); err != nil {
+		t.Fatalf("CreateWithContent: %v", err)
+	}
+	// The skill actually lives at ScopeGlobal; a ScopeProject delete request
+	// for the same name must refuse rather than silently no-op or, worse,
+	// resolve to an unrelated file.
+	if err := st.Delete("scoped", ScopeProject); err == nil {
+		t.Error("deleting with the wrong scope should error")
+	}
+	if _, ok := st.Read("scoped"); !ok {
+		t.Fatal("skill should survive a refused scope-mismatched delete")
+	}
+}
+
 // --- New edge cases ---
 
 func TestNewWithCustomPaths(t *testing.T) {

@@ -6,9 +6,17 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+
+	"reasonix/internal/config"
 )
 
 func TestNormalizeVersion(t *testing.T) {
@@ -203,35 +211,401 @@ func TestHumanSize(t *testing.T) {
 	}
 }
 
+func completeCLIRelease(tag string, prerelease bool) ghRelease {
+	assets := make([]ghAsset, 0, len(requiredCLIAssets))
+	for _, name := range requiredCLIAssets {
+		assets = append(assets, ghAsset{
+			Name:               name,
+			BrowserDownloadURL: fmt.Sprintf("https://github.com/esengine/DeepSeek-Reasonix/releases/download/%s/%s", tag, name),
+			Size:               42,
+		})
+	}
+	return ghRelease{TagName: tag, Prerelease: prerelease, Assets: assets}
+}
+
 func TestPickCLIRelease(t *testing.T) {
-	pick := func(rels []ghRelease) string {
-		if r := pickCLIRelease(rels); r != nil {
+	pick := func(rels []ghRelease, channel cliReleaseChannel) string {
+		if r := pickCLIRelease(rels, channel); r != nil {
 			return r.TagName
 		}
 		return ""
 	}
 
-	// Skips foreign namespaces (GitHub's "latest" can be a desktop-v release).
+	// Stable skips foreign namespaces and every prerelease, even when a Preview
+	// was published more recently than the latest Stable release.
 	mixed := []ghRelease{
-		{TagName: "desktop-v1.6.0"},
-		{TagName: "npm-v1.4.0"},
-		{TagName: "v1.6.0"},
+		completeCLIRelease("v1.18.0-preview.1", true),
+		{TagName: "desktop-v1.18.0"},
+		{TagName: "npm-v1.18.0"},
+		completeCLIRelease("v1.6.0", false),
 	}
-	if got := pick(mixed); got != "v1.6.0" {
-		t.Errorf("foreign namespaces: got %q, want v1.6.0", got)
-	}
-
-	// The 1.x line ships as rc on npm @next, so a newer prerelease must be
-	// selected, not skipped — `reasonix upgrade` always moves to the newest 1.x.
-	withRC := []ghRelease{
-		{TagName: "v1.7.0-rc.1"},
-		{TagName: "v1.6.0"},
-	}
-	if got := pick(withRC); got != "v1.7.0-rc.1" {
-		t.Errorf("newest 1.x (incl. rc) must win: got %q, want v1.7.0-rc.1", got)
+	if got := pick(mixed, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("stable channel: got %q, want v1.6.0", got)
 	}
 
-	if got := pick([]ghRelease{{TagName: "desktop-v1.0.0"}}); got != "" {
+	preview := []ghRelease{
+		completeCLIRelease("v1.18.0-preview.2", true),
+		completeCLIRelease("v1.19.0-rc.1", true),
+		completeCLIRelease("v1.18.0-preview.12", true),
+		completeCLIRelease("v1.18.0-preview.13", false), // GitHub prerelease metadata must agree.
+		completeCLIRelease("v1.17.21", false),
+	}
+	if got := pick(preview, cliReleasePreview); got != "v1.18.0-preview.12" {
+		t.Errorf("preview channel: got %q, want v1.18.0-preview.12", got)
+	}
+
+	incomplete := completeCLIRelease("v1.7.0", false)
+	incomplete.Assets = incomplete.Assets[:len(incomplete.Assets)-1]
+	if got := pick([]ghRelease{incomplete, completeCLIRelease("v1.6.0", false)}, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("incomplete newest Stable release: got %q, want v1.6.0", got)
+	}
+
+	insecure := completeCLIRelease("v1.7.0", false)
+	insecure.Assets[0].BrowserDownloadURL = "http://example.invalid/reasonix.tar.gz"
+	if got := pick([]ghRelease{insecure, completeCLIRelease("v1.6.0", false)}, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("release with insecure asset URL: got %q, want v1.6.0", got)
+	}
+
+	spoofed := completeCLIRelease("v1.7.0", false)
+	spoofed.Assets[0].BrowserDownloadURL = "https://github.com@evil.invalid/esengine/DeepSeek-Reasonix/releases/download/v1.7.0/reasonix-darwin-amd64.tar.gz"
+	if got := pick([]ghRelease{spoofed, completeCLIRelease("v1.6.0", false)}, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("release with spoofed asset host: got %q, want v1.6.0", got)
+	}
+
+	wrongTag := completeCLIRelease("v1.7.0", false)
+	wrongTag.Assets[0].BrowserDownloadURL = "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v1.6.0/reasonix-darwin-amd64.tar.gz"
+	if got := pick([]ghRelease{wrongTag, completeCLIRelease("v1.6.0", false)}, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("release with cross-tag asset URL: got %q, want v1.6.0", got)
+	}
+
+	empty := completeCLIRelease("v1.7.0", false)
+	empty.Assets[0].Size = 0
+	if got := pick([]ghRelease{empty, completeCLIRelease("v1.6.0", false)}, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("release with zero-byte asset: got %q, want v1.6.0", got)
+	}
+
+	duplicate := completeCLIRelease("v1.7.0", false)
+	duplicate.Assets = append(duplicate.Assets, duplicate.Assets[0])
+	if got := pick([]ghRelease{duplicate, completeCLIRelease("v1.6.0", false)}, cliReleaseStable); got != "v1.6.0" {
+		t.Errorf("release with duplicate required asset: got %q, want v1.6.0", got)
+	}
+
+	if got := pick([]ghRelease{{TagName: "desktop-v1.0.0"}}, cliReleaseStable); got != "" {
 		t.Errorf("no CLI release should return nil, got %q", got)
+	}
+}
+
+func TestFindCLIPlatformAssetRequiresExactArchiveName(t *testing.T) {
+	release := completeCLIRelease("v1.18.0", false)
+	release.Assets = append([]ghAsset{{
+		Name:               "reasonix-linux-amd64.signature",
+		BrowserDownloadURL: "https://example.invalid/signature",
+	}}, release.Assets...)
+
+	asset := findCLIPlatformAsset(&release, "linux", "amd64")
+	if asset == nil || asset.Name != "reasonix-linux-amd64.tar.gz" {
+		t.Fatalf("Linux asset = %+v, want exact tar.gz archive", asset)
+	}
+	if got := cliPlatformAssetName("windows", "arm64"); got != "reasonix-windows-arm64.zip" {
+		t.Fatalf("Windows asset name = %q, want reasonix-windows-arm64.zip", got)
+	}
+
+	expectedURL := asset.BrowserDownloadURL
+	release.Assets = append([]ghAsset{{
+		Name:               "reasonix-linux-amd64.tar.gz",
+		BrowserDownloadURL: "https://evil.invalid/reasonix-linux-amd64.tar.gz",
+	}}, release.Assets...)
+	asset = findCLIPlatformAsset(&release, "linux", "amd64")
+	if asset == nil || asset.BrowserDownloadURL != expectedURL {
+		t.Fatalf("platform selection accepted an unsafe duplicate: %+v", asset)
+	}
+
+	for i := range release.Assets {
+		if release.Assets[i].Name == "reasonix-linux-amd64.tar.gz" &&
+			release.Assets[i].BrowserDownloadURL == expectedURL {
+			release.Assets[i].Size = 0
+		}
+	}
+	if asset := findCLIPlatformAsset(&release, "linux", "amd64"); asset != nil {
+		t.Fatalf("platform selection accepted a zero-byte archive: %+v", asset)
+	}
+}
+
+func TestValidateCLIUpgradeRedirect(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		wantError bool
+	}{
+		{name: "GitHub HTTPS asset redirect", target: "https://release-assets.githubusercontent.com/file"},
+		{name: "GitHub redirect", target: "https://github.com/file"},
+		{name: "HTTPS downgrade", target: "http://release-assets.githubusercontent.com/file", wantError: true},
+		{name: "userinfo", target: "https://user@release-assets.githubusercontent.com/file", wantError: true},
+		{name: "missing hostname", target: "https:///file", wantError: true},
+		{name: "untrusted HTTPS host", target: "https://example.invalid/file", wantError: true},
+		{name: "githubusercontent suffix spoof", target: "https://release-assets.githubusercontent.com.evil.invalid/file", wantError: true},
+		{name: "explicit port", target: "https://release-assets.githubusercontent.com:443/file", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tt.target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = validateCLIUpgradeRedirect(req, nil)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("validateCLIUpgradeRedirect(%q) error = %v, wantError=%v", tt.target, err, tt.wantError)
+			}
+		})
+	}
+	t.Run("redirect limit", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/file", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateCLIUpgradeRedirect(req, make([]*http.Request, 10)); err == nil {
+			t.Fatal("validateCLIUpgradeRedirect accepted more than 10 redirects")
+		}
+	})
+}
+
+func TestCLIReleaseChannelContract(t *testing.T) {
+	if !strings.HasSuffix(ghAPIReleases, "?per_page=100") {
+		t.Fatalf("CLI release query must retain enough history for Stable after frequent Preview releases: %q", ghAPIReleases)
+	}
+
+	for _, tc := range []struct {
+		value string
+		want  cliReleaseChannel
+		ok    bool
+	}{
+		{"", cliReleaseStable, true},
+		{"stable", cliReleaseStable, true},
+		{"PREVIEW", cliReleasePreview, true},
+		{"canary", "", false},
+		{"rc", "", false},
+	} {
+		got, err := parseCLIReleaseChannel(tc.value)
+		if (err == nil) != tc.ok || got != tc.want {
+			t.Errorf("parseCLIReleaseChannel(%q) = (%q, %v), want (%q, ok=%v)", tc.value, got, err, tc.want, tc.ok)
+		}
+	}
+
+	for _, tc := range []struct {
+		version string
+		channel cliReleaseChannel
+		want    bool
+	}{
+		{"v1.17.21", cliReleaseStable, true},
+		{"v1.18.0-preview.1", cliReleaseStable, false},
+		{"v1.18.0-preview.1", cliReleasePreview, true},
+		{"v1.18.0-preview.01", cliReleasePreview, false},
+		{"v1.18.0-rc.1", cliReleasePreview, false},
+		{"v1.18.0", cliReleasePreview, false},
+	} {
+		if got := versionBelongsToCLIChannel(tc.version, tc.channel); got != tc.want {
+			t.Errorf("versionBelongsToCLIChannel(%q, %q) = %v, want %v", tc.version, tc.channel, got, tc.want)
+		}
+	}
+}
+
+func TestParseAndResolveCLIUpgradeChannel(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		args       []string
+		configured string
+		want       cliReleaseChannel
+		wantSave   bool
+		wantCheck  bool
+		wantForce  bool
+	}{
+		{name: "fresh default", configured: "", want: cliReleaseStable},
+		{name: "follow saved preview", configured: "preview", want: cliReleasePreview},
+		{name: "switch to preview", args: []string{"preview"}, configured: "stable", want: cliReleasePreview, wantSave: true},
+		{name: "switch back after flags", args: []string{"--check", "stable"}, configured: "preview", want: cliReleaseStable, wantSave: true, wantCheck: true},
+		{name: "flags after positional", args: []string{"preview", "--force"}, configured: "stable", want: cliReleasePreview, wantSave: true, wantForce: true},
+		{name: "one off override", args: []string{"--channel", "preview"}, configured: "stable", want: cliReleasePreview},
+		{name: "matching compatibility flag", args: []string{"preview", "--channel=preview"}, configured: "stable", want: cliReleasePreview, wantSave: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			syntax, err := parseCLIUpgradeSyntax(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, save, err := resolveCLIUpgradeChannel(syntax, tc.configured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want || save != tc.wantSave || syntax.checkOnly != tc.wantCheck || syntax.force != tc.wantForce {
+				t.Fatalf("resolved = (%q, save=%v, check=%v, force=%v), want (%q, save=%v, check=%v, force=%v)",
+					got, save, syntax.checkOnly, syntax.force, tc.want, tc.wantSave, tc.wantCheck, tc.wantForce)
+			}
+		})
+	}
+}
+
+func TestParseCLIUpgradeChannelRejectsAmbiguousArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"canary"},
+		{"stable", "preview"},
+		{"stable", "--channel", "preview"},
+		{"--channel", "rc"},
+		{"--channel"},
+		{"--channel="},
+	} {
+		if _, err := parseCLIUpgradeSyntax(args); err == nil {
+			t.Errorf("parseCLIUpgradeSyntax(%q) unexpectedly succeeded", args)
+		}
+	}
+}
+
+func TestUpgradeCommandRejectsMalformedConfigWithoutPanicking(t *testing.T) {
+	oldLoad := loadCLIUpgradeConfig
+	loadCLIUpgradeConfig = func() (*config.Config, error) {
+		return nil, errors.New("malformed TOML")
+	}
+	t.Cleanup(func() { loadCLIUpgradeConfig = oldLoad })
+
+	if code := upgradeCommand([]string{"--channel", "stable"}, "v1.17.0"); code != 1 {
+		t.Fatalf("upgradeCommand exit = %d, want 1", code)
+	}
+}
+
+func TestPersistCLIReleaseChannelWritesUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	if err := persistCLIReleaseChannel(cliReleasePreview); err != nil {
+		t.Fatalf("persist preview channel: %v", err)
+	}
+	cfg, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.CLIUpdateChannel(); got != "preview" {
+		t.Fatalf("saved CLI channel = %q, want preview", got)
+	}
+	raw, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "[cli]") || !strings.Contains(string(raw), `update_channel = "preview"`) {
+		t.Fatalf("saved config missing CLI channel:\n%s", raw)
+	}
+}
+
+func TestFetchCLIReleasePointer(t *testing.T) {
+	valid := completeCLIRelease("v1.18.0-preview.1", true)
+	invalidMetadata := completeCLIRelease("v1.18.0-preview.1", false)
+	incomplete := completeCLIRelease("v1.18.0-preview.1", true)
+	incomplete.Assets = incomplete.Assets[:len(incomplete.Assets)-1]
+	insecure := completeCLIRelease("v1.18.0-preview.1", true)
+	insecure.Assets[0].BrowserDownloadURL = "http://example.invalid/reasonix.tar.gz"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") != "application/json" || r.Header.Get("User-Agent") != "reasonix-cli" {
+			t.Errorf("unexpected pointer request headers: Accept=%q User-Agent=%q", r.Header.Get("Accept"), r.Header.Get("User-Agent"))
+		}
+		var release ghRelease
+		switch r.URL.Path {
+		case "/valid":
+			release = valid
+		case "/incomplete":
+			release = incomplete
+		case "/insecure":
+			release = insecure
+		default:
+			release = invalidMetadata
+		}
+		if err := json.NewEncoder(w).Encode(release); err != nil {
+			t.Errorf("encode release pointer: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	release, err := fetchCLIReleasePointer(server.Client(), server.URL+"/valid", cliReleasePreview)
+	if err != nil || release.TagName != "v1.18.0-preview.1" {
+		t.Fatalf("valid Preview pointer = (%+v, %v)", release, err)
+	}
+	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/invalid", cliReleasePreview); err == nil {
+		t.Fatal("pointer with mismatched GitHub prerelease metadata should fail closed")
+	}
+	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/incomplete", cliReleasePreview); err == nil {
+		t.Fatal("pointer missing a required CLI asset should fall back")
+	}
+	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/insecure", cliReleasePreview); err == nil {
+		t.Fatal("pointer with an insecure asset URL should fall back")
+	}
+}
+
+type upgradeRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn upgradeRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+func TestFetchLatestReleaseFallsThroughIncompletePointerAndGitHubRelease(t *testing.T) {
+	incompletePointer := completeCLIRelease("v1.8.0", false)
+	incompletePointer.Assets = incompletePointer.Assets[:len(incompletePointer.Assets)-1]
+	incompleteGitHub := completeCLIRelease("v1.7.0", false)
+	incompleteGitHub.Assets = incompleteGitHub.Assets[:len(incompleteGitHub.Assets)-1]
+	completeGitHub := completeCLIRelease("v1.6.0", false)
+
+	client := &http.Client{Transport: upgradeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var payload any
+		switch request.URL.String() {
+		case cliGatewayBase + "/stable/latest.json":
+			payload = incompletePointer
+		case ghAPIReleases:
+			payload = []ghRelease{incompleteGitHub, completeGitHub}
+		default:
+			t.Fatalf("unexpected release request: %s", request.URL)
+		}
+		body, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    request,
+		}, nil
+	})}
+
+	release, err := fetchLatestRelease(client, cliReleaseStable)
+	if err != nil {
+		t.Fatalf("fetchLatestRelease: %v", err)
+	}
+	if release.TagName != "v1.6.0" {
+		t.Fatalf("fallback release = %q, want v1.6.0", release.TagName)
+	}
+}
+
+func TestFetchBytesSizedRequiresExactReleaseAssetLength(t *testing.T) {
+	client := &http.Client{Transport: upgradeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(request.URL.Query().Get("body"))),
+			Request:    request,
+		}, nil
+	})}
+
+	if data, err := fetchBytesSized(client, "https://example.invalid/archive?body=exact", 5); err != nil || string(data) != "exact" {
+		t.Fatalf("exact release asset = %q, %v", data, err)
+	}
+	if _, err := fetchBytesSized(client, "https://example.invalid/archive?body=short", 6); err == nil {
+		t.Fatal("fetchBytesSized accepted fewer bytes than the release declared")
+	}
+	if _, err := fetchBytesSized(client, "https://example.invalid/archive?body=longer", 5); err == nil {
+		t.Fatal("fetchBytesSized accepted more bytes than the release declared")
+	}
+	if _, err := fetchBytesSized(client, "https://example.invalid/archive?body=", 0); err == nil {
+		t.Fatal("fetchBytesSized accepted a zero expected size")
+	}
+	if _, err := fetchBytesSized(client, "https://example.invalid/archive?body=x", maxCLIReleaseAssetSize+1); err == nil {
+		t.Fatal("fetchBytesSized accepted a size above the release maximum")
 	}
 }

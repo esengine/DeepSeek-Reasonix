@@ -74,6 +74,11 @@ func TestStripTransientUserBlocksUnwrapsMemoryCompilerExecution(t *testing.T) {
 			want: "fix the auth bug",
 		},
 		{
+			name: "automatic memory recall suffix is stripped",
+			in:   "fix AuthHandler\n\n<memory-recall>\n- recalled fact\n</memory-recall>",
+			want: "fix AuthHandler",
+		},
+		{
 			name: "active goal after other transient prefixes is stripped",
 			in: "<reasoning-language>\nuse Chinese\n</reasoning-language>\n\n" +
 				"<memory-update>\n- note\n</memory-update>\n\n" +

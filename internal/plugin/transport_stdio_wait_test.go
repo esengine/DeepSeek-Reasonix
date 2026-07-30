@@ -41,3 +41,14 @@ func TestWaitWithBudgetReturnsEarlyWhenWaitCompletes(t *testing.T) {
 		t.Fatal("waitWithBudget blocked on a wait that already completed")
 	}
 }
+
+func TestWaitFinishedWithinBudgetReportsGracefulExit(t *testing.T) {
+	if !waitFinishedWithinBudget(func() {}, time.Second) {
+		t.Fatal("completed wait should be reported as graceful")
+	}
+	blocked := make(chan struct{})
+	t.Cleanup(func() { close(blocked) })
+	if waitFinishedWithinBudget(func() { <-blocked }, 10*time.Millisecond) {
+		t.Fatal("blocked wait should require forced process cleanup")
+	}
+}

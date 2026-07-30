@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMetaForEvent, tabMetaFallbackDelay } from "../lib/tabMetaRefresh";
+import type { TabMeta } from "../lib/types";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
@@ -11,6 +13,9 @@ const commandPaletteSource = readFileSync(resolve(testDir, "../components/Comman
 const projectTreeSource = readFileSync(resolve(testDir, "../components/ProjectTree.tsx"), "utf8");
 const topicShortcutsSource = readFileSync(resolve(testDir, "../lib/topicShortcuts.ts"), "utf8");
 const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript.tsx"), "utf8");
+const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
+const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
+const bridgeSource = readFileSync(resolve(testDir, "../lib/bridge.ts"), "utf8");
 const layoutStoreSource = readFileSync(resolve(testDir, "../store/layout.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -25,6 +30,16 @@ function ok(value: unknown, label: string) {
     process.stdout.write(`  FAIL  ${label}\n`);
     failed += 1;
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function matchingBlocks(selector: string): string[] {
@@ -52,6 +67,179 @@ function finalDeclaration(selector: string, property: string): string | undefine
 
 console.log("\napp chrome tabs");
 
+const tabMeta = (overrides: Partial<TabMeta> = {}): TabMeta => ({
+  id: "tab-1",
+  scope: "project",
+  workspaceRoot: "/repo",
+  workspaceName: "repo",
+  topicId: "topic-1",
+  topicTitle: "Topic",
+  label: "model",
+  ready: true,
+  running: false,
+  cancellable: false,
+  mode: "normal",
+  active: true,
+  cwd: "/repo",
+  ...overrides,
+});
+
+ok(sameTabMetaLists([tabMeta()], [tabMeta()]), "identical tab metadata suppresses redundant state writes");
+ok(!sameTabMetaLists([tabMeta()], [tabMeta({ running: true })]), "runtime tab changes still invalidate metadata state");
+ok(tabMetaFallbackDelay("visible") === 15_000, "visible tab metadata fallback runs at low frequency");
+ok(tabMetaFallbackDelay("hidden") === 60_000, "hidden tab metadata fallback backs off further");
+ok(shouldRefreshTabMetaForEvent("turn_started"), "turn start refreshes tab runtime metadata immediately");
+ok(shouldRefreshTabMetaForEvent("approval_request"), "approval prompts refresh tab runtime metadata immediately");
+ok(!shouldRefreshTabMetaForEvent("text_delta"), "stream deltas do not trigger tab-list requests");
+
+{
+  const coordinator = createBoundedRefreshCoordinator<TabMeta[]>(2);
+  const first = deferred<TabMeta[]>();
+  const second = deferred<TabMeta[]>();
+  let loads = 0;
+  const firstRefresh = coordinator.run(() => {
+    loads += 1;
+    return first.promise;
+  });
+  const secondRefresh = coordinator.run(() => {
+    loads += 1;
+    return second.promise;
+  });
+  const saturatedRefresh = coordinator.run(() => {
+    loads += 1;
+    return Promise.resolve([]);
+  });
+  await Promise.resolve();
+  ok(loads === 2, "tab metadata refresh caps outstanding backend calls");
+
+  const latestTabs = [tabMeta({ id: "tab-latest" })];
+  second.resolve(latestTabs);
+  const saturatedResult = await saturatedRefresh;
+  ok(saturatedResult.coalesced, "saturated tab metadata refresh joins the newest request");
+  ok(saturatedResult.value === latestTabs, "saturated tab metadata refresh returns authoritative tabs instead of an empty sentinel");
+  ok(saturatedResult.latest, "coalesced newest tab metadata remains eligible to update state");
+
+  first.resolve([tabMeta({ id: "tab-stale" })]);
+  const firstResult = await firstRefresh;
+  await secondRefresh;
+  ok(!firstResult.latest, "an older tab metadata response cannot replace a newer snapshot");
+}
+
+{
+  const coordinator = createBoundedRefreshCoordinator<TabMeta[]>(2);
+  const preMutationA = deferred<TabMeta[]>();
+  const preMutationB = deferred<TabMeta[]>();
+  const postMutation = deferred<TabMeta[]>();
+  let loads = 0;
+  const loadValues: TabMeta[][] = [
+    [tabMeta({ id: "pre-a" })],
+    [tabMeta({ id: "pre-b" })],
+    [tabMeta({ id: "post-mutation" })],
+  ];
+  const loadPromises = [preMutationA.promise, preMutationB.promise, postMutation.promise];
+
+  const firstRefresh = coordinator.run(() => {
+    const index = loads;
+    loads += 1;
+    return loadPromises[index] ?? Promise.resolve(loadValues[index] ?? []);
+  });
+  const secondRefresh = coordinator.run(() => {
+    const index = loads;
+    loads += 1;
+    return loadPromises[index] ?? Promise.resolve(loadValues[index] ?? []);
+  });
+  await Promise.resolve();
+  ok(loads === 2, "pre-mutation tab metadata fills both in-flight slots");
+
+  const mutationRefresh = coordinator.run(
+    () => {
+      const index = loads;
+      loads += 1;
+      return loadPromises[index] ?? Promise.resolve(loadValues[index] ?? []);
+    },
+    { invalidate: true },
+  );
+  await Promise.resolve();
+  ok(loads === 2, "post-mutation refresh does not start until an in-flight slot frees");
+
+  preMutationA.resolve(loadValues[0]);
+  const firstResult = await firstRefresh;
+  await Promise.resolve();
+  await Promise.resolve();
+  ok(loads === 3, "post-mutation refresh starts as a trailing load after a slot frees");
+  ok(!firstResult.latest, "pre-mutation snapshot is not authoritative after invalidate");
+
+  const postTabs = loadValues[2];
+  postMutation.resolve(postTabs);
+  const mutationResult = await mutationRefresh;
+  ok(!mutationResult.coalesced, "post-mutation refresh does not join a pre-mutation request");
+  ok(mutationResult.value === postTabs, "post-mutation refresh returns the mutation-after snapshot");
+  ok(mutationResult.latest, "post-mutation trailing refresh remains eligible to update state");
+
+  preMutationB.resolve(loadValues[1]);
+  const secondResult = await secondRefresh;
+  ok(!secondResult.latest, "pre-mutation coalesced request cannot overwrite post-mutation state");
+}
+
+{
+  const coordinator = createBoundedRefreshCoordinator<TabMeta[]>(1);
+  const preMutation = deferred<TabMeta[]>();
+  const latestPostMutation = deferred<TabMeta[]>();
+  const started: string[] = [];
+
+  const preMutationRefresh = coordinator.run(() => {
+    started.push("pre");
+    return preMutation.promise;
+  });
+  await Promise.resolve();
+
+  const firstMutationRefresh = coordinator.run(
+    () => {
+      started.push("first-mutation");
+      return Promise.resolve([tabMeta({ id: "first-mutation" })]);
+    },
+    { invalidate: true },
+  );
+  const latestMutationRefresh = coordinator.run(
+    () => {
+      started.push("latest-mutation");
+      return latestPostMutation.promise;
+    },
+    { invalidate: true },
+  );
+
+  preMutation.resolve([tabMeta({ id: "pre" })]);
+  const preMutationResult = await preMutationRefresh;
+  await Promise.resolve();
+  await Promise.resolve();
+  ok(started.join(",") === "pre,latest-mutation", "queued invalidations retain only the latest trailing load");
+  ok(!preMutationResult.latest, "queued invalidations fence the pre-mutation load");
+
+  const latestTabs = [tabMeta({ id: "latest-mutation" })];
+  latestPostMutation.resolve(latestTabs);
+  const [firstMutationResult, latestMutationResult] = await Promise.all([firstMutationRefresh, latestMutationRefresh]);
+  ok(firstMutationResult.value === latestTabs, "an older queued mutation waits for the latest post-mutation snapshot");
+  ok(latestMutationResult.value === latestTabs, "the latest queued mutation receives its post-mutation snapshot");
+  ok(firstMutationResult.latest && latestMutationResult.latest, "the shared trailing snapshot remains authoritative");
+}
+
+ok(
+  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") &&
+    appSource.includes('document.addEventListener("visibilitychange", onVisibilityChange)') &&
+    appSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
+    appSource.includes("void refreshTabMetas();\n        schedule();"),
+  "tab metadata refresh is event-driven with a visibility-aware fallback",
+);
+
+ok(
+  appSource.includes("refreshTabMetas(undefined, { afterMutation: true })") &&
+    appSource.includes("{ afterMutation: true }") &&
+    appSource.includes("if (shouldRefreshTabMetaForEvent(e.kind)) {") &&
+    appSource.includes("void refreshTabMetas(undefined, { afterMutation: true });") &&
+    /await refreshTabMetas\(\s*\(\) => isNavigationIntentCurrent\(request\.navigationIntentSeq\),\s*\{\s*afterMutation:\s*true\s*\},?\s*\)/.test(appSource),
+  "tab lifecycle events and explicit mutations force a post-mutation trailing metadata refresh",
+);
+
 ok(
   /import \{ TabBar \} from "\.\/TabBar";/.test(appChromeSource),
   "AppChrome keeps the classic top session tab strip implementation",
@@ -76,9 +264,23 @@ ok(
 );
 
 ok(
-  /const WORKSPACE_PANEL_DEFAULT_OPEN = false;/.test(layoutStoreSource) &&
-    /workspacePanelOpen:\s*WORKSPACE_PANEL_DEFAULT_OPEN/.test(layoutStoreSource),
-  "right dock starts collapsed on launch",
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar", "--wails-draggable") === "drag" &&
+    finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .tabbar", "--wails-draggable") === "drag",
+  "classic tabbar whitespace drags the window on macOS and frameless Windows",
+);
+
+ok(
+  finalDeclaration(".app--darwin .app-chrome--tabs .tabbar *", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar *", "--wails-draggable") === "no-drag",
+  "classic tabbar controls and tab gaps remain interactive no-drag regions",
+);
+
+ok(
+  /const WORKSPACE_PANEL_DEFAULT_OPEN = true;/.test(layoutStoreSource) &&
+    /workspacePanelOpen:\s*loadWorkspacePanelOpen\(\)/.test(layoutStoreSource) &&
+    /export function saveWorkspacePanelOpen\(open: boolean\)/.test(layoutStoreSource) &&
+    /reasonix\.workspacePanel\.open/.test(layoutStoreSource),
+  "right dock open state is restored from localStorage with expanded first-launch default",
 );
 
 ok(
@@ -109,6 +311,48 @@ ok(
 ok(
   finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar > .tooltip-trigger:has(.tabbar__new)", "flex")?.includes("--chrome-panel-control-size"),
   "themed AppChrome new-tab button keeps a stable slot beside the tabs",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tab--active", "box-shadow")?.includes(
+    "inset 0 -2px 0 var(--project-accent, var(--accent))",
+  ),
+  "active themed tab carries the project-accent underline",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tab--active:focus-visible", "box-shadow")?.includes(
+    "inset 0 -2px 0 var(--project-accent, var(--accent))",
+  ) &&
+    finalDeclaration(":root[data-theme-style] .tabbar__tab--active:focus-visible", "box-shadow")?.includes(
+      "0 0 0 3px var(--accent-soft)",
+    ),
+  "keyboard focus on the active tab keeps both the focus ring and the accent underline",
+);
+
+ok(
+  matchingBlocks(".app--darwin .app-chrome--tabs .tabbar__tab--active").every(
+    (block) => !block.includes("inset 0 2px"),
+  ),
+  "macOS active tab declares no dead top-edge accent (the themed bottom-edge layer owns it)",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tabs", "gap") === "6px" &&
+    finalDeclaration(":root[data-theme-style] .tabbar__tab", "border") === "1px solid var(--border)",
+  "themed tabs keep distinct full outlines with visible spacing",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tab + .tabbar__tab:not(.tabbar__tab--drop-before)::before", "width") === "1px" &&
+    finalDeclaration(":root[data-theme-style] .app-chrome--tabs .tabbar__tab + .tabbar__tab:not(.tabbar__tab--drop-before)::before", "background") === "var(--border-2)",
+  "adjacent AppChrome tabs render a stronger divider inside their gap",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .tabbar__tab--active", "border-color") === "var(--border-2)" &&
+    finalDeclaration(":root[data-theme-style] .tabbar__tab--active", "font-weight") === "600",
+  "active themed tabs combine a stronger border outline and heavier label weight",
 );
 
 ok(
@@ -179,18 +423,55 @@ ok(
 );
 
 ok(
-  /const \[rewindCommitting, setRewindCommitting\] = useState\(false\);/.test(appSource) &&
-    /rewindStateRef\.current = null;/.test(appSource) &&
-    /setRewindCommitting\(true\);/.test(appSource),
-  "committing optimistic rewind clears undo state before awaiting the backend",
+  /const \[rewindStatesByTab, setRewindStatesByTab\] = useState<Record<string, RewindState>>\(\{\}\);/.test(appSource) &&
+    /setRewindStateForTab\(sourceTabId, null\);/.test(appSource) &&
+    /setRewindCommittingForTab\(sourceTabId, true\);/.test(appSource),
+  "committing optimistic rewind clears only the source tab before awaiting the backend",
 );
 
 ok(
-  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending;/.test(appSource) &&
-    /if \(!controllerReady\) return;\s*void commitThenSend\(text\)\.catch/.test(appSource) &&
+  /const controllerReady =\s*state\.meta\?\.ready === true &&\s*\(!state\.meta\.runtime \|\| state\.meta\.runtime\.phase === "ready"\) &&\s*!state\.meta\.startupErr &&\s*!state\.backendActivationPending &&\s*!runtimeTransitioning;/.test(appSource) &&
+    /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
   "welcome prompts and composer submit share the controller readiness gate",
+);
+
+ok(
+  /pendingPlanRevisionsByTab\[activeTabId\]/.test(appSource) &&
+    /commitThenSendRef\.current\(activeTabId, text\)/.test(appSource) &&
+    !/const \[pendingPlanRevision, setPendingPlanRevision\]/.test(appSource),
+  "queued plan revisions stay scoped to their source tab",
+);
+
+ok(
+  /commitThenSendRef\.current\(sourceTabId, trimmed, submitText\.trim\(\), structured\)/.test(appSource) &&
+    /sendToTab\(sourceTabId, displayText, submitText, undefined, structured, initialGoal\)/.test(appSource) &&
+    /onSteer=\{handleSteer\}/.test(appSource) &&
+    /composerInsertRequestsByTab\[activeTabId\]/.test(appSource) &&
+    /consumedInsertIdByDraftRef\.current\[draftKey\]/.test(composerSource),
+  "composer sends and steers carry an explicit source tab through async preparation",
+);
+
+ok(
+  appSource.includes('key={`${activeTabId ?? ""}:${state.approval.id}`}') &&
+    appSource.includes('key={`${activeTabId ?? ""}:${state.ask.id}`}') &&
+    /planRevisionInsertRequest\.tabId === activeTabId/.test(appSource) &&
+    /planRevisionInsertRequest\.approvalId === state\.approval\?\.id/.test(appSource),
+  "approval and ask local state is scoped by tab plus prompt identity",
+);
+
+ok(
+  /app\.NewSessionForTab\(tabId\)/.test(controllerSource) &&
+    /app\.ClearSessionForTab\(tabId\)/.test(controllerSource) &&
+    /app\.CompactForTab\(tabId\)/.test(controllerSource) &&
+    /app\.RewindForTab\(sourceTabId, turn, actionScope\)/.test(controllerSource) &&
+    /app\.ForkForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /app\.SummarizeFromForTab\(sourceTabId, turn\)/.test(controllerSource) &&
+    /NewSessionForTab\(tabID: string\)/.test(bridgeSource) &&
+    /CompactForTab\(tabID: string\)/.test(bridgeSource) &&
+    /RewindForTab\(tabID: string, turn: number, scope: string\)/.test(bridgeSource),
+  "session-changing controller actions use explicit tab-scoped Wails bindings",
 );
 
 ok(
@@ -199,16 +480,34 @@ ok(
   "Welcome is suppressed only until transcript history has loaded",
 );
 
+ok(
+  /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
+    /const workspaceScopeKey = \[/.test(appSource) &&
+    /activeTab\?\.sessionPath/.test(appSource) &&
+    /state\.meta\?\.sessionPath/.test(appSource) &&
+    /state\.meta\?\.cwd/.test(appSource) &&
+    /state\.sessionGen/.test(appSource) &&
+    /workspaceControllerEpoch/.test(appSource) &&
+    Array.from(appSource.matchAll(/workspaceScopeKey=\{workspaceScopeKey\}/g)).length === 3,
+  "workspace file consumers receive a session and controller scoped identity",
+);
+
+ok(
+  /const unsubReady = onReady\(\(readyTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource) &&
+    /const unsubRebuilt = onRuntimeRebuilt\(\(rebuiltTabId\) => \{[\s\S]*?setWorkspaceControllerEpoch[\s\S]*?\n    \}\);/.test(appSource),
+  "controller ready and rebuilt events invalidate active workspace file scopes",
+);
+
 const navigationBlock = appSource.match(/const runNavigationRequest = useCallback\([\s\S]*?\n  \}, \[[^\]]*singleSurfaceLayout[^\]]*\]\);/)?.[0] ?? "";
 ok(
   /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
     /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
     /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
-    /const latest = \(\) => request\.seq === navigationSeqRef\.current;/.test(appSource) &&
-    /return activateTopic\(scope, workspaceRoot, topicId/.test(appSource) &&
-    /return openTopicSession\(scope, workspaceRoot, topicId/.test(appSource) &&
-    /return openGlobalTab\(topicId\)/.test(appSource) &&
-    /return openProjectTab\(workspaceRoot, topicId\)/.test(appSource) &&
+    /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\);/.test(appSource) &&
+    /return activateTopic\(scope, workspaceRoot, topicId, sessionPath \|\| "", request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openTopicSession\(scope, workspaceRoot, topicId, sessionPath, request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openGlobalTab\(topicId, request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openProjectTab\(workspaceRoot, topicId, request\.navigationIntentSeq\)/.test(appSource) &&
     /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
     !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
     /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
@@ -287,6 +586,20 @@ ok(
     finalDeclaration(".app--windows-frameless:not(.app--workbench):not(.app--creation) .app-chrome--native-tabs .app-chrome__drag-rail", "right")?.includes("--windows-window-controls-safe") &&
     finalDeclaration(".app--windows .app-chrome--native-tabs .tabbar", "--wails-draggable") === "no-drag",
   "Windows classic chrome keeps a draggable rail while tabs remain clickable",
+);
+
+ok(
+  finalDeclaration(".sidebar", "--wails-draggable") === "drag" &&
+    finalDeclaration(".app--windows .sidebar", "--wails-draggable") === "no-drag" &&
+    finalDeclaration(".sidebar-resizer", "--wails-draggable") === "no-drag",
+  "Windows sidebar avoids native window drag without changing other platforms",
+);
+
+ok(
+  finalDeclaration(".app--windows.app--creation .topicbar", "position") === "relative" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "z-index") === "var(--z-app-chrome)" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "transform") === "translateY(-4px) !important",
+  "Windows Creation topic bar lifts its menus above conversation content without changing titlebar alignment",
 );
 
 for (const selector of [

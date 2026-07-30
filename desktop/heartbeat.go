@@ -22,6 +22,8 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/secrets"
 )
 
 // ── Data model ──────────────────────────────────────────────────────────────
@@ -57,6 +59,7 @@ type heartbeatConfig struct {
 type HeartbeatEngine struct {
 	mu            sync.Mutex
 	tasks         []HeartbeatTask
+	cfgMod        time.Time                        // config-file mtime as of the engine's last read/write (external-edit probe)
 	pendingTopics map[string]heartbeatPendingTopic // in-memory retry/in-flight safety for NewConversationEachRun
 	done          chan struct{}
 	running       bool
@@ -87,7 +90,7 @@ func (e *HeartbeatEngine) configPath() string {
 
 // loadTasks reads tasks from disk.
 func (e *HeartbeatEngine) loadTasks() []HeartbeatTask {
-	b, err := os.ReadFile(e.configPath())
+	b, err := readFileUTF8(e.configPath())
 	if err != nil {
 		return nil
 	}
@@ -97,6 +100,28 @@ func (e *HeartbeatEngine) loadTasks() []HeartbeatTask {
 		return nil
 	}
 	return cfg.Tasks
+}
+
+// noteConfigModLocked records the config file's current mtime so the tick
+// external-edit probe does not re-read a file the engine itself just wrote.
+func (e *HeartbeatEngine) noteConfigModLocked() {
+	if info, err := os.Stat(e.configPath()); err == nil {
+		e.cfgMod = info.ModTime()
+	}
+}
+
+// adoptExternalEditsLocked re-reads the config when its mtime moved since the
+// engine last touched the file: heartbeat-tasks.json is documented as human-
+// and AI-editable, so an external edit should be scheduled by the next tick
+// rather than waiting for a manual Refresh or an app restart.
+func (e *HeartbeatEngine) adoptExternalEditsLocked() {
+	info, err := os.Stat(e.configPath())
+	if err != nil || info.ModTime().Equal(e.cfgMod) {
+		return
+	}
+	e.cfgMod = info.ModTime()
+	e.tasks = e.loadTasks()
+	e.prunePendingTopicsLocked(e.tasks)
 }
 
 // saveTasks writes tasks to disk atomically.
@@ -129,6 +154,7 @@ func (e *HeartbeatEngine) Start() {
 		return
 	}
 	e.tasks = e.loadTasks()
+	e.noteConfigModLocked()
 	e.running = true
 	go e.loop()
 	log.Printf("[heartbeat] engine started (%d tasks)", len(e.tasks))
@@ -160,10 +186,12 @@ func (e *HeartbeatEngine) loop() {
 }
 
 // tick checks every enabled task and runs those whose interval has elapsed.
-// It merges results (topicId, lastRunAt) rather than replacing the full list,
-// so concurrent HeartbeatSaveTasks edits are not lost.
+// It first adopts any external edit to the config file (human/AI-editable),
+// then merges results (topicId, lastRunAt) rather than replacing the full
+// list, so concurrent HeartbeatSaveTasks edits are not lost.
 func (e *HeartbeatEngine) tick() {
 	e.mu.Lock()
+	e.adoptExternalEditsLocked()
 	tasks := append([]HeartbeatTask(nil), e.tasks...)
 	e.mu.Unlock()
 
@@ -283,7 +311,7 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 		tabMeta, err = e.app.openGlobalTabInactive(topicID)
 	}
 	if err != nil {
-		log.Printf("[heartbeat] OpenTab(%q): %v", t.Title, err)
+		log.Printf("[heartbeat] OpenTab(%q): %s", t.Title, secrets.RedactError(err))
 		t.LastRunAt = time.Now().UnixMilli()
 		return t
 	}
@@ -327,17 +355,14 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 	// session-mapped targets. The forwarder is set on the tab's event sink
 	// so AI output events are streamed to connected bot channels in
 	// real-time alongside the desktop UI.
-	botForwardAttached := false
+	var botForwarder event.Sink
 	if t.NotifyChannels != nil && *t.NotifyChannels {
-		botForwardAttached = e.attachBotForwarder(tabMeta.ID)
+		botForwarder = e.newBotForwarder(tabMeta.ID)
 	}
 
 	// Submit as a plain user turn so scheduled prompts cannot invoke desktop
 	// shell or slash-command handlers such as "!cmd", "/clear", or "/compact".
-	if !e.app.submitUserTurnToTab(tabMeta.ID, t.Prompt) {
-		if botForwardAttached {
-			e.clearBotForwarder(tabMeta.ID)
-		}
+	if !e.app.submitUserTurnToTabWithSink(tabMeta.ID, t.Prompt, botForwarder) {
 		log.Printf("[heartbeat] submit skipped for %q", t.Title)
 		return t
 	}
@@ -374,6 +399,7 @@ func (e *HeartbeatEngine) ReloadTasks() []HeartbeatTask {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.tasks = e.loadTasks()
+	e.noteConfigModLocked()
 	e.prunePendingTopicsLocked(e.tasks)
 	out := make([]HeartbeatTask, len(e.tasks))
 	copy(out, e.tasks)
@@ -386,7 +412,9 @@ func (e *HeartbeatEngine) ReplaceTasks(tasks []HeartbeatTask) error {
 	defer e.mu.Unlock()
 	e.tasks = tasks
 	e.prunePendingTopicsLocked(tasks)
-	return e.saveTasks(tasks)
+	err := e.saveTasks(tasks)
+	e.noteConfigModLocked()
+	return err
 }
 
 func (e *HeartbeatEngine) prunePendingTopicsLocked(tasks []HeartbeatTask) {
@@ -431,7 +459,18 @@ func (e *HeartbeatEngine) mergeRunUpdatesLocked(updates map[string]HeartbeatTask
 	if len(updates) == 0 {
 		return
 	}
-	tasks := append([]HeartbeatTask(nil), e.tasks...)
+	// Rebase onto the on-disk list before the full-list save: the config file
+	// is documented as human- and AI-editable, so an external edit may have
+	// landed after the in-memory snapshot this tick ran from. The engine owns
+	// only the run-state fields (TopicID, LastRunAt, CreatedAt backfill);
+	// task definitions added, edited, or deleted externally are adopted from
+	// disk, so the save below can never silently roll an external edit back.
+	tasks := e.loadTasks()
+	if tasks == nil {
+		// Missing or unreadable file: fall back to the in-memory list so the
+		// run state still lands (the historical behavior).
+		tasks = append([]HeartbeatTask(nil), e.tasks...)
+	}
 	for i := range tasks {
 		update, ok := updates[tasks[i].ID]
 		if !ok {
@@ -448,7 +487,9 @@ func (e *HeartbeatEngine) mergeRunUpdatesLocked(updates map[string]HeartbeatTask
 		}
 	}
 	e.tasks = tasks
+	e.prunePendingTopicsLocked(tasks)
 	_ = e.saveTasks(tasks)
+	e.noteConfigModLocked()
 }
 
 // parseInterval converts a string like "5m", "1h", "30s" to time.Duration.
@@ -781,7 +822,7 @@ func weeksBetween(a, b time.Time) int {
 // HeartbeatListTasks returns all heartbeat tasks.
 func (a *App) HeartbeatListTasks() []HeartbeatTask {
 	if a.heartbeat == nil {
-		return nil
+		return []HeartbeatTask{}
 	}
 	return a.heartbeat.ListTasks()
 }
@@ -789,7 +830,7 @@ func (a *App) HeartbeatListTasks() []HeartbeatTask {
 // HeartbeatReloadTasks reloads tasks from disk and returns them.
 func (a *App) HeartbeatReloadTasks() []HeartbeatTask {
 	if a.heartbeat == nil {
-		return nil
+		return []HeartbeatTask{}
 	}
 	return a.heartbeat.ReloadTasks()
 }
@@ -820,39 +861,26 @@ func (a *App) HeartbeatGenerateID() string {
 	return string(b)
 }
 
-// attachBotForwarder sets up event forwarding to connected bot channels for
-// the tab identified by tabID. It is called before submitting a heartbeat
-// prompt. If the bot runtime is not active or has no session-mapped targets
-// the call is a no-op.
-func (e *HeartbeatEngine) attachBotForwarder(tabID string) bool {
+// newBotForwarder builds event forwarding for a heartbeat turn. The caller
+// attaches it only after acquiring the tab's turn-admission gate.
+func (e *HeartbeatEngine) newBotForwarder(tabID string) event.Sink {
 	runtime := e.app.botRuntime
 	if runtime == nil || !runtime.Running() {
-		return false
+		return nil
 	}
 	cfg, err := e.app.loadDesktopBotConfig()
 	if err != nil {
 		log.Printf("[heartbeat] load config for bot forward: %v", err)
-		return false
+		return nil
 	}
 	targets := runtime.ForwardTargets(cfg)
 	if len(targets) == 0 {
-		return false // no session-mapped channels to forward to
+		return nil // no session-mapped channels to forward to
 	}
 	tab := e.app.tabByID(tabID)
 	if tab == nil || tab.sink == nil {
-		return false
+		return nil
 	}
 	log.Printf("[heartbeat] bot forwarding attached: %d target(s) for tab %s", len(targets), tabID)
-
-	forwarder := newBotEventForwarder(runtime, targets)
-	tab.sink.SetBotSink(forwarder)
-	return true
-}
-
-func (e *HeartbeatEngine) clearBotForwarder(tabID string) {
-	tab := e.app.tabByID(tabID)
-	if tab == nil || tab.sink == nil {
-		return
-	}
-	tab.sink.SetBotSink(nil)
+	return newBotEventForwarder(runtime, targets)
 }

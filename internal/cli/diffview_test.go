@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
+
 	"reasonix/internal/event"
 )
 
@@ -67,8 +69,8 @@ func TestDiffPath(t *testing.T) {
 }
 
 func TestDiffBarReappliesBackground(t *testing.T) {
-	defer func(prev bool) { colorEnabled = prev }(colorEnabled)
-	colorEnabled = true
+	defer func(prev colorprofile.Profile) { activeColorProfile = prev }(activeColorProfile)
+	activeColorProfile = colorprofile.ANSI256
 
 	line := diffBar('+', "a + b", "x.go", 40, bgDiffAdd, fgDiffAdd, 12, 3)
 	// Syntax highlighting emits multiple \033[0m resets; each must re-arm the bar

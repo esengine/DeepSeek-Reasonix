@@ -27,6 +27,33 @@ func TestToWireRetryingJSON(t *testing.T) {
 	}
 }
 
+func TestToWireNoticeCarriesCode(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeFinalReadiness, Text: "readiness copy"})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"code":"final_readiness"`) {
+		t.Fatalf("notice JSON = %s, want a stable code field", b)
+	}
+
+	w = ToWire(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "codeless notice"})
+	if b, err = json.Marshal(w); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"code"`) {
+		t.Fatalf("codeless notice JSON = %s, must omit the code field", b)
+	}
+
+	w = ToWire(event.Event{Kind: event.Text, Code: "stray"})
+	if b, err = json.Marshal(w); err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(b), `"code"`) {
+		t.Fatalf("non-notice JSON = %s, must not carry a code", b)
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
@@ -48,12 +75,14 @@ func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
+		"detail?: string;",
+		`outcome?: "final_readiness" | "recovery_paused";`,
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
-		"memoryCompiler?: MemoryCompilerStats;",
-		"export interface MemoryCompilerStats",
+		"resolvedName?: string;",
+		"capabilityId?: string;",
 		"cacheDiagnostics?: WireCacheDiagnostics;",
 		"export interface WireCacheDiagnostics",
 		"prefixHash: string;",
@@ -67,38 +96,67 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	}
 }
 
-func TestToWireMemoryCompilerStats(t *testing.T) {
-	w := ToWire(event.Event{
-		Kind: event.MemoryCompilerStatsEvent,
-		MemoryCompiler: &event.MemoryCompilerStats{
-			Injected:         true,
-			UsefulIR:         true,
-			CompiledTokens:   1200,
-			IROverheadTokens: 300,
-			MemoryReferences: 3,
-			Constraints:      2,
-			RiskNotes:        1,
-			ExecutionSteps:   4,
-			TotalNodes:       42,
-			HighSignalNodes:  11,
-			ToolResultNodes:  7,
-			DecisionNodes:    5,
-			StrategyCount:    3,
-			LearningCount:    6,
-		},
-	})
-	if w.Kind != "memory_compiler_stats" || w.MemoryCompiler == nil {
-		t.Fatalf("wire memory compiler stats = %+v", w)
-	}
-	if !w.MemoryCompiler.Injected || w.MemoryCompiler.TotalNodes != 42 || w.MemoryCompiler.CompiledTokens != 1200 {
-		t.Fatalf("wire memory compiler payload = %+v", w.MemoryCompiler)
+func TestToWireNoticeDetail(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "short", Detail: "diagnostics"})
+	if w.Kind != "notice" || w.Level != "warn" || w.Text != "short" || w.Detail != "diagnostics" {
+		t.Fatalf("wire notice = %+v", w)
 	}
 	b, err := json.Marshal(w)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if strings.Contains(string(b), "secret") || !strings.Contains(string(b), `"memoryCompiler":`) {
-		t.Fatalf("memory compiler stats JSON should contain only metrics payload: %s", string(b))
+	for _, want := range []string{`"kind":"notice"`, `"text":"short"`, `"detail":"diagnostics"`, `"level":"warn"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("notice JSON = %s, want it to contain %s", string(b), want)
+		}
+	}
+}
+
+func TestToWireToolCarriesResolvedCapabilityMetadata(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "c1", Name: "use_capability",
+		Args:         `{"action":"call","capability_id":"mcp-tool:db/write"}`,
+		ResolvedName: "mcp__db__write", CapabilityID: "mcp-tool:db/write",
+		ReadOnly: false, Refreshed: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{
+		`"name":"use_capability"`, `"resolvedName":"mcp__db__write"`,
+		`"capabilityId":"mcp-tool:db/write"`, `"readOnly":false`, `"refreshed":true`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("tool JSON = %s, want %s", b, want)
+		}
+	}
+}
+
+func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
+	readiness := ToWire(event.Event{
+		Kind:      event.TurnDone,
+		Err:       errors.New("final-answer readiness failed 3 times: missing verification"),
+		Outcome:   event.TurnOutcomeFinalReadiness,
+		Readiness: &event.FinalReadiness{Attempts: 3, Missing: []string{"verification", "review"}},
+	})
+	if readiness.Outcome != event.TurnOutcomeFinalReadiness || readiness.Err == "" || readiness.Readiness == nil || readiness.Readiness.Attempts != 3 {
+		t.Fatalf("readiness wire event = %+v", readiness)
+	}
+	b, err := json.Marshal(readiness)
+	if err != nil {
+		t.Fatalf("marshal readiness: %v", err)
+	}
+	if !strings.Contains(string(b), `"outcome":"final_readiness"`) || !strings.Contains(string(b), `"missing":["verification","review"]`) {
+		t.Fatalf("readiness JSON = %s, want structured outcome", b)
+	}
+
+	ordinary, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, Err: errors.New("provider failed")}))
+	if err != nil {
+		t.Fatalf("marshal ordinary error: %v", err)
+	}
+	if strings.Contains(string(ordinary), `"outcome"`) {
+		t.Fatalf("ordinary error JSON must omit outcome: %s", ordinary)
 	}
 }
 
@@ -149,7 +207,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID: "call-1", Name: "task", Args: `{"prompt":"x"}`, Output: "ignored",
 		Err: "blocked", ReadOnly: true, Truncated: true, DurationMs: 522,
-		Partial: true, ParentID: "parent-1",
+		Partial: true, Refreshed: true, ParentID: "parent-1",
 		FileDiff: event.FileDiff{Diff: "@@ -1 +1 @@\n-old\n+new\n", Added: 1, Removed: 1},
 		Profile:  &event.Profile{Model: "deepseek-pro", Effort: "max"},
 	}})
@@ -161,7 +219,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 	for _, want := range []string{
 		`"kind":"tool_dispatch"`, `"id":"call-1"`, `"name":"task"`,
 		`"args":"{\"prompt\":\"x\"}"`, `"output":"ignored"`, `"err":"blocked"`,
-		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`,
+		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`, `"refreshed":true`,
 		`"parentId":"parent-1"`, `"diff":"@@ -1 +1 @@\n-old\n+new\n"`,
 		`"added":1`, `"removed":1`, `"profile":{"model":"deepseek-pro","effort":"max"}`,
 	} {
@@ -215,6 +273,38 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 			name: "approval",
 			in:   event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "a1", Tool: "bash", Subject: "rm"}},
 			want: []string{`"kind":"approval_request"`, `"approval":{"id":"a1","tool":"bash","subject":"rm"}`},
+		},
+		{
+			name: "fresh approval",
+			in:   event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{ID: "a2", Tool: "mcp__srv__wipe", Subject: "srv/wipe", Fresh: true}},
+			want: []string{`"kind":"approval_request"`, `"tool":"mcp__srv__wipe"`, `"fresh":true`},
+		},
+		{
+			name: "recovery task grant",
+			in: event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+				ID: "r1", Tool: "bash", Subject: "git push origin feature", Fresh: true, Kind: "recovery",
+				Recovery: &event.RecoveryApproval{
+					NextAction: "git push origin feature", CanGrantTask: true,
+					TaskGrantScope: "git push origin → feature",
+				},
+			}},
+			want: []string{
+				`"kind":"recovery"`, `"next_action":"git push origin feature"`, `"can_grant_task":true`,
+				`"task_grant_scope":"git push origin → feature"`,
+			},
+		},
+		{
+			name: "recovery plan transition",
+			in: event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+				ID: "r-plan", Tool: "todo_write", Subject: "Update the active execution plan", Fresh: true, Kind: "recovery",
+				Recovery: &event.RecoveryApproval{
+					ChangeKind: "scope", PlanBefore: "1. Keep API", PlanAfter: "1. Replace API",
+				},
+			}},
+			want: []string{
+				`"kind":"recovery"`, `"change_kind":"scope"`,
+				`"plan_before":"1. Keep API"`, `"plan_after":"1. Replace API"`,
+			},
 		},
 		{
 			name: "ask",

@@ -66,14 +66,14 @@ function installWailsFlags(flags?: Partial<NonNullable<Window["wails"]>["flags"]
   };
 }
 
-function Harness({ enabled }: { enabled: boolean }) {
-  useWailsResizeFix(enabled);
+function Harness({ enabled, maximised }: { enabled: boolean; maximised: boolean }) {
+  useWailsResizeFix(enabled, maximised);
   return null;
 }
 
-async function renderHarness(root: Root, enabled: boolean) {
+async function renderHarness(root: Root, enabled: boolean, maximised = false) {
   await act(async () => {
-    root.render(<Harness enabled={enabled} />);
+    root.render(<Harness enabled={enabled} maximised={maximised} />);
   });
 }
 
@@ -90,7 +90,7 @@ console.log("\nwails resize fix");
   installWailsFlags({ enableResize: true, resizeEdge: "n-resize" });
   const root = createRoot(document.getElementById("root")!);
 
-  await renderHarness(root, false);
+  await renderHarness(root, false, true);
   window.dispatchEvent(new MouseEvent("mousemove", { clientX: 97, clientY: 40 }));
   eq(window.wails?.flags.enableResize, true, "disabled hook leaves Wails resize enabled");
   eq(window.wails?.flags.resizeEdge, "n-resize", "disabled hook leaves resize edge unchanged");
@@ -117,6 +117,72 @@ console.log("\nwails resize fix");
   eq(window.wails?.flags.resizeEdge, "n-resize", "cleanup restores previous resizeEdge");
   eq(document.documentElement.style.cursor, "grab", "cleanup restores previous cursor");
 
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  document.documentElement.style.cursor = "n-resize";
+  installWailsFlags({ enableResize: true, resizeEdge: undefined, defaultCursor: null });
+  const root = createRoot(document.getElementById("root")!);
+
+  await renderHarness(root, true, true);
+  eq(window.wails?.flags.resizeEdge, undefined, "maximised startup clears an absent resize edge safely");
+  eq(document.documentElement.style.cursor, "default", "maximised startup replaces a stale resize cursor");
+
+  await unmount(root);
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  document.documentElement.style.cursor = "e-resize";
+  installWailsFlags({ enableResize: true, resizeEdge: "e-resize", defaultCursor: "grab" });
+  const root = createRoot(document.getElementById("root")!);
+
+  await renderHarness(root, true, true);
+  eq(window.wails?.flags.resizeEdge, undefined, "maximised startup clears a stale resize edge");
+  eq(document.documentElement.style.cursor, "grab", "maximised startup restores Wails' remembered cursor");
+
+  await unmount(root);
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  Object.defineProperty(window, "outerWidth", { configurable: true, value: 104 });
+  Object.defineProperty(window, "outerHeight", { configurable: true, value: 84 });
+  Object.defineProperty(window.screen, "availWidth", { configurable: true, value: 100 });
+  Object.defineProperty(window.screen, "availHeight", { configurable: true, value: 80 });
+  installWailsFlags({ enableResize: true, resizeEdge: undefined });
+  const root = createRoot(document.getElementById("root")!);
+
+  await renderHarness(root, true, false);
+  window.dispatchEvent(new MouseEvent("mousemove", { clientX: 97, clientY: 40 }));
+  eq(window.wails?.flags.resizeEdge, "e-resize", "near-full-size normal window keeps edge resizing");
+
+  await unmount(root);
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  installWailsFlags({ enableResize: true, resizeEdge: undefined });
+  const root = createRoot(document.getElementById("root")!);
+
+  await renderHarness(root, true, false);
+  window.dispatchEvent(new MouseEvent("mousemove", { clientX: 97, clientY: 40 }));
+  eq(window.wails?.flags.resizeEdge, "e-resize", "normal window detects the resize edge");
+
+  await renderHarness(root, true, true);
+  eq(window.wails?.flags.resizeEdge, undefined, "maximise transition clears the resize edge immediately");
+  eq(document.documentElement.style.cursor, "default", "maximise transition restores the cursor");
+
+  await renderHarness(root, true, false);
+  window.dispatchEvent(new MouseEvent("mousemove", { clientX: 97, clientY: 40 }));
+  eq(window.wails?.flags.resizeEdge, "e-resize", "restore transition re-enables edge resizing");
+
+  await unmount(root);
   dom.window.close();
 }
 

@@ -8,6 +8,7 @@ import {
   SettingsPanel,
   formatProviderExtraBody,
   parseProviderExtraBody,
+  providerExtraBodyParseError,
   providerBaseURLFromChatURL,
   providerChatURLPreview,
   providerEditorEffectiveKind,
@@ -15,6 +16,11 @@ import {
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
 import type { SettingsView } from "../lib/types";
+import {
+  applyTypographyPreferences,
+  createDefaultTypographyPreferences,
+  getTypographyPreferences,
+} from "../lib/typographyPreferences";
 
 let passed = 0;
 let failed = 0;
@@ -41,6 +47,19 @@ function flushPromises(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+function installCanvasMock(win: Window) {
+  Object.defineProperty(win.HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value(type: string) {
+      if (type !== "2d") return null;
+      return {
+        font: "",
+        measureText: () => ({ width: 0 }),
+      } as unknown as CanvasRenderingContext2D;
+    },
+  });
+}
+
 async function waitFor(label: string, predicate: () => boolean) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await act(async () => {
@@ -64,7 +83,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     permissions: { mode: "ask", allow: [], ask: [], deny: [] },
     sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto" },
     network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },
-    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: false,
       model: "",
@@ -118,11 +137,11 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     displayMode,
     statusBarStyle: "text",
     statusBarItems: ["model", "workspace", "git_branch", "cache", "balance"],
-    defaultToolApprovalMode: "ask",
+    defaultToolApprovalMode: "auto",
     checkUpdates: true,
+    updateChannel: "stable",
     telemetry: true,
     metrics: true,
-    memoryCompilerEnabled: true,
     configPath: "/tmp/reasonix/config.toml",
     providerKinds: [],
     autoApproveTools: false,
@@ -146,11 +165,32 @@ try {
   extraBodyRejected = true;
 }
 ok(extraBodyRejected, "extra body editor rejects non-object JSON");
+const extraBodyTestT = ((key: string, vars?: Record<string, string | number>) => {
+  if (key === "settings.providerExtraBodyError") return "localized extra body fallback";
+  if (key === "settings.providerExtraBodyNull") return `${vars?.path} localized null`;
+  return key;
+}) as any;
+eq(
+  providerExtraBodyParseError(new SyntaxError("Unexpected token } in JSON"), extraBodyTestT),
+  "localized extra body fallback",
+  "extra body editor localizes JSON syntax errors",
+);
+try {
+  parseProviderExtraBody('{ "nested": { "value": null } }', extraBodyTestT);
+  ok(false, "extra body editor rejects localized null validation errors");
+} catch (e) {
+  eq(
+    providerExtraBodyParseError(e, extraBodyTestT),
+    "extra_body.nested.value localized null",
+    "extra body editor keeps localized structured validation errors",
+  );
+}
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
   pretendToBeVisual: true,
   url: "http://localhost/",
 });
+installCanvasMock(dom.window as unknown as Window);
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
@@ -166,6 +206,16 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
 localStorage.clear();
+
+const regionalTypography = createDefaultTypographyPreferences();
+regionalTypography.code = {
+  followGlobal: false,
+  fontFamily: "jetbrains",
+  customFontName: "",
+  fontSize: 15,
+};
+applyTypographyPreferences(regionalTypography);
+const regionalCodeFont = document.documentElement.style.getPropertyValue("--typography-code-font");
 
 const settingsSnapshots = [baseSettings("standard"), baseSettings("compact")];
 let settingsCalls = 0;
@@ -205,6 +255,10 @@ await act(async () => {
 
 const compactButton = Array.from(document.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Compact") as HTMLButtonElement | undefined;
 if (!compactButton) throw new Error("compact display mode button did not render");
+eq(document.querySelectorAll(".step-limit-control").length, 0, "general settings hide executor and planner step-limit controls");
+ok(!document.body.textContent?.includes("step limit"), "general settings keep automatic progress free of step-limit copy");
+ok(!document.body.textContent?.includes("Automatic plan mode"), "general settings omit the retired automatic Plan Mode control");
+ok(!document.body.textContent?.includes("planning defaults"), "general settings omit retired automatic Plan Mode copy");
 
 await act(async () => {
   compactButton.click();
@@ -269,6 +323,51 @@ await act(async () => {
   retryRoot.unmount();
 });
 
+const windowsSandboxRootEl = document.createElement("div");
+document.body.appendChild(windowsSandboxRootEl);
+const windowsSandboxRoot = createRoot(windowsSandboxRootEl);
+let windowsSetSandboxCalls = 0;
+window.go = {
+  main: {
+    App: {
+      // Deliberately return a stale enforce value: the Windows UI must still
+      // render the effective immutable off state.
+      Settings: async () => baseSettings("standard"),
+      SetSandbox: async () => {
+        windowsSetSandboxCalls += 1;
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  windowsSandboxRoot.render(
+    <LocaleProvider>
+      <SettingsPanel
+        initialTab="sandbox"
+        desktopPlatform="windows"
+        onClose={() => {}}
+        onChanged={() => {}}
+      />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+await waitFor("Windows Bash sandbox control", () => document.body.textContent?.includes("This setting is fixed to off.") === true);
+
+const windowsBashSelect = Array.from(windowsSandboxRootEl.querySelectorAll("select")).find((select) =>
+  Array.from(select.options).some((option) => option.value === "off"),
+);
+if (!windowsBashSelect) throw new Error("Windows Bash sandbox select did not render");
+ok(windowsBashSelect.disabled, "Windows Bash sandbox selector is disabled");
+eq(windowsBashSelect.value, "off", "Windows Bash sandbox selector is fixed to off");
+ok(!Array.from(windowsBashSelect.options).some((option) => option.value === "enforce"), "Windows Bash sandbox selector omits enforce");
+eq(windowsSetSandboxCalls, 0, "Windows immutable Bash sandbox state does not save enforce");
+
+await act(async () => {
+  windowsSandboxRoot.unmount();
+});
+
 const zoomRootEl = document.createElement("div");
 document.body.appendChild(zoomRootEl);
 const zoomRoot = createRoot(zoomRootEl);
@@ -302,6 +401,23 @@ await act(async () => {
   await flushPromises();
 });
 await waitFor("persisted display zoom sync", () => document.querySelector(".zoom-slider__value")?.textContent?.trim() === "50%");
+
+const monoFontSelect = zoomRootEl.querySelector("select[aria-labelledby='appearance-mono-font-family-label']") as HTMLSelectElement | null;
+if (!monoFontSelect) throw new Error("monospace font selector did not render");
+await act(async () => {
+  monoFontSelect.value = "custom";
+  monoFontSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  await flushPromises();
+});
+
+const preservedTypography = getTypographyPreferences();
+eq(preservedTypography.code.followGlobal, false, "global monospace changes preserve an explicit code-region override");
+eq(preservedTypography.code.fontFamily, "jetbrains", "global monospace changes preserve the regional code font choice");
+eq(
+  document.documentElement.style.getPropertyValue("--typography-code-font"),
+  regionalCodeFont,
+  "global monospace changes keep the regional code font CSS variable",
+);
 
 const resetZoomButton = document.querySelector("button[aria-label='Reset display zoom to 100%']") as HTMLButtonElement | null;
 if (!resetZoomButton) throw new Error("display zoom reset button did not render");

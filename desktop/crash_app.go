@@ -11,8 +11,9 @@ import (
 	"strings"
 )
 
-// crash_app.go is the crash/feedback/performance reporting surface. Reports are
-// sent only on an explicit user click in the frontend UI — never automatically.
+// crash_app.go is the crash/feedback/performance reporting surface. Frontend
+// reports are sent on an explicit user click. Native fatal/lifecycle reports are
+// queued locally and sent on a later launch only when desktop telemetry is on.
 
 var crashEndpoint = "https://crash.reasonix.io/v1/report"
 
@@ -59,45 +60,47 @@ type crashBreadcrumb struct {
 }
 
 type crashReport struct {
-	Kind           string            `json:"kind"`
-	Version        string            `json:"version"`
-	OS             string            `json:"os"`
-	Arch           string            `json:"arch"`
-	Message        string            `json:"message"`
-	Device         deviceInfo        `json:"device"`
-	SchemaVersion  int               `json:"schemaVersion,omitempty"`
-	Source         string            `json:"source,omitempty"`
-	Label          string            `json:"label,omitempty"`
-	ErrorType      string            `json:"errorType,omitempty"`
-	ErrorMessage   string            `json:"errorMessage,omitempty"`
-	Stack          string            `json:"stack,omitempty"`
-	ComponentStack string            `json:"componentStack,omitempty"`
-	TopFrame       string            `json:"topFrame,omitempty"`
-	BuildCommit    string            `json:"buildCommit,omitempty"`
-	Channel        string            `json:"channel,omitempty"`
-	Language       string            `json:"language,omitempty"`
-	View           string            `json:"view,omitempty"`
-	Breadcrumbs    []crashBreadcrumb `json:"breadcrumbs,omitempty"`
-	OccurredAt     string            `json:"occurredAt,omitempty"`
+	Kind            string            `json:"kind"`
+	Version         string            `json:"version"`
+	OS              string            `json:"os"`
+	Arch            string            `json:"arch"`
+	Message         string            `json:"message"`
+	Device          deviceInfo        `json:"device"`
+	SchemaVersion   int               `json:"schemaVersion,omitempty"`
+	Source          string            `json:"source,omitempty"`
+	Label           string            `json:"label,omitempty"`
+	ErrorType       string            `json:"errorType,omitempty"`
+	ErrorMessage    string            `json:"errorMessage,omitempty"`
+	Stack           string            `json:"stack,omitempty"`
+	ComponentStack  string            `json:"componentStack,omitempty"`
+	TopFrame        string            `json:"topFrame,omitempty"`
+	FingerprintHint string            `json:"fingerprintHint,omitempty"`
+	BuildCommit     string            `json:"buildCommit,omitempty"`
+	Channel         string            `json:"channel,omitempty"`
+	Language        string            `json:"language,omitempty"`
+	View            string            `json:"view,omitempty"`
+	Breadcrumbs     []crashBreadcrumb `json:"breadcrumbs,omitempty"`
+	OccurredAt      string            `json:"occurredAt,omitempty"`
 }
 
 type frontendCrashPayload struct {
-	SchemaVersion  int               `json:"schemaVersion"`
-	Kind           string            `json:"kind"`
-	Source         string            `json:"source"`
-	Label          string            `json:"label"`
-	Message        string            `json:"message"`
-	ErrorType      string            `json:"errorType"`
-	ErrorMessage   string            `json:"errorMessage"`
-	Stack          string            `json:"stack"`
-	ComponentStack string            `json:"componentStack"`
-	TopFrame       string            `json:"topFrame"`
-	BuildCommit    string            `json:"buildCommit"`
-	Channel        string            `json:"channel"`
-	Language       string            `json:"language"`
-	View           string            `json:"view"`
-	Breadcrumbs    []crashBreadcrumb `json:"breadcrumbs"`
-	OccurredAt     string            `json:"occurredAt"`
+	SchemaVersion   int               `json:"schemaVersion"`
+	Kind            string            `json:"kind"`
+	Source          string            `json:"source"`
+	Label           string            `json:"label"`
+	Message         string            `json:"message"`
+	ErrorType       string            `json:"errorType"`
+	ErrorMessage    string            `json:"errorMessage"`
+	Stack           string            `json:"stack"`
+	ComponentStack  string            `json:"componentStack"`
+	TopFrame        string            `json:"topFrame"`
+	FingerprintHint string            `json:"fingerprintHint"`
+	BuildCommit     string            `json:"buildCommit"`
+	Channel         string            `json:"channel"`
+	Language        string            `json:"language"`
+	View            string            `json:"view"`
+	Breadcrumbs     []crashBreadcrumb `json:"breadcrumbs"`
+	OccurredAt      string            `json:"occurredAt"`
 }
 
 func normalizeReportKind(kind string) (string, bool) {
@@ -213,6 +216,7 @@ func crashReportFromDetail(kind, detail string) (crashReport, error) {
 		r.Stack = sanitizeCrashText(payload.Stack, maxCrashStackBytes)
 		r.ComponentStack = sanitizeCrashText(payload.ComponentStack, maxCrashStackBytes)
 		r.TopFrame = sanitizeCrashText(payload.TopFrame, 300)
+		r.FingerprintHint = sanitizeCrashText(payload.FingerprintHint, 300)
 		r.BuildCommit = sanitizeCrashField(payload.BuildCommit, 64)
 		r.Channel = sanitizeCrashField(payload.Channel, 32)
 		r.Language = sanitizeCrashField(payload.Language, 64)

@@ -210,7 +210,7 @@ func TestChannelBackedSink(t *testing.T) {
 		{Kind: ToolDispatch, Tool: Tool{Name: "bash"}},
 		{Kind: ToolResult, Tool: Tool{Output: "ok"}},
 		{Kind: Usage, Usage: &provider.Usage{TotalTokens: 42}},
-		{Kind: Notice, Level: LevelWarn, Text: "heads up"},
+		{Kind: Notice, Level: LevelWarn, Text: "heads up", Detail: "diagnostics"},
 		{Kind: TurnDone},
 	}
 	for _, e := range events {
@@ -221,6 +221,9 @@ func TestChannelBackedSink(t *testing.T) {
 		got := <-ch
 		if got.Kind != want.Kind {
 			t.Errorf("event %d: Kind = %d, want %d", i, got.Kind, want.Kind)
+		}
+		if got.Detail != want.Detail {
+			t.Errorf("event %d: Detail = %q, want %q", i, got.Detail, want.Detail)
 		}
 	}
 }

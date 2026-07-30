@@ -59,6 +59,7 @@ system_prompt_sensitive=()
 
 for file in "${changed_files[@]:-}"; do
   case "$file" in
+    desktop/session_prompt.go|\
     internal/agent/agent.go|\
     internal/agent/ask.go|\
     internal/agent/cache*|\
@@ -71,6 +72,7 @@ for file in "${changed_files[@]:-}"; do
     internal/command/slashtool.go|\
     internal/config/config.go|\
     internal/config/system_prompt*|\
+    internal/environment/*|\
     internal/history/tool.go|\
     internal/installsource/*|\
     internal/lsp/tool.go|\
@@ -87,10 +89,12 @@ for file in "${changed_files[@]:-}"; do
   esac
 
   case "$file" in
+    desktop/session_prompt.go|\
     internal/agent/task.go|\
     internal/boot/*|\
     internal/config/config.go|\
     internal/config/system_prompt*|\
+    internal/environment/*|\
     internal/memory/*|\
     internal/outputstyle/*|\
     internal/skill/*)

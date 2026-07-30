@@ -1,10 +1,12 @@
 package control
 
 import (
+	"encoding/json"
 	"testing"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 )
 
 func TestParsePlanTodos(t *testing.T) {
@@ -61,8 +63,8 @@ func TestParsePlanTodos(t *testing.T) {
 			name: "two-level plan: phases at level 0, indented sub-steps at level 1",
 			plan: "1. Add the loader\n   - parse the TOML\n   - validate fields\n2. Wire it up\n  - call from boot",
 			want: []seedTodo{
-				{Content: "Add the loader", Status: "in_progress", Level: 0},
-				{Content: "parse the TOML", Status: "pending", Level: 1},
+				{Content: "Add the loader", Status: "pending", Level: 0},
+				{Content: "parse the TOML", Status: "in_progress", Level: 1},
 				{Content: "validate fields", Status: "pending", Level: 1},
 				{Content: "Wire it up", Status: "pending", Level: 0},
 				{Content: "call from boot", Status: "pending", Level: 1},
@@ -72,8 +74,8 @@ func TestParsePlanTodos(t *testing.T) {
 			name: "tab-indented sub-step is level 1",
 			plan: "- Phase one\n\t- nested by tab",
 			want: []seedTodo{
-				{Content: "Phase one", Status: "in_progress", Level: 0},
-				{Content: "nested by tab", Status: "pending", Level: 1},
+				{Content: "Phase one", Status: "pending", Level: 0},
+				{Content: "nested by tab", Status: "in_progress", Level: 1},
 			},
 		},
 		{
@@ -83,11 +85,19 @@ func TestParsePlanTodos(t *testing.T) {
 			name: "numbered headings are phases; title is ignored; bullets are sub-steps",
 			plan: "## Plan: add a flag\n\n### 1. Define the field\n   - add Verbose bool\n   - document it\n\n### 2. Wire it up\n   - read from config",
 			want: []seedTodo{
-				{Content: "Define the field", Status: "in_progress", Level: 0},
-				{Content: "add Verbose bool", Status: "pending", Level: 1},
+				{Content: "Define the field", Status: "pending", Level: 0},
+				{Content: "add Verbose bool", Status: "in_progress", Level: 1},
 				{Content: "document it", Status: "pending", Level: 1},
 				{Content: "Wire it up", Status: "pending", Level: 0},
 				{Content: "read from config", Status: "pending", Level: 1},
+			},
+		},
+		{
+			name: "leading indented item is promoted instead of seeding an orphan sub-step",
+			plan: "  - recover configuration\n- restart normally",
+			want: []seedTodo{
+				{Content: "recover configuration", Status: "in_progress", Level: 0},
+				{Content: "restart normally", Status: "pending", Level: 0},
 			},
 		},
 	}
@@ -103,6 +113,29 @@ func TestParsePlanTodos(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPlanTodosJSONAlwaysSatisfiesSerialContract(t *testing.T) {
+	plans := []string{
+		"1. Flat first\n2. Flat second",
+		"1. Phase one\n   - child one\n   - child two\n2. Phase two\n   - child three",
+		"   - accidentally indented first\n   - nested child\n2. Next phase",
+	}
+	for _, plan := range plans {
+		args := PlanTodosJSON(plan)
+		if args == "" {
+			t.Fatalf("PlanTodosJSON(%q) returned no seed", plan)
+		}
+		var payload struct {
+			Todos []evidence.TodoItem `json:"todos"`
+		}
+		if err := json.Unmarshal([]byte(args), &payload); err != nil {
+			t.Fatalf("PlanTodosJSON(%q): %v", plan, err)
+		}
+		if err := evidence.ValidateSerialTodos(payload.Todos); err != nil {
+			t.Fatalf("PlanTodosJSON(%q) emitted invalid state: %v\n%s", plan, err, args)
+		}
 	}
 }
 

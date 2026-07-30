@@ -144,7 +144,13 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   const statusFilterRef = useRef<HTMLButtonElement>(null);
   const [workspaceMap, setWorkspaceMap] = useState<Record<string, string>>({});
   const backdropRef = useRef<HTMLDivElement>(null);
+  const dirtyRef = useRef(false);
   const startedRef = useRef(false);
+
+  // Reset dirty ref when leaving edit mode
+  useEffect(() => {
+    if (!editing) dirtyRef.current = false;
+  }, [editing]);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -269,7 +275,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
 
   const handleBackdrop = useCallback(
     (e: React.MouseEvent) => {
-      if (e.target === backdropRef.current) onClose();
+      if (e.target === backdropRef.current && !dirtyRef.current) onClose();
     },
     [onClose],
   );
@@ -277,7 +283,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   useEffect(() => {
     if (!open) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !dirtyRef.current && !document.querySelector("[data-anchored-popover='active']")) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -286,8 +292,8 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   if (!open) return null;
 
   const scopeFilterLabel = (filter: string, map: Record<string, string>): string => {
-    if (filter === "all") return "全部项目";
-    if (filter === "global") return "全局";
+    if (filter === "all") return t("heartbeat.filterAllProjects");
+    if (filter === "global") return t("heartbeat.scopeGlobal");
     return map[filter] || filter.split("/").pop() || filter;
   };
 
@@ -298,7 +304,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   };
 
   return (
-    <div ref={backdropRef} className="heartbeat-backdrop" onClick={handleBackdrop}>
+    <div ref={backdropRef} className="heartbeat-backdrop" onMouseDown={handleBackdrop}>
       <div className="heartbeat-modal">
         <header className="heartbeat-modal__header">
           {editing ? (
@@ -308,7 +314,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           ) : (
             <Activity size={16} />
           )}
-          <span>{editing ? t("heartbeat.editTask") : "自动化任务"}</span>
+          <span>{editing ? t("heartbeat.editTask") : t("heartbeat.scheduler")}</span>
           <button
             className="heartbeat-modal__close"
             onClick={onClose}
@@ -319,7 +325,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
         </header>
 
         {editing ? (
-          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} />
+          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} onDirtyChange={(d) => { dirtyRef.current = d; }} />
         ) : (
           <div className="heartbeat-modal__body">
             <div className="heartbeat-toolbar">
@@ -396,7 +402,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                       type="button"
                       onClick={() => { setScopeFilter("all"); setScopeFilterOpen(false); }}
                     >
-                      <span>全部项目</span>
+                      <span>{t("heartbeat.filterAllProjects")}</span>
                       {scopeFilter === "all" && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
                     <button
@@ -406,7 +412,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                       type="button"
                       onClick={() => { setScopeFilter("global"); setScopeFilterOpen(false); }}
                     >
-                      <span>全局</span>
+                      <span>{t("heartbeat.scopeGlobal")}</span>
                       {scopeFilter === "global" && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
                     {(() => {
@@ -477,7 +483,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
               ) : filtered.length === 0 ? (
                 <div className="heartbeat-empty">
                   <Heart size={24} />
-                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : "没有匹配的任务"}</span>
+                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : t("heartbeat.noMatchingTasks")}</span>
                 </div>
               ) : (
                 <ul className="heartbeat-tasklist">
@@ -615,13 +621,13 @@ function TaskCard({
 // ── Cycle Editor ──────────────────────────────────────────────────────────────
 
 const WEEKDAYS = [
-  { key: "mon", label: "周一" },
-  { key: "tue", label: "周二" },
-  { key: "wed", label: "周三" },
-  { key: "thu", label: "周四" },
-  { key: "fri", label: "周五" },
-  { key: "sat", label: "周六" },
-  { key: "sun", label: "周日" },
+  { key: "mon", labelKey: "heartbeat.weekdayMon" },
+  { key: "tue", labelKey: "heartbeat.weekdayTue" },
+  { key: "wed", labelKey: "heartbeat.weekdayWed" },
+  { key: "thu", labelKey: "heartbeat.weekdayThu" },
+  { key: "fri", labelKey: "heartbeat.weekdayFri" },
+  { key: "sat", labelKey: "heartbeat.weekdaySat" },
+  { key: "sun", labelKey: "heartbeat.weekdaySun" },
 ] as const;
 
 const ALL_WEEKDAYS = WEEKDAYS.map(w => w.key);
@@ -735,11 +741,11 @@ function CycleEditor({
 
   const MONTHS = Array.from({ length: 12 }, (_, i) => ({
     value: String(i + 1),
-    label: `${i + 1}月`,
+    label: t("heartbeat.monthOption", { n: i + 1 }),
   }));
   const DAYS = Array.from({ length: 31 }, (_, i) => ({
     value: String(i + 1),
-    label: `${i + 1}日`,
+    label: t("heartbeat.dayOption", { n: i + 1 }),
   }));
 
   return (
@@ -809,7 +815,7 @@ function CycleEditor({
                 onClick={() => onDayToggle(wd.key)}
                 aria-pressed={selectedDays.includes(wd.key)}
               >
-                {wd.label}
+                {t(wd.labelKey)}
               </button>
             ))}
           </div>
@@ -831,11 +837,13 @@ function TaskEditor({
   onSave,
   onCancel,
   onDelete,
+  onDirtyChange,
 }: {
   task: HeartbeatTask;
   onSave: (t: HeartbeatTask) => void;
   onCancel: () => void;
   onDelete: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const t = useT();
   const titleRef = useRef<HTMLInputElement>(null);
@@ -861,6 +869,23 @@ function TaskEditor({
   }, [projectOpen]);
 
   const [draft, setDraft] = useState(task);
+  const initialTaskRef = useRef(task);
+  const isDirty = draft.title !== initialTaskRef.current.title
+    || draft.prompt !== initialTaskRef.current.prompt
+    || draft.interval !== initialTaskRef.current.interval
+    || draft.enabled !== initialTaskRef.current.enabled
+    || draft.approvalMode !== initialTaskRef.current.approvalMode
+    || draft.newConversationEachRun !== initialTaskRef.current.newConversationEachRun
+    || draft.notifyChannels !== initialTaskRef.current.notifyChannels
+    || draft.scope !== initialTaskRef.current.scope
+    || draft.workspaceRoot !== initialTaskRef.current.workspaceRoot
+    || draft.timeWindowStart !== initialTaskRef.current.timeWindowStart
+    || draft.timeWindowEnd !== initialTaskRef.current.timeWindowEnd;
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
+
   const intervalBeforeCycle = useRef<string | null>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
 
@@ -1174,7 +1199,8 @@ function TaskEditor({
         <button
           className="heartbeat-btn heartbeat-btn--primary"
           onClick={() => onSave(draft)}
-          disabled={!draft.title.trim() || !draft.prompt.trim()}
+          disabled={!draft.title.trim() || !draft.prompt.trim() || !isDirty}
+          title={!draft.title.trim() || !draft.prompt.trim() ? t("heartbeat.requiredFields") : !isDirty ? t("heartbeat.noChanges") : undefined}
         >
           {isNew ? t("heartbeat.add") : t("heartbeat.save")}
         </button>

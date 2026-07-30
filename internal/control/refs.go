@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -18,7 +19,9 @@ import (
 	"time"
 
 	"reasonix/internal/fileref"
+	"reasonix/internal/instruction"
 	"reasonix/internal/proc"
+	"reasonix/internal/secrets"
 )
 
 // maxFileRefBytes caps how much of an @-referenced file is injected into a
@@ -68,19 +71,41 @@ type ExternalFolderRefEntry struct {
 	IsDir       bool
 }
 
-// refTokenRe matches an @reference token: '@' then a run of non-space chars.
-var refTokenRe = regexp.MustCompile(`@([^\s]+)`)
 var pathLocationSuffixRe = regexp.MustCompile(`:\d+(?::\d+)?:?$`)
 
 const externalFolderRefPrefix = "__reasonix_external_folder"
 
 // parseRefTokens extracts the deduped, punctuation-trimmed tokens following '@'
-// in a line. Pure: classification (server? file?) happens in classifyRef.
+// in a line. A token is a run of non-whitespace bytes, except that a
+// backslash-escaped space or tab is part of the token with the backslash
+// dropped — that is how a path containing spaces survives the
+// whitespace-delimited grammar (EscapeRefPath produces that form). Any other
+// backslash stays literal so Windows separators keep their meaning. Pure:
+// classification (server? file?) happens in classifyRef.
 func parseRefTokens(line string) []string {
 	var toks []string
 	seen := map[string]bool{}
-	for _, g := range refTokenRe.FindAllStringSubmatch(line, -1) {
-		t := strings.TrimRight(g[1], ".,;!?)]}")
+	for i := 0; i < len(line); i++ {
+		if line[i] != '@' {
+			continue
+		}
+		var b strings.Builder
+		j := i + 1
+		for j < len(line) {
+			ch := line[j]
+			if ch == '\\' && j+1 < len(line) && (line[j+1] == ' ' || line[j+1] == '\t') {
+				b.WriteByte(line[j+1])
+				j += 2
+				continue
+			}
+			if isRefTokenBoundary(ch) {
+				break
+			}
+			b.WriteByte(ch)
+			j++
+		}
+		i = j - 1
+		t := strings.TrimRight(b.String(), ".,;!?)]}")
 		if t == "" || seen[t] {
 			continue
 		}
@@ -88,6 +113,53 @@ func parseRefTokens(line string) []string {
 		toks = append(toks, t)
 	}
 	return toks
+}
+
+// isRefTokenBoundary matches the whitespace class the old `@([^\s]+)` token
+// regexp stopped at.
+func isRefTokenBoundary(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r', '\f':
+		return true
+	default:
+		return false
+	}
+}
+
+// EscapeRefPath returns path with spaces and tabs backslash-escaped so the
+// result survives whitespace-delimited @-token parsing (parseRefTokens
+// reverses it). Every other byte, including backslashes, passes through
+// unchanged so Windows separators keep their meaning.
+func EscapeRefPath(path string) string {
+	if !strings.ContainsAny(path, " \t") {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path) + 8)
+	for i := 0; i < len(path); i++ {
+		if path[i] == ' ' || path[i] == '\t' {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
+}
+
+// UnescapeRefPath reverses EscapeRefPath: a backslash before a space or tab is
+// dropped; any other backslash stays literal.
+func UnescapeRefPath(path string) string {
+	if !strings.Contains(path, `\`) {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path))
+	for i := 0; i < len(path); i++ {
+		if path[i] == '\\' && i+1 < len(path) && (path[i+1] == ' ' || path[i+1] == '\t') {
+			continue
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
 }
 
 // classifyRef decides what a token refers to. A "server:uri" token whose server
@@ -641,7 +713,7 @@ func FileRefLine(line string) (string, bool) {
 	if info, err := os.Stat(p); err != nil || info.IsDir() {
 		return "", false
 	}
-	return "@" + p, true
+	return "@" + EscapeRefPath(p), true
 }
 
 // SlashCodeCommentLine reports whether a slash-prefixed line is ordinary source
@@ -773,6 +845,14 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 	refs := c.detectRefsMode(line, scopedOnly)
 	refs = resolveBareNames(refs, c.workspaceRoot)
 	var b strings.Builder
+	includedInstructionPaths := map[string]bool{}
+	includedInstructionBodies := map[string]bool{}
+	if current := c.memory.current(); current != nil {
+		for _, doc := range current.Docs {
+			includedInstructionPaths[cleanAbsPath(doc.Path)] = true
+			includedInstructionBodies[doc.Body] = true
+		}
+	}
 	for _, r := range refs {
 		switch r.kind {
 		case refResource:
@@ -792,6 +872,13 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
 			}
+			pathInstructions, diagnostics := c.resolveReferencedInstructions(r, baseDir, includedInstructionPaths, includedInstructionBodies)
+			if pathInstructions != "" {
+				appendRefBlock(&b, "path-instructions", `target="`+html.EscapeString(displayPathForRef(r))+`"`, pathInstructions)
+			}
+			for _, diagnostic := range diagnostics {
+				errs = append(errs, "@"+r.raw+" — "+diagnostic.Message)
+			}
 			tag := "file"
 			if isDir {
 				tag = "dir"
@@ -806,6 +893,52 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 		}
 	}
 	return b.String(), errs
+}
+
+func (c *Controller) resolveReferencedInstructions(r ref, baseDir string, includedPaths, includedBodies map[string]bool) (string, []instruction.Diagnostic) {
+	mem := c.memory.current()
+	if mem == nil || strings.TrimSpace(c.workspaceRoot) == "" || r.baseDir != "" {
+		return "", nil
+	}
+	absPath, absBase, ok := resolveAbsRef(r.path, baseDir)
+	if !ok || cleanAbsPath(absBase) != cleanAbsPath(c.workspaceRoot) {
+		return "", nil
+	}
+	targetDir := absPath
+	if info, err := os.Stat(absPath); err != nil || !info.IsDir() {
+		targetDir = filepath.Dir(absPath)
+	}
+	resolved := instruction.Resolve(instruction.ResolveOptions{
+		WorkspaceRoot: c.workspaceRoot,
+		TargetDir:     targetDir,
+		UserDir:       mem.UserDir,
+	})
+	var delta []instruction.Document
+	for _, doc := range resolved.Documents {
+		pathKey := cleanAbsPath(doc.Path)
+		if includedPaths[pathKey] || includedBodies[doc.Body] {
+			continue
+		}
+		includedPaths[pathKey] = true
+		includedBodies[doc.Body] = true
+		delta = append(delta, doc)
+	}
+	return instruction.Block(delta), resolved.Diagnostics
+}
+
+func displayPathForRef(r ref) string {
+	if r.displayPath != "" {
+		return r.displayPath
+	}
+	return r.path
+}
+
+func cleanAbsPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
 }
 
 func appendRefBlock(b *strings.Builder, tag, attr, body string) {
@@ -1124,6 +1257,7 @@ func runPDFTextCommand(name string, args []string) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), pdfExtractTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Env = secrets.ProcessEnv()
 	setShellKillTree(cmd)
 	cmd.WaitDelay = pdfExtractWaitDelay
 	proc.HideWindow(cmd)

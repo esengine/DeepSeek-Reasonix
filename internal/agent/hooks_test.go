@@ -13,15 +13,16 @@ import (
 
 // stubHooks blocks PreToolUse for named tools and records what it saw.
 type stubHooks struct {
-	blockPre      map[string]bool
-	preSeen       []string
-	postSeen      []string
-	preCompactOut string   // returned from PreCompact (extra summary guidance)
-	subagentSeen  []string // last-answer text passed to each SubagentStop
-	hasPostLLM    bool     // whether HasPostLLMCall reports a PostLLMCall hook
-	postLLMOut    string   // replacement returned from PostLLMCall (when hasPostLLM)
-	postLLMSeen   []string // reasoning text each PostLLMCall received
-	postLLMTurns  []int    // turn number each PostLLMCall received
+	blockPre        map[string]bool
+	preSeen         []string
+	postSeen        []string
+	postFailureSeen []string
+	preCompactOut   string   // returned from PreCompact (extra summary guidance)
+	subagentSeen    []string // last-answer text passed to each SubagentStop
+	hasPostLLM      bool     // whether HasPostLLMCall reports a PostLLMCall hook
+	postLLMOut      string   // replacement returned from PostLLMCall (when hasPostLLM)
+	postLLMSeen     []string // reasoning text each PostLLMCall received
+	postLLMTurns    []int    // turn number each PostLLMCall received
 }
 
 func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage) (bool, string) {
@@ -34,6 +35,10 @@ func (h *stubHooks) PreToolUse(_ context.Context, name string, _ json.RawMessage
 
 func (h *stubHooks) PostToolUse(_ context.Context, name string, _ json.RawMessage, _ string) {
 	h.postSeen = append(h.postSeen, name)
+}
+
+func (h *stubHooks) PostToolUseFailure(_ context.Context, name string, _ json.RawMessage, _ string, _ error) {
+	h.postFailureSeen = append(h.postFailureSeen, name)
 }
 
 func (h *stubHooks) SubagentStop(_ context.Context, last string) {
@@ -102,5 +107,19 @@ func TestPreToolUseHookBlocks(t *testing.T) {
 	// PostToolUse fires only for the call that actually ran.
 	if got := strings.Join(h.postSeen, ","); got != "read_file" {
 		t.Errorf("PostToolUse should fire only for the run tool, saw %q", got)
+	}
+}
+
+func TestPostToolUseFailureUsesFailureHook(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(failTool{name: "broken"})
+	h := &stubHooks{}
+	a := New(nil, reg, NewSession(""), Options{Hooks: h}, event.Discard)
+	a.executeOne(context.Background(), provider.ToolCall{Name: "broken", Arguments: `{}`})
+	if got := strings.Join(h.postFailureSeen, ","); got != "broken" {
+		t.Fatalf("failure hooks = %q", got)
+	}
+	if len(h.postSeen) != 0 {
+		t.Fatalf("success hook fired for failure: %v", h.postSeen)
 	}
 }

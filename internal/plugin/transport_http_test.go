@@ -51,6 +51,7 @@ func mcpHTTPServer(t *testing.T, sse bool) *httptest.Server {
 		}
 
 		var result any
+		progressToken := ""
 		switch req.Method {
 		case "initialize":
 			result = map[string]any{"protocolVersion": protocolVersion, "serverInfo": map[string]any{"name": "h", "version": "0"}}
@@ -59,15 +60,17 @@ func mcpHTTPServer(t *testing.T, sse bool) *httptest.Server {
 				"name":        "greet",
 				"description": "Greet someone.",
 				"inputSchema": map[string]any{"type": "object"},
-				"annotations": map[string]any{"readOnlyHint": true},
+				"annotations": map[string]any{"readOnlyHint": true, "destructiveHint": true},
 			}}}
 		case "tools/call":
 			var p struct {
+				Meta      map[string]any `json:"_meta"`
 				Arguments struct {
 					Name string `json:"name"`
 				} `json:"arguments"`
 			}
 			_ = json.Unmarshal(req.Params, &p)
+			progressToken, _ = p.Meta["progressToken"].(string)
 			result = map[string]any{"content": []map[string]any{{"type": "text", "text": "hello " + p.Arguments.Name}}}
 		}
 		resp := map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result}
@@ -78,6 +81,12 @@ func mcpHTTPServer(t *testing.T, sse bool) *httptest.Server {
 			// A server notification first: the client must skip it and keep
 			// reading for the id-matching response.
 			fmt.Fprint(w, "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{}}\n\n")
+			if progressToken != "" {
+				progress, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/progress", "params": map[string]any{
+					"progressToken": progressToken, "progress": 3, "total": 4, "message": "Streaming",
+				}})
+				fmt.Fprintf(w, "event: message\ndata: %s\n\n", progress)
+			}
 			fmt.Fprintf(w, "event: message\ndata: %s\n\n", b)
 			return
 		}
@@ -110,17 +119,108 @@ func runHTTPTransportTest(t *testing.T, sse bool) {
 	if !tools[0].ReadOnly() {
 		t.Error("readOnlyHint not honoured over HTTP")
 	}
-	got, err := tools[0].Execute(ctx, json.RawMessage(`{"name":"sam"}`))
+	annotations, ok := tools[0].(tool.MCPAnnotations)
+	if !ok || !annotations.MCPDestructiveHint() {
+		t.Error("destructiveHint not honoured over HTTP")
+	}
+	progress := make(chan string, 1)
+	executeCtx := tool.WithProgress(ctx, func(chunk string) { progress <- chunk })
+	got, err := tools[0].Execute(executeCtx, json.RawMessage(`{"name":"sam"}`))
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
 	if got != "hello sam" {
 		t.Errorf("Execute = %q, want %q", got, "hello sam")
 	}
+	if sse {
+		select {
+		case chunk := <-progress:
+			if chunk != "Streaming (3/4)\n" {
+				t.Fatalf("progress = %q", chunk)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Streamable HTTP progress notification was not routed")
+		}
+	}
+}
+
+func TestStreamableHTTPAnswersRootsRequestInSSEResponse(t *testing.T) {
+	workspaceRoot := t.TempDir()
+	reply := make(chan struct {
+		ID     string `json:"id"`
+		Result struct {
+			Roots []mcpRoot `json:"roots"`
+		} `json:"result"`
+	}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var response struct {
+			ID     string `json:"id"`
+			Result struct {
+				Roots []mcpRoot `json:"roots"`
+			} `json:"result"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&response); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		reply <- response
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+	transport, err := newHTTPTransport(Spec{Name: "roots", URL: server.URL, WorkspaceRoot: workspaceRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.close()
+	stream := strings.NewReader("data: {\"jsonrpc\":\"2.0\",\"id\":\"server-roots\",\"method\":\"roots/list\"}\n\n" +
+		"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
+	if _, err := transport.readSSEResponse(context.Background(), stream, 1); err != nil {
+		t.Fatal(err)
+	}
+	got := <-reply
+	want := mcpRoots(workspaceRoot)
+	if got.ID != "server-roots" || len(got.Result.Roots) != 1 || got.Result.Roots[0] != want[0] {
+		t.Fatalf("roots response = %+v, want %+v", got, want)
+	}
 }
 
 func TestHTTPTransportJSON(t *testing.T) { runHTTPTransportTest(t, false) }
 func TestHTTPTransportSSE(t *testing.T)  { runHTTPTransportTest(t, true) }
+
+func TestHTTPTransportDoesNotRedirectCredentialsAcrossOrigins(t *testing.T) {
+	var targetCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls.Add(1)
+		if got := r.Header.Get("X-API-Key"); got != "" {
+			t.Errorf("redirect target received credential header %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/mcp", http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	transport, err := newHTTPTransport(Spec{
+		Name: "redirect", Type: "http", URL: source.URL,
+		Headers: map[string]string{"X-API-Key": "secret"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := transport.do(context.Background(), []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("cross-origin redirect status = %d, want %d", resp.StatusCode, http.StatusTemporaryRedirect)
+	}
+	if targetCalls.Load() != 0 {
+		t.Fatalf("cross-origin redirect target received %d requests", targetCalls.Load())
+	}
+}
 
 func TestHTTPTransportReinitializesExpiredSession(t *testing.T) {
 	var initializeCount atomic.Int32

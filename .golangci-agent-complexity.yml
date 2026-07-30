@@ -1,0 +1,40 @@
+# Report-only complexity monitor for internal/agent production code.
+# Uses funlen + cyclop with generous thresholds so existing code does not
+# generate a flood of noise. issues-exit-code is forced to 0 by the CI step so
+# this never blocks merges while we establish a baseline and track trend.
+version: "2"
+
+run:
+  tests: false
+
+linters:
+  default: none
+  enable:
+    - funlen
+    - cyclop
+  settings:
+    funlen:
+      # Deliberately above a hard 50-line rule: length alone is not the
+      # acceptance gate. This surfaces only the remaining large hotspots after
+      # the Run/executeOne extraction so trend can be tracked.
+      lines: 120
+      statements: 80
+      ignore-comments: true
+    cyclop:
+      max-complexity: 30
+      package-average: 0
+      skip-tests: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Report mode: never fail the job. Baseline/trend is the gate, not a hard cut.
+  # The CI step also passes --issues-exit-code=0 for older golangci-lint builds.
+  uniq-by-line: false
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-linter-name: true
+      print-issued-lines: true

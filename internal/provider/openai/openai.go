@@ -12,6 +12,8 @@
 //     reasoning_effort, matching LongCat's OpenAI-compatible API.
 //   - ollama.com → accepts hosted Ollama Cloud's reasoning_effort scale,
 //     including max, and omits the field for none/disabled.
+//   - official Kimi API + kimi-k3 preserves complete assistant messages and
+//     uses K3's fixed-sampling/max_completion_tokens request shape.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
 //     vanilla reasoning_effort scale (low/medium/high).
 //
@@ -68,6 +70,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if effort == "auto" {
 		effort = ""
 	}
+	supportedEfforts, _ := cfg.Extra["supported_efforts"].([]string)
+	explicitMaxEffort := supportsEffort(supportedEfforts, "max")
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	chatURL, _ := cfg.Extra["chat_url"].(string)
@@ -85,6 +89,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	zhipu := protocol == "" && IsZhipu(cfg.BaseURL)
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
+	kimiK3 := IsKimiAPI(cfg.BaseURL) && strings.EqualFold(strings.TrimSpace(cfg.Model), "kimi-k3")
 	// Optional explicit `thinking` config field — a vendor-agnostic escape hatch
 	// (credit @eghrhegpe, #5063) for OpenAI-compatible providers we don't
 	// auto-detect (e.g. opencode.ai). "enabled"/"disabled" drive thinking.type;
@@ -162,11 +167,14 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		}
 	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
-		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
-		// to the OpenAI ceiling and reject other values at boot, not at request time.
+		// high) by default. Preserve max only when the resolved model explicitly
+		// advertises it (for example OpenCode Go's Kimi K3); otherwise max remains
+		// clamped to the OpenAI ceiling because MiMo and similar backends reject it.
 		switch effort {
 		case "max":
-			effort = "high"
+			if !explicitMaxEffort {
+				effort = "high"
+			}
 		case "low", "medium", "high":
 		default:
 			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
@@ -190,6 +198,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		minimax:      minimax,
 		zhipu:        zhipu,
 		longcat:      longcat,
+		kimiK3:       kimiK3,
+		mimo:         IsMiMo(cfg.BaseURL),
 		thinkingType: thinkingType,
 		vision:       vision,
 		visionDetail: visionDetail,
@@ -197,6 +207,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		http:         httpClient,
 		idleTimeout:  defaultStreamIdleTimeout,
 	}, nil
+}
+
+func supportsEffort(levels []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, level := range levels {
+		if strings.ToLower(strings.TrimSpace(level)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
@@ -224,6 +244,8 @@ type client struct {
 	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
 	zhipu        bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
 	longcat      bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	kimiK3       bool          // true only for kimi-k3 on Moonshot's official direct API hosts
+	mimo         bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
 	thinkingType string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision       bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
@@ -233,6 +255,32 @@ type client struct {
 }
 
 func (c *client) Name() string { return c.name }
+
+func (c *client) RequiresToolCallReasoning() bool {
+	return c != nil && c.deepseek && c.thinkingType != "disabled"
+}
+
+func (c *client) RequiresReasoningRoundTrip() bool {
+	return c != nil && c.kimiK3
+}
+
+func (c *client) WarnOnMissingToolCallReasoning() bool {
+	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model)
+}
+
+func expectsDeepSeekToolCallReasoning(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if !strings.Contains(model, "deepseek") || strings.Contains(model, "flash") {
+		return false
+	}
+	// "-pro" must end a name segment: a bare Contains would also match the
+	// deepseek-prover math models, which do not emit tool-call reasoning.
+	return strings.Contains(model, "reasoner") ||
+		strings.Contains(model, "deepseek-r1") ||
+		strings.HasSuffix(model, "-pro") ||
+		strings.Contains(model, "-pro-") ||
+		strings.Contains(model, "-pro.")
+}
 
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
@@ -365,7 +413,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, err
+		return nil, provider.AnnotateToolSchemaError(err, req.Tools)
 	}
 	c.authed.Store(true)
 
@@ -430,18 +478,54 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 	// carry an assistant tool_calls turn whose results never landed, which DeepSeek
 	// rejects with a 400 ("must be followed by tool messages …").
 	src := provider.SanitizeToolPairing(req.Messages)
-	msgs := make([]chatMessage, len(src))
-	for i, m := range src {
+	msgs := make([]chatMessage, 0, len(src))
+	// Images returned by tool calls can't ride in the tool message itself — the
+	// OpenAI API accepts only text content parts under role "tool" — so they are
+	// carried by a synthetic user message injected after the turn's full run of
+	// tool results, before the next non-tool message (splitting a tool-result
+	// run would break the API's tool-call pairing validation).
+	var pendingToolImages []string
+	flushToolImages := func() {
+		if len(pendingToolImages) == 0 {
+			return
+		}
+		msgs = append(msgs, chatMessage{
+			Role:    "user",
+			Content: imageContentParts("Images returned by the preceding tool call(s):", pendingToolImages, c.visionDetail),
+		})
+		pendingToolImages = nil
+	}
+	for _, m := range src {
+		if m.Role != provider.RoleTool {
+			flushToolImages()
+		}
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
 			Name:       m.Name,
 		}
-		// DeepSeek thinking mode 400s a tool_calls turn whose reasoning_content was
-		// dropped on a cache-miss replay ("reasoning_content … must be passed back"),
-		// so round it back — but only on the turn that carries the tool calls.
-		if c.deepseek && m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
-			cm.ReasoningContent = m.ReasoningContent
+		// DeepSeek thinking mode 400s an assistant tool_calls turn whose
+		// reasoning_content KEY is absent from the request JSON ("reasoning_content
+		// … must be passed back"). The API accepts an empty string, and only
+		// validates turns after the last user message, but emitting the field on
+		// every tool_calls turn is uniform and verified accepted — so always send
+		// it (empty included) rather than fail the request when reasoning was lost
+		// upstream (e.g. a gateway renamed the field). With thinking disabled the
+		// API tolerates every shape, so keep the exact pre-fix bytes there: send
+		// the key only when a thinking-mode round left reasoning in the history
+		// (dropping it would invalidate the prompt-cache prefix of mixed
+		// thinking-on→off sessions for no gain).
+		if m.Role == provider.RoleAssistant {
+			switch {
+			case c.kimiK3 && (m.ReasoningContent != "" || len(m.ToolCalls) > 0):
+				// Kimi K3 requires the complete assistant message on multi-turn
+				// and tool-call requests, including provider-issued reasoning.
+				cm.ReasoningContent = &m.ReasoningContent
+			case c.deepseek && len(m.ToolCalls) > 0:
+				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
+					cm.ReasoningContent = &m.ReasoningContent
+				}
+			}
 		}
 		for _, tc := range m.ToolCalls {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
@@ -455,14 +539,21 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		case m.Role != provider.RoleAssistant || len(cm.ToolCalls) == 0 || m.Content != "":
 			cm.Content = m.Content
 		}
-		msgs[i] = cm
+		msgs = append(msgs, cm)
+		if c.vision && m.Role == provider.RoleTool {
+			pendingToolImages = append(pendingToolImages, m.Images...)
+		}
 	}
+	flushToolImages()
 
 	var tools []chatTool
 	for _, t := range req.Tools {
 		parameters := t.Parameters
 		if len(parameters) == 0 {
 			parameters = provider.CanonicalizeSchema(nil)
+		}
+		if c.mimo {
+			parameters = provider.NormalizeLegacyTupleItemsForDraft202012(parameters)
 		}
 		tools = append(tools, chatTool{
 			Type:     "function",
@@ -482,6 +573,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		ExtraBody:       c.extraBody,
 	}
 	switch {
+	case c.kimiK3:
+		// K3 fixes its sampling values and recommends omitting them. It also
+		// names the output budget max_completion_tokens rather than max_tokens.
+		out.Temperature = nil
+		out.MaxTokens = 0
+		out.MaxCompletionTokens = req.MaxTokens
+		out.ExtraBody = omitExtraBodyFields(out.ExtraBody,
+			"temperature", "top_p", "n", "presence_penalty", "frequency_penalty", "max_completion_tokens")
 	case c.deepseek:
 		// DeepSeek's CoT is controlled by `thinking` plus `reasoning_effort` for
 		// depth. Thinking is on by default but can be turned off via
@@ -586,6 +685,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 	acc := map[int]*provider.ToolCall{}
 	started := map[int]bool{}
+	argBucket := map[int]int{}
 	var order []int
 	var lastFinishReason string
 	var sawDone bool
@@ -632,9 +732,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		}
 
 		delta := sr.Choices[0].Delta
-		if delta.ReasoningContent != "" {
+		reasoningDelta := delta.ReasoningContent
+		if reasoningDelta == "" {
+			reasoningDelta = delta.Reasoning
+		}
+		if reasoningDelta != "" {
 			emitted = true
-			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: delta.ReasoningContent}) {
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: reasoningDelta}) {
 				return emitted, ctx.Err()
 			}
 		}
@@ -675,6 +779,18 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				emitted = true
 				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}}) {
 					return emitted, ctx.Err()
+				}
+			}
+			// Progress ticks while a large argument payload streams (a 30KB
+			// write_file body can take a minute-plus): one chunk per 2KB bucket
+			// so the consumer can show liveness without per-delta spam.
+			if started[tc.Index] {
+				if bucket := len(cur.Arguments) / 2048; bucket > argBucket[tc.Index] {
+					argBucket[tc.Index] = bucket
+					emitted = true
+					if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: cur.ID, Name: cur.Name}, ArgChars: len(cur.Arguments)}) {
+						return emitted, ctx.Err()
+					}
 				}
 			}
 		}
@@ -759,16 +875,37 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 // --- OpenAI-compatible wire protocol ---
 
 type chatRequest struct {
-	Model           string         `json:"model"`
-	Messages        []chatMessage  `json:"messages"`
-	Tools           []chatTool     `json:"tools,omitempty"`
-	Stream          bool           `json:"stream"`
-	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
-	Temperature     *float64       `json:"temperature,omitempty"`
-	MaxTokens       int            `json:"max_tokens,omitempty"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
-	Thinking        *thinkingMode  `json:"thinking,omitempty"`
-	ExtraBody       map[string]any `json:"-"`
+	Model               string         `json:"model"`
+	Messages            []chatMessage  `json:"messages"`
+	Tools               []chatTool     `json:"tools,omitempty"`
+	Stream              bool           `json:"stream"`
+	StreamOptions       *streamOptions `json:"stream_options,omitempty"`
+	Temperature         *float64       `json:"temperature,omitempty"`
+	MaxTokens           int            `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	Thinking            *thinkingMode  `json:"thinking,omitempty"`
+	ExtraBody           map[string]any `json:"-"`
+}
+
+func omitExtraBodyFields(in map[string]any, names ...string) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	omit := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		omit[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	out := make(map[string]any, len(in))
+	for name, value := range in {
+		if _, blocked := omit[strings.ToLower(strings.TrimSpace(name))]; !blocked {
+			out[name] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (r chatRequest) MarshalJSON() ([]byte, error) {
@@ -807,8 +944,12 @@ type chatMessage struct {
 	// serializes as null (nil here); a string for every other text message
 	// (empty included — null is rejected by some backends for a tool message);
 	// and a []chatContentPart array for a vision user turn carrying images.
-	Content          any            `json:"content"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Content any `json:"content"`
+	// A pointer so the field can serialize as an empty string: DeepSeek thinking
+	// mode requires the reasoning_content key to be PRESENT on assistant
+	// tool_calls turns (an empty value passes; a missing key 400s), while every
+	// other message must keep omitting it.
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 	Name             string         `json:"name,omitempty"`
@@ -862,6 +1003,7 @@ type streamResponse struct {
 		Delta struct {
 			Content          string         `json:"content"`
 			ReasoningContent string         `json:"reasoning_content"`
+			Reasoning        string         `json:"reasoning"`
 			ToolCalls        []chatToolCall `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`

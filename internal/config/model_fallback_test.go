@@ -107,6 +107,127 @@ func TestResolveModelWithFallbackHonorsDefaultModel(t *testing.T) {
 	}
 }
 
+func TestResolveNewSessionChatModelSkipsNonChatProviders(t *testing.T) {
+	c := &Config{
+		DefaultModel: "keyless/chat",
+		Providers: []ProviderEntry{
+			{Name: "keyless", BaseURL: "https://keyless.example.com", Model: "chat", APIKeyEnv: "MISSING_KEY"},
+			{Name: "audio", BaseURL: "https://audio.example.com", Model: "tts-1", resolvedAPIKey: "sk-test"},
+			{Name: "embedding", BaseURL: "https://embedding.example.com", Model: "text-embedding-3-small", resolvedAPIKey: "sk-test"},
+			{Name: "visible", BaseURL: "https://visible.example.com", Models: []string{"text-embedding-3-small", "chat-model"}, Default: "text-embedding-3-small", resolvedAPIKey: "sk-test"},
+		},
+	}
+
+	got, fallback, ok := c.ResolveNewSessionChatModel()
+	if !ok || !fallback || got != "visible/chat-model" {
+		t.Fatalf("ResolveNewSessionChatModel() = (%q, %v, %v), want (visible/chat-model, true, true)", got, fallback, ok)
+	}
+}
+
+func TestResolveNewSessionChatModelIgnoresDesktopProviderAccess(t *testing.T) {
+	c := &Config{
+		DefaultModel: "visible/chat",
+		Desktop:      DesktopConfig{ProviderAccess: []string{}},
+		Providers: []ProviderEntry{
+			{Name: "visible", BaseURL: "https://visible.example.com", Model: "chat", resolvedAPIKey: "sk-test"},
+		},
+	}
+
+	got, fallback, ok := c.ResolveNewSessionChatModel()
+	if !ok || fallback || got != "visible/chat" {
+		t.Fatalf("ResolveNewSessionChatModel() = (%q, %v, %v), want (visible/chat, false, true)", got, fallback, ok)
+	}
+}
+
+func TestResolveDesktopNewSessionModelFiltersUnavailableAndNonChatProviders(t *testing.T) {
+	c := &Config{
+		DefaultModel: "hidden/chat",
+		Desktop:      DesktopConfig{ProviderAccess: []string{"audio", "visible"}},
+		Providers: []ProviderEntry{
+			{Name: "hidden", BaseURL: "https://hidden.example.com", Model: "chat", APIKeyEnv: "KEY", resolvedAPIKey: "sk-test"},
+			{Name: "audio", BaseURL: "https://audio.example.com", Model: "tts-1", APIKeyEnv: "KEY", resolvedAPIKey: "sk-test"},
+			{Name: "visible", BaseURL: "https://visible.example.com", Models: []string{"text-embedding-3-small", "chat-model"}, Default: "text-embedding-3-small", APIKeyEnv: "KEY", resolvedAPIKey: "sk-test"},
+		},
+	}
+
+	got, fallback, ok := c.ResolveDesktopNewSessionModel()
+	if !ok || !fallback || got != "visible/chat-model" {
+		t.Fatalf("ResolveDesktopNewSessionModel() = (%q, %v, %v), want (visible/chat-model, true, true)", got, fallback, ok)
+	}
+}
+
+func TestResolveDesktopNewSessionModelDoesNotReadmitIneligibleDefaultWithoutFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+	}{
+		{
+			name: "provider is outside desktop access",
+			cfg: &Config{
+				DefaultModel: "hidden/chat",
+				Desktop:      DesktopConfig{ProviderAccess: []string{"audio"}},
+				Providers: []ProviderEntry{
+					{Name: "hidden", BaseURL: "https://hidden.example.com", Model: "chat", APIKeyEnv: "KEY", resolvedAPIKey: "sk-test"},
+					{Name: "audio", BaseURL: "https://audio.example.com", Model: "tts-1", APIKeyEnv: "KEY", resolvedAPIKey: "sk-test"},
+				},
+			},
+		},
+		{
+			name: "default is not a chat model",
+			cfg: &Config{
+				DefaultModel: "audio/tts-1",
+				Desktop:      DesktopConfig{ProviderAccess: []string{"audio"}},
+				Providers: []ProviderEntry{
+					{Name: "audio", BaseURL: "https://audio.example.com", Model: "tts-1", APIKeyEnv: "KEY", resolvedAPIKey: "sk-test"},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got, fallback, ok := tt.cfg.ResolveDesktopNewSessionModel(); got != "" || fallback || ok {
+				t.Fatalf("ResolveDesktopNewSessionModel() = (%q, %v, %v), want no eligible model", got, fallback, ok)
+			}
+		})
+	}
+}
+
+func TestResolveDesktopNewSessionModelHonorsExplicitEmptyAccess(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.Desktop.ProviderAccess = []string{}
+
+	if got, fallback, ok := c.ResolveDesktopNewSessionModel(); got != "" || fallback || ok {
+		t.Fatalf("ResolveDesktopNewSessionModel() = (%q, %v, %v), want no model when provider access is explicitly empty", got, fallback, ok)
+	}
+}
+
+func TestResolveDesktopNewSessionModelKeepsAllowedKeylessDefaultWithoutFallback(t *testing.T) {
+	c := &Config{
+		DefaultModel: "keyless/chat",
+		Desktop:      DesktopConfig{ProviderAccess: []string{"keyless"}},
+		Providers: []ProviderEntry{
+			{Name: "keyless", BaseURL: "https://keyless.example.com", Model: "chat", APIKeyEnv: "MISSING_KEY"},
+		},
+	}
+
+	got, fallback, ok := c.ResolveDesktopNewSessionModel()
+	if !ok || fallback || got != "keyless/chat" {
+		t.Fatalf("ResolveDesktopNewSessionModel() = (%q, %v, %v), want raw allowed keyless default", got, fallback, ok)
+	}
+}
+
+func TestResolveDesktopNewSessionModelKeepsUsableDefaultVerbatim(t *testing.T) {
+	c := testModelFallbackConfig(t)
+	c.DefaultModel = "prov-b"
+	c.Desktop.ProviderAccess = []string{"prov-b"}
+
+	got, fallback, ok := c.ResolveDesktopNewSessionModel()
+	if !ok || fallback || got != "prov-b" {
+		t.Fatalf("ResolveDesktopNewSessionModel() = (%q, %v, %v), want (prov-b, false, true)", got, fallback, ok)
+	}
+}
+
 func TestModelRefsProvider(t *testing.T) {
 	if !ModelRefsProvider("deepseek-flash", "deepseek-flash") {
 		t.Fatal("bare provider ref should match provider")

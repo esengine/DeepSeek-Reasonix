@@ -1,0 +1,270 @@
+---
+import Base from '../layouts/Base.astro';
+import SiteHeader from './SiteHeader.astro';
+import type { ReleaseItem, ReleaseRecord } from '../data/releases';
+import { releasePath } from '../data/releases';
+import { isThematicTitle } from '../scripts/release-title.js';
+import '../styles/changelog.css';
+
+const { release, releases, canonical } = Astro.props as {
+  release: ReleaseRecord;
+  releases: ReleaseRecord[];
+  canonical?: string;
+};
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const prHref = (ref: number) => `${repo}/pull/${ref}`;
+
+/* A title that is exactly the version string ("Reasonix 1.17.14") means a
+   patch release — it gets the compact hero; anything else (including
+   "Reasonix 1.18.0 — Better agents") keeps the full hero. */
+const isThematic = isThematicTitle(release.title.en, release.version);
+
+const kindLabel = (kind: string) => ({
+  new: { en: 'New', zh: '新增' },
+  improved: { en: 'Improved', zh: '改进' },
+  fixed: { en: 'Fixed', zh: '修复' },
+  security: { en: 'Security', zh: '安全' },
+}[kind] ?? { en: kind, zh: kind });
+
+const surfaceLabel = (surface: string) => ({
+  agent: { en: 'Agent', zh: 'Agent' },
+  desktop: { en: 'Desktop', zh: '桌面端' },
+  cli: { en: 'CLI', zh: 'CLI' },
+  mcp: { en: 'MCP', zh: 'MCP' },
+  security: { en: 'Security', zh: '安全' },
+  provider: { en: 'Provider', zh: '模型服务' },
+  plugin: { en: 'Plugins', zh: '插件' },
+}[surface] ?? { en: surface, zh: surface });
+
+/* Sections render only when they have content; numbering is sequential. */
+const sectionDefs = [
+  ...(release.guides.length ? [{ id: 'guides', en: 'Guides', zh: '使用攻略' }] : []),
+  { id: 'highlights', en: 'Highlights', zh: '重点内容' },
+  ...(['new', 'improved', 'fixed'] as const)
+    .filter((kind) => release.changes[kind].length)
+    .map((kind) => ({ id: kind, ...kindLabel(kind) })),
+  ...(release.upgrade.length ? [{ id: 'upgrade', en: 'Upgrade notes', zh: '升级提醒' }] : []),
+  ...(release.risks.length ? [{ id: 'risks', en: 'Risk notes', zh: '风险提示' }] : []),
+  ...(release.contributors.length ? [{ id: 'thanks', en: 'Thanks', zh: '致谢' }] : []),
+];
+const sectionNum = new Map(sectionDefs.map((s, i) => [s.id, String(i + 1).padStart(2, '0')]));
+const tocItems = [...sectionDefs, { id: 'download', en: 'Download', zh: '下载与安装' }];
+
+/* Version rail: group by minor, show the latest few patches per group,
+   older ones behind a native <details> expander. */
+const minorKey = (v: string) => v.split('.').slice(0, 2).join('.');
+const railGroups: { key: string; items: ReleaseRecord[] }[] = [];
+for (const item of releases) {
+  const key = minorKey(item.version);
+  const last = railGroups[railGroups.length - 1];
+  if (last && last.key === key) last.items.push(item);
+  else railGroups.push({ key, items: [item] });
+}
+const RAIL_VISIBLE = 3;
+
+const titleEn = `Reasonix v${release.version} release notes`;
+const titleZh = `Reasonix v${release.version} 更新日志`;
+const description = release.summary.en;
+---
+
+<Base title={titleEn} titleEn={titleEn} titleZh={titleZh} description={description} canonical={canonical}>
+  <SiteHeader active="changelog" scrolled />
+
+  <main class="release-stage">
+    <div class="release-mobile-switcher">
+      <label for="release-version"><span class="l-en">Version</span><span class="l-zh">版本</span></label>
+      <select id="release-version" data-release-version>
+        {releases.map((item) => <option value={item.version} selected={item.version === release.version}>v{item.version}</option>)}
+      </select>
+    </div>
+
+    <div class="release-grid">
+      <aside class="release-rail" aria-label="Release versions">
+        <div class="release-rail__eyebrow"><span class="release-rail__mark"></span><span class="l-en">Release ledger</span><span class="l-zh">版本档案</span></div>
+        <nav>
+          {railGroups.map((group) => {
+            const visible = group.items.slice(0, RAIL_VISIBLE);
+            const overflow = group.items.slice(RAIL_VISIBLE);
+            return (
+              <div class="release-rail__group">
+                <p class="release-rail__minor">{group.key}.x</p>
+                {visible.map((item) => (
+                  <a class:list={["release-version-link", { active: item.version === release.version }]} href={`${base}${releasePath(item.version)}`}>
+                    <span class="release-version-link__line"><strong>v{item.version}</strong>{item === releases[0] && <em><span class="l-en">Latest</span><span class="l-zh">最新</span></em>}</span>
+                    <small>{item.date}</small>
+                  </a>
+                ))}
+                {overflow.length > 0 && (
+                  <details class="release-rail__more" open={overflow.some((item) => item.version === release.version)}>
+                    <summary>
+                      <span class="when-closed"><span class="l-en">+{overflow.length} more</span><span class="l-zh">还有 {overflow.length} 个</span></span>
+                      <span class="when-open"><span class="l-en">Show less</span><span class="l-zh">收起</span></span>
+                    </summary>
+                    {overflow.map((item) => (
+                      <a class:list={["release-version-link", { active: item.version === release.version }]} href={`${base}${releasePath(item.version)}`}>
+                        <span class="release-version-link__line"><strong>v{item.version}</strong>{item === releases[0] && <em><span class="l-en">Latest</span><span class="l-zh">最新</span></em>}</span>
+                        <small>{item.date}</small>
+                      </a>
+                    ))}
+                  </details>
+                )}
+              </div>
+            );
+          })}
+        </nav>
+        <a class="release-rail__all" href={`${repo}/releases`}><span class="l-en">All GitHub releases ↗</span><span class="l-zh">全部 GitHub Releases ↗</span></a>
+      </aside>
+
+      <article class="release-paper">
+        <header class:list={["release-hero", { "release-hero--compact": !isThematic }]}>
+          <div class="release-hero__meta">
+            <span class="release-channel"><span class="release-channel__dot"></span>{release.channel}</span>
+            <time datetime={release.date}>{release.date}</time>
+          </div>
+          {isThematic && <p class="release-hero__version">Reasonix / v{release.version}</p>}
+          <h1><span class="l-en">{release.title.en}</span><span class="l-zh">{release.title.zh}</span></h1>
+          <div class="release-surfaces">
+            {release.surfaces.map((surface) => {
+              const label = surfaceLabel(surface);
+              return <span><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></span>;
+            })}
+          </div>
+          {isThematic ? (
+            <blockquote><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></blockquote>
+          ) : (
+            <p class="release-lede"><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></p>
+          )}
+          {isThematic && (
+            <div class="release-hero__actions">
+              <a class="btn btn-dark" href={release.links.download}><span class="l-en">Download v{release.version}</span><span class="l-zh">下载 v{release.version}</span></a>
+              <a class="btn btn-ghost" href={release.links.github}><span class="l-en">View on GitHub ↗</span><span class="l-zh">在 GitHub 查看 ↗</span></a>
+            </div>
+          )}
+        </header>
+
+        {release.guides.length > 0 && (
+          <section id="guides" class="release-section release-guides">
+            <div class="release-section__head"><span>{sectionNum.get('guides')}</span><h2><span class="l-en">Start here</span><span class="l-zh">使用攻略</span></h2></div>
+            <div class="release-guide-grid">
+              {release.guides.map((guide) => (
+                <a class="release-guide" href={guide.href}>
+                  <span class="release-guide__arrow">↗</span>
+                  <h3><span class="l-en">{guide.title.en}</span><span class="l-zh">{guide.title.zh}</span></h3>
+                  <p><span class="l-en">{guide.body.en}</span><span class="l-zh">{guide.body.zh}</span></p>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section id="highlights" class="release-section">
+          <div class="release-section__head"><span>{sectionNum.get('highlights')}</span><h2><span class="l-en">Highlights</span><span class="l-zh">重点内容</span></h2></div>
+          <div class="release-highlight-list">
+            {release.highlights.map((item, index) => {
+              const kind = kindLabel(item.kind);
+              return (
+                <article class="release-highlight" data-kind={item.kind}>
+                  <div class="release-highlight__index">{String(index + 1).padStart(2, '0')}</div>
+                  <div>
+                    <div class="release-highlight__kind"><span class="l-en">{kind.en}</span><span class="l-zh">{kind.zh}</span></div>
+                    <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                    <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                    {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        {(['new', 'improved', 'fixed'] as const).map((kind) => {
+          const items = release.changes[kind];
+          if (!items.length) return null;
+          const label = kindLabel(kind);
+          return (
+            <section id={kind} class="release-section release-change-section">
+              <div class="release-section__head"><span>{sectionNum.get(kind)}</span><h2><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></h2></div>
+              <div class="release-change-list">
+                {items.map((item: ReleaseItem) => (
+                  <article>
+                    <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                    <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                    {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                  </article>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+
+        {release.upgrade.length > 0 && (
+          <section id="upgrade" class="release-section">
+            <div class="release-section__head"><span>{sectionNum.get('upgrade')}</span><h2><span class="l-en">Upgrade notes</span><span class="l-zh">升级提醒</span></h2></div>
+            <div class="release-notice-list">
+              {release.upgrade.map((item) => (
+                <article class:list={["release-notice", `release-notice--${item.level}`]}>
+                  <div class="release-notice__icon">{item.level === 'warning' ? '!' : 'i'}</div>
+                  <div>
+                    <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                    <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                    {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {release.risks.length > 0 && (
+          <section id="risks" class="release-section">
+            <div class="release-section__head"><span>{sectionNum.get('risks')}</span><h2><span class="l-en">Risk notes</span><span class="l-zh">风险提示</span></h2></div>
+            <div class="release-change-list">
+              {release.risks.map((item) => (
+                <article>
+                  <h3><span class="l-en">{item.title.en}</span><span class="l-zh">{item.title.zh}</span></h3>
+                  <p><span class="l-en">{item.body.en}</span><span class="l-zh">{item.body.zh}</span></p>
+                  {item.refs?.length && <div class="release-refs">{item.refs.map((ref) => <a href={prHref(ref)}>#{ref}</a>)}</div>}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {release.contributors.length > 0 && (
+          <section id="thanks" class="release-section release-thanks">
+            <div class="release-section__head"><span>{sectionNum.get('thanks')}</span><h2><span class="l-en">Thanks</span><span class="l-zh">致谢</span></h2></div>
+            <p><span class="l-en">This release was shaped by:</span><span class="l-zh">感谢本版本的贡献者：</span></p>
+            <div>{release.contributors.map((name) => <a href={`https://github.com/${name}`}>@{name}</a>)}</div>
+          </section>
+        )}
+
+        <section id="download" class="release-section release-download">
+          <div>
+            <p class="release-download__kicker"><span class="l-en">Ready when you are</span><span class="l-zh">准备好即可升级</span></p>
+            <h2><span class="l-en">Ship with a safer Reasonix.</span><span class="l-zh">升级到更可靠的 Reasonix。</span></h2>
+          </div>
+          <div class="release-download__actions">
+            <a class="btn btn-dark" href={release.links.download}><span class="l-en">Download</span><span class="l-zh">下载</span></a>
+            <a class="release-compare" href={release.links.compare}><span class="l-en">Full comparison ↗</span><span class="l-zh">完整差异 ↗</span></a>
+          </div>
+        </section>
+      </article>
+
+      <aside class="release-toc">
+        <p><span class="l-en">In v{release.version}</span><span class="l-zh">在 v{release.version} 中</span></p>
+        <nav>{tocItems.map((item) => <a href={`#${item.id}`}><span class="l-en">{item.en}</span><span class="l-zh">{item.zh}</span></a>)}</nav>
+      </aside>
+    </div>
+  </main>
+
+  <footer class="release-footer">
+    <a class="brand" href={`${base}/`}><img src={`${base}/logo.svg`} alt="" /><span>Reasonix</span></a>
+    <span>© 2026 Reasonix · MIT</span>
+    <a href={repo}>GitHub ↗</a>
+  </footer>
+
+  <script>
+    import '../scripts/changelog.js';
+  </script>
+</Base>

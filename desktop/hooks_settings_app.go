@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/hook"
 )
 
@@ -34,9 +35,10 @@ func (a *App) HooksSettings(scope string) HooksSettingsView {
 		Scope:       s,
 		Path:        path,
 		ProjectRoot: root,
-		Trusted:     s == string(hook.ScopeGlobal) || hook.IsTrusted(root, ""),
-		Hooks:       []HookConfigView{},
-		Events:      hookEventNames(),
+		// Retained for older Wails clients. Both scopes are enabled by default.
+		Trusted: true,
+		Hooks:   []HookConfigView{},
+		Events:  hookEventNames(),
 	}
 	settings, err := readHooksSettingsFile(path)
 	if err != nil || settings.Hooks == nil {
@@ -69,6 +71,7 @@ func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookCo
 		if cmd == "" {
 			continue
 		}
+		cmd = hook.NormalizeCommand(cmd)
 		settings.Hooks[event] = append(settings.Hooks[event], hook.HookConfig{
 			Match:       strings.TrimSpace(h.Match),
 			Command:     cmd,
@@ -84,15 +87,15 @@ func (a *App) SaveHooksSettingsForRoot(scope, projectRoot string, hooks []HookCo
 }
 
 func (a *App) TrustProjectHooks() error {
-	return a.TrustProjectHooksForRoot(a.activeHookProjectRoot())
+	// Retained for older generated Wails clients. Project hooks are enabled by
+	// default, so there is no trust state to mutate.
+	return nil
 }
 
 func (a *App) TrustProjectHooksForRoot(root string) error {
-	root = strings.TrimSpace(root)
-	if strings.TrimSpace(root) == "" || root == "." {
-		return fmt.Errorf("no active project workspace")
-	}
-	return hook.Trust(root, "")
+	// Retained for older generated Wails clients. Project hooks are enabled by
+	// default, so there is no trust state to mutate.
+	return nil
 }
 
 func (a *App) activeHookProjectRoot() string {
@@ -145,7 +148,7 @@ func hookConfigView(event hook.Event, cfg hook.HookConfig) HookConfigView {
 
 func readHooksSettingsFile(path string) (hook.Settings, error) {
 	var settings hook.Settings
-	body, err := os.ReadFile(path)
+	body, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		return settings, err
 	}
@@ -163,7 +166,7 @@ func writeHooksSettingsFile(path string, settings hook.Settings) error {
 		return fmt.Errorf("empty hooks settings path")
 	}
 	raw := map[string]json.RawMessage{}
-	if body, err := os.ReadFile(path); err == nil {
+	if body, err := fileencoding.ReadFileUTF8(path); err == nil {
 		if err := json.Unmarshal(body, &raw); err != nil {
 			return err
 		}

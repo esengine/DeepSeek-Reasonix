@@ -2,7 +2,7 @@
 Type=Application
 Name=Reasonix
 Comment=Reasonix desktop — a Wails shell around the Go kernel
-Exec=reasonix-desktop
+Exec=reasonix-guard launch --detach
 Icon=reasonix-desktop
 Categories=Development;Utility;
 Terminal=false

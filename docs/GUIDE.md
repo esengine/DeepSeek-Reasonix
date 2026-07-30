@@ -12,6 +12,7 @@
 ## Contents
 
 - [Configuration](#configuration)
+- [CLI reference](./CLI.md)
 - [Environment variables](#environment-variables)
 - [Serve web frontend](#serve-web-frontend)
 - [Configuration paths](./CONFIG_PATHS.md)
@@ -21,6 +22,7 @@
 - [Desktop hooks](#desktop-hooks)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Permissions & sandbox](#permissions--sandbox)
+- [Capability diagnostics](#capability-diagnostics)
 - [Plugins (MCP)](#plugins-mcp)
 - [Slash commands](#slash-commands)
 - [@ references](#-references)
@@ -33,8 +35,7 @@ built-in defaults**. Starting with **Reasonix v1.8.1**, the user config lives at
 `~/.reasonix/config.toml` on macOS/Linux and
 `%AppData%\reasonix\config.toml` on Windows; see
 [Configuration paths](./CONFIG_PATHS.md) for migration and related data paths.
-Fields marked user/global only, including agent step limits, are not overridden
-by `./reasonix.toml`.
+Fields marked user/global only are not overridden by `./reasonix.toml`.
 Provider entries name secrets with `api_key_env`, while the secret values live in
 Reasonix's global `<Reasonix home>/.env`, shared by CLI and desktop. Project
 `.env`, home `.env`, inherited shell environment variables, legacy credentials,
@@ -54,21 +55,17 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
-# cursor_shape = "underline"       # block|underline|bar; CLI/TUI text cursor
+# cursor_shape = "bar"             # block|underline|bar; CLI/TUI text cursor
 
 [agent]
-max_steps = 0                    # user/global only; executor tool-call rounds; 0 = no limit
-planner_max_steps = 0            # user/global only; planner read-only tool-call rounds; 0 = no limit
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
-# plan_mode_allowed_tools = ["custom_reader"]   # extra read-only custom tools only;
-#                                                # does not unlock blocked tools or unsafe bash
-# plan_mode_read_only_commands = ["gh issue view", "gh pr diff"]   # extra read-only shell prefixes for planning
+# plan_mode_read_only_commands = ["gh issue view"]   # legacy compatibility only; Plan bash now uses Permissions
 # planner_model = "deepseek-pro"      # optional low-frequency planner
 # subagent_model = "deepseek-pro"     # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }
 # max_subagent_depth = 2              # nested delegation depth; set 1 for the old single-layer boundary
-auto_plan = "off"                  # user-level only; off|on; off keeps plan mode manual
-# auto_plan_classifier = "deepseek-flash"   # optional; only borderline tasks call it
+# max_subagent_concurrency = 6        # session-wide sub-agent concurrency (task/fleet/skills)
+# max_parallel_writers = 3            # concurrent writers with non-overlapping write_paths
 tool_result_snip_ratio = 0.6       # shorten stale tool output before summary compaction
 
 [[providers]]
@@ -102,7 +99,7 @@ allow = ["Bash(go test:*)"]                  # never prompted
 [sandbox]
 # workspace_root = ""          # file-writers confined here; empty = current dir
 # allow_write    = ["/tmp"]    # extra dirs write_file/edit_file/multi_edit/move_file may touch
-# forbid_read    = ["${HOME}/.ssh"]   # dirs the agent must not read or list
+# forbid_read    = ["${HOME}/.ssh"]   # paths the agent must not read or list
 
 [serve]
 auth_mode = "none"             # none|token|password; use auth before binding beyond localhost
@@ -119,27 +116,17 @@ tool_timeout_seconds = { "generate_video" = 1800 }   # optional raw MCP tool nam
 
 For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-configuration-toml).
 
-`[agent].plan_mode_allowed_tools` is an extra read-only declaration for custom or
-external tools Reasonix cannot classify itself. For MCP/plugin tools, a concrete
-model-visible name such as `mcp__github__issue_read` also promotes that tool to a
-trusted read-only reader for planner and read-only research surfaces. Prefer the
-one-time MCP read-only trust prompt, or plugin-level `trusted_read_only_tools`
-when you want to pre-seed audited tools; keep `plan_mode_allowed_tools` as the
-compatibility escape valve. It never unlocks known blocked plan-mode tools such
-as `bash`, `task`, writers, installers, or memory mutation tools, and it never
-bypasses bash's plan-mode safety checks.
+Installed and project-configured MCP servers need no per-tool trust
+list. The dedicated two-model Planner may use every non-destructive MCP tool,
+even when the server omits `readOnlyHint`; strict read-only sub-agents still
+require `readOnlyHint: true` and no `destructiveHint`.
 
-Use `[agent].plan_mode_read_only_commands` when plan-mode research needs a
-specific shell command that Reasonix cannot classify but you know is read-only,
-such as `gh issue view` or an internal query CLI. Entries are concrete command
-prefixes, not tool names: `["gh issue view"]` permits `gh issue view 4572`, while
-`bash`, `sh`, and other shell interpreters are ignored. Shell operators,
-redirection, command substitution, background execution, and unsafe built-in
-command flags remain blocked while planning. In interactive plan mode, Reasonix
-can also ask you to trust a concrete unknown query prefix the first time it is
-needed; the persistent choice writes the same
-`[agent].plan_mode_read_only_commands` entry. Auto/YOLO approval never answers
-this trust prompt.
+`[agent].plan_mode_read_only_commands` is also retained for config round trips,
+but the main Plan workflow no longer has a separate bash allowlist or trust
+prompt. Bash classification and approval use the same Permissions rules in Plan
+and Standard mode; the Sandbox remains the filesystem, process, and network
+boundary. Dedicated planner and read-only subagent runners keep their own strict
+read-only tool registry and foreground-command classifier.
 
 ### Environment variables
 
@@ -148,28 +135,70 @@ described above. The variables below are process-level advanced switches; set
 them before launching Reasonix. Project `.env` files are not a runtime source for
 Reasonix control variables.
 
-`REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true` enables the optional LLM
-task/chat classifier for Memory v5. By default it is disabled, and Reasonix uses
-the local heuristic classifier without extra provider calls. When enabled, cache
-misses may send a small classifier request through the configured provider before
-deciding whether a user input is task-like or conversational; this can add a
-little latency, provider usage, and token cost. The classifier result is cached
-per session for a short time. Only the exact trimmed value `true` enables it;
-unset, `false`, `1`, and `TRUE` keep the default heuristic path.
+### CLI telemetry
+
+The CLI can send a once-per-day anonymous active-install ping and bounded,
+content-free event counters to `https://crash.reasonix.io`. Configure the
+user-global policy with:
 
 ```bash
-REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true reasonix
+reasonix config telemetry          # print the effective mode
+reasonix config telemetry auto     # default: local interactive TTY only
+reasonix config telemetry on       # also allow local headless `reasonix run`
+reasonix config telemetry off      # disable and delete pending counter files
 ```
 
-For development runs, prefix the command that starts the process, for example:
+On the first eligible release-build interactive session, Reasonix explains the
+exact data boundary and asks once before any telemetry request. The prompt is
+`[Y/n]`: pressing Enter, `y`, or `yes` stores `auto`; `n` or `no` stores `off`
+and deletes pending counters. After the choice is saved, enabled reporting is
+silent and the prompt is not shown again. If the preference cannot be saved,
+nothing is uploaded.
+
+Reporting is always disabled in CI, Safe Mode, development builds, and when
+`DO_NOT_TRACK` is set or `REASONIX_TELEMETRY=0`. Under `auto`, redirected/piped
+or otherwise non-interactive sessions do not report. When no choice has been
+saved yet, these ineligible sessions neither prompt nor report. Network failures
+after consent are silent and never change stdout, stderr, or the process exit
+code; unsent counters stay in a bounded local queue for a later invocation.
+
+The ping contains a dedicated random 128-bit CLI install ID, CLI version, OS,
+architecture, and the `cli` surface marker. Counter batches use that same ID for
+daily active-install deduplication and contain only fixed buckets such as CLI
+mode/profile, permission/session mode, turn latency, finish reason, cache-hit
+range, generic Provider/tool error class, compaction, recovery counters, and
+normalized UI language. This ID is separate from the desktop install ID and is
+not an account, hardware, repository, or session identifier.
+
+Reasonix never uploads prompts, answers, reasoning, tool names/arguments/output,
+paths, repositories/branches, session IDs, exact token or cost values,
+Provider/model names, base URLs, or environment variables.
+
+### CLI crash reports
+
+An unhandled Go panic that reaches the CLI entrypoint is saved locally as a sanitized report under
+`<Reasonix home>/cli-crash-reports`. Reasonix keeps at most 10 files with owner-only
+permissions. The panic value is never serialized. Absolute source paths become
+`<path>/<file>.go:<line>`, function arguments are removed, and the same secret,
+token, email, and long-identifier scrubbers run both when saving and immediately
+before sending.
+
+Crash reports are never uploaded automatically. Review and manage them with:
 
 ```bash
-REASONIX_MEMORY_COMPILER_LLM_CLASSIFICATION=true wails dev -forcebuild
+reasonix report                 # preview newest; prompt before sending on a TTY
+reasonix report list            # list local reports
+reasonix report show [ID]       # preview without sending
+reasonix report send [ID]       # explicit send; delete locally only after success
+reasonix report delete [ID]     # delete without sending
 ```
 
-Packaged desktop apps launched from the OS app launcher may not inherit variables
-from your interactive terminal; start the app from an environment-managed launcher
-when you intentionally want this advanced switch enabled.
+Piped or redirected `reasonix report` calls only preview and never prompt or
+send. Safe Mode also blocks sending while leaving the local report available for
+review or deletion. The CLI telemetry setting does not auto-send or auto-delete
+these separately reviewed reports. Runtime fatal throws, operating-system kills,
+and panics in unwrapped background goroutines cannot be recovered by Go and do
+not produce this local report.
 
 ## Serve web frontend
 
@@ -202,7 +231,7 @@ Token mode prints a share URL with `?token=...`; pass `--token` or set
 ```bash
 reasonix serve --hash-password --password 'strong-password'
 
-# ~/.reasonix/config.toml
+# <Reasonix home>/config.toml
 [serve]
 auth_mode = "password" # none|token|password
 password_hash = "$2a$12$..."
@@ -214,6 +243,87 @@ model and reasoning-effort controls, Goal, a live todo panel fed by the
 `todo_write` tool, and provider balance when configured. Use `--model`,
 `--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
 user-global `default_model`.
+
+## Editor integrations over ACP
+
+`reasonix acp` exposes Reasonix as an ACP v1 stdio agent for editors and other
+host clients. The dedicated **[ACP editor integration](./ACP.md)** guide covers
+startup, capability negotiation, session lifecycle, independent model/work/
+collaboration/approval controls, client filesystem and terminal capabilities,
+MCP servers, permission requests, and the Reasonix mid-turn steering extension.
+
+## Remote SSH
+
+The remote module runs Reasonix on a remote host and reaches it over your own
+SSH connection — VS Code Remote-SSH style. It bootstraps a persistent headless
+`reasonix serve` on the remote host, forwards a local loopback port to it, and
+opens the existing serve web client through that tunnel. The agent, its tools,
+and its files all live on the remote host at full fidelity; nothing runs through
+a lossy file proxy. V1 supports Linux and macOS remote hosts.
+
+Hosts live in a user-global `[remote]` section of `config.toml`. Like
+`[secrets]`, a project `reasonix.toml` cannot inject or override remote hosts —
+a cloned repo can never steer where Reasonix opens SSH connections. Credentials
+follow the provider idiom: the host names an env var (`passphrase_env`,
+`password_env`) whose value lives in Reasonix's global `.env`; key material
+itself is never stored — `identity_file` is a path.
+
+```toml
+[remote]
+[[remote.hosts]]
+name          = "gpu-box"
+host          = "203.0.113.7"
+user          = "dev"
+identity_file = "~/.ssh/id_ed25519"
+workspace     = "~/projects/app"
+serve_install = "auto"            # auto | npm | upload | never
+
+[[remote.hosts.forwards]]
+type   = "local"                  # local (-L) | remote (-R)
+bind   = "127.0.0.1:5432"
+target = "127.0.0.1:5432"
+```
+
+CLI:
+
+```bash
+reasonix remote add gpu-box dev@203.0.113.7 --workspace '~/projects/app'
+reasonix remote import --all              # import aliases; ssh -G resolves Include/Match rules when connecting
+reasonix remote test gpu-box              # dial + auth + host-key confirmation
+reasonix remote connect gpu-box --open    # bootstrap serve, tunnel, open the URL
+reasonix remote serve status gpu-box
+reasonix remote fs ls gpu-box:'~/projects/app'
+```
+
+Hosts with `use_ssh_config` enabled resolve the final effective configuration
+through the local OpenSSH `ssh -G`, including `Include`, wildcard `Host`,
+`Match` (including `Match exec`), repeated `IdentityFile`, `ProxyJump`, and
+`IdentitiesOnly`. Import stores the original alias instead of a stale snapshot.
+
+`connect` is a foreground supervisor (like `ssh -N` plus the serve bootstrap):
+it keeps the tunnel and configured forwards alive, auto-reconnects with
+exponential backoff if the link drops, and re-attaches forwards on reconnect.
+Ctrl-C disconnects the local side only — the remote serve keeps running, so the
+next `connect` reuses it. There is no background daemon in V1.
+
+Host keys are verified against your OpenSSH `~/.ssh/known_hosts` (read-only)
+plus a Reasonix-managed `~/.reasonix/remote/known_hosts`. A first-seen key
+prompts for trust-on-first-use and is recorded in the managed file; a key that
+contradicts a recorded one is a hard error that names the offending line and is
+never auto-accepted.
+
+Remote-side state lives under the remote host's `~/.reasonix/remote/`:
+`serve-<workspace-slug>.json` (pid, bound loopback address, workspace),
+`serve-<slug>.token` (0600; the auth token, passed to serve via `--token-file`
+so it never appears in `ps`), and `serve-<slug>.log`.
+
+In the desktop app, manage hosts under **Settings -> Remote SSH**, then use the
+status-bar chip or the host row's **Remote explorer** button to browse and edit
+files over SFTP, manage port forwards, and start/open the remote workspace.
+Opening a workspace creates a separate native Reasonix window, similar to a
+VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
+window is an isolated, lightweight shell and does not restore or acquire local
+conversation sessions.
 
 ## Custom OpenAI-compatible providers
 
@@ -239,9 +349,19 @@ usually needs only the provider API key: the key value is stored in Reasonix hom
 environment-variable name, context window, vision model metadata, proxy bypass
 for China-only endpoints, MiniMax `reasoning_split`, GLM/MiniMax thinking
 heuristics, Anthropic-compatible Bearer auth where needed, Ollama Cloud
-max-effort support, and OpenCode Go per-model reasoning overrides. After adding
-a preset, open its provider card if you need to change models, headers,
-endpoint, or compatibility settings.
+max-effort support, and OpenCode Go per-model reasoning overrides. The OpenCode
+Go preset includes its native `kimi-k3` subscription route with image input,
+`high`/`max` reasoning effort, and a 1,048,576-token context window. Existing untouched
+OpenCode Go preset installs are upgraded automatically; edited model catalogs
+are preserved. The Kimi CN and Kimi Global direct-API presets also include
+`kimi-k3` with image input, a 1,048,576-token context window, and the official
+`low`/`high`/`max` effort scale (default `max`). For the official K3 endpoints,
+Reasonix preserves complete assistant messages across turns, sends output limits
+as `max_completion_tokens`, and omits K3's fixed sampling parameters. Untouched
+legacy Kimi direct-API catalogs are upgraded automatically without changing the
+default model; custom catalogs and endpoints are preserved. After adding a
+preset, open its provider card if you need to change models, headers, endpoint,
+or compatibility settings.
 
 Fill **API address** with the provider endpoint that should receive the standard
 chat path. In this mode Reasonix previews and sends chat requests to:
@@ -283,7 +403,16 @@ For Anthropic-compatible services, such as some coding-plan endpoints, choose
 | Model capability mode | Which reasoning request protocol Reasonix should use for this provider. | Keep **Auto-detect** unless the gateway is misdetected or the model docs require a specific reasoning format. |
 | Thinking override | Provider-specific override for `thinking.type`. | Keep **Auto** unless the backend documents `enabled`, `disabled`, or `adaptive`. Unsupported values can make some OpenAI-compatible gateways reject the request. |
 | Balance URL | Optional endpoint for wallet/balance lookup. | Set it when the provider exposes a balance endpoint and you want the desktop status bar to show it. |
-| Context window | The maximum number of tokens this provider keeps in context. `0` means provider default. | Set it when the model's real context size differs from Reasonix's default or built-in metadata. |
+| Context window | The provider-wide token budget Reasonix uses for automatic context cleanup. `0` disables automatic compaction. | Set it to the provider's model context limit; use a per-model override below when selected models differ. |
+
+Each selected model also has an optional **Context window** input. Leave it blank
+to inherit the provider-wide value, or enter a positive token count to override
+that value for this model. This avoids premature compaction for long-context
+models and provider errors for shorter-context models sharing the same endpoint.
+Use the context-window limit from the model documentation, not the maximum output
+tokens. For example, 128K commonly means `128000`; if the provider documents
+`131072`, use that exact value. Values below 16384 show a non-blocking warning
+because they can trigger frequent compaction and reduce cache hit rates.
 
 Model capability mode options:
 
@@ -339,28 +468,33 @@ events.
 The injected hook context is dynamic current-turn context. It does not change
 the stable system prompt, memory prefix, or tool schema, though dynamic content
 can still reduce cache reuse for that turn. The detailed desktop hook schema and
-trust model are documented in [the Chinese desktop hooks guide](./DESKTOP_HOOKS.zh-CN.md).
+loading model are documented in [the Chinese desktop hooks guide](./DESKTOP_HOOKS.zh-CN.md).
 
 ## Keyboard shortcuts
 
 Shortcuts are documented by client because users usually look for the keys that
-work in the surface they are using. The small mode rule is: `Shift+Tab` only
-controls Plan, `Ctrl/Cmd+Y` only controls YOLO, and paste stays on the platform
-paste key.
+work in the surface they are using. Desktop keeps its Plan toggle, while the CLI
+cycles Ask, Auto, and Plan with `Shift+Tab`. Desktop uses `Cmd+Y` on macOS or
+`Ctrl+Y` elsewhere for YOLO by default. If YOLO is rebound on Windows/Linux,
+`Ctrl+Y` becomes the standard composer redo fallback. Desktop paste stays on the
+platform paste key; in the CLI, terminal-native text paste and
+application-owned image paste use separate shortcuts.
 
 `[ui].shortcut_layout` is still accepted for old configs, but the shortcut
 behavior below is unified across layouts.
 
 For CLI/TUI text input, `[ui].cursor_shape` accepts `underline`, `block`, or
-`bar`. The default is `underline` because terminal block cursors can visually
-cover double-width CJK characters in some mixed-language input. Set it to
-`block` to keep the old terminal-style cursor, or `bar` for a thin insertion
-cursor. This setting does not change desktop or web text fields.
+`bar`. The default is `bar`: it remains easy to locate without covering
+double-width CJK characters in mixed-language input. Set it to `block` for a
+traditional terminal cursor or `underline` for a lower-profile cursor. This
+setting does not change desktop or web text fields.
 
 ### Desktop GUI
 
-Desktop shortcuts are managed from **Settings → Shortcuts**. Pick a row, press a
-new key combination, and Reasonix saves it for the desktop app. Conflicting
+Desktop shortcuts are managed from **Settings → Shortcuts**. Pick a configurable
+row, press a new key combination, and Reasonix saves it for the desktop app.
+Standard editing shortcuts such as Undo and Redo are shown as locked rows because
+the WebView's native text history uses those platform chords. Conflicting
 bindings are rejected so one shortcut never triggers two actions. Press `?` or
 use the help button in the topic bar to open the shortcuts sheet; it is generated
 from the same shortcut registry, so it reflects any custom bindings.
@@ -384,8 +518,10 @@ Composer shortcuts:
 | --- | --- | --- |
 | `Enter` | Sends the current message | IME composition confirmation is left alone. |
 | `Shift+Enter` | Inserts a newline | The composer keeps focus. |
-| `Shift+Tab` | Toggles Plan on/off | Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
-| `Cmd+Y` / `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. |
+| `Shift+Tab` | Toggles Plan on/off | Plan changes the workflow instruction; built-in writers keep the active Ask/Auto/YOLO and Sandbox boundary, while MCP writer/destructive targets stay hard-blocked for the whole planning phase. |
+| `Cmd+Z` on macOS, `Ctrl+Z` on Windows/Linux | Undoes the latest composer edit | Native typing stays in the WebView history; Reasonix-managed paste, cut, folded blocks, and structured tokens are restored as complete transactions. |
+| `Cmd+Shift+Z` on macOS, `Ctrl+Shift+Z` on Windows/Linux | Redoes the latest composer edit | On Windows/Linux, `Ctrl+Y` is also accepted after the YOLO shortcut has been rebound. |
+| `Cmd+Y` / `Ctrl+Y` (default) | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. The current binding is shown in **Settings → Shortcuts**. |
 | `Cmd+V` on macOS, `Ctrl+V` on Windows/Linux | Pastes clipboard content | Clipboard images are attached; images can also be dropped into the composer. |
 | Plain `Up` / `Down` at the prompt boundary | Recalls older or newer submitted prompts | Modified arrows and native text navigation stay with the textarea. |
 | `Esc` while a turn is running | Cancels the running turn | If the turn has not produced a response yet, the draft is restored. |
@@ -405,6 +541,22 @@ Menus and controls:
 
 ### CLI / TUI
 
+The composer uses theme-coloured top and bottom borders and a slim bar cursor by
+default. Long drafts grow to the available maximum height; once they overflow,
+wheel events inside the composer scroll the draft without moving the insertion
+cursor, while wheel events in the transcript keep scrolling the conversation.
+Use `/theme auto|light|dark` to select the background mode, or `/theme <style>`
+to select one of the named accent palettes shown by bare `/theme`.
+
+The responsive footer keeps the active Ask/Auto/Plan or YOLO posture and current
+interaction state on the left. On wider terminals, model, effort, and work mode
+stay together on the right; a second row shows available Git identity, cache hit
+rate, context use, compaction headroom, jobs, and balance. `ready` is the idle
+composer state, not a model-health check. Pickers, approvals, image paste, shell
+mode, and other active interactions replace it. Narrow terminals move, wrap, or
+compact whole groups; labels and displayed work-mode values follow `/language`,
+while `/work-mode` command arguments remain the stable English identifiers.
+
 Chat and transcript shortcuts:
 
 | Key or command | What it does | Notes |
@@ -417,36 +569,40 @@ Chat and transcript shortcuts:
 | `Ctrl+L` or `/cls` | Clears only the visible transcript | The LLM context, session file, tools, memory, and plugins stay loaded. Use `/clear` when you want to discard the conversation context. |
 | `Esc` | Backs out of the current action | It un-sends a just-submitted turn before any reply, cancels a running turn, or clears non-empty input. |
 | Double `Esc` on an empty idle composer | Opens the rewind picker | Same entry point as `/rewind`. |
-| Transcript text selection | Copies transcript text | The full-screen TUI enables mouse reporting, so drag in the transcript to select text in-app; releasing the mouse copies it automatically, and `Ctrl+C`/`Super+C`/`Meta+C` or right-clicking the active selection copy it again. |
+| Transcript text selection | Copies transcript text | Releasing an in-app drag writes through the verified native clipboard path in a local session (`pbcopy` on macOS, the available Wayland/X11 tool on Linux, or the Windows clipboard). SSH falls back to OSC 52 and labels the fallback instead of claiming native success. `Ctrl+C`/`Super+C`/`Meta+C` or right-clicking the active selection copies it again. |
+| Composer text selection | Selects, copies, or replaces draft text | Releasing an in-app drag copies the selection through the same verified clipboard path as transcript text. Typing or pasting replaces the selection; arrow keys collapse it. |
+| Right-click with no active selection | Pastes clipboard text locally | In a local session with in-app mouse capture on, Reasonix reads text only and routes it through the normal bracketed-paste handling. Over SSH, use the terminal paste shortcut because the remote process cannot read the local clipboard; `/mouse` restores the terminal's native right-click menu. Right-click with an active selection still copies that selection. |
 | `/mouse` | Toggles in-app mouse capture | Off hands the mouse back to your terminal, restoring its native click-drag selection and right-click context menu, at the cost of in-app drag-select, the transcript scrollbar, and wheel-scroll. Set `REASONIX_DISABLE_MOUSE=1` to start every session with it off. |
-| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
+| `Ctrl+C` | Copies, cancels, clears, or quits | Copies an active transcript or composer selection first. Otherwise it cancels a running turn, clears non-empty input, or quits on a second empty-composer press. |
 | `Ctrl+D` | Quits the TUI | Immediate quit. |
-| `Ctrl+V`, `Ctrl+Shift+V`, `Meta+V`, or `Super+V` | Pastes clipboard content | The CLI tries an image first, then falls back to text or file references. |
-| `/paste-image` | Pastes a clipboard image | Use it when you want image-only paste or the terminal handles text paste itself. |
+| Your terminal's text-paste shortcut | Pastes text | Text stays on the terminal's bracketed-paste path (`Cmd+V` on macOS, commonly `Ctrl+Shift+V` on Linux, and the terminal's configured shortcut elsewhere). Reasonix consumes the resulting paste event and never probes for an image first. |
+| `Ctrl+V` on macOS/Linux; `Alt+V` on Windows | Pastes a clipboard image | Image paste is a separate application action. The footer shows `Pasting image…` while the clipboard is read, then inserts an editable `[image #N]` token at the cursor. |
+| `/paste-image` | Pastes a clipboard image | Command form of the same image-only action. |
 | A line starting with `!` | Runs a shell command directly | The command runs locally without asking the model. |
 
 Mode and display shortcuts:
 
 | Key or command | What it does | Notes |
 | --- | --- | --- |
-| `Shift+Tab` | Toggles Plan on/off | Plan is read-only planning and does not cycle Ask/Auto/YOLO. |
+| `Shift+Tab` | Cycles Ask → Auto → Plan → Ask | YOLO remains outside this composer-mode cycle; the footer shows the active mode. |
 | `Ctrl+Y` | Toggles YOLO on/off | Turning YOLO off restores the previous Ask/Auto base when known. Terminals that forward Command/Super may also send `Cmd+Y`, but `Ctrl+Y` is the reliable terminal shortcut. |
 | `--yolo`, `--dangerously-skip-permissions` | Starts chat in YOLO | Same runtime mode as `Ctrl+Y`. |
+| `/work-mode [economy|balanced|delivery]` | Shows or switches the current session's work mode | `/profile` is a compatibility alias. Switching rebuilds the runtime atomically, preserves the conversation and approval posture, and is blocked while work is active. |
+| `/theme [auto|light|dark|style]` | Shows or switches the CLI theme | Bare `/theme` lists background modes and named accent palettes. The choice is saved to the user config; `REASONIX_THEME` and `REASONIX_THEME_STYLE` can override it for one run. |
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
-| Ask / Auto | No keyboard cycle | Ask is the default interactive base. Auto is not entered through `Shift+Tab`; use clients or APIs that expose the tool approval posture directly. |
-| `/goal <objective>`, `/goal --research <objective>`, `/goal --simple <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle; clearly long-horizon goals automatically enable AutoResearch. Ordinary prompts with strong AutoResearch signals are also upgraded into Goal. |
+| `/goal <objective>`, `/goal --research <objective>`, `/goal --simple <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle; clearly long-horizon goals automatically enable AutoResearch after Goal is explicitly started. |
 | `/migrate`, `/migrate --from <legacy-dir>` | Retries legacy migration or imports sessions from a chosen v0.x source | Use `--from` for custom Windows v0.52 install/data directories; it imports sessions only. See [Configuration paths](./CONFIG_PATHS.md). |
 
 Picker and approval shortcuts:
 
 | Context | Keys | What they do |
 | --- | --- | --- |
-| Slash or `@` completion | `Up` / `Down`, `Tab` / `Enter`, `Esc` | Move, accept, or close the completion menu. |
+| Slash or `@` completion | `Up` / `Down`, `Ctrl+P` / `Ctrl+N`, `Tab` / `Enter`, `Esc` | Move, accept, or close the completion menu. |
 | Tool approval prompt | `y`/`1`, `a`/`2`, `p`/`3`, `n`/`4`, `Enter`, `Esc`, `Ctrl+C` | Allow once, allow for session, persist allow, deny, accept default allow once, deny, or cancel the turn. |
 | Ask question card | `Up`/`Down` or `j`/`k`, `Left`/`Right` or `h`/`l`, `Space`, `Enter`, `1`-`9`, `Esc`, `Ctrl+C` | Navigate answers/tabs, toggle multi-select answers, submit/activate, pick numbered options, dismiss, or cancel the turn. |
 | Rewind picker | `Up`/`Down` or `j`/`k`, `Enter`, `b`, `c`, `d`, `f`, `s`, `u`, `Esc` | Choose a turn, apply both/conversation/code/fork/summarize actions, or go back/close. |
-| Resume picker | `Up`/`Down` or `j`/`k`, `Enter`, `Esc` | Choose a saved session or close the picker. |
+| Model, provider, or resume picker | `Up`/`Down` or `Ctrl+P`/`Ctrl+N`; `j`/`k` while search is empty; type to filter; `Enter`; `Esc` | Search, select an item, or close the picker. Once search input starts, `j`/`k` become query text. `/provider` opens that provider's model list. |
 | MCP import picker | `Up`/`Down` or `j`/`k`, `Space`, `Enter`, `Esc` / `Ctrl+C` | Move, select servers, import selected servers, or cancel. |
 | MCP manager | `Up`/`Down` or `j`/`k`, `Enter`, `Left`/`Right` or `h`/`l`, `r`, number keys, `q` / `Ctrl+C` | Navigate server lists/details, refresh, choose actions, or close. |
 | `/clear` confirmation | Arrow keys or `j`/`k` / `Tab`, `Enter`, `y`, `n`, `Esc` / `Ctrl+C` | Toggle Clear/Cancel, confirm clear, or cancel. |
@@ -457,8 +613,8 @@ Mode meanings:
 | --- | --- |
 | Ask | Prompts for fallback writer approvals. |
 | Auto | Auto-allows fallback approvals; explicit `ask` / `deny` rules still apply. |
-| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, plan approval prompts, and MCP read-only trust prompts still wait. |
-| Plan | Keeps the next work read-only until a plan is approved or Plan is turned off. |
+| YOLO | Skips ordinary tool approval prompts; `deny`, user `ask` questions, and plan approval prompts still wait. |
+| Plan | Directs the model to plan first — a plan-first workflow, not an all-tools read-only mode. Built-in writers still follow the active Ask/Auto/YOLO rules and Sandbox; installed MCP writers, destructive targets, and readers from unauthorized servers are hard-blocked for the whole planning phase (approval cannot release them; they return once Plan exits), and explicit phase-only tools such as `complete_step` wait until approval. |
 | Goal | Pursues a saved objective until complete, blocked, or cleared. |
 
 ## Permissions & sandbox
@@ -470,43 +626,92 @@ for example `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`.
 `reasonix` can grant Bash as an exact command or as a conservative command
 prefix (for example `Bash(go test:*)`), while file-editing tools share session
 edit grants and persist path-scoped rules such as `Edit(src/app.go)`.
-`reasonix run` stays autonomous but still honours `deny`.
+Parameter/arithmetic expansions, assignments, heredocs, file redirects, and globs cannot reuse a bare
+Bash, prefix, or glob allow; a user-approved reusable choice saves the whole
+command as `Bash=<literal>`. They still follow normal fallback, so Auto executes
+them without an extra prompt. Command/process substitution, a dynamic command
+name, `eval`, `source`, shell `-c`, inline runtime code, and unparseable forms
+require a human in interactive Ask/Auto. Headless Ask/Auto/DontAsk reject that
+nested/indirect class unless an exact literal exists; YOLO may bypass it.
+`reasonix run` otherwise stays autonomous and always honours `deny`.
+
+Ask is not read-only: after approval, a writer can still run. Permissions decide
+whether to allow or prompt; the Sandbox is the enforced capability boundary.
+The sandbox remains a second boundary after authorization; confinement cannot
+make ambiguous command parsing safe to authorize automatically.
 
 Permissions are *policy* (which calls to allow / prompt). The **sandbox** is
 *enforcement*: the file-writers (`write_file` / `edit_file` / `multi_edit` / `move_file`)
 refuse any path outside `[sandbox] workspace_root` (default: the current dir, so
 edits stay in the project), resolving symlinks and `..` so a link can't tunnel
-out. `forbid_read` optionally hides sensitive directories from the agent's
+out. `forbid_read` optionally hides sensitive files or directories from the agent's
 read/list/search tools; use absolute paths or `${HOME}` / `${VAR}` references,
 not `~`, because config expansion is environment-variable based. `bash` is
 itself jailed by default when an OS sandbox is available (`[sandbox] bash`,
-Seatbelt on macOS, bubblewrap on Linux, and a native helper on Windows):
+Seatbelt on macOS and bubblewrap on Linux):
 commands may write only those same roots plus platform-specific command
 temp/cache roots, cannot read configured `forbid_read` roots while the OS
 sandbox is active, and reach the network only when `[sandbox] network` is set.
-The native Windows helper delegates the low-level isolation to
-`github.com/SivanCola/windows-sandbox`, which uses AppContainer for read-only
-commands and a low-integrity token for writable commands, temporarily grants
-access to the workspace, a per-command temp root, and the target executable,
-applies deny ACEs for `forbid_read` (files as well as directories), snapshots
-touched DACLs before editing them, and restores those snapshots best-effort
-after the command exits. Concurrent commands touching the same workspace are
-serialized so their ACL edits cannot corrupt each other, and residue from a
-force-killed command (a lingering low-integrity label or `forbid_read` deny) is
-cleaned up by the next run. Because a writable command runs under a
-low-integrity token, it can still write the few locations Windows leaves
-writable to any low-integrity process (for example `%USERPROFILE%\AppData\LocalLow`)
-in addition to the configured roots; the workspace boundary and `forbid_read`
-denials still hold. Read-only AppContainer commands omit network capabilities
-when networking is disabled; writable Windows commands fail closed when
-`[sandbox] network = false`.
+Reasonix always removes saved provider and bot credential variables from tool
+subprocess environments and automatically adds its global credential `.env` to
+the runtime read-deny boundary. Project `.env` files keep their existing
+workspace-scoped behavior.
+**Windows note:** Reasonix does not ship an OS-level Bash sandbox on Windows.
+The effective mode is fixed to `off`; even an older config containing
+`bash = "enforce"` resolves to `off`, `reasonix doctor` flags the ignored value,
+and the desktop selector is read-only. Bash commands therefore run unconfined,
+while the dedicated file tools still enforce `workspace_root`, `allow_write`,
+and `forbid_read` in process. Saved credential variables are still removed from
+the child environment, but an approved unconfined shell runs as the user and is
+not a security boundary for other user-readable files.
+
 When no OS sandbox backend is available, `bash = "enforce"` refuses bash
 execution instead of running unconfined. Install the platform sandbox backend
 (bubblewrap/`bwrap` on Linux, `sandbox-exec` on macOS) or set
 `[sandbox] bash = "off"` to explicitly restore the pre-1.16 unconfined shell
-behavior (see
-[`SPEC.md` §9](./SPEC.md#9-roadmap-not-in-current-scope) for the escape-prompt
-and optional elevated Windows hardening still to come).
+behavior. On Windows the compatible value is always `off`.
+
+For coding-quality reports, run `reasonix doctor quality <branch-id-or-path>`
+(add `--json` for structured output). This reads the selected session but emits
+only content-free counts and profile categories: model family, runtime profile,
+collaboration / approval modes, message and tool-call counts, verification and persisted
+compaction-summary counts, plus desktop token/cache telemetry when available.
+It omits transcript text, paths, session identifiers, tool arguments and output,
+endpoints, and custom model names, so the result is suitable for a public issue
+or Discussion. This differs from `reasonix doctor session`, whose support zip
+contains the complete unredacted transcript and must remain in a trusted support
+channel.
+
+## Capability diagnostics
+
+Use this when a skill, slash command, hook, plugin package, MCP server, or
+`AGENTS.md` is missing, shadowed, disabled, or fails to start. Full flag
+reference, JSON schema, and issue codes:
+**[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)**.
+
+```bash
+# Static (default): no network, no MCP child processes
+reasonix doctor capabilities
+
+# Machine-readable (stdout is pure JSON)
+reasonix doctor capabilities --json
+
+# Another workspace root
+reasonix doctor capabilities --root /path/to/project
+
+# Live MCP probe — only when you explicitly allow starting third-party servers
+reasonix doctor capabilities --live --timeout 5s
+```
+
+| Surface | How |
+| --- | --- |
+| CLI | `reasonix doctor capabilities` (above) |
+| Desktop | **Settings → Diagnostics** — refresh, copy redacted JSON, optional “include current session runtime” (reads the active tab Host only; does **not** start MCP) |
+| Agent | `/reasonix-guide` (built-in inline skill) or ask naturally; it prefers static doctor JSON before `--live` |
+
+Exit code `0` allows warnings/info; `1` means at least one `error` (or a live
+start failure); `2` is bad flags. This is separate from `reasonix doctor`
+(providers/sandbox) and `reasonix plugin doctor <name>` (one package).
 
 ## Plugins (MCP)
 
@@ -514,32 +719,66 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 `stdio` (default) launches a local subprocess (`command`/`args`/`env`); `http`
 (Streamable HTTP) connects to a remote `url` with optional static `headers`
 (`${VAR}` / `${VAR:-default}` expanded from the environment, so tokens stay out
-of the file). Tools surface to the model as `mcp__<server>__<tool>`; a tool
-declaring MCP's `readOnlyHint: true` joins parallel dispatch and the permission
-reader-default, but planner / read-only research confirms third-party read-only
-hints before relying on them. In interactive sessions, approve the first trust
-prompt once, or choose the persistent option to remember the raw MCP tool name.
-This trust prompt is a user decision, so Auto/YOLO tool approval does not answer
-it; allowing for the session or persisting trust prevents repeat prompts for the
-same MCP tool.
-Advanced users can also pre-seed audited third-party readers on the plugin:
+of the file); `sse` connects to servers that still use the legacy persistent
+GET + announced POST endpoint transport.
 
-```toml
-[[plugins]]
-name = "github"
-command = "github-mcp"
-trusted_read_only_tools = ["issue_read", "pull_request_read"]
-```
+Browse the official MCP Registry from **Settings → MCP servers → Browse
+registry**, or use `reasonix mcp browse [query]` and
+`reasonix mcp install <registry-name>`. Registry access is explicit and never
+runs during startup. Entries that need secrets or required arguments are shown
+as manual setup instead of being installed with an incomplete configuration;
+query-specific cached results remain available during a registry outage.
 
-The desktop MCP panel keeps this as an advanced management surface: expand a
-configured server and open its tools list, then use **Pre-trust read-only** or a
-per-tool **Pre-trust** button only when you want to approve tools before they are
-needed. Use **Untrust** to remove a remembered reader. The desktop writes the raw
-MCP tool names to `trusted_read_only_tools` in the owning config source: project
-`.mcp.json` servers are updated under
-`mcpServers.<server>.trusted_read_only_tools`, while ordinary Reasonix plugins
-are updated in the user's Reasonix config. Trust only side-effect-free readers;
-create/update/delete tools should remain untrusted.
+The normal setup path is intentionally one step. Use Desktop's **Add and
+connect**, `/mcp add`, or ask Reasonix to install a package or URL. These
+explicit installs are saved to the user-global `config.toml` and are also
+authorization: the server connects in the current session, and no second trust
+step appears now or on the next startup. Servers declared by the current
+project's `reasonix.toml` or `.mcp.json` remain in that project and are trusted
+without a separate launch confirmation. Explicit deny rules still win. The
+server's calls run
+directly, including tools that declare `destructiveHint`. The dedicated Planner
+still refuses destructive tools, and strict read-only sub-agents still expose
+only hinted non-destructive readers.
+
+MCP names are resolved once per workspace. Project declarations override
+same-name global installs; inside a project, `reasonix.toml` overrides
+`.mcp.json`. Editing updates the effective declaration in its original file,
+and removing a higher-priority declaration reveals the next one instead of
+deleting every same-name entry.
+
+stdio servers keep one process for initialize, reads, and writes, so stateful
+servers such as browsers retain sessions and open pages. Because an OS sandbox
+is fixed when a process starts, this shared process uses the server's normal
+process sandbox for every call; `readOnlyHint` and read-only sub-agent filtering
+are dispatch policy, not a second per-call process sandbox.
+
+Tools surface to the model as `mcp__<server>__<tool>`. A tool declaring MCP's
+`readOnlyHint: true` joins parallel dispatch and the strict read-only tool
+surfaces. Installing a server or declaring it in project configuration
+authorizes the dedicated Planner to use all of its non-destructive
+tools without another per-tool setting; strict read-only research sub-agents
+receive only hinted non-destructive readers. Tools without the hint remain
+write-capable for scheduling and mutation accounting. While planning, built-in
+writers keep the ordinary permission posture. The dedicated Planner permits
+authorized non-destructive MCP (including opaque writers) but hard-blocks
+destructive or unauthorized targets; a single-model Plan without that dedicated
+Planner keeps the older writer/destructive block until Plan exits.
+
+Installing an MCP server is the authorization decision. After installation, all
+of its tools run directly without a second server-level, per-tool, writer, or
+destructive approval setting. Explicit global deny rules still win. The host
+keeps `readOnlyHint` and `destructiveHint` internally for parallel scheduling,
+Plan restrictions, strict read-only sub-agents, and cached-to-live safety
+reclassification; these hints do not add user configuration.
+Reasonix deliberately trusts an installed server to describe those hints
+honestly. Planner/read-only filtering is therefore a workflow boundary for
+trusted servers, not containment against a malicious MCP server; explicit deny
+rules and the process sandbox remain host-controlled boundaries.
+
+The retired `trusted_read_only_tools`, `default_tools_approval_mode`,
+`tools.<raw>.approval_mode`, and `approvals_reviewer` fields are ignored when
+loading older files and removed the next time Reasonix saves that MCP entry.
 
 A server's **prompts** surface as `/mcp__<server>__<prompt>` slash commands
 (positional args after the command); its **resources** are pulled in by writing
@@ -565,7 +804,10 @@ headers = { Authorization = "Bearer ${STRIPE_KEY}" }
 Enabled MCP servers start connecting automatically in the background after a
 session begins, so chat stays usable while tools come online. Use `/mcp` or the
 desktop MCP panel to refresh status, reconnect a server, inspect failures, or
-disable a server for the current session.
+disable a server for the current session. For a read-only config/runtime health
+report across skills, hooks, packages, and MCP (without changing settings), see
+[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)
+(`reasonix doctor capabilities` or **Settings → Diagnostics**).
 
 **Already have an `.mcp.json`?** Drop it in the project root and Reasonix
 reads it as-is — the `mcpServers` spec (`command`/`args`/`env`, `type`/`url`/
@@ -589,74 +831,112 @@ convenient.
 ## Slash commands
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
-`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/mcp`, `/skills`, `/hooks`,
-`/memory`, `/memory-v5`, `/goal`, `/output-style`, `/sandbox`, `/language`,
-`/auto-plan`, `/reasoning-language`, `/help`) run
-locally — `/help` lists them all. `/new` starts a new session while saving the
-previous transcript for history/resume; `/clear` asks for confirmation, then
-discards the current context without saving it. `/tree` shows saved conversation
-branches, `/branch [name]` forks the current conversation tip, `/branch <turn>
-[name]` forks from an earlier checkpointed turn, and `/switch <id|name>` loads
-another branch. **Custom commands** are Markdown files under `.reasonix/commands/`
-(project) or `~/.reasonix/commands/` (user) — `review.md` becomes
-`/review`, a subdirectory namespaces it (`git/commit.md` → `/git:commit`). The
-body is a prompt template; invoking the command sends it as a turn.
+`/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
+`/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
+`/reasoning-language`, `/help`) run
+locally — `/help` lists them all. Built-in **skills** such as `/init`,
+`/explore`, `/test`, and `/reasonix-guide` also appear in the slash menu and via
+`run_skill` (bodies load on demand; only the index line is cache-stable). Use
+`/reasonix-guide` when you need config or capability troubleshooting; it points
+at `reasonix doctor capabilities` (see
+[Capability diagnostics](./CAPABILITY_DIAGNOSTICS.md)). `/new` starts a new
+session while saving the previous transcript for history/resume; `/clear` asks
+for confirmation, then discards the current context without saving it. `/tree`
+shows saved conversation branches, `/branch [name]` forks the current
+conversation tip, `/branch <turn> [name]` forks from an earlier checkpointed
+turn, and `/switch <id|name>` loads another branch. **Custom commands** are
+Markdown files under `.reasonix/commands/` (project) or `~/.reasonix/commands/`
+(user) — `review.md` becomes `/review`, a subdirectory namespaces it
+(`git/commit.md` → `/git:commit`). The body is a prompt template; invoking the
+command sends it as a turn.
 
-`/memory` lists both memory documents (`REASONIX.md` / `AGENTS.md`) and saved
-auto-memory facts. During agent turns, the read-only `history` and `memory`
-tools let the model retrieve prior session decisions, compacted-history
-archives, and saved facts on demand instead of injecting that dynamic state into
-the stable system prompt. `/forget <name>` archives a saved fact rather than
-deleting it permanently; the CLI/TUI and desktop memory panel can show those
-archived files for traceability, but they are not searched as active memory.
-Agent-initiated `remember` and `forget` calls always ask for fresh human approval
-and show a compact preview of the saved or archived memory before they run.
-Guardian review cannot answer for the user; non-interactive runs refuse these
-tools instead of auto-approving them.
-Retrieval keeps the top BM25 result while trimming weak common-word matches, and
-0-result responses suggest narrower, more distinctive follow-up searches.
-Memory v5 is enabled by default across the CLI/TUI, `reasonix serve`, and the
-desktop app because they all share the same local controller. It records local,
-project-scoped execution traces and compiler state under Reasonix home, then
-compiles the next user turn into a compact execution contract only when prior
-outcomes produce actionable constraints. Early turns may only write traces and
-inject nothing. The default `verbosity = "observe"` keeps this as local learning
-and content-free metrics only; it does not send `<memory-compiler-execution>` to
-the provider-visible user turn. Opt into `verbosity = "compact"` (or the legacy
-`on` command) when you explicitly want compact execution-contract injection,
-including selected compact memory references in the provider-visible user turn.
-Memory v5 never bypasses memory approvals and never mutates the cache-stable
-system prompt, provider prefix, or tool schemas.
+### Subagent profiles
 
-Toggle future turns with `/memory-v5 off|observe|compact|on|status` inside an
-interactive session, or with `reasonix config memory-v5 off|observe|compact|on|status`
-from a shell/script.
-Desktop users can also use Settings → General → Memory v5. Settings → Updates →
-Share aggregate quality metrics controls the optional aggregate upload. When
-enabled, that upload may include only anonymous
-count/size buckets such as injection on/off, compiled-token bucket, IR-overhead
-bucket, memory-reference count, constraint/risk/step counts, and memory-graph
-size buckets. It never includes memory text, prompts, tool outputs, file paths,
-IDs, keys, base URLs, or file contents.
+Subagent profiles are manual Skills with `runAs: subagent` and
+`invocation: manual`. They are stored in the same project/global Skill roots as
+the desktop settings page, so profiles created on either surface are immediately
+available to the other after the session refreshes. In interactive chat, invoke
+one with `/<name> <task>`; Reasonix runs an isolated child loop and keeps only
+the task and final answer in the parent conversation.
 
-CLI/TUI and `reasonix serve` use the same user/global config. Project
-`reasonix.toml` files cannot override this user/global setting. The CLI command
-updates this underlying config; advanced users may also edit it manually under
-Reasonix home:
+The headless CLI provides explicit management and execution commands without
+changing the ordinary `reasonix run` task semantics:
 
-```toml
-[agent]
-memory_compiler = { enabled = true, verbosity = "observe" }
+```bash
+reasonix subagent list
+reasonix subagent create reviewer --description "Review changes" --prompt-file reviewer.md --tools read_file,grep,bash
+reasonix subagent edit reviewer --effort high --model deepseek-pro
+reasonix subagent try reviewer "review the current diff"   # always read-only
+reasonix subagent run reviewer "review and fix the current diff"
+reasonix subagent delete reviewer --yes
 ```
 
-The CLI can use Memory v5 for local turns, but it does not run the desktop
-aggregate metrics upload pipeline. When `reasonix run --metrics <path>` is used,
-the JSON also includes content-free `memory_compiler_*` summary fields and a
-`memory_compiler_turn_details` array with per-turn injection state, compiled token
-and IR-overhead estimates, referenced-memory/constraint/risk/step counts, and
-current memory-graph counts.
-For implementation details, see
-[`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md).
+`create` defaults to project scope when a workspace is available and to global
+scope otherwise; pass `--scope project|global` to choose explicitly. `edit`
+changes only explicitly supplied fields, and an empty value such
+as `--model=` or `--tools=` clears that field. The profile editors deliberately
+refuse custom-path or richer hand-authored Skills so they cannot discard
+frontmatter, references, or scripts; manage those files through the Skills
+workflow instead. Built-in profiles have no editable file, so `edit` accepts
+only `--model` and `--effort` for them and stores the same per-name overrides as
+the desktop settings page.
+
+See [Subagent profiles](./SUBAGENT_PROFILES.md) for the complete CLI reference,
+Skill file format, model precedence, safety behavior, and troubleshooting.
+
+Context Engine v2 separates two intentionally different layers:
+
+- **Standing instructions** come from hierarchical `REASONIX.md`, `AGENTS.md`,
+  and `CLAUDE.md` files. Put rules here when they must be present on every
+  relevant turn. User-global files load first, then workspace and deeper target
+  directories; within one directory, `.local.md` variants win.
+- **Background memory** stores one durable fact per Markdown file. Each fact has
+  an immutable ID, monotonic revision, timestamps, independent `type`
+  (`user`, `feedback`, `project`, `reference`) and `scope` (`project`,
+  `global`), plus freshness metadata. Facts may be stale, so they never outrank
+  the current request or standing instructions.
+
+Reasonix automatically recalls a small set of relevant facts before each real
+user turn. It searches the raw user message, suppresses generic requests such as
+"continue", prefers project facts over equivalent global fallbacks, down-ranks
+stale facts, and appends at most four facts / 2,400 characters to the user turn.
+This dynamic suffix does not rewrite the cache-stable system prompt or tool
+schemas. Use `/memory recall` to see the selected IDs, scores, reasons,
+freshness, budget, and suppression decision.
+
+New, bounded, non-sensitive project/reference facts can be created
+automatically with no setup or approval click. Global facts, user preferences,
+feedback, updates, duplicates, sensitive/oversized content, and every `forget`
+still require explicit confirmation. The storage layer makes the automatic
+grant create-only, so it cannot overwrite a fact that appears concurrently.
+A top-level headless controller may use the same one-shot low-risk create path;
+sub-agents and headless surfaces without the owning scoped controller fail closed.
+
+`forget` archives rather than permanently deletes. Every update snapshots the
+previous revision; restore and archive recovery always create a higher revision
+instead of overwriting history:
+
+```text
+/memory instructions
+/memory recall
+/memory revisions <id-or-name>
+/memory restore <id-or-name> <revision>
+/memory archived
+/memory recover <archive-path>
+```
+
+The desktop Context Center shows the same provenance, conflicts, revision
+history, recall trace, and recovery actions. Opening its Suggestions tab scans
+recent local user turns automatically; candidates are deduplicated against both
+memory scopes and instruction bodies, but nothing is saved until the user
+accepts it. Remote workspaces never fall back to local desktop memory or
+sessions.
+
+Legacy facts are upgraded in place with deterministic IDs and revision 1;
+missing scope is inferred from the containing directory. Migration is
+idempotent, old clients retain safe routing, and legacy Memory v5 transcripts
+remain readable. For the complete behavior and privacy/cache contract, see
+[`Context Engine v2`](SESSION_MEMORY_RETRIEVAL.md).
 
 ```markdown
 ---
@@ -676,9 +956,9 @@ objectives stay lightweight: Reasonix keeps working until the goal is complete,
 blocked, or cleared. When a goal is clearly long-horizon, Goal automatically
 enables the AutoResearch strategy instead of requiring a separate
 `/auto-research` skill; `auto-research` is not listed as a standalone built-in
-skill in Settings -> Skills or the slash menu. If an ordinary chat prompt has a
-very strong long-horizon signal, the host also upgrades it into the equivalent
-of `/goal --research <original prompt>`.
+skill in Settings -> Skills or the slash menu. Ordinary chat never changes the
+collaboration mode implicitly; choose Goal in the composer or use `/goal` to
+start a long-running objective.
 
 For complex work, write the objective as a
 [task contract](./TASK_CONTRACT.md): Context, Request, Output format,
@@ -695,10 +975,8 @@ phases such as research/diagnosis, implementation/fixing, verification/testing,
 optimization/documentation/release, or when the user names an existing
 `.reasonix/autoresearch/<task-id>/` directory. Advanced users can force it with
 `/goal --research <objective>` or force lightweight Goal with
-`/goal --simple <objective>`. Ordinary-chat auto-upgrade is more conservative
-than `/goal`'s internal classification: standalone phrases such as "long term",
-"optimize", "research this", or "verify this" do not create AutoResearch tasks
-by themselves.
+`/goal --simple <objective>`. Outside an explicitly started Goal, those signals
+remain ordinary chat text and do not create durable AutoResearch state.
 
 Once AutoResearch is active, the agent treats the goal as a stateful research
 loop instead of a chat-only continuation. It creates or reuses a project-local
@@ -734,10 +1012,11 @@ time, descend into folders) plus MCP resources.
 
 ## Two-model collaboration
 
-`reasonix setup` keeps first-run minimal: pick provider → keys (every SKU of a
-chosen provider is enabled). Running two models together (executor + planner,
-separate cache-stable sessions) is a one-line edit afterwards — set
-`planner_model` to any other enabled provider:
+`reasonix setup` manages providers, model lists, credentials, connection tests,
+and the default model. It stages changes until Save and exit, and synchronizes
+provider access with the desktop app. See the [CLI reference](./CLI.md#configure-providers).
+Running two models together (executor + planner, separate cache-stable sessions)
+is a one-line edit afterwards — set `planner_model` to any other enabled provider:
 
 ```toml
 [agent]
@@ -746,12 +1025,54 @@ planner_model = "deepseek-pro"   # used as the low-frequency planner
 
 The planner sees loaded `REASONIX.md` / `AGENTS.md` memory and a small read-only
 research tool set, so it can inspect relevant files before handing a plan to the
-executor. Writer and workflow tools remain executor-only. `max_steps` limits the
-executor; `planner_max_steps` limits only the planner, and either can be set to
-`0` for no round limit.
+executor. Writer and workflow tools remain executor-only.
 
-Keep step-limit preferences in the user config. Project `./reasonix.toml` files
-do not override `max_steps` or `planner_max_steps`.
+Reasonix routes each turn deterministically without another classifier model:
+questions, short follow-ups, clear atomic edits, and bounded read-only actions
+go straight to the executor; bounded implementation work may receive a short
+light plan. Ambiguous, cross-surface, structured, high-risk, active-Goal, or
+Delivery work receives a full plan unless the request is clearly atomic or
+read-only. Explicit Plan Mode
+remains a separate host workflow and is never planned twice. An explicit
+`plan first` / `先规划` request forces planning, while `just do it` / `直接改`
+goes directly to the executor. Execution boundaries are recognized across the
+request, not only at its beginning, while quoted examples are ignored. Bare
+plan-first requests continue from the planner to the executor automatically.
+Requests that explicitly say to wait for confirmation pause at the host
+approval boundary and continue to the executor after approval. Only an
+explicit `plan only` / `不要执行` request ends the
+current turn with the plan persisted and no execution; a later user instruction
+can continue in the same session. The phase detail records a privacy-safe route,
+depth, and reason code for diagnosis without logging the user prompt.
+
+Light plans contain a compact objective, at most four ordered steps, likely
+touchpoints, and the main verification. Full plans distinguish verified from
+candidate touchpoints and add relevant non-goals, risks, acceptance criteria,
+command-level verification, and rollback guidance when the operation is hard to
+reverse. These contracts are part of one stable planner system prompt; only the
+small per-turn depth instruction is appended to the user turn, preserving the
+planner's prefix cache after the one-time prompt upgrade. The host also gives
+light and full research different per-turn round budgets. If a planner still
+does not finalize after its bounded research and finalization round, ordinary
+plan-and-execute work continues with the executor using the original task.
+Plan-only and approval-gated requests remain fail-closed, and the incomplete
+planner turn is rolled back instead of leaving an unusable continuation tail.
+
+Reasonix manages normal execution automatically: if an active todo produces no
+new completion, unique read, command, or mutation for 8 tool-call rounds, the
+host asks the executor to reassess. After 16 no-progress rounds it pauses with
+saved work that can be resumed in the next user turn. Exact repeats do not count
+as progress; new host-observed work renews the lease. Two-level task lists keep
+the same single-current contract: the active level-1 sub-step is the one
+`in_progress` item while its level-0 phase stays `pending`; sub-steps are worked
+and signed off in order, and once every sub-step has completed the phase itself
+becomes `in_progress` for its own final sign-off.
+
+Existing `[agent].max_steps` and `planner_max_steps` keys remain syntactically
+accepted during upgrades, but their values are ignored and removed with a
+one-time notice. This prevents a stale hidden limit from truncating automatic
+progress or inherited subagent work. Use the one-off CLI `--max-steps` flag when
+an explicit run budget is needed; unattended bots retain `[bot].max_steps`.
 
 Subagent skills inherit the executor model by default. Set `subagent_model` to
 run them on another configured model, or use `subagent_models` to override only
@@ -772,24 +1093,119 @@ best expressed through an existing skill. Both run ephemeral read-only
 subagents with only read-only research tools plus safe foreground bash, return
 only the final answer, and do not create resumable subagent transcripts.
 Read-only nested delegation may be available until `max_subagent_depth` is
-reached, but writer-capable `task` / `run_skill` remain unavailable. In
-token economy mode, connect only this narrow surface with
-`connect_tool_source(source="read_only_skill")`; the full `skills` source still
-enables writer-capable skill tools and remains blocked in plan mode.
+reached, but writer-capable `task` / `run_skill` remain unavailable inside these
+read-only child registries. In token economy mode, connect this narrow surface
+with `connect_tool_source(source="read_only_skill")` when that isolation is
+required; loading the full `skills` source in Plan is allowed, and subsequent
+writer calls still pass through Permissions/Sandbox.
 
-For interactive frontends, plan mode is manual by default. Set
-`agent.auto_plan = "on"` to make complex-looking tasks enter plan mode
-automatically: Reasonix first drafts a read-only plan, then waits for approval
-before editing or running side-effecting commands. `auto_plan_classifier` can
-name a cheap provider such as `deepseek-flash`; it is only called for borderline
-inputs and falls back to the heuristic if classification fails. Use
-`/auto-plan off|on` inside `reasonix` to change the user-level setting, or
-`reasonix config auto-plan off|on` from a shell/script. Auto-plan is user-level
-only; `agent.auto_plan` in a project `reasonix.toml` is ignored. The visible
-reasoning language uses a similar shape: `/reasoning-language auto|zh|en` in the
+Every strict read-only child is built through one shared construction
+pairing — `RunReadOnlySubAgentWithSession` / `NewReadOnlyAgent` — which marks
+the child permanently read-only and applies a final registry filter. The filter
+removes writers, destructive MCP targets, readers from unauthorized servers,
+and every host-mutating tool. User-installed and project-configured servers are
+authorized immediately. Eligible readers may still start on demand. These are
+the strict read-only entrances:
+
+| Entrance | Purpose |
+| --- | --- |
+| `read_only_task` | Isolated read-only research child from the main session |
+| `parallel_tasks` (read-only) | Concurrent read-only research children |
+| `fleet` with `read_only: true` | Parallel profile-aware batch (forced read-only per item) |
+| `read_only_skill` | The same isolation driving an existing skill |
+| `reasonix review` (CLI) | Read-only review of a diff or branch |
+| Desktop preview/review subagents | Read-only desktop analysis surfaces |
+
+The interactive two-model Planner uses a dedicated construction path
+(`NewPlannerAgent`): it still blocks bash, file writers, and ordinary writers,
+but may call authorized, non-destructive MCP through the fixed
+`use_capability` proxy without requiring `readOnlyHint`. Direct `mcp__*`
+schemas never enter the Planner tool list, so MCP install/connect churn does
+not change the Planner cache prefix after the one-time schema upgrade. Missing
+`readOnlyHint` no longer blocks the Planner; tools with `destructiveHint` are
+zero-exec and should be written into the plan for the Executor.
+In Balanced two-model sessions the Executor has its own frontend for the same
+stable proxy, so an `auto_start=false` or destructive capability discovered by
+the Planner remains callable by capability ID after handoff. Planner and
+Executor ledgers/audits stay isolated and only the Host connection is shared.
+
+Ordinary `task` / `fleet` sub-agents also get the same fixed proxy (session-
+shared Host and connections, per-agent frontend/ledger) and may call installed
+or project-configured MCP without `readOnlyHint`. Those calls use the trusted
+MCP permission path (live authorization plus explicit deny only); writer and
+destructive calls are still serialized, recorded as mutations, and subject to
+Delivery evidence/lease guards rather than Planner handoff. Strict
+`read_only_task` / `read_only_skill` / review sub-agents share the stable proxy
+schema and connection reuse but keep the strict execution gate
+(`authorized && readOnlyHint && !destructiveHint`). Profile `allowed-tools`
+MCP names convert to capability-id allowlists on the proxy; children never
+inherit dynamic `mcp__*` schemas.
+
+Inside a strict child, `use_capability` re-checks the resolved target before
+commit/permission/hooks/execution. An unconnected eligible MCP reader may start
+on demand from the current schema cache. Before `tools/call`, cached
+`readOnlyHint`/`destructiveHint` facts are checked against the live
+initialize/tools-list result; a reader-to-writer change or destructive promotion
+means zero executions and a normal retry through the current boundary. A
+schema-only change refreshes the cache for the next session without interrupting
+the authorized call. Runtime enablement, authorization, and the complete
+connection identity are checked again immediately before dispatch, so a
+same-name client from another project/tab cannot be reused accidentally. An
+unauthorized server cannot raise privileges there. This strict-child boundary
+is narrower than the dedicated Planner: the Planner accepts authorized opaque
+non-destructive MCP, while a strict child requires an explicit reader hint and
+never exposes writers at all.
+
+Choose the startup runtime profile with
+`--profile economy|balanced|delivery` (for example, `reasonix run --profile
+delivery "fix and verify this bug"`). Economy starts with nine tools: direct
+read/bash/edit/write, background-shell lifecycle controls, `ask`, and
+`connect_tool_source`. Dedicated search/file/workflow tools, session history,
+memory mutation, slash commands, Skills, MCP, LSP, web access, installation, and
+subagents are connected only when the task needs them. Balanced is the default
+with the complete tool surface; when a distinct Planner is configured, both
+Planner and Executor add the fixed `use_capability` proxy. The proxy schema is
+stable, but the Balanced Executor deliberately retains direct `mcp__*` tools,
+so its overall provider tool prefix may still change when those direct tools
+are installed, connected, or refreshed. Delivery keeps that complete surface,
+adds one stable proxy tool (`use_capability`) for on-demand MCP inspect/call
+without schema churn, and adds a stable contract to establish acceptance
+criteria, fix root causes, verify the result, and review the final diff. The
+host enforces that contract: mutations and verification commands are blocked
+until a concrete `todo_write` acceptance list exists; a changed result cannot
+finalize until it has been reviewed, verified after the latest mutation, and
+signed off with `complete_step`; Skill/MCP `require`/`prefer` routes must be
+invoked or declined with host-proven reasons; and medium/high-risk changes
+require structured review (and security review when high). Meta tools such as
+`task`, `run_skill`, and `review` are not counted as mutations by themselves —
+only real child writes are. Read-only analysis remains available without
+forcing a write.
+Inside an interactive TUI session, use `/work-mode` to inspect the current
+choice or `/work-mode economy|balanced|delivery` to switch it. `/profile` is a
+compatibility alias. The switch atomically rebuilds the controller while
+preserving history, the session path, leases, and the Ask/Auto/YOLO posture; it
+is rejected while a turn, approval/question, background job, or another runtime
+switch is active. A failed build leaves the previous controller usable. This
+command changes only the current session and does not persist a new global
+default. Crossing profiles creates one new provider cache prefix. Within
+Balanced and Delivery the system contract and tool schema then stay stable; in
+Economy each successful `connect_tool_source` call adds the connected schemas
+to the next request, creating one more prefix that stays stable until the tool
+surface changes again.
+
+Desktop tabs expose the same three choices and persist Economy or Delivery;
+legacy empty/`full` values remain Balanced.
+
+For interactive frontends, Plan Mode is always an explicit user choice. Select
+Plan in the desktop collaboration-mode control or cycle to Plan with
+`Shift+Tab` in the CLI. Reasonix first drafts a plan, then waits for approval
+before the workflow switches to implementation. Tool calls made while drafting
+still use the current Permissions and Sandbox. Legacy `agent.auto_plan` and
+`agent.auto_plan_classifier` values are ignored and removed from the user config
+during upgrade. The visible reasoning language can be changed with
+`/reasoning-language auto|zh|en` in the
 session, or `reasonix config reasoning-language auto|zh|en` in a shell/script.
-Memory v5 uses `/memory-v5 off|observe|compact|on|status` or
-`reasonix config memory-v5 off|observe|compact|on|status` and is user-level only. Pass `--local`
+Pass `--local`
 to the reasoning-language shell command only when you intentionally want a
 project-local override.
 

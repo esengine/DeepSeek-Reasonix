@@ -6,30 +6,40 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
+	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
+	"reasonix/internal/workspacelease"
 )
 
 // DefaultTaskSystemPrompt steers a sub-agent toward focused, terse delivery —
 // it doesn't see the parent's conversation so it must self-contain.
 const DefaultTaskSystemPrompt = `You are a sub-agent invoked by a parent coding agent to carry out one focused task.
-Use the provided tools to investigate or act. Return a single final answer that is concise
-and self-contained — the parent will see only that answer, not your tool calls or reasoning.
-If you need to ask for clarification, fail with a precise question instead of guessing.`
+Use the provided tools to investigate or act. For MCP, use the stable use_capability
+proxy (list → inspect → call); do not expect direct mcp__* tool schemas. Return a
+single final answer that is concise and self-contained — the parent will see only
+that answer, not your tool calls or reasoning. If you need to ask for clarification,
+fail with a precise question instead of guessing.`
 
 // DefaultReadOnlyTaskSystemPrompt steers read-only sub-agents toward isolated
 // research. They never receive writer tools, persisted transcript controls, or
 // background process controls, so their final answer is the only handoff.
 const DefaultReadOnlyTaskSystemPrompt = `You are a read-only research sub-agent invoked by a parent coding agent.
 Use only the provided read-only tools to inspect code, docs, history, and safe shell output.
-Do not attempt to write files, install capabilities, mutate memory, control long-lived
+For MCP, use use_capability only for authorized tools that declare readOnly and are
+not destructive; never treat missing readOnlyHint as permission to call. Do not
+attempt to write files, install capabilities, mutate memory, control long-lived
 processes, or delegate to writer-capable agents. If a read-only delegation tool is
 available and genuinely useful, you may use it within the configured depth limit.
 Return a concise, self-contained final answer with the evidence the parent needs.`
@@ -38,12 +48,14 @@ const subagentStartContext = `<subagent-context event="SubagentStart">
 Before acting, check the available skills and tools. If a relevant skill is available, invoke it before continuing. Delegate to another sub-agent only when the task genuinely benefits from isolated context and the delegation tool is available.
 </subagent-context>`
 
+// read_skill is deliberately not listed: it renders playbook text inline and
+// cannot recurse, so depth-capped sub-agents keep it and can still read
+// playbooks even when they can no longer delegate.
 var subagentRecursiveTools = []string{
 	"task",
 	"read_only_task",
 	"run_skill",
 	"read_only_skill",
-	"read_skill",
 	"explore",
 	"research",
 	"review",
@@ -52,6 +64,7 @@ var subagentRecursiveTools = []string{
 
 var subagentAlwaysHiddenTools = []string{
 	"parallel_tasks",
+	"fleet",
 	"install_skill",
 	"install_source",
 }
@@ -68,12 +81,34 @@ var readOnlySubagentWorkflowTools = []string{
 
 const subagentToolBoundarySummary = "Recursive agent/skill tools are exposed only while max_subagent_depth leaves another delegation layer; unsupported background job tools (parallel_tasks, wait, bash_output, kill_shell) are excluded; bash is exposed as foreground-only inside subagents."
 
+// maxConcurrentBackgroundTasks is the legacy writer-background fallback used
+// only when a TaskTool has no session scheduler (tests). Production boots
+// inject MaxParallelWriters via SubagentScheduler.
+const maxConcurrentBackgroundTasks = DefaultMaxParallelWriters
+
+// AlwaysHiddenSubagentTools returns the tool names excluded from every
+// subagent's registry regardless of an explicit allowlist or delegation
+// depth (unlike subagentRecursiveTools, which depends on remaining depth).
+// That covers both subagentAlwaysHiddenTools and subagentJobTools —
+// SubagentToolRegistryForDepth and its read-only variant strip the job tools
+// unconditionally too. Host UIs offering a tool picker for a subagent
+// profile's allowed-tools should exclude these from the offered choices —
+// selecting them would be silently ignored at runtime.
+func AlwaysHiddenSubagentTools() []string {
+	names := append([]string(nil), subagentAlwaysHiddenTools...)
+	return append(names, subagentJobTools...)
+}
+
 // SubagentMetaTools returns the tool names that spawned agents should not inherit
 // from the parent registry unless a future call site deliberately opts into a
 // different boundary. They can spawn or author more agent work, so excluding them
 // preserves one layer of delegation without adding a spawn-count cap.
+// read_skill stays listed here so the guardian and planner surfaces, which
+// exclude these names, keep their provider-visible tool sets byte-identical —
+// only the sub-agent depth cap deliberately stopped stripping it.
 func SubagentMetaTools() []string {
 	out := append([]string(nil), subagentRecursiveTools...)
+	out = append(out, "read_skill")
 	out = append(out, subagentAlwaysHiddenTools...)
 	return out
 }
@@ -90,13 +125,30 @@ func SubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry 
 // SubagentToolRegistryForDepth returns the writer-capable tool set for a spawned
 // subagent at childDepth. Recursive delegation tools are available only when the
 // child still has room to spawn one more subagent.
+//
+// Direct mcp__* schemas are never exposed: MCP goes only through the fixed
+// use_capability proxy so connect/disconnect/tool-list churn cannot change the
+// child provider-visible tool prefix. With no explicit allowlist the child gets
+// the full proxy (installed/authorized MCP, including tools without
+// readOnlyHint). An explicit allowlist converts mcp__* / mcp-tool: names into a
+// capability-id allowlist on a restricted proxy.
 func SubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDepth, maxDepth int) *tool.Registry {
+	return SubagentToolRegistryForDepthWithRuntime(parent, names, childDepth, maxDepth, nil)
+}
+
+// SubagentToolRegistryForDepthWithRuntime is SubagentToolRegistryForDepth with
+// an optional session MCP runtime used when the parent registry has no
+// use_capability (for example Economy or legacy callers) but sub-agents still
+// need the proxy.
+func SubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []string, childDepth, maxDepth int, runtime *MCPCapabilityRuntime) *tool.Registry {
 	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
 	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
 		exclude = append(exclude, subagentRecursiveTools...)
 	}
 	exclude = append(exclude, subagentJobTools...)
 	sub := FilterRegistry(parent, names, exclude...)
+	stripDirectMCPTools(sub)
+	attachSubagentCapabilityProxy(parent, sub, names, runtime)
 	if bash, ok := sub.Get("bash"); ok {
 		sub.Add(foregroundOnlyBash{inner: bash})
 	}
@@ -149,17 +201,16 @@ func (b readOnlyBash) Description() string {
 		desc = "Execute a command in the shell and return combined stdout/stderr."
 	}
 	desc = strings.Replace(desc, "Execute a command in the shell", "Execute a foreground read-only command in the shell", 1)
-	return desc + " Only plan-mode safe read-only commands are allowed; shell operators, background execution, process preservation, and write-capable arguments are blocked."
+	return desc + " Only permission-classified read-only commands are allowed; shell operators, background execution, process preservation, and write-capable arguments are blocked."
 }
 
 func (readOnlyBash) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Read-only shell command to execute in the foreground. Must match the plan-mode safe bash policy."}},"required":["command"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Read-only shell command to execute in the foreground. Must match the permission-layer read-only command policy."}},"required":["command"]}`)
 }
 
 func (b readOnlyBash) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	decision := planmode.Policy{}.Decide(planmode.Call{Name: "bash", Args: args})
-	if decision.Blocked {
-		return decision.Message, nil
+	if !permission.BashCommandIsReadOnly(args) {
+		return "blocked: read-only subagents can run only permission-classified foreground read-only commands", nil
 	}
 	return b.inner.Execute(ctx, args)
 }
@@ -199,6 +250,84 @@ type TaskTool struct {
 	baseEffort          string
 	identityProfile     func(modelRef, effort string) (string, string)
 	maxSubagentDepth    int
+	deliveryProfile     bool
+	workspaceLease      *workspacelease.Owner
+	// scheduler is the session-scoped concurrency + write-claim controller.
+	// nil falls back to the legacy jobs.ReserveStart cap for background tasks.
+	scheduler *SubagentScheduler
+	// profileLookup resolves profile= names from the live Skill store without
+	// embedding the name list in the tool schema (cache stability).
+	profileLookup ProfileLookup
+	// profileConfigModel/Effort look up persistent per-profile overrides
+	// (agent.subagent_models / subagent_efforts).
+	profileConfigModel  func(profile string) string
+	profileConfigEffort func(profile string) string
+	// bashSandboxEnforced reports whether OS sandbox can honour write roots
+	// for bash inside path-bound writer sub-agents.
+	bashSandboxEnforced func() bool
+	// recoveryGate is the shared Auto Guard boundary for
+	// this session (root + sub-agents). nil disables recovery in children.
+	recoveryGate RecoveryGate
+	// capabilityRuntime is the session-shared MCP Host/specs substrate. Each
+	// sub-agent gets its own use_capability frontend so ledger state stays
+	// isolated while connections reuse the parent Host.
+	capabilityRuntime *MCPCapabilityRuntime
+}
+
+// TaskToolOptions holds the construction parameters for a TaskTool.
+// Prefer NewTaskToolWithOptions for new call sites; the positional NewTaskTool
+// remains as a compatibility wrapper for one full iteration cycle.
+type TaskToolOptions struct {
+	Provider            provider.Provider
+	Pricing             *provider.Pricing
+	ParentRegistry      *tool.Registry
+	MaxSteps            int
+	ContextWindow       int
+	RecentKeep          int
+	SoftCompactRatio    float64
+	ToolResultSnipRatio float64
+	CompactRatio        float64
+	CompactForceRatio   float64
+	Temperature         float64
+	ArchiveDir          string
+	SysPrompt           string
+	Gate                Gate
+	KeepPolicy          KeepPolicy
+	SubagentModel       string
+	SubagentEffort      string
+	ResolveProvider     func(string, string) (provider.Provider, *provider.Pricing, int, error)
+}
+
+// NewTaskToolWithOptions is the internal standard constructor for TaskTool.
+// An empty SysPrompt still resolves to DefaultTaskSystemPrompt. No extra
+// validation or default overrides are applied beyond the historical NewTaskTool
+// behavior.
+func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
+	sysPrompt := opts.SysPrompt
+	if sysPrompt == "" {
+		sysPrompt = DefaultTaskSystemPrompt
+	}
+	return &TaskTool{
+		prov:                opts.Provider,
+		pricing:             opts.Pricing,
+		parentReg:           opts.ParentRegistry,
+		maxSteps:            opts.MaxSteps,
+		contextWindow:       opts.ContextWindow,
+		recentKeep:          opts.RecentKeep,
+		softCompactRatio:    opts.SoftCompactRatio,
+		toolResultSnipRatio: opts.ToolResultSnipRatio,
+		compactRatio:        opts.CompactRatio,
+		compactForceRatio:   opts.CompactForceRatio,
+		temperature:         opts.Temperature,
+		archiveDir:          opts.ArchiveDir,
+		keepPolicy:          opts.KeepPolicy,
+		sysPrompt:           sysPrompt,
+		gate:                opts.Gate,
+		subagentModel:       opts.SubagentModel,
+		subagentEffort:      opts.SubagentEffort,
+		resolveProvider:     opts.ResolveProvider,
+		maxSubagentDepth:    DefaultMaxSubagentDepth,
+	}
 }
 
 // NewTaskTool wires a task tool to the parent agent's environment so its
@@ -207,33 +336,32 @@ type TaskTool struct {
 // is the permission gate sub-agents inherit — pass the headless variant so
 // deny rules still bite while autonomous sub-agents are never blocked on an
 // interactive prompt (there is no UI to answer one).
+//
+// Compatibility wrapper: new call sites should prefer NewTaskToolWithOptions.
+// The positional form is kept for at least one full iteration cycle.
 func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *tool.Registry,
 	maxSteps, contextWindow, recentKeep int, softCompactRatio, toolResultSnipRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
 	keepPolicy KeepPolicy, subagentModel, subagentEffort string, resolveProvider func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
-	if sysPrompt == "" {
-		sysPrompt = DefaultTaskSystemPrompt
-	}
-	return &TaskTool{
-		prov:                prov,
-		pricing:             pricing,
-		parentReg:           parentReg,
-		maxSteps:            maxSteps,
-		contextWindow:       contextWindow,
-		recentKeep:          recentKeep,
-		softCompactRatio:    softCompactRatio,
-		toolResultSnipRatio: toolResultSnipRatio,
-		compactRatio:        compactRatio,
-		compactForceRatio:   compactForceRatio,
-		temperature:         temperature,
-		archiveDir:          archiveDir,
-		keepPolicy:          keepPolicy,
-		sysPrompt:           sysPrompt,
-		gate:                gate,
-		subagentModel:       subagentModel,
-		subagentEffort:      subagentEffort,
-		resolveProvider:     resolveProvider,
-		maxSubagentDepth:    DefaultMaxSubagentDepth,
-	}
+	return NewTaskToolWithOptions(TaskToolOptions{
+		Provider:            prov,
+		Pricing:             pricing,
+		ParentRegistry:      parentReg,
+		MaxSteps:            maxSteps,
+		ContextWindow:       contextWindow,
+		RecentKeep:          recentKeep,
+		SoftCompactRatio:    softCompactRatio,
+		ToolResultSnipRatio: toolResultSnipRatio,
+		CompactRatio:        compactRatio,
+		CompactForceRatio:   compactForceRatio,
+		Temperature:         temperature,
+		ArchiveDir:          archiveDir,
+		SysPrompt:           sysPrompt,
+		Gate:                gate,
+		KeepPolicy:          keepPolicy,
+		SubagentModel:       subagentModel,
+		SubagentEffort:      subagentEffort,
+		ResolveProvider:     resolveProvider,
+	})
 }
 
 // WithTranscripts enables persisted sub-agent transcript continuation for this
@@ -257,10 +385,73 @@ func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 	return t
 }
 
+// WithDeliveryProfile propagates the parent's runtime delivery contract into
+// writer-capable sub-agents. Read-only sub-agents may receive the flag too, but
+// the mutation gate remains dormant for them.
+func (t *TaskTool) WithDeliveryProfile(enabled bool) *TaskTool {
+	t.deliveryProfile = enabled
+	return t
+}
+
+// WithWorkspaceLease shares the parent's workspace-wide delivery write lease
+// with every spawned sub-agent. A shared owner is required: independent owners
+// in one session would deadlock when a child tries to write while its parent
+// already retains the lease.
+func (t *TaskTool) WithWorkspaceLease(owner *workspacelease.Owner) *TaskTool {
+	t.workspaceLease = owner
+	return t
+}
+
+// WithScheduler attaches the session-scoped concurrency and write-claim
+// controller used by task, fleet, parallel_tasks, and profile skill runners.
+func (t *TaskTool) WithScheduler(s *SubagentScheduler) *TaskTool {
+	t.scheduler = s
+	return t
+}
+
+// Scheduler returns the attached session scheduler (may be nil in unit tests).
+func (t *TaskTool) Scheduler() *SubagentScheduler {
+	if t == nil {
+		return nil
+	}
+	return t.scheduler
+}
+
+// WithProfileLookup enables task/fleet profile= resolution from the Skill store.
+func (t *TaskTool) WithProfileLookup(lookup ProfileLookup) *TaskTool {
+	t.profileLookup = lookup
+	return t
+}
+
+// WithProfileConfigResolvers supplies persistent per-profile model/effort
+// overrides (agent.subagent_models / subagent_efforts).
+func (t *TaskTool) WithProfileConfigResolvers(model, effort func(profile string) string) *TaskTool {
+	t.profileConfigModel = model
+	t.profileConfigEffort = effort
+	return t
+}
+
+// WithBashSandboxEnforced tells path-bound writer runs whether bash can keep
+// the same write roots under the OS sandbox.
+func (t *TaskTool) WithBashSandboxEnforced(fn func() bool) *TaskTool {
+	t.bashSandboxEnforced = fn
+	return t
+}
+
+// WithCapabilityRuntime attaches the session-shared MCP runtime so ordinary and
+// read-only sub-agents receive a stable use_capability frontend without
+// inheriting dynamic mcp__* schemas.
+func (t *TaskTool) WithCapabilityRuntime(rt *MCPCapabilityRuntime) *TaskTool {
+	if t != nil {
+		t.capabilityRuntime = rt
+	}
+	return t
+}
+
 func (t *TaskTool) Name() string { return "task" }
 
 func (t *TaskTool) Description() string {
-	return "Spawn a sub-agent for a focused sub-task. The sub-agent runs in its own session with the same provider and a filtered tool list (defaults to every parent tool, then applies the subagent boundary: " + subagentToolBoundarySummary + "). Only its final answer is returned. Use this to (a) keep long exploration sequences out of the parent's context budget, or (b) delegate self-contained work like 'find every place that calls X and summarise the patterns'."
+	return "Spawn a sub-agent for a focused sub-task. Optional profile selects a runAs=subagent Skill whose body becomes the full system prompt (no implicit concise default). Optional write_paths declare non-overlapping write targets so background writers may run in parallel; omitting write_paths on a writer claims the whole workspace and serializes writers. The sub-agent runs in its own session with a filtered tool list (defaults to every parent tool, then applies the subagent boundary: " + subagentToolBoundarySummary + "). Only its final answer is returned."
 }
 
 func (t *TaskTool) Schema() json.RawMessage {
@@ -269,11 +460,13 @@ func (t *TaskTool) Schema() json.RawMessage {
 "properties":{
   "prompt":{"type":"string","description":"What the sub-agent should accomplish. Be specific about the deliverable — the sub-agent does not see this conversation."},
   "description":{"type":"string","description":"Short label for the sub-task (3-7 words). Surfaced in the dispatch line so the user sees what's running."},
-  "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. ` + subagentToolBoundarySummary + `"},
+  "profile":{"type":"string","description":"Optional runAs=subagent profile name. Resolved at runtime from the Skill store; explicit names may invoke invocation=manual profiles. The profile body becomes the full system prompt."},
+  "write_paths":{"type":"array","items":{"type":"string"},"description":"Optional workspace-relative or absolute file/directory paths this writer may modify. Globs and workspace escapes are rejected. Writers without write_paths claim the whole workspace (serializing against every other writer claim). Non-overlapping paths allow parallel writers up to max_parallel_writers. In fleet, multiple whole-workspace claims fail preflight before any task starts."},
+  "tools":{"type":"array","items":{"type":"string"},"description":"Optional tool whitelist. When profile sets allowed-tools, this list is intersected (call args cannot expand profile permissions). ` + subagentToolBoundarySummary + `"},
   "max_steps":{"type":"integer","description":"Optional cap on tool-call rounds. Defaults to half the parent's cap (min 5).","minimum":1},
   "run_in_background":{"type":"boolean","description":"Run the sub-agent asynchronously: returns a job id immediately and keeps working across turns. Collect its final answer with wait, and you'll be notified when it finishes. Use for long, independent sub-tasks you don't need to block on right now."},
-  "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name)."},
-  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max)."},
+  "model":{"type":"string","description":"Optional model override for the sub-agent (a configured provider/model name). Precedence: persistent profile config, this argument, profile frontmatter, global subagent default, parent model."},
+  "effort":{"type":"string","description":"Optional reasoning effort for the sub-agent (e.g. high, max). Same precedence as model."},
   "continue_from":{"type":"string","description":"Continue a prior compatible subagent transcript in the current conversation context. Pass only the 'sa_...' value from the prior result's 'Subagent reference: ...' line. If the ref belongs to an ancestor conversation, the framework continues a current-conversation copy."}
 },
 "required":["prompt"]
@@ -285,16 +478,37 @@ func (t *TaskTool) Schema() json.RawMessage {
 // running two sub-agents at once and letting their writes race.
 func (t *TaskTool) ReadOnly() bool { return false }
 
-// ResolveProfile extracts model/effort from task args and applies config defaults.
+// ResolveProfile extracts model/effort from task args (and optional profile
+// overrides) for dispatch-line display. Runtime execution re-resolves with the
+// full precedence chain.
 func (t *TaskTool) ResolveProfile(args json.RawMessage) *event.Profile {
 	var p struct {
-		Model  string `json:"model"`
-		Effort string `json:"effort"`
+		Model   string `json:"model"`
+		Effort  string `json:"effort"`
+		Profile string `json:"profile"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return nil
 	}
-	model, effort := t.effectiveProfile(p.Model, p.Effort)
+	profileModel, profileEffort := "", ""
+	configModel, configEffort := "", ""
+	if name := strings.TrimSpace(p.Profile); name != "" {
+		if def, err := ResolveProfileDefinition(t.profileLookup, name); err == nil {
+			profileModel, profileEffort = def.Model, def.Effort
+		}
+		if t.profileConfigModel != nil {
+			configModel = t.profileConfigModel(name)
+		}
+		if t.profileConfigEffort != nil {
+			configEffort = t.profileConfigEffort(name)
+		}
+	}
+	model, effort := ResolveModelEffort(
+		configModel, configEffort,
+		p.Model, p.Effort,
+		profileModel, profileEffort,
+		t.subagentModel, t.subagentEffort,
+	)
 	if model == "" && effort == "" {
 		return nil
 	}
@@ -315,7 +529,7 @@ func NewReadOnlyTaskTool(task *TaskTool) *ReadOnlyTaskTool {
 func (*ReadOnlyTaskTool) Name() string { return "read_only_task" }
 
 func (*ReadOnlyTaskTool) Description() string {
-	return "Spawn a read-only research sub-agent for a focused investigation. The sub-agent runs in an isolated, ephemeral session with read-only tools only; bash is wrapped to allow only plan-mode safe foreground commands. It cannot write files, install capabilities, mutate memory, run background jobs, continue/fork transcripts, or delegate to writer-capable agents. Read-only nested delegation may be available until max_subagent_depth is reached. Only its final answer is returned."
+	return "Spawn a read-only research sub-agent for a focused investigation. The sub-agent runs in an isolated, ephemeral session with read-only tools only; bash is wrapped to allow only permission-classified foreground read-only commands. It cannot write files, install capabilities, mutate memory, run background jobs, continue/fork transcripts, or delegate to writer-capable agents. Read-only nested delegation may be available until max_subagent_depth is reached. Only its final answer is returned."
 }
 
 func (*ReadOnlyTaskTool) Schema() json.RawMessage {
@@ -366,19 +580,25 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	maxSteps := p.MaxSteps
-	if maxSteps <= 0 && r.task.maxSteps > 0 {
-		maxSteps = r.task.maxSteps / 2
-		if maxSteps < 5 {
-			maxSteps = 5
-		}
+	// Ordinary read_only_task keeps the concise default system prompt and does
+	// not accept profile/write_paths (use fleet with read_only for those).
+	releaseSlot, err := r.task.acquireSlot(ctx, AcquireRequest{
+		Writer: false,
+		Nested: SubagentDepth(ctx) > 0,
+		Label:  firstNonEmpty(p.Description, "read_only_task"),
+	})
+	if err != nil {
+		return "", err
 	}
+	defer releaseSlot()
+
+	maxSteps := r.task.childMaxSteps(p.MaxSteps)
 
 	childDepth, err := r.task.nextSubagentDepth(ctx)
 	if err != nil {
 		return "", err
 	}
-	subReg := ReadOnlySubagentToolRegistryForDepth(r.task.parentReg, p.Tools, childDepth, r.task.maxDepth())
+	subReg := ReadOnlySubagentToolRegistryForDepthWithRuntime(r.task.parentReg, p.Tools, childDepth, r.task.maxDepth(), r.task.capabilityRuntime)
 	if subReg.Len() == 0 {
 		return "", fmt.Errorf("read_only_task has no read-only tools available")
 	}
@@ -387,7 +607,32 @@ func (r *ReadOnlyTaskTool) Execute(ctx context.Context, args json.RawMessage) (s
 	if err != nil {
 		return "", fmt.Errorf("read-only sub-agent profile: %w", err)
 	}
-	return r.task.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth)
+	answer, err := r.task.runReadOnlySubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, NewSession(DefaultReadOnlyTaskSystemPrompt), childDepth, subagentRecoveryTaskID(ctx, ""))
+	if err != nil {
+		return "", err
+	}
+	return GuardSubagentHostDecisionText(answer), nil
+}
+
+// childMaxSteps resolves a sub-agent's step budget. An explicit request wins.
+// Otherwise mirror the parent: a finite parent caps the child at half its
+// budget (min 5) so a delegated sub-task stays shorter than the whole turn; an
+// unbounded parent yields an unbounded child (it shares the parent's ctx, so
+// cancelling the turn stops it, and it compacts its own context — the same
+// bounds the parent has). Shared by task, read_only_task, and parallel_tasks
+// children so the default cannot drift per call site.
+func (t *TaskTool) childMaxSteps(requested int) int {
+	if requested > 0 {
+		return requested
+	}
+	if t.maxSteps <= 0 {
+		return 0
+	}
+	half := t.maxSteps / 2
+	if half < 5 {
+		half = 5
+	}
+	return half
 }
 
 func (t *TaskTool) effectiveProfile(model, effort string) (string, string) {
@@ -406,6 +651,8 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	var p struct {
 		Prompt          string   `json:"prompt"`
 		Description     string   `json:"description"`
+		Profile         string   `json:"profile"`
+		WritePaths      []string `json:"write_paths"`
 		Tools           []string `json:"tools"`
 		MaxSteps        int      `json:"max_steps"`
 		RunInBackground bool     `json:"run_in_background"`
@@ -417,33 +664,155 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
-	if p.Prompt == "" {
+	if strings.TrimSpace(p.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	maxSteps := p.MaxSteps
-	if maxSteps <= 0 {
-		// No explicit cap from the caller: mirror the parent. A finite parent caps
-		// the sub-agent at half its budget (min 5) so a delegated sub-task stays
-		// shorter than the whole turn; an unbounded parent yields an unbounded
-		// sub-agent. The sub-agent shares the parent's ctx, so cancelling the turn
-		// stops it, and it compacts its own context — the same bounds the parent has.
-		if t.maxSteps > 0 {
-			maxSteps = t.maxSteps / 2
-			if maxSteps < 5 {
-				maxSteps = 5
-			}
+	spec, err := t.buildTaskSpec(ctx, p.Prompt, p.Description, p.Profile, p.WritePaths, p.Tools, p.MaxSteps, p.Model, p.Effort, p.ContinueFrom, p.ForkFrom, p.RunInBackground, false)
+	if err != nil {
+		return "", err
+	}
+	return t.RunProfileSpec(ctx, spec)
+}
+
+// buildTaskSpec resolves profile, tools, model/effort, and write claims for a
+// single task/fleet item. forceReadOnly forces the read-only registry.
+func (t *TaskTool) buildTaskSpec(ctx context.Context, prompt, description, profile string, writePaths, tools []string, maxSteps int, model, effort, continueFrom, forkFrom string, background, forceReadOnly bool) (ProfileExecSpec, error) {
+	spec := ProfileExecSpec{
+		Kind:            "task",
+		Name:            "task",
+		Prompt:          prompt,
+		Description:     description,
+		CallTools:       tools,
+		MaxSteps:        maxSteps,
+		ContinueFrom:    strings.TrimSpace(continueFrom),
+		ForkFrom:        strings.TrimSpace(forkFrom),
+		RunInBackground: background,
+		Nested:          SubagentDepth(ctx) > 0,
+		SystemPrompt:    t.sysPrompt,
+	}
+	profile = strings.TrimSpace(profile)
+	readOnly := forceReadOnly
+	var profileTools []string
+	var profileModel, profileEffort string
+	if profile != "" {
+		def, err := ResolveProfileDefinition(t.profileLookup, profile)
+		if err != nil {
+			return ProfileExecSpec{}, err
+		}
+		spec.Profile = def.Name
+		spec.Name = def.Name
+		spec.Kind = "skill"
+		spec.SystemPrompt = def.Body
+		spec.UseProfilePrompt = true
+		profileTools = def.AllowedTools
+		profileModel, profileEffort = def.Model, def.Effort
+		if def.ReadOnly {
+			readOnly = true
 		}
 	}
+	spec.ReadOnly = readOnly
+	spec.ProfileTools = profileTools
 
+	configModel, configEffort := "", ""
+	if profile != "" {
+		if t.profileConfigModel != nil {
+			configModel = t.profileConfigModel(profile)
+		}
+		if t.profileConfigEffort != nil {
+			configEffort = t.profileConfigEffort(profile)
+		}
+	}
+	spec.Model, spec.Effort = ResolveModelEffort(
+		configModel, configEffort,
+		model, effort,
+		profileModel, profileEffort,
+		t.subagentModel, t.subagentEffort,
+	)
+
+	if !readOnly {
+		// Every writer carries a claim. Omitting write_paths conservatively claims
+		// the whole workspace, including foreground task calls, so they cannot
+		// bypass an already-running background/fleet writer claim. Direct legacy
+		// TaskTool constructions without a workspace/scheduler keep their old
+		// no-claim behavior; production boot always configures both.
+		requireClaim := t.scheduler != nil || strings.TrimSpace(t.workspaceRoot) != "" || background || len(writePaths) > 0
+		claims, err := t.resolveWriterClaims(writePaths, requireClaim)
+		if err != nil {
+			return ProfileExecSpec{}, err
+		}
+		spec.WritePaths = claims
+		if requireClaim && claims.Empty() {
+			return ProfileExecSpec{}, fmt.Errorf("writer claim resolved empty")
+		}
+	} else if len(writePaths) > 0 {
+		return ProfileExecSpec{}, fmt.Errorf("write_paths is not valid for read-only tasks")
+	}
+	return spec, nil
+}
+
+func (t *TaskTool) resolveWriterClaims(writePaths []string, requireClaim bool) (WritePathSet, error) {
+	if len(writePaths) > 0 {
+		return NormalizeWritePaths(t.workspaceRoot, writePaths)
+	}
+	if !requireClaim {
+		return WritePathSet{}, nil
+	}
+	return WholeWorkspaceWriteClaim(t.workspaceRoot)
+}
+
+// RunProfileSpec executes a unified profile/task specification. Shared by task,
+// fleet items, and boot-wired skill runners so prompt, tools, claims, and
+// scheduling cannot drift across entry points.
+func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (string, error) {
+	if t == nil {
+		return "", fmt.Errorf("task tool is not configured")
+	}
+	if strings.TrimSpace(spec.Prompt) == "" {
+		return "", fmt.Errorf("prompt is required")
+	}
+	if strings.TrimSpace(spec.SystemPrompt) == "" {
+		if spec.UseProfilePrompt {
+			return "", fmt.Errorf("profile system prompt is empty")
+		}
+		spec.SystemPrompt = t.sysPrompt
+	}
+
+	maxSteps := t.childMaxSteps(spec.MaxSteps)
 	childDepth, err := t.nextSubagentDepth(ctx)
 	if err != nil {
 		return "", err
 	}
-	subReg := t.buildSubReg(p.Tools, childDepth)
-	modelRef, effortRef := t.effectiveProfile(p.Model, p.Effort)
+
+	toolNames, err := IntersectToolLists(t.parentReg, spec.ProfileTools, spec.CallTools)
+	if err != nil {
+		return "", err
+	}
+	var subReg *tool.Registry
+	if spec.ReadOnly {
+		subReg = ReadOnlySubagentToolRegistryForDepthWithRuntime(t.parentReg, toolNames, childDepth, t.maxDepth(), t.capabilityRuntime)
+		if subReg.Len() == 0 {
+			return "", fmt.Errorf("no read-only tools available for this sub-agent")
+		}
+	} else {
+		subReg = t.buildSubReg(toolNames, childDepth)
+		// Explicit paths are an execution boundary and rebind/drop tools that
+		// cannot honor it. A synthesized whole-workspace claim is a scheduling
+		// boundary for omitted write_paths; it preserves the legacy registry and
+		// the parent session's existing sandbox/permission boundaries.
+		if !spec.WritePaths.Empty() && !spec.WritePaths.WholeWorkspace {
+			keepBash := t.bashCanEnforceWriteRoots()
+			bound, removed := BindWritePaths(subReg, spec.WritePaths, t.workspaceRoot, keepBash)
+			subReg = bound
+			if len(removed) > 0 && subReg.Len() == 0 {
+				return "", fmt.Errorf("no path-bound write tools available after dropping unbound writers: %s", strings.Join(removed, ", "))
+			}
+		}
+	}
+
+	modelRef, effortRef := spec.Model, spec.Effort
 	parentID, parent, _, _ := CallContext(ctx)
-	run, err := t.prepareTranscriptRun(subReg, modelRef, effortRef, ParentSession(ctx), parentID, p.ContinueFrom, p.ForkFrom)
+	run, err := t.prepareTranscriptRunWithPrompt(subReg, modelRef, effortRef, ParentSession(ctx), parentID, spec.ContinueFrom, spec.ForkFrom, spec.SystemPrompt, spec.Kind, spec.Name)
 	if err != nil {
 		return "", err
 	}
@@ -453,31 +822,73 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", fmt.Errorf("sub-agent profile: %w", err)
 	}
 
-	// Background: register a job that runs the sub-agent under the manager's
-	// session context (so it survives this turn) and return immediately. The
-	// sub-agent's tool activity still streams, nested under this call, because the
-	// nested sink captures the parent ID + stream now (not from the job ctx).
-	if p.RunInBackground {
+	isWriter := !spec.ReadOnly
+	acquireReq := AcquireRequest{
+		Writer:     isWriter,
+		WritePaths: spec.WritePaths,
+		Nested:     spec.Nested,
+		Label:      firstNonEmpty(spec.Description, spec.Name, "task"),
+	}
+	// Defensive fallback for callers that manually construct a background spec
+	// instead of going through buildTaskSpec.
+	if isWriter && spec.WritePaths.Empty() && spec.RunInBackground {
+		whole, werr := WholeWorkspaceWriteClaim(t.workspaceRoot)
+		if werr != nil {
+			run.Release()
+			return "", werr
+		}
+		acquireReq.WritePaths = whole
+		spec.WritePaths = whole
+	}
+
+	runSession := func(runCtx context.Context, sink event.Sink) (string, error) {
+		recoveryTaskID := subagentRecoveryTaskID(runCtx, run.Ref)
+		if spec.ReadOnly {
+			return t.runReadOnlySubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID)
+		}
+		return t.runSubSession(runCtx, spec.Prompt, subReg, sink, maxSteps, prov, pricing, ctxWin, run.Session, childDepth, recoveryTaskID)
+	}
+
+	if spec.RunInBackground {
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
-			if run != nil {
-				run.Release()
-			}
+			run.Release()
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
-		nested := subSinkFor(parentID, parent)
-		label := p.Description
-		if label == "" {
-			label = "task"
+		// Legacy hard-cap remains only when no scheduler is attached. With a
+		// scheduler, return the job immediately and queue for a slot inside the
+		// job so the parent turn is not blocked at concurrency limits.
+		var releaseStart func()
+		if t.scheduler == nil {
+			var running int
+			var okReserve bool
+			releaseStart, running, okReserve = jm.ReserveStartForSession(jobs.SessionFromContext(ctx), "task", maxConcurrentBackgroundTasks)
+			if !okReserve {
+				run.Release()
+				return "", fmt.Errorf("%d background tasks are already running for this session (limit %d); collect their results with wait — or run this sub-task in the foreground — before starting more", running, maxConcurrentBackgroundTasks)
+			}
+			defer releaseStart()
+		} else {
+			releaseStart = func() {}
 		}
+		nested := subSinkFor(parentID, parent)
+		label := firstNonEmpty(spec.Description, spec.Name, "task")
 		if t.transcripts != nil && run != nil && run.Ref != "" {
 			if err := t.transcripts.MarkRunning(run); err != nil {
+				releaseStart()
 				run.Release()
 				return "", err
 			}
 		}
+		parentSession := ParentSession(ctx)
+		backgroundEvidence := evidence.NewLedger()
+		// Capture acquire request by value for the job goroutine.
+		slotReq := acquireReq
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "task", label, func(jobCtx context.Context, _ io.Writer) (result string, err error) {
+			jobCtx = WithParentSession(jobCtx, parentSession)
+			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer run.Release()
+			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
 			defer func() {
 				if r := recover(); r != nil {
 					panicErr := fmt.Errorf("internal error: panic: %v\n%s", r, debug.Stack())
@@ -485,7 +896,14 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 					err = errors.Join(panicErr, t.transcripts.SaveFailed(run))
 				}
 			}()
-			answer, err := t.runSubSession(jobCtx, p.Prompt, subReg, nested, maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
+			// Queue for a concurrency/write slot here — not before Start —
+			// so the parent tool call returns a job id immediately.
+			releaseSlot, slotErr := t.acquireSlot(jobCtx, slotReq)
+			if slotErr != nil {
+				return FormatSubagentRunResult("", run, true), errors.Join(slotErr, t.transcripts.SaveFailed(run))
+			}
+			defer releaseSlot()
+			answer, err := runSession(jobCtx, nested)
 			if err != nil {
 				return FormatSubagentRunResult("", run, true), errors.Join(err, t.transcripts.SaveFailed(run))
 			}
@@ -494,15 +912,26 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 			}
 			return FormatSubagentRunResult(answer, run, false), nil
 		})
-		if run != nil && run.Ref != "" {
-			return fmt.Sprintf("Started background task %q (%s).\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, FormatSubagentReference(run)), nil
+		releaseStart()
+		queuedNote := ""
+		if t.scheduler != nil {
+			queuedNote = " It may wait in the session queue until a concurrency/write slot is free."
 		}
-		return fmt.Sprintf("Started background task %q (%s). It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label), nil
+		if run != nil && run.Ref != "" {
+			return fmt.Sprintf("Started background task %q (%s).%s\n%s\nIt runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, queuedNote, FormatSubagentReference(run)), nil
+		}
+		return fmt.Sprintf("Started background task %q (%s).%s It runs across turns; collect its final answer with wait (or wait will return it once done), and you'll be notified when it finishes.", job.ID, label, queuedNote), nil
 	}
 
-	// Foreground: run synchronously, nesting events under this call.
+	// Foreground: acquire a slot (queue if needed), then run synchronously.
+	releaseSlot, err := t.acquireSlot(ctx, acquireReq)
+	if err != nil {
+		run.Release()
+		return "", err
+	}
+	defer releaseSlot()
 	defer run.Release()
-	answer, err := t.runSubSession(ctx, p.Prompt, subReg, subSink(ctx), maxSteps, prov, pricing, ctxWin, run.Session, childDepth)
+	answer, err := runSession(ctx, subSink(ctx))
 	if err != nil {
 		return "", errors.Join(err, t.transcripts.SaveFailed(run))
 	}
@@ -512,10 +941,25 @@ func (t *TaskTool) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 		return FormatSubagentRunResult(answer, run, false), nil
 	}
-	return answer, nil
+	return GuardSubagentHostDecisionText(answer), nil
 }
 
-func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom string) (*SubagentRun, error) {
+func (t *TaskTool) acquireSlot(ctx context.Context, req AcquireRequest) (func(), error) {
+	noop := func() {}
+	if t.scheduler == nil {
+		return noop, nil
+	}
+	return t.scheduler.Acquire(ctx, req)
+}
+
+func (t *TaskTool) bashCanEnforceWriteRoots() bool {
+	if t != nil && t.bashSandboxEnforced != nil {
+		return t.bashSandboxEnforced()
+	}
+	return false
+}
+
+func (t *TaskTool) prepareTranscriptRunWithPrompt(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string) (*SubagentRun, error) {
 	continueFrom = strings.TrimSpace(continueFrom)
 	legacyForkFrom = strings.TrimSpace(legacyForkFrom)
 	parentSession = strings.TrimSpace(parentSession)
@@ -525,24 +969,29 @@ func (t *TaskTool) prepareTranscriptRun(subReg *tool.Registry, modelRef, effortR
 	if t.transcripts == nil {
 		return nil, fmt.Errorf("subagent transcript store is required")
 	}
-	// Headless runs (e.g. `reasonix run`) never mint a session path, so there is
-	// no parent session to own a transcript. Run the sub-agent ephemerally —
-	// exactly as before persisted transcripts existed — instead of failing the
-	// call. Continuation/fork need a persisted owner, so they error here.
+	if systemPrompt == "" {
+		systemPrompt = t.sysPrompt
+	}
+	if kind == "" {
+		kind = "task"
+	}
+	if name == "" {
+		name = "task"
+	}
 	if parentSession == "" {
 		if continueFrom != "" || legacyForkFrom != "" {
 			return nil, fmt.Errorf("subagent continuation requires a persisted session; none is active in this run")
 		}
-		return EphemeralSubagentRun(t.sysPrompt), nil
+		return EphemeralSubagentRun(systemPrompt), nil
 	}
 	identityModel, identityEffort := t.effectiveIdentity(modelRef, effortRef)
 	spec := SubagentSpec{
-		Kind:             "task",
-		Name:             "task",
+		Kind:             kind,
+		Name:             name,
 		WorkspaceRoot:    t.workspaceRoot,
 		ParentSession:    parentSession,
 		ParentToolCallID: parentID,
-		SystemPrompt:     t.sysPrompt,
+		SystemPrompt:     systemPrompt,
 		Registry:         subReg,
 		Model:            identityModel,
 		Effort:           identityEffort,
@@ -581,7 +1030,7 @@ func (t *TaskTool) effectiveEffortIdentity(effort string) string {
 // buildSubReg returns the sub-agent's tool set: the named whitelist (minus
 // unavailable sub-agent tools), or every parent tool except those tools.
 func (t *TaskTool) buildSubReg(names []string, childDepth int) *tool.Registry {
-	return SubagentToolRegistryForDepth(t.parentReg, names, childDepth, t.maxDepth())
+	return SubagentToolRegistryForDepthWithRuntime(t.parentReg, names, childDepth, t.maxDepth(), t.capabilityRuntime)
 }
 
 func (t *TaskTool) maxDepth() int {
@@ -608,6 +1057,8 @@ func (t *TaskTool) nextSubagentDepth(ctx context.Context) (int, error) {
 // every parent tool), minus any excluded names. Used to scope what a spawned
 // sub-agent — a `task` sub-agent or a subagent skill — may call, e.g. excluding
 // `task` to bar recursive nesting, or restricting to a skill's allowed-tools.
+// Direct MCP tools may be copied here; callers that need a stable MCP surface
+// should strip them and attach use_capability via attachSubagentCapabilityProxy.
 func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *tool.Registry {
 	sub := tool.NewRegistry()
 	if parent == nil {
@@ -617,19 +1068,330 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 	for _, e := range exclude {
 		ex[e] = true
 	}
+	customAllowlist := len(names) > 0
 	src := names
-	if len(src) == 0 {
+	if !customAllowlist {
 		src = parent.Names()
+	} else {
+		src = expandToolPatterns(parent, src)
 	}
 	for _, name := range src {
 		if ex[name] {
 			continue
 		}
-		if tl, ok := parent.Get(name); ok {
-			sub.Add(tl)
+		// MCP never enters through the generic filter when named as capability
+		// ids; model-visible mcp__* may still be listed for conversion later.
+		if strings.HasPrefix(name, "mcp-tool:") || strings.HasPrefix(name, "mcp-server:") {
+			continue
 		}
+		tl, ok := parent.Get(name)
+		if !ok {
+			continue
+		}
+		sub.Add(tl)
 	}
 	return sub
+}
+
+// stripDirectMCPTools removes provider-visible mcp__* tools so sub-agents use
+// only the stable use_capability proxy for MCP.
+func stripDirectMCPTools(reg *tool.Registry) {
+	if reg == nil {
+		return
+	}
+	for _, name := range append([]string(nil), reg.Names()...) {
+		if strings.HasPrefix(name, tool.MCPNamePrefix) {
+			reg.RemovePrefix(name)
+		}
+	}
+}
+
+// restrictedCapabilityProxy preserves a subagent allowed-tools boundary when
+// MCP is available only through use_capability. The pseudo mcp-tool: and
+// mcp-server: entries never become provider tools; they select one proxy schema
+// whose resolver rejects every capability outside the exact allowlist.
+//
+// Provider-visible name/description/schema stay identical to the unrestricted
+// proxy so allowlist expansion never changes the child cache prefix. Allowlist
+// enforcement is host-local (check + filtered list results).
+type restrictedCapabilityProxy struct {
+	tool.Tool
+	resolver tool.CallResolver
+	allowed  map[string]bool
+	// servers is the set of MCP server names implied by allowed IDs; list
+	// results are filtered to this set so profile isolation covers discovery.
+	servers map[string]bool
+}
+
+// Description is fixed: never embed dynamic capability IDs (they change with
+// MCP install/tool-list and would break the stable provider tool prefix).
+func (t *restrictedCapabilityProxy) Description() string {
+	return t.Tool.Description()
+}
+
+func (t *restrictedCapabilityProxy) check(args json.RawMessage) error {
+	var p struct {
+		Action       string `json:"action"`
+		CapabilityID string `json:"capability_id"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil {
+		return fmt.Errorf("invalid args: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(p.Action), "list") {
+		return nil
+	}
+	id := strings.TrimSpace(p.CapabilityID)
+	if id == "" {
+		return fmt.Errorf("capability_id is required")
+	}
+	if !t.allowed[id] {
+		return fmt.Errorf("capability %q is outside this subagent's allowed-tools", id)
+	}
+	return nil
+}
+
+func (t *restrictedCapabilityProxy) ResolveCall(ctx context.Context, args json.RawMessage) (tool.ResolvedCall, error) {
+	if err := t.check(args); err != nil {
+		return tool.ResolvedCall{}, err
+	}
+	rc, err := t.resolver.ResolveCall(ctx, args)
+	if err != nil {
+		return rc, err
+	}
+	var p struct {
+		Action string `json:"action"`
+	}
+	_ = json.Unmarshal(args, &p)
+	if strings.EqualFold(strings.TrimSpace(p.Action), "list") && rc.SkipExecute {
+		rc.Result = filterCapabilityListResult(rc.Result, t.servers)
+	}
+	return rc, nil
+}
+
+func (t *restrictedCapabilityProxy) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	if err := t.check(args); err != nil {
+		return "", err
+	}
+	out, err := t.Tool.Execute(ctx, args)
+	if err != nil {
+		return out, err
+	}
+	var p struct {
+		Action string `json:"action"`
+	}
+	_ = json.Unmarshal(args, &p)
+	if strings.EqualFold(strings.TrimSpace(p.Action), "list") {
+		return filterCapabilityListResult(out, t.servers), nil
+	}
+	return out, nil
+}
+
+// emptyCapabilityListResult is the fail-closed list payload: no server metadata.
+func emptyCapabilityListResult(note string) string {
+	if strings.TrimSpace(note) == "" {
+		note = "list is filtered to this subagent's allowed MCP servers."
+	}
+	b, err := json.MarshalIndent(map[string]any{
+		"servers": []listServerInfo{},
+		"note":    note,
+	}, "", "  ")
+	if err != nil {
+		return `{"servers":[],"note":"list is filtered to this subagent's allowed MCP servers."}`
+	}
+	return string(b)
+}
+
+// filterCapabilityListResult keeps only servers in the allowlist for restricted
+// proxies. Empty allowlist or unreadable payloads fail closed (empty server
+// list) so discovery never leaks the full configured MCP inventory.
+func filterCapabilityListResult(raw string, servers map[string]bool) string {
+	const baseNote = "list is filtered to this subagent's allowed MCP servers."
+	if len(servers) == 0 {
+		return emptyCapabilityListResult(baseNote + " No allowed MCP servers were resolved from the profile allowlist.")
+	}
+	var payload struct {
+		Servers []listServerInfo `json:"servers"`
+		Note    string           `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return emptyCapabilityListResult(baseNote + " List payload was unreadable; returning no servers (fail-closed).")
+	}
+	filtered := make([]listServerInfo, 0, len(payload.Servers))
+	for _, s := range payload.Servers {
+		if servers[strings.TrimSpace(s.Name)] {
+			filtered = append(filtered, s)
+		}
+	}
+	payload.Servers = filtered
+	if payload.Note == "" {
+		payload.Note = baseNote
+	} else if !strings.Contains(payload.Note, "Filtered to this subagent") {
+		payload.Note = payload.Note + " Filtered to this subagent's allowed MCP servers."
+	}
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return emptyCapabilityListResult(baseNote + " Failed to encode filtered list (fail-closed).")
+	}
+	return string(b)
+}
+
+// validMCPServerCapabilityID accepts mcp-server:<non-empty-name> only.
+func validMCPServerCapabilityID(id string) (server string, ok bool) {
+	if !strings.HasPrefix(id, "mcp-server:") {
+		return "", false
+	}
+	server = strings.TrimSpace(strings.TrimPrefix(id, "mcp-server:"))
+	// Reject empty and path-like fragments that are not bare server names.
+	return server, server != "" && !strings.Contains(server, "/")
+}
+
+// validMCPToolCapabilityID accepts mcp-tool:<server>/<tool> with both parts non-empty.
+func validMCPToolCapabilityID(id string) (server, raw string, ok bool) {
+	if !strings.HasPrefix(id, "mcp-tool:") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(id, "mcp-tool:")
+	server, raw, cut := strings.Cut(rest, "/")
+	server = strings.TrimSpace(server)
+	raw = strings.TrimSpace(raw)
+	return server, raw, cut && server != "" && raw != ""
+}
+
+func serversFromCapabilityAllowlist(allowed map[string]bool) map[string]bool {
+	servers := map[string]bool{}
+	for id := range allowed {
+		id = strings.TrimSpace(id)
+		if server, ok := validMCPServerCapabilityID(id); ok {
+			servers[server] = true
+			continue
+		}
+		if server, _, ok := validMCPToolCapabilityID(id); ok {
+			servers[server] = true
+		}
+	}
+	return servers
+}
+
+// attachSubagentCapabilityProxy installs a per-agent use_capability frontend.
+// Any parent-copied proxy is replaced so children never share Executor ledger
+// state. No allowlist → full proxy. Explicit allowlist with MCP names →
+// restricted proxy. Explicit "use_capability" → full proxy. Explicit allowlist
+// without MCP entries → no proxy.
+func attachSubagentCapabilityProxy(parent, sub *tool.Registry, names []string, runtime *MCPCapabilityRuntime) {
+	if sub == nil {
+		return
+	}
+	// Drop any provider-copied use_capability so we always install an isolated
+	// frontend (shared Host/runtime, independent ledger/audit).
+	if _, ok := sub.Get("use_capability"); ok {
+		sub.RemovePrefix("use_capability")
+	}
+	frontend := newSubagentCapabilityFrontend(parent, runtime)
+	if frontend == nil {
+		return
+	}
+	if len(names) == 0 || allowlistRequestsUnrestrictedProxy(names) {
+		sub.Add(frontend)
+		return
+	}
+	allowed := mcpCapabilityAllowlist(parent, names)
+	if len(allowed) == 0 {
+		// Custom allowlist with no valid MCP entries: do not expose the proxy.
+		return
+	}
+	servers := serversFromCapabilityAllowlist(allowed)
+	if len(servers) == 0 {
+		// Incomplete capability IDs produced an empty server set: fail closed
+		// rather than installing a restricted proxy that would list everything.
+		return
+	}
+	resolver, ok := frontend.(tool.CallResolver)
+	if !ok {
+		return
+	}
+	sub.Add(&restrictedCapabilityProxy{
+		Tool:     frontend,
+		resolver: resolver,
+		allowed:  allowed,
+		servers:  servers,
+	})
+}
+
+func newSubagentCapabilityFrontend(parent *tool.Registry, runtime *MCPCapabilityRuntime) tool.Tool {
+	if runtime != nil {
+		return runtime.NewFrontend(nil, nil)
+	}
+	if parent == nil {
+		return nil
+	}
+	inner, ok := parent.Get("use_capability")
+	if !ok {
+		return nil
+	}
+	if uc, ok := inner.(*UseCapabilityTool); ok {
+		return uc.CloneForAgent(nil, nil)
+	}
+	return inner
+}
+
+// mcpCapabilityAllowlist converts profile/call tool names into capability IDs
+// for the restricted use_capability proxy. Accepts complete mcp-tool:<s>/<t>,
+// mcp-server:<s>, model-visible mcp__* names, and wildcards expanded against
+// the parent. Incomplete prefixes such as "mcp-server:" or "mcp-tool:foo" are
+// rejected so they cannot install a restricted proxy with an empty server set.
+func mcpCapabilityAllowlist(parent *tool.Registry, names []string) map[string]bool {
+	if len(names) == 0 {
+		return nil
+	}
+	expanded := names
+	if parent != nil {
+		expanded = expandToolPatterns(parent, names)
+	}
+	allowed := map[string]bool{}
+	for _, name := range expanded {
+		name = strings.TrimSpace(name)
+		switch {
+		case name == "use_capability":
+			// Explicit proxy grant is handled as a full frontend by the caller
+			// when this is the only MCP-related entry; leave empty here so a
+			// bare use_capability allowlist entry still installs unrestricted.
+			continue
+		case strings.HasPrefix(name, "mcp-server:"):
+			if server, ok := validMCPServerCapabilityID(name); ok {
+				allowed["mcp-server:"+server] = true
+			}
+		case strings.HasPrefix(name, "mcp-tool:"):
+			if server, raw, ok := validMCPToolCapabilityID(name); ok {
+				allowed["mcp-tool:"+server+"/"+raw] = true
+			}
+		default:
+			if parent != nil {
+				if tl, ok := parent.Get(name); ok {
+					if m, ok := tl.(tool.MCPMetadata); ok {
+						server := strings.TrimSpace(m.MCPServerName())
+						raw := strings.TrimSpace(m.MCPRawToolName())
+						if server != "" && raw != "" {
+							allowed["mcp-tool:"+server+"/"+raw] = true
+							continue
+						}
+					}
+				}
+			}
+			if server, raw, ok := tool.SplitMCPName(name); ok {
+				allowed["mcp-tool:"+server+"/"+raw] = true
+			}
+		}
+	}
+	return allowed
+}
+
+func allowlistRequestsUnrestrictedProxy(names []string) bool {
+	for _, name := range names {
+		if strings.TrimSpace(name) == "use_capability" {
+			return true
+		}
+	}
+	return false
 }
 
 var plannerNonResearchTools = []string{
@@ -642,17 +1404,43 @@ var plannerNonResearchTools = []string{
 }
 
 // PlannerToolRegistry returns the tool set exposed to the two-model planner:
-// read-only research tools only. It deliberately excludes workflow/meta tools
-// that are technically read-only but can prompt the user, update visible task
-// state, wait on jobs, or expand commands instead of inspecting context.
+// built-in read-only research tools plus the stable use_capability proxy. Direct
+// mcp__* schemas are excluded so MCP connect/disconnect/tool-list churn never
+// changes the Planner provider-visible tool prefix. Workflow/meta tools that are
+// technically read-only but can prompt the user, update visible task state, wait
+// on jobs, or expand commands are also excluded.
 func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
 	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
-	return FilterReadOnlyRegistry(parent, exclude...)
+	base := FilterReadOnlyRegistry(parent, exclude...)
+	sub := tool.NewRegistry()
+	if base != nil {
+		for _, name := range base.Names() {
+			// Never copy the parent proxy or direct MCP: Delivery would share
+			// Executor ledger/audit; MCP schemas are proxy-only for the planner.
+			if name == "use_capability" || strings.HasPrefix(name, tool.MCPNamePrefix) {
+				continue
+			}
+			if tl, ok := base.Get(name); ok {
+				sub.Add(tl)
+			}
+		}
+	}
+	// Always install an isolated frontend (independent ledger/audit; shared Host).
+	if parent != nil {
+		if tl, ok := parent.Get("use_capability"); ok {
+			if uc, ok := tl.(*UseCapabilityTool); ok {
+				sub.Add(uc.CloneForAgent(nil, nil))
+			} else {
+				sub.Add(tl)
+			}
+		}
+	}
+	return sub
 }
 
 // ReadOnlySubagentToolRegistry returns the tool set exposed to read-only
 // sub-agents: read-only research tools plus a bash wrapper that enforces the
-// plan-mode safe command policy at execution time. Workflow/meta tools are
+// permission-layer read-only command policy at execution time. Workflow/meta tools are
 // excluded even when their Tool.ReadOnly contract is true.
 func ReadOnlySubagentToolRegistry(parent *tool.Registry, names []string) *tool.Registry {
 	return ReadOnlySubagentToolRegistryForDepth(parent, names, 1, 1)
@@ -660,8 +1448,21 @@ func ReadOnlySubagentToolRegistry(parent *tool.Registry, names []string) *tool.R
 
 // ReadOnlySubagentToolRegistryForDepth returns the tool set exposed to read-only
 // subagents. It permits only read-only delegation tools while another depth
-// layer is available.
+// layer is available. Direct mcp__* schemas are never exposed; MCP goes only
+// through use_capability. Dynamic execution still requires authorized server +
+// readOnlyHint + non-destructive (enforced by ReadOnlyExecution), so strict
+// agents share the stable proxy schema and connection reuse without permission
+// relaxation.
+//
+// Custom profile/call allowlists remain authoritative and convert MCP names
+// into a capability-id allowlist on a restricted proxy.
 func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string, childDepth, maxDepth int) *tool.Registry {
+	return ReadOnlySubagentToolRegistryForDepthWithRuntime(parent, names, childDepth, maxDepth, nil)
+}
+
+// ReadOnlySubagentToolRegistryForDepthWithRuntime is the read-only registry
+// builder with an optional session MCP runtime for proxy injection.
+func ReadOnlySubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []string, childDepth, maxDepth int, runtime *MCPCapabilityRuntime) *tool.Registry {
 	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
 	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
 		exclude = append(exclude, subagentRecursiveTools...)
@@ -682,9 +1483,14 @@ func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string,
 	src := names
 	if len(src) == 0 {
 		src = parent.Names()
+	} else {
+		src = expandToolPatterns(parent, src)
 	}
 	for _, name := range src {
 		if ex[name] {
+			continue
+		}
+		if strings.HasPrefix(name, "mcp-tool:") || strings.HasPrefix(name, "mcp-server:") {
 			continue
 		}
 		tl, ok := parent.Get(name)
@@ -695,21 +1501,52 @@ func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string,
 			sub.Add(readOnlyBash{inner: tl})
 			continue
 		}
-		if !tl.ReadOnly() {
+		// Direct MCP never enters the strict registry — use_capability only.
+		if isInstalledMCPTool(tl) || strings.HasPrefix(name, tool.MCPNamePrefix) {
 			continue
 		}
-		if u, ok := tl.(tool.PlanModeUntrustedReadOnly); ok && u.PlanModeUntrustedReadOnly() {
-			// An external tool's self-reported readOnlyHint isn't trusted for a
-			// read-only research sub-agent; exclude it like a writer.
+		if !tl.ReadOnly() {
 			continue
 		}
 		sub.Add(tl)
 	}
+	attachSubagentCapabilityProxy(parent, sub, names, runtime)
 	return sub
 }
 
+// expandToolPatterns resolves explicit wildcard allowlist entries from imported
+// agent profiles against the current registry. Expansion is deterministic and
+// session-local, so optional MCP tools only enter a child after connection.
+func expandToolPatterns(parent *tool.Registry, names []string) []string {
+	if parent == nil {
+		return nil
+	}
+	available := parent.Names()
+	seen := map[string]bool{}
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if !strings.ContainsAny(name, "*?[") {
+			if !seen[name] {
+				seen[name] = true
+				out = append(out, name)
+			}
+			continue
+		}
+		for _, candidate := range available {
+			matched, err := filepath.Match(name, candidate)
+			if err == nil && matched && !seen[candidate] {
+				seen[candidate] = true
+				out = append(out, candidate)
+			}
+		}
+	}
+	return out
+}
+
 // FilterReadOnlyRegistry builds a sub-registry containing only tools whose
-// ReadOnly contract is true, minus explicit exclusions.
+// ReadOnly contract is true, minus explicit exclusions. MCP tools must
+// additionally come from an authorized server and must not carry
+// destructiveHint.
 func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Registry {
 	ex := make(map[string]bool, len(exclude))
 	for _, e := range exclude {
@@ -727,7 +1564,7 @@ func FilterReadOnlyRegistry(parent *tool.Registry, exclude ...string) *tool.Regi
 		if !ok || !tl.ReadOnly() {
 			continue
 		}
-		if u, ok := tl.(tool.PlanModeUntrustedReadOnly); ok && u.PlanModeUntrustedReadOnly() {
+		if isInstalledMCPTool(tl) && (!mcpServerAuthorized(tl) || mcpDestructiveHint(tl)) {
 			continue
 		}
 		sub.Add(tl)
@@ -747,9 +1584,30 @@ func (t *TaskTool) resolveSubSessionRuntime(modelRef, effort string) (provider.P
 	return prov, pricing, ctxWin, nil
 }
 
-func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int) (string, error) {
+func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID string) (string, error) {
+	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID)
+	// Capture the pristine task before host framing is prepended: delivery
+	// intent classification must judge the task, not the wrapper.
+	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
-	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, Options{
+	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
+}
+
+func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, subReg *tool.Registry, sink event.Sink, maxSteps int, prov provider.Provider, pricing *provider.Pricing, ctxWin int, sess *Session, childDepth int, recoveryTaskID string) (string, error) {
+	opts := t.subagentOptions(ctx, maxSteps, pricing, ctxWin, childDepth, recoveryTaskID)
+	// Capture the pristine task before host framing is prepended: delivery
+	// intent classification must judge the task, not the wrapper.
+	opts.ClassifierTaskText = prompt
+	prompt = t.withWorkspaceContext(prompt)
+	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
+}
+
+// subagentOptions is the single construction point for the run options every
+// sub-agent spawned through this tool shares (task, read_only_task, and
+// parallel_tasks children). Compaction, language preferences, and depth limits
+// must stay uniform across those paths — add new fields here, not at call sites.
+func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *provider.Pricing, ctxWin, childDepth int, recoveryTaskID string) Options {
+	return Options{
 		MaxSteps:            maxSteps,
 		Temperature:         t.temperature,
 		Pricing:             pricing,
@@ -767,7 +1625,31 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 		ReasoningLanguage:   ReasoningLanguageFromContext(ctx),
 		SubagentDepth:       childDepth,
 		MaxSubagentDepth:    t.maxDepth(),
-	}, sink)
+		DeliveryProfile:     t.deliveryProfile,
+		WorkspaceLease:      t.workspaceLease,
+		RecoveryGate:        t.recoveryGate,
+		RecoveryAgentID:     "subagent",
+		RecoveryTaskID:      recoveryTaskID,
+	}
+}
+
+func subagentRecoveryTaskID(ctx context.Context, ref string) string {
+	if ref = strings.TrimSpace(ref); ref != "" {
+		return "subagent:" + ref
+	}
+	if callID, _, _, ok := CallContext(ctx); ok && strings.TrimSpace(callID) != "" {
+		return "subagent:" + strings.TrimSpace(callID)
+	}
+	return "subagent"
+}
+
+// WithRecoveryGate shares Auto Guard with spawned sub-agents.
+func (t *TaskTool) WithRecoveryGate(g RecoveryGate) *TaskTool {
+	if t == nil {
+		return nil
+	}
+	t.recoveryGate = g
+	return t
 }
 
 func (t *TaskTool) withWorkspaceContext(prompt string) string {
@@ -786,9 +1668,12 @@ func subagentWorkspaceContext(root string) string {
 	if root == "" {
 		return ""
 	}
+	// Wording note: avoid incidental action verbs ("resolve", "fix", …) in this
+	// host framing — it is prepended to every sub-agent prompt and must never
+	// read as task intent (see classifierTaskText, which also strips it).
 	return `<workspace-context event="SubagentWorkspace">
 Current workspace: ` + strconv.Quote(root) + `
-File tools resolve relative paths against this workspace. For project inspection, prefer "." or relative paths unless the user explicitly named another absolute path.
+File tools interpret relative paths against this workspace. For project inspection, prefer "." or relative paths unless the user explicitly named another absolute path.
 </workspace-context>`
 }
 
@@ -810,6 +1695,7 @@ func FormatSubagentReference(run *SubagentRun) string {
 }
 
 func FormatSubagentRunResult(answer string, run *SubagentRun, failed bool) string {
+	answer = GuardSubagentHostDecisionText(answer)
 	if run == nil || run.Ref == "" {
 		return answer
 	}
@@ -822,6 +1708,35 @@ func FormatSubagentRunResult(answer string, run *SubagentRun, failed bool) strin
 	return FormatSubagentReference(run) + "\n\nFinal answer:\n" + answer
 }
 
+// GuardSubagentHostDecisionText appends a fixed boundary warning only when a
+// child agent result appears to discuss host approval or user-owned decisions.
+// The implementation lives in internal/tool so the skill tools share the exact
+// same phrase list and notice.
+func GuardSubagentHostDecisionText(answer string) string {
+	return tool.GuardSubagentHostDecisionText(answer)
+}
+
+// maxReviewReportNudges bounds the in-session completion nudges sent to a
+// review subagent that finished without submitting review_report. Each nudge is
+// one cheap continuation request on the same (cached) subagent session — far
+// cheaper than discarding the run and re-reviewing from scratch.
+const maxReviewReportNudges = 2
+
+// reviewReportTaskContract is appended to the task prompt of a review subagent
+// whose run must end with a typed report. The skill body describes how to
+// review; this states the non-negotiable submission protocol.
+func reviewReportTaskContract(kind evidence.ReviewKind) string {
+	return fmt.Sprintf(`<review-report-contract event="SubagentReviewReport">
+Before your final answer you MUST call the review_report tool exactly once with kind=%q, your verdict (pass | warn | block), reviewed_paths listing only files you actually read this run, and your findings. The host discards a review run that ends without a successful review_report call — your prose summary alone does not count.
+</review-report-contract>`, string(kind))
+}
+
+// reviewReportNudgePrompt asks an already-finished review subagent to submit
+// the missing typed report without redoing the review.
+func reviewReportNudgePrompt(kind evidence.ReviewKind) string {
+	return fmt.Sprintf("You finished the review without calling the review_report tool, so the host cannot accept the run yet. Do not redo the review. Call review_report now with kind=%q, your verdict (pass | warn | block), reviewed_paths listing only the files you actually read in this conversation, and the findings you already reported. Then restate your final verdict in one sentence.", string(kind))
+}
+
 // RunSubAgentWithSession continues an existing sub-agent session with prompt and
 // returns the latest final assistant answer. Fresh sub-agents pass a newly-created
 // session; continued sub-agents pass a loaded transcript session.
@@ -832,23 +1747,262 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if opts.SubagentDepth > 0 {
 		ctx = WithSubagentDepth(ctx, opts.SubagentDepth)
 	}
+	// Callers that wrap the prompt themselves (runSubSession) set
+	// ClassifierTaskText before wrapping; for everyone else the prompt is
+	// still pristine here, so capture it before host framing is prepended.
+	if strings.TrimSpace(opts.ClassifierTaskText) == "" {
+		opts.ClassifierTaskText = prompt
+	}
+	planWorkflow := PlanModeFromContext(ctx)
 	if opts.SubagentDepth > 0 && isFreshSubagentSession(sess) {
 		prompt = subagentStartContext + "\n\n" + prompt
 	}
+	if planWorkflow && !strings.Contains(prompt, planmode.Marker) {
+		prompt = planmode.Marker + "\n\n" + prompt
+	}
+	if kind := opts.RequireReviewReportKind; kind != "" {
+		prompt = prompt + "\n\n" + reviewReportTaskContract(kind)
+	}
 	sub := New(prov, reg, sess, opts, sink)
+	sub.SetPlanMode(planWorkflow)
 	if err := sub.Run(ctx, prompt); err != nil {
+		// Still merge any partial child evidence so parent gates see real writes.
+		mergeChildEvidence(ctx, sub)
+		if answer, ok := salvageReadinessExhaustedAnswer(sub, sess, opts, err); ok {
+			return answer, nil
+		}
 		return "", fmt.Errorf("sub-agent: %w", err)
 	}
-	// Walk the session backwards for the last assistant message with content —
-	// that's the sub-agent's final answer. Intermediate assistant messages with
-	// tool_calls but no text don't count.
+	// Review/security subagents must hand back a typed report the parent's
+	// delivery gate can verify; prose alone would leave the gate demanding a
+	// review forever with no way to tell why it never arrives. A run that
+	// finished without the report gets bounded completion nudges on the same
+	// session (evidence preserved, so review_report can still cite the reads it
+	// already earned) before the whole run is declared failed.
+	if kind := opts.RequireReviewReportKind; kind != "" {
+		nudges := 0
+		for !sub.HasSuccessfulReviewReport(kind) && nudges < maxReviewReportNudges {
+			nudges++
+			sub.preserveEvidenceOnce = true
+			if err := sub.Run(ctx, reviewReportNudgePrompt(kind)); err != nil {
+				mergeChildEvidence(ctx, sub)
+				return "", fmt.Errorf("sub-agent: %w", err)
+			}
+		}
+		if !sub.HasSuccessfulReviewReport(kind) {
+			mergeChildEvidence(ctx, sub)
+			dumpRef := dumpFailedSubagentSession(opts.ArchiveDir, string(kind), sess)
+			return "", fmt.Errorf("%s subagent finished without submitting review_report (kind=%s) even after %d host nudges; the report must be submitted by the review subagent itself (the parent has no review_report tool) — re-run the review skill%s", kind, kind, nudges, dumpRef)
+		}
+	}
+	mergeChildEvidence(ctx, sub)
+	if answer := latestAssistantAnswer(sess); answer != "" {
+		return answer, nil
+	}
+	return "", fmt.Errorf("sub-agent finished without producing a final answer")
+}
+
+// readOnlyAgentConstruction is the single pairing every strictly read-only
+// loop shares: the permanent ReadOnlyExecution flag plus the final registry
+// filter. Batch children (RunReadOnlySubAgentWithSession) and legacy call sites
+// that still use NewReadOnlyAgent build through it, so a missed call site
+// cannot set only half the boundary. The interactive two-model planner uses
+// NewPlannerAgent instead (PlannerMCPExecution).
+func readOnlyAgentConstruction(reg *tool.Registry, opts Options) (*tool.Registry, Options) {
+	opts.ReadOnlyExecution = true
+	opts.PlannerMCPExecution = false
+	return strictReadOnlyExecutionRegistry(reg), opts
+}
+
+// NewReadOnlyAgent constructs a long-lived, strictly read-only agent through
+// the shared construction boundary. Prefer NewPlannerAgent for the two-model
+// planner so authorized non-destructive MCP can run via use_capability.
+func NewReadOnlyAgent(prov provider.Provider, reg *tool.Registry, sess *Session, opts Options, sink event.Sink) *Agent {
+	reg, opts = readOnlyAgentConstruction(reg, opts)
+	return New(prov, reg, sess, opts, sink)
+}
+
+// NewPlannerAgent constructs the interactive two-model planner: permanent
+// ReadOnlyExecution still blocks bash, file writers, and ordinary non-MCP
+// writers, while PlannerMCPExecution allows authorized, non-destructive MCP
+// through the stable use_capability proxy without requiring readOnlyHint.
+func NewPlannerAgent(prov provider.Provider, reg *tool.Registry, sess *Session, opts Options, sink event.Sink) *Agent {
+	opts.ReadOnlyExecution = true
+	opts.PlannerMCPExecution = true
+	// Keep construction-time filter for ordinary tools; use_capability stays
+	// because it is ReadOnly. Direct mcp__* tools are already excluded by
+	// PlannerToolRegistry. Dynamic MCP targets are re-checked after resolve.
+	reg = plannerExecutionRegistry(reg)
+	return New(prov, reg, sess, opts, sink)
+}
+
+// plannerExecutionRegistry is the construction-time filter for NewPlannerAgent.
+// It removes ordinary writers and destructive direct MCP tools while keeping
+// use_capability and built-in research tools. Host-starting deferred MCP
+// targets are allowed at execution time under PlannerMCPExecution.
+func plannerExecutionRegistry(reg *tool.Registry) *tool.Registry {
+	filtered := tool.NewRegistry()
+	if reg == nil {
+		return filtered
+	}
+	for _, name := range reg.Names() {
+		target, ok := reg.Get(name)
+		if !ok {
+			continue
+		}
+		if name == "use_capability" {
+			filtered.Add(target)
+			continue
+		}
+		if strings.HasPrefix(name, tool.MCPNamePrefix) {
+			// Defense in depth: planner never exposes direct MCP schemas.
+			continue
+		}
+		if !target.ReadOnly() || mcpDestructiveHint(target) {
+			continue
+		}
+		if h, ok := target.(tool.ReadOnlyExecutionHostMutation); ok && h.ReadOnlyExecutionHostMutation() {
+			// Ordinary host mutations stay out; MCP startup is only via proxy.
+			continue
+		}
+		filtered.Add(target)
+	}
+	return filtered
+}
+
+// RunReadOnlySubAgentWithSession is the construction boundary for every
+// strictly read-only child loop. Registry filtering limits the visible surface;
+// this permanent execution flag also re-checks targets resolved dynamically by
+// proxy tools such as use_capability. It never enables PlannerMCPExecution.
+func RunReadOnlySubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
+	reg, opts = readOnlyAgentConstruction(reg, opts)
+	return RunSubAgentWithSession(ctx, prov, reg, sess, prompt, opts, sink)
+}
+
+// strictReadOnlyExecutionRegistry is the final construction-time filter shared
+// by every strict child. Callers still apply role-specific filtering (review,
+// planner, profile allowlists), while this layer guarantees that a missed call
+// site cannot expose writers, destructive MCP tools, readers from unauthorized
+// servers, or an unauthorized host-starting target to the model.
+func strictReadOnlyExecutionRegistry(reg *tool.Registry) *tool.Registry {
+	filtered := tool.NewRegistry()
+	if reg == nil {
+		return filtered
+	}
+	for _, name := range reg.Names() {
+		target, ok := reg.Get(name)
+		if !ok || !target.ReadOnly() || mcpDestructiveHint(target) {
+			continue
+		}
+		if isInstalledMCPTool(target) && !mcpServerAuthorized(target) {
+			continue
+		}
+		if mutation, ok := target.(tool.ReadOnlyExecutionHostMutation); ok && mutation.ReadOnlyExecutionHostMutation() && !readOnlyExecutionAllowsMCPStartup(target) {
+			continue
+		}
+		filtered.Add(target)
+	}
+	return filtered
+}
+
+// latestAssistantAnswer walks the session backwards for the last assistant
+// message with content — that's the sub-agent's final answer. Intermediate
+// assistant messages with tool_calls but no text don't count.
+func latestAssistantAnswer(sess *Session) string {
+	if sess == nil {
+		return ""
+	}
 	for i := len(sess.Messages) - 1; i >= 0; i-- {
 		m := sess.Messages[i]
 		if m.Role == provider.RoleAssistant && strings.TrimSpace(m.Content) != "" {
-			return m.Content, nil
+			return m.Content
 		}
 	}
-	return "", fmt.Errorf("sub-agent finished without producing a final answer")
+	return ""
+}
+
+// salvageReadinessExhaustedAnswer degrades a sub-agent's readiness exhaustion
+// from a hard failure to an explicitly unverified result. The gate exists to
+// stop unverified *claims*, not to discard finished *work*: when the child has
+// a real successful mutation on disk and a visible answer, failing the whole
+// run makes the parent believe the work is broken and spawn repair tasks for
+// changes that already landed — the failure cascade users see as a wall of
+// "background task failed" notices. The child's receipts were already merged
+// into the parent ledger, so the parent's own delivery gates still require
+// verification and review of those writes before it can final-answer.
+//
+// Salvage is refused when the child produced no successful mutation (an
+// unbacked "done" claim must keep failing, e.g. a spoofed or lazy run) and for
+// report-required review sub-agents, whose contract is the typed review_report
+// rather than prose.
+func salvageReadinessExhaustedAnswer(sub *Agent, sess *Session, opts Options, err error) (string, bool) {
+	var readinessErr *FinalReadinessError
+	if !errors.As(err, &readinessErr) {
+		return "", false
+	}
+	if opts.RequireReviewReportKind != "" {
+		return "", false
+	}
+	if sub == nil || !sub.EvidenceSummary().HasMutation() {
+		return "", false
+	}
+	answer := latestAssistantAnswer(sess)
+	if answer == "" {
+		return "", false
+	}
+	return "[unverified] The sub-agent finished its work but exhausted the host delivery sign-off checks before reporting (" +
+		readinessErr.Reason +
+		"). Its successful writes are already on disk and its receipts were merged into this turn's evidence. " +
+		"Inspect the diff and run the relevant checks before relying on the result below; do not re-run or \"fix\" the same work without first checking what already changed.\n\nSub-agent answer:\n" +
+		answer, true
+}
+
+// dumpFailedSubagentSession best-effort persists a failed report-required
+// subagent transcript for post-hoc diagnosis (read-only skill subagents are
+// otherwise ephemeral, so a protocol failure leaves no trace). Returns a
+// human-readable suffix naming the dump, or "" when disabled/failed.
+func dumpFailedSubagentSession(archiveDir, kind string, sess *Session) string {
+	if strings.TrimSpace(archiveDir) == "" || sess == nil {
+		return ""
+	}
+	dir := filepath.Join(archiveDir, "subagent-report-failures")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", kind, time.Now().UnixNano()))
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	enc := json.NewEncoder(f)
+	for _, m := range sess.Messages {
+		if err := enc.Encode(m); err != nil {
+			return ""
+		}
+	}
+	return "; transcript dumped to " + path
+}
+
+// mergeChildEvidence folds a sub-agent's real receipts into the parent ledger
+// carried on ctx. Meta tools themselves are never mutations.
+func mergeChildEvidence(ctx context.Context, sub *Agent) {
+	if sub == nil {
+		return
+	}
+	parent, ok := evidence.FromContext(ctx)
+	if !ok || parent == nil {
+		return
+	}
+	parent.MergeChild(sub.EvidenceSummary())
+}
+
+// EvidenceSummary exports this agent's turn-scoped receipts for parent merge.
+func (a *Agent) EvidenceSummary() evidence.ChildEvidenceSummary {
+	if a == nil || a.evidence == nil {
+		return evidence.ChildEvidenceSummary{}
+	}
+	return a.evidence.Summary()
 }
 
 func isFreshSubagentSession(sess *Session) bool {

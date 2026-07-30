@@ -8,6 +8,7 @@ import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
 import { normalizeMath } from "./mathNormalize";
 import { openExternal } from "../lib/bridge";
+import { markdownImageSource } from "../lib/markdownImage";
 
 const MermaidDiagram = lazy(() => import("./MermaidDiagram"));
 
@@ -127,30 +128,40 @@ function createComponents(plainStatusBlocks: boolean): Components {
         {children}
       </a>
     ),
+    img: ({ src, alt, title }) => (
+      <img
+        src={markdownImageSource(src)}
+        alt={alt ?? ""}
+        title={title}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+      />
+    ),
   };
 }
 
 const MarkdownRenderer = memo(function MarkdownRenderer({
   text,
   plainStatusBlocks = false,
+  bare = false,
 }: {
   text: string;
   plainStatusBlocks?: boolean;
+  bare?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mathContent = useMemo(() => normalizeMath(text), [text]);
   const components = useMemo(() => createComponents(plainStatusBlocks), [plainStatusBlocks]);
-  return (
-    <div className="md" ref={containerRef}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={components}
-      >
-        {mathContent}
-      </ReactMarkdown>
-    </div>
+  const content = (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={components}
+    >
+      {mathContent}
+    </ReactMarkdown>
   );
+  return bare ? content : <div className="md" ref={containerRef}>{content}</div>;
 });
 
 export default MarkdownRenderer;

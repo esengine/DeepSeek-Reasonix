@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
@@ -86,6 +87,64 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	}
 	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 {
 		t.Fatalf("context panel total tokens = %d, want 140", panel.TotalTokens)
+	}
+}
+
+func TestWorkspaceTabRepricesUsageWithoutMixingCurrencies(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 1_000_000, CompletionTokens: 100_000, TotalTokens: 1_100_000},
+		UsageSource: event.UsageSourceExecutor,
+		Pricing:     &provider.Pricing{Input: 1, Output: 2, Currency: "CNY"},
+	})
+	if ok := tab.repriceUsage(map[string]*provider.Pricing{
+		event.UsageSourceExecutor: {Input: 0.14, Output: 0.28, Currency: "USD"},
+	}); !ok {
+		t.Fatal("repriceUsage rejected a complete source mapping")
+	}
+	got := tab.telemetrySnapshot().Usage
+	want := 0.14 + 0.1*0.28
+	if got.SessionCurrency != "$" || got.SessionCost != want {
+		t.Fatalf("repriced usage = %f %q, want %f USD", got.SessionCost, got.SessionCurrency, want)
+	}
+}
+
+func TestRepriceTabUsageUsesDetectedLocaleForAutoCurrency(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.Default()
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save auto config: %v", err)
+	}
+	tab := &WorkspaceTab{WorkspaceRoot: t.TempDir(), model: "deepseek-flash/deepseek-v4-flash"}
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		UsageSource: event.UsageSourceExecutor,
+		Pricing:     &provider.Pricing{Input: 0.14, Currency: "USD"},
+	})
+	app := NewApp()
+	app.setDesktopLocale("zh-CN")
+
+	app.repriceTabUsageForCurrentCurrency(tab)
+
+	got := tab.telemetrySnapshot().Usage
+	if got.SessionCurrency != "¥" || got.SessionCost != 1 {
+		t.Fatalf("auto-locale repriced usage = %f %q, want 1 CNY", got.SessionCost, got.SessionCurrency)
+	}
+}
+
+func TestWorkspaceTabDoesNotAddDifferentCurrencies(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage:   &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		Pricing: &provider.Pricing{Input: 1, Currency: "CNY"},
+	})
+	tab.recordUsage(event.Event{
+		Usage:   &provider.Usage{PromptTokens: 1_000_000, TotalTokens: 1_000_000},
+		Pricing: &provider.Pricing{Input: 0.14, Currency: "USD"},
+	})
+	got := tab.telemetrySnapshot().Usage
+	if got.SessionCurrency != "$" || got.SessionCost != 0.14 {
+		t.Fatalf("mixed-currency usage = %f %q, want only the current USD bucket", got.SessionCost, got.SessionCurrency)
 	}
 }
 
@@ -197,5 +256,203 @@ func TestContextPanelUsesLastUsageBreakdownWithTelemetryTotal(t *testing.T) {
 	if panel.CacheHitTokens != 7 || panel.CacheMissTokens != 3 {
 		t.Fatalf("context panel cache breakdown = hit:%d miss:%d, want last usage 7/3",
 			panel.CacheHitTokens, panel.CacheMissTokens)
+	}
+}
+
+func costedUsageEvent() event.Event {
+	return event.Event{
+		Usage:   &provider.Usage{PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140},
+		Pricing: &provider.Pricing{CacheHit: 1, Input: 2, Output: 3, Currency: "¥"},
+	}
+}
+
+func TestSyncTelemetryToSessionReKeysAcrossRotation(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.jsonl")
+	pathB := filepath.Join(dir, "b.jsonl")
+
+	tab := &WorkspaceTab{}
+	tab.syncTelemetryToSession(pathA)
+	tab.recordUsage(costedUsageEvent())
+	costA := tab.telemetrySnapshot().Usage.SessionCost
+	if costA <= 0 {
+		t.Fatalf("seed cost = %f, want positive", costA)
+	}
+	if err := saveTelemetry(pathA+".telemetry.json", tab.telemetrySnapshot()); err != nil {
+		t.Fatalf("save telemetry A: %v", err)
+	}
+
+	// Same session: in-memory totals survive.
+	tab.syncTelemetryToSession(pathA)
+	if got := tab.telemetrySnapshot().Usage.SessionCost; got != costA {
+		t.Fatalf("same-session sync cost = %f, want %f", got, costA)
+	}
+
+	// Rotation to a session without a sidecar starts from zero — the previous
+	// session's totals must not bleed over (#5850).
+	tab.syncTelemetryToSession(pathB)
+	if got := tab.telemetrySnapshot().Usage; got.SessionCost != 0 || got.TotalTokens != 0 || got.RequestCount != 0 {
+		t.Fatalf("rotated telemetry = %+v, want zeroed", got)
+	}
+
+	// Rotating back restores session A's persisted totals.
+	tab.syncTelemetryToSession(pathA)
+	if got := tab.telemetrySnapshot().Usage.SessionCost; got != costA {
+		t.Fatalf("restored cost = %f, want %f", got, costA)
+	}
+}
+
+func TestContextUsageForTabReKeysAfterControllerRotation(t *testing.T) {
+	dir := t.TempDir()
+	rotated := filepath.Join(dir, "rotated.jsonl")
+	stale := filepath.Join(dir, "stale.jsonl")
+
+	ag := agent.New(usageProvider{usage: &provider.Usage{}}, tool.NewRegistry(), agent.NewSession("system"), agent.Options{}, event.Discard)
+	tab := &WorkspaceTab{
+		ID:   "tab",
+		Ctrl: control.New(control.Options{Executor: ag, Sink: event.Discard, SessionDir: dir, SessionPath: rotated}),
+	}
+	// Telemetry still keyed to the pre-rotation session: a typed /new routes
+	// through Controller.Submit and rotates without App.NewSession running.
+	tab.syncTelemetryToSession(stale)
+	tab.recordUsage(costedUsageEvent())
+
+	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
+	info := app.ContextUsageForTab("tab")
+	if info.SessionCost != 0 || info.SessionTokens != 0 {
+		t.Fatalf("context after rotation = cost %f tokens %d, want zeros", info.SessionCost, info.SessionTokens)
+	}
+	if got := tab.telemetrySnapshot().Usage.RequestCount; got != 0 {
+		t.Fatalf("telemetry request count after rotation = %d, want 0", got)
+	}
+}
+
+func TestNewSessionResetsTabUsageTelemetry(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	sessPath := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "world"})
+	exec := agent.New(stubProvider{}, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		activeTabID:      "tab",
+	}
+	tab := &WorkspaceTab{
+		ID:            "tab",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		SessionPath:   sessPath,
+		Ready:         true,
+		model:         "test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	tab.Ctrl = control.New(control.Options{
+		Executor:    exec,
+		SessionDir:  dir,
+		SessionPath: sessPath,
+		Label:       "test",
+		Sink:        tab.sink,
+	})
+	app.tabs[tab.ID] = tab
+
+	tab.syncTelemetryToSession(sessPath)
+	tab.recordUsage(costedUsageEvent())
+	if seed := tab.telemetrySnapshot().Usage.SessionCost; seed <= 0 {
+		t.Fatalf("seed cost = %f, want positive", seed)
+	}
+
+	if err := app.NewSession(); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if got := tab.telemetrySnapshot().Usage; got.SessionCost != 0 || got.RequestCount != 0 || got.TotalTokens != 0 {
+		t.Fatalf("telemetry after NewSession = %+v, want zeroed", got)
+	}
+	if info := app.ContextUsageForTab("tab"); info.SessionCost != 0 || info.SessionTokens != 0 {
+		t.Fatalf("context after NewSession = cost %f tokens %d, want zeros", info.SessionCost, info.SessionTokens)
+	}
+}
+
+func TestSnapshotConflictRecoveryCarriesTelemetryToFork(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	root := globalTabWorkspaceRoot()
+	dir := desktopSessionDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	originalPath := filepath.Join(dir, "session.jsonl")
+	current := agent.NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(originalPath); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+
+	staleSess := agent.NewSession("sys")
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "local second"})
+	staleExec := agent.New(stubProvider{}, tool.NewRegistry(), staleSess, agent.Options{}, event.Discard)
+	app := &App{
+		tabs:             map[string]*WorkspaceTab{},
+		detachedSessions: map[string]*WorkspaceTab{},
+		activeTabID:      "recovery_tab",
+	}
+	tab := &WorkspaceTab{
+		ID:            "recovery_tab",
+		Scope:         "global",
+		WorkspaceRoot: root,
+		SessionPath:   originalPath,
+		Ready:         true,
+		model:         "test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	tab.Ctrl = control.New(control.Options{
+		Executor:            staleExec,
+		SessionDir:          dir,
+		SessionPath:         originalPath,
+		Label:               "test",
+		Sink:                tab.sink,
+		SessionRecoveryMeta: app.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:  app.handleTabSessionRecovered(tab),
+	})
+	app.tabs[tab.ID] = tab
+
+	tab.syncTelemetryToSession(originalPath)
+	tab.recordUsage(costedUsageEvent())
+	want := tab.telemetrySnapshot().Usage.SessionCost
+	if want <= 0 {
+		t.Fatalf("seed cost = %f, want positive", want)
+	}
+
+	if err := tab.Ctrl.Snapshot(); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	recoveryPath := tab.Ctrl.SessionPath()
+	if recoveryPath == "" || recoveryPath == originalPath {
+		t.Fatalf("recovery path = %q, want distinct path", recoveryPath)
+	}
+
+	// The fork continues the conversation: in-memory totals carry over and a
+	// later sync against the fork path must not wipe them.
+	tab.syncTelemetryToSession(recoveryPath)
+	if got := tab.telemetrySnapshot().Usage.SessionCost; got != want {
+		t.Fatalf("carried cost = %f, want %f", got, want)
+	}
+	// The fork's sidecar was persisted at retarget time, so cost survives an
+	// app exit before the next usage event.
+	if got := loadTelemetry(recoveryPath + ".telemetry.json").Usage.SessionCost; got != want {
+		t.Fatalf("fork sidecar cost = %f, want %f", got, want)
 	}
 }

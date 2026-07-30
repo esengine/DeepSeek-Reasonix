@@ -20,6 +20,12 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
+	if !strings.Contains(titlePrompt, "same language as the user's message") {
+		t.Fatalf("title prompt does not preserve the user's language: %q", titlePrompt)
+	}
+}
+
 // fakeRunner stands in for an agent.Runner: it records the composed input and
 // returns without emitting model events, so the controller's TurnDone is the
 // observable signal.
@@ -321,6 +327,20 @@ func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	}
 }
 
+func TestServeIndexPresentsRecoveryPauseAsNotice(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"e.outcome==='recovery_paused'",
+		"showNotice('⏸ '+__('recovery_paused'))",
+		"'recovery_paused': 'Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.'",
+		"'recovery_paused': '已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing recovery pause support %q", want)
+		}
+	}
+}
+
 func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -371,6 +391,124 @@ func TestServeIndexPagePassesLanguagePreferenceToClient(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "const __LANG_PREF = 'en';") {
 		t.Fatalf("pinned desktop language was not passed through:\n%s", string(body))
+	}
+}
+
+func TestServeModelsMarksActiveByModelRef(t *testing.T) {
+	writeServeModelConfig(t)
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{
+		Sink:     bc,
+		Label:    "shared-chat",
+		ModelRef: "alternate/shared-chat",
+	})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("models status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Current string `json:"current"`
+		Models  []struct {
+			Ref    string `json:"ref"`
+			Active bool   `json:"active"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode models: %v", err)
+	}
+	if body.Current != "alternate/shared-chat" {
+		t.Fatalf("current = %q, want alternate/shared-chat", body.Current)
+	}
+	active := map[string]bool{}
+	for _, m := range body.Models {
+		active[m.Ref] = m.Active
+	}
+	if active["default/shared-chat"] {
+		t.Fatal("default provider was marked active even though the controller is on alternate/shared-chat")
+	}
+	if !active["alternate/shared-chat"] {
+		t.Fatal("alternate/shared-chat was not marked active")
+	}
+}
+
+func TestServeSwitchEffortUsesModelRefForDuplicateModelNames(t *testing.T) {
+	writeServeModelConfig(t)
+
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{
+		Sink:       bc,
+		Label:      "shared-chat",
+		ModelRef:   "alternate/shared-chat",
+		SessionDir: t.TempDir(),
+	})
+	server := New(ctrl, bc, config.ServeConfig{})
+	var builtRef string
+	server.buildController = func(_ context.Context, ref string) (*control.Controller, error) {
+		builtRef = ref
+		return control.New(control.Options{
+			Sink:       bc,
+			Label:      "shared-chat",
+			ModelRef:   ref,
+			SessionDir: t.TempDir(),
+		}), nil
+	}
+
+	if err := server.switchEffort(context.Background(), "high"); err != nil {
+		t.Fatalf("switchEffort: %v", err)
+	}
+	if builtRef != "alternate/shared-chat" {
+		t.Fatalf("rebuilt model ref = %q, want alternate/shared-chat", builtRef)
+	}
+	edit := config.LoadForEdit(config.UserConfigPath())
+	def, _ := edit.Provider("default")
+	if def.Effort != "" {
+		t.Fatalf("default effort = %q, want unchanged", def.Effort)
+	}
+	alt, _ := edit.Provider("alternate")
+	if alt.Effort != "high" {
+		t.Fatalf("alternate effort = %q, want high", alt.Effort)
+	}
+}
+
+func writeServeModelConfig(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	cfgPath := config.UserConfigPath()
+	if cfgPath == "" {
+		t.Fatal("user config path is empty")
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `default_model = "default/shared-chat"
+
+[[providers]]
+name = "default"
+kind = "openai"
+base_url = "http://127.0.0.1:1/v1"
+models = ["shared-chat"]
+default = "shared-chat"
+supported_efforts = ["low", "high"]
+
+[[providers]]
+name = "alternate"
+kind = "openai"
+base_url = "http://127.0.0.1:2/v1"
+models = ["shared-chat"]
+default = "shared-chat"
+supported_efforts = ["low", "high"]
+`
+	if err := os.WriteFile(cfgPath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -36,7 +36,7 @@ non-destructively when `<Reasonix home>/.env` is missing them.
 | Global slash commands | `<Reasonix home>/commands/` |
 | Global skills | `<Reasonix home>/skills/` |
 | Global hooks | `<Reasonix home>/settings.json` |
-| Hook trust store | `<Reasonix home>/trust.json` |
+| Remote-SSH managed known_hosts | `<Reasonix home>/remote/known_hosts` |
 | Sessions | `<state root>/sessions/` |
 | Archives | `<state root>/archive/` |
 | Memory | `<state root>/memory/` and `<state root>/projects/` |
@@ -56,6 +56,13 @@ skill, sandbox, bot, and agent settings that Reasonix renders into user config.
 Provider entries store the name of the credential variable in `api_key_env`, not
 the secret value.
 
+Saved provider and bot credential variables are removed from every
+model-controlled child-process environment. The global credential `.env` is
+also hidden from Reasonix's file readers, sandboxed shell commands, and MCP
+servers; this does not change the visibility of a project's ordinary `.env`.
+On Windows, shell commands remain outside an OS sandbox as documented in the
+Guide, so approve shell access only for trusted tasks.
+
 Example:
 
 ```toml
@@ -66,14 +73,10 @@ credentials_store = "auto"   # legacy compatibility; provider keys are in .env
 
 [ui]
 theme = "auto"
-cursor_shape = "underline"   # CLI/TUI text cursor: underline|block|bar
+cursor_shape = "bar"         # CLI/TUI text cursor: underline|block|bar
 
 [desktop]
 provider_access = ["deepseek"]
-
-[agent]
-auto_plan = "off"
-max_steps = 0
 
 [[providers]]
 name        = "deepseek"
@@ -92,9 +95,9 @@ Do not put API key values in `config.toml`. This file is regular configuration:
 it is safe to inspect, edit, migrate, and include in diagnostics after standard
 redaction. Secrets belong in the global `.env` below.
 
-`[ui].cursor_shape` affects only the CLI/TUI composer. The default `underline`
-avoids terminal block-cursor artifacts with double-width CJK characters; use
-`block` or `bar` if you prefer those cursor shapes.
+`[ui].cursor_shape` affects only the CLI/TUI composer. The default `bar` stays
+visible without covering double-width CJK characters; use `block` or
+`underline` if you prefer those cursor shapes.
 
 ### Custom provider `api_key_env` names
 
@@ -107,7 +110,9 @@ Reasonix derives the default from the provider name. Names that normalize to
 ASCII keep readable env names such as `LOCAL_GATEWAY_API_KEY`; names made
 entirely of non-ASCII characters get a stable hash suffix such as
 `CUSTOM_d39b9067_API_KEY` so two Chinese provider names do not share
-`CUSTOM_API_KEY`.
+`CUSTOM_API_KEY`. Names beginning with a digit get a `CUSTOM_` prefix so the
+generated environment variable remains valid; for example, `9router` becomes
+`CUSTOM_9ROUTER_API_KEY`.
 
 In the CLI custom-provider wizard, the provider name is generated from the base
 URL first, then the same provider-name rule is applied. For example

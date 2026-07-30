@@ -7,6 +7,10 @@ import (
 	"runtime"
 )
 
-func applyMac(string) error {
+func applyMac(string, string) error {
 	return fmt.Errorf("self-update unsupported on %s", runtime.GOOS)
+}
+
+func maybeRunMacUpdateHandoff([]string) (bool, int) {
+	return false, 0
 }

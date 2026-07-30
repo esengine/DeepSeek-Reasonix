@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 type Task struct {
@@ -32,7 +33,7 @@ func main() {
 	path := filepath.Join(base, "heartbeat-tasks.json")
 
 	// Read existing
-	b, _ := os.ReadFile(path)
+	b, _ := fileencoding.ReadFileUTF8(path)
 	var data struct {
 		Tasks []Task `json:"tasks"`
 	}

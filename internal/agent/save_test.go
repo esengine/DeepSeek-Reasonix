@@ -6,17 +6,391 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"reasonix/internal/provider"
+	"reasonix/internal/store"
 )
 
 // touch sets a file's mtime to t. Used by the listing-order test so it
 // doesn't have to sleep between Saves.
 func touch(path string, t time.Time) error {
 	return os.Chtimes(path, t, t)
+}
+
+func TestSaveLoadPreservesLegacyContentAndRawUserContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	const raw = "fix the bug"
+	const rendered = "<reasoning-language>zh</reasoning-language>\n\nfix the bug"
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: rendered, RawContent: raw})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+
+	before, err := json.Marshal(provider.ModelMessages(s.Snapshot()))
+	if err != nil {
+		t.Fatalf("marshal provider messages before save: %v", err)
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	stored := loaded.Snapshot()
+	if got := stored[1].Content; got != rendered {
+		t.Fatalf("reloaded provider content = %q, want %q", got, rendered)
+	}
+	if got := stored[1].RawContent; got != raw {
+		t.Fatalf("reloaded raw content = %q, want %q", got, raw)
+	}
+	if stored[1].ProviderContent != "" {
+		t.Fatalf("reloaded transitional provider content = %q, want empty", stored[1].ProviderContent)
+	}
+	after, err := json.Marshal(provider.ModelMessages(stored))
+	if err != nil {
+		t.Fatalf("marshal provider messages after load: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("provider request bytes changed across save/load:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+func TestLoadSessionMigratesLegacyInjectedUserContentWithoutChangingProviderBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	const raw = "fix the bug"
+	const legacy = "<reasoning-language>\nVisible reasoning/thinking text preference: use Simplified Chinese.\n</reasoning-language>\n\nfix the bug"
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: legacy})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot legacy fixture: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	stored := loaded.Snapshot()
+	if got := stored[1].Content; got != legacy {
+		t.Fatalf("migrated provider content = %q, want legacy bytes", got)
+	}
+	if got := stored[1].RawContent; got != raw {
+		t.Fatalf("migrated raw content = %q, want %q", got, raw)
+	}
+	if stored[1].ProviderContent != "" {
+		t.Fatalf("migrated transitional provider content = %q, want empty", stored[1].ProviderContent)
+	}
+	model := provider.ModelMessages(stored)
+	if got := model[1].Content; got != legacy {
+		t.Fatalf("provider content after migration = %q, want %q", got, legacy)
+	}
+	if !loaded.normalizedDirty {
+		t.Fatal("legacy migration must schedule a rewrite on the next save")
+	}
+}
+
+func TestLoadSessionMigratesTransitionalProviderContentToLegacySafeShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	const raw = "fix the bug"
+	const rendered = "<reasoning-language>zh</reasoning-language>\n\nfix the bug"
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: raw, ProviderContent: rendered})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot transitional fixture: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	stored := loaded.Snapshot()
+	if stored[1].Content != rendered || stored[1].RawContent != raw || stored[1].ProviderContent != "" {
+		t.Fatalf("transitional user turn not canonicalized: %+v", stored[1])
+	}
+	model := provider.ModelMessages(stored)
+	if model[1].Content != rendered || model[1].RawContent != "" || model[1].ProviderContent != "" {
+		t.Fatalf("provider model turn not canonical: %+v", model[1])
+	}
+	if !loaded.normalizedDirty {
+		t.Fatal("transitional migration must schedule a rewrite on the next save")
+	}
+}
+
+// TestSnapshotUpToDateFastPath locks in the #6607 switch-lag fix: a snapshot
+// of a session that has not changed since its last save to the same path must
+// be a pure in-memory no-op — no serialize, no digest, no disk access. The
+// desktop snapshots defensively on every tab/session switch, and on large
+// transcripts the redundant full-save work is seconds of UI freeze.
+func TestSnapshotUpToDateFastPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("initial SaveSnapshot: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false right after a successful save")
+	}
+	if s.snapshotUpToDate(filepath.Join(t.TempDir(), "other.jsonl")) {
+		t.Fatal("snapshotUpToDate = true for a different path")
+	}
+
+	// Deterministic proof the disk is untouched: scribble on the event log and
+	// snapshot again. The fast path skips entirely, so the scribble survives; a
+	// full save would detect and repair/truncate it.
+	logPath := store.SessionEventLog(path)
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	if _, err := f.Write([]byte("{torn")); err != nil {
+		t.Fatalf("scribble: %v", err)
+	}
+	f.Close()
+	before, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("no-op SaveSnapshot: %v", err)
+	}
+	after, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log after no-op save: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("no-op snapshot touched the disk — fast path did not fire")
+	}
+
+	// Any transcript change re-arms the full path, which heals the scribble
+	// and persists the new turn.
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "again"})
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true after Add")
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after Add: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false after the follow-up save")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if loaded.eventLogDamaged {
+		t.Fatal("follow-up save left the log damaged")
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "again" {
+		t.Fatalf("reloaded tail = %q, want %q", got, "again")
+	}
+	// A load-adopted baseline must NOT arm the fast path: the ledger can lag
+	// the transcript after an interrupted save, and the first save after a
+	// load is the one that heals it (see
+	// TestSameContentSaveHealsStaleLedgerDigest).
+	if loaded.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true for a freshly loaded session")
+	}
+
+	// A pending rewrite (compaction/rewind) also disarms the fast path.
+	s.Replace(append([]provider.Message(nil), loaded.Messages[:2]...))
+	s.IncrementRewrite()
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true with a pending rewrite")
+	}
+}
+
+func TestSaveSnapshotBoundsCrossProcessFileLockWait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	lock, err := tryTakeSessionLockFile(store.SessionLockFile(path))
+	if err != nil {
+		t.Fatalf("take competing session lock: %v", err)
+	}
+	defer lock.Unlock()
+
+	prevWait, prevPoll := sessionFileLockWait, sessionFileLockPollInterval
+	sessionFileLockWait = 40 * time.Millisecond
+	sessionFileLockPollInterval = 5 * time.Millisecond
+	defer func() {
+		sessionFileLockWait = prevWait
+		sessionFileLockPollInterval = prevPoll
+	}()
+
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "must stay in memory"})
+	started := time.Now()
+	err = s.SaveSnapshot(path)
+	if !errors.Is(err, ErrSessionFileLockHeld) {
+		t.Fatalf("SaveSnapshot error = %v, want ErrSessionFileLockHeld", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("SaveSnapshot waited %v for a held cross-process lock; want a bounded failure", elapsed)
+	}
+	if got := s.Snapshot(); len(got) != 2 || got[1].Content != "must stay in memory" {
+		t.Fatalf("failed save changed in-memory transcript: %+v", got)
+	}
+}
+
+func TestSaveSnapshotSucceedsWhenCrossProcessFileLockReleasesBeforeDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	lock, err := tryTakeSessionLockFile(store.SessionLockFile(path))
+	if err != nil {
+		t.Fatalf("take competing session lock: %v", err)
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(30 * time.Millisecond)
+		lock.Unlock()
+		close(released)
+	}()
+	t.Cleanup(func() { <-released })
+
+	prevWait, prevPoll := sessionFileLockWait, sessionFileLockPollInterval
+	sessionFileLockWait = 500 * time.Millisecond
+	sessionFileLockPollInterval = 5 * time.Millisecond
+	defer func() {
+		sessionFileLockWait = prevWait
+		sessionFileLockPollInterval = prevPoll
+	}()
+
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "save after transient lock"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after transient lock: %v", err)
+	}
+	select {
+	case <-released:
+	default:
+		t.Fatal("SaveSnapshot returned before the competing lock was released")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := loaded.Snapshot(); len(got) != 2 || got[1].Content != "save after transient lock" {
+		t.Fatalf("persisted transcript = %+v", got)
+	}
+}
+
+func TestSaveShutdownRecoveryBranchBypassesHeldOriginalFileLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "persisted"})
+	if err := base.SaveSnapshot(path); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+
+	current, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "unsaved shutdown tail"})
+	lock, err := tryTakeSessionLockFile(store.SessionLockFile(path))
+	if err != nil {
+		t.Fatalf("take competing session lock: %v", err)
+	}
+	defer lock.Unlock()
+
+	prevWait, prevPoll := sessionFileLockWait, sessionFileLockPollInterval
+	sessionFileLockWait = 40 * time.Millisecond
+	sessionFileLockPollInterval = 5 * time.Millisecond
+	defer func() {
+		sessionFileLockWait = prevWait
+		sessionFileLockPollInterval = prevPoll
+	}()
+
+	saveErr := current.SaveSnapshot(path)
+	if !errors.Is(saveErr, ErrSessionFileLockHeld) {
+		t.Fatalf("SaveSnapshot error = %v, want ErrSessionFileLockHeld", saveErr)
+	}
+	info, err := current.SaveShutdownRecoveryBranch(RecoveryBranchOptions{
+		OriginalPath: path,
+		Reason:       "shutdown session file lock timeout",
+	})
+	if err != nil {
+		t.Fatalf("SaveShutdownRecoveryBranch: %v", err)
+	}
+	if info.Path == path {
+		t.Fatalf("shutdown recovery path = original path %q", path)
+	}
+	if !info.Meta.Recovered || info.Meta.RecoveryReason != "shutdown session file lock timeout" {
+		t.Fatalf("shutdown recovery meta = %+v", info.Meta)
+	}
+	recovered, err := LoadSession(info.Path)
+	if err != nil {
+		t.Fatalf("load shutdown recovery: %v", err)
+	}
+	if got := recovered.Snapshot(); len(got) != 3 || got[2].Content != "unsaved shutdown tail" {
+		t.Fatalf("shutdown recovery transcript = %+v", got)
+	}
+	original, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload original session: %v", err)
+	}
+	if got := original.Snapshot(); len(got) != 2 {
+		t.Fatalf("held original transcript changed: %+v", got)
+	}
+}
+
+// TestRepairedSessionArmsFastPath (#6613 review P2): a session loaded with a
+// damaged event log — or carrying a load-time normalization repair — must
+// re-arm the snapshot no-op fast path once a successful save persists the
+// repair. Before the fix the flags were never cleared, so a repaired session
+// paid a full serialize + digest on every defensive snapshot until restart.
+func TestRepairedSessionArmsFastPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	sessionWithTurns(t, path, 2)
+
+	// Tear the event log so the next load marks it damaged.
+	logPath := store.SessionEventLog(path)
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		t.Fatalf("open log: %v", err)
+	}
+	if _, err := f.Write([]byte(`{"schema_version":1,"type":"ap`)); err != nil {
+		t.Fatalf("write torn tail: %v", err)
+	}
+	f.Close()
+
+	s, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if !s.eventLogDamaged {
+		t.Fatal("test setup: session should load damaged")
+	}
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true for a damaged, unsaved session")
+	}
+
+	// The healing save persists the repair; the fast path must arm afterwards.
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "heal"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("healing SaveSnapshot: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false after the healing save — repaired session never re-arms the fast path")
+	}
+
+	// A pending normalization repair also disarms, and a successful save that
+	// lands it re-arms.
+	s.normalizedDirty = true
+	if s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = true with a pending normalization repair")
+	}
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot with normalization flag: %v", err)
+	}
+	if !s.snapshotUpToDate(path) {
+		t.Fatal("snapshotUpToDate = false after the save persisted the normalization repair")
+	}
 }
 
 // TestSaveLoadRoundTrip is the contract `reasonix --resume` depends on: a
@@ -64,6 +438,119 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		if len(loaded.Messages[i].ToolCalls) != len(m.ToolCalls) {
 			t.Errorf("message %d tool_calls count mismatch", i)
 		}
+	}
+}
+
+func TestSavePreservesToolContentOnDisk(t *testing.T) {
+	secret := "sk-real-secret-value-123456"
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect"})
+	s.Add(provider.Message{
+		Role:       provider.RoleTool,
+		Name:       "bash",
+		ToolCallID: "call_1",
+		Content:    "DEEPSEEK_API_KEY=" + secret + "\n",
+	})
+
+	path := filepath.Join(t.TempDir(), "verbatim.jsonl")
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved session: %v", err)
+	}
+	if !strings.Contains(string(body), "DEEPSEEK_API_KEY="+secret) {
+		t.Fatalf("session did not persist tool content verbatim:\n%s", body)
+	}
+}
+
+func TestSaveProtectsVerbatimSessionEventLog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file ACLs are not represented by Unix permission bits")
+	}
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect"})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "API_KEY=raw-secret"})
+	path := filepath.Join(t.TempDir(), "private.jsonl")
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("first SaveSnapshot: %v", err)
+	}
+	eventPath := store.SessionEventLog(path)
+	assertPrivateSessionFile(t, eventPath)
+
+	// Simulate an event log created by a previous release. The next append must
+	// tighten the existing inode before writing any new unredacted content.
+	if err := os.Chmod(eventPath, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("append SaveSnapshot: %v", err)
+	}
+	assertPrivateSessionFile(t, eventPath)
+}
+
+func assertPrivateSessionFile(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("%s mode = %04o, want 0600", path, got)
+	}
+}
+
+// TestSaveVerbatimRoundTripKeepsSnapshotBaselineStable pins digest consistency
+// for byte-preserving transcripts: a loaded transcript re-saves without a
+// rewrite or revision bump, and appending afterward remains a plain append.
+func TestSaveVerbatimRoundTripKeepsSnapshotBaselineStable(t *testing.T) {
+	secret := "sk-real-secret-value-123456"
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect"})
+	s.Add(provider.Message{
+		Role:       provider.RoleTool,
+		Name:       "bash",
+		ToolCallID: "call_1",
+		Content:    "DEEPSEEK_API_KEY=" + secret + "\n",
+	})
+
+	path := filepath.Join(t.TempDir(), "stable.jsonl")
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("first SaveSnapshot: %v", err)
+	}
+	rev1, _, err := sessionContentRevision(path)
+	if err != nil {
+		t.Fatalf("read revision: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("resave of loaded session: %v", err)
+	}
+	rev2, _, err := sessionContentRevision(path)
+	if err != nil {
+		t.Fatalf("read revision after resave: %v", err)
+	}
+	if rev1 != rev2 {
+		t.Fatalf("no-op resave bumped revision %d -> %d", rev1, rev2)
+	}
+
+	// A continued conversation still append-saves cleanly on top.
+	loaded.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := loaded.SaveSnapshot(path); err != nil {
+		t.Fatalf("append snapshot after verbatim round-trip: %v", err)
+	}
+	reloaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if got := len(reloaded.Messages); got != 4 {
+		t.Fatalf("message count after append = %d, want 4", got)
 	}
 }
 
@@ -141,6 +628,337 @@ func TestSaveSnapshotAllowsAppendFromDiskPrefix(t *testing.T) {
 	}
 	if got := len(loaded.Messages); got != 3 {
 		t.Fatalf("message count after append snapshot = %d, want 3", got)
+	}
+}
+
+// TestSaveSnapshotAppendsAcrossInterruptedToolCallTail is the mid-turn autosave
+// shape from the field: a snapshot lands between an assistant tool call and its
+// still-running result, so the transcript on disk ends with a dangling call
+// that LoadSession answers with a fabricated placeholder. The live session then
+// records the real result and keeps going. The next snapshot is a pure append
+// over the bytes on disk and must land as one — not collide with the
+// placeholder, misread the turn as divergence, and fork a recovery branch.
+func TestSaveSnapshotAppendsAcrossInterruptedToolCallTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "Build passed."})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after tool result: %v", err)
+	}
+
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log damaged after appending over an interrupted tool tail")
+	}
+	if replay.records != 2 {
+		t.Fatalf("event log records = %d, want 2 (bootstrap replace + append)", replay.records)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := len(loaded.Messages); got != 5 {
+		t.Fatalf("message count after append snapshot = %d, want 5", got)
+	}
+	if got := loaded.Messages[3].Content; got != "ok" {
+		t.Fatalf("tool result after round-trip = %q, want %q", got, "ok")
+	}
+	if loaded.normalizedDirty {
+		t.Fatal("transcript still needs repair after appending the real tool result")
+	}
+}
+
+// TestSaveSnapshotAppendsAcrossPartiallyAnsweredMultiToolCallTail covers the
+// same raw-prefix fallback when a multi-call assistant turn already has some
+// tool results on disk. LoadSession fabricates placeholders only for the still
+// unanswered calls; the live session later appends the real remaining results.
+func TestSaveSnapshotAppendsAcrossPartiallyAnsweredMultiToolCallTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "inspect and test"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "I will run a few checks.",
+		ToolCalls: []provider.ToolCall{
+			{ID: "call_read", Name: "read_file", Arguments: `{"path":"main.go"}`},
+			{ID: "call_test", Name: "bash", Arguments: `{"cmd":"go test ./..."}`},
+			{ID: "call_status", Name: "bash", Arguments: `{"cmd":"git status --short"}`},
+		},
+	})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "read_file", ToolCallID: "call_read", Content: "package main"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("partial multi-tool SaveSnapshot: %v", err)
+	}
+
+	loadedPartial, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession partial: %v", err)
+	}
+	if !loadedPartial.normalizedDirty {
+		t.Fatal("partial multi-tool load should need placeholder repair")
+	}
+
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_test", Content: "ok"})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_status", Content: "clean"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "All checks passed."})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after remaining multi-tool results: %v", err)
+	}
+
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 2 || events[1].Type != sessionEventTypeAppend {
+		t.Fatalf("events after multi-tool append = %+v, want trailing append", events)
+	}
+	if events[1].MessageIndex != 4 || len(events[1].Messages) != 3 {
+		t.Fatalf("multi-tool append event index=%d len=%d, want index 4 len 3", events[1].MessageIndex, len(events[1].Messages))
+	}
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log damaged after appending remaining multi-tool results")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession final: %v", err)
+	}
+	if got := len(loaded.Messages); got != 7 {
+		t.Fatalf("message count after multi-tool append = %d, want 7", got)
+	}
+	if got := loaded.Messages[4].Content; got != "ok" {
+		t.Fatalf("second tool result after round-trip = %q, want ok", got)
+	}
+	if got := loaded.Messages[5].Content; got != "clean" {
+		t.Fatalf("third tool result after round-trip = %q, want clean", got)
+	}
+	if loaded.normalizedDirty {
+		t.Fatal("multi-tool transcript still needs repair after real results landed")
+	}
+}
+
+// TestSaveSnapshotUnchangedInterruptedToolCallTailIsNoOp covers the turn that
+// stays interrupted (cancel, crash recovery with nothing new in memory):
+// re-snapshotting the exact bytes on disk must be a no-op, not a stale-prefix
+// conflict against the placeholder the load-time repair fabricated.
+func TestSaveSnapshotUnchangedInterruptedToolCallTailIsNoOp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+	logBefore, err := os.ReadFile(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("ReadFile event log: %v", err)
+	}
+
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot unchanged: %v", err)
+	}
+	logAfter, err := os.ReadFile(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("ReadFile event log after no-op snapshot: %v", err)
+	}
+	if string(logBefore) != string(logAfter) {
+		t.Fatal("no-op snapshot rewrote the event log")
+	}
+	if revision, _, err := sessionContentRevision(path); err != nil || revision != 1 {
+		t.Fatalf("revision after no-op snapshot = %d (err %v), want 1", revision, err)
+	}
+}
+
+// TestSaveRewriteOwnedAcrossInterruptedToolCallTail: compaction rewrites the
+// in-memory history while the transcript on disk still ends with the dangling
+// call a mid-turn snapshot left behind. Ownership is anchored on the raw bytes
+// this session wrote; the placeholder fabricated on load must not revoke it.
+func TestSaveRewriteOwnedAcrossInterruptedToolCallTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+
+	s.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "[compacted] run the build"},
+	})
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite after compaction: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := len(loaded.Messages); got != 2 {
+		t.Fatalf("message count after owned rewrite = %d, want 2", got)
+	}
+	if got := loaded.Messages[1].Content; got != "[compacted] run the build" {
+		t.Fatalf("compacted message after round-trip = %q", got)
+	}
+}
+
+// TestSaveSnapshotAfterDirtyResumeKeepsEventChainReplayable: a session resumed
+// from an interrupted tool tail carries the load-time repair in memory, so its
+// transcript is one message longer than what the event log replays. The next
+// snapshot must not take the append shortcut with that inflated index — the
+// chain-broken append event would be discarded on replay, silently dropping
+// the whole new turn from disk. It must fall back to a full rewrite that
+// persists the repair and the new turn together.
+func TestSaveSnapshotAfterDirtyResumeKeepsEventChainReplayable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"make"}`}},
+	})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn SaveSnapshot: %v", err)
+	}
+
+	// Crash + reopen: the resume load answers the dangling call with a
+	// placeholder, then the user runs another turn.
+	resumed, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession resume: %v", err)
+	}
+	if !resumed.normalizedDirty {
+		t.Fatal("resume load should carry a pending repair for the dangling call")
+	}
+	resumed.Add(provider.Message{Role: provider.RoleUser, Content: "try again"})
+	resumed.Add(provider.Message{Role: provider.RoleAssistant, Content: "done"})
+	if err := resumed.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after dirty resume: %v", err)
+	}
+
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log chain broken by the post-resume snapshot")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession reload: %v", err)
+	}
+	if got := len(loaded.Messages); got != 6 {
+		t.Fatalf("message count after post-resume snapshot = %d, want 6", got)
+	}
+	if got := loaded.Messages[3].ToolCallID; got != "call_1" {
+		t.Fatalf("placeholder tool result not persisted; message 3 tool_call_id = %q", got)
+	}
+	if got := loaded.Messages[5].Content; got != "done" {
+		t.Fatalf("new turn after round-trip = %q, want %q", got, "done")
+	}
+}
+
+// TestSaveSnapshotAfterDirtyResumeWithTruncatedToolArgsPersistsRepair covers a
+// same-length load-time repair: truncated tool-call JSON is fixed in memory, but
+// appending against the repaired view would leave the broken arguments on disk.
+// The snapshot must rewrite so the repair and new turn persist together.
+func TestSaveSnapshotAfterDirtyResumeWithTruncatedToolArgsPersistsRepair(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run tests"})
+	s.Add(provider.Message{
+		Role:      provider.RoleAssistant,
+		Content:   "Running tests.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"cmd":"go test ./...`}},
+	})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot with truncated args: %v", err)
+	}
+
+	resumed, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession resume: %v", err)
+	}
+	if !resumed.normalizedDirty {
+		t.Fatal("resume load should carry a pending repair for truncated tool arguments")
+	}
+	const repairedArgs = `{"cmd":"go test ./..."}`
+	if got := resumed.Messages[2].ToolCalls[0].Arguments; got != repairedArgs {
+		t.Fatalf("repaired args on resume = %q, want %q", got, repairedArgs)
+	}
+
+	resumed.Add(provider.Message{Role: provider.RoleUser, Content: "summarize"})
+	resumed.Add(provider.Message{Role: provider.RoleAssistant, Content: "Tests passed."})
+	if err := resumed.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot after truncated-args resume: %v", err)
+	}
+
+	events := readSessionEventsForTest(t, path)
+	if len(events) != 2 || events[1].Type != sessionEventTypeReplace || events[1].Reason != "snapshot" {
+		t.Fatalf("events after truncated-args repair = %+v, want trailing snapshot replace", events)
+	}
+	replay, err := replaySessionEventLog(SessionEventLogPath(path))
+	if err != nil {
+		t.Fatalf("replay event log: %v", err)
+	}
+	if replay.damaged {
+		t.Fatal("event log damaged after truncated-args repair rewrite")
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession reload: %v", err)
+	}
+	if loaded.normalizedDirty {
+		t.Fatal("truncated-args repair was not persisted")
+	}
+	if got := loaded.Messages[2].ToolCalls[0].Arguments; got != repairedArgs {
+		t.Fatalf("persisted args = %q, want %q", got, repairedArgs)
+	}
+	if got := loaded.Messages[5].Content; got != "Tests passed." {
+		t.Fatalf("new turn after round-trip = %q, want %q", got, "Tests passed.")
+	}
+}
+
+// TestSaveRecoveryBranchNotNeededWhenRawTranscriptCoversSnapshot: the
+// recovery-needed check must also judge coverage against the pre-repair bytes.
+// Here the stored transcript equals the snapshot exactly, but normalization
+// backfills an empty tool-call name on load; that repair must not make the
+// disk look like it fails to cover the snapshot and fork a pointless recovery.
+func TestSaveRecoveryBranchNotNeededWhenRawTranscriptCoversSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the build"})
+	s.Add(provider.Message{
+		Role: provider.RoleAssistant, Content: "Running it.",
+		ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "", Arguments: `{"cmd":"make"}`}},
+	})
+	s.Add(provider.Message{Role: provider.RoleTool, Name: "bash", ToolCallID: "call_1", Content: "ok"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	_, err := s.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if !errors.Is(err, ErrSessionRecoveryNotNeeded) {
+		t.Fatalf("SaveRecoveryBranch err = %v, want ErrSessionRecoveryNotNeeded", err)
 	}
 }
 
@@ -444,6 +1262,176 @@ func TestSaveSnapshotSameContentByOtherRuntimeKeepsClonedBaselineWritable(t *tes
 	}
 }
 
+func TestSaveSnapshotAllowsExactAppendFromStaleRevisionBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	staleBaseline := s.persistState(path)
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot prefix append: %v", err)
+	}
+	prefixMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta prefix ok=%v err=%v", ok, err)
+	}
+	if prefixMeta.Revision == staleBaseline.revision {
+		t.Fatalf("prefix revision did not advance: %d", prefixMeta.Revision)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0)
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot exact append from stale revision baseline: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession appended: %v", err)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "two" {
+		t.Fatalf("tail after stale-baseline append = %q, want two", got)
+	}
+	advancedMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advancedMeta.Revision != prefixMeta.Revision+1 {
+		t.Fatalf("revision after stale-baseline append = %d, want %d", advancedMeta.Revision, prefixMeta.Revision+1)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after stale-baseline append = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveSnapshotAllowsCompatibleSystemAppendFromStaleRevisionBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys v1")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	staleBaseline := s.persistState(path)
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot prefix append: %v", err)
+	}
+	prefixMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta prefix ok=%v err=%v", ok, err)
+	}
+
+	// A resume swapped the system prompt, then the turn appended a message —
+	// while the persistence baseline still points at the first save.
+	msgs := s.Snapshot()
+	msgs[0] = provider.Message{Role: provider.RoleSystem, Content: "sys v2"}
+	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "two"})
+	s.Replace(msgs)
+	s.setPersistedBaseline(path, staleBaseline.digest, staleBaseline.version, staleBaseline.revision, true, true, 0)
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot compatible-system append from stale baseline: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession appended: %v", err)
+	}
+	if got := loaded.Messages[0].Content; got != "sys v2" {
+		t.Fatalf("system after compatible append = %q, want sys v2", got)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "two" {
+		t.Fatalf("tail after compatible append = %q, want two", got)
+	}
+	advancedMeta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advancedMeta.Revision != prefixMeta.Revision+1 {
+		t.Fatalf("revision after compatible append = %d, want %d", advancedMeta.Revision, prefixMeta.Revision+1)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after compatible append = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveSnapshotRefusesStaleBaselineAppendOverRewoundTranscript(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot extend: %v", err)
+	}
+
+	// Another runtime rewinds the transcript below this session's baseline
+	// (e.g. a cancelled turn truncated the partial assistant reply).
+	other, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession other: %v", err)
+	}
+	other.Replace(other.Snapshot()[:2])
+	if err := other.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite rewind: %v", err)
+	}
+
+	// Appending from the stale baseline would resurrect the rewound suffix.
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "two"})
+	if err := s.SaveSnapshot(path); !errors.Is(err, ErrSessionSnapshotConflict) {
+		t.Fatalf("SaveSnapshot over rewound transcript err = %v, want ErrSessionSnapshotConflict", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession after refused append: %v", err)
+	}
+	if got := len(loaded.Messages); got != 2 {
+		t.Fatalf("messages after refused append = %d, want rewound 2", got)
+	}
+}
+
+func TestSaveRewriteAllowsOwnedRewriteAfterLedgerReset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial turn"})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("SaveSnapshot base: %v", err)
+	}
+	// The meta sidecar (revision ledger) is lost — e.g. swept by a cleanup
+	// that deleted session-adjacent files. The transcript itself is intact.
+	if err := os.Remove(BranchMetaPath(path)); err != nil {
+		t.Fatalf("remove sidecar: %v", err)
+	}
+
+	// A cancelled turn strips the partial reply and flushes via SaveRewrite.
+	msgs := s.Snapshot()
+	s.Replace(msgs[:len(msgs)-1])
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite after ledger reset: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession truncated: %v", err)
+	}
+	if got := len(loaded.Messages); got != 2 {
+		t.Fatalf("messages after owned rewrite = %d, want 2", got)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "first" {
+		t.Fatalf("tail after owned rewrite = %q, want first", got)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after owned rewrite = %v err=%v, want none", matches, err)
+	}
+}
+
 func TestSaveSnapshotStillPersistsNormalizedRepair(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	mal := NewSession("sys")
@@ -527,7 +1515,7 @@ func TestSaveSnapshotRejectsStalePrefixAfterSystemPromptRefresh(t *testing.T) {
 	}
 }
 
-func TestSaveRewriteRejectsRevisionCASConflict(t *testing.T) {
+func TestSaveRewriteAllowsRewriteOverSameContentForeignStamp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	base := NewSession("sys")
 	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
@@ -540,6 +1528,9 @@ func TestSaveRewriteRejectsRevisionCASConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession stale: %v", err)
 	}
+	// Another runtime healed the ledger over identical content: the revision
+	// advanced under a foreign writer id, but the recorded digest still
+	// describes the exact bytes this session loaded and owns.
 	meta, ok, err := LoadBranchMeta(path)
 	if err != nil || !ok {
 		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
@@ -554,9 +1545,63 @@ func TestSaveRewriteRejectsRevisionCASConflict(t *testing.T) {
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: "summarized first"},
 	})
+	if err := stale.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite over same-content stamp: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "summarized first" {
+		t.Fatalf("tail after owned rewrite = %q, want summarized first", got)
+	}
+	advanced, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta advanced ok=%v err=%v", ok, err)
+	}
+	if advanced.Revision != meta.Revision+1 {
+		t.Fatalf("revision after rewrite = %d, want %d", advanced.Revision, meta.Revision+1)
+	}
+	if matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("recovery branches after owned rewrite = %v err=%v, want none", matches, err)
+	}
+}
+
+func TestSaveRewriteRejectsForeignStampForUnattributedBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	base := NewSession("sys")
+	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	base.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	if err := base.Save(path); err != nil {
+		t.Fatalf("Save base: %v", err)
+	}
+
+	stale, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession stale: %v", err)
+	}
+	// A foreign stamp whose digest disagrees with the on-disk transcript is
+	// the aftermath of a save whose bytes and record split — the transcript
+	// cannot be attributed, so the rewrite must fall to the conflict path.
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	meta.Revision++
+	meta.WriterID = "other-writer"
+	meta.ContentDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+	if err := SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+		t.Fatalf("stamp foreign digest: %v", err)
+	}
+
+	stale.Replace([]provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "summarized first"},
+	})
 	err = stale.SaveRewrite(path)
 	if !errors.Is(err, ErrSessionSnapshotConflict) {
-		t.Fatalf("SaveRewrite revision conflict err = %v, want ErrSessionSnapshotConflict", err)
+		t.Fatalf("SaveRewrite unattributed stamp err = %v, want ErrSessionSnapshotConflict", err)
 	}
 	var conflict *SessionSnapshotConflictError
 	if !errors.As(err, &conflict) || conflict.Kind != SessionSnapshotConflictDiverged {
@@ -795,6 +1840,86 @@ func TestSaveRecoveryBranchSkipsPureStalePrefix(t *testing.T) {
 	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
 	if _, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path}); !errors.Is(err, ErrSessionRecoveryNotNeeded) {
 		t.Fatalf("SaveRecoveryBranch stale prefix err = %v, want ErrSessionRecoveryNotNeeded", err)
+	}
+}
+
+func divergedSessionPair(t *testing.T, dir, name string) (string, *Session) {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	current := NewSession("sys")
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	current.Add(provider.Message{Role: provider.RoleUser, Content: "disk second"})
+	if err := current.Save(path); err != nil {
+		t.Fatalf("Save current: %v", err)
+	}
+	stale := NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "local " + name})
+	return path, stale
+}
+
+func stampRecoveryMeta(t *testing.T, path string, depth int) {
+	t.Helper()
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	meta.Recovered = true
+	meta.RecoveryDepth = depth
+	if err := SaveBranchMeta(path, meta); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+}
+
+func TestSaveRecoveryBranchStampsAndCapsChainDepth(t *testing.T) {
+	dir := t.TempDir()
+
+	// Forking from a normal session stamps depth 1.
+	path, stale := divergedSessionPair(t, dir, "session.jsonl")
+	info, err := stale.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: path})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch: %v", err)
+	}
+	if info.Meta.RecoveryDepth != 1 {
+		t.Fatalf("first fork depth = %d, want 1", info.Meta.RecoveryDepth)
+	}
+
+	// Forking from a recovery branch increments the chain depth.
+	deeper, staleDeeper := divergedSessionPair(t, dir, "deeper.jsonl")
+	stampRecoveryMeta(t, deeper, 1)
+	info, err = staleDeeper.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: deeper})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch from depth 1: %v", err)
+	}
+	if info.Meta.RecoveryDepth != 2 {
+		t.Fatalf("nested fork depth = %d, want 2", info.Meta.RecoveryDepth)
+	}
+
+	// A legacy recovery meta without the depth field counts as depth 1.
+	legacy, staleLegacy := divergedSessionPair(t, dir, "legacy.jsonl")
+	stampRecoveryMeta(t, legacy, 0)
+	info, err = staleLegacy.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: legacy})
+	if err != nil {
+		t.Fatalf("SaveRecoveryBranch from legacy recovery: %v", err)
+	}
+	if info.Meta.RecoveryDepth != 2 {
+		t.Fatalf("legacy nested fork depth = %d, want 2", info.Meta.RecoveryDepth)
+	}
+
+	// A parent at the cap refuses to fork deeper.
+	capped, staleCapped := divergedSessionPair(t, dir, "capped.jsonl")
+	stampRecoveryMeta(t, capped, SessionRecoveryMaxDepth)
+	if _, err := staleCapped.SaveRecoveryBranch(RecoveryBranchOptions{OriginalPath: capped}); !errors.Is(err, ErrSessionRecoveryDepthExceeded) {
+		t.Fatalf("SaveRecoveryBranch at cap err = %v, want ErrSessionRecoveryDepthExceeded", err)
+	}
+	forks, err := filepath.Glob(filepath.Join(dir, "capped-recovery-*.jsonl"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(forks) != 0 {
+		t.Fatalf("capped parent still forked: %v", forks)
 	}
 }
 
@@ -1305,6 +2430,49 @@ func TestListSessionOrderIncludesEmptySessionsWithoutPreviewScan(t *testing.T) {
 	}
 }
 
+func TestSessionListingsExposeRecoveryMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "recovered.jsonl")
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "continued recovery"})
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
+	}
+	meta.Recovered = true
+	meta.RecoveryDigest = strings.Repeat("a", 64)
+	meta.ParentID = "parent"
+	if err := SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+		t.Fatal(err)
+	}
+
+	ordered, err := ListSessionOrder(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != 1 {
+		t.Fatalf("ListSessionOrder len = %d, want 1", len(ordered))
+	}
+	if ordered[0].RecoveryDigest != meta.RecoveryDigest || ordered[0].ParentID != meta.ParentID {
+		t.Fatalf("ordered recovery metadata = digest:%q parent:%q, want digest:%q parent:%q", ordered[0].RecoveryDigest, ordered[0].ParentID, meta.RecoveryDigest, meta.ParentID)
+	}
+
+	listed, err := ListSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ListSessions len = %d, want 1", len(listed))
+	}
+	if listed[0].RecoveryDigest != meta.RecoveryDigest || listed[0].ParentID != meta.ParentID {
+		t.Fatalf("listed recovery metadata = digest:%q parent:%q, want digest:%q parent:%q", listed[0].RecoveryDigest, listed[0].ParentID, meta.RecoveryDigest, meta.ParentID)
+	}
+}
+
 func writeBranchMeta(t *testing.T, path string, createdAt, updatedAt time.Time) {
 	t.Helper()
 	meta := BranchMeta{
@@ -1371,4 +2539,77 @@ func readSessionEventsForTest(t *testing.T, path string) []sessionEventRecord {
 		out = append(out, rec)
 	}
 	return out
+}
+
+// TestReconcileOverlongMigratesDiagnosticSidecars pins two halves of one fix:
+// overlong-name reconciliation must skip .events.jsonl / .conflicts.jsonl
+// sidecars instead of renaming each into a fake session with fabricated meta,
+// and the owning transcript's rename must carry those sidecars along instead
+// of orphaning them under the retired stem.
+func TestReconcileOverlongMigratesDiagnosticSidecars(t *testing.T) {
+	dir := t.TempDir()
+	// 236-byte transcript name: past the 224 reconcile bound, while its
+	// .events.jsonl (243) and .conflicts.jsonl (246) still fit under 255 —
+	// exactly the window where the old suffix filter mistook them for
+	// overlong sessions.
+	id := strings.Repeat("s", 230)
+	oldPath := filepath.Join(dir, id+".jsonl")
+	content := `{"role":"system","content":"sys"}` + "\n" + `{"role":"user","content":"hello"}` + "\n"
+	if err := os.WriteFile(oldPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.SessionEventLog(oldPath),
+		[]byte(`{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"hello"}]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.SessionConflictLog(oldPath),
+		[]byte(`{"outcome":"forked_recovery_branch"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.SessionRecoveryState(oldPath),
+		[]byte(`{"tasks":{"root":{"phase":"diagnosing"}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The salvage sidecar holds raw session bytes; orphaning it under the
+	// retired stem would leave unreachable transcript content behind (#6613
+	// review follow-up).
+	if err := os.WriteFile(store.SessionEventLogDamaged(oldPath),
+		[]byte(`{"damaged_tail":true}`+"\ntorn bytes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReconcileSessionSidecars(dir); err != nil {
+		t.Fatalf("ReconcileSessionSidecars: %v", err)
+	}
+
+	newPath := filepath.Join(dir, recoveryParentStem(id)+".jsonl")
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("renamed transcript missing: %v", err)
+	}
+	if _, err := os.Stat(store.SessionEventLog(newPath)); err != nil {
+		t.Fatalf("event log not migrated with the rename: %v", err)
+	}
+	if _, err := os.Stat(store.SessionEventLogDamaged(newPath)); err != nil {
+		t.Fatalf("damaged salvage sidecar not migrated with the rename: %v", err)
+	}
+	if _, err := os.Stat(store.SessionConflictLog(newPath)); err != nil {
+		t.Fatalf("conflict log not migrated with the rename: %v", err)
+	}
+	if _, err := os.Stat(store.SessionRecoveryState(newPath)); err != nil {
+		t.Fatalf("recovery state not migrated with the rename: %v", err)
+	}
+	for _, gone := range []string{oldPath, store.SessionEventLog(oldPath), store.SessionEventLogDamaged(oldPath), store.SessionConflictLog(oldPath), store.SessionRecoveryState(oldPath)} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("%s still present under the retired stem (err=%v)", filepath.Base(gone), err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if store.IsSessionTranscriptName(e.Name()) && e.Name() != filepath.Base(newPath) {
+			t.Fatalf("reconcile fabricated an extra session from a sidecar: %s", e.Name())
+		}
+	}
 }

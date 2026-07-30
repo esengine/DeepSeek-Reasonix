@@ -3,6 +3,9 @@
 package proc
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
@@ -42,6 +45,17 @@ func KillTree(cmd *exec.Cmd) {
 // the job handle, 0 if it could not be created — then KillTracked relies on
 // KillTree alone.
 func StartTracked(cmd *exec.Cmd) (uintptr, error) {
+	return startTracked(cmd, false)
+}
+
+// StartTrackedRequired is the fail-closed form used when orphaned descendants
+// would violate the caller's lifecycle contract. The child remains suspended
+// until Job Object assignment succeeds.
+func StartTrackedRequired(cmd *exec.Cmd) (uintptr, error) {
+	return startTracked(cmd, true)
+}
+
+func startTracked(cmd *exec.Cmd, requireJob bool) (uintptr, error) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
@@ -49,8 +63,48 @@ func StartTracked(cmd *exec.Cmd) (uintptr, error) {
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
-	defer resumeProcess(uint32(cmd.Process.Pid))
-	return assignJob(cmd), nil
+	job := assignJob(cmd)
+	if requireJob && job == 0 {
+		return 0, errors.Join(ErrProcessTrackingUnavailable, terminateAndReapStartedProcess(cmd, 0))
+	}
+	if err := resumeProcess(uint32(cmd.Process.Pid)); err != nil {
+		resumeErr := fmt.Errorf("resume suspended process %d: %w", cmd.Process.Pid, err)
+		cleanupErr := terminateAndReapStartedProcess(cmd, job)
+		if requireJob {
+			return 0, errors.Join(ErrProcessTrackingUnavailable, resumeErr, cleanupErr)
+		}
+		return 0, errors.Join(resumeErr, cleanupErr)
+	}
+	return job, nil
+}
+
+func terminateAndReapStartedProcess(cmd *exec.Cmd, job uintptr) error {
+	var cleanupErrors []error
+	if job != 0 {
+		handle := windows.Handle(job)
+		if err := windows.TerminateJobObject(handle, 1); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("terminate job object: %w", err))
+		}
+		if err := windows.CloseHandle(handle); err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Errorf("close job object: %w", err))
+		}
+	}
+	if cmd == nil || cmd.Process == nil {
+		cleanupErrors = append(cleanupErrors, errors.New("started process is unavailable for termination"))
+		return errors.Join(cleanupErrors...)
+	}
+	if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("terminate suspended process: %w", err))
+	}
+	waitErr := cmd.Wait()
+	var exitErr *exec.ExitError
+	if waitErr != nil && !errors.As(waitErr, &exitErr) && !errors.Is(waitErr, os.ErrProcessDone) {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf("reap suspended process: %w", waitErr))
+	}
+	if cmd.ProcessState == nil {
+		cleanupErrors = append(cleanupErrors, errors.New("suspended process was not reaped"))
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 func assignJob(cmd *exec.Cmd) uintptr {
@@ -84,36 +138,65 @@ func assignJob(cmd *exec.Cmd) uintptr {
 	return uintptr(job)
 }
 
-// resumeProcess resumes every thread of pid. A CREATE_SUSPENDED process has a
-// single suspended primary thread, so this releases it once the job is assigned.
-func resumeProcess(pid uint32) {
+// resumeProcess resumes the primary thread. Before it runs, a CREATE_SUSPENDED
+// process cannot create another thread; absence or duplication is fail-closed.
+func resumeProcess(pid uint32) error {
 	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPTHREAD, 0)
 	if err != nil {
-		return
+		return err
 	}
 	defer func() { _ = windows.CloseHandle(snap) }()
 	var te windows.ThreadEntry32
 	te.Size = uint32(unsafe.Sizeof(te))
+	var threadID uint32
 	for err := windows.Thread32First(snap, &te); err == nil; err = windows.Thread32Next(snap, &te) {
 		if te.OwnerProcessID != pid {
 			continue
 		}
-		th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, te.ThreadID)
-		if err != nil {
-			continue
+		if threadID != 0 {
+			return fmt.Errorf("multiple threads found for suspended process %d", pid)
 		}
-		_, _ = windows.ResumeThread(th)
-		_ = windows.CloseHandle(th)
+		threadID = te.ThreadID
 	}
+	if threadID == 0 {
+		return fmt.Errorf("no thread found for suspended process %d", pid)
+	}
+	th, err := windows.OpenThread(windows.THREAD_SUSPEND_RESUME, false, threadID)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = windows.CloseHandle(th) }()
+	previous, err := windows.ResumeThread(th)
+	if err != nil {
+		return err
+	}
+	if previous > 1 {
+		return fmt.Errorf("thread %d remains suspended (previous count %d)", threadID, previous)
+	}
+	return nil
 }
 
 // KillTracked terminates cmd's whole process tree. When job (from StartTracked)
 // is non-zero, terminating it kills even detached descendants; the KillTree pass
 // then catches anything spawned in the gap before the job was assigned.
 func KillTracked(cmd *exec.Cmd, job uintptr) {
-	if job != 0 {
-		_ = windows.TerminateJobObject(windows.Handle(job), 1)
-		_ = windows.CloseHandle(windows.Handle(job))
+	if job == 0 {
+		KillTree(cmd)
+		return
 	}
-	KillTree(cmd)
+	FinishTracked(job)
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+}
+
+// FinishTracked releases a completed command's Job Object. Closing a job with
+// KILL_ON_JOB_CLOSE also terminates descendants without a PID-reuse-prone
+// taskkill fallback after cmd.Wait.
+func FinishTracked(job uintptr) {
+	if job == 0 {
+		return
+	}
+	_ = windows.TerminateJobObject(windows.Handle(job), 1)
+	_ = windows.CloseHandle(windows.Handle(job))
 }

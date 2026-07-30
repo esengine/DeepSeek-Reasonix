@@ -35,10 +35,10 @@ func (o okTool) Schema() json.RawMessage                                  { retu
 func (o okTool) ReadOnly() bool                                           { return true }
 func (o okTool) Execute(context.Context, json.RawMessage) (string, error) { return "ok", nil }
 
-func warnNoticeRecorder() (event.Sink, *[]string) {
+func noticeRecorder() (event.Sink, *[]string) {
 	var notices []string
 	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice && e.Level == event.LevelWarn {
+		if e.Kind == event.Notice {
 			notices = append(notices, e.Text)
 		}
 	})
@@ -48,20 +48,20 @@ func warnNoticeRecorder() (event.Sink, *[]string) {
 // TestStormBreakerEscalatesRepeatedFailure: once the same tool has failed the
 // same way stormBreakThreshold times in a row, the model-facing result must carry
 // the loop-guard directive (not just the raw error again), and the user must get
-// a warn notice. The arguments DIFFER on every call — mirroring the live failure
+// a notice. The arguments DIFFER on every call — mirroring the live failure
 // mode where a stuck model re-words the payload — to prove detection keys on the
 // error, not the bytes.
 func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	args := []string{`{"content":"Mountains are`, `{"path":"n.txt","content":"Peaks rise`, `{}`}
 	var last string
 	for i := 0; i < stormBreakThreshold; i++ {
 		call := provider.ToolCall{Name: "write_file", Arguments: args[i]}
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if !strings.Contains(last, "[loop guard]") {
@@ -74,7 +74,105 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 		t.Errorf("loop-guard result should still preserve the original error, got: %q", last)
 	}
 	if len(*notices) == 0 {
-		t.Errorf("loop guard should emit a warn notice to the user")
+		t.Errorf("loop guard should emit a notice to the user")
+	}
+}
+
+// TestStormBreakerEscalatesRepeatedBlockedPermission covers the readiness
+// recovery failure mode where the model keeps changing bash commands after the
+// host returns the same permission denial. Blocked calls used to reset the storm
+// counter, so this loop could churn approval prompts without ever changing
+// approach.
+func TestStormBreakerEscalatesRepeatedBlockedPermission(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+	sink, notices := noticeRecorder()
+	a := New(nil, reg, NewSession(""), Options{
+		Gate: &stubGate{deny: map[string]bool{"bash": true}},
+	}, sink)
+
+	args := []string{
+		`{"command":"go test ./..."}`,
+		`{"command":"git status --short"}`,
+		`{"command":"ls -la"}`,
+	}
+	var last string
+	for i := 0; i < stormBreakThreshold; i++ {
+		call := provider.ToolCall{Name: "bash", Arguments: args[i]}
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
+	}
+
+	if !strings.Contains(last, "[loop guard]") {
+		t.Fatalf("after %d same permission blocks the result should carry the loop guard, got: %q", stormBreakThreshold, last)
+	}
+	if !strings.Contains(last, "blocked") || !strings.Contains(last, "permission") {
+		t.Fatalf("permission loop guard should preserve blocked context, got: %q", last)
+	}
+	if len(*notices) == 0 {
+		t.Errorf("loop guard should emit a notice to the user")
+	}
+}
+
+// TestStormBreakerEscalatesAlternatingBlockedShapes: rotating between two
+// blocked tools defeats the signature detector (each turn resets the count),
+// but every turn is still a host refusal with zero progress. The blocked-turn
+// streak must trip the guard anyway.
+func TestStormBreakerEscalatesAlternatingBlockedShapes(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+	reg.Add(fakeTool{name: "web_fetch", readOnly: false})
+	sink, notices := noticeRecorder()
+	a := New(nil, reg, NewSession(""), Options{
+		Gate: &stubGate{deny: map[string]bool{"bash": true, "web_fetch": true}},
+	}, sink)
+
+	calls := []provider.ToolCall{
+		{Name: "bash", Arguments: `{"command":"go test ./..."}`},
+		{Name: "web_fetch", Arguments: `{"url":"https://example.com"}`},
+		{Name: "bash", Arguments: `{"command":"ls"}`},
+	}
+	var last string
+	for _, call := range calls {
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
+	}
+
+	if !strings.Contains(last, "[loop guard]") {
+		t.Fatalf("after %d all-blocked turns the guard should fire despite alternating tools, got: %q", stormBreakThreshold, last)
+	}
+	if !a.loopGuardArmed {
+		t.Fatal("streak guard should arm the final-readiness loop-guard pass")
+	}
+	if len(*notices) == 0 {
+		t.Errorf("streak loop guard should emit a notice to the user")
+	}
+}
+
+// TestStormBreakerBlockedStreakResetBySuccess: a turn that makes real progress
+// proves the model is not stuck, so the blocked-turn streak must start over.
+func TestStormBreakerBlockedStreakResetBySuccess(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "bash", readOnly: false})
+	reg.Add(fakeTool{name: "read_file", readOnly: true})
+	a := New(nil, reg, NewSession(""), Options{
+		Gate: &stubGate{deny: map[string]bool{"bash": true}},
+	}, event.Discard)
+
+	calls := []provider.ToolCall{
+		{Name: "bash", Arguments: `{"command":"go test ./..."}`},
+		{Name: "bash", Arguments: `{"command":"ls"}`},
+		{Name: "read_file", Arguments: `{"path":"a.go"}`},
+		{Name: "bash", Arguments: `{"command":"pwd"}`},
+	}
+	var last string
+	for _, call := range calls {
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
+	}
+
+	if strings.Contains(last, "[loop guard]") {
+		t.Fatalf("a successful turn should reset the blocked streak, got: %q", last)
+	}
+	if a.blockedTurnStreak != 1 {
+		t.Fatalf("blockedTurnStreak = %d, want 1 after success reset plus one block", a.blockedTurnStreak)
 	}
 }
 
@@ -85,7 +183,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_a"})
 	reg.Add(failTool{name: "write_b"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
@@ -94,7 +192,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 	}
 	var first string
 	for i := 0; i < stormBreakThreshold; i++ {
-		first = a.executeBatch(context.Background(), batch)[0]
+		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
 	if !strings.Contains(first, "[loop guard]") {
@@ -104,7 +202,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 		t.Errorf("guard should name the repeated batch, got: %q", first)
 	}
 	if len(*notices) == 0 {
-		t.Errorf("loop guard should emit a warn notice for a repeated batch")
+		t.Errorf("loop guard should emit a notice for a repeated batch")
 	}
 }
 
@@ -115,7 +213,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
 	reg.Add(okTool{name: "read_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	batch := []provider.ToolCall{
@@ -124,14 +222,14 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 	}
 	var first string
 	for i := 0; i < stormBreakThreshold+2; i++ {
-		first = a.executeBatch(context.Background(), batch)[0]
+		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
 	if strings.Contains(first, "[loop guard]") {
 		t.Fatalf("a batch with a succeeding call should never trip the guard, got: %q", first)
 	}
 	if len(*notices) != 0 {
-		t.Errorf("no warn notice expected when part of the batch succeeds, got %v", *notices)
+		t.Errorf("no notice expected when part of the batch succeeds, got %v", *notices)
 	}
 }
 
@@ -140,20 +238,20 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
 	var last string
 	for i := 0; i < stormBreakThreshold-1; i++ {
-		last = a.executeBatch(context.Background(), []provider.ToolCall{call})[0]
+		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 
 	if strings.Contains(last, "[loop guard]") {
 		t.Fatalf("guard fired after only %d repeats (threshold %d)", stormBreakThreshold-1, stormBreakThreshold)
 	}
 	if len(*notices) != 0 {
-		t.Errorf("no warn notice expected below threshold, got %v", *notices)
+		t.Errorf("no notice expected below threshold, got %v", *notices)
 	}
 }
 
@@ -163,23 +261,30 @@ func TestStormBreakerResetsOnSuccess(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(failTool{name: "write_file"})
 	reg.Add(okTool{name: "read_file"})
-	sink, notices := warnNoticeRecorder()
+	sink, notices := noticeRecorder()
 	a := New(nil, reg, NewSession(""), Options{}, sink)
 
 	fail := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
 	good := provider.ToolCall{Name: "read_file", Arguments: `{"path":"x"}`}
 	ctx := context.Background()
 
-	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 1
-	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 2
-	a.executeBatch(ctx, []provider.ToolCall{good})            // success → reset
-	a.executeBatch(ctx, []provider.ToolCall{fail})            // count 1
-	last := a.executeBatch(ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
+	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
+	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 2
+	a.executeBatch(ctx, []provider.ToolCall{good})                    // success → reset
+	a.executeBatch(ctx, []provider.ToolCall{fail})                    // count 1
+	last := executeBatchOutputs(a, ctx, []provider.ToolCall{fail})[0] // count 2 — still below threshold
 
 	if strings.Contains(last, "[loop guard]") {
 		t.Fatalf("guard should have reset after a successful turn, got: %q", last)
 	}
 	if len(*notices) != 0 {
-		t.Errorf("no warn notice expected when a success breaks the run, got %v", *notices)
+		t.Errorf("no notice expected when a success breaks the run, got %v", *notices)
 	}
+}
+
+// executeBatchOutputs runs the batch and returns just the model-facing outputs.
+func executeBatchOutputs(a *Agent, ctx context.Context, calls []provider.ToolCall) []string {
+	batch := a.executeBatch(ctx, calls)
+	outputs := batch.results
+	return outputs
 }

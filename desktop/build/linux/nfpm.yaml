@@ -1,12 +1,13 @@
 # nfpm config for the Linux .deb package. scripts/desktop-build.sh's linux branch
 # runs `nfpm package` after `wails build`, from the desktop/ dir (so the src paths
-# below are relative to desktop/). The .deb is a human-download artifact only — like
-# the macOS .dmg — so the Linux updater channel stays the .tar.gz and cmd/sign's
-# manifest skips .deb files.
+# below are relative to desktop/). Portable clients keep using the .tar.gz under
+# platforms[]; this .deb is the native package channel (native_packages) and also
+# remains a human-download artifact.
 #
-# $DEB_VERSION and $DEB_ARCH are exported by desktop-build.sh. DEB_VERSION is the tag
-# minus a leading "v" and any prerelease suffix (a strict X.Y.Z that dpkg accepts);
-# DEB_ARCH is the Go arch name, which already matches Debian's (amd64, arm64).
+# $DEB_VERSION and $DEB_ARCH are exported by desktop-build.sh. DEB_VERSION follows
+# Debian version ordering: stable X.Y.Z, prereleases as X.Y.Z~rc.N / X.Y.Z~canary.N
+# so they sort below the matching stable package. DEB_ARCH is the Go arch name,
+# which already matches Debian's (amd64, arm64).
 name: "reasonix-desktop"
 arch: "${DEB_ARCH}"
 platform: "linux"
@@ -21,14 +22,32 @@ homepage: "https://github.com/esengine/DeepSeek-Reasonix"
 license: "MIT"
 # Runtime libraries the WebKitGTK 4.1 build links against (-tags webkit2_41); apt
 # pulls them in on install. These package names ship from Ubuntu 22.04 / Debian 12 on.
+# pkexec is required for the in-app Polkit authorization update path.
 depends:
   - libgtk-3-0
   - libwebkit2gtk-4.1-0
+  - pkexec
 contents:
   - src: ./build/bin/reasonix-desktop
     dst: /usr/bin/reasonix-desktop
     file_info:
       mode: 0755
+  - src: ./build/bin/reasonix-guard
+    dst: /usr/bin/reasonix-guard
+    file_info:
+      mode: 0755
+  - src: ./build/bin/reasonix
+    dst: /usr/bin/reasonix
+    file_info:
+      mode: 0755
+  - src: ./build/bin/reasonix-update-helper
+    dst: /usr/lib/reasonix/reasonix-update-helper
+    file_info:
+      mode: 0755
+  - src: ./build/linux/io.reasonix.desktop.update.policy
+    dst: /usr/share/polkit-1/actions/io.reasonix.desktop.update.policy
+    file_info:
+      mode: 0644
   - src: ./build/linux/reasonix.desktop
     dst: /usr/share/applications/reasonix.desktop
     file_info:

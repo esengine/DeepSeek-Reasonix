@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bufio"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -644,6 +646,144 @@ func TestSubagentStoreCleanupStaleRunningMarksInterrupted(t *testing.T) {
 	if _, err := store.prepareFork(ref, spec); err == nil || !strings.Contains(err.Error(), "cannot be continued or forked") {
 		t.Fatalf("PrepareFork error = %v, want interrupted fork rejection", err)
 	}
+}
+
+func TestSubagentStoreCleanupStaleRunningSkipsMissingParentProof(t *testing.T) {
+	store := NewSubagentStore(t.TempDir())
+	spec := testSubagentSpec(t, "review")
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.MarkRunning(run); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	ref := run.Ref
+	run.Release()
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	meta.ParentSession = ""
+	if err := store.saveMeta(meta); err != nil {
+		t.Fatalf("saveMeta without parent: %v", err)
+	}
+
+	cleaned, err := store.CleanupStaleRunning()
+	if err != nil {
+		t.Fatalf("CleanupStaleRunning: %v", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("cleaned = %d without parent proof, want 0", cleaned)
+	}
+	meta, err = store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta after cleanup: %v", err)
+	}
+	if meta.Status != SubagentRunning {
+		t.Fatalf("status = %q without parent proof, want running", meta.Status)
+	}
+}
+
+func TestSubagentStoreCleanupStaleRunningSkipsForeignLiveParent(t *testing.T) {
+	sessionDir := t.TempDir()
+	store := NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	spec := testSubagentSpec(t, "review")
+	spec.ParentSession = "live-parent"
+	run, err := store.PrepareFresh(spec)
+	if err != nil {
+		t.Fatalf("PrepareFresh: %v", err)
+	}
+	if err := store.MarkRunning(run); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	ref := run.Ref
+	run.Release()
+
+	parentPath := filepath.Join(sessionDir, spec.ParentSession+".jsonl")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSubagentStoreForeignLeaseHelper$")
+	cmd.Env = append(os.Environ(),
+		"REASONIX_SUBAGENT_LEASE_HELPER=1",
+		"REASONIX_SUBAGENT_LEASE_PATH="+parentPath,
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("StdinPipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("StdoutPipe: %v", err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start lease holder: %v", err)
+	}
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "ready\n" {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		t.Fatalf("lease holder readiness = %q, err = %v", line, err)
+	}
+
+	cleaned, err := store.CleanupStaleRunning()
+	if err != nil {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		t.Fatalf("CleanupStaleRunning with foreign holder: %v", err)
+	}
+	if cleaned != 0 {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		t.Fatalf("cleaned = %d while foreign parent lease was live, want 0", cleaned)
+	}
+	meta, err := store.LoadMeta(ref)
+	if err != nil {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		t.Fatalf("LoadMeta with foreign holder: %v", err)
+	}
+	if meta.Status != SubagentRunning {
+		_ = stdin.Close()
+		_ = cmd.Wait()
+		t.Fatalf("status = %q while foreign parent lease was live, want running", meta.Status)
+	}
+
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("release lease holder stdin: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("lease holder exit: %v", err)
+	}
+	cleaned, err = store.CleanupStaleRunning()
+	if err != nil {
+		t.Fatalf("CleanupStaleRunning after foreign release: %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("cleaned = %d after foreign release, want 1", cleaned)
+	}
+	meta, err = store.LoadMeta(ref)
+	if err != nil {
+		t.Fatalf("LoadMeta after foreign release: %v", err)
+	}
+	if meta.Status != SubagentInterrupted {
+		t.Fatalf("status = %q after foreign release, want interrupted", meta.Status)
+	}
+}
+
+func TestSubagentStoreForeignLeaseHelper(t *testing.T) {
+	if os.Getenv("REASONIX_SUBAGENT_LEASE_HELPER") != "1" {
+		return
+	}
+	lease, err := TryAcquireSessionLease(os.Getenv("REASONIX_SUBAGENT_LEASE_PATH"))
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	if _, err := os.Stdout.WriteString("ready\n"); err != nil {
+		lease.Release()
+		t.Fatalf("write readiness: %v", err)
+	}
+	var release [1]byte
+	_, _ = os.Stdin.Read(release[:])
+	lease.Release()
 }
 
 func TestSubagentStoreSkipsSaveForDestroyedParent(t *testing.T) {

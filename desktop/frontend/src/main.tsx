@@ -1,3 +1,4 @@
+import "./lib/compat";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
@@ -6,11 +7,13 @@ import { installGlobalCrashHandlers, installPerformancePressureMonitor } from ".
 import { installWailsNonFileDragErrorSuppression } from "./lib/bridge";
 import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
 import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
-import { LocaleProvider } from "./lib/i18n";
+import { LocaleProvider, preloadDetectedLocale } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
 import { initFontFamily } from "./lib/fontFamily";
 import { initTextSize } from "./lib/textSize";
+import { initTypographyPreferences } from "./lib/typographyPreferences";
 import { initTheme } from "./lib/theme";
+import { initConversationWidth } from "./lib/conversationWidth";
 import "./styles.css";
 
 // Install first so startup/runtime failures paint a useful error instead of a
@@ -39,8 +42,10 @@ function initTypographyPlatform() {
 
 initTypographyPlatform();
 initTheme();
+initConversationWidth();
 initTextSize();
 initFontFamily();
+initTypographyPreferences();
 
 // Pre-warm font fallback stacks so the first frame doesn't flicker between the
 // browser default font and the app's configured typeface. Inserting a hidden span
@@ -76,15 +81,25 @@ if (typeof window !== "undefined" && window.runtime) {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
+const rootElement = root;
 
-createRoot(root).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <LocaleProvider>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </LocaleProvider>
-    </ErrorBoundary>
-  </StrictMode>,
-);
+async function mountApp() {
+  try {
+    await preloadDetectedLocale();
+  } catch (error) {
+    console.error("failed to preload desktop locale", error);
+  }
+  createRoot(rootElement).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <LocaleProvider>
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </LocaleProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}
+
+void mountApp();

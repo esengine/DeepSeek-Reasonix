@@ -14,6 +14,7 @@ Examples:
   ./prod_test
   ./prod_test darwin/arm64
   ./prod_test darwin/universal v1.5.0-prodtest stable
+  ./prod_fast_test
 
 Defaults:
   platform  auto-detected from this machine; macOS defaults to darwin/universal
@@ -24,9 +25,14 @@ Environment overrides:
   PROD_TEST_PLATFORM       Same as first argument.
   PROD_TEST_VERSION        Same as second argument.
   PROD_TEST_CHANNEL        Same as third argument.
+  PROD_TEST_FAST           1 enables a faster local iteration build:
+                           native host architecture on macOS, no Wails clean,
+                           and no DMG packaging unless overridden below.
   PROD_TEST_INSTALL_TOOLS  1 installs missing Wails/create-dmg/nfpm when possible.
                            Set to 0 to only check and print missing deps.
   PROD_TEST_OPEN_DIST      1 opens dist/ after a successful build when supported.
+  DESKTOP_BUILD_CLEAN      0 skips Wails -clean.
+  DESKTOP_BUILD_SKIP_DMG   1 skips macOS DMG creation.
 EOF
 }
 
@@ -87,6 +93,24 @@ detect_platform() {
 	fi
 }
 
+detect_native_platform() {
+	local os arch machine
+	case "$(uname -s)" in
+	Darwin) os="darwin" ;;
+	Linux) os="linux" ;;
+	MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+	*) fail "unsupported host OS: $(uname -s)" ;;
+	esac
+
+	machine="$(uname -m)"
+	case "$machine" in
+	arm64|aarch64) arch="arm64" ;;
+	x86_64|amd64) arch="amd64" ;;
+	*) fail "unsupported host architecture: $machine" ;;
+	esac
+	printf '%s/%s' "$os" "$arch"
+}
+
 default_version() {
 	local ref sha dirty
 	ref="$(git branch --show-current 2>/dev/null || true)"
@@ -138,6 +162,9 @@ install_or_check_tools() {
 
 	case "$os" in
 	darwin)
+		if [[ "${DESKTOP_BUILD_SKIP_DMG:-0}" == "1" ]]; then
+			return
+		fi
 		if ! command -v create-dmg >/dev/null 2>&1; then
 			if [[ "$install_tools" == "1" && -x "$(command -v brew 2>/dev/null || true)" ]]; then
 				echo "==> installing create-dmg"
@@ -163,7 +190,21 @@ install_or_check_tools() {
 	esac
 }
 
-PLATFORM="${1:-${PROD_TEST_PLATFORM:-$(detect_platform)}}"
+FAST="${PROD_TEST_FAST:-0}"
+if [[ "$FAST" == "1" ]]; then
+	export DESKTOP_BUILD_CLEAN="${DESKTOP_BUILD_CLEAN:-0}"
+	export DESKTOP_BUILD_SKIP_DMG="${DESKTOP_BUILD_SKIP_DMG:-1}"
+fi
+
+if [[ -n "${1:-}" ]]; then
+	PLATFORM="$1"
+elif [[ -n "${PROD_TEST_PLATFORM:-}" ]]; then
+	PLATFORM="$PROD_TEST_PLATFORM"
+elif [[ "$FAST" == "1" ]]; then
+	PLATFORM="$(detect_native_platform)"
+else
+	PLATFORM="$(detect_platform)"
+fi
 VERSION="${2:-${PROD_TEST_VERSION:-$(default_version)}}"
 CHANNEL="${3:-${PROD_TEST_CHANNEL:-stable}}"
 OPEN_DIST="${PROD_TEST_OPEN_DIST:-1}"
@@ -202,6 +243,9 @@ echo "==> commit: $(git rev-parse --short=8 HEAD 2>/dev/null || echo unknown)"
 echo "==> platform: $PLATFORM"
 echo "==> version: $VERSION"
 echo "==> channel: $CHANNEL"
+if [[ "$FAST" == "1" ]]; then
+	echo "==> fast mode: DESKTOP_BUILD_CLEAN=$DESKTOP_BUILD_CLEAN DESKTOP_BUILD_SKIP_DMG=$DESKTOP_BUILD_SKIP_DMG"
+fi
 
 bash scripts/desktop-build.sh "$PLATFORM" "$VERSION" "$CHANNEL"
 

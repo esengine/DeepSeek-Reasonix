@@ -161,16 +161,17 @@ func botStart(args []string, version string) int {
 		<-sigCh
 		fmt.Fprintln(os.Stderr, "\nshutting down...")
 		cancel()
-		gw.Stop()
 	}()
 
 	fmt.Fprintf(os.Stderr, "reasonix bot starting (model: %s, channels: %s)...\n", modelName, *channels)
 	fmt.Fprintf(os.Stderr, "version: %s\n", version)
 
 	if err := gw.Start(ctx); err != nil {
+		gw.Stop()
 		fmt.Fprintf(os.Stderr, "error: start gateway: %v\n", err)
 		return 1
 	}
+	defer gw.Stop()
 
 	// 等待信号或 context 取消
 	<-ctx.Done()

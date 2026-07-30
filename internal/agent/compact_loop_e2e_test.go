@@ -99,7 +99,7 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, tur
 		case event.CompactionStarted:
 			started++
 		case event.Notice:
-			if strings.Contains(e.Text, "Auto-compaction paused") {
+			if strings.Contains(e.Text, "Automatic context cleanup paused") {
 				paused = true
 			}
 			if strings.Contains(e.Text, "pruned") {

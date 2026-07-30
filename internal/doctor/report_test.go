@@ -129,3 +129,29 @@ func TestRenderTextFlagsUnavailableSandboxAsFailClosed(t *testing.T) {
 		t.Fatalf("enforce with an OS sandbox should not be flagged unavailable:\n%s", active)
 	}
 }
+
+// TestCollectFlagsIgnoredEnforceConfig pins the visibility contract for the
+// platform force-off: when the config file says enforce but the effective mode
+// resolves to off (Windows), doctor must say so in both the warnings list and
+// the sandbox bash line instead of silently reporting "off".
+func TestCollectFlagsIgnoredEnforceConfig(t *testing.T) {
+	t.Setenv("REASONIX_HOME", filepath.Join(t.TempDir(), "reasonix"))
+
+	cfg := config.Default()
+	cfg.Sandbox.Bash = "enforce"
+	report := Collect(Options{Version: "test", Config: cfg})
+
+	ignored := cfg.BashMode() == "off"
+	if report.Sandbox.BashConfigIgnored != ignored {
+		t.Fatalf("BashConfigIgnored = %v, want %v (BashMode %q)", report.Sandbox.BashConfigIgnored, ignored, cfg.BashMode())
+	}
+
+	text := RenderText(Report{Sandbox: SandboxReport{Bash: "off", BashConfigIgnored: true}})
+	if !strings.Contains(text, `config requests "enforce", ignored`) {
+		t.Fatalf("ignored enforce should be flagged on the bash line:\n%s", text)
+	}
+	plain := RenderText(Report{Sandbox: SandboxReport{Bash: "off"}})
+	if strings.Contains(plain, "ignored") {
+		t.Fatalf("plain off must not claim the config was ignored:\n%s", plain)
+	}
+}

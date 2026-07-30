@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-violet-starlight",
+  "name": "Violet Starlight",
+  "author": "Reasonix Contributors",
+  "description": "Blue-violet starfield with glowing butterflies and an original celestial muse.",
+  "license": "MIT",
+  "baseStyle": "nocturne",
+  "tokens": {
+    "light": {
+      "bg": "#F7F4FF",
+      "bgSoft": "#EFEBFB",
+      "bgElev": "#FCFAFF",
+      "panel": "#FCFAFF",
+      "sidebar": "#EEE9FA",
+      "chat": "#FAF8FF",
+      "workspace": "#FCFAFF",
+      "workspaceFiles": "#F1EDFB",
+      "border": "#CABDEC",
+      "borderSoft": "#E8E3F7",
+      "fg": "#251F3C",
+      "fgDim": "#544B74",
+      "fgFaint": "#9188B3",
+      "accent": "#6242C7",
+      "accentFg": "#F7F4FF"
+    },
+    "dark": {
+      "bg": "#0C1022",
+      "bgSoft": "#131834",
+      "bgElev": "#1A2140",
+      "panel": "#151B36",
+      "sidebar": "#121732",
+      "chat": "#111630",
+      "workspace": "#1A2140",
+      "workspaceFiles": "#131834",
+      "border": "#2E3A66",
+      "borderSoft": "#222B4E",
+      "fg": "#F4F2FF",
+      "fgDim": "#C2BDE8",
+      "fgFaint": "#8580B8",
+      "accent": "#9B86FF",
+      "accentFg": "#14102E"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "round"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.73,
+    "focusY": 0.44,
+    "safeArea": "left",
+    "homeOpacity": 0.96,
+    "taskOpacity": 0.18,
+    "overlayStrength": 0.72,
+    "paneOpacity": 0.5
+  }
+}

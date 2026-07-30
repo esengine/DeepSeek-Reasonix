@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +98,91 @@ func TestSanitizeToolPairingLeavesWellFormedUnchanged(t *testing.T) {
 	for i := range in {
 		if out[i].Role != in[i].Role || out[i].Content != in[i].Content || out[i].ToolCallID != in[i].ToolCallID {
 			t.Fatalf("well-formed message %d mutated: %+v -> %+v", i, in[i], out[i])
+		}
+	}
+}
+
+func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
+	local := Message{
+		Role: RoleTool, ToolCallID: LocalOnlyToolID, Name: LocalOnlyToolName,
+		Content: "partial answer", ReasoningContent: "partial reasoning", LocalOnly: true,
+		ToolCalls:       []ToolCall{{ID: "partial", Name: "write_file"}},
+		InterruptedTurn: &InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"write_file"}},
+	}
+	in := []Message{
+		{Role: RoleUser, Content: "task"},
+		local,
+		{Role: RoleUser, Content: "continue"},
+	}
+	model := ModelMessages(in)
+	if len(model) != 2 || model[0].Content != "task" || model[1].Content != "continue" {
+		t.Fatalf("ModelMessages leaked or reordered local-only record: %+v", model)
+	}
+	wire := SanitizeToolPairing(in)
+	if len(wire) != 2 || wire[0].Content != "task" || wire[1].Content != "continue" {
+		t.Fatalf("SanitizeToolPairing leaked local-only record: %+v", wire)
+	}
+	session := NormalizeSessionMessages(in)
+	if len(session) != len(in) || !session[1].LocalOnly || session[1].Content != local.Content {
+		t.Fatalf("session normalization did not preserve local display: %+v", session)
+	}
+}
+
+func TestModelMessagesUsesProviderContentWithoutMutatingStoredMessage(t *testing.T) {
+	stored := []Message{{
+		Role:            RoleUser,
+		Content:         "fix the bug",
+		ProviderContent: "<reasoning-language>zh</reasoning-language>\n\nfix the bug",
+	}}
+
+	model := ModelMessages(stored)
+	if len(model) != 1 {
+		t.Fatalf("ModelMessages length = %d, want 1", len(model))
+	}
+	if got := model[0].Content; got != stored[0].ProviderContent {
+		t.Fatalf("model content = %q, want provider content %q", got, stored[0].ProviderContent)
+	}
+	if model[0].ProviderContent != "" {
+		t.Fatalf("provider-local field leaked into model message: %q", model[0].ProviderContent)
+	}
+	if stored[0].Content != "fix the bug" || stored[0].ProviderContent == "" {
+		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
+func TestModelMessagesStripsRawContentWithoutChangingLegacyContent(t *testing.T) {
+	const rendered = "<reasoning-language>zh</reasoning-language>\n\nfix the bug"
+	stored := []Message{{Role: RoleUser, Content: rendered, RawContent: "fix the bug"}}
+
+	model := ModelMessages(stored)
+	if len(model) != 1 || model[0].Content != rendered {
+		t.Fatalf("provider-visible content changed: %+v", model)
+	}
+	if model[0].RawContent != "" {
+		t.Fatalf("raw display metadata leaked into provider request: %+v", model[0])
+	}
+	if stored[0].RawContent != "fix the bug" || stored[0].Content != rendered {
+		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
+func TestLocalOnlySentinelIsSafeWhenNewFieldsAreIgnoredByLegacyReader(t *testing.T) {
+	legacyView := []Message{
+		{Role: RoleUser, Content: "task"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c1", Name: "read_file", Arguments: `{}`}}},
+		{Role: RoleTool, ToolCallID: "c1", Name: "read_file", Content: "ok"},
+		// Simulate an older binary: unknown local_only/interrupted_turn JSON fields
+		// were ignored, leaving only the orphan tool sentinel and partial content.
+		{Role: RoleTool, ToolCallID: LocalOnlyToolID, Name: LocalOnlyToolName, Content: "partial reasoning that must not leak"},
+		{Role: RoleUser, Content: "continue"},
+	}
+	wire := SanitizeToolPairing(legacyView)
+	if len(wire) != 4 {
+		t.Fatalf("legacy normalization kept local sentinel: %+v", wire)
+	}
+	for _, message := range wire {
+		if message.ToolCallID == LocalOnlyToolID || strings.Contains(message.Content, "must not leak") {
+			t.Fatalf("legacy normalization leaked display-only content: %+v", wire)
 		}
 	}
 }
@@ -354,6 +440,19 @@ func TestAuthErrorWithKeyEnv(t *testing.T) {
 	}
 }
 
+func TestAuthErrorBodyStaysOutOfError(t *testing.T) {
+	// Body carries the server's reason for display layers to extract, but it
+	// must never leak into Error(): servers echo masked key fragments in auth
+	// bodies, and the ambient string flows into logs and traces.
+	e := &AuthError{Provider: "relay", Status: 401, Body: `{"error":{"message":"Your api key: ****ae54 has expired"}}`}
+	if e.Body == "" {
+		t.Fatal("Body should carry the server's reason")
+	}
+	if msg := e.Error(); contains(msg, "ae54") || contains(msg, "{") {
+		t.Errorf("AuthError.Error() must not include body content: %s", msg)
+	}
+}
+
 func TestAuthErrorWithoutKeyEnv(t *testing.T) {
 	e := &AuthError{Provider: "openai", Status: 403}
 	msg := e.Error()
@@ -440,7 +539,7 @@ func TestRoleConstants(t *testing.T) {
 // --- ChunkType constants ---
 
 func TestChunkTypeConstants(t *testing.T) {
-	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError}
+	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError}
 	for i, ct := range types {
 		if int(ct) != i {
 			t.Errorf("ChunkType %d: got %d", i, int(ct))

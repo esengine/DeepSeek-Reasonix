@@ -71,7 +71,7 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	skills, hooks, mcp := pkg.CapabilityCounts()
+	skills, commands, hooks, mcp := pkg.CapabilityCounts()
 	state := "disabled"
 	if p.Enabled {
 		state = "enabled"
@@ -82,13 +82,13 @@ func InstalledShowText(reasonixHome, name string) (string, error) {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "plugin %s [%s]\n", p.Name, state)
-	fmt.Fprintf(&b, "version: %s\nkind: %s\nroot: %s\nsource: %s\ncapabilities: %d skills, %d hooks, %d MCP servers\n", version, p.ManifestKind, filepath.Clean(root), p.Source, skills, hooks, mcp)
+	fmt.Fprintf(&b, "version: %s\nkind: %s\nroot: %s\nsource: %s\ncapabilities: %d skills, %d commands, %d hooks, %d MCP servers\n", version, p.ManifestKind, filepath.Clean(root), p.Source, skills, commands, hooks, mcp)
 	if p.Enabled {
-		b.WriteString("usage: enabled plugins load into new sessions; use /skills, invoke /<skill>, or ask naturally.\n")
+		b.WriteString("usage: enabled plugins load into new sessions; use /skills, invoke /<plugin>:<skill> or /<plugin>:<command>, or ask naturally.\n")
 	} else {
-		b.WriteString("usage: enable this plugin before its skills, hooks, or MCP servers participate in sessions.\n")
+		b.WriteString("usage: enable this plugin before its skills, commands, hooks, or MCP servers participate in sessions.\n")
 	}
-	appendInventoryText(&b, pkg.Inventory())
+	appendInventoryText(&b, p.Name, pkg.Inventory())
 	for _, warning := range warnings {
 		fmt.Fprintf(&b, "warning: %s\n", warning)
 	}
@@ -114,10 +114,13 @@ func pluginCapabilityText(reasonixHome string, p InstalledPlugin) string {
 	if err != nil {
 		return "invalid: " + err.Error()
 	}
-	skills, hooks, mcp := pkg.CapabilityCounts()
+	skills, commands, hooks, mcp := pkg.CapabilityCounts()
 	parts := []string{}
 	if skills > 0 {
 		parts = append(parts, fmt.Sprintf("%d skills", skills))
+	}
+	if commands > 0 {
+		parts = append(parts, fmt.Sprintf("%d commands", commands))
 	}
 	if hooks > 0 {
 		parts = append(parts, fmt.Sprintf("%d hooks", hooks))
@@ -131,7 +134,22 @@ func pluginCapabilityText(reasonixHome string, p InstalledPlugin) string {
 	return strings.Join(parts, " / ")
 }
 
-func appendInventoryText(b *strings.Builder, inv Inventory) {
+func appendInventoryText(b *strings.Builder, pluginName string, inv Inventory) {
+	if len(inv.Commands) > 0 {
+		b.WriteString("commands:\n")
+		for _, cmd := range inv.Commands {
+			desc := oneLine(cmd.Description)
+			if desc == "" {
+				desc = "(no description)"
+			}
+			invocation := "/" + pluginName + ":" + cmd.Name
+			if cmd.ArgHint != "" {
+				fmt.Fprintf(b, "  %s %s - %s\n", invocation, cmd.ArgHint, desc)
+			} else {
+				fmt.Fprintf(b, "  %s - %s\n", invocation, desc)
+			}
+		}
+	}
 	if len(inv.Skills) > 0 {
 		b.WriteString("skills:\n")
 		for _, sk := range inv.Skills {
@@ -139,10 +157,7 @@ func appendInventoryText(b *strings.Builder, inv Inventory) {
 			if desc == "" {
 				desc = "(no description)"
 			}
-			invocation := sk.Invocation
-			if invocation == "" {
-				invocation = "/" + sk.Name
-			}
+			invocation := "/" + pluginName + ":" + sk.Name
 			if sk.RunAs != "" {
 				fmt.Fprintf(b, "  %s [%s] - %s\n", invocation, sk.RunAs, desc)
 			} else {
@@ -179,7 +194,7 @@ func appendInventoryText(b *strings.Builder, inv Inventory) {
 			fmt.Fprintf(b, "  %s [%s] - %s\n", server.Name, server.Transport, target)
 		}
 	}
-	if len(inv.Skills) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
+	if len(inv.Skills) == 0 && len(inv.Commands) == 0 && len(inv.Hooks) == 0 && len(inv.MCPServers) == 0 {
 		b.WriteString("capabilities: no detailed inventory available\n")
 	}
 }

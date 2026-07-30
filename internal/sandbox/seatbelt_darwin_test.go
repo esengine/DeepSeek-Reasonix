@@ -139,6 +139,35 @@ func TestSeatbeltProfileContainsRoots(t *testing.T) {
 	}
 }
 
+func TestMinimalWriteProfileOnlyAddsExplicitRootsAndDev(t *testing.T) {
+	root := t.TempDir()
+	dirs := writeAllowDirsForSpec(Spec{Mode: "enforce", WriteRoots: []string{root}, MinimalWrites: true})
+	if !containsDarwinPath(dirs, root) || !containsDarwinPath(dirs, "/dev") {
+		t.Fatalf("minimal write dirs = %v", dirs)
+	}
+	for _, forbidden := range []string{"/tmp", "/private/tmp", filepath.Join(os.Getenv("HOME"), ".npm"), filepath.Join(os.Getenv("HOME"), ".cache")} {
+		if forbidden != "" && containsDarwinPath(dirs, forbidden) {
+			t.Fatalf("minimal MCP profile unexpectedly allowed broad write root %q: %v", forbidden, dirs)
+		}
+	}
+}
+
+func containsDarwinPath(paths []string, want string) bool {
+	abs, err := filepath.Abs(want)
+	if err != nil {
+		return false
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	for _, path := range paths {
+		if path == abs {
+			return true
+		}
+	}
+	return false
+}
+
 func TestCommandUnwrappedWhenOff(t *testing.T) {
 	argv, wrapped := Command(Spec{Mode: "off"}, Shell{Kind: ShellBash, Path: "bash"}, "echo hi")
 	if wrapped {

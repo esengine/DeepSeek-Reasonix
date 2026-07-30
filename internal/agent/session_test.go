@@ -396,9 +396,181 @@ func TestNewSessionPathSanitizesSlashes(t *testing.T) {
 	}
 }
 
+func TestNewSessionPathSanitizesWindowsReservedPunctuation(t *testing.T) {
+	dir := t.TempDir()
+	path := NewSessionPath(dir, `nemotron-3-nano:30b<>"|?*`)
+	base := filepath.Base(path)
+	if strings.ContainsAny(base, `:<>"|?*`) {
+		t.Fatalf("filename contains Windows-reserved punctuation: %s", base)
+	}
+	if !strings.Contains(base, "nemotron-3-nano-30b") {
+		t.Fatalf("colon should be replaced without hiding the model hint: %s", base)
+	}
+
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	if err := s.Save(path); err != nil {
+		t.Fatalf("save session with sanitized model filename: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("stat saved session: %v", err)
+	}
+}
+
 func TestNewSessionPathEmptyModel(t *testing.T) {
 	path := NewSessionPath("/dir", "")
 	if !strings.Contains(path, "session") {
 		t.Errorf("empty model should use 'session' fallback: %s", path)
+	}
+}
+
+// --- rewrite-save baseline ---
+
+// TestNeedsRewriteSaveFollowsSaves pins the baseline's lifecycle on the
+// session object itself: an in-memory rewrite demands a rewrite save, every
+// full save re-anchors (including the plain force Save the depth-cap recovery
+// path uses), and the baseline never moves backwards when a slower save
+// reports an older capture.
+func TestNeedsRewriteSaveFollowsSaves(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	if s.NeedsRewriteSave() {
+		t.Fatal("fresh session should not need a rewrite save")
+	}
+	s.IncrementRewrite()
+	if !s.NeedsRewriteSave() {
+		t.Fatal("in-memory rewrite must demand a rewrite save")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("force save must re-anchor the rewrite baseline")
+	}
+	s.IncrementRewrite()
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("SaveRewrite: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("SaveRewrite must re-anchor the rewrite baseline")
+	}
+
+	// A slower save that captured an older rewriteVersion must not roll the
+	// baseline back below what a faster save already persisted.
+	digest, err := digestSessionMessages(s.Snapshot())
+	if err != nil {
+		t.Fatalf("digest: %v", err)
+	}
+	s.markPersisted(path, digest, 1, 1, 0)
+	if s.NeedsRewriteSave() {
+		t.Fatal("stale capture rolled the rewrite baseline backwards")
+	}
+}
+
+func TestUpdateToolCallPreviewPersistsAfterMidTurnSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "edit twice"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{
+		{ID: "c1", Name: "edit_file", Arguments: `{}`},
+		{ID: "c2", Name: "edit_file", Arguments: `{}`},
+	}})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn snapshot: %v", err)
+	}
+
+	refreshed := provider.ToolCall{ID: "c2", Diff: "@@ -1 +1 @@\n-ready\n+done\n", Added: 1, Removed: 1}
+	if !s.UpdateToolCallPreview(refreshed) {
+		t.Fatal("matching tool call was not updated")
+	}
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c1", Name: "edit_file", Content: "ready"})
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c2", Name: "edit_file", Content: "done"})
+	if !s.NeedsRewriteSave() {
+		t.Fatal("mutating a snapshotted assistant message must require rewrite save")
+	}
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("rewrite refreshed preview: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	var got provider.ToolCall
+	for _, msg := range loaded.Messages {
+		for _, call := range msg.ToolCalls {
+			if call.ID == "c2" {
+				got = call
+			}
+		}
+	}
+	if got.Diff != refreshed.Diff || got.Added != 1 || got.Removed != 1 {
+		t.Fatalf("persisted preview = %+v, want %+v", got, refreshed)
+	}
+}
+
+func TestUpdateToolCallResolutionPersistsAfterMidTurnSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	s := NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "use MCP"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{
+		ID: "c1", Name: "use_capability",
+		Arguments: `{"action":"call","capability_id":"mcp-tool:db/write"}`,
+	}}})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("mid-turn snapshot: %v", err)
+	}
+
+	readOnly := false
+	resolved := provider.ToolCall{
+		ID: "c1", ResolvedName: "mcp__db__write",
+		CapabilityID: "mcp-tool:db/write", ResolvedReadOnly: &readOnly,
+	}
+	if !s.UpdateToolCallResolution(resolved) {
+		t.Fatal("matching tool call resolution was not updated")
+	}
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "c1", Name: "use_capability", Content: "done"})
+	if !s.NeedsRewriteSave() {
+		t.Fatal("resolved metadata on a snapshotted assistant message must require rewrite save")
+	}
+	if err := s.SaveRewrite(path); err != nil {
+		t.Fatalf("rewrite resolved metadata: %v", err)
+	}
+
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	got := loaded.Messages[2].ToolCalls[0]
+	if got.ResolvedReadOnly == nil || *got.ResolvedReadOnly ||
+		got.ResolvedName != resolved.ResolvedName || got.CapabilityID != resolved.CapabilityID {
+		t.Fatalf("persisted resolved metadata = %+v, want %+v", got, resolved)
+	}
+}
+
+// TestRewriteBaselineStaysWithClones: an unpersisted rewrite travels with the
+// clone, and the source persisting later does not mark the clone's copy as
+// saved — each session object owns its own baseline, so no swap can orphan or
+// misattribute it.
+func TestRewriteBaselineStaysWithClones(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	s.IncrementRewrite()
+	clone := s.CloneWithMessages(s.Snapshot())
+	if !clone.NeedsRewriteSave() {
+		t.Fatal("clone must inherit the unpersisted rewrite")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if s.NeedsRewriteSave() {
+		t.Fatal("source baseline not re-anchored by save")
+	}
+	if !clone.NeedsRewriteSave() {
+		t.Fatal("saving the source must not mark the clone's rewrite persisted")
 	}
 }

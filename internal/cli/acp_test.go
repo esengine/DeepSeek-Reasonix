@@ -169,6 +169,47 @@ effort = "high"
 	}
 }
 
+func TestACPFactoryAdvertisesAndNormalizesRuntimeProfiles(t *testing.T) {
+	isolateCLIConfigHome(t)
+	if _, err := config.SetCredential("REASONIX_TEST_KEY", "test-key"); err != nil {
+		t.Fatalf("SetCredential: %v", err)
+	}
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+default_model = "local"
+
+[[providers]]
+name = "local"
+kind = "acp-test-provider"
+base_url = "http://example.invalid"
+model = "fake-model"
+api_key_env = "REASONIX_TEST_KEY"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := (&acpFactory{profile: "full"}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{
+		Cwd:            project,
+		RuntimeProfile: "delivery",
+	})
+	if err != nil {
+		t.Fatalf("SessionConfigState: %v", err)
+	}
+	work, ok := findACPConfigOption(state.ConfigOptions, "work_mode")
+	if !ok || work.CurrentValue != "delivery" || state.RuntimeProfile != "delivery" || len(work.Options) != 3 {
+		t.Fatalf("work mode state = %+v / %q, want delivery with 3 options", work, state.RuntimeProfile)
+	}
+
+	state, err = (&acpFactory{profile: "full"}).SessionConfigState(context.Background(), acp.SessionConfigStateParams{Cwd: project})
+	if err != nil {
+		t.Fatalf("default SessionConfigState: %v", err)
+	}
+	work, _ = findACPConfigOption(state.ConfigOptions, "work_mode")
+	if work.CurrentValue != "balanced" || state.RuntimeProfile != "balanced" {
+		t.Fatalf("legacy full profile = %+v / %q, want balanced", work, state.RuntimeProfile)
+	}
+}
+
 func TestACPTaskProfileDefaults(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.SubagentModel = "default-model"

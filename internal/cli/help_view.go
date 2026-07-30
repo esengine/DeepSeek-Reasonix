@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"reasonix/internal/command"
-	"reasonix/internal/i18n"
 	"reasonix/internal/plugin"
 	"reasonix/internal/skill"
 )
@@ -54,46 +53,29 @@ func writeHelpItems(b *strings.Builder, width int, title string, items []compIte
 }
 
 func builtinHelpItems() []compItem {
-	return []compItem{
-		{label: "/compact", hint: i18n.M.CmdCompact},
-		{label: "/new", hint: i18n.M.CmdNew},
-		{label: "/rename", hint: i18n.M.CmdRename},
-		{label: "/clear", hint: i18n.M.CmdClear},
-		{label: "/cls", hint: i18n.M.CmdCls},
-		{label: "/rewind", hint: i18n.M.CmdRewind},
-		{label: "/tree", hint: i18n.M.CmdTree},
-		{label: "/branch", hint: i18n.M.CmdBranch},
-		{label: "/switch", hint: i18n.M.CmdSwitchBranch},
-		{label: "/todo", hint: i18n.M.CmdTodo},
-		{label: "/model", hint: i18n.M.CmdModel},
-		{label: "/provider", hint: i18n.M.CmdProvider},
-		{label: "/mcp", hint: i18n.M.CmdMcp},
-		{label: "/skills", hint: i18n.M.CmdSkill},
-		{label: "/plugins", hint: i18n.M.CmdPlugins},
-		{label: "/hooks", hint: i18n.M.CmdHooks},
-		{label: "/memory", hint: i18n.M.CmdMemory},
-		{label: "/migrate", hint: i18n.M.CmdMigrate},
-		{label: "/output-style", hint: i18n.M.CmdOutputStyle},
-		{label: "/diff-fold", hint: i18n.M.CmdDiffFold},
-		{label: "/sandbox", hint: i18n.M.CmdSandbox},
-		{label: "/verbose", hint: i18n.M.CmdVerbose},
-		{label: "/mouse", hint: i18n.M.CmdMouse},
-		{label: "/language", hint: i18n.M.CmdLanguage},
-		{label: "/auto-plan", hint: i18n.M.CmdAutoPlan},
-		{label: "/reasoning-language", hint: i18n.M.CmdReasonLang},
-		{label: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
-		{label: "/help", hint: i18n.M.CmdHelp},
-		{label: "/copy", hint: i18n.M.CmdCopy},
-		{label: "/export", hint: i18n.M.CmdExport},
-	}
+	return builtinSlashHelpItems()
 }
 
 func customHelpItems(commands []command.Command) []compItem {
 	items := make([]compItem, 0, len(commands))
 	for _, c := range commands {
-		items = append(items, compItem{label: "/" + c.Name, hint: c.Description})
+		if c.Hidden {
+			continue
+		}
+		items = append(items, compItem{label: "/" + c.Name, hint: customCommandHint(c)})
 	}
 	return items
+}
+
+func customCommandHint(c command.Command) string {
+	if c.Plugin == "" {
+		return c.Description
+	}
+	source := "plugin " + c.Plugin
+	if c.Description == "" {
+		return source
+	}
+	return source + " · " + c.Description
 }
 
 func skillHelpItems(skills []skill.Skill) []compItem {
@@ -103,9 +85,20 @@ func skillHelpItems(skills []skill.Skill) []compItem {
 		if s.RunAs == skill.RunSubagent {
 			hint = "subagent · " + hint
 		}
-		items = append(items, compItem{label: "/" + s.Name, hint: hint})
+		items = append(items, compItem{label: "/" + s.SlashName(), hint: skillCommandHint(s, hint)})
 	}
 	return items
+}
+
+func skillCommandHint(s skill.Skill, hint string) string {
+	if s.Plugin == "" {
+		return hint
+	}
+	source := "plugin " + s.Plugin
+	if hint == "" {
+		return source
+	}
+	return source + " · " + hint
 }
 
 func promptHelpItems(prompts []plugin.Prompt) []compItem {

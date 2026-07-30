@@ -1,12 +1,42 @@
 package agent
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"reasonix/internal/provider"
 )
+
+func TestBranchMetaIgnoresRetiredAutoRecoveryField(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "legacy.jsonl")
+	metaPath := BranchMetaPath(sessionPath)
+	legacy := `{"id":"legacy","name":"kept","recovery_checkpoint_enabled":false}`
+	if err := os.WriteFile(metaPath, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("write legacy branch meta: %v", err)
+	}
+
+	meta, ok, err := LoadBranchMeta(sessionPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta ok=%v err=%v", ok, err)
+	}
+	if meta.Name != "kept" {
+		t.Fatalf("name = %q, want kept", meta.Name)
+	}
+	if err := SaveBranchMeta(sessionPath, meta); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+	written, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatalf("read rewritten branch meta: %v", err)
+	}
+	if strings.Contains(string(written), "recovery_checkpoint_enabled") {
+		t.Fatalf("retired recovery field survived rewrite: %s", written)
+	}
+}
 
 func TestBranchMetaRoundTripAndList(t *testing.T) {
 	dir := t.TempDir()

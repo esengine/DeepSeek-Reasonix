@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-sage-breeze",
+  "name": "Sage Breeze",
+  "author": "Reasonix Contributors",
+  "description": "Cream paper, sage sprigs and an original illustrated reader on the right.",
+  "license": "MIT",
+  "baseStyle": "slate",
+  "tokens": {
+    "light": {
+      "bg": "#F7F7EF",
+      "bgSoft": "#EFEFE2",
+      "bgElev": "#FCFCF6",
+      "panel": "#FCFCF6",
+      "sidebar": "#EEEEE0",
+      "chat": "#FAFAF4",
+      "workspace": "#FCFCF6",
+      "workspaceFiles": "#F1F1E5",
+      "border": "#BFC095",
+      "borderSoft": "#E8E8D8",
+      "fg": "#26332D",
+      "fgDim": "#4E6157",
+      "fgFaint": "#7C8F83",
+      "accent": "#47735F",
+      "accentFg": "#F7F7EF"
+    },
+    "dark": {
+      "bg": "#101814",
+      "bgSoft": "#17211C",
+      "bgElev": "#1E2922",
+      "panel": "#19231D",
+      "sidebar": "#161F1A",
+      "chat": "#151E19",
+      "workspace": "#1E2922",
+      "workspaceFiles": "#17211C",
+      "border": "#32443A",
+      "borderSoft": "#25322B",
+      "fg": "#EEF6F0",
+      "fgDim": "#B7CDBF",
+      "fgFaint": "#7E968A",
+      "accent": "#84CBA7",
+      "accentFg": "#0E1A13"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.73,
+    "focusY": 0.44,
+    "safeArea": "left",
+    "homeOpacity": 1.0,
+    "taskOpacity": 0.2,
+    "overlayStrength": 0.68,
+    "paneOpacity": 0.5
+  }
+}

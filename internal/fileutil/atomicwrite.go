@@ -23,28 +23,55 @@ var (
 // ReplaceFile. A crash or power cut at any point leaves either the old file or
 // the complete new file, never a truncated one. perm applies to the final file.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmpPath, err := writeAtomicTemp(path, data, perm)
+	if err != nil {
+		return err
+	}
+	if err := ReplaceFile(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+// AtomicCreateFile publishes a complete file only when path is still absent.
+// It is the non-overwriting counterpart to AtomicWriteFile: a concurrent writer
+// that creates path wins, and its file is never replaced.
+func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
+	tmpPath, err := writeAtomicTemp(path, data, perm)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+	if err := os.Link(tmpPath, path); err != nil {
+		return fmt.Errorf("publish new file %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error) {
 	dir := filepath.Dir(path)
 	dirPerm := os.FileMode(0o755)
 	if perm&0o077 == 0 {
 		dirPerm = 0o700
 	}
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
-		return fmt.Errorf("create dir for %s: %w", path, err)
+		return "", fmt.Errorf("create dir for %s: %w", path, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".atomic-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create tmp for %s: %w", path, err)
+		return "", fmt.Errorf("create tmp for %s: %w", path, err)
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
-		return fmt.Errorf("write tmp for %s: %w", path, err)
+		return "", fmt.Errorf("write tmp for %s: %w", path, err)
 	}
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
-		return fmt.Errorf("fsync tmp for %s: %w", path, err)
+		return "", fmt.Errorf("fsync tmp for %s: %w", path, err)
 	}
 	// Chmod the still-open handle, before Close, so there is no window between
 	// close and a path-based chmod for another process (Windows AV / search
@@ -53,17 +80,13 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Chmod(perm); err != nil {
 		tmp.Close()
 		os.Remove(tmpPath)
-		return fmt.Errorf("chmod tmp for %s: %w", path, err)
+		return "", fmt.Errorf("chmod tmp for %s: %w", path, err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(tmpPath)
-		return fmt.Errorf("close tmp for %s: %w", path, err)
+		return "", fmt.Errorf("close tmp for %s: %w", path, err)
 	}
-	if err := ReplaceFile(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return nil
+	return tmpPath, nil
 }
 
 // ReplaceFile renames tmp onto dest, publishing the new content atomically: a

@@ -1,3 +1,5 @@
+//go:build live
+
 package openai
 
 import (
@@ -18,16 +20,16 @@ type probeResult struct {
 	reasoningText                string
 }
 
-// TestRealDeepSeekCacheProbe is an env-gated end-to-end probe against the live
-// DeepSeek API. It answers, with real numbers:
+// TestRealDeepSeekCacheProbe is a build-tagged, env-gated end-to-end probe
+// against the live DeepSeek API. It answers, with real numbers:
 //  1. does DeepSeek's auto cache actually serve reasonix's request shape, and how
 //     much does a repeated prefix hit;
 //  2. does deepseek-v4-flash even return reasoning_content (i.e. is the round-trip
 //     amplifier real for this model);
-//  3. does re-sending reasoning_content inflate prompt_tokens and/or break the
-//     cache hit on the next turn (the open question the mock can't answer).
+//  3. how much does DeepSeek's required tool-call reasoning replay add to
+//     prompt_tokens, and does the replayed prefix still receive cache hits.
 //
-// Run with:  set -a; source .env; set +a; go test ./internal/provider/openai/ -run TestRealDeepSeekCacheProbe -v -count=1
+// Run with:  set -a; source .env; set +a; go test -tags live ./internal/provider/openai/ -run TestRealDeepSeekCacheProbe -v -count=1
 func TestRealDeepSeekCacheProbe(t *testing.T) {
 	key := os.Getenv("DEEPSEEK_API_KEY")
 	if key == "" {
@@ -117,11 +119,10 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 	t.Logf("saw reasoning chunks: %v   reasoning_tokens reported: %d   reasoning_text_len: %d",
 		p1a.sawReasoning, p1a.reasoning, len(p1a.reasoningText))
 	if !p1a.sawReasoning && p1a.reasoning == 0 {
-		t.Logf("→ v4-flash does NOT produce reasoning_content, so the reasoning round-trip " +
-			"amplifier does not apply to your active model (it only bites deepseek-reasoner).")
+		t.Logf("→ this v4-flash response did not contain reasoning_content; replay cost applies only to tool-call turns that actually carry provider-issued reasoning")
 	}
 
-	// ---- Probe 2: does re-sending reasoning_content inflate prompt / break cache? ----
+	// ---- Probe 2: cost/cache effect of required tool-call reasoning replay ----
 	longReasoning := strings.Repeat("Let me think carefully about each requirement and weigh the trade-offs. ", 40)
 	histBase := func(withReasoning bool) []provider.Message {
 		asst := provider.Message{
@@ -146,11 +147,13 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 	withR := histBase(true)
 	noR := histBase(false)
 
-	// warm each prefix once, then measure the second (cache-eligible) call.
+	// DeepSeek thinking mode requires provider-issued reasoning_content to be
+	// replayed on assistant tool_calls turns. These histories intentionally
+	// produce different wire requests: withR carries the reasoning text, while
+	// noR exercises Reasonix's empty-key recovery fallback. Warm each prefix once,
+	// then measure the second (cache-eligible) call.
 	if _, err := send(withR); err != nil {
-		t.Logf("==== Probe 2 ====")
-		t.Logf("DeepSeek REJECTED a request carrying reasoning_content in history: %v", err)
-		t.Logf("→ round-tripping reasoning_content is not just a cache concern; the API refuses it.")
+		t.Fatalf("probe2 required reasoning replay: %v", err)
 	} else {
 		if _, err := send(noR); err != nil {
 			t.Fatalf("probe2 no-reasoning warm: %v", err)
@@ -165,13 +168,9 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 			t.Fatalf("probe2 no-reasoning measure: %v", err)
 		}
 		t.Logf("==== Probe 2: reasoning_content round-trip on real cache ====")
-		t.Logf("WITH reasoning_content: prompt=%d hit=%d miss=%d  rate=%s", p2withR.prompt, p2withR.hit, p2withR.miss, rate(p2withR))
-		t.Logf("WITHOUT (stripped):     prompt=%d hit=%d miss=%d  rate=%s", p2noR.prompt, p2noR.hit, p2noR.miss, rate(p2noR))
-		// Before the fix this delta was ~+500 (DeepSeek billed the re-sent
-		// reasoning as prompt input). After the fix the openai provider drops
-		// reasoning_content from the request, so both variants send an identical
-		// wire request and the delta should be ~0.
-		t.Logf("prompt_tokens delta (with - without) = %d  (~0 confirms the provider no longer re-uploads reasoning_content)", p2withR.prompt-p2noR.prompt)
+		t.Logf("REQUIRED replay:    prompt=%d hit=%d miss=%d  rate=%s", p2withR.prompt, p2withR.hit, p2withR.miss, rate(p2withR))
+		t.Logf("EMPTY-key fallback: prompt=%d hit=%d miss=%d  rate=%s", p2noR.prompt, p2noR.hit, p2noR.miss, rate(p2noR))
+		t.Logf("prompt_tokens replay cost (required - empty fallback) = %d", p2withR.prompt-p2noR.prompt)
 	}
 }
 

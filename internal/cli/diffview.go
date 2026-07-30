@@ -139,7 +139,7 @@ func diffBar(sign byte, code, path string, width int, bg, signFg string, lineNo,
 		barW = 4
 	}
 	code = clampPlain(code, barW-2)
-	if !colorEnabled {
+	if !colorOn() {
 		return "  " + gutter + " " + string(sign) + " " + code
 	}
 	hl := reapplyBG(highlightCode(path, code), bg)
@@ -196,7 +196,7 @@ func atoi(s string) int {
 
 func highlightClamped(code, path string, w int) string {
 	c := clampPlain(code, w)
-	if !colorEnabled {
+	if !colorOn() {
 		return c
 	}
 	return highlightCode(path, c)

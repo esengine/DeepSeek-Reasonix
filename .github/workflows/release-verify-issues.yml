@@ -1,0 +1,62 @@
+name: Request verification on released issues
+
+# A PR that writes "Fixes #N" auto-closes its issue on merge. One that writes
+# "Refs"/"Related"/"Addresses" does not, so the report stays open waiting for a
+# follow-up nobody remembers to send after the release. This sends it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to announce (e.g. desktop-v1.18.0)
+        required: true
+        type: string
+      dry_run:
+        description: Print the targets without commenting
+        required: false
+        default: true
+        type: boolean
+  release:
+    types: [published]
+  push:
+    branches:
+      - main-v2
+    paths:
+      - '.github/workflows/release-verify-issues.yml'
+      - 'scripts/release-verify-issues.mjs'
+      - 'scripts/release-verify-issues.test.mjs'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: release-verify-issues-${{ github.event.inputs.tag || github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    if: github.repository == 'esengine/DeepSeek-Reasonix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Test notifier
+        run: node --test scripts/release-verify-issues.test.mjs
+      # A push that only touched the script has no release to announce; the test
+      # above is the whole point of that trigger.
+      - name: Request verification
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          args=(--tag "$TAG")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          node scripts/release-verify-issues.mjs "${args[@]}"

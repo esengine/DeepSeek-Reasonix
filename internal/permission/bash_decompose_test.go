@@ -246,6 +246,40 @@ func TestPolicyDecideCompoundBash(t *testing.T) {
 	}
 }
 
+func TestPolicyDecideCompoundBashUsesWriterFallback(t *testing.T) {
+	command := `$file = Get-ChildItem -Path "D:\fixtures\reports" -Filter "*sample*.txt" | Select-Object -First 1; python -c "import sys; f=open(sys.argv[1], 'r', encoding='utf-8'); print(f.read()[:10000]); f.close()" $file.FullName`
+
+	cases := []struct {
+		name string
+		mode string
+		want Decision
+	}{
+		{
+			name: "auto writer fallback asks for dynamic compound bash segments",
+			mode: "allow",
+			want: Ask,
+		},
+		{
+			name: "ask writer fallback still prompts for uncovered compound bash segments",
+			mode: "ask",
+			want: Ask,
+		},
+		{
+			name: "deny writer fallback blocks dynamic compound bash segments",
+			mode: "deny",
+			want: Deny,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New(tt.mode, nil, nil, nil)
+			if got := p.DecideSubject("bash", false, command); got != tt.want {
+				t.Fatalf("DecideSubject(mode=%q) = %v, want %v", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPolicyDecideCompoundBashPreservesWholeCommandRules(t *testing.T) {
 	subject := `git add . && git commit -m "wip" && git push`
 
@@ -277,4 +311,42 @@ func TestPolicyDecideCompoundBashPreservesWholeCommandRules(t *testing.T) {
 			t.Fatalf("DecideSubject(%q) = %v, want %v", subject, got, Ask)
 		}
 	})
+}
+
+func TestPolicyDecideDynamicCompoundPreservesSegmentDenyAndAsk(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject string
+		ask     []string
+		deny    []string
+		want    Decision
+	}{
+		{
+			name:    "glob segment deny beats auto fallback",
+			subject: "git status && rm *.log",
+			deny:    []string{"Bash(rm *)"},
+			want:    Deny,
+		},
+		{
+			name:    "redirect segment ask beats auto fallback",
+			subject: "git status && printf result > output.txt",
+			ask:     []string{"Bash(printf *)"},
+			want:    Ask,
+		},
+		{
+			name:    "indirect execution segment deny beats required human ask",
+			subject: `git status && eval "touch /tmp/x"`,
+			deny:    []string{"Bash(eval *)"},
+			want:    Deny,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := New("allow", []string{"Bash"}, tt.ask, tt.deny)
+			if got := p.DecideSubject("bash", false, tt.subject); got != tt.want {
+				t.Fatalf("DecideSubject(%q) = %v, want %v", tt.subject, got, tt.want)
+			}
+		})
+	}
 }

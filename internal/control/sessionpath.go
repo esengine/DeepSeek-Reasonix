@@ -16,7 +16,7 @@ func (c *Controller) EnsureSessionPath() {
 	if c.SessionPath() != "" || c.SessionDir() == "" {
 		return
 	}
-	c.SetSessionPath(agent.NewSessionPath(c.SessionDir(), c.Label()))
+	c.SetFreshSessionPath(agent.NewSessionPath(c.SessionDir(), c.Label()))
 }
 
 // AdoptHistory makes a freshly built controller continue an existing
@@ -40,6 +40,14 @@ func (c *Controller) AdoptHistory(msgs []provider.Message, path string) {
 		}
 		c.Resume(agent.NewSession("").CloneWithMessages(msgs), path)
 	} else if path != "" {
+		// Even an empty transcript can carry session-scoped sidecars such as a
+		// running or blocked Goal. Resume a persisted empty session so controller
+		// rebuilds preserve that state; fall back to a plain binding for a fresh
+		// path that has not been saved yet.
+		if loaded, err := agent.LoadSession(path); err == nil && loaded != nil {
+			c.Resume(loaded, path)
+			return
+		}
 		c.SetSessionPath(path)
 	}
 }

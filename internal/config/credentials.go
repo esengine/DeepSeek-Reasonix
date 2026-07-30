@@ -8,10 +8,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/BurntSushi/toml"
 	"github.com/joho/godotenv"
 
 	"reasonix/internal/fileutil"
+	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
 const (
@@ -124,7 +124,7 @@ func credentialsStoreMode() string {
 		CredentialsStore string `toml:"credentials_store"`
 	}
 	if path := userConfigLoadPath(); path != "" {
-		_, _ = toml.DecodeFile(path, &partial)
+		_, _ = decodeTOMLFile(path, &partial)
 	}
 	return normalizeCredentialsStore(partial.CredentialsStore)
 }
@@ -174,8 +174,37 @@ func credentialEnvNamesFromConfig(cfg *Config) []string {
 		add(conn.Credential.AppSecretEnv)
 		add(conn.Credential.TokenEnv)
 	}
+	for _, h := range cfg.Remote.Hosts {
+		add(h.PassphraseEnv)
+		add(h.PasswordEnv)
+	}
 	sort.Strings(out)
 	return out
+}
+
+// CredentialEnvNames returns every environment-variable name whose value can
+// be loaded from Reasonix's global credential store. This includes configured
+// provider/bot keys and stored keys that are no longer referenced by the
+// current config: loadCredentialStoreForRoot loads the whole credential file,
+// so stale entries must remain outside child-process environments too.
+func (c *Config) CredentialEnvNames() []string {
+	names := credentialEnvNamesFromConfig(c)
+	seen := make(map[string]bool, len(names))
+	for _, name := range names {
+		seen[name] = true
+	}
+	if file, ok := readDotEnvFile(UserCredentialsPath()); ok {
+		for name := range file.Values {
+			name = strings.TrimSpace(name)
+			if !isCredentialKey(name) || seen[name] {
+				continue
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func resolveProviderCredentialsForRoot(root string, cfg *Config) {
@@ -248,6 +277,12 @@ func SetCredential(key, value string) (string, error) {
 		return "", fmt.Errorf("credential value for %s contains a newline", key)
 	}
 	return StoreCredentialLines([]string{key + "=" + value})
+}
+
+// IsValidCredentialKey reports whether key can be stored in Reasonix's dotenv
+// credential file and exposed as an environment variable.
+func IsValidCredentialKey(key string) bool {
+	return isCredentialKey(strings.TrimSpace(key))
 }
 
 func RemoveCredential(key string) error {
@@ -580,7 +615,7 @@ func removeCredentialFromFile(path, key string) error {
 }
 
 func readCredentialFileLines(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileencoding.ReadFileUTF8(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

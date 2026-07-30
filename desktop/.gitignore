@@ -28,6 +28,7 @@
 /build/linux/*
 !/build/linux/nfpm.yaml
 !/build/linux/reasonix.desktop
+!/build/linux/io.reasonix.desktop.update.policy
 !/build/linux/icons
 !/build/linux/icons/**
 

@@ -44,7 +44,7 @@ func newMarkdownRenderer(width int) *mdRenderer {
 }
 
 func italic(s string) string {
-	if !colorEnabled {
+	if !colorOn() {
 		return s
 	}
 	return "\033[3m" + s + "\033[0m"

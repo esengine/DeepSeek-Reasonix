@@ -5,18 +5,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
+
+	"reasonix/internal/control"
+
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
 func TestConfigureCLIThemeSwitchesModeAndDefaultStyle(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	configureCLITheme("light")
 	if activeCLITheme.name != "light" || activeCLITheme.style != "sandstone" {
@@ -36,12 +38,10 @@ func TestConfigureCLIThemeSwitchesModeAndDefaultStyle(t *testing.T) {
 }
 
 func TestConfigureCLIThemeStyleOverride(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	configureCLIThemeWithStyle("dark", "aurora")
 	if activeCLITheme.name != "dark" || activeCLITheme.style != "aurora" {
@@ -58,12 +58,10 @@ func TestConfigureCLIThemeStyleOverride(t *testing.T) {
 }
 
 func TestConfigureCLIThemeHonorsEnvOverride(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "ember")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	configureCLIThemeWithStyle("light", "glacier")
 	if activeCLITheme.name != "dark" || activeCLITheme.style != "ember" {
@@ -71,9 +69,29 @@ func TestConfigureCLIThemeHonorsEnvOverride(t *testing.T) {
 	}
 }
 
+func TestThemeRendersAtProfileFidelity(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	configureCLIThemeWithStyle("dark", "graphite")
+
+	activeColorProfile = colorprofile.TrueColor
+	if got := accent("x"); !strings.HasPrefix(got, "\033[38;2;217;119;87m") {
+		t.Fatalf("truecolor accent = %q, want 24-bit #d97757", got)
+	}
+
+	activeColorProfile = colorprofile.ANSI256
+	if got := accent("x"); !strings.HasPrefix(got, ansiAccent) {
+		t.Fatalf("256-colour accent = %q, want %q", got, ansiAccent)
+	}
+
+	activeColorProfile = colorprofile.NoTTY
+	if got := accent("x"); got != "x" {
+		t.Fatalf("no-tty accent = %q, want unstyled text", got)
+	}
+}
+
 func TestThemeArgCompletion(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 	configureCLIThemeWithStyle("dark", "graphite")
 
 	m := newTestChatTUI()
@@ -87,16 +105,17 @@ func TestThemeArgCompletion(t *testing.T) {
 }
 
 func TestRunThemeSubcommandSwitchesAccentAndTextarea(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 	configureCLIThemeWithStyle("dark", "graphite")
 
 	m := newTestChatTUI()
-	m.runThemeSubcommand("/theme aurora")
+	m.ctrl = control.New(control.Options{})
+	if cmd := m.runThemeSubcommand("/theme aurora"); cmd == nil {
+		t.Fatal("a real theme change should start the sweep")
+	}
 	if activeCLITheme.name != "dark" || activeCLITheme.style != "aurora" {
 		t.Fatalf("current theme = %s/%s, want dark/aurora", activeCLITheme.name, activeCLITheme.style)
 	}
@@ -150,8 +169,8 @@ func TestParseOSC11Response(t *testing.T) {
 }
 
 func TestAutoThemeFallsBackToColorFGBG(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = false
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
 
 	t.Setenv("COLORFGBG", "0;15")
 	if got := resolveCLITheme("auto").name; got != "light" {
@@ -165,12 +184,10 @@ func TestAutoThemeFallsBackToColorFGBG(t *testing.T) {
 }
 
 func TestApplyTextareaThemeClearsCursorLineBackground(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	for _, mode := range []string{"dark", "light", "auto"} {
 		t.Run(mode, func(t *testing.T) {
@@ -203,14 +220,12 @@ func TestApplyTextareaThemeClearsCursorLineBackground(t *testing.T) {
 }
 
 func TestApplyTextareaThemeHonorsCursorShape(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	prevShape := cliCursorShape
 	defer func() { cliCursorShape = prevShape }()
-	colorEnabled = true
+	activeColorProfile = colorprofile.ANSI256
 	configureCLITheme("dark")
 
 	for _, tt := range []struct {
@@ -218,11 +233,11 @@ func TestApplyTextareaThemeHonorsCursorShape(t *testing.T) {
 		in   string
 		want tea.CursorShape
 	}{
-		{name: "default", in: "", want: tea.CursorUnderline},
+		{name: "default", in: "", want: tea.CursorBar},
 		{name: "underline", in: "underline", want: tea.CursorUnderline},
 		{name: "block", in: "block", want: tea.CursorBlock},
 		{name: "bar", in: "bar", want: tea.CursorBar},
-		{name: "unknown", in: "unknown", want: tea.CursorUnderline},
+		{name: "unknown", in: "unknown", want: tea.CursorBar},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			cliCursorShape = tt.in
@@ -235,25 +250,58 @@ func TestApplyTextareaThemeHonorsCursorShape(t *testing.T) {
 	}
 }
 
+func TestComposerBorderAndCursorTrackThemeAccent(t *testing.T) {
+	t.Setenv("REASONIX_THEME", "")
+	t.Setenv("REASONIX_THEME_STYLE", "")
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+
+	for _, theme := range cliThemeStyles {
+		t.Run(theme.name, func(t *testing.T) {
+			configureCLITheme(theme.name)
+			want := themeLipColor(activeCLITheme.accent)
+			if got := inputBoxStyle.GetBorderTopForeground(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("composer top border color = %v, want theme accent %v", got, want)
+			}
+			if got := inputBoxStyle.GetBorderBottomForeground(); !reflect.DeepEqual(got, want) {
+				t.Fatalf("composer bottom border color = %v, want theme accent %v", got, want)
+			}
+
+			ti := textarea.New()
+			applyTextareaTheme(&ti)
+			if got := ti.Styles().Cursor.Color; !reflect.DeepEqual(got, want) {
+				t.Fatalf("composer cursor color = %v, want theme accent %v", got, want)
+			}
+		})
+	}
+
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+	empty := lipgloss.NewStyle().GetBorderTopForeground()
+	if got := inputBoxStyle.GetBorderTopForeground(); !reflect.DeepEqual(got, empty) {
+		t.Fatalf("NO_COLOR composer top border color = %v, want no color", got)
+	}
+	if got := inputBoxStyle.GetBorderBottomForeground(); !reflect.DeepEqual(got, empty) {
+		t.Fatalf("NO_COLOR composer bottom border color = %v, want no color", got)
+	}
+}
+
 // TestRuntimeAutoThemeDoesNotProbeStdin guards the fix for a runtime `/theme auto`
 // that live-probed the terminal (raw-mode stdin read) while the TUI owned stdin,
 // racing bubbletea's input reader. The switch must resolve via the COLORFGBG
 // fallback instead, never invoking the probe.
 func TestRuntimeAutoThemeDoesNotProbeStdin(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
 	t.Setenv("COLORFGBG", "15;0")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
-	prev := queryTerminalBackgroundForTheme
-	defer func() { queryTerminalBackgroundForTheme = prev }()
 	probed := false
-	queryTerminalBackgroundForTheme = func() (terminalRGB, bool) {
+	defer func(prev func() (terminalRGB, bool)) { terminalProbe = prev }(terminalProbe)
+	terminalProbe = func() (terminalRGB, bool) {
 		probed = true
-		return terminalRGB{}, false
+		return terminalRGB{255, 255, 255}, true
 	}
 
 	if got := setCLIThemeMode("auto").name; got != "dark" {
@@ -262,10 +310,19 @@ func TestRuntimeAutoThemeDoesNotProbeStdin(t *testing.T) {
 	if probed {
 		t.Fatal("runtime /theme auto probed the terminal while the TUI owns stdin")
 	}
+
+	withTerminalProbe(func() {
+		if got := resolveCLITheme("auto").name; got != "light" {
+			t.Fatalf("opted-in probe resolved %q, want light", got)
+		}
+	})
+	if !probed {
+		t.Fatal("withTerminalProbe should be the one path that reaches the terminal")
+	}
 }
 
-func restoreThemeForTest(prevColor bool, prevTheme cliPalette) {
-	colorEnabled = prevColor
+func restoreThemeForTest(prevColor colorprofile.Profile, prevTheme cliPalette) {
+	activeColorProfile = prevColor
 	activeCLITheme = prevTheme
 	refreshCLIStyles()
 }

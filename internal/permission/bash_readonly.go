@@ -1,16 +1,36 @@
 package permission
 
 import (
+	"encoding/json"
 	"strings"
 
 	"reasonix/internal/shellparse"
 	"reasonix/internal/shellsafe"
 )
 
+// BashCommandIsReadOnly reports whether a bash tool call is a known foreground
+// read-only command. Capability-restricted runners use this directly instead of
+// depending on Plan mode: Plan is a collaboration workflow, while this check is
+// an execution permission boundary.
+func BashCommandIsReadOnly(args json.RawMessage) bool {
+	var p struct {
+		Command                     string `json:"command"`
+		RunInBackground             bool   `json:"run_in_background"`
+		PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil || strings.TrimSpace(p.Command) == "" {
+		return false
+	}
+	if p.RunInBackground || p.PreserveBackgroundProcesses {
+		return false
+	}
+	return isReadOnlyBashSubject(p.Command)
+}
+
 // isReadOnlyBashSubject returns true when a bash command is a known read-only
 // operation. The subject is the JSON arg value extracted by Subject() — for bash
 // it is the raw command string. Command membership comes from the shared
-// shellsafe tables (one source of truth with the plan-mode gate, #5341); the
+// shellsafe tables (the shared command-classification source, #5341); the
 // argument rigor below is permission-specific.
 func isReadOnlyBashSubject(subject string) bool {
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {

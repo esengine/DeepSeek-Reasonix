@@ -212,3 +212,34 @@ func TestAtomicWriteFileCreatesParentDir(t *testing.T) {
 		t.Fatalf("file not created: %v", err)
 	}
 }
+
+func TestAtomicCreateFileNeverOverwritesExisting(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("concurrent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicCreateFile(path, []byte("confirmed"), 0o600); err == nil {
+		t.Fatal("AtomicCreateFile overwrote an existing target")
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "concurrent" {
+		t.Fatalf("existing target changed: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "config.toml" {
+		t.Fatalf("temporary files leaked: %v", entries)
+	}
+}
+
+func TestAtomicCreateFilePublishesCompleteContent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "config.toml")
+	if err := AtomicCreateFile(path, []byte("confirmed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "confirmed" {
+		t.Fatalf("created target = %q, %v", got, err)
+	}
+}

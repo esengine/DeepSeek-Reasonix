@@ -60,55 +60,19 @@ const (
 // slashItems is the full set of slash commands offered for completion: the
 // built-in verbs, custom commands, skills (each as "/<name>"), and MCP prompts.
 func (m *chatTUI) slashItems() []compItem {
-	items := []compItem{
-		{label: "/compact", insert: "/compact ", hint: i18n.M.CmdCompact},
-		{label: "/new", insert: "/new ", hint: i18n.M.CmdNew},
-		{label: "/clear", insert: "/clear", hint: i18n.M.CmdClear},
-		{label: "/cls", insert: "/cls", hint: i18n.M.CmdCls},
-		{label: "/resume", insert: "/resume ", hint: i18n.M.CmdResume},
-		{label: "/rename", insert: "/rename ", hint: i18n.M.CmdRename},
-		{label: "/rewind", insert: "/rewind", hint: i18n.M.CmdRewind},
-		{label: "/tree", insert: "/tree", hint: i18n.M.CmdTree},
-		{label: "/branch", insert: "/branch ", hint: i18n.M.CmdBranch},
-		{label: "/switch", insert: "/switch ", hint: i18n.M.CmdSwitchBranch},
-		{label: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp},
-		{label: "/plugins", insert: "/plugins", hint: i18n.M.CmdPlugins},
-		{label: "/model", insert: "/model ", hint: i18n.M.CmdModel, descend: true},
-		{label: "/provider", insert: "/provider ", hint: i18n.M.CmdProvider, descend: true},
-		{label: "/skills", insert: "/skills", hint: i18n.M.CmdSkill},
-		{label: "/reload-cmd", insert: "/reload-cmd", hint: i18n.M.CmdReloadCmd},
-		{label: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true},
-		{label: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
-		{label: "/output-style", insert: "/output-style", hint: i18n.M.CmdOutputStyle},
-		{label: "/verbose", insert: "/verbose", hint: i18n.M.CmdVerbose},
-		{label: "/mouse", insert: "/mouse", hint: i18n.M.CmdMouse},
-		{label: "/diff-fold", insert: "/diff-fold", hint: i18n.M.CmdDiffFold},
-		{label: "/sandbox", insert: "/sandbox", hint: i18n.M.CmdSandbox},
-		{label: "/effort", insert: "/effort ", hint: i18n.M.CmdEffort, descend: true},
-		{label: "/auto-plan", insert: "/auto-plan ", hint: i18n.M.CmdAutoPlan, descend: true},
-		{label: "/reasoning-language", insert: "/reasoning-language ", hint: i18n.M.CmdReasonLang, descend: true},
-		{label: "/memory-v5", insert: "/memory-v5 ", hint: i18n.M.CmdMemoryV5, descend: true},
-		{label: "/theme", insert: "/theme ", hint: i18n.M.CmdTheme, descend: true},
-		{label: "/language", insert: "/language ", hint: i18n.M.CmdLanguage, descend: true},
-		{label: "/help", insert: "/help ", hint: i18n.M.CmdHelp},
-		{label: "/memory", insert: "/memory ", hint: i18n.M.CmdMemory},
-		{label: "/migrate", insert: "/migrate", hint: i18n.M.CmdMigrate},
-		{label: "/goal", insert: "/goal ", hint: i18n.M.CmdGoal, descend: true},
-		{label: "/remember", insert: "/remember ", hint: i18n.M.CmdRemember},
-		{label: "/forget", insert: "/forget ", hint: i18n.M.CmdForget},
-		{label: "/quit", insert: "/quit", hint: i18n.M.CmdQuit},
-		{label: "/copy", insert: "/copy", hint: i18n.M.CmdCopy},
-		{label: "/export", insert: "/export", hint: i18n.M.CmdExport},
-	}
+	items := builtinSlashItems()
 	for _, c := range m.commands {
-		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: c.Description})
+		if c.Hidden {
+			continue
+		}
+		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: customCommandHint(c)})
 	}
 	for _, s := range m.skills {
 		hint := s.Description
 		if s.RunAs == skill.RunSubagent {
 			hint = "🧬 " + hint
 		}
-		items = append(items, compItem{label: "/" + s.Name, insert: "/" + s.Name + " ", hint: hint})
+		items = append(items, compItem{label: "/" + s.SlashName(), insert: "/" + s.SlashName() + " ", hint: skillCommandHint(s, hint)})
 	}
 	for _, p := range m.prompts() {
 		items = append(items, compItem{label: "/" + p.Name, insert: "/" + p.Name + " ", hint: p.Description})
@@ -162,6 +126,9 @@ func (m *chatTUI) updateCompletion() {
 // currently /mcp; custom commands and MCP prompts take free-form template args,
 // so they yield nothing.
 func (m *chatTUI) slashArgItems(val string) ([]compItem, int, bool) {
+	if items, from, ok := m.workModeArgItems(val); ok {
+		return items, from, len(items) > 0
+	}
 	if items, from, ok := m.branchArgItems(val); ok {
 		return items, from, len(items) > 0
 	}
@@ -199,6 +166,7 @@ func (m *chatTUI) slashArgData() control.ArgData {
 		data.DisabledSkills = m.ctrl.DisabledSkills()
 		data.ConfiguredMCP = m.ctrl.ConfiguredMCPNames()
 		data.DisconnectedMCP = m.ctrl.DisconnectedMCPNames()
+		data.MemoryRefs, data.MemoryArchives = control.MemoryCompletionData(m.ctrl.Memory())
 	}
 	if m.host != nil {
 		data.ServerNames = m.host.ServerNames()
@@ -212,7 +180,7 @@ func (m *chatTUI) explicitSubcommandItems(val string) ([]compItem, int, bool) {
 		return nil, 0, false
 	}
 	switch cmd {
-	case "/mcp", "/skill", "/skills", "/plugin", "/plugins":
+	case "/mcp", "/skill", "/skills", "/plugin", "/plugins", "/memory":
 	default:
 		return nil, 0, false
 	}
@@ -236,7 +204,7 @@ func (m *chatTUI) bareSubcommandSpace(val string) bool {
 		return false
 	}
 	switch fields[0] {
-	case "/mcp", "/skill", "/skills", "/plugin", "/plugins":
+	case "/mcp", "/skill", "/skills", "/plugin", "/plugins", "/memory":
 		return true
 	default:
 		return false
@@ -262,6 +230,9 @@ func (m *chatTUI) branchArgItems(val string) ([]compItem, int, bool) {
 		return nil, from, true
 	}
 	branches, err := m.ctrl.Branches()
+	// Branches snapshots first, which can retarget the controller to a
+	// recovery branch; keep the lease on whatever the controller now owns.
+	m.followSessionLease()
 	if err != nil {
 		return nil, from, true
 	}
@@ -353,12 +324,21 @@ func subsequenceMatch(target, query string) bool {
 
 // activeAtToken finds the @-reference token ending at the cursor (assumed at the
 // input's end). The '@' must start the line or follow whitespace, so emails
-// like "a@b" don't trigger it. Returns the '@' offset and the text after it.
+// like "a@b" don't trigger it. A backslash-escaped space or tab is part of the
+// token (the form EscapeRefPath inserts for paths with spaces), so completion
+// can descend through such directories. Returns the '@' offset and the text
+// after it.
 func activeAtToken(val string) (int, string, bool) {
 	for i := len(val) - 1; i >= 0; i-- {
 		switch val[i] {
-		case ' ', '\t', '\n':
+		case ' ', '\t':
+			if i > 0 && val[i-1] == '\\' {
+				i-- // escaped whitespace stays inside the token
+				continue
+			}
 			return 0, "", false // hit whitespace before an '@' → no active token
+		case '\n':
+			return 0, "", false
 		case '@':
 			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' || val[i-1] == '\n' {
 				return i, val[i+1:], true
@@ -386,11 +366,15 @@ func (m *chatTUI) atItems(token string) []compItem {
 // unless frag starts with '.'. Top-level tokens also surface MCP resources.
 func (m *chatTUI) fileItems(token string) []compItem {
 	dir, frag := splitPathToken(token)
+	// The typed token may carry backslash-escaped spaces (the form completion
+	// itself inserts); filesystem lookups need the real path while inserts keep
+	// the escaped grammar.
+	fsFrag := control.UnescapeRefPath(frag)
 	workspaceRoot := ""
 	if m.ctrl != nil {
 		workspaceRoot = m.ctrl.WorkspaceRoot()
 	}
-	readDir := dir
+	readDir := control.UnescapeRefPath(dir)
 	if workspaceRoot != "" {
 		if readDir == "" {
 			readDir = workspaceRoot
@@ -409,20 +393,20 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		return entries[i].IsDir() && !entries[j].IsDir()
 	})
 
-	showHidden := strings.HasPrefix(frag, ".")
+	showHidden := strings.HasPrefix(fsFrag, ".")
 	var items []compItem
 	for _, e := range entries {
 		name := e.Name()
-		if !strings.HasPrefix(name, frag) {
+		if !strings.HasPrefix(name, fsFrag) {
 			continue
 		}
 		if !showHidden && strings.HasPrefix(name, ".") {
 			continue
 		}
 		if e.IsDir() {
-			items = append(items, compItem{label: name + "/", insert: "@" + dir + name + "/", hint: "dir", descend: true})
+			items = append(items, compItem{label: name + "/", insert: "@" + dir + control.EscapeRefPath(name) + "/", hint: "dir", descend: true})
 		} else {
-			items = append(items, compItem{label: name, insert: "@" + dir + name})
+			items = append(items, compItem{label: name, insert: "@" + dir + control.EscapeRefPath(name)})
 		}
 		if len(items) >= maxCompItems {
 			break
@@ -440,15 +424,16 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		if remaining > maxFileSearchItems {
 			remaining = maxFileSearchItems
 		}
-		results := m.searchFileRefs(frag)
+		results := m.searchFileRefs(fsFrag)
 		if len(results) > remaining {
 			results = results[:remaining]
 		}
 		for _, path := range results {
-			if seen[path] {
+			escaped := control.EscapeRefPath(path)
+			if seen[escaped] {
 				continue
 			}
-			items = append(items, compItem{label: path, insert: "@" + path, hint: "file"})
+			items = append(items, compItem{label: path, insert: "@" + escaped, hint: "file"})
 			if len(items) >= maxCompItems {
 				break
 			}

@@ -1,25 +1,164 @@
 name: Release
 
-# CLI binary line. Tag namespace `v<semver>` triggers this — it builds the
-# release archives + checksums, publishes the GitHub release, and updates the
-# Homebrew cask. npm is a SEPARATE line (release-npm.yml, `npm-v*`) so an npm
-# prerelease can ship without forcing the stable cask, and vice versa; desktop is
-# `desktop-v*` (release-desktop.yml). A prerelease `v*-rc*` still builds archives
-# and a prerelease GitHub release, but goreleaser auto-skips the cask upload
-# (brew has no prerelease channel — see .goreleaser.yaml).
+# Native CLI binary line. Stable releases are called by release-stable.yml after
+# its single GitHub `release`-environment approval. Preview uses immutable
+# vX.Y.Z-preview.N tags, publishes a GitHub prerelease behind the same `canary`
+# gate as Desktop Preview, and never moves Homebrew or GitHub Latest. Other
+# standalone prereleases remain internal stable-channel checkpoints behind the
+# `release` gate.
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Native CLI release channel"
+        required: true
+        # Preserve existing tag-only recovery dispatches as Stable. Preview must
+        # be an explicit operator choice or arrive through the tag relay.
+        default: stable
+        type: choice
+        options: [stable, preview]
+      tag:
+        description: "Existing protected CLI tag (Preview: v1.18.0-preview.1; Stable/RC: v1.18.0-rc.1)"
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      channel:
+        description: "Native CLI release channel selected by the approved orchestrator"
+        required: false
+        default: stable
+        type: string
+      tag:
+        description: "Existing CLI tag selected by the approved release orchestrator"
+        required: true
+        type: string
+      approved_cli_tag:
+        description: "Stable CLI tag recorded by the approved orchestrator"
+        required: true
+        type: string
+      approved_sha:
+        description: "Immutable commit recorded by the approved orchestrator"
+        required: true
+        type: string
+      orchestrated:
+        description: "True only when called by release-stable.yml after approval"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write # create the release and upload archives
 
+concurrency:
+  # A channel pointer is a monotonic public state machine. Serialize all
+  # publishers for the same channel so an older recovery run cannot pass its
+  # read-before-write window after a newer release has published.
+  group: release-cli-${{ inputs.channel || 'stable' }}
+  cancel-in-progress: false
+
 jobs:
+  resolve:
+    name: resolve CLI release
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      base_version: ${{ steps.release.outputs.base_version }}
+      notes_version: ${{ steps.release.outputs.notes_version }}
+      channel: ${{ steps.release.outputs.channel }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Resolve channel and tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+        run: bash scripts/resolve-cli-release.sh
+      - name: Record immutable candidate
+        id: candidate
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+        run: |
+          set -euo pipefail
+          git fetch origin main-v2
+          sha="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          if ! git merge-base --is-ancestor "$sha" origin/main-v2; then
+            echo "::error::$RELEASE_TAG points to $sha, which is not on main-v2 history"
+            exit 1
+          fi
+          if [ "$RELEASE_CHANNEL" = "preview" ] && [ "$sha" != "$(git rev-parse origin/main-v2)" ]; then
+            echo "::error::CLI Preview must tag current main-v2; $RELEASE_TAG points to $sha"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: Verify existing protected tag
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          APPROVED_SHA: ${{ steps.candidate.outputs.sha }}
+          VERIFY_RELEASE_CHECKOUT: false
+        run: bash scripts/verify-release-tag.sh
+
+  orchestration-guard:
+    name: verify approved orchestrator
+    needs: resolve
+    if: ${{ inputs.orchestrated }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: Verify caller and approved release ref
+        env:
+          ACTUAL_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-stable.yml@{1}', github.repository, github.ref) }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          CALLER_SHA: ${{ github.sha }}
+          APPROVED_CLI_TAG: ${{ inputs.approved_cli_tag }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          VERIFY_RELEASE_CHECKOUT: false
+        run: |
+          bash scripts/verify-release-authorization.sh
+          bash scripts/verify-release-tag.sh
+
+  release-gate:
+    name: approve standalone CLI release
+    needs: resolve
+    if: ${{ !inputs.orchestrated }}
+    runs-on: ubuntu-latest
+    environment: ${{ needs.resolve.outputs.channel == 'preview' && 'canary' || 'release' }}
+    steps:
+      - env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+        run: echo "Approved standalone CLI $RELEASE_CHANNEL release $RELEASE_TAG"
+
   cache-guard:
     name: cache hit guard
+    needs: [resolve, orchestration-guard, release-gate]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -28,31 +167,210 @@ jobs:
 
   goreleaser:
     name: archives + checksums + homebrew tap
-    needs: cache-guard
+    needs: [resolve, cache-guard]
+    if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # CLI stable release (archives + GitHub release + Homebrew cask). Gated on the
-    # `release` environment so only esengine can approve it going public.
-    environment: release
+    # The stable caller has already passed the single GitHub release approval.
+    # Standalone prereleases pass release-gate above. This job therefore must not
+    # add a second GitHub environment approval.
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Download orchestrator-reviewed release notes
+        if: ${{ inputs.orchestrated }}
+        uses: actions/download-artifact@v8
+        with:
+          name: stable-reviewed-release-notes
+          path: /tmp/stable-reviewed-release-notes
+      - name: Use orchestrator-reviewed release notes
+        if: ${{ inputs.orchestrated }}
+        run: |
+          test -s /tmp/stable-reviewed-release-notes/release-notes.md
+          cp /tmp/stable-reviewed-release-notes/release-notes.md /tmp/release-notes.md
+      - name: Render reviewed release notes
+        if: ${{ !inputs.orchestrated }}
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.notes_version }}
+        run: node scripts/release-notes.mjs render --version "$RELEASE_TAG" --output /tmp/release-notes.md
+      - name: Revalidate approved release ref
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
+        run: bash scripts/verify-release-tag.sh
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: '~> v2'
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ needs.resolve.outputs.channel == 'stable' && secrets.HOMEBREW_TAP_TOKEN || '' }}
+          # workflow_dispatch recovery runs have a branch-shaped GITHUB_REF even
+          # though checkout is on the release tag. Pin GoReleaser explicitly, and
+          # avoid ambiguity from the three release tags sharing one commit.
+          GORELEASER_CURRENT_TAG: ${{ needs.resolve.outputs.tag }}
+
+      - name: Publish product release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: gh release edit "$TAG" --notes-file /tmp/release-notes.md
+
+      - name: Publish CLI release metadata to R2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_R2" != "true" ]; then
+            echo "R2 secrets not configured; skipping CLI release metadata"
+            exit 0
+          fi
+
+          channel=""
+          if [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            channel="stable"
+          elif [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$ ]]; then
+            channel="preview"
+          else
+            echo "internal CLI release $TAG; publishing only immutable metadata"
+          fi
+
+          required_assets='[
+            "reasonix-darwin-amd64.tar.gz",
+            "reasonix-darwin-arm64.tar.gz",
+            "reasonix-linux-amd64.tar.gz",
+            "reasonix-linux-arm64.tar.gz",
+            "reasonix-windows-amd64.zip",
+            "reasonix-windows-arm64.zip",
+            "SHA256SUMS"
+          ]'
+          gh api "repos/${{ github.repository }}/releases/tags/$TAG" > /tmp/cli-release.raw.json
+          jq --arg tag "$TAG" --argjson required "$required_assets" '
+            if .tag_name != $tag then error("release tag mismatch") else . end |
+            if .draft then error("draft release cannot be published") else . end |
+            . as $release |
+            ($release.assets | map({key: .name, value: .}) | from_entries) as $assets |
+            if ($required | all(. as $name | $assets[$name] != null))
+            then {
+              tag_name: $release.tag_name,
+              prerelease: $release.prerelease,
+              html_url: $release.html_url,
+              assets: [
+                $required[] as $name |
+                $assets[$name] |
+                {
+                  name: .name,
+                  browser_download_url: .browser_download_url,
+                  size: .size
+                }
+              ]
+            }
+            else error("release is missing one or more required CLI assets")
+            end
+          ' /tmp/cli-release.raw.json > /tmp/cli-release.json
+          if [ -n "$channel" ]; then
+            bash scripts/validate-cli-release-manifest.sh \
+              "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.json
+          else
+            bash scripts/validate-cli-release-manifest.sh \
+              any "$TAG" "${{ github.repository }}" /tmp/cli-release.json
+          fi
+
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          validation_channel="${channel:-any}"
+          immutable_key="cli/releases/${TAG}/latest.json"
+          immutable_error="$(mktemp)"
+          if aws s3 cp "s3://${R2_BUCKET}/${immutable_key}" /tmp/cli-release.immutable.json \
+            --endpoint-url "$endpoint" 2>"$immutable_error"; then
+            bash scripts/validate-cli-release-manifest.sh \
+              "$validation_channel" "$TAG" "${{ github.repository }}" \
+              /tmp/cli-release.immutable.json
+            if ! cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json; then
+              echo "::error::immutable CLI release metadata for $TAG already exists with different content"
+              exit 1
+            fi
+            echo "immutable CLI release metadata for $TAG already exists; preserving it"
+          elif grep -Eiq '404|NoSuchKey|Not Found' "$immutable_error"; then
+            aws s3 cp /tmp/cli-release.json "s3://${R2_BUCKET}/${immutable_key}" \
+              --endpoint-url "$endpoint" \
+              --content-type "application/json; charset=utf-8" \
+              --cache-control "public, max-age=31536000, immutable"
+          else
+            cat "$immutable_error" >&2
+            exit 1
+          fi
+          rm -f "$immutable_error"
+
+          aws s3 cp "s3://${R2_BUCKET}/${immutable_key}" /tmp/cli-release.immutable.json \
+            --endpoint-url "$endpoint"
+          bash scripts/validate-cli-release-manifest.sh \
+            "$validation_channel" "$TAG" "${{ github.repository }}" \
+            /tmp/cli-release.immutable.json
+          cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json
+
+          if [ -z "$channel" ]; then
+            echo "internal CLI release $TAG; Stable and Preview pointers remain unchanged"
+            exit 0
+          fi
+
+          current_tag=""
+          pointer_error="$(mktemp)"
+          if aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
+            --endpoint-url "$endpoint" 2>"$pointer_error"; then
+            current_tag="$(jq -er '.tag_name | strings' /tmp/cli-release.pointer.json)"
+            bash scripts/validate-cli-release-manifest.sh \
+              "$channel" "$current_tag" "${{ github.repository }}" /tmp/cli-release.pointer.json
+          elif grep -Eiq '404|NoSuchKey|Not Found' "$pointer_error"; then
+            echo "CLI $channel pointer does not exist yet"
+          else
+            cat "$pointer_error" >&2
+            exit 1
+          fi
+          rm -f "$pointer_error"
+
+          pointer_manifest=-
+          if [ -n "$current_tag" ]; then
+            pointer_manifest=/tmp/cli-release.pointer.json
+          fi
+          pointer_decision="$(
+            bash scripts/decide-cli-pointer-update.sh \
+              "$channel" /tmp/cli-release.json "$pointer_manifest"
+          )"
+          if [ "$pointer_decision" = "skip" ]; then
+            echo "CLI $channel pointer remains ${current_tag:-unset}; candidate $TAG is not newer and needs no repair"
+            exit 0
+          fi
+          aws s3 cp /tmp/cli-release.json "s3://${R2_BUCKET}/cli/${channel}/latest.json" \
+            --endpoint-url "$endpoint" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=300, stale-if-error=86400"
+
+          aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
+            --endpoint-url "$endpoint"
+          bash scripts/validate-cli-release-manifest.sh \
+            "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.pointer.json
+          cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json
+          echo "CLI $channel pointer -> $TAG"
 
       - name: Attach desktop manifest compatibility asset
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
@@ -76,7 +394,7 @@ jobs:
           aws configure set region auto
           aws s3 cp "s3://${R2_BUCKET}/latest/latest.json" latest.raw.json \
             --endpoint-url "https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          jq '.download_page = "https://reasonix.io/#start"' latest.raw.json > latest.json
+          jq '.download_page = "https://reasonix.io/?download=desktop#start"' latest.raw.json > latest.json
           jq -e '
             ([.platforms[] | (.url, .sig)] |
               all(type == "string" and startswith("https://dl.reasonix.io/") and (contains("/releases/latest/") | not)))
@@ -84,16 +402,17 @@ jobs:
           gh release upload "$TAG" latest.json --clobber
 
       # The compatibility asset exists for pre-v1.16 desktop updaters that
-      # still poll GitHub's repository-wide latest URL — so verify it exactly
-      # the way those clients fetch it: anonymously, over the public edge, with
-      # a Go client UA. Unlike dl.reasonix.io (whose bot protection 403s
-      # Actions egress — see the R2 note above), GitHub serves its own runners,
-      # so this can hard-fail. #5826/#5858 shipped a broken update check for
-      # weeks precisely because nothing exercised the public path. Retries
+      # still poll GitHub's repository-wide latest URL. Desktop releases now
+      # own that Latest badge, but this check still exercises the public fallback
+      # path exactly the way those clients fetch it: anonymously, over the public
+      # edge, with a Go client UA. Unlike dl.reasonix.io (whose bot protection
+      # 403s Actions egress — see the R2 note above), GitHub serves its own
+      # runners, so this can hard-fail. #5826/#5858 shipped a broken update check
+      # for weeks precisely because nothing exercised the public path. Retries
       # cover the release CDN propagating the freshly uploaded asset.
       - name: Smoke public compatibility manifest
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.resolve.outputs.tag }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
         run: |
           set -euo pipefail
@@ -119,3 +438,52 @@ jobs:
           done
           echo "::error::public compatibility manifest unreachable at $url"
           exit 1
+
+      # A stable CLI release must never leave the npm line behind: v1.17.5
+      # shipped as binaries/Homebrew while npm `latest` still pointed at 0.53.2
+      # (#5822) — every `npm update -g` user was silently downgraded to a
+      # months-old version, and nothing noticed because the npm line
+      # (release-npm.yml, `npm-vX.Y.Z` tags) is triggered independently and the
+      # stable npm tag was simply never pushed. release-npm.yml's own verify
+      # step only guards runs that happen; this guard catches the run that
+      # DIDN'T.
+      #
+      # Two distinct states, two responses (the approved orchestrator starts the
+      # CLI and npm reusable workflows concurrently, and npm dist-tags propagate
+      # asynchronously, so "tag pushed but latest not moved yet" is a NORMAL
+      # mid-release state, not a failure):
+      #   - npm-v<version> tag missing  -> hard fail. This is the #5822 gap:
+      #     nobody pushed the npm release at all.
+      #   - tag pushed, latest lagging  -> poll briefly, then WARN and pass.
+      #     The npm job may still be publishing; release-npm.yml's verify step
+      #     owns asserting the dist-tag lands.
+      - name: Check npm latest dist-tag freshness
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          case "$TAG" in
+            *-*)
+              echo "prerelease $TAG — npm latest does not move on prereleases; skipping"
+              exit 0
+              ;;
+          esac
+          version="${TAG#v}"
+          if ! git ls-remote --exit-code origin "refs/tags/npm-v$version" >/dev/null; then
+            echo "::error::the npm-v$version tag was never pushed — the npm channel is being left behind and 'npm update -g' users will be downgraded to the old 'latest'. Push it: git tag npm-v$version ${TAG} && git push origin npm-v$version (or 'npm dist-tag add reasonix@$version latest' for an already-published version)."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6; do
+            got="$(npm view reasonix dist-tags.latest 2>/dev/null || true)"
+            if [ -n "$got" ]; then
+              newest="$(printf '%s\n%s\n' "$got" "$version" | sort -V | tail -1)"
+              if [ "$newest" = "$got" ]; then
+                echo "npm latest -> $got (>= $version) OK"
+                exit 0
+              fi
+            fi
+            echo "npm latest -> ${got:-<unreadable>}, want >= $version (attempt $attempt)"
+            sleep 10
+          done
+          echo "::warning::npm-v$version is pushed but npm 'latest' is still ${got:-<unreadable>} — the concurrent npm publish is likely still running or propagating. Monitor the npm job; its verify step asserts the dist-tag lands."
+          exit 0

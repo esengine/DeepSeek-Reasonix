@@ -11,18 +11,24 @@ export function VirtualMenu<T>({
   activeIndex,
   itemKey,
   renderItem,
+  estimateSize,
 }: {
   items: T[];
   activeIndex: number;
   itemKey: (item: T, index: number) => string;
   renderItem: (item: T, index: number) => ReactNode;
+  estimateSize?: (item: T, index: number) => number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => 34,
+    estimateSize: (index) => estimateSize?.(items[index], index) ?? 34,
     overscan: 10,
+    // Measurement callbacks can arrive during React's commit phase. Let the
+    // virtualizer update stable row positions directly instead of dispatching a
+    // reducer update for every ResizeObserver measurement (React #185).
+    directDomUpdates: true,
   });
 
   useEffect(() => {
@@ -33,14 +39,13 @@ export function VirtualMenu<T>({
 
   return (
     <div ref={scrollRef} className="slashmenu" role="listbox">
-      <div className="slashmenu__sizer" style={{ height: virtualizer.getTotalSize() }}>
+      <div ref={virtualizer.containerRef} className="slashmenu__sizer">
         {virtualizer.getVirtualItems().map((row) => (
           <div
             key={itemKey(items[row.index], row.index)}
             data-index={row.index}
             ref={virtualizer.measureElement}
             className="slashmenu__row"
-            style={{ transform: `translateY(${row.start}px)` }}
           >
             {renderItem(items[row.index], row.index)}
           </div>

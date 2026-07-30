@@ -11,7 +11,7 @@ changed and how to move over.
 | Language | TypeScript / Node | Go |
 | Branch | [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) (maintenance only) | `main-v2` (default, active) |
 | Versions | `0.x` (up to v0.54.x) | `1.0.0`+ |
-| Install | `npm i -g reasonix` (the `latest` tag, stays on `0.x`) | `npm i -g reasonix@next` — `latest` deliberately stays on `0.x`; or a release archive / `go build` |
+| Install | `npm i -g reasonix@0.53.2` (pin a `0.x` version) | `npm i -g reasonix` — `latest` points at the current `1.x` stable; or a release archive / `go build` |
 | Code intelligence | embedding semantic search + tree-sitter symbols | LSP-assisted code reading plus grep/read_file/glob; semantic index is not yet ported |
 
 "v1" and "v2" are **codebase generations**, not semver: the v1 line never reached
@@ -23,18 +23,17 @@ changed and how to move over.
 same way esbuild/biome ship native binaries via npm). The binary itself is a
 standalone Go executable; npm is only the installer, not a runtime dependency.
 
-**`npm i -g reasonix` deliberately still installs `0.x`.** A bare install — and
-`npx reasonix`, and 0.53's own `update` — follows npm's `latest` tag, which we
-keep pinned to the `0.x` line so existing users aren't pulled into the rewrite
-without asking. v1.x (Go) ships under the `next` tag; opt in explicitly:
+**`npm i -g reasonix` installs the current `1.x` stable.** npm's `latest` tag
+moved to the Go line with `1.17.5` — the earlier "`latest` stays pinned to
+`0.x`" migration guard silently downgraded `npm update -g` users once 1.x went
+stable (#5822), so it was retired. Release candidates still ship under the
+`next` tag; `0.x` stays installable by pinning:
 
 ```sh
-npm i -g reasonix@next     # or pin a version: reasonix@1.1.0
-reasonix
+npm i -g reasonix          # current 1.x stable
+npm i -g reasonix@next     # release candidate, when one is ahead of stable
+npm i -g reasonix@0.53.2   # pin the legacy TS build
 ```
-
-`latest` will stay on `0.x` for the foreseeable future, so installing or
-updating v2 always means `@next` (or a pinned `1.x`).
 
 Prebuilt archives (`reasonix-<os>-<arch>.tar.gz` / `.zip`) and the desktop
 installer are attached to each GitHub release. These are a **separate channel**
@@ -86,6 +85,47 @@ v0.x sessions are in a custom Windows install/data directory, use
 See
 [Configuration paths](./CONFIG_PATHS.md) for the full path list and limitations.
 
+## Context Engine v2 upgrade
+
+Instruction and memory upgrades are automatic and do not require a setup mode,
+re-index command, or new configuration:
+
+| Existing data | Upgrade behavior |
+| --- | --- |
+| `REASONIX.md`, `AGENTS.md`, `CLAUDE.md` | Loaded as standing instructions with source, directory, precedence, imports, and diagnostics. Existing file names remain valid. |
+| Nested instruction files | Resolve from workspace root to the active target path; within one directory, `.local.md` wins. Deeper directories still outrank broader ones. |
+| Legacy fact without `id` / `revision` | Receives a deterministic scope-aware `legacy-*` ID and starts at revision 1. Migration is idempotent. |
+| Legacy fact without `metadata.scope` | Scope is inferred from the project/global directory that already owns the file. |
+| Existing `MEMORY.md` | Treated as a derived index and rebuilt from active fact files; hand-carried stale entries do not become facts. |
+| Existing active facts | Remain active and gain revision history only when subsequently changed. |
+| Existing archive entries | Remain excluded from recall and can be recovered explicitly from Context Center or `/memory recover`. |
+| Old Memory v5 transcript | Remains readable; previews recover the original user prompt from `<memory-compiler-execution>`. |
+| `[agent].memory_compiler` | Retired and removed by the existing one-time config migration. |
+
+The first current boot persists missing identity/timestamp metadata without
+changing the fact body. Compatibility routing fields keep older Reasonix
+clients from moving a fact into the wrong scope directory if versions share the
+same state root.
+
+After upgrading, use these diagnostics instead of editing migration state:
+
+```text
+/memory
+/memory instructions
+/memory recall
+/memory revisions <id-or-name>
+/memory archived
+```
+
+New relevant facts are recalled automatically. Only bounded, non-sensitive,
+create-only project/reference facts may be saved without a confirmation;
+global facts, preferences, feedback, updates, duplicates, sensitive content,
+and every archive operation remain explicit user decisions. The desktop
+Suggestions tab scans automatically but never saves a candidate until accepted.
+
+See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for the full precedence,
+freshness, recovery, cache, privacy, and remote-workspace contract.
+
 ## What's the same
 
 The agent core carries over: the loop, tools (read/write/edit/glob/grep/bash/…),
@@ -99,38 +139,52 @@ and DeepSeek prefix-cache–oriented design.
   search + tree-sitter symbol index is not bundled in v2 yet, and CodeGraph is no
   longer shipped as an internal MCP server.
 - **Plan mode** + `complete_step` (evidence-backed step sign-off).
-- **Plan-mode tool overrides are narrower, and plan mode is fail-closed for
-  external tools**: `[agent].plan_mode_allowed_tools` now only declares extra
-  read-only custom/external tools. It no longer unlocks known blocked plan-mode
-  tools such as `bash`, `task`, writers, installers, or memory mutation tools, and
-  unsafe bash commands still remain blocked. To migrate old
-  `plan_mode_allowed_tools = ["bash", ...]` configs, move concrete read-only
-  shell prefixes such as `gh issue view` or internal query CLIs to
-  `[agent].plan_mode_read_only_commands`; do not declare shell interpreters or
-  writer-capable commands there. Interactive plan-mode runs can also ask you to
-  trust a concrete unknown query prefix once, and the persistent choice writes
-  the same `plan_mode_read_only_commands` entry. Auto/YOLO tool approval does
-  not answer this bash trust prompt. Use `read_only_task` / `read_only_skill`
-  instead of trying to unlock `task` / `run_skill` while planning. An MCP/plugin tool
-  whose read-only status comes from the server's untrusted `readOnlyHint` is
-  confirmed the first time an interactive plan-mode run needs it; choose the
-  persistent option to write the plugin-level `trusted_read_only_tools` raw-name
-  list. Auto/YOLO tool approval does not answer this trust prompt, although a
-  session or persistent trust choice prevents repeat prompts for the same MCP
-  tool. Non-interactive runs still fail closed, so pre-seed
-  `trusted_read_only_tools` or declare a concrete `mcp__<server>__<tool>` when no
-  user can approve. In the desktop MCP
-  panel, expand a server and use **Pre-trust read-only** for currently listed
-  `readOnlyHint` tools, per-tool **Pre-trust** for audited readers, or
-  **Untrust** to remove a tool; those actions write the same
-  `trusted_read_only_tools` list. First-party `ReadOnlyToolNames` overrides and
-  built-ins stay trusted.
+- **MCP project identity and schema-cache URLs are credential-aware**: userinfo
+  and credential query values (token, api_key, password, ...) do not enter the
+  project launch identity digest or schema cache key, so credential rotation
+  keeps the same project runtime/cache identity. User-installed servers do not
+  compute a project identity digest. Legacy launch/tool authorization receipts
+  are no longer required by configured MCP servers.
+- **MCP setup is now add-and-use.** Servers added by the user (Desktop, CLI,
+  user config, legacy user import, or a user-installed plugin package) are
+  trusted immediately and global installs persist to `config.toml`. Repository
+  `reasonix.toml` / `.mcp.json` servers stay project-scoped and are trusted
+  without a separate launch confirmation. Project entries override same-name
+  global entries; `reasonix.toml` overrides `.mcp.json` inside the project.
+  Treat opening an unfamiliar repository as opting into executable project
+  configuration: review `.reasonix/settings.json`, `reasonix.toml`, and
+  `.mcp.json` before starting Reasonix. If a repository causes unexpected MCP
+  or Hook behavior, restart in Safe Mode to disable those external integrations
+  while recovering.
+- **stdio MCP connections are persistent.** This fixes stateful servers that
+  lost browser/session state when writer calls received a fresh process.
+- **Plan mode and permission policy are now independent**: Plan directs the
+  model to plan first. Ordinary built-in and Bash calls still use the active
+  Ask/Auto/YOLO rules and Sandbox, while installed MCP and proxy-resolved MCP
+  writer/destructive targets plus readers from unauthorized servers stay hard-blocked for the
+  whole planning phase. Explicit execution-phase tools such as `complete_step` also
+  remain unavailable until plan approval. `plan_mode_read_only_commands` is
+  still parsed and round-tripped for old configs, but it no longer controls
+  main Plan availability. Installed or project-configured servers contribute their
+  non-destructive `readOnlyHint` tools to planner/read-only registries
+  automatically. Use `read_only_task` /
+  `read_only_skill` when a child must be technically restricted to read-only;
+  ordinary `task` / `run_skill` calls remain writer-capable and permission-gated
+  in Plan. Installed MCP tools use the server's `readOnlyHint` for ordinary
+  dispatch. Tools without the hint remain writer-classified. The retired
+  `default_tools_approval_mode`, `tools.<raw>.approval_mode`, and
+  `approvals_reviewer` fields are ignored and removed on the next save; installing
+  or explicitly authorizing a server now makes all of its tools directly usable.
 - **Read-only subagent research**: use `read_only_task` for generic isolated
   research in plan mode, or `read_only_skill` when the work should follow an
   existing skill. Both expose only read-only tools and safe foreground bash, do
   not write resumable transcripts, and keep writer-capable `task` / `run_skill`
-  blocked until after plan approval.
-- **No web dashboard** — the v2 line is terminal + desktop (Wails), by design.
+  out of those explicitly read-only child registries. Ordinary writer-capable
+  delegation in Plan uses Permissions/Sandbox.
+- **Web dashboard remains available; desktop is recommended**: run
+  `reasonix serve` when a local browser UI is useful. For the primary visual
+  experience, prefer the Wails desktop app; CLI/TUI remains the terminal-native
+  path.
 - Some granular v1 tools are intentionally consolidated (e.g. file-management ops
   go through `bash`); a few v1 tools are not yet ported (tracked on Discussions).
 

@@ -106,40 +106,7 @@ func TestBashSandboxEscapeDenialBlocksUnconfinedRun(t *testing.T) {
 	}
 }
 
-func TestBashWindowsSandboxRuntimeFailureCanRerunUnconfinedOnce(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
-	sh := sandbox.ResolveShell("", "", nil)
-	oldCommand := bashSandboxCommand
-	bashSandboxCommand = func(spec sandbox.Spec, sh sandbox.Shell, command string) ([]string, bool) {
-		return unconfinedShellArgv(sh, windowsSandboxFailureForShell(sh)), true
-	}
-	defer func() { bashSandboxCommand = oldCommand }()
-	oldRuntimeFailure := bashWindowsSandboxRuntimeFailure
-	bashWindowsSandboxRuntimeFailure = func(_ []string, out string, err error) bool {
-		return err != nil && strings.Contains(out, "windows sandbox: boom")
-	}
-	defer func() { bashWindowsSandboxRuntimeFailure = oldRuntimeFailure }()
-
-	approver := &fakeSandboxEscapeApprover{allow: true}
-	ctx := sandbox.WithEscapeApprover(context.Background(), approver)
-	out, err := (bash{sb: sandbox.Spec{Mode: "enforce"}, shell: sh}).Execute(ctx, argsJSON(t, map[string]any{"command": echoForShell(sh, "rerun")}))
-	if err != nil {
-		t.Fatalf("Execute returned error after runtime escape: %v (out=%q)", err, out)
-	}
-	if !strings.Contains(out, "rerun") {
-		t.Fatalf("output = %q, want unconfined rerun output", out)
-	}
-	if strings.Contains(out, "windows sandbox: boom") {
-		t.Fatalf("output should come from rerun only, got %q", out)
-	}
-	if len(approver.calls) != 1 {
-		t.Fatalf("approval calls = %d, want 1", len(approver.calls))
-	}
-}
-
-func TestBashSandboxEscapeSessionGrantRunsForegroundUnconfinedBeforeHelper(t *testing.T) {
+func TestBashSandboxEscapeSessionGrantRunsForegroundUnconfinedBeforeWrapper(t *testing.T) {
 	restore := forceWindowsSandboxEscapeTestMode(t)
 	defer restore()
 
@@ -152,12 +119,6 @@ func TestBashSandboxEscapeSessionGrantRunsForegroundUnconfinedBeforeHelper(t *te
 		return unconfinedShellArgv(sh, command), false
 	}
 	defer func() { bashSandboxCommand = oldCommand }()
-	oldRuntimeFailure := bashWindowsSandboxRuntimeFailure
-	bashWindowsSandboxRuntimeFailure = func(_ []string, out string, err error) bool {
-		return err != nil && strings.Contains(out, "windows sandbox: boom")
-	}
-	defer func() { bashWindowsSandboxRuntimeFailure = oldRuntimeFailure }()
-
 	approver := &fakeSandboxEscapeApprover{sessionAllowed: true}
 	ctx := sandbox.WithEscapeApprover(context.Background(), approver)
 	out, err := (bash{sb: sandbox.Spec{Mode: "enforce"}, shell: sh}).Execute(ctx, argsJSON(t, map[string]any{"command": echoForShell(sh, "session-rerun")}))
@@ -178,7 +139,7 @@ func TestBashSandboxEscapeSessionGrantRunsForegroundUnconfinedBeforeHelper(t *te
 	}
 }
 
-func TestBashSandboxEscapeSessionGrantRunsBackgroundUnconfinedBeforeHelper(t *testing.T) {
+func TestBashSandboxEscapeSessionGrantRunsBackgroundUnconfinedBeforeWrapper(t *testing.T) {
 	restore := forceWindowsSandboxEscapeTestMode(t)
 	defer restore()
 
@@ -228,29 +189,6 @@ func TestBashSandboxEscapeSessionGrantRunsBackgroundUnconfinedBeforeHelper(t *te
 	}
 }
 
-func TestBashWindowsSandboxRuntimeFailureRequiresHelperMarker(t *testing.T) {
-	restore := forceWindowsSandboxEscapeTestMode(t)
-	defer restore()
-
-	payload := "encoded-payload"
-	argv := []string{"reasonix", sandbox.WindowsHelperCommand, payload, "--", "cmd"}
-	marker := sandbox.WindowsSandboxFailureMarker(payload)
-	err := exit126Error(t)
-
-	if !isWindowsSandboxRuntimeFailure(argv, marker+" windows sandbox: boom", err) {
-		t.Fatalf("runtime failure with helper marker was not detected")
-	}
-	if isWindowsSandboxRuntimeFailure(argv, "windows sandbox: boom", err) {
-		t.Fatalf("child output without helper marker should not trigger runtime escape")
-	}
-	if isWindowsSandboxRuntimeFailure([]string{"cmd"}, marker+" windows sandbox: boom", err) {
-		t.Fatalf("non-helper argv should not trigger runtime escape")
-	}
-	if isWindowsSandboxRuntimeFailure(argv, marker+" windows sandbox: boom", nil) {
-		t.Fatalf("successful command should not trigger runtime escape")
-	}
-}
-
 func forceWindowsSandboxEscapeTestMode(t *testing.T) func() {
 	t.Helper()
 	old := bashSandboxEscapePromptEnabled
@@ -263,16 +201,6 @@ func echoForShell(sh sandbox.Shell, text string) string {
 		return "Write-Output " + text
 	}
 	return "printf " + text
-}
-
-func exit126Error(t *testing.T) error {
-	t.Helper()
-	sh := sandbox.ResolveShell("", "", nil)
-	_, err := (bash{shell: sh}).runForeground(context.Background(), bashParams{Command: "exit 126"}, sh, unconfinedShellArgv(sh, "exit 126"), false, nil)
-	if err == nil {
-		t.Fatalf("exit 126 command unexpectedly succeeded")
-	}
-	return err
 }
 
 func windowsSandboxFailureForShell(sh sandbox.Shell) string {

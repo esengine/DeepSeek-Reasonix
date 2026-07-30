@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-crimson-horizon",
+  "name": "Crimson Horizon",
+  "author": "Reasonix Contributors",
+  "description": "Pearl-white sky over a coral-red future city skyline. No people, pure skyline.",
+  "license": "MIT",
+  "baseStyle": "graphite",
+  "tokens": {
+    "light": {
+      "bg": "#FFF8F7",
+      "bgSoft": "#F9EEEC",
+      "bgElev": "#FFFFFF",
+      "panel": "#FFFFFF",
+      "sidebar": "#F9ECEA",
+      "chat": "#FFFBFA",
+      "workspace": "#FFFFFF",
+      "workspaceFiles": "#FBF1EF",
+      "border": "#DFB3AD",
+      "borderSoft": "#F6E4E2",
+      "fg": "#301D1D",
+      "fgDim": "#6B4644",
+      "fgFaint": "#A9807D",
+      "accent": "#B92B38",
+      "accentFg": "#FFF8F7"
+    },
+    "dark": {
+      "bg": "#190D11",
+      "bgSoft": "#221318",
+      "bgElev": "#2B181E",
+      "panel": "#25141A",
+      "sidebar": "#211218",
+      "chat": "#201116",
+      "workspace": "#2B181E",
+      "workspaceFiles": "#221319",
+      "border": "#582F3C",
+      "borderSoft": "#361B24",
+      "fg": "#FFF1F2",
+      "fgDim": "#DFB3B6",
+      "fgFaint": "#AC7E84",
+      "accent": "#FF6772",
+      "accentFg": "#2A0E12"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "soft"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.75,
+    "focusY": 0.45,
+    "safeArea": "left",
+    "homeOpacity": 0.98,
+    "taskOpacity": 0.22,
+    "overlayStrength": 0.66,
+    "paneOpacity": 0.5
+  }
+}

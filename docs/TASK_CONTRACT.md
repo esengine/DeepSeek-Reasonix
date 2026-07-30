@@ -48,8 +48,9 @@ after the task is complete.
 - **Goal mode** treats the goal as a task contract and keeps working until the
   request, output format, constraints, and verification expectations are
   satisfied.
-- **Plan mode** is still the right choice when you want a read-only plan before
-  edits or side effects.
+- **Plan mode** is the right choice when you want the model to draft and confirm
+  a plan before implementation. It is a workflow instruction, not a read-only
+  permission boundary.
 - **Tool approval** remains separate: file writes, shell commands, publishing,
   credentials, and external effects still follow the configured approval policy.
 - **Checkpoints/Rewind** are file and conversation snapshots. The task contract's

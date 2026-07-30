@@ -1,5 +1,5 @@
 import { createRoot, type Root } from "react-dom/client";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import katexCss from "katex/dist/katex.min.css?inline";
@@ -7,14 +7,20 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { highlightToHtml } from "./highlight";
 import { normalizeMath } from "../components/mathNormalize";
+import {
+  createRasterPdf,
+  isSafeInlineExportImage,
+  neutralizeExternalCssResources,
+  PDF_CONTENT_ASPECT,
+  planRasterSlices,
+  transformExportMarkdownUrl,
+  type RasterSlice,
+} from "./sessionExportCore";
 
 const EXPORT_WIDTH = 920;
-const MAX_CANVAS_SIDE = 16384;
-const PDF_PAGE_WIDTH = 595.28;
-const PDF_PAGE_HEIGHT = 841.89;
-const PDF_MARGIN = 36;
+const MAX_CANVAS_SIDE = 8192;
 
-const EXPORT_STYLES = `
+const EXPORT_STYLES = neutralizeExternalCssResources(`
 ${katexCss}
 .session-export-page,
 .session-export-page * {
@@ -189,7 +195,18 @@ ${katexCss}
 .session-export-page .hljs-attr {
   color: #be123c;
 }
-`;
+.session-export-page .export-media-placeholder {
+  display: inline-block;
+  max-width: 100%;
+  margin: 4px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--fg-faint);
+  background: var(--bg-soft);
+  font-size: 0.9em;
+}
+`);
 
 const staticMarkdownComponents: Components = {
   pre: ({ children }) => <>{children}</>,
@@ -205,6 +222,12 @@ const staticMarkdownComponents: Components = {
     );
   },
   a: ({ href, children }) => <a href={href}>{children}</a>,
+  img: ({ src, alt, title }) => {
+    if (isSafeInlineExportImage(src)) {
+      return <img src={src} alt={alt ?? ""} title={title} />;
+    }
+    return <span className="export-media-placeholder">[{alt || title || "image"}]</span>;
+  },
 };
 
 function StaticMarkdown({ text }: { text: string }) {
@@ -214,6 +237,7 @@ function StaticMarkdown({ text }: { text: string }) {
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
         components={staticMarkdownComponents}
+        urlTransform={(value, key) => transformExportMarkdownUrl(value, key, defaultUrlTransform)}
       >
         {normalizeMath(text)}
       </ReactMarkdown>
@@ -242,6 +266,32 @@ function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+async function waitForInlineImages(surface: HTMLElement): Promise<void> {
+  await Promise.all(
+    Array.from(surface.querySelectorAll("img")).map(async (image) => {
+      if (typeof image.decode === "function") {
+        try {
+          await image.decode();
+        } catch {
+          // Broken inline data stays as the browser's normal missing-image UI.
+        }
+        return;
+      }
+      if (image.complete) return;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          image.removeEventListener("load", done);
+          image.removeEventListener("error", done);
+          resolve();
+        };
+        image.addEventListener("load", done, { once: true });
+        image.addEventListener("error", done, { once: true });
+        if (image.complete) done();
+      });
+    }),
+  );
+}
+
 async function renderExportSurface(markdown: string): Promise<RenderedExport> {
   const host = document.createElement("div");
   host.style.position = "fixed";
@@ -266,6 +316,9 @@ async function renderExportSurface(markdown: string): Promise<RenderedExport> {
     host.remove();
     throw new Error("Export surface was not rendered");
   }
+
+  await waitForInlineImages(surface);
+  await nextFrame();
 
   return { root, host, surface };
 }
@@ -293,145 +346,121 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function serializeSurface(surface: HTMLElement, width: number, height: number): string {
+function replaceExternalMedia(root: HTMLElement): void {
+  root.querySelectorAll("img, video, audio, iframe, object, embed").forEach((element) => {
+    if (element instanceof HTMLImageElement && isSafeInlineExportImage(element.getAttribute("src") ?? undefined)) return;
+    const placeholder = document.createElement("span");
+    placeholder.className = "export-media-placeholder";
+    const label = element.getAttribute("alt") || element.getAttribute("title") || element.tagName.toLowerCase();
+    placeholder.textContent = `[${label}]`;
+    element.replaceWith(placeholder);
+  });
+}
+
+function pruneSliceClone(source: HTMLElement, clone: HTMLElement, slice: RasterSlice): void {
+  const sourceMarkdown = source.querySelector<HTMLElement>(".md");
+  const cloneMarkdown = clone.querySelector<HTMLElement>(".md");
+  if (!sourceMarkdown || !cloneMarkdown) return;
+  const surfaceTop = source.getBoundingClientRect().top;
+  const markdownTop = sourceMarkdown.getBoundingClientRect().top;
+  const selected: Array<{ node: Element; top: number }> = [];
+  Array.from(sourceMarkdown.children).forEach((node) => {
+    const rect = node.getBoundingClientRect();
+    const top = rect.top - surfaceTop;
+    const bottom = rect.bottom - surfaceTop;
+    if (bottom > slice.offset && top < slice.offset + slice.height) {
+      selected.push({ node, top: rect.top - markdownTop });
+    }
+  });
+  if (selected.length === 0) return;
+
+  cloneMarkdown.replaceChildren();
+  cloneMarkdown.style.position = "relative";
+  cloneMarkdown.style.height = `${Math.max(1, sourceMarkdown.scrollHeight)}px`;
+  for (const item of selected) {
+    const child = item.node.cloneNode(true) as HTMLElement;
+    child.style.position = "absolute";
+    child.style.top = `${item.top}px`;
+    child.style.left = "0";
+    child.style.right = "0";
+    child.style.margin = "0";
+    cloneMarkdown.appendChild(child);
+  }
+}
+
+function serializeSurfaceSlice(surface: HTMLElement, width: number, slice: RasterSlice): string {
   const clone = surface.cloneNode(true) as HTMLElement;
+  pruneSliceClone(surface, clone, slice);
+  replaceExternalMedia(clone);
   clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
   clone.style.width = `${width}px`;
-  clone.style.minHeight = `${height}px`;
+  clone.style.minHeight = `${slice.offset + slice.height}px`;
+  clone.style.transform = `translateY(-${slice.offset}px)`;
+  clone.style.transformOrigin = "top left";
   const style = document.createElement("style");
   style.textContent = EXPORT_STYLES;
   clone.insertBefore(style, clone.firstChild);
-  return new XMLSerializer().serializeToString(clone);
+  const viewport = document.createElement("div");
+  viewport.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  viewport.style.width = `${width}px`;
+  viewport.style.height = `${slice.height}px`;
+  viewport.style.overflow = "hidden";
+  viewport.style.background = "#ffffff";
+  viewport.appendChild(clone);
+  return new XMLSerializer().serializeToString(viewport);
 }
 
-async function renderSurfaceToCanvas(surface: HTMLElement): Promise<HTMLCanvasElement> {
-  const width = Math.max(1, Math.ceil(surface.scrollWidth || surface.getBoundingClientRect().width || EXPORT_WIDTH));
+function exportScale(): number {
+  return Math.min(2, Math.max(1.5, window.devicePixelRatio || 1));
+}
+
+function naturalPageBreaks(surface: HTMLElement): number[] {
+  const surfaceTop = surface.getBoundingClientRect().top;
+  const markdown = surface.querySelector<HTMLElement>(".md");
+  if (!markdown) return [];
+  return Array.from(markdown.children).map((node) => Math.ceil(node.getBoundingClientRect().bottom - surfaceTop));
+}
+
+function planSurfaceSlices(surface: HTMLElement, maxSliceHeight: number): RasterSlice[] {
   const height = Math.max(1, Math.ceil(surface.scrollHeight || surface.getBoundingClientRect().height || 1));
-  const preferredScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
-  const scale = Math.min(preferredScale, MAX_CANVAS_SIDE / width, MAX_CANVAS_SIDE / height);
+  const breakpoints = naturalPageBreaks(surface);
+  const contentEnd = breakpoints.length > 0
+    ? breakpoints.reduce((maximum, value) => Math.max(maximum, value), 1)
+    : height;
+  return planRasterSlices(height, maxSliceHeight, breakpoints, contentEnd);
+}
+
+async function renderSurfaceSliceToCanvas(
+  surface: HTMLElement,
+  slice: RasterSlice,
+  scale: number,
+): Promise<HTMLCanvasElement> {
+  const width = Math.max(1, Math.ceil(surface.scrollWidth || surface.getBoundingClientRect().width || EXPORT_WIDTH));
   const canvasWidth = Math.max(1, Math.floor(width * scale));
-  const canvasHeight = Math.max(1, Math.floor(height * scale));
-  const serialized = serializeSurface(surface, width, height);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
-  const svgUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-
-  try {
-    const image = await loadImage(svgUrl);
-    const canvas = document.createElement("canvas");
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) throw new Error("Canvas is not available");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    ctx.scale(scale, scale);
-    ctx.drawImage(image, 0, 0, width, height);
-    return canvas;
-  } finally {
-    URL.revokeObjectURL(svgUrl);
-  }
-}
-
-function bytesFromString(value: string): Uint8Array {
-  const bytes = new Uint8Array(value.length);
-  for (let i = 0; i < value.length; i++) {
-    bytes[i] = value.charCodeAt(i) & 0xff;
-  }
-  return bytes;
-}
-
-function concatBytes(chunks: Uint8Array[]): Uint8Array {
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
+  const canvasHeight = Math.max(1, Math.floor(slice.height * scale));
+  const serialized = serializeSurfaceSlice(surface, width, slice);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${slice.height}" viewBox="0 0 ${width} ${slice.height}"><foreignObject width="100%" height="100%">${serialized}</foreignObject></svg>`;
+  // Chromium/WebView2 versions used by shipped desktop builds mark an SVG
+  // foreignObject loaded from a blob URL as cross-origin. A self-contained data
+  // URL keeps the image origin-clean so toBlob() can encode the canvas.
+  const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  const image = await loadImage(svgUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasWidth;
+  canvas.height = canvasHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas is not available");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+  ctx.scale(scale, scale);
+  ctx.drawImage(image, 0, 0, width, slice.height);
+  return canvas;
 }
 
 function arrayBufferFromBytes(bytes: Uint8Array): ArrayBuffer {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
   return copy.buffer;
-}
-
-function pdfNumber(value: number): string {
-  return value.toFixed(3).replace(/\.?0+$/, "");
-}
-
-function pdfString(value: string): string {
-  return value
-    .replace(/[^\x20-\x7e]/g, "")
-    .replace(/\\/g, "\\\\")
-    .replace(/\(/g, "\\(")
-    .replace(/\)/g, "\\)");
-}
-
-function createRasterPdf(jpegBytes: Uint8Array, imageWidth: number, imageHeight: number, title: string): Uint8Array {
-  const contentWidth = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
-  const contentHeight = PDF_PAGE_HEIGHT - PDF_MARGIN * 2;
-  const renderedHeight = imageHeight * (contentWidth / imageWidth);
-  const pageCount = Math.max(1, Math.ceil(renderedHeight / contentHeight));
-  const imageObjectId = 3 + pageCount * 2;
-  const infoObjectId = imageObjectId + 1;
-  const objectCount = infoObjectId;
-  const chunks: Uint8Array[] = [];
-  const offsets: number[] = new Array(objectCount + 1).fill(0);
-  let position = 0;
-
-  const push = (value: string | Uint8Array) => {
-    const bytes = typeof value === "string" ? bytesFromString(value) : value;
-    chunks.push(bytes);
-    position += bytes.length;
-  };
-  const addObject = (id: number, body: string) => {
-    offsets[id] = position;
-    push(`${id} 0 obj\n${body}\nendobj\n`);
-  };
-  const addStreamObject = (id: number, header: string, body: Uint8Array) => {
-    offsets[id] = position;
-    push(`${id} 0 obj\n${header}\nstream\n`);
-    push(body);
-    push("\nendstream\nendobj\n");
-  };
-
-  push("%PDF-1.4\n%\xff\xff\xff\xff\n");
-  addObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
-
-  const kids = Array.from({ length: pageCount }, (_, index) => `${3 + index * 2} 0 R`).join(" ");
-  addObject(2, `<< /Type /Pages /Kids [ ${kids} ] /Count ${pageCount} >>`);
-
-  for (let index = 0; index < pageCount; index++) {
-    const pageId = 3 + index * 2;
-    const contentId = pageId + 1;
-    const y = PDF_PAGE_HEIGHT - PDF_MARGIN - renderedHeight + index * contentHeight;
-    const stream = bytesFromString(
-      `q\n${pdfNumber(contentWidth)} 0 0 ${pdfNumber(renderedHeight)} ${pdfNumber(PDF_MARGIN)} ${pdfNumber(y)} cm\n/Im0 Do\nQ\n`,
-    );
-    addObject(
-      pageId,
-      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pdfNumber(PDF_PAGE_WIDTH)} ${pdfNumber(PDF_PAGE_HEIGHT)}] /Resources << /XObject << /Im0 ${imageObjectId} 0 R >> /ProcSet [/PDF /ImageC] >> /Contents ${contentId} 0 R >>`,
-    );
-    addStreamObject(contentId, `<< /Length ${stream.length} >>`, stream);
-  }
-
-  addStreamObject(
-    imageObjectId,
-    `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.length} >>`,
-    jpegBytes,
-  );
-  addObject(infoObjectId, `<< /Title (${pdfString(title)}) /Producer (Reasonix) >>`);
-
-  const xrefStart = position;
-  push(`xref\n0 ${objectCount + 1}\n0000000000 65535 f \n`);
-  for (let id = 1; id <= objectCount; id++) {
-    push(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
-  }
-  push(`trailer\n<< /Size ${objectCount + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`);
-
-  return concatBytes(chunks);
 }
 
 export function blobToBase64(blob: Blob): Promise<string> {
@@ -446,23 +475,54 @@ export function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function renderSessionImageBlob(markdown: string): Promise<Blob> {
+async function renderSessionImages<T>(markdown: string, encode: (blob: Blob) => Promise<T>): Promise<T[]> {
   const rendered = await renderExportSurface(markdown);
   try {
-    const canvas = await renderSurfaceToCanvas(rendered.surface);
-    return await canvasToBlob(canvas, "image/png");
+    const scale = exportScale();
+    const slices = planSurfaceSlices(rendered.surface, Math.floor(MAX_CANVAS_SIDE / scale));
+    const images: T[] = [];
+    for (const slice of slices) {
+      const canvas = await renderSurfaceSliceToCanvas(rendered.surface, slice, scale);
+      try {
+        images.push(await encode(await canvasToBlob(canvas, "image/png")));
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+      }
+    }
+    return images;
   } finally {
     disposeExport(rendered);
   }
 }
 
+export function renderSessionImageBlobs(markdown: string): Promise<Blob[]> {
+  return renderSessionImages(markdown, async (blob) => blob);
+}
+
+export function renderSessionImageBase64Payloads(markdown: string): Promise<string[]> {
+  return renderSessionImages(markdown, blobToBase64);
+}
+
 export async function renderSessionPdfBlob(markdown: string, title: string): Promise<Blob> {
   const rendered = await renderExportSurface(markdown);
   try {
-    const canvas = await renderSurfaceToCanvas(rendered.surface);
-    const jpegBlob = await canvasToBlob(canvas, "image/jpeg", 0.92);
-    const jpegBytes = new Uint8Array(await jpegBlob.arrayBuffer());
-    const pdfBytes = createRasterPdf(jpegBytes, canvas.width, canvas.height, title);
+    const scale = exportScale();
+    const width = Math.max(1, Math.ceil(rendered.surface.scrollWidth || rendered.surface.getBoundingClientRect().width || EXPORT_WIDTH));
+    const pageHeight = Math.max(1, Math.floor(width * PDF_CONTENT_ASPECT));
+    const slices = planSurfaceSlices(rendered.surface, pageHeight);
+    const images = [];
+    for (const slice of slices) {
+      const canvas = await renderSurfaceSliceToCanvas(rendered.surface, slice, scale);
+      try {
+        const jpegBlob = await canvasToBlob(canvas, "image/jpeg", 0.9);
+        images.push({ bytes: new Uint8Array(await jpegBlob.arrayBuffer()), width: canvas.width, height: canvas.height });
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+      }
+    }
+    const pdfBytes = createRasterPdf(images, title);
     return new Blob([arrayBufferFromBytes(pdfBytes)], { type: "application/pdf" });
   } finally {
     disposeExport(rendered);

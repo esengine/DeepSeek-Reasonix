@@ -735,7 +735,6 @@ func TestNewSessionUsesFreshTopicIdentity(t *testing.T) {
 	if newPath == "" || filepath.Clean(newPath) == filepath.Clean(oldPath) {
 		t.Fatalf("new session path = %q, want fresh path distinct from %q", newPath, oldPath)
 	}
-
 	if err := os.WriteFile(newPath, []byte(`{"role":"user","content":"new prompt"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write new session: %v", err)
 	}

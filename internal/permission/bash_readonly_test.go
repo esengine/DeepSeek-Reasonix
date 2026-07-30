@@ -1,6 +1,9 @@
 package permission
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestIsReadOnlyBashSubject(t *testing.T) {
 	tests := []struct {
@@ -121,6 +124,28 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		t.Run(tt.cmd, func(t *testing.T) {
 			if got := isReadOnlyBashSubject(tt.cmd); got != tt.want {
 				t.Errorf("isReadOnlyBashSubject(%q) = %v, want %v", tt.cmd, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBashCommandIsReadOnlyRejectsProcessLifecycleFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want bool
+	}{
+		{name: "foreground reader", args: `{"command":"git status"}`, want: true},
+		{name: "background reader", args: `{"command":"git status","run_in_background":true}`},
+		{name: "preserved reader", args: `{"command":"git status","preserve_background_processes":true}`},
+		{name: "writer", args: `{"command":"rm -rf build"}`},
+		{name: "missing command", args: `{}`},
+		{name: "malformed", args: `{"command":`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := BashCommandIsReadOnly(json.RawMessage(tc.args)); got != tc.want {
+				t.Fatalf("BashCommandIsReadOnly(%s) = %v, want %v", tc.args, got, tc.want)
 			}
 		})
 	}

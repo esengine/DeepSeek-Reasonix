@@ -1,7 +1,7 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, initialState, metaFromTab, reducer, sameMeta, shouldReconcileStaleTurn } from "../lib/useController";
-import type { Meta, TabMeta, WireUsage } from "../lib/types";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
 
@@ -14,6 +14,16 @@ function eq(a: unknown, b: unknown, label: string) {
     passed += 1;
   } else {
     process.stdout.write(`  FAIL  ${label}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}\n`);
+    failed += 1;
+  }
+}
+
+function ok(value: boolean, label: string) {
+  if (value) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}\n`);
     failed += 1;
   }
 }
@@ -84,6 +94,39 @@ console.log("\nuse controller meta");
 
 {
   eq(
+    modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
+    "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "model busy guard is localized",
+  );
+  eq(
+    modelSwitchNoticeText("this session is already open in another Reasonix window or still running in the background; close the other window or open a copy before changing model"),
+    "This session is open in another Reasonix window or still running in the background. Close that window, stop the background run, or open a copy before changing models.",
+    "model lease conflict explains the safe path",
+  );
+  eq(
+    modelSwitchNoticeText("workspace is still starting"),
+    "This session is still starting. Try changing models again in a moment.",
+    "model startup race asks the user to retry later",
+  );
+  eq(
+    modelSwitchNoticeText('tab "tab-a" changed while switching model; retry'),
+    "The current session changed while switching models. Try once more.",
+    "model tab race asks the user to retry",
+  );
+  eq(
+    modelSwitchNoticeText('unknown model "missing"'),
+    'Unknown model "missing".',
+    "model unknown error is localized",
+  );
+  eq(
+    modelSwitchNoticeText('model "other/other-model" is not available because provider "other" is not added'),
+    'Model "other/other-model" is unavailable because provider "other" is not added.',
+    "model provider access error is localized",
+  );
+}
+
+{
+  eq(
     effortSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing effort"),
     "Reasoning effort cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
     "effort busy guard is worded as temporary",
@@ -111,17 +154,229 @@ console.log("\nuse controller meta");
 }
 
 {
+  eq(
+    tokenModeSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
+    "Work mode cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
+    "work mode busy guard is localized",
+  );
+  eq(
+    tokenModeSwitchNoticeText('tab "tab-a" changed while switching token mode; retry'),
+    "The current session changed while switching work mode. Try once more.",
+    "work mode tab race asks the user to retry",
+  );
+}
+
+{
+  eq(
+    localizedBackendNoticeText("Session autosave failed: disk full"),
+    "Session autosave failed: disk full",
+    "backend autosave notice is localized through the active dictionary",
+  );
+  eq(
+    localizedBackendNoticeText("Session save failed before changing model: disk full"),
+    "Session save failed before changing models: disk full",
+    "backend save-before-action notice localizes the action",
+  );
+  eq(
+    localizedBackendNoticeText('model "old/model" is no longer available; switched to new/model'),
+    'Model "old/model" is no longer available; switched to new/model.',
+    "backend model fallback notice is localized",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as recovery branch 20260706-152144.863947300-longcat-openai-LongCat-2.0-119b7259f151-recovery-693ce51bcbcbaa9"),
+    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "legacy recovery branch notice can be normalized without exposing internal branch id",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; unsaved local transcript was saved as a conflict copy"),
+    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "recovery copy notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("session conflicts kept recurring; kept the transcript on the current recovery branch"),
+    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "legacy repeated recovery conflict notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("repeated save conflicts were detected; saved the current conflict copy in place"),
+    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "repeated recovery conflict notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; adopted the newer transcript"),
+    "The session changed on disk, so Reasonix adopted the newer transcript.",
+    "adopted transcript notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("session changed on disk; adopted the newer transcript (local changes already covered)"),
+    "The session changed on disk, so Reasonix adopted the newer transcript; the local changes were already covered.",
+    "covered adopted transcript notice can be normalized",
+  );
+  eq(
+    localizedBackendNoticeText("The assistant answered before taking action; asking it to use the required tools."),
+    "The assistant answered before taking action; asking it to use the required tools.",
+    "canonical backend notice is routed through the locale dictionary",
+  );
+  eq(
+    localizedBackendNoticeText("background export failed: needs attention"),
+    "Background export needs attention.",
+    "dynamic background job notice is user-facing",
+  );
+}
+
+{
+  eq(
+    localizedNoticeText("Task status needs one more check (reworded backend copy).", "final_readiness"),
+    "Task status needs one more check; asking the assistant to finish or explain what is blocking it.",
+    "a stable notice code localizes the main copy even after backend copy edits",
+  );
+  eq(
+    localizedNoticeText("reworded workspace contention copy", "workspace_lease"),
+    "Another Delivery session is writing to this workspace; this session will continue automatically when it is safe.",
+    "workspace lease contention uses its stable localized notice code",
+  );
+  eq(
+    localizedNoticeText("reworded cancelled-turn copy", "cancelled_turn_display"),
+    "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
+    "cancelled turn history explains the model-context boundary",
+  );
+  eq(
+    localizedNoticeText("Tool round limit reached; asking the assistant to summarize progress.", "unknown_future_code"),
+    "Tool round limit reached; asking the assistant to summarize progress.",
+    "an unknown notice code falls back to exact-text matching",
+  );
+  eq(
+    localizedNoticeText("some free-form backend message"),
+    "some free-form backend message",
+    "a codeless unmatched notice keeps its raw text",
+  );
+}
+
+{
+  let s = reducer(initialState, {
+    type: "event",
+    e: { kind: "notice", level: "warn", text: "session conflicts kept recurring; kept the transcript on the current recovery branch" },
+  });
+  s = reducer(s, {
+    type: "event",
+    e: { kind: "notice", level: "warn", text: "repeated save conflicts were detected; saved the current conflict copy in place" },
+  });
+  const recoveryNotices = s.items.filter((item) => item.kind === "notice" && item.text.includes("current conflict copy"));
+  eq(recoveryNotices.length, 0, "recovery conflict notices stay silent in the live transcript");
+  eq(s.seq, 0, "silent recovery notices do not consume sequence ids");
+
+  s = reducer(s, { type: "event", e: { kind: "notice", level: "warn", text: "runtime notice" } });
+  s = reducer(s, { type: "event", e: { kind: "notice", level: "warn", text: "runtime notice" } });
+  const ordinaryNotices = s.items.filter((item) => item.kind === "notice" && item.text === "runtime notice");
+  eq(ordinaryNotices.length, 2, "ordinary repeated notices remain visible");
+}
+
+{
+  const quietLifecycleMessages = [
+    { level: "info", text: "guardian enabled · model=guardian-test" },
+    { level: "warn", text: "2 MCP server(s) failed to start: fs, browser — run /mcp for details" },
+    { level: "warn", text: "mcp fs: stdio plugin \"fs\": command \"missing-fs\" not found on PATH" },
+    { level: "info", text: "settings applied: session refreshed after the lease was released" },
+    { level: "info", text: "plugin \"slowserver\" has been slow 3 startups in a row (last 30000ms, budget 1000ms); demoting to background startup this session" },
+  ] as const;
+  let s = initialState;
+  for (const message of quietLifecycleMessages) {
+    s = reducer(s, { type: "event", e: { kind: "notice", level: message.level, text: message.text } });
+  }
+  eq(s.items.filter((item) => item.kind === "notice").length, 0, "background lifecycle notices stay silent in the live transcript");
+  eq(s.seq, 0, "silent lifecycle notices do not consume sequence ids");
+
+  const userActionFailure = reducer(s, { type: "event", e: { kind: "notice", level: "warn", text: "mcp connect: no configured MCP server named \"fs\"" } });
+  const visibleNotices = userActionFailure.items.filter((item) => item.kind === "notice");
+  eq(visibleNotices.length, 1, "user-triggered MCP failures remain visible");
+  eq(visibleNotices[0]?.kind === "notice" && visibleNotices[0].text, "mcp connect: no configured MCP server named \"fs\"", "visible MCP failure keeps its text");
+}
+
+{
+  const history: HistoryMessage[] = [
+    { role: "notice", level: "warn", content: "session conflicts kept recurring; kept the transcript on the current recovery branch" },
+    { role: "notice", level: "warn", content: "repeated save conflicts were detected; saved the current conflict copy in place" },
+    { role: "notice", level: "info", content: "guardian enabled · model=guardian-test" },
+    { role: "notice", level: "warn", content: "1 MCP server(s) failed to start: fs — run /mcp for details" },
+    { role: "notice", level: "info", content: "settings applied: session refreshed after the lease was released" },
+    { role: "user", content: "continue" },
+  ];
+  const hydrated = historyMessagesToItems(history, "h");
+  const recoveryNotices = hydrated.items.filter((item) => item.kind === "notice" && item.text.includes("current conflict copy"));
+  const lifecycleNotices = hydrated.items.filter((item) => item.kind === "notice");
+  const users = hydrated.items.filter((item) => item.kind === "user");
+  eq(recoveryNotices.length, 0, "recovery conflict notices stay silent when hydrating history");
+  eq(lifecycleNotices.length, 0, "background lifecycle notices stay silent when hydrating history");
+  eq(users[0]?.kind === "user" && users[0].id, "h0", "silent history notices keep later item ids compact");
+  eq(hydrated.seq, 1, "silent history notices do not inflate the hydrated sequence");
+}
+
+{
+  const hydrated = historyMessagesToItems([{ role: "notice", level: "warn", content: "short notice", detail: "historical diagnostic" }], "h");
+  const notice = hydrated.items.find((item) => item.kind === "notice" && item.text === "short notice");
+  eq(notice?.kind === "notice" && notice.detail, "historical diagnostic", "history notices preserve expandable detail text");
+}
+
+{
+  const hydrated = historyMessagesToItems([{ role: "notice", level: "info", content: "Tool round limit reached (reworded backend copy).", code: "tool_budget" }], "h");
+  const notice = hydrated.items.find((item) => item.kind === "notice");
+  eq(
+    notice?.kind === "notice" && notice.text,
+    "Tool round limit reached; asking the assistant to summarize progress.",
+    "history notices localize by stable code when the replayed record carries one",
+  );
+}
+
+{
+  const hydrated = historyMessagesToItems([
+    { role: "user", content: "finish" },
+    { role: "assistant", content: "done", reasoning: "worked", workDurationMs: 24_000 },
+  ], "h");
+  const assistant = hydrated.items.find((item) => item.kind === "assistant");
+  eq(assistant?.kind === "assistant" && assistant.workDurationMs, 24_000, "history restores persisted turn work duration");
+}
+
+{
   eq(sameMeta(meta(), meta()), true, "identical meta is unchanged");
   eq(sameMeta(meta({ collaborationMode: "normal" }), meta({ collaborationMode: "plan" })), false, "collaboration mode changes invalidate meta equality");
   eq(sameMeta(meta({ workspacePath: "/repo" }), meta({ workspacePath: "/other" })), false, "workspace path changes invalidate meta equality");
   eq(sameMeta(meta({ gitBranch: "main" }), meta({ gitBranch: "feature" })), false, "git branch changes invalidate meta equality");
   eq(sameMeta(meta({ imageInputEnabled: true }), meta({ imageInputEnabled: false })), false, "image input capability changes invalidate meta equality");
+  eq(
+    sameMeta(
+      meta({ canonicalTodos: [{ content: "Ship", status: "in_progress" }] }),
+      meta({ canonicalTodos: [{ content: "Ship", status: "completed" }] }),
+    ),
+    false,
+    "canonical todo progress invalidates meta equality",
+  );
+  eq(
+    sameMeta(meta({ canonicalTodos: [] }), meta({ canonicalTodos: [] })),
+    true,
+    "equivalent empty canonical todo lists keep meta stable",
+  );
 }
 
 {
   const preserved = metaFromTab(tab({ toolApprovalMode: "" }), meta({ toolApprovalMode: "auto", autoApproveTools: false }));
   eq(preserved.toolApprovalMode, "auto", "blank tab snapshot preserves explicit auto approval mode");
   eq(preserved.autoApproveTools, false, "blank tab snapshot does not silently resurrect yolo approval");
+  const todos = [{ content: "Keep task state", status: "in_progress" }];
+  const withTodos = metaFromTab(tab(), meta({ canonicalTodos: todos }));
+  eq(withTodos.canonicalTodos, todos, "optimistic tab metadata preserves canonical todos for the same session");
+}
+
+{
+  const before = meta({ canonicalTodos: [{ content: "Ship", status: "in_progress" }] });
+  const completed = meta({ canonicalTodos: [{ content: "Ship", status: "completed" }] });
+  const updated = reducer({ ...initialState, meta: before }, { type: "meta", meta: completed });
+  eq(updated.meta?.canonicalTodos?.[0]?.status, "completed", "meta refresh applies canonical todo progress");
+
+  const reset = reducer(updated, { type: "reset" });
+  eq(reset.meta?.canonicalTodos, undefined, "session reset clears canonical todos from the previous session");
+
+  const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
+  eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
 }
 
 {
@@ -136,17 +391,62 @@ console.log("\nuse controller meta");
 }
 
 {
+  const originalNow = Date.now;
+  let now = 1_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+    now = 1_200;
+    s = reducer(s, { type: "event", e: { kind: "reasoning", reasoning: "plan" } });
+    eq(s.live?.reasoningStartedAt, 1_200, "first reasoning delta records a reasoning start time");
+    now = 3_700;
+    s = reducer(s, { type: "event", e: { kind: "text", text: "answer" } });
+    eq(s.live?.reasoningComplete, true, "first answer token marks reasoning complete");
+    eq(s.live?.reasoningCompletedAt, 3_700, "first answer token records reasoning completion time");
+    now = 4_200;
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    const assistant = s.items.find((item) => item.kind === "assistant");
+    eq(assistant?.kind === "assistant" && assistant.reasoningDurationMs, 2_500, "turn_done persists the live reasoning duration");
+    eq(assistant?.kind === "assistant" && assistant.workDurationMs, 3_200, "turn_done persists the full turn wall-clock duration");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+{
+  const originalNow = Date.now;
+  let now = 5_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+    now = 5_100;
+    s = reducer(s, { type: "event", e: { kind: "reasoning", reasoning: "diagnose" } });
+    now = 6_400;
+    s = reducer(s, { type: "event", e: { kind: "message", text: "done", reasoning: "diagnose" } });
+    const assistant = s.items.find((item) => item.kind === "assistant");
+    eq(assistant?.kind === "assistant" && assistant.reasoningDurationMs, 1_300, "final message records reasoning duration when no text delta arrived");
+    eq(assistant?.kind === "assistant" && assistant.workDurationMs, 1_400, "final message records cumulative turn work duration before turn_done");
+    eq(s.live, undefined, "final message still closes live reasoning state");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
+{
   const started = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
   const waiting = reducer(started, { type: "event", e: { kind: "approval_request", approval: { id: "1", tool: "bash", subject: "go test" } } });
   eq(waiting.running, true, "approval prompt keeps the turn running");
   eq(waiting.pendingPrompt, true, "approval prompt marks pendingPrompt");
   eq(waiting.cancellable, true, "approval prompt remains cancellable");
+  ok(typeof waiting.promptWaitStartedAt === "number" && waiting.promptWaitStartedAt > 0, "approval_request starts tab-scoped prompt wait");
 
   const canceling = reducer(waiting, { type: "cancel_requested" });
   eq(canceling.approval, undefined, "cancel_requested clears approval prompt locally");
   eq(canceling.pendingPrompt, false, "cancel_requested clears pendingPrompt locally");
   eq(canceling.cancelRequested, true, "cancel_requested marks cancelling");
   eq(canceling.running, true, "cancel_requested waits for backend turn_done before idling");
+  eq(canceling.promptWaitStartedAt, undefined, "cancel_requested closes the open prompt wait");
+  ok((canceling.turnWaitAccumMs ?? 0) >= 0, "cancel_requested accumulates closed wait into the turn");
   const stalePrompt = reducer(canceling, { type: "event", e: { kind: "approval_request", approval: { id: "late", tool: "bash", subject: "sleep" } } });
   eq(stalePrompt.approval, undefined, "late approval after cancel_requested stays hidden");
 
@@ -161,6 +461,40 @@ console.log("\nuse controller meta");
   eq(foregroundRunningFromRuntimeMeta({ running: true }), true, "legacy running metadata remains foreground-running");
   eq(foregroundRunningFromRuntimeMeta({ running: true, pendingPrompt: true, backgroundJobs: 1 }), true, "pending prompts remain foreground-running");
   eq(foregroundRunningFromRuntimeMeta({ running: true, backgroundJobs: 1 }), false, "background jobs without cancellable are background-only");
+}
+
+// User-wait is tab-scoped: approval_request starts the clock even while the tab
+// is not rendered; clearApproval folds the open interval into turnWaitAccumMs.
+// workDurationMs excludes that wait so background suspension is not model work.
+{
+  const originalNow = Date.now;
+  let now = 10_000;
+  Date.now = () => now;
+  try {
+    let s = reducer(initialState, { type: "event", e: { kind: "turn_started" } });
+    eq(s.turnStartAt, 10_000, "turn starts at t0");
+    eq(s.turnWaitAccumMs, 0, "fresh turn has no wait accum");
+    now = 12_000;
+    s = reducer(s, {
+      type: "event",
+      e: { kind: "approval_request", approval: { id: "bg-1", tool: "bash", subject: "sleep 1" } },
+    });
+    eq(s.promptWaitStartedAt, 12_000, "approval_request records wait start at event time");
+    now = 15_000;
+    // Tab stays off-screen for 3s; controller still counts via open interval.
+    eq(currentTurnWaitMs(s, now), 3_000, "open wait counts while tab is backgrounded");
+    s = reducer(s, { type: "clearApproval" });
+    eq(s.promptWaitStartedAt, undefined, "clearApproval closes the open wait");
+    eq(s.turnWaitAccumMs, 3_000, "clearApproval accumulates background wait into the turn");
+    now = 16_000;
+    s = reducer(s, { type: "event", e: { kind: "message", text: "done", reasoning: "" } });
+    s = reducer(s, { type: "event", e: { kind: "turn_done" } });
+    const assistant = s.items.find((item) => item.kind === "assistant");
+    // Wall 6s (10k→16k) − 3s wait = 3s model work.
+    eq(assistant?.kind === "assistant" && assistant.workDurationMs, 3_000, "workDurationMs excludes user-wait including background wait");
+  } finally {
+    Date.now = originalNow;
+  }
 }
 
 {
@@ -237,6 +571,12 @@ console.log("\nuse controller meta");
   const notice = merged.items.find((item) => item.kind === "notice" && item.text === "runtime notice");
   eq(user?.kind === "user" && user.checkpointTurn, 0, "turn_done checkpoint merge stamps user turn zero");
   eq(Boolean(notice), true, "turn_done checkpoint merge preserves runtime notices");
+}
+
+{
+  const s = reducer(initialState, { type: "event", e: { kind: "notice", level: "warn", text: "short notice", detail: "verbose diagnostic" } });
+  const notice = s.items.find((item) => item.kind === "notice" && item.text === "short notice");
+  eq(notice?.kind === "notice" && notice.detail, "verbose diagnostic", "runtime notices preserve expandable detail text");
 }
 
 {

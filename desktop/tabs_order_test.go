@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/remote/workbench/target"
 )
 
 func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
@@ -30,6 +31,18 @@ func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
 		}
 	}
 	return &App{tabs: tabs, tabOrder: append([]string(nil), ids...), activeTabID: active}
+}
+
+func installNoopRuntimeEvents(app *App, sinks ...*tabEventSink) {
+	emit := func(context.Context, string, ...interface{}) {}
+	if app != nil {
+		app.runtimeEvents.emit = emit
+	}
+	for _, sink := range sinks {
+		if sink != nil {
+			sink.runtimeEvents.emit = emit
+		}
+	}
 }
 
 func tabIDs(tabs []TabMeta) []string {
@@ -325,6 +338,16 @@ func TestConcurrentActivateTopicSerializesSingleSurfacePruning(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	app := NewApp()
 	t.Cleanup(func() { app.shutdown(context.Background()) })
+	_, remoteGen, err := app.workbench().targets.BeginRemoteConnect("remote-host", "/srv/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.workbench().targets.MarkRemoteConnected(remoteGen); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := app.workbench().targets.ActivateRemote(remoteGen); err != nil {
+		t.Fatal(err)
+	}
 
 	topics := []string{
 		"topic-a",
@@ -363,6 +386,39 @@ func TestConcurrentActivateTopicSerializesSingleSurfacePruning(t *testing.T) {
 	}
 	if !tabs[0].Active {
 		t.Fatalf("remaining tab is not active: %+v", tabs[0])
+	}
+	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindLocal {
+		t.Fatalf("local topic navigation left execution target at %+v", active)
+	}
+}
+
+func TestSetActiveTabSwitchesRemoteProjectionOnlyForDifferentTab(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "a", "a", "b")
+	_, remoteGen, err := app.workbench().targets.BeginRemoteConnect("remote-host", "/srv/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.workbench().targets.MarkRemoteConnected(remoteGen); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := app.workbench().targets.ActivateRemote(remoteGen); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := app.SetActiveTab("a"); err != nil {
+		t.Fatal(err)
+	}
+	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindRemote {
+		t.Fatalf("same-tab hydration switched target to %+v", active)
+	}
+	if err := app.SetActiveTab("b"); err != nil {
+		t.Fatal(err)
+	}
+	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindLocal {
+		t.Fatalf("different local tab left target at %+v", active)
+	}
+	if app.activeTabID != "b" {
+		t.Fatalf("active tab = %q, want b", app.activeTabID)
 	}
 }
 
@@ -906,8 +962,14 @@ func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
 	if tab.Ctrl != nil {
 		t.Fatalf("tab controller = %T, want nil when lease is held", tab.Ctrl)
 	}
-	if !tab.Ready {
-		t.Fatal("tab should be ready with startup error")
+	if tab.Ready {
+		t.Fatal("tab with no controller must not report ready")
+	}
+	app.mu.RLock()
+	runtimeView := app.sessionRuntimeViewLocked(tab)
+	app.mu.RUnlock()
+	if runtimeView.Phase != sessionRuntimeLeaseBlocked {
+		t.Fatalf("runtime phase = %q, want %q", runtimeView.Phase, sessionRuntimeLeaseBlocked)
 	}
 	// The surfaced startup error is the sanitized busy message: the raw lease
 	// error would leak the session path and the holder's host-pid-writer id
@@ -918,6 +980,142 @@ func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
 	if strings.Contains(tab.StartupErr, agent.ErrSessionLeaseHeld.Error()) ||
 		strings.Contains(tab.StartupErr, path) {
 		t.Fatalf("startup error leaked raw lease details: %q", tab.StartupErr)
+	}
+}
+
+func TestDeferredStartupRetryBuildsAfterLeaseRelease(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	prevInterval := deferredRebuildRetryInterval
+	deferredRebuildRetryInterval = 20 * time.Millisecond
+	t.Cleanup(func() { deferredRebuildRetryInterval = prevInterval })
+
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "startup-retry.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			lease.Release()
+		}
+	})
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.enableDeferredRebuildRetry()
+	t.Cleanup(app.stopDeferredRebuildRetry)
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "startup_retry")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	installNoopRuntimeEvents(app, tab.sink)
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if ctrl := app.controllerForTab(tab); ctrl != nil {
+			ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil {
+		t.Fatalf("controller = %T, want nil while external lease is held", tab.Ctrl)
+	}
+	if !tab.StartupErrLeaseHeld {
+		t.Fatalf("startup retry flag = false, startup err = %q", tab.StartupErr)
+	}
+	if !app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry was not scheduled while the lease was held")
+	}
+
+	lease.Release()
+	released = true
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if !app.deferredRebuildPending(tab.ID) && app.controllerForTab(tab) != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry is still pending after the lease was released")
+	}
+	if ctrl := app.controllerForTab(tab); ctrl == nil {
+		t.Fatal("controller was not rebuilt after the lease was released")
+	}
+	if tab.StartupErr != "" || tab.StartupErrLeaseHeld {
+		t.Fatalf("startup error after retry = %q retryable=%v, want cleared", tab.StartupErr, tab.StartupErrLeaseHeld)
+	}
+}
+
+func TestTabAndCtrlByIDRecoversStartupLeaseBeforeAction(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := desktopSessionDir(globalTabWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "startup-before-action.jsonl")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write placeholder session: %v", err)
+	}
+	lease, err := agent.TryAcquireSessionLease(path)
+	if err != nil {
+		t.Fatalf("TryAcquireSessionLease: %v", err)
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			lease.Release()
+		}
+	})
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "startup_action")
+	tab.SessionPath = path
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	installNoopRuntimeEvents(app, tab.sink)
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if ctrl := app.controllerForTab(tab); ctrl != nil {
+			ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+
+	app.buildTabController(tab)
+	if !tab.StartupErrLeaseHeld {
+		t.Fatalf("startup retry flag = false, startup err = %q", tab.StartupErr)
+	}
+	lease.Release()
+	released = true
+
+	gotTab, ctrl := app.tabAndCtrlByID(tab.ID)
+	if gotTab != tab {
+		t.Fatalf("tabAndCtrlByID tab = %p, want %p", gotTab, tab)
+	}
+	if ctrl == nil {
+		t.Fatal("tabAndCtrlByID did not rebuild the controller before returning")
+	}
+	if app.deferredRebuildPending(tab.ID) {
+		t.Fatal("startup retry remained pending after synchronous recovery")
+	}
+	if tab.StartupErr != "" || tab.StartupErrLeaseHeld {
+		t.Fatalf("startup error after synchronous recovery = %q retryable=%v, want cleared", tab.StartupErr, tab.StartupErrLeaseHeld)
 	}
 }
 

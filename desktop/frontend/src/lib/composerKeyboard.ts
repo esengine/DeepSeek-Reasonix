@@ -1,4 +1,61 @@
+import { loadCustomShortcuts, matchesShortcut, type ShortcutPlatform } from "./keyboardShortcuts";
+import { replaceInvocationTextRange, type ComposerInvocation } from "./invocationDisplay";
+
 export type PromptHistoryDirection = "up" | "down";
+
+export interface ComposerEnterKeyLike {
+  key: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+}
+
+// "newline-native" keeps the browser's own line-break insertion (only the
+// plain Shift+Enter chord, today's proven path); "newline-insert" means the
+// chord has no native insertion (e.g. Ctrl+Enter) so the composer must insert
+// the "\n" itself. "none" swallows the chord: an Enter combo matching neither
+// the send nor the newline shortcut must not fall through to the input, or
+// native insertion would resurrect the unbound default.
+export type ComposerEnterAction = "send" | "newline-native" | "newline-insert" | "none";
+
+export function composerEnterAction(event: ComposerEnterKeyLike, platform: ShortcutPlatform): ComposerEnterAction | null {
+  if (event.key !== "Enter") return null;
+  if (matchesShortcut(event, "composer.newline", platform)) {
+    const nativeInserts = Boolean(event.shiftKey) && !event.ctrlKey && !event.metaKey && !event.altKey;
+    return nativeInserts ? "newline-native" : "newline-insert";
+  }
+  if (matchesShortcut(event, "composer.send", platform)) return "send";
+  // Before composer shortcuts were configurable, every non-Shift Enter chord
+  // submitted. Preserve that default compatibility, but stop applying it as
+  // soon as the user explicitly chooses a send chord.
+  if (!loadCustomShortcuts()["composer.send"] && !event.shiftKey) return "send";
+  // Plain Enter bound to neither chord (send moved to e.g. Ctrl+Enter) still
+  // breaks the line — the WeChat/DingTalk-style layout users expect there.
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) return "newline-insert";
+  return "none";
+}
+
+export interface ComposerSelectionLike {
+  start: number;
+  end: number;
+  afterInvocationId?: string;
+}
+
+export function insertComposerNewline(
+  text: string,
+  invocations: ComposerInvocation[],
+  selection: ComposerSelectionLike,
+): { text: string; invocations: ComposerInvocation[] } {
+  return replaceInvocationTextRange(
+    text,
+    invocations,
+    selection.start,
+    selection.end,
+    "\n",
+    selection.afterInvocationId,
+  );
+}
 
 export interface PromptHistoryKeyLike {
   key?: string;

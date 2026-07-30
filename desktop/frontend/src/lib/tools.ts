@@ -78,6 +78,10 @@ export function subjectOf(name: string, args: string): string {
     case "todo_write":
     case "exit_plan_mode":
       return ""; // these get dedicated cards, not a subject line
+    case "use_capability":
+      // Stable MCP proxy: show the capability id as the collapsed subject so
+      // Planner/Delivery cards read as "MCP · mcp-tool:server/tool".
+      return str(a, "capability_id") || str(a, "action");
     default:
       return str(a, "path") || str(a, "file_path");
   }

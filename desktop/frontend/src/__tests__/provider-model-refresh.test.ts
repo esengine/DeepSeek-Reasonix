@@ -6,10 +6,13 @@ import {
   isLikelyChatModel,
   isLikelyVisionModel,
   mergedFetchedProviderModels,
+  mergeProviderModelContextWindows,
   providerApiKeyEnvForSave,
   providerDefaultModel,
   providerIsConfigured,
   providerModelCandidates,
+  providerModelContextWindowDrafts,
+  providerModelContextWindowIsSmall,
   providerRequiresKey,
 } from "../lib/providerModels";
 
@@ -122,6 +125,67 @@ eq(
   "falls back to first saved model when default is unavailable",
 );
 
+const contextOverrides = [
+  {
+    model: "short-model",
+    reasoningProtocol: "none",
+    supportedEfforts: [],
+    defaultEffort: "",
+    vision: null,
+    contextWindow: 32768,
+  },
+  {
+    model: "long-model",
+    reasoningProtocol: "",
+    supportedEfforts: [],
+    defaultEffort: "",
+    vision: null,
+    contextWindow: 1000000,
+  },
+];
+
+eq(
+  providerModelContextWindowDrafts(contextOverrides),
+  { "short-model": "32768", "long-model": "1000000" },
+  "loads positive per-model context windows into editable drafts",
+);
+
+eq(
+  mergeProviderModelContextWindows(contextOverrides, ["short-model", "new-model"], {
+    "short-model": "65536",
+    "new-model": "131072",
+  }),
+  [
+    { ...contextOverrides[0], contextWindow: 65536 },
+    {
+      model: "new-model",
+      reasoningProtocol: "",
+      supportedEfforts: [],
+      defaultEffort: "",
+      vision: null,
+      contextWindow: 131072,
+    },
+  ],
+  "merges model context edits while preserving other overrides and dropping removed models",
+);
+
+eq(
+  mergeProviderModelContextWindows([], ["invalid-model"], { "invalid-model": "Infinity" }),
+  [],
+  "drops non-finite model context values before crossing the desktop bridge",
+);
+
+eq(
+  [
+    providerModelContextWindowIsSmall("8192"),
+    providerModelContextWindowIsSmall("16384"),
+    providerModelContextWindowIsSmall(""),
+    providerModelContextWindowIsSmall("Infinity"),
+  ],
+  [true, false, false, false],
+  "warns only for positive context windows below 16384 tokens",
+);
+
 eq(
   providerApiKeyEnvForSave("Local Gateway", "", ""),
   "",
@@ -135,6 +199,12 @@ eq(
 );
 
 eq(
+  providerApiKeyEnvForSave("9router", "", "sk-test"),
+  "CUSTOM_9ROUTER_API_KEY",
+  "creates a valid key env for a digit-leading custom provider",
+);
+
+eq(
   providerApiKeyEnvForSave("Local Gateway", "GATEWAY_KEY", ""),
   "GATEWAY_KEY",
   "preserves an explicitly configured key env",
@@ -142,11 +212,12 @@ eq(
 
 eq(
   [
+    apiKeyEnvFromProviderName("9router"),
     apiKeyEnvFromProviderName("商汤"),
     apiKeyEnvFromProviderName("通义千问"),
   ],
-  ["CUSTOM_d39b9067_API_KEY", "CUSTOM_e995c4c9_API_KEY"],
-  "generates distinct stable key envs for non-ASCII provider names",
+  ["CUSTOM_9ROUTER_API_KEY", "CUSTOM_d39b9067_API_KEY", "CUSTOM_e995c4c9_API_KEY"],
+  "generates valid stable key envs for digit-leading and non-ASCII provider names",
 );
 
 eq(

@@ -13,6 +13,8 @@ package jobs
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -21,22 +23,34 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
 )
 
 var renamePath = os.Rename
+var repairArtifactMeta = writeMeta
+
+var (
+	managerOwnerSeq   atomic.Uint64
+	liveManagerOwners = struct {
+		sync.RWMutex
+		ids map[string]struct{}
+	}{ids: map[string]struct{}{}}
+)
 
 // Status is a job's lifecycle state.
 type Status string
 
 const (
-	Running Status = "running"
-	Done    Status = "done"
-	Failed  Status = "failed"
-	Killed  Status = "killed"
+	Running     Status = "running"
+	Done        Status = "done"
+	Failed      Status = "failed"
+	Killed      Status = "killed"
+	Interrupted Status = "interrupted"
 )
 
 // DefaultTeardownGrace bounds Close and destroy waits for non-cooperative jobs.
@@ -128,14 +142,24 @@ type Job struct {
 	artifactComplete bool
 	artifactErr      string
 	tombstone        bool
+
+	evidence          evidence.ChildEvidenceSummary
+	evidenceCommitted bool
 }
 
 // Manager is the session's background-job table. It is safe for concurrent use.
 type Manager struct {
-	sink   event.Sink
-	root   context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	sink       event.Sink
+	root       context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
+	onJobStart func(done <-chan struct{})
+	ownerID    string
+	ownerDone  sync.Once
+	// sessionOwnershipProbe authorizes destructive repair of persisted running
+	// artifacts. A nil probe is conservative: an observer that cannot prove it
+	// owns the transcript must never publish an interrupted tombstone.
+	sessionOwnershipProbe func(path string) bool
 
 	mu           sync.Mutex
 	seq          int
@@ -147,6 +171,7 @@ type Manager struct {
 	artifactDirs map[string]string
 	loaded       map[string]bool
 	tempRoot     string
+	reservations map[string]int
 
 	stalledWarning time.Duration
 	teardownGrace  time.Duration
@@ -180,6 +205,20 @@ func WithTeardownGrace(d time.Duration) Option {
 	}
 }
 
+// WithJobStartObserver observes every registered background job before its
+// goroutine starts. Delivery uses this to retain a workspace writer lease until
+// the job is truly terminal. The callback must return quickly.
+func WithJobStartObserver(observer func(done <-chan struct{})) Option {
+	return func(m *Manager) { m.onJobStart = observer }
+}
+
+// WithSessionOwnershipProbe supplies the runtime ownership check used when
+// loading persisted Running artifacts. The probe must return true only when the
+// current runtime owns the session transcript for writing.
+func WithSessionOwnershipProbe(probe func(path string) bool) Option {
+	return func(m *Manager) { m.sessionOwnershipProbe = probe }
+}
+
 // TeardownGrace reports the manager's configured close/destroy wait window.
 func (m *Manager) TeardownGrace() time.Duration { return m.teardownGrace }
 
@@ -199,16 +238,59 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 		jobs:          map[string]*Job{},
 		destroying:    map[string]bool{},
 		artifactDirs:  map[string]string{},
+		reservations:  map[string]int{},
 		loaded:        map[string]bool{},
 		tempRoot:      tempRoot,
 		teardownGrace: DefaultTeardownGrace,
+		ownerID:       newManagerOwnerID(),
 	}
+	registerManagerOwner(m.ownerID)
 	for _, opt := range opts {
 		if opt != nil {
 			opt(m)
 		}
 	}
 	return m
+}
+
+func newManagerOwnerID() string {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err == nil {
+		return hex.EncodeToString(token[:])
+	}
+	return fmt.Sprintf("%d-%d-%d", os.Getpid(), time.Now().UnixNano(), managerOwnerSeq.Add(1))
+}
+
+func registerManagerOwner(ownerID string) {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return
+	}
+	liveManagerOwners.Lock()
+	liveManagerOwners.ids[ownerID] = struct{}{}
+	liveManagerOwners.Unlock()
+}
+
+func managerOwnerIsLive(ownerID string) bool {
+	ownerID = strings.TrimSpace(ownerID)
+	if ownerID == "" {
+		return false
+	}
+	liveManagerOwners.RLock()
+	_, ok := liveManagerOwners.ids[ownerID]
+	liveManagerOwners.RUnlock()
+	return ok
+}
+
+func (m *Manager) releaseOwner() {
+	if m == nil {
+		return
+	}
+	m.ownerDone.Do(func() {
+		liveManagerOwners.Lock()
+		delete(liveManagerOwners.ids, m.ownerID)
+		liveManagerOwners.Unlock()
+	})
 }
 
 // jobWriter appends a job's streamed output under its lock so a concurrent
@@ -237,10 +319,81 @@ func (m *Manager) Start(kind, label string, run func(ctx context.Context, out io
 	return m.StartForSession("", kind, label, run)
 }
 
+// validatePathSegment rejects values that would let parentSession or kind
+// escape the temp-root fallback built by artifactDirLocked. Persistent artifact
+// directories bound by SetActiveSessionPath are trusted store paths and are
+// intentionally outside that temp root. The check is intentionally conservative:
+// it forbids any path-separator character (forward slash, backslash), NUL, and
+// any control character. Empty parentSession is allowed (the unscoped default);
+// kind must be non-empty.
+//
+// See #6932. Before this check existed, a malicious or malformed parentSession
+// such as "../../etc" combined with filepath.Join(tempRoot, parentSession, id)
+// resolved to a directory outside the manager's temp root, allowing the
+// subsequent os.MkdirAll + os.OpenFile to create files at locations controlled
+// by the caller (subject to the running process's filesystem permissions).
+func validatePathSegment(name, field string) error {
+	if field == "kind" && name == "" {
+		return fmt.Errorf("jobs: %s must not be empty", field)
+	}
+	for i, r := range name {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			return fmt.Errorf("jobs: %s contains control character 0x%02x at index %d", field, r, i)
+		case r == '/' || r == '\\':
+			return fmt.Errorf("jobs: %s contains path separator %q at index %d", field, r, i)
+		}
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("jobs: %s is reserved (%q)", field, name)
+	}
+	return nil
+}
+
+// startInvalid registers a job that failed validation BEFORE any goroutine or
+// artifact was created. The job is observable to Wait / list calls as Failed
+// with the validation error recorded in artifactErr, and no run goroutine is
+// started so the manager's wg is unaffected.
+func (m *Manager) startInvalid(parentSession, kind, label string, validationErr error) *Job {
+	finishedAt := nowMs()
+	m.mu.Lock()
+	m.seq++
+	id := fmt.Sprintf("invalid-%d", m.seq)
+	j := &Job{
+		ID:               id,
+		Kind:             kind,
+		Label:            label,
+		SessionID:        parentSession,
+		status:           Failed,
+		startedAt:        finishedAt,
+		activityAt:       finishedAt,
+		finishedAt:       finishedAt,
+		runReturned:      true,
+		cancel:           func() {},
+		done:             make(chan struct{}),
+		artifactComplete: false,
+		artifactErr:      validationErr.Error(),
+	}
+	key := jobKey(parentSession, id)
+	m.jobs[key] = j
+	m.order = append(m.order, key)
+	m.mu.Unlock()
+	close(j.done)
+	m.recordCompletion(parentSession, id, kind, label, Failed, validationErr)
+	return j
+}
+
 // StartForSession launches a job owned by parentSession. Session-scoped readers
 // only see jobs whose owner matches the active session.
 func (m *Manager) StartForSession(parentSession, kind, label string, run func(ctx context.Context, out io.Writer) (string, error)) *Job {
 	parentSession = strings.TrimSpace(parentSession)
+	kind = strings.TrimSpace(kind)
+	if err := validatePathSegment(parentSession, "parentSession"); err != nil {
+		return m.startInvalid(parentSession, kind, label, err)
+	}
+	if err := validatePathSegment(kind, "kind"); err != nil {
+		return m.startInvalid(parentSession, kind, label, err)
+	}
 	m.mu.Lock()
 	m.seq++
 	id := fmt.Sprintf("%s-%d", kind, m.seq)
@@ -263,10 +416,21 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		artifactComplete: artifactErr == "",
 		artifactErr:      artifactErr,
 	}
+	ctx = WithSession(ctx, parentSession)
+	ctx = context.WithValue(ctx, jobCtxKey{}, j)
 	key := jobKey(parentSession, id)
 	m.jobs[key] = j
 	m.order = append(m.order, key)
 	m.mu.Unlock()
+	j.mu.Lock()
+	if err := m.writeJobMetaLocked(j, Running); err != nil {
+		j.artifactComplete = false
+		j.artifactErr = err.Error()
+	}
+	j.mu.Unlock()
+	if m.onJobStart != nil {
+		m.onJobStart(j.done)
+	}
 
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
 
@@ -365,16 +529,31 @@ func (m *Manager) openArtifactLocked(parentSession, id string) (logPath, metaPat
 	if dir == "" {
 		return "", "", nil, "artifact directory unavailable"
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(dir); err != nil {
 		return filepath.Join(dir, id+jobLogExt), filepath.Join(dir, id+jobMetaExt), nil, err.Error()
 	}
 	logPath = filepath.Join(dir, id+jobLogExt)
 	metaPath = filepath.Join(dir, id+jobMetaExt)
-	f, err := os.Create(logPath)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return logPath, metaPath, nil, err.Error()
 	}
+	// O_TRUNC does not apply the requested mode to an existing artifact. Tighten
+	// it before any raw tool output is written so upgrades cannot append secrets
+	// to a legacy 0644 log.
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return logPath, metaPath, nil, err.Error()
+	}
 	return logPath, metaPath, f, ""
+}
+
+func ensurePrivateArtifactDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	// MkdirAll leaves an existing 0755 directory unchanged.
+	return os.Chmod(dir, 0o700)
 }
 
 func (m *Manager) artifactDirLocked(parentSession string) string {
@@ -397,18 +576,94 @@ func (m *Manager) writeJobMetaLocked(j *Job, st Status) error {
 	if j.artifactMetaPath == "" {
 		return nil
 	}
-	return writeMeta(j.artifactMetaPath, artifactMeta{
+	meta := artifactMeta{
 		ID:               j.ID,
 		Kind:             j.Kind,
 		Label:            j.Label,
 		SessionID:        j.SessionID,
+		OwnerID:          m.ownerID,
 		Status:           st,
 		StartedAt:        j.startedAt,
 		FinishedAt:       j.finishedAt,
-		ArtifactComplete: j.artifactComplete && j.artifactErr == "",
+		ArtifactComplete: st != Running && j.artifactComplete && j.artifactErr == "",
 		ArtifactError:    j.artifactErr,
 		LogPath:          filepath.Base(j.artifactPath),
-	})
+	}
+	if j.Kind == "task" {
+		meta.MutationEvidenceVersion = mutationEvidenceVersion
+		meta.MutationEvidence = mutationEvidenceForArtifact(j.evidence)
+	}
+	return writeMeta(j.artifactMetaPath, meta)
+}
+
+func mutationEvidenceForArtifact(summary evidence.ChildEvidenceSummary) *artifactMutationEvidence {
+	firstMutation := -1
+	for i, receipt := range summary.Receipts {
+		if receipt.Success && receipt.Mutation {
+			firstMutation = i
+			break
+		}
+	}
+	if firstMutation < 0 {
+		return nil
+	}
+	return &artifactMutationEvidence{
+		Risk:  string(evidence.ClassifyMutationRisk(summary.Receipts, firstMutation)),
+		Paths: summary.MutationPaths(),
+	}
+}
+
+func mutationEvidenceFromArtifact(meta artifactMeta) evidence.ChildEvidenceSummary {
+	if meta.Kind != "task" {
+		return evidence.ChildEvidenceSummary{}
+	}
+	if meta.MutationEvidenceVersion != mutationEvidenceVersion {
+		// Any version this build cannot parse — a pre-feature artifact
+		// (version 0) or one written by a newer build — is treated as an
+		// opaque mutation. A missing summary only proves the mutation state
+		// was not recorded, not that the task made no changes: a legacy
+		// background writer task collected after upgrade could carry real,
+		// unreviewed edits. Recovering it as opaque RiskHigh forces fresh
+		// inspection and review rather than silently skipping it, and keeps
+		// downgrade coexistence on a shared state directory conservative.
+		return opaqueRecoveredTaskMutation()
+	}
+	if meta.MutationEvidence == nil {
+		// Same-version artifact with no summary: this build DID record the
+		// mutation state and found none, so there is genuinely nothing to
+		// recover.
+		return evidence.ChildEvidenceSummary{}
+	}
+
+	paths := append([]string(nil), meta.MutationEvidence.Paths...)
+	switch evidence.RiskLevel(meta.MutationEvidence.Risk) {
+	case evidence.RiskLow, evidence.RiskMedium:
+		// Known paths preserve the original adaptive risk level while still
+		// requiring fresh inspection and verification after recovery.
+	case evidence.RiskHigh:
+		// The original risk may have come from an opaque or privileged tool,
+		// which the sanitized artifact intentionally does not retain. Recover it
+		// as opaque so restart cannot downgrade the security-review requirement.
+		paths = nil
+	default:
+		return opaqueRecoveredTaskMutation()
+	}
+	return evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
+		ToolName: recoveredBackgroundTaskToolName,
+		Success:  true,
+		Write:    true,
+		Mutation: true,
+		Paths:    paths,
+	}}}
+}
+
+func opaqueRecoveredTaskMutation() evidence.ChildEvidenceSummary {
+	return evidence.ChildEvidenceSummary{Receipts: []evidence.Receipt{{
+		ToolName: recoveredBackgroundTaskToolName,
+		Success:  true,
+		Write:    true,
+		Mutation: true,
+	}}}
 }
 
 func (m *Manager) artifactTargetDirForJob(j *Job) string {
@@ -445,7 +700,7 @@ func (j *Job) moveArtifactToDirLocked(dir string) error {
 	if filepath.Clean(filepath.Dir(j.artifactPath)) == filepath.Clean(dir) {
 		return nil
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(dir); err != nil {
 		return err
 	}
 	newLogPath := filepath.Join(dir, filepath.Base(j.artifactPath))
@@ -513,14 +768,16 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 	m.mu.Unlock()
 
 	level, text := event.LevelInfo, fmt.Sprintf("background %s finished: %s", kind, id)
+	detail := ""
 	switch st {
 	case Failed:
-		level, text = event.LevelWarn, fmt.Sprintf("background %s failed: %s — %v", kind, id, err)
+		level, text = event.LevelWarn, fmt.Sprintf("background %s failed: needs attention", kind)
+		detail = fmt.Sprintf("background %s failed: %s — %v", kind, id, err)
 	case Killed:
 		text = fmt.Sprintf("background %s killed: %s", kind, id)
 	}
 	if shouldEmit {
-		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text})
+		m.sink.Emit(event.Event{Kind: event.Notice, Level: level, Text: text, Detail: detail})
 	}
 }
 
@@ -649,6 +906,11 @@ func (j *Job) readArtifactSinceOffsetLocked() string {
 	return text
 }
 
+// readArtifactAllLocked deliberately reads raw bytes: the artifact is captured
+// subprocess output (possibly binary), not a user-edited config file, and the
+// incremental reader (readArtifactSinceOffsetLocked) is raw byte-offset based —
+// decoding only the whole-file path would render the same artifact in two
+// different encodings and could garble binary output via UTF-16 misdetection.
 func (j *Job) readArtifactAllLocked() string {
 	if j.artifactPath == "" {
 		return ""
@@ -804,6 +1066,50 @@ func (m *Manager) RunningForSession(parentSession string) []View {
 	return out
 }
 
+// ReserveStartForSession atomically reserves capacity for a job start. The
+// caller must release the reservation after StartForSession has registered the
+// job (or when setup fails). Running jobs and in-flight start reservations both
+// count toward limit, so concurrent callers cannot overshoot it.
+func (m *Manager) ReserveStartForSession(parentSession, kind string, limit int) (release func(), running int, ok bool) {
+	if limit <= 0 {
+		return func() {}, 0, true
+	}
+	parentSession = strings.TrimSpace(parentSession)
+	key := jobKey(parentSession, kind)
+	m.mu.Lock()
+	for _, jobKey := range m.order {
+		j := m.jobs[jobKey]
+		if j == nil || !sessionMatches(parentSession, j.SessionID) || j.Kind != kind {
+			continue
+		}
+		select {
+		case <-j.done:
+		default:
+			running++
+		}
+	}
+	running += m.reservations[key]
+	if running >= limit {
+		m.mu.Unlock()
+		return func() {}, running, false
+	}
+	m.reservations[key]++
+	m.mu.Unlock()
+
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			m.mu.Lock()
+			m.reservations[key]--
+			if m.reservations[key] == 0 {
+				delete(m.reservations, key)
+			}
+			m.mu.Unlock()
+		})
+	}
+	return release, running, true
+}
+
 // HasUnfinishedForSession reports whether parentSession owns any job whose
 // goroutine has not fully exited yet. Empty parentSession preserves the legacy
 // unscoped behavior.
@@ -869,18 +1175,58 @@ func (m *Manager) SetActiveSession(parentSession string) {
 	m.mu.Unlock()
 }
 
+// validateTrustedSessionPath performs defense-in-depth syntax validation on a
+// transcript path already trusted by the store/controller layer. It rejects
+// control characters, but deliberately preserves separators and `..`: those are
+// valid host-path syntax, and rejecting them without a trusted root would break
+// legitimate relative paths without establishing filesystem containment.
+func validateTrustedSessionPath(sessionPath string) error {
+	if sessionPath == "" {
+		return fmt.Errorf("jobs: sessionPath must not be empty")
+	}
+	for i, r := range sessionPath {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("jobs: sessionPath contains control character 0x%02x at index %d", r, i)
+		}
+	}
+	return nil
+}
+
 // SetActiveSessionPath binds a parent session id to its persistent transcript
 // path, migrates any temporary artifacts, and loads completed job tombstones from
-// the session sidecar.
+// the session sidecar. sessionPath must come from the trusted store/controller
+// path; this method does not establish filesystem containment on its own.
 func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 	parentSession = strings.TrimSpace(parentSession)
 	sessionPath = strings.TrimSpace(sessionPath)
-	m.mu.Lock()
-	m.active = parentSession
+	// Preserve the legacy active-only behavior for calls without a complete
+	// binding. In particular, an empty path is not an error or filesystem input.
 	if parentSession == "" || sessionPath == "" {
+		m.mu.Lock()
+		m.active = parentSession
 		m.mu.Unlock()
 		return
 	}
+	// Reject malformed trusted paths before any filesystem side effect. This is
+	// syntax hardening, not a boundary for arbitrary caller-controlled paths.
+	if err := validateTrustedSessionPath(sessionPath); err != nil {
+		m.mu.Lock()
+		m.active = parentSession
+		// A rejected rebinding must not leave future jobs writing to a stale
+		// transcript that happened to use the same parent session id.
+		delete(m.artifactDirs, parentSession)
+		delete(m.loaded, parentSession)
+		m.mu.Unlock()
+		m.sink.Emit(event.Event{
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Text:   "Ignoring SetActiveSessionPath with invalid session path",
+			Detail: fmt.Sprintf("session %q: %v", parentSession, err),
+		})
+		return
+	}
+	m.mu.Lock()
+	m.active = parentSession
 	oldDir := m.artifactDirLocked(parentSession)
 	adoptDefault := false
 	if _, hasDir := m.artifactDirs[parentSession]; !hasDir && m.hasUnscopedJobsLocked() {
@@ -913,7 +1259,7 @@ func (m *Manager) SetActiveSessionPath(parentSession, sessionPath string) {
 		}
 	}
 	if !loaded {
-		m.loadSessionArtifacts(parentSession, newDir)
+		m.loadSessionArtifacts(parentSession, sessionPath, newDir)
 	}
 }
 
@@ -976,7 +1322,7 @@ func (m *Manager) recordArtifactMigrationError(parentSession string, err error) 
 	active := m.active
 	m.mu.Unlock()
 	if active == "" || active == parentSession {
-		m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: text})
+		m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Job artifact migration failed.", Detail: text})
 	}
 }
 
@@ -1084,7 +1430,7 @@ func migrateArtifactDirSkipping(src, dst string, skip map[string]bool) error {
 		}
 		return err
 	}
-	if err := os.MkdirAll(dst, 0o755); err != nil {
+	if err := ensurePrivateArtifactDir(dst); err != nil {
 		return err
 	}
 	for _, entry := range entries {
@@ -1103,6 +1449,11 @@ func migrateArtifactDirSkipping(src, dst string, skip map[string]bool) error {
 }
 
 func moveArtifactFile(src, dst string) error {
+	// A rename preserves the source mode, so tighten legacy artifacts before
+	// either the fast rename or the cross-device copy fallback.
+	if err := os.Chmod(src, 0o600); err != nil {
+		return err
+	}
 	if err := renamePath(src, dst); err == nil {
 		return nil
 	}
@@ -1118,12 +1469,13 @@ func copyArtifactFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	info, err := in.Stat()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
-	if err != nil {
+	if err := out.Chmod(0o600); err != nil {
+		_ = out.Close()
+		_ = os.Remove(dst)
 		return err
 	}
 	_, copyErr := io.Copy(out, in)
@@ -1139,7 +1491,7 @@ func copyArtifactFile(src, dst string) error {
 	return nil
 }
 
-func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
+func (m *Manager) loadSessionArtifacts(parentSession, sessionPath, dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		m.mu.Lock()
@@ -1148,18 +1500,50 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 		return
 	}
 	var loaded []*Job
+	deferredLiveOwner := false
+	var repairErrors []string
 	maxSeq := 0
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != jobMetaExt {
 			continue
 		}
-		meta, err := readMeta(filepath.Join(dir, entry.Name()))
+		metaPath := filepath.Join(dir, entry.Name())
+		meta, err := readMeta(metaPath)
 		if err != nil || strings.TrimSpace(meta.ID) == "" {
 			continue
 		}
 		id := strings.TrimSpace(meta.ID)
 		if seq := maxJobSeq(id); seq > maxSeq {
 			maxSeq = seq
+		}
+		// A persisted Running record may belong to another manager in this
+		// process or to another Reasonix process entirely. Only the runtime that
+		// owns the session lease may repair an abandoned record as Interrupted.
+		// Observers without proof of ownership defer the artifact and leave the
+		// session reloadable for a later owned bind.
+		if meta.Status == Running {
+			if managerOwnerIsLive(meta.OwnerID) {
+				deferredLiveOwner = true
+				continue
+			}
+			if m.sessionOwnershipProbe == nil || !m.sessionOwnershipProbe(sessionPath) {
+				deferredLiveOwner = true
+				continue
+			}
+			meta.Status = Interrupted
+			if meta.FinishedAt == 0 {
+				meta.FinishedAt = nowMs()
+			}
+			meta.ArtifactComplete = false
+			if err := repairArtifactMeta(metaPath, meta); err != nil {
+				// Do not publish an in-memory Interrupted tombstone when the durable
+				// state still says Running. Keep the session reloadable so a later bind
+				// can retry the repair, and surface the failure instead of letting live
+				// and machine-facing status silently disagree.
+				deferredLiveOwner = true
+				repairErrors = append(repairErrors, fmt.Sprintf("repair job %s metadata: %v", id, err))
+				continue
+			}
 		}
 		done := make(chan struct{})
 		close(done)
@@ -1182,6 +1566,15 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 			artifactComplete: meta.ArtifactComplete,
 			artifactErr:      meta.ArtifactError,
 			tombstone:        true,
+			evidence:         mutationEvidenceFromArtifact(meta),
+		})
+	}
+	if len(repairErrors) > 0 {
+		m.sink.Emit(event.Event{
+			Kind:   event.Notice,
+			Level:  event.LevelWarn,
+			Text:   "Background job recovery did not complete.",
+			Detail: strings.Join(repairErrors, "; "),
 		})
 	}
 	m.mu.Lock()
@@ -1197,7 +1590,7 @@ func (m *Manager) loadSessionArtifacts(parentSession, dir string) {
 	if maxSeq > m.seq {
 		m.seq = maxSeq
 	}
-	m.loaded[parentSession] = true
+	m.loaded[parentSession] = !deferredLiveOwner
 }
 
 // BeginDestroySession marks a parent session as being removed from active use
@@ -1312,6 +1705,7 @@ func (m *Manager) CloseAsync() {
 	m.cancel()
 	go func() {
 		m.wg.Wait()
+		m.releaseOwner()
 		m.removeTempRoot()
 	}()
 }
@@ -1323,6 +1717,7 @@ func (m *Manager) CloseWithGrace(grace time.Duration) TeardownResult {
 	done := make(chan struct{})
 	go func() {
 		m.wg.Wait()
+		m.releaseOwner()
 		close(done)
 	}()
 	result, timedOut := waitTeardownTargets(context.Background(), m.closeTargets(), grace, done)
@@ -1433,7 +1828,7 @@ func (m *Manager) emitTeardownTimeout(action string, result TeardownResult) {
 			fmt.Fprintf(&b, " waited=%s", job.Waited.Round(time.Millisecond))
 		}
 	}
-	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: b.String()})
+	m.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Background job teardown timed out.", Detail: b.String()})
 }
 
 func (m *Manager) removeTempRoot() {
@@ -1473,6 +1868,7 @@ func jobKey(parentSession, id string) string {
 
 type ctxKey struct{}
 type sessionCtxKey struct{}
+type jobCtxKey struct{}
 
 // WithManager stamps ctx with the job manager so tools can reach it via
 // FromContext. The agent sets this on every tool call's context.
@@ -1498,4 +1894,129 @@ func WithSession(ctx context.Context, parentSession string) context.Context {
 func SessionFromContext(ctx context.Context) string {
 	session, _ := ctx.Value(sessionCtxKey{}).(string)
 	return strings.TrimSpace(session)
+}
+
+// PublishEvidence attaches a background agent's host-observed receipts to its
+// job. The receipts stay independent of the parent turn ledger until the
+// parent collects the terminal result with wait or bash_output.
+func PublishEvidence(ctx context.Context, summary evidence.ChildEvidenceSummary) {
+	j, _ := ctx.Value(jobCtxKey{}).(*Job)
+	if j == nil || len(summary.Receipts) == 0 {
+		return
+	}
+	j.mu.Lock()
+	j.evidence.Receipts = append(j.evidence.Receipts, summary.Receipts...)
+	j.mu.Unlock()
+}
+
+// LeaseEvidenceForSession returns a copy of a terminal job's evidence without
+// consuming it. Collection is only provisional: the receipts merge into the
+// collecting turn's ledger, but that ledger is discarded if the turn is
+// cancelled, errors, or the process exits before the turn commits. Consuming
+// here would then lose the mutation for good — the parent's next turn resets its
+// ledger and this job would report nothing, so a background change would ship
+// unreviewed. The evidence is drained only by CommitEvidenceForSession, which
+// the agent calls after the collecting turn passes its delivery gates. A
+// committed job returns empty so a re-poll after successful delivery does not
+// re-demand review.
+func (m *Manager) LeaseEvidenceForSession(parentSession, id string) evidence.ChildEvidenceSummary {
+	summary, _ := m.tryLeaseEvidenceForSession(parentSession, id)
+	return summary
+}
+
+// TryLeaseEvidenceForSession is LeaseEvidenceForSession plus a ready flag that
+// separates "terminal evidence available" (possibly empty — a committed job or
+// one with no mutations) from "not ready to lease yet": unknown job, still
+// running, or killed but its run goroutine has not yet flushed PublishEvidence
+// and closed done. KillForSession flips status to Killed synchronously, well
+// before the goroutine actually returns, so a bash_output poll that lands in
+// that window must not treat the empty read as final. Callers that record a
+// lease (collectBackgroundEvidence) must gate on ready so they never note a
+// lease before the evidence exists — noting it early would let a later commit
+// drain evidence nobody ever merged or reviewed.
+func (m *Manager) TryLeaseEvidenceForSession(parentSession, id string) (evidence.ChildEvidenceSummary, bool) {
+	return m.tryLeaseEvidenceForSession(parentSession, id)
+}
+
+func (m *Manager) tryLeaseEvidenceForSession(parentSession, id string) (evidence.ChildEvidenceSummary, bool) {
+	j := m.get(parentSession, id)
+	if j == nil {
+		return evidence.ChildEvidenceSummary{}, false
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	select {
+	case <-j.done:
+	default:
+		return evidence.ChildEvidenceSummary{}, false
+	}
+	if j.evidenceCommitted {
+		return evidence.ChildEvidenceSummary{}, true
+	}
+	out := make([]evidence.Receipt, len(j.evidence.Receipts))
+	copy(out, j.evidence.Receipts)
+	return evidence.ChildEvidenceSummary{Receipts: out}, true
+}
+
+// PendingEvidenceJobIDsForSession returns the IDs of parentSession's terminal
+// jobs that carry uncommitted mutation evidence — a prior turn leased it but
+// never delivered (the turn failed or was cancelled, and the next turn's Reset
+// wiped it from the per-turn ledger), or the process restarted before any turn
+// collected it at all. The agent re-leases these at the start of every turn so
+// a turn that never calls wait/bash_output still surfaces the pending mutation
+// to its final-readiness checks instead of silently shipping it unreviewed.
+func (m *Manager) PendingEvidenceJobIDsForSession(parentSession string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ids []string
+	for _, key := range m.order {
+		j := m.jobs[key]
+		if j == nil || !sessionMatches(parentSession, j.SessionID) {
+			continue
+		}
+		j.mu.Lock()
+		terminal := false
+		select {
+		case <-j.done:
+			terminal = true
+		default:
+		}
+		pending := terminal && !j.evidenceCommitted && len(j.evidence.Receipts) > 0
+		j.mu.Unlock()
+		if pending {
+			ids = append(ids, j.ID)
+		}
+	}
+	return ids
+}
+
+// CommitEvidenceForSession permanently consumes a terminal job's evidence after
+// the collecting turn has accounted for it (passed final-readiness). It clears
+// the in-memory copy and drains the persisted mutation summary so neither a
+// same-process re-poll nor a restart resurrects receipts the delivered turn
+// already reviewed. Best-effort on the disk rewrite — a failed rewrite merely
+// restores the conservative resurrection behavior.
+func (m *Manager) CommitEvidenceForSession(parentSession, id string) {
+	j := m.get(parentSession, id)
+	if j == nil {
+		return
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	select {
+	case <-j.done:
+	default:
+		return
+	}
+	if j.evidenceCommitted {
+		return
+	}
+	hadEvidence := len(j.evidence.Receipts) > 0
+	j.evidenceCommitted = true
+	j.evidence = evidence.ChildEvidenceSummary{}
+	if hadEvidence {
+		if err := m.writeJobMetaLocked(j, j.status); err != nil {
+			j.noteArtifactErr("evidence drain: " + err.Error())
+		}
+	}
 }

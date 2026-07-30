@@ -8,17 +8,30 @@
 // @ts-ignore `wails generate module` creates this locally; fresh checkouts keep
 // typecheck green by falling back to a disabled drift check below.
 import type * as GeneratedApp from "../../wailsjs/go/main/App";
+import type { InvocationRequest } from "./invocationDisplay";
+import type { ProviderTrustPrompt, WorkbenchActiveTarget, WorkbenchRemoteHint } from "./workbenchTarget";
 
 import { addBreadcrumb } from "./breadcrumbs";
 import { t } from "./i18n";
-import { providerRequiresKey } from "./providerModels";
+import { providerIsConfigured, providerRequiresKey } from "./providerModels";
 import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarItems";
+import { registerTrustedThemeBackgroundURLs } from "./themePack";
 import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 
 import type {
   AutoResearchFindingView,
   AutoResearchEvidenceView,
   AutoResearchStatusView,
+  RemoteHostView,
+  RemoteHostInput,
+  RemoteConnectionStatus,
+  RemoteDirEntry,
+  RemoteFilePreview,
+  RemoteWriteResult,
+  RemoteForwardInput,
+  RemoteForwardView,
+  RemoteServerView,
+  RemoteForwardsEvent,
   BalanceInfo,
   BotConnectionDiagnostic,
   BotInstallPollResult,
@@ -26,21 +39,30 @@ import type {
   BotRuntimeStatusView,
   BotSettingsView,
   CapabilitiesView,
+  CapabilityDiagnosticsReport,
   CheckpointMeta,
   CommandInfo,
   ContextInfo,
   ContextPanelInfo,
   DirEntry,
   DesktopStartupSettingsView,
+  DeliveryWorktreeAvailability,
+  DeliveryWorktreeOpenResult,
   DroppedItem,
   EffortInfo,
   FilePreview,
+  ExternalOpenersView,
   HistoryMessage,
   HistoryPage,
   HookConfigView,
   HooksSettingsView,
   JobView,
+  MCPMarketplaceEntry,
   MCPServerInput,
+  MCPInstallResult,
+  MCPMarketplaceView,
+  MCPToolView,
+  MemoryFact,
   MemorySuggestion,
   MemorySuggestionsView,
   MemoryView,
@@ -66,13 +88,17 @@ import type {
   SkillSuggestion,
   SkillView,
   SlashArgsResult,
+  SubagentProfileInput,
   TabMeta,
+  TerminalSessionView,
+  TerminalWorkspaceView,
   TopicMeta,
   ToolApprovalMode,
   UpdateDownloadResult,
   UpdateInfo,
   UpdateProgress,
   WireEvent,
+  WorkspaceChangeDetailView,
   WorkspaceChangesView,
   GitCommitView,
   GitCommitDetailView,
@@ -137,6 +163,20 @@ export interface AppBindings {
   SubmitToTab(tabID: string, input: string): Promise<void>;
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitDeliveryRecoveryToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitInvocationsToTab(tabID: string, display: string, input: string, invocations: InvocationRequest[]): Promise<void>;
+  SubmitInitialGoalToTab(
+    tabID: string,
+    goal: string,
+    display: string,
+    input: string,
+    invocations: InvocationRequest[],
+    collaborationMode: string,
+    toolApprovalMode: string,
+    targetKind: string,
+    targetIdentityGen: number,
+    targetRequestSeq: number,
+  ): Promise<string[]>;
   SubmitEditedDisplayToTab(tabID: string, display: string, input: string, original: string): Promise<void>;
   RunShell(command: string): Promise<void>;
   RunShellForTab(tabID: string, command: string): Promise<void>;
@@ -146,24 +186,41 @@ export interface AppBindings {
   CancelTab(tabID: string): Promise<void>;
   Approve(id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
   ApproveTab(tabID: string, id: string, allow: boolean, session: boolean, persist: boolean): Promise<void>;
+  ResolveRecovery(id: string, action: string, feedback: string): Promise<void>;
+  ResolveRecoveryTab(tabID: string, id: string, action: string, feedback: string): Promise<void>;
+  // Legacy no-ops: Auto Guard is always built into Auto.
+  SetRecoveryCheckpointEnabled(enabled: boolean): Promise<void>;
+  SetRecoveryCheckpointEnabledTab(tabID: string, enabled: boolean): Promise<void>;
+  RecoveryCheckpointEnabled(): Promise<boolean>;
+  RecoveryCheckpointEnabledTab(tabID: string): Promise<boolean>;
   AnswerQuestion(id: string, answers: QuestionAnswer[]): Promise<void>;
   AnswerQuestionForTab(tabID: string, id: string, answers: QuestionAnswer[]): Promise<void>;
   ReplayPendingPrompts(): Promise<void>;
   SetPlanMode(on: boolean): Promise<void>;
   SetMode(mode: string): Promise<void>;
-  SetModeForTab(tabID: string, mode: string): Promise<void>;
+  // Resolves with the pending approval prompt ids the switch auto-allowed
+  // (drained); prompts not listed are still pending backend-side (#6432).
+  SetModeForTab(tabID: string, mode: string): Promise<string[] | void>;
   SetAutoApproveTools(on: boolean): Promise<void>;
   SetCollaborationMode(mode: string): Promise<void>;
   SetCollaborationModeForTab(tabID: string, mode: string): Promise<void>;
   SetToolApprovalMode(mode: string): Promise<void>;
-  SetToolApprovalModeForTab(tabID: string, mode: string): Promise<void>;
+  // Same drained-prompt-id contract as SetModeForTab.
+  SetToolApprovalModeForTab(tabID: string, mode: string): Promise<string[] | void>;
+  // Atomically applies the controller-facing composer profile and reports any
+  // approval prompts drained by the resulting tool-approval posture.
+  SetComposerProfileForTab(tabID: string, collaborationMode: string, toolApprovalMode: string, goal: string): Promise<string[] | void>;
   SetGoal(goal: string): Promise<void>;
   SetGoalForTab(tabID: string, goal: string): Promise<void>;
+  ResumeGoalForTab(tabID: string): Promise<boolean>;
   ClearGoal(): Promise<void>;
   ClearGoalForTab(tabID: string): Promise<void>;
   Compact(): Promise<void>;
+  CompactForTab(tabID: string): Promise<void>;
   NewSession(): Promise<void>;
+  NewSessionForTab(tabID: string): Promise<void>;
   ClearSession(): Promise<void>;
+  ClearSessionForTab(tabID: string): Promise<void>;
   History(): Promise<HistoryMessage[]>;
   HistoryForTab(tabID: string): Promise<HistoryMessage[]>;
   HistoryPage(beforeTurn: number, limit: number): Promise<HistoryPage>;
@@ -172,9 +229,13 @@ export interface AppBindings {
   Checkpoints(): Promise<CheckpointMeta[]>;
   CheckpointsForTab(tabID: string): Promise<CheckpointMeta[]>;
   Rewind(turn: number, scope: string): Promise<void>;
+  RewindForTab(tabID: string, turn: number, scope: string): Promise<void>;
   Fork(turn: number): Promise<TabMeta>;
+  ForkForTab(tabID: string, turn: number): Promise<TabMeta>;
   SummarizeFrom(turn: number): Promise<void>;
+  SummarizeFromForTab(tabID: string, turn: number): Promise<void>;
   SummarizeUpTo(turn: number): Promise<void>;
+  SummarizeUpToForTab(tabID: string, turn: number): Promise<void>;
   ListSessions(): Promise<SessionMeta[]>;
   ListTrashedSessions(): Promise<SessionMeta[]>;
   ResumeSession(path: string): Promise<HistoryMessage[]>;
@@ -185,8 +246,10 @@ export interface AppBindings {
   OpenChannelSessionPageForTab(tabID: string, path: string, limit: number): Promise<HistoryPage>;
   PreviewSession(path: string): Promise<HistoryMessage[]>;
   DeleteSession(path: string): Promise<void>;
+  DeleteRecoveryCopy(path: string): Promise<void>;
   RestoreSession(path: string): Promise<void>;
   PurgeTrashedSession(path: string): Promise<void>;
+  PurgeRecoveryCopy(path: string): Promise<void>;
   RenameSession(path: string, title: string): Promise<void>;
   ScanPromptHistory(nonce: string): Promise<PromptHistoryResult>;
   ListWorkspaces(): Promise<WorkspaceView[]>;
@@ -211,7 +274,10 @@ export interface AppBindings {
   Commands(): Promise<CommandInfo[]>;
   Capabilities(): Promise<CapabilitiesView>;
   MCPServers(): Promise<ServerView[]>;
+  MCPMarketplace(query: string): Promise<MCPMarketplaceView>;
+  MCPMarketplaceResolve(registryName: string): Promise<MCPMarketplaceEntry>;
   SkillsSettings(): Promise<SkillsSettingsView>;
+  CapabilityDiagnostics(includeSessionRuntime: boolean): Promise<CapabilityDiagnosticsReport>;
   Plugins(): Promise<PluginView[]>;
   PlanPluginInstall(source: string, options: PluginInstallOptions): Promise<string>;
   InstallPlugin(source: string, options: PluginInstallOptions): Promise<string>;
@@ -220,13 +286,12 @@ export interface AppBindings {
   UpdatePlugin(name: string): Promise<string>;
   PluginDoctor(name: string): Promise<PluginView>;
   AddMCPServer(input: MCPServerInput): Promise<number>;
+  InstallMCPServer(input: MCPServerInput): Promise<MCPInstallResult>;
   UpdateMCPServer(name: string, input: MCPServerInput): Promise<void>;
   RemoveMCPServer(name: string): Promise<void>;
+  AuthorizeAndConnectMCPServer(name: string): Promise<void>;
   ReconnectMCPServer(name: string): Promise<void>;
   ClearMCPServerAuthentication(name: string): Promise<void>;
-  TrustMCPServerTool(name: string, toolName: string): Promise<void>;
-  TrustMCPServerTools(name: string, toolNames: string[]): Promise<void>;
-  UntrustMCPServerTool(name: string, toolName: string): Promise<void>;
   PickSkillFolder(): Promise<string>;
   PickPluginFolder(): Promise<string>;
   AddSkillPath(path: string): Promise<void>;
@@ -234,25 +299,44 @@ export interface AppBindings {
   RefreshSkills(): Promise<void>;
   ReloadCommands(): Promise<void>;
   SetSkillEnabled(name: string, enabled: boolean): Promise<void>;
+  AvailableSubagentTools(): Promise<MCPToolView[]>;
+  CreateSubagentProfile(input: SubagentProfileInput): Promise<string>;
+  UpdateSubagentProfile(name: string, scope: string, input: SubagentProfileInput): Promise<void>;
+  DeleteSubagentProfile(name: string, scope: string): Promise<void>;
+  SetSubagentProfileModel(name: string, ref: string): Promise<void>;
+  SetSubagentProfileEffort(name: string, level: string): Promise<void>;
+  TrySubagentProfile(input: SubagentProfileInput, task: string): Promise<string>;
+  CancelTrySubagentProfile(): Promise<void>;
   SetMCPServerEnabled(name: string, enabled: boolean): Promise<void>;
   SetMCPServerTier(name: string, tier: string): Promise<void>;
   SlashArgs(input: string): Promise<SlashArgsResult>;
   ListDir(rel: string): Promise<DirEntry[]>;
+  ListDirForTab(tabID: string, rel: string): Promise<DirEntry[]>;
   SearchFileRefs(query: string): Promise<DirEntry[]>;
+  SearchFileRefsForTab(tabID: string, query: string): Promise<DirEntry[]>;
   ReadFile(rel: string): Promise<FilePreview>;
+  ReadFileForTab(tabID: string, rel: string): Promise<FilePreview>;
   WorkspaceChanges(tabID: string): Promise<WorkspaceChangesView>;
+  WorkspaceChangeDetail(tabID: string, path: string): Promise<WorkspaceChangeDetailView>;
   GitBranches(): Promise<string[]>;
   GitCheckout(branch: string): Promise<void>;
   WorkspaceGitHistory(tabID: string, path: string): Promise<GitCommitView[]>;
   WorkspaceGitCommitDetail(tabID: string, hash: string, path: string): Promise<GitCommitDetailView>;
   OpenWorkspacePath(rel: string): Promise<void>;
+  OpenWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
+  ExternalOpeners(): Promise<ExternalOpenersView>;
+  SetPreferredExternalOpener(id: string): Promise<void>;
+  OpenWorkspaceInExternalOpener(id: string): Promise<void>;
+  OpenWorkspaceInExternalOpenerForTab(tabID: string, id: string): Promise<void>;
   RevealWorkspacePath(rel: string): Promise<void>;
+  RevealWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
   PickExportFile(defaultFilename: string, mimeType: string): Promise<string>;
   SaveExportFile(path: string, payload: string, base64Encoded: boolean): Promise<void>;
+  SaveExportImageFiles(path: string, payloads: string[]): Promise<void>;
   AttachDropped(path: string): Promise<DroppedItem>;
   AttachmentDataURL(path: string): Promise<string>;
   Models(): Promise<ModelInfo[]>;
@@ -270,6 +354,10 @@ export interface AppBindings {
   AcceptMemorySuggestion(suggestion: MemorySuggestion): Promise<string>;
   AcceptSkillSuggestion(suggestion: SkillSuggestion): Promise<string>;
   MemoryForTab(tabID: string): Promise<MemoryView>;
+  MemoryRevisions(ref: string): Promise<MemoryFact[]>;
+  MemoryRevisionsForTab(tabID: string, ref: string): Promise<MemoryFact[]>;
+  RestoreMemoryRevision(ref: string, revision: number): Promise<MemoryFact>;
+  RestoreMemoryRevisionForTab(tabID: string, ref: string, revision: number): Promise<MemoryFact>;
   MemorySuggestionsForTab(tabID: string): Promise<MemorySuggestionsView>;
   AcceptMemorySuggestionForTab(tabID: string, suggestion: MemorySuggestion): Promise<string>;
   AcceptSkillSuggestionForTab(tabID: string, suggestion: SkillSuggestion): Promise<string>;
@@ -277,6 +365,8 @@ export interface AppBindings {
   RememberForTab(tabID: string, scope: string, note: string): Promise<string>;
   Forget(name: string): Promise<void>;
   ForgetForTab(tabID: string, name: string): Promise<void>;
+  RestoreArchivedMemory(archivePath: string): Promise<MemoryFact>;
+  RestoreArchivedMemoryForTab(tabID: string, archivePath: string): Promise<MemoryFact>;
   SaveDoc(path: string, body: string): Promise<string>;
   SaveDocForTab(tabID: string, path: string, body: string): Promise<string>;
   DesktopStartupSettings(): Promise<DesktopStartupSettingsView>;
@@ -291,8 +381,12 @@ export interface AppBindings {
   SetSubagentModel(ref: string): Promise<void>;
   SetSubagentEffort(level: string): Promise<void>;
   SetMaxSubagentDepth(depth: number): Promise<void>;
+  SetMaxSubagentConcurrency(n: number): Promise<void>;
+  SetMaxParallelWriters(n: number): Promise<void>;
   SetAutoPlan(mode: string): Promise<void>;
   SetDefaultToolApprovalMode(mode: string): Promise<void>;
+  SetDefaultAutoRecoveryCheckpoint(enabled: boolean): Promise<void>;
+
   SaveProvider(p: ProviderView): Promise<void>;
   SaveProviderWithKey(p: ProviderView, key: string): Promise<string>;
   AddOfficialProviderAccess(kind: string, key: string): Promise<string>;
@@ -324,16 +418,32 @@ export interface AppBindings {
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>;
   SetDesktopLanguage(lang: string): Promise<void>;
+  SetDesktopCurrency(currency: string): Promise<void>;
   SetDesktopAppearance(theme: string, style: string): Promise<void>;
+  ListThemePacks(): Promise<import("./themePack").ThemePackView[]>;
+  GetActiveThemePack(): Promise<import("./themePack").ThemeActiveView>;
+  GetThemeExperience(): Promise<import("./themeExperience").ThemeExperienceView>;
+  ActivateThemePack(id: string): Promise<void>;
+  ActivateBaseStyle(style: string): Promise<void>;
+  DisableThemePack(): Promise<void>;
+  RestoreGraphiteAppearance(): Promise<void>;
+  ResetThemePack(): Promise<void>;
+  SaveThemePack(input: import("./themePack").ThemeSaveInput): Promise<import("./themePack").ThemePackView>;
+  DeleteThemePack(id: string): Promise<void>;
+  CopyThemePack(sourceID: string, newID: string, newName: string): Promise<import("./themePack").ThemePackView>;
+  ImportThemePack(sourcePath: string, replace: boolean): Promise<import("./themePack").ThemeImportResult>;
+  ExportThemePack(id: string, destPath: string): Promise<string>;
+  PickThemeBackground(): Promise<string>;
   SetDesktopLayoutStyle(style: string): Promise<void>;
   SetDesktopZoomFactor(factor: number): Promise<void>;
   GetDesktopZoomFactor(): Promise<number>;
   RestartApplication(): Promise<void>;
   SetDesktopCheckUpdates(enabled: boolean): Promise<void>;
+  SetDesktopUpdateChannel(channel: string): Promise<void>;
   SetDesktopTelemetry(enabled: boolean): Promise<void>;
   SetDesktopMetrics(enabled: boolean): Promise<void>;
-  SetMemoryCompilerEnabled(enabled: boolean): Promise<void>;
   SetExpandThinking(on: boolean): Promise<void>;
+  SetDesktopConversationWidth(width: string): Promise<void>;
   MigrateDesktopPreferences(language: string, theme: string, style: string): Promise<void>;
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
@@ -344,9 +454,11 @@ export interface AppBindings {
   // Runtime-only.
   SetBypass(on: boolean): Promise<void>;
   Version(): Promise<string>;
-  CheckUpdate(): Promise<UpdateInfo | null>;
-  DownloadUpdate(): Promise<UpdateDownloadResult | null>;
-  InstallUpdate(): Promise<void>;
+  CheckUpdate(channel: string): Promise<UpdateInfo | null>;
+  DownloadUpdate(channel: string): Promise<UpdateDownloadResult | null>;
+  DownloadUpdateRequest(channel: string, expectedVersion: string, requestId: string): Promise<UpdateDownloadResult | null>;
+  InstallUpdate(channel: string): Promise<void>;
+  InstallUpdateRequest(channel: string, expectedVersion: string, requestId: string): Promise<void>;
   ApplyUpdate(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
   NeedsOnboarding(): Promise<boolean>;
@@ -356,6 +468,8 @@ export interface AppBindings {
   ReportCrash(kind: string, detail: string): Promise<void>;
   ListTabs(): Promise<TabMeta[]>;
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
+  DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
+  CreateDeliveryWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
   OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
   EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
@@ -364,6 +478,13 @@ export interface AppBindings {
   SetActiveTab(tabID: string): Promise<void>;
   ReorderTabs(tabIDs: string[]): Promise<void>;
   CloseTab(tabID: string): Promise<void>;
+  TerminalWorkspaceForTab(tabID: string): Promise<TerminalWorkspaceView>;
+  TerminalOutputForTab(tabID: string, sessionID: string): Promise<string>;
+  CreateTerminalForTab(tabID: string, relativePath: string, shellID: string): Promise<TerminalSessionView>;
+  WriteTerminalForTab(tabID: string, sessionID: string, data: string): Promise<void>;
+  ResizeTerminalForTab(tabID: string, sessionID: string, cols: number, rows: number): Promise<void>;
+  CloseTerminalForTab(tabID: string, sessionID: string): Promise<void>;
+  RenameTerminalForTab(tabID: string, sessionID: string, title: string): Promise<void>;
   ListProjectTree(): Promise<ProjectNode[]>;
   RenameProject(workspaceRoot: string, title: string): Promise<void>;
   SetProjectColor(workspaceRoot: string, color: string): Promise<void>;
@@ -378,6 +499,41 @@ export interface AppBindings {
   // New native-feel bindings (added with the desktop native-feel plan).
   ConfirmAction(req: NativeConfirmRequest): Promise<boolean>;
   SaveWindowState(state: DesktopWindowState): Promise<void>;
+  // ── Remote (SSH) ──
+  RemoteHosts(): Promise<RemoteHostView[]>;
+  AddRemoteHost(input: RemoteHostInput): Promise<RemoteHostView>;
+  UpdateRemoteHost(id: string, input: RemoteHostInput): Promise<RemoteHostView>;
+  RemoveRemoteHost(id: string): Promise<void>;
+  ScanSSHConfig(): Promise<RemoteHostInput[]>;
+  ConnectRemoteHost(id: string): Promise<void>;
+  DisconnectRemoteHost(id: string): Promise<void>;
+  RemoteConnectionStatuses(): Promise<RemoteConnectionStatus[]>;
+  ConfirmRemoteHostKey(hostId: string, accept: boolean): Promise<void>;
+  ConfirmRemoteSecret(hostId: string, promptId: string, secret: string, accept: boolean): Promise<void>;
+  ListRemoteDir(hostId: string, path: string): Promise<RemoteDirEntry[]>;
+  ReadRemoteFile(hostId: string, path: string): Promise<RemoteFilePreview>;
+  WriteRemoteFile(hostId: string, path: string, body: string, expectMtimeUnix: number): Promise<RemoteWriteResult>;
+  MkdirRemote(hostId: string, path: string): Promise<void>;
+  RenameRemotePath(hostId: string, oldPath: string, newPath: string): Promise<void>;
+  DeleteRemotePath(hostId: string, path: string, recursive: boolean): Promise<void>;
+  RemoteForwards(hostId: string): Promise<RemoteForwardView[]>;
+  AddRemoteForward(hostId: string, input: RemoteForwardInput): Promise<RemoteForwardView>;
+  RemoveRemoteForward(hostId: string, forwardId: string): Promise<void>;
+  EnsureRemoteServer(hostId: string, workspace: string): Promise<void>;
+  OpenRemoteWorkspace(hostId: string, workspace: string): Promise<void>;
+  StopRemoteServer(hostId: string): Promise<void>;
+  RemoteServerStatus(hostId: string): Promise<RemoteServerView>;
+  RemoteServerLogs(hostId: string, tailLines: number): Promise<string>;
+  RemoteLastWorkspace(hostId: string): Promise<string>;
+  // ── Native Remote Workbench (same main window) ──
+  WorkbenchActiveTarget(): Promise<WorkbenchActiveTarget>;
+  WorkbenchLastRemoteHint(): Promise<WorkbenchRemoteHint>;
+  WorkbenchSwitchLocal(): Promise<WorkbenchActiveTarget>;
+  WorkbenchConnectRemote(hostId: string, workspace: string): Promise<void>;
+  WorkbenchDisconnectRemote(): Promise<void>;
+  WorkbenchRemoteRequest(method: string, paramsJSON: string): Promise<string>;
+  WorkbenchResolveProviderTrust(accept: boolean): Promise<void>;
+  WorkbenchPendingProviderTrust(): Promise<ProviderTrustPrompt | null>;
 }
 
 // Compile-time drift check. Exclude<A, B> extracts keys in A that are missing
@@ -452,6 +608,55 @@ export function onEvent(cb: (e: WireEvent) => void): () => void {
     return window.runtime.EventsOn(EVENT_CHANNEL, (payload) => cb(payload as WireEvent));
   }
   return mockSubscribe(cb);
+}
+
+export interface TerminalOutputEvent {
+  id: string;
+  data: string;
+}
+
+export interface TerminalExitEvent {
+  id: string;
+  exitCode: number;
+  removed?: boolean;
+}
+
+function terminalEventPayload<T>(payload: unknown): T | null {
+  if (!payload || typeof payload !== "object") return null;
+  return payload as T;
+}
+
+export function onTerminalOutput(cb: (event: TerminalOutputEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("terminal:output", (payload) => {
+      const event = terminalEventPayload<TerminalOutputEvent>(payload);
+      if (event?.id && typeof event.data === "string") cb(event);
+    });
+  }
+  mockTerminalOutputListeners.add(cb);
+  return () => mockTerminalOutputListeners.delete(cb);
+}
+
+export function onTerminalExit(cb: (event: TerminalExitEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("terminal:exit", (payload) => {
+      const event = terminalEventPayload<TerminalExitEvent>(payload);
+      if (event?.id && typeof event.exitCode === "number") cb(event);
+    });
+  }
+  mockTerminalExitListeners.add(cb);
+  return () => mockTerminalExitListeners.delete(cb);
+}
+
+const mockTerminalOutputListeners = new Set<(event: TerminalOutputEvent) => void>();
+const mockTerminalExitListeners = new Set<(event: TerminalExitEvent) => void>();
+
+export function __emitMockTerminalOutput(event: TerminalOutputEvent): void {
+  mockTerminalOutputListeners.forEach((listener) => listener(event));
+}
+
+export function __emitMockTerminalExit(event: TerminalExitEvent): void {
+  mockTerminalExitListeners.forEach((listener) => listener(event));
 }
 
 // onUpdaterProgress subscribes to the auto-updater's progress events (a separate
@@ -574,6 +779,21 @@ export function onFilesDropped(cb: (paths: string[]) => void): () => void {
 
 // onReady subscribes to the agent:ready event fired when boot.Build completes.
 // The frontend re-fetches Meta/Context/History when this lands.
+// onRuntimeRebuilt fires when a tab's controller is replaced in place
+// (model/effort/token-mode switch, clear-while-running). The rebuilt
+// controller restarts prompt ids, so per-tab id-keyed state must reset.
+export function onRuntimeRebuilt(cb: (tabId?: string, runtimeEpoch?: string) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("runtime:rebuilt", (tabId?: unknown, runtimeEpoch?: unknown) =>
+      cb(
+        typeof tabId === "string" ? tabId : undefined,
+        typeof runtimeEpoch === "string" ? runtimeEpoch : undefined,
+      )
+    );
+  }
+  return () => {};
+}
+
 export function onReady(cb: (tabId?: string) => void): () => void {
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("agent:ready", (tabId?: unknown) => cb(typeof tabId === "string" ? tabId : undefined));
@@ -604,27 +824,87 @@ export function onSessionRecoveryFailed(cb: (payload: SessionRecoveryFailedEvent
   return () => {};
 }
 
+export function onRemoteStatus(cb: (s: RemoteConnectionStatus) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:status", (payload?: unknown) => cb((payload ?? {}) as RemoteConnectionStatus));
+  }
+  return registerMockRemoteListener("status", cb as (v: unknown) => void);
+}
+
+export function onRemoteForwards(cb: (e: RemoteForwardsEvent) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:forwards", (payload?: unknown) => cb((payload ?? {}) as RemoteForwardsEvent));
+  }
+  return registerMockRemoteListener("forwards", cb as (v: unknown) => void);
+}
+
+export function onRemoteServer(cb: (s: RemoteServerView) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:server", (payload?: unknown) => cb((payload ?? {}) as RemoteServerView));
+  }
+  return registerMockRemoteListener("server", cb as (v: unknown) => void);
+}
+
+/** Provider authorization is a Desktop-only prompt. The payload is deliberately
+ * secret-free; the one-shot answer returns through the typed Wails binding. */
+export function onProviderTrust(cb: (prompt: ProviderTrustPrompt) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:provider-trust", (payload?: unknown) => cb((payload ?? {}) as ProviderTrustPrompt));
+  }
+  return () => {};
+}
+
+/** Committed Local/Remote projection changes. Generation lets consumers drop
+ * stale async hydration when the user switches targets quickly. */
+export function onWorkbenchTarget(cb: (target: WorkbenchActiveTarget) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("remote:workbench-target", (payload?: unknown) => cb((payload ?? { kind: "local" }) as WorkbenchActiveTarget));
+  }
+  return () => {};
+}
+
+// Mock event fan-out so browser-dev and tsx tests can drive remote:* events
+// without a Wails runtime.
+type MockRemoteChannel = "status" | "forwards" | "server";
+const mockRemoteListeners: Record<MockRemoteChannel, Set<(v: unknown) => void>> = {
+  status: new Set(),
+  forwards: new Set(),
+  server: new Set(),
+};
+function registerMockRemoteListener(ch: MockRemoteChannel, cb: (v: unknown) => void): () => void {
+  mockRemoteListeners[ch].add(cb);
+  return () => mockRemoteListeners[ch].delete(cb);
+}
+export function __emitMockRemote(ch: MockRemoteChannel, payload: unknown): void {
+  for (const cb of mockRemoteListeners[ch]) cb(payload);
+}
+
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
 function bridgeBreadcrumb(method: string): string {
   if (method === "ReportCrash") return "";
   if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
     return `turn ${method}`;
-  if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth)/.test(method))
+  if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
     return `model ${method}`;
-  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetMemoryCompilerEnabled|SetReasoningLanguage)/.test(method))
+  if (/^(SetDesktop|SetCloseBehavior|SetDisplayMode|SetStatusBar|SetExpandThinking|SetAutoPlan|SetDefaultToolApprovalMode|SetReasoningLanguage)/.test(method))
     return `settings ${method}`;
   if (/^(SaveProvider|AddOfficialProviderAccess|AddProviderPresetAccess|ResetProviderPresetAccess|RemoveProviderAccess|DeleteProvider|SaveProviderKey|SetProviderKey|ClearProviderKey|FetchProviderModels|ConnectKey)/.test(method))
     return `provider ${method}`;
-  if (/^(CheckUpdate|DownloadUpdate|InstallUpdate|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
-  if (/^(AddMCPServer|UpdateMCPServer|RemoveMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|TrustMCPServerTool|TrustMCPServerTools|UntrustMCPServerTool|SetMCPServer)/.test(method))
+  if (/^(CheckUpdate|DownloadUpdate|DownloadUpdateRequest|InstallUpdate|InstallUpdateRequest|ApplyUpdate|OpenDownloadPage)/.test(method)) return `update ${method}`;
+  if (/^(AddMCPServer|InstallMCPServer|UpdateMCPServer|RemoveMCPServer|AuthorizeAndConnectMCPServer|ReconnectMCPServer|ClearMCPServerAuthentication|SetMCPServer)/.test(method))
     return `mcp ${method}`;
-  if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion)/.test(method))
+  if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
     return `nav ${method}`;
   return "";
+}
+
+function elapsedMs(startedAt: number): number {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  return Math.max(0, Math.round(now - startedAt));
 }
 
 export const app: AppBindings = new Proxy({} as AppBindings, {
@@ -635,18 +915,26 @@ export const app: AppBindings = new Proxy({} as AppBindings, {
     return (...args: unknown[]) => {
       const method = String(prop);
       const crumb = bridgeBreadcrumb(method);
+      const startedAt = crumb ? (typeof performance !== "undefined" ? performance.now() : Date.now()) : 0;
       if (crumb) addBreadcrumb("bridge", crumb);
       try {
         const result = (v as (...a: unknown[]) => unknown).apply(target, args);
         if (result && typeof (result as Promise<unknown>).then === "function") {
-          return (result as Promise<unknown>).catch((err) => {
-            if (crumb) addBreadcrumb("bridge.error", method);
-            throw err;
-          });
+          return (result as Promise<unknown>).then(
+            (value) => {
+              if (crumb) addBreadcrumb("bridge", `${crumb} done ms=${elapsedMs(startedAt)}`);
+              return value;
+            },
+            (err) => {
+              if (crumb) addBreadcrumb("bridge.error", `${method} ms=${elapsedMs(startedAt)}`);
+              throw err;
+            },
+          );
         }
+        if (crumb) addBreadcrumb("bridge", `${crumb} done ms=${elapsedMs(startedAt)}`);
         return result;
       } catch (err) {
-        if (crumb) addBreadcrumb("bridge.error", method);
+        if (crumb) addBreadcrumb("bridge.error", `${method} ms=${elapsedMs(startedAt)}`);
         throw err;
       }
     };
@@ -705,6 +993,12 @@ function emitUpdater(p: UpdateProgress) {
   updaterListeners.forEach((l) => l(p));
 }
 
+// Test seam for the browser-dev updater state machine. Production Wails builds
+// receive the same payloads through runtime.EventsOn("updater:progress").
+export function __emitMockUpdater(p: UpdateProgress): void {
+  emitUpdater(p);
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -719,13 +1013,24 @@ function browserPlatformOverride(): "darwin" | "windows" | "linux" | "" {
   return value === "darwin" || value === "windows" || value === "linux" ? value : "";
 }
 
-function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" {
+function browserPreviewBashSandboxMode(): "enforce" | "off" {
+  return browserPlatformOverride() === "windows" ? "off" : "enforce";
+}
+
+function browserPreviewEffectiveShell(prefer = "auto"): "bash" | "git-bash" | "powershell" | "pwsh" {
+  const normalized = prefer.trim().toLowerCase();
+  if (normalized === "powershell" || normalized === "pwsh") return normalized;
+  return browserPlatformOverride() === "windows" ? "git-bash" : "bash";
+}
+
+function mockScenario(): "demo" | "fresh" | "running" | "guidance" | "sandbox_escape" | "notice" {
   if (typeof window === "undefined") return "demo";
   const value = new URLSearchParams(window.location.search).get("mock")?.trim().toLowerCase();
   if (value === "fresh" || value === "empty" || value === "first-run") return "fresh";
   if (value === "guidance" || value === "guide" || value === "steer") return "guidance";
   if (value === "running" || value === "busy" || value === "streaming") return "running";
   if (value === "sandbox_escape" || value === "sandbox-escape" || value === "sandboxescape") return "sandbox_escape";
+  if (value === "notice" || value === "notices" || value === "notice-preview") return "notice";
   return "demo";
 }
 
@@ -768,7 +1073,7 @@ function mockPreset(id: string, label: string, description: string, keyEnv: stri
   return { id, label, description, keyEnv, provider };
 }
 
-const mockKimiAPIModels = ["kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"];
+const mockKimiAPIModels = ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"];
 const mockLongCatModels = ["LongCat-2.0"];
 const mockMiMoV25Models = ["mimo-v2.5-pro", "mimo-v2.5"];
 const mockMiniMaxModels = ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"];
@@ -779,7 +1084,7 @@ const mockQwenAPIModels = ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3
 const mockQwenPlanModels = ["qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"];
 const mockQwenPlanVisionModels = ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"];
 const mockStepFunModels = ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"];
-const mockOpenCodeGoModels = ["glm-5.2", "glm-5.1", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"];
+const mockOpenCodeGoModels = ["glm-5.2", "glm-5.1", "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "deepseek-v4-pro", "deepseek-v4-flash", "mimo-v2.5-pro", "mimo-v2.5"];
 const mockOpenCodeGoAnthropicModels = ["qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "minimax-m3", "minimax-m2.7", "minimax-m2.5"];
 const mockOpenCodeZenAnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "qwen3.6-plus", "qwen3.5-plus", "qwen3.6-plus-free"];
 const mockNovitaModels = ["zai-org/glm-5.2", "moonshotai/kimi-k2.7-code", "minimax/minimax-m3", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-flash", "qwen/qwen3.7-max", "qwen/qwen3.6-plus", "zai-org/glm-5v-turbo"];
@@ -790,8 +1095,8 @@ const mockOllamaCloudModels = ["glm-5.2", "kimi-k2.7-code", "deepseek-v4-pro", "
 const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
   mockPreset("longcat-openai", "LongCat OpenAI", "LongCat Platform OpenAI-compatible endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-openai", kind: "openai", baseUrl: "https://api.longcat.chat/openai/v1", modelsUrl: "https://api.longcat.chat/openai/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("longcat-anthropic", "LongCat Anthropic", "LongCat Platform Anthropic-compatible Messages endpoint for LongCat-2.0.", "LONGCAT_API_KEY", mockProviderTemplate({ name: "longcat-anthropic", kind: "anthropic", baseUrl: "https://api.longcat.chat/anthropic", modelsUrl: "https://api.longcat.chat/anthropic/v1/models", models: mockLongCatModels, default: "LongCat-2.0", apiKeyEnv: "LONGCAT_API_KEY", authHeader: true, contextWindow: 131072, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
-  mockPreset("kimi-cn", "Kimi CN API", "Moonshot Kimi China OpenAI-compatible API.", "KIMI_API_KEY", mockProviderTemplate({ name: "kimi-cn", kind: "openai", baseUrl: "https://api.moonshot.cn/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "KIMI_API_KEY", balanceUrl: "https://api.moonshot.cn/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none" })),
-  mockPreset("kimi-global", "Kimi Global API", "Moonshot Kimi international OpenAI-compatible API.", "MOONSHOT_API_KEY", mockProviderTemplate({ name: "kimi-global", kind: "openai", baseUrl: "https://api.moonshot.ai/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "MOONSHOT_API_KEY", balanceUrl: "https://api.moonshot.ai/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none" })),
+  mockPreset("kimi-cn", "Kimi CN API", "Moonshot Kimi China OpenAI-compatible API.", "KIMI_API_KEY", mockProviderTemplate({ name: "kimi-cn", kind: "openai", baseUrl: "https://api.moonshot.cn/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "KIMI_API_KEY", balanceUrl: "https://api.moonshot.cn/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none", modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["low", "high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
+  mockPreset("kimi-global", "Kimi Global API", "Moonshot Kimi international OpenAI-compatible API.", "MOONSHOT_API_KEY", mockProviderTemplate({ name: "kimi-global", kind: "openai", baseUrl: "https://api.moonshot.ai/v1", models: mockKimiAPIModels, visionModels: mockKimiAPIModels, default: "kimi-k2.7-code", apiKeyEnv: "MOONSHOT_API_KEY", balanceUrl: "https://api.moonshot.ai/v1/users/me/balance", contextWindow: 262144, reasoningProtocol: "none", modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["low", "high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
   mockPreset("kimi-coding-plan", "Kimi Coding Plan", "Kimi Coding Plan via its dedicated Anthropic-compatible endpoint.", "KIMI_CODING_API_KEY", mockProviderTemplate({ name: "kimi-coding-plan", kind: "anthropic", baseUrl: "https://api.kimi.com/coding/", models: ["kimi-for-coding"], visionModels: ["kimi-for-coding"], default: "kimi-for-coding", apiKeyEnv: "KIMI_CODING_API_KEY", headers: { "User-Agent": "claude-code/0.1.0" }, thinking: "adaptive", contextWindow: 262144 })),
   mockPreset("mimo-api", "MiMo API", "Xiaomi MiMo direct API with text and vision-capable models.", "MIMO_API_KEY", mockProviderTemplate({ name: "mimo-api", kind: "openai", baseUrl: "https://api.xiaomimimo.com/v1", models: mockMiMoV25Models, visionModels: ["mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", contextWindow: 1048576 })),
   mockPreset("mimo-anthropic", "MiMo Anthropic", "Xiaomi MiMo direct Anthropic-compatible endpoint.", "MIMO_API_KEY", mockProviderTemplate({ name: "mimo-anthropic", kind: "anthropic", baseUrl: "https://api.xiaomimimo.com/anthropic", models: mockMiMoV25Models, visionModels: ["mimo-v2.5"], default: "mimo-v2.5-pro", apiKeyEnv: "MIMO_API_KEY", thinking: "adaptive", contextWindow: 1048576 })),
@@ -811,7 +1116,7 @@ const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
   mockPreset("glm-coding-plan-cn-anthropic", "GLM Coding Plan CN Anthropic", "Zhipu GLM China coding-plan Anthropic-compatible endpoint.", "GLM_PLAN_API_KEY", mockProviderTemplate({ name: "glm-coding-plan-cn-anthropic", kind: "anthropic", baseUrl: "https://open.bigmodel.cn/api/anthropic", models: mockGLMAnthropicModels, default: "glm-5.2[1m]", apiKeyEnv: "GLM_PLAN_API_KEY", authHeader: true, thinking: "adaptive", contextWindow: 1000000 })),
   mockPreset("zai-coding-plan-global", "Z.AI Coding Plan Global", "Z.AI international coding-plan endpoint.", "ZAI_CODING_API_KEY", mockProviderTemplate({ name: "zai-coding-plan-global", kind: "openai", baseUrl: "https://api.z.ai/api/coding/paas/v4", models: mockGLMCodingModels, default: "glm-5.2", apiKeyEnv: "ZAI_CODING_API_KEY", contextWindow: 1000000, thinking: "enabled", supportedEfforts: ["enabled", "disabled"], defaultEffort: "enabled" })),
   mockPreset("zai-coding-plan-global-anthropic", "Z.AI Coding Plan Global Anthropic", "Z.AI international coding-plan Anthropic-compatible endpoint.", "ZAI_CODING_API_KEY", mockProviderTemplate({ name: "zai-coding-plan-global-anthropic", kind: "anthropic", baseUrl: "https://api.z.ai/api/anthropic", models: mockGLMAnthropicModels, default: "glm-5.2[1m]", apiKeyEnv: "ZAI_CODING_API_KEY", authHeader: true, thinking: "adaptive", contextWindow: 1000000 })),
-  mockPreset("opencode-go", "OpenCode Go", "OpenCode Go relay with per-model capability overrides.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", models: mockOpenCodeGoModels, default: "glm-5.2", apiKeyEnv: "OPENCODE_GO_API_KEY", contextWindow: 128000 })),
+  mockPreset("opencode-go", "OpenCode Go", "OpenCode Go relay with per-model capability overrides.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go", kind: "openai", baseUrl: "https://opencode.ai/zen/go/v1", models: mockOpenCodeGoModels, visionModels: ["kimi-k3"], default: "glm-5.2", apiKeyEnv: "OPENCODE_GO_API_KEY", contextWindow: 128000, modelOverrides: [{ model: "kimi-k3", reasoningProtocol: "openai", supportedEfforts: ["high", "max"], defaultEffort: "max", contextWindow: 1048576 }] })),
   mockPreset("opencode-go-anthropic", "OpenCode Go Anthropic", "OpenCode Go subscription Anthropic-compatible route for Qwen and MiniMax models.", "OPENCODE_GO_API_KEY", mockProviderTemplate({ name: "opencode-go-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen/go", models: mockOpenCodeGoAnthropicModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus"], default: "qwen3.7-plus", apiKeyEnv: "OPENCODE_GO_API_KEY", thinking: "adaptive", contextWindow: 262144 })),
   mockPreset("opencode-zen-anthropic", "OpenCode Zen Anthropic", "OpenCode Zen Anthropic-compatible route for Claude and Qwen models.", "OPENCODE_API_KEY", mockProviderTemplate({ name: "opencode-zen-anthropic", kind: "anthropic", baseUrl: "https://opencode.ai/zen", models: mockOpenCodeZenAnthropicModels, visionModels: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"], default: "claude-sonnet-4-6", apiKeyEnv: "OPENCODE_API_KEY", contextWindow: 262144 })),
   mockPreset("qwen-cn", "Qwen CN API", "Alibaba DashScope China standard OpenAI-compatible endpoint.", "QWEN_API_KEY", mockProviderTemplate({ name: "qwen-cn", kind: "openai", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", models: mockQwenAPIModels, visionModels: ["qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"], default: "qwen3.7-plus", apiKeyEnv: "QWEN_API_KEY" })),
@@ -820,8 +1125,8 @@ const mockProviderPresetTemplates: MockProviderPresetTemplate[] = [
   mockPreset("qwen-coding-plan-cn-anthropic", "Qwen Coding Plan CN Anthropic", "Alibaba Cloud Qwen Coding Plan China Anthropic-compatible endpoint.", "QWEN_CODING_API_KEY", mockProviderTemplate({ name: "qwen-coding-plan-cn-anthropic", kind: "anthropic", baseUrl: "https://coding.dashscope.aliyuncs.com/apps/anthropic", models: mockQwenPlanModels, visionModels: mockQwenPlanVisionModels, default: "qwen3.7-plus", apiKeyEnv: "QWEN_CODING_API_KEY", thinking: "adaptive" })),
   mockPreset("qwen-coding-plan-global", "Qwen Coding Plan Global", "Alibaba Cloud Qwen Coding Plan international endpoint.", "QWEN_CODING_API_KEY", mockProviderTemplate({ name: "qwen-coding-plan-global", kind: "openai", baseUrl: "https://coding-intl.dashscope.aliyuncs.com/v1", models: mockQwenPlanModels, visionModels: mockQwenPlanVisionModels, default: "qwen3.7-plus", apiKeyEnv: "QWEN_CODING_API_KEY" })),
   mockPreset("qwen-coding-plan-global-anthropic", "Qwen Coding Plan Global Anthropic", "Alibaba Cloud Qwen Coding Plan international Anthropic-compatible endpoint.", "QWEN_CODING_API_KEY", mockProviderTemplate({ name: "qwen-coding-plan-global-anthropic", kind: "anthropic", baseUrl: "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic", models: mockQwenPlanModels, visionModels: mockQwenPlanVisionModels, default: "qwen3.7-plus", apiKeyEnv: "QWEN_CODING_API_KEY", thinking: "adaptive" })),
-  mockPreset("stepfun", "StepFun", "StepFun coding-plan OpenAI-compatible endpoint.", "STEPFUN_API_KEY", mockProviderTemplate({ name: "stepfun", kind: "openai", baseUrl: "https://api.stepfun.ai/step_plan/v1", models: mockStepFunModels, default: "step-3.7-flash", apiKeyEnv: "STEPFUN_API_KEY", supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" })),
-  mockPreset("stepfun-anthropic", "StepFun Anthropic", "StepFun coding-plan Anthropic-compatible endpoint.", "STEPFUN_API_KEY", mockProviderTemplate({ name: "stepfun-anthropic", kind: "anthropic", baseUrl: "https://api.stepfun.ai/step_plan", models: mockStepFunModels, default: "step-3.7-flash", apiKeyEnv: "STEPFUN_API_KEY", thinking: "adaptive", supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" })),
+  mockPreset("stepfun", "StepFun", "StepFun coding-plan OpenAI-compatible endpoint.", "STEPFUN_API_KEY", mockProviderTemplate({ name: "stepfun", kind: "openai", baseUrl: "https://api.stepfun.com/step_plan/v1", models: mockStepFunModels, default: "step-3.7-flash", apiKeyEnv: "STEPFUN_API_KEY", supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" })),
+  mockPreset("stepfun-anthropic", "StepFun Anthropic", "StepFun coding-plan Anthropic-compatible endpoint.", "STEPFUN_API_KEY", mockProviderTemplate({ name: "stepfun-anthropic", kind: "anthropic", baseUrl: "https://api.stepfun.com/step_plan", models: mockStepFunModels, default: "step-3.7-flash", apiKeyEnv: "STEPFUN_API_KEY", thinking: "adaptive", supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" })),
   mockPreset("novita", "NovitaAI", "NovitaAI OpenAI-compatible multi-model gateway.", "NOVITA_API_KEY", mockProviderTemplate({ name: "novita", kind: "openai", baseUrl: "https://api.novita.ai/openai/v1", models: mockNovitaModels, default: "zai-org/glm-5.2", apiKeyEnv: "NOVITA_API_KEY" })),
   mockPreset("gmi", "GMI Cloud", "GMI Cloud direct multi-model OpenAI-compatible gateway.", "GMI_API_KEY", mockProviderTemplate({ name: "gmi", kind: "openai", baseUrl: "https://api.gmi-serving.com/v1", models: mockGMIModels, default: "zai-org/GLM-5.2-FP8", apiKeyEnv: "GMI_API_KEY", headers: { "User-Agent": "Reasonix" } })),
   mockPreset("vercel-ai-gateway", "Vercel AI Gateway", "Vercel AI Gateway via Anthropic-compatible Messages API.", "AI_GATEWAY_API_KEY", mockProviderTemplate({ name: "vercel-ai-gateway", kind: "anthropic", baseUrl: "https://ai-gateway.vercel.sh", models: mockVercelModels, visionModels: ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4.8", "openai/gpt-5.4", "openai/gpt-5.4-pro", "moonshotai/kimi-k2.7-code"], default: "anthropic/claude-sonnet-4.6", apiKeyEnv: "AI_GATEWAY_API_KEY", authHeader: true, contextWindow: 1000000 })),
@@ -868,25 +1173,111 @@ function cloneMockProviderTemplate(id: string, key: string): ProviderView | unde
 const mockPreviewImageDataURL =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='120' viewBox='0 0 160 120'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23f97316'/%3E%3Cstop offset='1' stop-color='%232563eb'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='160' height='120' rx='14' fill='url(%23g)'/%3E%3Ccircle cx='44' cy='38' r='16' fill='%23fff7ed' opacity='.9'/%3E%3Cpath d='M18 96 62 58l24 22 18-16 38 32z' fill='%23ffffff' opacity='.9'/%3E%3C/svg%3E";
 
+function mockExternalOpenerIconDataURL(color: string, label: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${color}"/><text x="32" y="40" text-anchor="middle" font-family="system-ui" font-size="25" font-weight="700" fill="white">${label}</text></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 function makeMockApp(): AppBindings {
   const scenario = mockScenario();
   const freshMock = scenario === "fresh";
   const guidanceMock = scenario === "guidance";
   const runningMock = scenario === "running" || guidanceMock;
   const sandboxEscapeMock = scenario === "sandbox_escape";
+  const noticePreviewMock = scenario === "notice";
   const mockAttachmentDataURLs = new Map<string, string>();
   let cancelled = false;
   let pendingAskPreview = false;
   let pendingApprovalPreview = false;
+  // Mirrors the last emitted approval preview so mode switches can mirror the
+  // backend drain contract: only non-fresh tools auto-allow; plan/sandbox
+  // escape prompts stay pending and visible.
+  let pendingApprovalPreviewPrompt: { id: string; tool: string } | undefined;
   const globalWorkspaceRoot = "~/Library/Application Support/reasonix/global-workspace";
   let cwd = freshMock ? globalWorkspaceRoot : "~/projects/joyquant-db"; // mutable so PickWorkspace is visible in dev
   let workspaces = freshMock ? [] : ["~/projects/joyquant-db", "~/projects/joyquant-sys", "~/projects/reasonix", "~/projects/blade"];
   let mockEffort = "auto";
   let mockDesktopZoomFactor = 1.0;
+  let mockActiveThemeId = "";
+  let mockBaseStyle = "graphite";
+  let mockThemeMode: "auto" | "light" | "dark" = "dark";
+  // Vite rewrites these literal asset URLs in both dev and production builds.
+  // Keeping them on the browser mock makes local visual acceptance match the
+  // Wails bridge, whose ListThemePacks response carries the same two URLs.
+  const mockOfficialThemeAssets = {
+    "official-rose-dawn": {
+      previewUrl: new URL("../../../themes/official/official-rose-dawn/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-rose-dawn/background.webp", import.meta.url).href,
+    },
+    "official-fortune-forge": {
+      previewUrl: new URL("../../../themes/official/official-fortune-forge/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-fortune-forge/background.webp", import.meta.url).href,
+    },
+    "official-crimson-horizon": {
+      previewUrl: new URL("../../../themes/official/official-crimson-horizon/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-crimson-horizon/background.webp", import.meta.url).href,
+    },
+    "official-sage-breeze": {
+      previewUrl: new URL("../../../themes/official/official-sage-breeze/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-sage-breeze/background.webp", import.meta.url).href,
+    },
+    "official-spark-notebook": {
+      previewUrl: new URL("../../../themes/official/official-spark-notebook/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-spark-notebook/background.webp", import.meta.url).href,
+    },
+    "official-violet-starlight": {
+      previewUrl: new URL("../../../themes/official/official-violet-starlight/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-violet-starlight/background.webp", import.meta.url).href,
+    },
+    "official-cyan-stage": {
+      previewUrl: new URL("../../../themes/official/official-cyan-stage/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-cyan-stage/background.webp", import.meta.url).href,
+    },
+    "official-noir-gold": {
+      previewUrl: new URL("../../../themes/official/official-noir-gold/preview.webp", import.meta.url).href,
+      backgroundUrl: new URL("../../../themes/official/official-noir-gold/background.webp", import.meta.url).href,
+    },
+  } as const;
+  registerTrustedThemeBackgroundURLs(Object.values(mockOfficialThemeAssets).map((asset) => asset.backgroundUrl));
+  let mockThemePacks: import("./themePack").ThemePackView[] = [
+    { id: "graphite", name: "Graphite", author: "Reasonix", baseStyle: "graphite", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "aurora", name: "Aurora", author: "Reasonix", baseStyle: "aurora", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "slate", name: "Slate", author: "Reasonix", baseStyle: "slate", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "carbon", name: "Carbon", author: "Reasonix", baseStyle: "carbon", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "nocturne", name: "Nocturne", author: "Reasonix", baseStyle: "nocturne", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { id: "amber", name: "Amber", author: "Reasonix", baseStyle: "amber", builtin: true, kind: "base", active: false, hasBackground: false, tokens: {}, recipes: { density: "comfortable", corners: "soft" } },
+    { ...mockOfficialThemeAssets["official-rose-dawn"], id: "official-rose-dawn", name: "Rose Dawn", author: "Reasonix Contributors", license: "MIT", baseStyle: "graphite", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-rose-dawn.name", descriptionKey: "settings.themes.official.official-rose-dawn.description", tokens: { light: { bg: "#FFF7F8", fg: "#3A252C", accent: "#B43F65" }, dark: { bg: "#1E1419", fg: "#FFF3F6", accent: "#E26D91" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.72, focusY: 0.43, safeArea: "left", homeOpacity: 1, taskOpacity: 0.2, overlayStrength: 0.68, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-fortune-forge"], id: "official-fortune-forge", name: "Fortune Forge", author: "Reasonix Contributors", license: "MIT", baseStyle: "amber", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-fortune-forge.name", descriptionKey: "settings.themes.official.official-fortune-forge.description", tokens: { light: { bg: "#FFF8E8", fg: "#382116", accent: "#A92D22" }, dark: { bg: "#1D140D", fg: "#FFF2D1", accent: "#E8AD38" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.74, focusY: 0.44, safeArea: "left", homeOpacity: 1, taskOpacity: 0.2, overlayStrength: 0.7, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-crimson-horizon"], id: "official-crimson-horizon", name: "Crimson Horizon", author: "Reasonix Contributors", license: "MIT", baseStyle: "graphite", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-crimson-horizon.name", descriptionKey: "settings.themes.official.official-crimson-horizon.description", tokens: { light: { bg: "#FFF8F7", fg: "#301D1D", accent: "#B92B38" }, dark: { bg: "#190D11", fg: "#FFF1F2", accent: "#FF6772" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.75, focusY: 0.45, safeArea: "left", homeOpacity: 0.98, taskOpacity: 0.22, overlayStrength: 0.66, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-sage-breeze"], id: "official-sage-breeze", name: "Sage Breeze", author: "Reasonix Contributors", license: "MIT", baseStyle: "slate", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-sage-breeze.name", descriptionKey: "settings.themes.official.official-sage-breeze.description", tokens: { light: { bg: "#F7F7EF", fg: "#26332D", accent: "#47735F" }, dark: { bg: "#101814", fg: "#EEF6F0", accent: "#84CBA7" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.73, focusY: 0.44, safeArea: "left", homeOpacity: 1, taskOpacity: 0.2, overlayStrength: 0.68, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-spark-notebook"], id: "official-spark-notebook", name: "Spark Notebook", author: "Reasonix Contributors", license: "MIT", baseStyle: "aurora", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-spark-notebook.name", descriptionKey: "settings.themes.official.official-spark-notebook.description", tokens: { light: { bg: "#FFF9ED", fg: "#2B2F35", accent: "#007B78" }, dark: { bg: "#14171A", fg: "#F8F5E9", accent: "#42D1C6" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.74, focusY: 0.46, safeArea: "left", homeOpacity: 0.98, taskOpacity: 0.2, overlayStrength: 0.68, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-violet-starlight"], id: "official-violet-starlight", name: "Violet Starlight", author: "Reasonix Contributors", license: "MIT", baseStyle: "nocturne", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-violet-starlight.name", descriptionKey: "settings.themes.official.official-violet-starlight.description", tokens: { light: { bg: "#F7F4FF", fg: "#251F3C", accent: "#6242C7" }, dark: { bg: "#0C1022", fg: "#F4F2FF", accent: "#9B86FF" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.73, focusY: 0.44, safeArea: "left", homeOpacity: 0.96, taskOpacity: 0.18, overlayStrength: 0.72, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-cyan-stage"], id: "official-cyan-stage", name: "Cyan Stage", author: "Reasonix Contributors", license: "MIT", baseStyle: "carbon", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-cyan-stage.name", descriptionKey: "settings.themes.official.official-cyan-stage.description", tokens: { light: { bg: "#F1FCFD", fg: "#173238", accent: "#007C92" }, dark: { bg: "#07181D", fg: "#E9FCFF", accent: "#37D7E4" } }, recipes: { density: "comfortable", corners: "round" }, background: { focusX: 0.74, focusY: 0.45, safeArea: "left", homeOpacity: 0.96, taskOpacity: 0.18, overlayStrength: 0.72, paneOpacity: 0.50 } },
+    { ...mockOfficialThemeAssets["official-noir-gold"], id: "official-noir-gold", name: "Noir Gold", author: "Reasonix Contributors", license: "MIT", baseStyle: "carbon", builtin: true, kind: "official", active: false, hasBackground: true, nameKey: "settings.themes.official.official-noir-gold.name", descriptionKey: "settings.themes.official.official-noir-gold.description", tokens: { light: { bg: "#FCF8EE", fg: "#2A241B", accent: "#7A5A16" }, dark: { bg: "#0D0B09", fg: "#F8F1DF", accent: "#D9B45B" } }, recipes: { density: "comfortable", corners: "soft" }, background: { focusX: 0.73, focusY: 0.43, safeArea: "left", homeOpacity: 0.94, taskOpacity: 0.18, overlayStrength: 0.74, paneOpacity: 0.50 } },
+  ];
   const day = 86_400_000;
   const t0 = Date.now();
   // Mutable so MCP add/remove/retry are observable in browser dev.
   let capServers: ServerView[] = [
+    {
+      name: "project-knowledge",
+      transport: "http",
+      status: "connected",
+      configured: true,
+      autoStart: true,
+      tier: "background",
+      source: "project",
+      configSource: "reasonix.toml",
+      url: "https://mcp.example.test/project",
+      tools: 3,
+      prompts: 0,
+      resources: 1,
+      toolList: [
+        { name: "search_knowledge", description: "Search the project knowledge base.", readOnlyHint: true },
+        { name: "get_document", description: "Read a knowledge-base document.", readOnlyHint: true },
+        { name: "list_topics", description: "List available knowledge topics.", readOnlyHint: true },
+      ],
+    },
     {
       name: "github",
       transport: "stdio",
@@ -899,7 +1290,6 @@ function makeMockApp(): AppBindings {
       tools: 4,
       prompts: 2,
       resources: 0,
-      trustedReadOnlyTools: ["pull_request_read"],
       toolList: [
         { name: "issue_read", description: "Read GitHub issue details and comments.", readOnlyHint: true },
         { name: "pull_request_read", description: "Read pull request metadata, files, and review threads.", readOnlyHint: true },
@@ -934,9 +1324,19 @@ function makeMockApp(): AppBindings {
     { name: "figma", transport: "http", status: "failed", configured: true, autoStart: true, tier: "background", url: "https://mcp.figma.com/mcp", authStatus: "required", authUrl: "https://mcp.figma.com/mcp", tools: 0, prompts: 0, resources: 0, error: "connect: 401 unauthorized" },
   ];
   const capSkills: SkillView[] = [
-    { name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true },
-    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false },
-    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true },
+    {
+      name: "explore", description: "Investigate the codebase in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true,
+      allowedTools: ["read_file", "ls", "glob", "grep", "code_index"], invocation: "/explore", invocationMode: "auto",
+      configuredModel: "deepseek/deepseek-v4-pro", configuredEffort: "high",
+    },
+    { name: "research", description: "Combine web_fetch + code reading in an isolated subagent", scope: "builtin", runAs: "subagent", enabled: true, allowedTools: ["read_file", "ls", "glob", "grep", "code_index", "web_fetch"], invocation: "/research", invocationMode: "auto" },
+    { name: "review", description: "Review the staged diff", scope: "project", runAs: "inline", enabled: false, invocation: "/review" },
+    { name: "init", description: "Scaffold a REASONIX.md for this repo", scope: "builtin", runAs: "inline", enabled: true, invocation: "/init" },
+    {
+      name: "my-formatter", description: "Formats code the way I like it", scope: "global", runAs: "subagent", enabled: true,
+      model: "deepseek-pro", effort: "high", allowedTools: ["read_file", "edit_file"], color: "amber", invocation: "/my-formatter", invocationMode: "manual",
+      body: "You are a code formatting assistant. Reformat the given file to match project style without changing behavior.",
+    },
   ];
   let capSkillRoots: SkillRootView[] = [
     { dir: "~/projects/reasonix/.reasonix/skills", scope: "project", priority: 1, status: "missing", configured: false, removable: true, skills: 0 },
@@ -982,7 +1382,7 @@ function makeMockApp(): AppBindings {
   // Mutable so delete/rename are observable in browser dev.
   const sessions: SessionMeta[] = [
     { path: "/mock/sessions/a.jsonl", preview: "fix the login bug in auth.go", turns: 12, createdAt: t0 - 2 * day, lastActivityAt: t0 - 3_600_000, modTime: t0 - 3_600_000, current: true, open: true },
-    { path: "/mock/sessions/b.jsonl", preview: "refactor the payment module", turns: 5, createdAt: t0 - 3 * day, lastActivityAt: t0 - 6 * 3_600_000, modTime: t0 - 6 * 3_600_000, current: false, open: true },
+    { path: "/mock/sessions/b-recovery-0123456789abcdef.jsonl", preview: "refactor the payment module", turns: 5, createdAt: t0 - 3 * day, lastActivityAt: t0 - 6 * 3_600_000, modTime: t0 - 6 * 3_600_000, current: false, open: true, recovered: true, recoveryCopy: true },
     { path: "/mock/sessions/c.jsonl", preview: "write the README and badges", turns: 8, createdAt: t0 - 4 * day, lastActivityAt: t0 - day - 3_600_000, modTime: t0 - day - 3_600_000, current: false, open: false },
     { path: "/mock/sessions/d.jsonl", preview: "explain the plugin host design", turns: 3, createdAt: t0 - 5 * day, lastActivityAt: t0 - 4 * day, modTime: t0 - 4 * day, current: false, open: false },
   ];
@@ -1033,6 +1433,8 @@ function makeMockApp(): AppBindings {
       scope: "global",
       topicId: "topic_product",
       topicTitle: t("mock.trashGlobalProductTitle"),
+      recovered: true,
+      recoveryCopy: true,
     },
   ];
   if (freshMock) {
@@ -1054,14 +1456,14 @@ function makeMockApp(): AppBindings {
     ],
     providerPresets: mockProviderPresetViews(),
     permissions: { mode: "ask", allow: ["ls", "read_file"], ask: [], deny: ["Bash(rm:*)"] },
-    sandbox: { bash: "enforce", network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto" },
+    sandbox: { bash: browserPreviewBashSandboxMode(), network: true, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: cwd, effectiveWriteRoots: [cwd], shell: "auto", effectiveShell: browserPreviewEffectiveShell("auto") },
     network: {
       proxyMode: "auto",
       proxyUrl: "",
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
     bot: {
       enabled: !freshMock,
       model: "",
@@ -1197,18 +1599,20 @@ function makeMockApp(): AppBindings {
       ],
     },
     desktopLanguage: "",
+    desktopCurrency: "",
     desktopLayoutStyle: "workbench",
     desktopTheme: "auto",
     desktopThemeStyle: "graphite",
+    conversationWidth: "standard",
     closeBehavior: "background",
     displayMode: "compact",
     statusBarStyle: "text",
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
-    defaultToolApprovalMode: "ask",
+    defaultToolApprovalMode: "auto",
     checkUpdates: true,
+    updateChannel: "stable",
     telemetry: true,
     metrics: true,
-    memoryCompilerEnabled: true,
     configPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai", "anthropic"],
     autoApproveTools: false,
@@ -1239,7 +1643,7 @@ function makeMockApp(): AppBindings {
     provider.apiKeyEnv === "DEEPSEEK_API_KEY" ? { ...provider, keySet: !freshMock } : provider,
   );
   if (freshMock) {
-    settings.configPath = "~/.config/reasonix/config.toml";
+    settings.configPath = "~/.reasonix/config.toml";
   }
   const mockNow = Date.now();
   const mockProjectTree: ProjectNode[] = freshMock ? [] : [
@@ -1356,6 +1760,7 @@ function makeMockApp(): AppBindings {
       out.push({
         role: "user",
         content: `第 ${i} 轮：检查聊天滚动定位，切换会话后应该自动停在最新消息底部。`,
+        createdAt: t0 - (19 - i) * 15 * 60_000,
       });
       if (i === 4) {
         out.push({ role: "phase", content: "复现切换会话后的滚动位置" });
@@ -1527,6 +1932,7 @@ function makeMockApp(): AppBindings {
         }
         if (tab.topicId === "topic_sys_coord") {
           pendingApprovalPreview = true;
+          pendingApprovalPreviewPrompt = { id: "mock-sys-confirm", tool: "bash" };
           emit({ kind: "reasoning", text: "我已经准备好执行同步脚本，但这个操作会影响本地 workspace，需要用户确认。" });
           await delay(160);
           emit({
@@ -1557,7 +1963,43 @@ function makeMockApp(): AppBindings {
     setMockTabRunning(currentMockTurnTabId(), false);
     emit({ kind: "turn_done" });
   };
-  let mockTabs: TabMeta[] = freshMock ? [
+  // Fresh user decisions never auto-allow on a posture switch (mirrors the
+  // backend's requiresFreshApprovalTool set).
+  const mockFreshApprovalTools = new Set(["exit_plan_mode", "sandbox_escape", "memory_remember", "memory_forget", "managed_config_write"]);
+  // Mirrors the backend drain contract for the mode-switch bindings: returns
+  // the prompt ids the new posture auto-allowed; fresh prompts stay pending.
+  const drainMockApprovalPreviews = (toolApprovalMode: string): string[] => {
+    if (toolApprovalMode !== "auto" && toolApprovalMode !== "yolo") return [];
+    const prompt = pendingApprovalPreviewPrompt;
+    if (!pendingApprovalPreview || !prompt || mockFreshApprovalTools.has(prompt.tool)) return [];
+    pendingApprovalPreview = false;
+    pendingApprovalPreviewPrompt = undefined;
+    emit({ kind: "message", text: `approval preview auto-allowed (${toolApprovalMode})` });
+    emitMockTurnDone();
+    return [prompt.id];
+  };
+  let mockTabs: TabMeta[] = noticePreviewMock ? [
+    {
+      id: "tab_notice_preview",
+      scope: "project",
+      workspaceRoot: "~/projects/reasonix",
+      workspaceName: "reasonix",
+      workspacePath: "~/projects/reasonix",
+      gitBranch: "codex/compact-chat-notices-i18n",
+      topicId: "topic_notice_preview",
+      topicTitle: "Compact notice preview",
+      projectColor: "green",
+      label: "DeepSeek-R1",
+      ready: true,
+      running: false,
+      mode: "normal",
+      collaborationMode: "normal",
+      toolApprovalMode: "ask",
+      tokenMode: "full",
+      active: true,
+      cwd: "~/projects/reasonix",
+    },
+  ] : freshMock ? [
     {
       id: "tab_global",
       scope: "global",
@@ -1640,6 +2082,7 @@ function makeMockApp(): AppBindings {
     window.setTimeout(() => {
       if (pendingApprovalPreview) return;
       pendingApprovalPreview = true;
+      pendingApprovalPreviewPrompt = { id: "mock-sandbox-escape-preview", tool: "sandbox_escape" };
       emitMockTurnStarted();
       emit({ kind: "reasoning", text: t("mock.sandboxEscapeReasoning") });
       emit({
@@ -1668,6 +2111,13 @@ function makeMockApp(): AppBindings {
   };
   const mockModelLabel = (ref: string): string => mockModelCatalog.find((model) => model.ref === mockModelRef(ref))?.model ?? ref.split("/").pop() ?? ref;
   const mockTabModelRef = (tab?: TabMeta): string => mockModelRef(tab?.label ?? "");
+  let mockTerminalSessions: TerminalSessionView[] = [];
+  const mockTerminalOutput = new Map<string, string>();
+  const mockTerminalTabIDs = new Map<string, string>();
+  const mockTerminalBytes = (text: string): string => {
+    if (typeof btoa === "function") return btoa(unescape(encodeURIComponent(text)));
+    return "";
+  };
   const setMockTabModel = (tabID: string | undefined, name: string) => {
     const ref = mockModelRef(name);
     const label = mockModelLabel(ref);
@@ -1737,6 +2187,7 @@ function makeMockApp(): AppBindings {
       }
       if (trimmedInput === "/approve-preview" || trimmedInput === "approve preview" || trimmedInput === "approve预览") {
         pendingApprovalPreview = true;
+        pendingApprovalPreviewPrompt = { id: "mock-approval-preview", tool: "bash" };
         await delay(250);
         if (cancelled) return;
         emit({
@@ -1749,6 +2200,45 @@ function makeMockApp(): AppBindings {
         });
         return;
       }
+      if (trimmedInput === "/recovery-preview" || trimmedInput === "recovery preview" || trimmedInput === "恢复预览") {
+        pendingApprovalPreview = true;
+        pendingApprovalPreviewPrompt = { id: "mock-recovery-preview", tool: "write_file" };
+        await delay(250);
+        if (cancelled) return;
+        emit({
+          kind: "approval_request",
+          approval: {
+            id: "mock-recovery-preview",
+            tool: "write_file",
+            subject: "internal/recovery/gate.go",
+            reason: "The proposed recovery changes the implementation method after a failing verification.",
+            fresh: true,
+            kind: "recovery",
+            recovery: {
+              source_agent: "root",
+              failed_tool: "bash",
+              failed_summary: "go test ./internal/recovery failed",
+              diagnosis: "The failure is isolated to recovery state persistence.",
+              next_tool: "write_file",
+              next_action: "Update internal/recovery/gate.go",
+              change_kind: "strategy",
+              change_rationale: "The proposed edit changes the recovery method and needs a fresh decision.",
+              plan_before: [
+                "1. Keep the existing Auto execution path [in_progress]",
+                "2. Add execution-risk approval prompts [pending]",
+                "3. Run the recovery regression suite [pending]",
+              ].join("\n"),
+              plan_after: [
+                "1. Keep the existing Auto execution path [in_progress]",
+                "2. Ask only when strategy or scope changes [pending]",
+                "3. Show the old and proposed plan before deciding [pending]",
+                "4. Run the recovery regression suite [pending]",
+              ].join("\n"),
+            },
+          },
+        });
+        return;
+      }
       if (
         trimmedInput === "/sandbox-escape-preview" ||
         trimmedInput === "sandbox escape preview" ||
@@ -1756,6 +2246,7 @@ function makeMockApp(): AppBindings {
         trimmedInput === "sandbox escape预览"
       ) {
         pendingApprovalPreview = true;
+        pendingApprovalPreviewPrompt = { id: "mock-sandbox-escape-preview", tool: "sandbox_escape" };
         await delay(250);
         if (cancelled) return;
         emit({
@@ -1775,6 +2266,7 @@ function makeMockApp(): AppBindings {
         trimmedInput === "plan approve预览"
       ) {
         pendingApprovalPreview = true;
+        pendingApprovalPreviewPrompt = { id: "mock-plan-approval-preview", tool: "exit_plan_mode" };
         await delay(250);
         if (cancelled) return;
         emit({
@@ -1949,6 +2441,18 @@ function makeMockApp(): AppBindings {
       // dev. Bail if cancelled during the wait — nothing was streamed yet.
       await delay(700);
       if (cancelled) return;
+      const reasoningChunks = [
+        "我先判断这是浏览器预览环境，所以不会调用真实 kernel。\n",
+        "接着模拟 provider 的 reasoning delta：先展示思考过程，再切到正式回复。\n",
+        "完成后前端应该把过程区折叠成“已工作 N 秒”。\n",
+      ];
+      for (const chunk of reasoningChunks) {
+        if (cancelled) return;
+        emit({ kind: "reasoning", reasoning: chunk });
+        await delay(520);
+      }
+      if (cancelled) return;
+      await delay(260);
       const reply =
         `You said: **${input}**\n\n` +
         "This is the browser dev mock — the real reply comes from the kernel " +
@@ -1997,6 +2501,34 @@ function makeMockApp(): AppBindings {
         async SubmitDisplayToTab(_tabID, display, input) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
+        async SubmitDeliveryRecoveryToTab(_tabID, display, input) {
+          await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
+        },
+        async SubmitInvocationsToTab(_tabID, display, input, _invocations) {
+          await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
+        },
+        async SubmitInitialGoalToTab(
+          _tabID,
+          goal,
+          display,
+          input,
+          invocations,
+          _collaborationMode,
+          _toolApprovalMode,
+          _targetKind,
+          _targetIdentityGen,
+          _targetRequestSeq,
+        ) {
+          return await withMockTabScope(_tabID, async () => {
+            await this.SetGoalForTab(_tabID, goal);
+            if (invocations.length > 0) {
+              await this.SubmitInvocationsToTab(_tabID, display, input, invocations);
+              return [];
+            }
+            await this.SubmitDisplayToTab(_tabID, display, input);
+            return [];
+          });
+        },
         async SubmitEditedDisplayToTab(_tabID, display, input, _original) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
@@ -2035,6 +2567,7 @@ function makeMockApp(): AppBindings {
         async Approve(_id, allow, session, persist) {
           if (!pendingApprovalPreview) return;
           pendingApprovalPreview = false;
+          pendingApprovalPreviewPrompt = undefined;
           const suffix = persist ? "grant saved" : session ? "grant active this session" : "allowed once";
           emit({
             kind: "message",
@@ -2044,6 +2577,29 @@ function makeMockApp(): AppBindings {
         },
         async ApproveTab(_tabID, id, allow, session, persist) {
           await withMockTabScope(_tabID, () => this.Approve(id, allow, session, persist));
+        },
+        async ResolveRecovery(id, action, feedback) {
+          const active = mockTabs.find((tab) => tab.active);
+          await this.ResolveRecoveryTab(active?.id ?? "", id, action, feedback);
+        },
+        async ResolveRecoveryTab(_tabID, id, action, feedback) {
+          void id;
+          void feedback;
+          pendingApprovalPreview = false;
+          pendingApprovalPreviewPrompt = undefined;
+          emit({
+            kind: "message",
+            text: `recovery preview answered: ${action}`,
+          });
+          emitMockTurnDone();
+        },
+        async SetRecoveryCheckpointEnabled(_enabled) {},
+        async SetRecoveryCheckpointEnabledTab(_tabID, _enabled) {},
+        async RecoveryCheckpointEnabled() {
+          return true;
+        },
+        async RecoveryCheckpointEnabledTab(_tabID) {
+          return true;
         },
         async AnswerQuestion(_id, answers) {
       if (!pendingAskPreview) return;
@@ -2072,16 +2628,18 @@ function makeMockApp(): AppBindings {
         },
         async SetModeForTab(tabID, mode) {
           const nextMode = normalizeMode(mode);
-          mockTabs = mockTabs.map((tab) =>
-            tab.id === tabID
-              ? {
-                  ...tab,
-                  mode: nextMode,
-                  collaborationMode: normalizeCollaborationMode(undefined, tab.goal, nextMode),
-                  toolApprovalMode: mockToolApprovalModeAfterModeChange(tab.toolApprovalMode, nextMode),
-                }
-              : tab,
-          );
+          let nextToolApprovalMode: ToolApprovalMode | "" = "";
+          mockTabs = mockTabs.map((tab) => {
+            if (tab.id !== tabID) return tab;
+            nextToolApprovalMode = mockToolApprovalModeAfterModeChange(tab.toolApprovalMode, nextMode);
+            return {
+              ...tab,
+              mode: nextMode,
+              collaborationMode: normalizeCollaborationMode(undefined, tab.goal, nextMode),
+              toolApprovalMode: nextToolApprovalMode,
+            };
+          });
+          return drainMockApprovalPreviews(nextToolApprovalMode);
         },
         async SetCollaborationMode(mode) {
           const active = mockTabs.find((tab) => tab.active);
@@ -2117,6 +2675,27 @@ function makeMockApp(): AppBindings {
                 }
               : tab,
           );
+          return drainMockApprovalPreviews(next);
+        },
+        async SetComposerProfileForTab(tabID, collaborationMode, toolApprovalMode, goal) {
+          const nextCollaboration = normalizeCollaborationMode(collaborationMode);
+          const nextToolApproval = normalizeToolApprovalMode(toolApprovalMode);
+          const nextGoal = goal.trim();
+          settings.autoApproveTools = nextToolApproval === "yolo";
+          settings.bypass = nextToolApproval === "yolo";
+          mockTabs = mockTabs.map((tab) => {
+            if (tab.id !== tabID) return tab;
+            const plan = !nextGoal && nextCollaboration === "plan";
+            return {
+              ...tab,
+              collaborationMode: nextGoal ? "goal" : plan ? "plan" : "normal",
+              toolApprovalMode: nextToolApproval,
+              goal: nextGoal,
+              goalStatus: nextGoal ? "running" : "stopped",
+              mode: modeWithAutoApproveTools(modeWithPlan(normalizeMode(tab.mode), plan), nextToolApproval === "yolo"),
+            };
+          });
+          return drainMockApprovalPreviews(nextToolApproval);
         },
         async SetGoal(goal) {
           const active = mockTabs.find((tab) => tab.active);
@@ -2136,6 +2715,15 @@ function makeMockApp(): AppBindings {
               : tab,
           );
         },
+        async ResumeGoalForTab(tabID) {
+          let resumed = false;
+          mockTabs = mockTabs.map((tab) => {
+            if (tab.id !== tabID || !tab.goal || tab.goalStatus === "complete") return tab;
+            resumed = true;
+            return { ...tab, goalStatus: "running", collaborationMode: "goal" };
+          });
+          return resumed;
+        },
         async ClearGoal() {
           await this.SetGoal("");
         },
@@ -2143,8 +2731,11 @@ function makeMockApp(): AppBindings {
           await this.SetGoalForTab(tabID, "");
         },
         async Compact() {},
+        async CompactForTab() {},
         async NewSession() {},
+        async NewSessionForTab() {},
         async ClearSession() {},
+        async ClearSessionForTab() {},
     async Checkpoints() {
       return [
         { turn: 0, prompt: "你好呀", files: ["src/App.tsx"], fileCount: 1, turnFileCount: 1, time: Date.now() - 30_000, canCode: true, canConversation: true },
@@ -2154,6 +2745,7 @@ function makeMockApp(): AppBindings {
       return this.Checkpoints();
     },
     async Rewind() {},
+    async RewindForTab() {},
     async Fork() {
       const active = mockTabs.find((tab) => tab.active) ?? mockTabs[0];
       const tab: TabMeta = {
@@ -2167,8 +2759,14 @@ function makeMockApp(): AppBindings {
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
     },
+    async ForkForTab(tabID, turn) {
+      mockTabs = mockTabs.map((tab) => ({ ...tab, active: tab.id === tabID }));
+      return this.Fork(turn);
+    },
     async SummarizeFrom() {},
+    async SummarizeFromForTab() {},
     async SummarizeUpTo() {},
+    async SummarizeUpToForTab() {},
         async History() {
           return [];
         },
@@ -2253,6 +2851,9 @@ function makeMockApp(): AppBindings {
         });
       }
     },
+    async DeleteRecoveryCopy(path: string) {
+      return this.DeleteSession(path);
+    },
     async RestoreSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);
       if (i >= 0) {
@@ -2267,6 +2868,9 @@ function makeMockApp(): AppBindings {
     async PurgeTrashedSession(path: string) {
       const i = trashedSessions.findIndex((s) => s.path === path);
       if (i >= 0) trashedSessions.splice(i, 1);
+    },
+    async PurgeRecoveryCopy(path: string) {
+      return this.PurgeTrashedSession(path);
     },
     async RenameSession(path: string, title: string) {
       const s = sessions.find((x) => x.path === path);
@@ -2452,17 +3056,32 @@ function makeMockApp(): AppBindings {
           console.info("mock AutoResearchRecordEvidence");
         },
     async Commands() {
-      return [
-        { name: "new", description: "start new session; save transcript", kind: "builtin" as const },
-        { name: "clear", description: "discard current context", kind: "builtin" as const },
-        { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const },
-        { name: "model", description: "Switch model", kind: "builtin" as const },
-        { name: "effort", description: "Set reasoning effort", kind: "builtin" as const },
-        { name: "skill", description: "List skills", kind: "builtin" as const },
-        { name: "plugins", description: "Manage plugin packages", kind: "builtin" as const },
-        { name: "explore", description: "Investigate the codebase in an isolated subagent", kind: "skill" as const },
-        { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const },
+      const commands: CommandInfo[] = [
+        { name: "new", description: "start new session; save transcript", kind: "builtin" as const, group: "actions" },
+        { name: "clear", description: "discard current context", kind: "builtin" as const, group: "actions" },
+        { name: "compact", description: "Summarize older history to free up context", kind: "builtin" as const, group: "actions" },
+        { name: "model", description: "Switch model", kind: "builtin" as const, group: "actions" },
+        { name: "effort", description: "Set reasoning effort", kind: "builtin" as const, group: "actions" },
+        { name: "skill", description: "List skills", kind: "builtin" as const, group: "skills" },
+        { name: "mcp", description: "Manage MCP servers", kind: "builtin" as const, group: "integrations" },
+        { name: "plugins", description: "Manage plugin packages", kind: "builtin" as const, group: "integrations" },
+        { name: "review", description: "Review the staged diff", hint: "[focus]", kind: "custom" as const, group: "skills" },
       ];
+      const seen = new Set(commands.map((command) => command.name));
+      for (const skill of capSkills) {
+        if (skill.enabled === false) continue;
+        const name = (skill.invocation || `/${skill.name}`).replace(/^\/+/, "");
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        commands.push({
+          name,
+          description: skill.description,
+          kind: skill.runAs === "subagent" ? "subagent" : "skill",
+          group: skill.runAs === "subagent" ? "subagents" : "skills",
+          color: skill.color,
+        });
+      }
+      return commands;
     },
     async Capabilities() {
       return {
@@ -2475,11 +3094,126 @@ function makeMockApp(): AppBindings {
     async MCPServers() {
       return capServers.map((s) => ({ ...s }));
     },
+    async MCPMarketplace(query: string) {
+      const servers = [
+        {
+          name: "io.modelcontextprotocol/server-filesystem",
+          suggestedName: "server-filesystem",
+          title: "Filesystem",
+          description: "Secure file operations through MCP.",
+          version: "1.0.0",
+          installable: true,
+          transport: "stdio",
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-filesystem@1.0.0"],
+        },
+        {
+          name: "io.example/manual",
+          suggestedName: "manual",
+          title: "Manual setup example",
+          description: "Requires an API key before installation.",
+          version: "1.0.0",
+          installable: false,
+          unavailableReason: "package requires environment variables or arguments",
+          args: [],
+        },
+      ];
+      const normalized = query.trim().toLowerCase();
+      return {
+        servers: normalized ? servers.filter((entry) => [entry.name, entry.title, entry.description].join(" ").toLowerCase().includes(normalized)) : servers,
+        cached: false,
+      } as MCPMarketplaceView;
+    },
+    async MCPMarketplaceResolve(registryName: string) {
+      const result = await this.MCPMarketplace(registryName);
+      const entry = result.servers.find((candidate) => candidate.name.toLowerCase() === registryName.trim().toLowerCase());
+      if (!entry) throw new Error(`MCP Registry has no server named ${JSON.stringify(registryName)}`);
+      return entry;
+    },
     async SkillsSettings() {
       return {
         skills: capSkills.map((s) => ({ ...s })),
         skillRoots: capSkillRoots.map((s) => ({ ...s })),
       };
+    },
+    async CapabilityDiagnostics(includeSessionRuntime: boolean) {
+      const report: CapabilityDiagnosticsReport = {
+        schema_version: 1,
+        root: "<workspace>",
+        live: false,
+        summary: {
+          errors: 0,
+          warnings: 1,
+          infos: includeSessionRuntime ? 1 : 0,
+          instructions: 1,
+          skills: capSkills.length,
+          commands: 0,
+          hooks: 0,
+          plugins: capPlugins.length,
+          mcp_servers: capServers.length,
+        },
+        instructions: { docs: [{ path: "<workspace>/AGENTS.md", scope: "project", directory: "<workspace>", depth: 0, order: 1 }] },
+        skills: {
+          roots: [{ path: "<workspace>/.reasonix/skills", scope: "project", status: "ok" }],
+          entries: capSkills.map((s) => ({
+            name: s.name,
+            description: s.description,
+            scope: s.scope,
+            path: "(mock)",
+            status: "winner",
+            run_as: s.runAs,
+          })),
+          winners: capSkills.length,
+          shadowed: 0,
+        },
+        commands: { roots: [], entries: [], winners: 0, shadowed: 0 },
+        hooks: { trusted_project: true, project_defines_hooks: false, sources: [], entries: [] },
+        plugins: {
+          packages: capPlugins.map((p) => ({
+            name: p.name,
+            enabled: p.enabled,
+            root: p.root || "<external>/plugin",
+            skills: p.skills ?? 0,
+            commands: 0,
+            hooks: p.hooks ?? 0,
+            mcp_servers: p.mcpServers ?? 0,
+            status: p.enabled ? "ok" : "disabled",
+          })),
+        },
+        mcp: {
+          servers: capServers.map((s) => ({
+            name: s.name,
+            transport: s.transport || "stdio",
+            start_intent: s.startIntent === "off" ? "off" : "automatic",
+            source: "toml",
+            runtime_status: includeSessionRuntime ? s.status || "connected" : undefined,
+            tool_count: s.tools,
+            env_keys: s.envKeys ?? [],
+            header_keys: s.headerKeys ?? [],
+          })),
+        },
+        issues: [
+          {
+            severity: "warning",
+            code: "skill.missing_description",
+            subsystem: "skills",
+            name: "example",
+            message: "mock warning for browser harness",
+            remediation: "Add a description frontmatter field",
+            settings_tab: "skills",
+          },
+          ...(includeSessionRuntime
+            ? [{
+                severity: "info" as const,
+                code: "mcp.runtime_unavailable",
+                subsystem: "mcp",
+                message: "browser mock has no live Host; runtime fields are synthetic",
+                settings_tab: "mcp",
+              }]
+            : []),
+        ],
+      };
+      return JSON.parse(JSON.stringify(report)) as CapabilityDiagnosticsReport;
     },
     async Plugins() {
       return capPlugins.map((p) => ({ ...p }));
@@ -2558,6 +3292,10 @@ function makeMockApp(): AppBindings {
       });
       return tools;
     },
+    async InstallMCPServer(input: MCPServerInput) {
+      const tools = await this.AddMCPServer(input);
+      return { name: input.name, state: "ready" as const, toolCount: tools, action: "none" as const, message: `${input.name} is ready` };
+    },
     async UpdateMCPServer(name: string, input: MCPServerInput) {
       capServers = capServers.map((s) => {
         if (s.name !== name) return s;
@@ -2573,7 +3311,6 @@ function makeMockApp(): AppBindings {
           url: input.transport === "stdio" ? "" : input.url,
           envKeys: input.env ? Object.keys(input.env).sort() : s.envKeys,
           headerKeys: input.headers ? Object.keys(input.headers).sort() : s.headerKeys,
-          trustedReadOnlyTools: input.trustedReadOnlyTools ?? s.trustedReadOnlyTools,
           tools: nextTools,
           error: undefined,
           authStatus: nextStatus !== "connected" && input.transport !== "stdio" ? "possible" : undefined,
@@ -2583,6 +3320,20 @@ function makeMockApp(): AppBindings {
     },
     async RemoveMCPServer(name: string) {
       capServers = capServers.filter((s) => s.name !== name);
+    },
+    async AuthorizeAndConnectMCPServer(name: string) {
+      capServers = capServers.map((s) =>
+        s.name === name
+          ? {
+              ...s,
+              status: "connected",
+              runtimeState: "ready",
+              tools: s.tools || 4,
+              error: undefined,
+              requiresLaunchApproval: false,
+            }
+          : s,
+      );
     },
     async ReconnectMCPServer(name: string) {
       capServers = capServers.map((s) =>
@@ -2609,33 +3360,6 @@ function makeMockApp(): AppBindings {
             }
           : s,
       );
-    },
-    async TrustMCPServerTool(name: string, toolName: string) {
-      const normalizedTool = toolName.trim();
-      if (!normalizedTool) return;
-      capServers = capServers.map((s) => {
-        if (s.name !== name) return s;
-        const trusted = Array.from(new Set([...(s.trustedReadOnlyTools ?? []), normalizedTool]));
-        return { ...s, trustedReadOnlyTools: trusted };
-      });
-    },
-    async TrustMCPServerTools(name: string, toolNames: string[]) {
-      const normalizedTools = toolNames.map((tool) => tool.trim()).filter(Boolean);
-      if (normalizedTools.length === 0) return;
-      capServers = capServers.map((s) => {
-        if (s.name !== name) return s;
-        const trusted = Array.from(new Set([...(s.trustedReadOnlyTools ?? []), ...normalizedTools]));
-        return { ...s, trustedReadOnlyTools: trusted };
-      });
-    },
-    async UntrustMCPServerTool(name: string, toolName: string) {
-      const normalizedTool = toolName.trim();
-      if (!normalizedTool) return;
-      capServers = capServers.map((s) => {
-        if (s.name !== name) return s;
-        const trusted = (s.trustedReadOnlyTools ?? []).filter((tool) => tool !== normalizedTool);
-        return { ...s, trustedReadOnlyTools: trusted };
-      });
     },
     async PickSkillFolder() {
       return "~/my-skills";
@@ -2673,6 +3397,60 @@ function makeMockApp(): AppBindings {
     async SetSkillEnabled(name: string, enabled: boolean) {
       const skill = capSkills.find((s) => s.name === name);
       if (skill) skill.enabled = enabled;
+    },
+    async AvailableSubagentTools() {
+      return [
+        { name: "read_file", description: "Read a file's contents", readOnlyHint: true },
+        { name: "ls", description: "List a directory", readOnlyHint: true },
+        { name: "glob", description: "Find files by name pattern", readOnlyHint: true },
+        { name: "grep", description: "Search file contents", readOnlyHint: true },
+        { name: "code_index", description: "Look up symbol definitions and file outlines", readOnlyHint: true },
+        { name: "edit_file", description: "Edit an existing file" },
+        { name: "write_file", description: "Write a new file" },
+        { name: "bash", description: "Run a shell command" },
+        { name: "web_fetch", description: "Fetch a URL" },
+      ];
+    },
+    async CreateSubagentProfile(input: SubagentProfileInput) {
+      const name = input.name.trim();
+      const builtinNames = ["init", "explore", "research", "install-capability", "review", "security-review", "test"];
+      if (builtinNames.includes(name)) throw new Error(`"${name}" is a built-in subagent name and cannot be reused`);
+      if (capSkills.some((s) => s.name === name)) throw new Error(`"${name}" already exists`);
+      capSkills.push({
+        name, description: input.description, scope: input.scope === "project" ? "project" : "global",
+        runAs: "subagent", enabled: true, model: input.model, effort: input.effort,
+        allowedTools: input.allowedTools, color: input.color, invocation: `/${name}`, invocationMode: "manual",
+      });
+      return `~/.reasonix/skills/${name}/SKILL.md`;
+    },
+    async UpdateSubagentProfile(name: string, scope: string, input: SubagentProfileInput) {
+      const skill = capSkills.find((s) => s.name === name && s.scope === scope);
+      if (!skill) throw new Error(`"${name}" resolves at a different scope — refusing to update`);
+      skill.description = input.description;
+      skill.color = input.color;
+      skill.model = input.model;
+      skill.effort = input.effort;
+      skill.allowedTools = input.allowedTools;
+    },
+    async DeleteSubagentProfile(name: string, scope: string) {
+      const idx = capSkills.findIndex((s) => s.name === name && s.scope === scope);
+      if (idx < 0) throw new Error(`"${name}" resolves at a different scope — refusing to delete`);
+      capSkills.splice(idx, 1);
+    },
+    async SetSubagentProfileModel(name: string, ref: string) {
+      const skill = capSkills.find((s) => s.name === name);
+      if (skill) skill.configuredModel = ref || undefined;
+    },
+    async SetSubagentProfileEffort(name: string, level: string) {
+      const skill = capSkills.find((s) => s.name === name);
+      if (skill) skill.configuredEffort = level || undefined;
+    },
+    async CancelTrySubagentProfile() {},
+    async TrySubagentProfile(input: SubagentProfileInput, task: string) {
+      if (!task.trim()) throw new Error("task is required");
+      if (!input.systemPrompt.trim()) throw new Error("system prompt is required");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return `[mock run of "${input.name || "draft"}"]\n\nTask: ${task}\n\n(This is a dev-mode mock response — the real backend runs an isolated subagent loop against your configured model.)`;
     },
     async SetMCPServerEnabled(name: string, enabled: boolean) {
       capServers = capServers.map((s) =>
@@ -2712,7 +3490,6 @@ function makeMockApp(): AppBindings {
         ],
         "/hooks": [
           { label: "list", insert: "list", hint: "list active hooks" },
-          { label: "trust", insert: "trust", hint: "trust this project's hooks" },
         ],
         "/model": [
           { label: "deepseek/deepseek-v4-flash", insert: "deepseek/deepseek-v4-flash", hint: "current" },
@@ -2748,11 +3525,17 @@ function makeMockApp(): AppBindings {
       }
       return [{ name: "file.go", isDir: false }];
     },
+    async ListDirForTab(_tabID: string, rel: string) {
+      return this.ListDir(rel);
+    },
     async SearchFileRefs(query: string) {
       const q = query.toLowerCase();
       return ["desktop/frontend/src/lib/bridge.ts", "frontend/wailsjs/runtime/runtime.js", "internal/control/refs.go"]
         .filter((path) => path.split("/").pop()?.toLowerCase().includes(q))
         .map((name) => ({ name, isDir: false }));
+    },
+    async SearchFileRefsForTab(_tabID: string, query: string) {
+      return this.SearchFileRefs(query);
     },
     async ReadFile(rel: string) {
       const samples: Record<string, string> = {
@@ -2768,6 +3551,9 @@ function makeMockApp(): AppBindings {
         truncated: false,
         binary: false,
       };
+    },
+    async ReadFileForTab(_tabID: string, rel: string) {
+      return this.ReadFile(rel);
     },
     async WorkspaceChanges(_tabID: string) {
       return {
@@ -2785,6 +3571,14 @@ function makeMockApp(): AppBindings {
           { path: "README.md", sources: ["git"], gitStatus: "??" },
           { path: "internal/control/controller.go", sources: ["session"], turns: [1], latestTime: Date.now() - 120_000 },
         ],
+      };
+    },
+    async WorkspaceChangeDetail(_tabID: string, path: string) {
+      return {
+        source: "git" as const,
+        added: 2,
+        removed: 1,
+        diff: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,3 @@\n-old line\n+new line\n context\n+another line`,
       };
     },
     async GitBranches() {
@@ -2807,8 +3601,30 @@ function makeMockApp(): AppBindings {
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
     },
+    async OpenWorkspacePathForTab(_tabID: string, rel: string) {
+      await this.OpenWorkspacePath(rel);
+    },
+    async ExternalOpeners() {
+      return {
+        openers: [
+          { id: "vscode", name: "VS Code", kind: "editor", iconDataUrl: mockExternalOpenerIconDataURL("#1684d6", "V") },
+          { id: "cursor", name: "Cursor", kind: "editor", iconDataUrl: mockExternalOpenerIconDataURL("#25262a", "C") },
+          { id: "finder", name: "Finder", kind: "file-manager", iconDataUrl: mockExternalOpenerIconDataURL("#36aaf4", "F") },
+          { id: "ghostty", name: "Ghostty", kind: "terminal", iconDataUrl: mockExternalOpenerIconDataURL("#264db6", ">") },
+        ],
+        preferred: "vscode",
+      } as ExternalOpenersView;
+    },
+    async SetPreferredExternalOpener(_id: string) {},
+    async OpenWorkspaceInExternalOpener(_id: string) {},
+    async OpenWorkspaceInExternalOpenerForTab(_tabID: string, id: string) {
+      await this.OpenWorkspaceInExternalOpener(id);
+    },
     async RevealWorkspacePath(rel: string) {
       console.info("mock RevealWorkspacePath", rel);
+    },
+    async RevealWorkspacePathForTab(_tabID: string, rel: string) {
+      await this.RevealWorkspacePath(rel);
     },
     async RevealPath(path: string) {
       console.info("mock RevealPath", path);
@@ -2845,6 +3661,20 @@ function makeMockApp(): AppBindings {
       a.click();
       a.remove();
       if (!base64Encoded) URL.revokeObjectURL(url);
+    },
+    async SaveExportImageFiles(path: string, payloads: string[]) {
+      if (payloads.length === 0) throw new Error("No image payloads to export");
+      const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+      const dot = path.lastIndexOf(".");
+      const extensionStart = dot > slash ? dot : path.length;
+      const stem = path.slice(0, extensionStart);
+      const extension = path.slice(extensionStart);
+      for (let index = 0; index < payloads.length; index++) {
+        const partPath = payloads.length > 1
+          ? `${stem}-${index + 1}-of-${payloads.length}${extension}`
+          : path;
+        await this.SaveExportFile(partPath, payloads[index], true);
+      }
     },
     async AttachDropped(path: string) {
       const name = path.split(/[/\\]/).filter(Boolean).pop() ?? path;
@@ -2899,26 +3729,38 @@ function makeMockApp(): AppBindings {
     async Memory() {
       return {
         available: true,
-        storeDir: "~/.config/reasonix/projects/-mock/memory",
-        storeGlobalDir: "~/.config/reasonix/memory/global",
+        storeDir: "~/.reasonix/projects/-mock/memory",
+        storeGlobalDir: "~/.reasonix/memory/global",
         docs: [
           {
             path: "REASONIX.md",
             scope: "project",
+            directory: ".",
             body: "# Reasonix project memory\n\nMock doc shown in the browser dev seam.\n\n## Notes\n\n- prefers concise replies",
+            imports: [],
+            depth: 0,
+            order: 0,
+            precedence: 0,
           },
           {
-            path: "~/.config/reasonix/REASONIX.md",
+            path: "~/.reasonix/REASONIX.md",
             scope: "user",
             body: t("mock.memoryBody"),
+            imports: [],
+            depth: -1,
+            order: 1,
+            precedence: 1,
           },
         ],
+        instructionDiagnostics: [],
         facts: [
           {
             name: "prefers-tabs",
             description: "User prefers tabs",
             type: "user",
+            scope: "project",
             body: "Indent with tabs.",
+            freshness: "fresh",
           },
         ],
         archives: [
@@ -2926,16 +3768,27 @@ function makeMockApp(): AppBindings {
             name: "old-plan",
             description: "Superseded planning note",
             type: "project",
+            scope: "project",
             body: "This plan was archived after the implementation changed.",
-            path: "~/.config/reasonix/projects/-mock/memory/.archive/20260612-021500.000-old-plan.md",
+            path: "~/.reasonix/projects/-mock/memory/.archive/20260612-021500.000-old-plan.md",
             archivedAt: "2026-06-12T02:15:00Z",
+            freshness: "current",
           },
         ],
         scopes: [
-          { scope: "user", path: "~/.config/reasonix/REASONIX.md" },
+          { scope: "user", path: "~/.reasonix/REASONIX.md" },
           { scope: "project", path: "REASONIX.md" },
           { scope: "local", path: "REASONIX.local.md" },
         ],
+        conflicts: [],
+        lastRecall: {
+          query: "",
+          hits: [],
+          omitted: 0,
+          charBudget: 2400,
+          usedChars: 0,
+          suppressed: "no user turn yet",
+        },
       };
     },
     async MemorySuggestions() {
@@ -2947,6 +3800,7 @@ function makeMockApp(): AppBindings {
             title: "Prefers concise replies",
             description: "User prefers concise replies unless detail is requested.",
             type: "user",
+            scope: "project",
             body: "User prefers concise replies unless detail is requested.\n\n**Why:** Suggested from recent local history.\n**How to apply:** Keep answers brief by default.",
             reason: "future-facing preference",
             evidence: ["mock-session: always keep replies concise"],
@@ -2988,6 +3842,28 @@ function makeMockApp(): AppBindings {
     async MemoryForTab(_tabID: string) {
       return this.Memory();
     },
+    async MemoryRevisions(_ref: string) {
+      return [];
+    },
+    async MemoryRevisionsForTab(_tabID: string, ref: string) {
+      return this.MemoryRevisions(ref);
+    },
+    async RestoreMemoryRevision(ref: string, revision: number) {
+      emit({ kind: "notice", level: "info", text: `restored revision → ${ref}@${revision}` });
+      return {
+        id: ref,
+        revision: revision + 1,
+        name: ref,
+        description: "Restored memory revision",
+        type: "project",
+        scope: "project",
+        body: "Restored guidance.",
+        freshness: "fresh",
+      };
+    },
+    async RestoreMemoryRevisionForTab(_tabID: string, ref: string, revision: number) {
+      return this.RestoreMemoryRevision(ref, revision);
+    },
     async Remember(_scope: string, _note: string) {
       emit({ kind: "notice", level: "info", text: `remembered → ${_scope}` });
       return `${_scope} REASONIX.md (mock): ${_note}`;
@@ -3001,6 +3877,22 @@ function makeMockApp(): AppBindings {
     async ForgetForTab(_tabID: string, name: string) {
       return this.Forget(name);
     },
+    async RestoreArchivedMemory(archivePath: string) {
+      emit({ kind: "notice", level: "info", text: `restored → ${archivePath}` });
+      return {
+        id: "mock-restored-memory",
+        revision: 2,
+        name: "restored-memory",
+        description: "Recovered archived memory",
+        type: "project",
+        scope: "project",
+        body: "Recovered guidance.",
+        freshness: "fresh",
+      };
+    },
+    async RestoreArchivedMemoryForTab(_tabID: string, archivePath: string) {
+      return this.RestoreArchivedMemory(archivePath);
+    },
     async SaveDoc(_path: string, _body: string) {
       emit({ kind: "notice", level: "info", text: `saved → ${_path}` });
       return _path;
@@ -3009,7 +3901,7 @@ function makeMockApp(): AppBindings {
       return this.SaveDoc(path, body);
     },
     async DesktopStartupSettings() {
-      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, statusBarStyle, statusBarItems, checkUpdates } = settings;
+      const { bot, desktopLanguage, desktopLayoutStyle, desktopTheme, desktopThemeStyle, displayMode, statusBarStyle, statusBarItems, checkUpdates, conversationWidth } = settings;
       return JSON.parse(JSON.stringify({
         bot,
         desktopLanguage,
@@ -3020,6 +3912,7 @@ function makeMockApp(): AppBindings {
         statusBarStyle,
         statusBarItems,
         checkUpdates,
+        conversationWidth,
       })) as DesktopStartupSettingsView;
     },
     async Settings() {
@@ -3038,12 +3931,10 @@ function makeMockApp(): AppBindings {
       hookSettings[key].hooks = JSON.parse(JSON.stringify(hooks)) as HookConfigView[];
     },
     async TrustProjectHooks() {
-      hookSettings.project.trusted = true;
+      // Compatibility no-op: project hooks are enabled automatically.
     },
-    async TrustProjectHooksForRoot(projectRoot: string) {
-      if (projectRoot && projectRoot === hookSettings.project.projectRoot) {
-        hookSettings.project.trusted = true;
-      }
+    async TrustProjectHooksForRoot(_projectRoot: string) {
+      // Compatibility no-op: project hooks are enabled automatically.
     },
     async SetDefaultModel(ref: string) {
       settings.defaultModel = ref;
@@ -3060,11 +3951,25 @@ function makeMockApp(): AppBindings {
     async SetMaxSubagentDepth(depth: number) {
       settings.agent = { ...settings.agent, maxSubagentDepth: depth <= 1 ? 1 : 2 };
     },
+    async SetMaxSubagentConcurrency(n: number) {
+      const total = Math.max(1, Math.min(32, Math.floor(n) || 6));
+      const writers = Math.min(total, Math.max(1, settings.agent.maxParallelWriters || 3));
+      settings.agent = { ...settings.agent, maxSubagentConcurrency: total, maxParallelWriters: writers };
+    },
+    async SetMaxParallelWriters(n: number) {
+      const total = Math.max(1, Math.min(32, settings.agent.maxSubagentConcurrency || 6));
+      const writers = Math.max(1, Math.min(total, Math.floor(n) || 3));
+      settings.agent = { ...settings.agent, maxParallelWriters: writers };
+    },
     async SetAutoPlan(mode: string) {
-      settings.autoPlan = mode;
+      if (mode !== "off") throw new Error("Automatic plan mode has been retired; use Plan Mode explicitly.");
+      settings.autoPlan = "off";
     },
     async SetDefaultToolApprovalMode(mode: string) {
       settings.defaultToolApprovalMode = normalizeToolApprovalMode(mode);
+    },
+    async SetDefaultAutoRecoveryCheckpoint(_enabled: boolean) {
+      // Legacy no-op; Auto Guard is always built into Auto.
     },
     async SaveProvider(p: ProviderView) {
       p.added = true;
@@ -3173,7 +4078,7 @@ function makeMockApp(): AppBindings {
         async ReloadSettings() {},
         async SetSandbox(bash: string, network: boolean, workspaceRoot: string, allowWrite: string[], shell: string) {
           const effectiveWorkspaceRoot = workspaceRoot.trim() || cwd;
-          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell };
+          settings.sandbox = { bash, network, workspaceRoot, allowWrite, effectiveWorkspaceRoot, effectiveWriteRoots: [effectiveWorkspaceRoot, ...allowWrite], shell, effectiveShell: browserPreviewEffectiveShell(shell) };
         },
         async SetNetwork(n: NetworkView) {
           settings.network = n;
@@ -3293,9 +4198,132 @@ function makeMockApp(): AppBindings {
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
         },
+        async SetDesktopCurrency(currency: string) {
+          settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";
+        },
         async SetDesktopAppearance(theme: string, style: string) {
           settings.desktopTheme = theme === "auto" || theme === "light" ? theme : "dark";
           settings.desktopThemeStyle = style;
+          mockThemeMode = settings.desktopTheme as "auto" | "light" | "dark";
+          if (["graphite","aurora","slate","carbon","nocturne","amber"].includes(style)) {
+            mockBaseStyle = style;
+          }
+        },
+        async ListThemePacks() {
+          const baseActive = !mockActiveThemeId;
+          return mockThemePacks.map((p) => {
+            const kind = p.kind || (p.builtin ? "base" : "user");
+            let active = false;
+            if (kind === "base") active = baseActive && p.id === mockBaseStyle;
+            else active = p.id === mockActiveThemeId;
+            return { ...p, active, tokens: { light: { ...(p.tokens.light || {}) }, dark: { ...(p.tokens.dark || {}) } }, recipes: { ...p.recipes } };
+          });
+        },
+        async GetActiveThemePack() {
+          // Base style ids are never active packs in the redesigned model.
+          const pack = mockActiveThemeId && !["graphite","aurora","slate","carbon","nocturne","amber"].includes(mockActiveThemeId)
+            ? mockThemePacks.find((p) => p.id === mockActiveThemeId)
+            : null;
+          return { activeThemeId: pack ? mockActiveThemeId : "", pack: pack ? { ...pack, active: true } : null, safeMode: false };
+        },
+        async GetThemeExperience() {
+          const pack = mockActiveThemeId && !["graphite","aurora","slate","carbon","nocturne","amber"].includes(mockActiveThemeId)
+            ? mockThemePacks.find((p) => p.id === mockActiveThemeId)
+            : null;
+          return {
+            themeMode: mockThemeMode,
+            baseStyle: mockBaseStyle,
+            effectiveStyle: pack?.baseStyle || mockBaseStyle,
+            activeThemeId: pack ? mockActiveThemeId : "",
+            activePack: pack ? { ...pack, active: true } : null,
+            safeMode: false,
+          };
+        },
+        async ActivateThemePack(id: string) {
+          const next = String(id || "").trim();
+          if (["graphite","aurora","slate","carbon","nocturne","amber"].includes(next)) {
+            throw new Error(`base style ${next} is not a theme pack; use ActivateBaseStyle`);
+          }
+          mockActiveThemeId = next;
+        },
+        async ActivateBaseStyle(style: string) {
+          const s = String(style || "").trim().toLowerCase();
+          if (!["graphite","aurora","slate","carbon","nocturne","amber"].includes(s)) {
+            throw new Error(`unknown base style ${s}`);
+          }
+          mockBaseStyle = s;
+          mockActiveThemeId = "";
+        },
+        async DisableThemePack() {
+          mockActiveThemeId = "";
+        },
+        async RestoreGraphiteAppearance() {
+          mockBaseStyle = "graphite";
+          mockActiveThemeId = "";
+        },
+        async ResetThemePack() {
+          mockActiveThemeId = "";
+        },
+        async SaveThemePack(input: import("./themePack").ThemeSaveInput) {
+          const pack: import("./themePack").ThemePackView = {
+            id: input.id,
+            name: input.name,
+            author: input.author,
+            description: input.description,
+            license: input.license,
+            baseStyle: input.baseStyle,
+            builtin: false,
+            kind: "user",
+            active: Boolean(input.activate),
+            hasBackground: Boolean(
+              (input.background && (input.backgroundDataUrl || input.background.image)) ||
+              (input.taskBackground && (input.taskBackgroundDataUrl || input.taskBackground.image)),
+            ),
+            backgroundUrl: input.backgroundDataUrl || "",
+            taskBackgroundUrl: input.taskBackgroundDataUrl || "",
+            tokens: input.tokens || {},
+            recipes: input.recipes || { density: "comfortable", corners: "soft" },
+            background: input.background ?? undefined,
+            taskBackground: input.taskBackground ?? undefined,
+          };
+          const idx = mockThemePacks.findIndex((p) => p.id === pack.id);
+          if (idx >= 0) mockThemePacks[idx] = pack;
+          else mockThemePacks.push(pack);
+          if (input.activate) mockActiveThemeId = pack.id;
+          return pack;
+        },
+        async DeleteThemePack(id: string) {
+          mockThemePacks = mockThemePacks.filter((p) => p.id !== id || p.builtin);
+          if (mockActiveThemeId === id) mockActiveThemeId = "";
+        },
+        async CopyThemePack(sourceID: string, newID: string, newName: string) {
+          const src = mockThemePacks.find((p) => p.id === sourceID);
+          if (!src) throw new Error("source theme not found");
+          const pack: import("./themePack").ThemePackView = {
+            ...src,
+            id: newID,
+            name: newName || `${src.name} Copy`,
+            builtin: false,
+            kind: "user",
+            nameKey: undefined,
+            descriptionKey: undefined,
+            active: false,
+          };
+          mockThemePacks.push(pack);
+          return pack;
+        },
+        async ImportThemePack(_sourcePath: string, replace: boolean) {
+          if (replace) {
+            return { pack: mockThemePacks[0], replaced: true };
+          }
+          // Simulate conflict path without re-prompting for a file on confirm.
+          return { pack: mockThemePacks[0], replaced: false, needsReplace: true, pendingId: "pending-mock" };
+        },
+        async ExportThemePack(_id: string, _destPath: string) {
+          return "";
+        },
+        async PickThemeBackground() {
+          return "";
         },
         async SetDesktopLayoutStyle(style: string) {
           settings.desktopLayoutStyle = style === "workbench" || style === "creation" ? style : "classic";
@@ -3312,14 +4340,17 @@ function makeMockApp(): AppBindings {
         async SetDesktopCheckUpdates(enabled: boolean) {
           settings.checkUpdates = enabled;
         },
+        async SetDesktopUpdateChannel(channel: string) {
+          settings.updateChannel = channel === "preview" ? "preview" : "stable";
+        },
         async SetDesktopTelemetry(enabled: boolean) {
           settings.telemetry = enabled;
         },
         async SetDesktopMetrics(enabled: boolean) {
           settings.metrics = enabled;
         },
-        async SetMemoryCompilerEnabled(enabled: boolean) {
-          settings.memoryCompilerEnabled = enabled;
+        async SetDesktopConversationWidth(width: string) {
+          settings.conversationWidth = width;
         },
         async SetExpandThinking(_on: boolean) {},
         async MigrateDesktopPreferences(language: string, theme: string, style: string) {
@@ -3355,59 +4386,73 @@ function makeMockApp(): AppBindings {
     async Version() {
       return "v1.0.0 (browser dev)";
     },
-    async CheckUpdate() {
+    async CheckUpdate(channel: string) {
       // Keep the default browser preview focused on the primary product surface.
-      // DownloadUpdate/InstallUpdate remain mocked for explicit updater-flow tests.
+      // Updater methods remain mocked for explicit updater-flow tests.
       return {
         available: false,
         current: "v1.0.0",
         latest: "v1.0.0",
         notes: "",
-        channel: "stable",
+        channel: channel === "preview" ? "preview" : "stable",
         canSelfUpdate: false,
         manualOnly: true,
+        installMode: "manual",
         manualReason: "browser preview",
         downloaded: false,
         downloadUrl: "",
         assetSize: 0,
       };
     },
-    async DownloadUpdate() {
+    async DownloadUpdate(channel: string) {
+      const expectedVersion = channel === "preview" ? "v1.1.0-preview.1" : "v1.1.0";
+      return this.DownloadUpdateRequest(channel, expectedVersion, "mock-legacy-download");
+    },
+    async DownloadUpdateRequest(channel: string, expectedVersion: string, requestId: string) {
+      const selectedChannel = channel === "preview" ? "preview" : "stable";
       const total = 12_345_678;
       for (let r = 0; r <= total; r += 1_800_000) {
-        emitUpdater({ phase: "downloading", received: Math.min(r, total), total });
+        emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "downloading", received: Math.min(r, total), total });
         await delay(120);
       }
-      emitUpdater({ phase: "verifying", received: total, total });
+      emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "verifying", received: total, total });
       await delay(500);
-      emitUpdater({ phase: "downloaded", received: total, total });
-      return { version: "v1.1.0", channel: "stable", path: "/tmp/reasonix-update", size: total, sha256: "mock" };
+      emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "downloaded", received: total, total });
+      return { requestId, version: expectedVersion, channel: selectedChannel, path: "/tmp/reasonix-update", size: total, sha256: "mock" };
     },
-    async InstallUpdate() {
+    async InstallUpdate(channel: string) {
+      const expectedVersion = channel === "preview" ? "v1.1.0-preview.1" : "v1.1.0";
+      await this.InstallUpdateRequest(channel, expectedVersion, "mock-legacy-install");
+    },
+    async InstallUpdateRequest(channel: string, expectedVersion: string, requestId: string) {
+      const selectedChannel = channel === "preview" ? "preview" : "stable";
       const total = 12_345_678;
-      emitUpdater({ phase: "installing", received: total, total });
+      emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "installing", received: total, total });
       await delay(500);
-      emitUpdater({ phase: "done", received: total, total });
+      emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "done", received: total, total });
       // The real shell relaunches here; the mock just stops.
     },
     async ApplyUpdate() {
-      await this.DownloadUpdate();
-      await this.InstallUpdate();
+      await this.DownloadUpdateRequest("stable", "v1.1.0", "mock-apply-download");
+      await this.InstallUpdateRequest("stable", "v1.1.0", "mock-apply-install");
     },
     async OpenDownloadPage() {
       if (typeof window !== "undefined") {
-        window.open("https://reasonix.io/#start", "_blank", "noopener");
+        window.open("https://reasonix.io/?download=desktop#start", "_blank", "noopener");
       }
     },
-    // Dev seam: drives the overlay flow in the browser until ConnectKey sets the
-    // key. Matches ConnectKey on apiKeyEnv so the two stay in sync.
+    // Dev seam: match the backend's provider-agnostic onboarding predicate.
     async NeedsOnboarding() {
-      return !settings.providers.find((p) => p.apiKeyEnv === "DEEPSEEK_API_KEY")?.keySet;
+      return !settings.providers.some((p) => p.models.length > 0 && providerIsConfigured(p));
     },
     async ConnectKey(apiKey: string) {
       if (!apiKey.trim()) throw new Error("key is required");
       settings.providers.forEach((p) => {
-        if (p.apiKeyEnv === "DEEPSEEK_API_KEY") p.keySet = true;
+        if (p.apiKeyEnv === "DEEPSEEK_API_KEY") {
+          p.added = true;
+          p.keySet = true;
+          p.configured = true;
+        }
       });
       await delay(300);
       return "";
@@ -3450,6 +4495,29 @@ function makeMockApp(): AppBindings {
       };
       mockTabs = [...mockTabs.map((item) => ({ ...item, active: false })), tab];
       return { ...tab };
+    },
+    async DeliveryWorktreeAvailability(workspaceRoot: string) {
+      return workspaceRoot
+        ? { available: true, repoRoot: workspaceRoot, branch: "main", sourceDirty: false }
+        : { available: false, reason: "project folder is required" };
+    },
+    async CreateDeliveryWorktree(workspaceRoot: string) {
+      if (!workspaceRoot) throw new Error("project folder is required");
+      const suffix = Date.now().toString(36);
+      const isolatedRoot = `/mock/reasonix-worktrees/${suffix}/${workspaceRoot.split("/").filter(Boolean).pop() ?? "project"}`;
+      const topicID = `topic_worktree_${suffix}`;
+      const tab = await this.OpenProjectTab(isolatedRoot, topicID);
+      tab.isolatedWorktree = true;
+      tab.gitBranch = `reasonix/delivery-${suffix}`;
+      mockTabs = mockTabs.map((candidate) => candidate.id === tab.id ? { ...tab } : candidate);
+      return {
+        workspaceRoot: isolatedRoot,
+        worktreeRoot: isolatedRoot,
+        sourceRoot: workspaceRoot,
+        branch: tab.gitBranch,
+        sourceDirty: false,
+        tab,
+      };
     },
     async OpenGlobalTab(_topicID: string) {
       const existing = mockTabs.find((tab) => tab.scope === "global" && tab.topicId === _topicID);
@@ -3530,11 +4598,72 @@ function makeMockApp(): AppBindings {
     },
     async CloseTab(_tabID: string) {
       if (mockTabs.length <= 1) return;
+      const terminalIDs = mockTerminalSessions
+        .filter((session) => mockTerminalTabIDs.get(session.id) === _tabID)
+        .map((session) => session.id);
+      mockTerminalSessions = mockTerminalSessions.filter((session) => !terminalIDs.includes(session.id));
+      terminalIDs.forEach((id) => {
+        mockTerminalOutput.delete(id);
+        mockTerminalTabIDs.delete(id);
+        __emitMockTerminalExit({ id, exitCode: 0, removed: true });
+      });
       const wasActive = mockTabs.some((tab) => tab.id === _tabID && tab.active);
       mockTabs = mockTabs.filter((tab) => tab.id !== _tabID);
       if (wasActive && mockTabs.length > 0 && !mockTabs.some((tab) => tab.active)) {
         mockTabs[mockTabs.length - 1] = { ...mockTabs[mockTabs.length - 1], active: true };
       }
+    },
+    async TerminalWorkspaceForTab(tabID: string) {
+      const tab = mockTabs.find((candidate) => candidate.id === tabID) ?? mockTabs.find((candidate) => candidate.active);
+      const sessions = tab ? mockTerminalSessions.filter((session) => mockTerminalTabIDs.get(session.id) === tab.id) : [];
+      return {
+        available: true,
+        readOnly: Boolean(tab?.readOnly),
+        sessions: sessions.map((session) => ({ ...session })),
+        shells: [
+          { id: "default", label: "Default shell" },
+          { id: "bash", label: "bash" },
+          { id: "zsh", label: "zsh" },
+        ],
+      };
+    },
+    async TerminalOutputForTab(tabID: string, sessionID: string) {
+      if (mockTerminalTabIDs.get(sessionID) !== tabID) return "";
+      return mockTerminalOutput.get(sessionID) ?? "";
+    },
+    async CreateTerminalForTab(tabID: string, relativePath: string, shellID: string) {
+      const tab = mockTabs.find((candidate) => candidate.id === tabID) ?? mockTabs.find((candidate) => candidate.active);
+      if (tab?.readOnly) throw new Error("channel session is read-only");
+      const id = `term-mock-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const session: TerminalSessionView = {
+        id,
+        title: shellID || "Default shell",
+        shell: shellID || "default",
+        cwd: `${tab?.cwd || cwd}/${relativePath || "."}`.replace(/\/\.\/?$/, ""),
+        createdAt: Date.now(),
+        running: true,
+      };
+      mockTerminalSessions = [...mockTerminalSessions, session];
+      mockTerminalOutput.set(id, "Reasonix terminal ready\r\n");
+      mockTerminalTabIDs.set(id, tabID);
+      window.setTimeout(() => __emitMockTerminalOutput({ id, data: mockTerminalBytes("Reasonix terminal ready\r\n") }), 0);
+      return { ...session };
+    },
+    async WriteTerminalForTab(_tabID: string, sessionID: string, data: string) {
+      const session = mockTerminalSessions.find((candidate) => candidate.id === sessionID);
+      if (!session?.running) throw new Error("terminal session has exited");
+      mockTerminalOutput.set(sessionID, `${mockTerminalOutput.get(sessionID) ?? ""}${data}`);
+      window.setTimeout(() => __emitMockTerminalOutput({ id: sessionID, data: mockTerminalBytes(data) }), 0);
+    },
+    async ResizeTerminalForTab() {},
+    async CloseTerminalForTab(_tabID: string, sessionID: string) {
+      mockTerminalSessions = mockTerminalSessions.filter((session) => session.id !== sessionID);
+      mockTerminalOutput.delete(sessionID);
+      mockTerminalTabIDs.delete(sessionID);
+      __emitMockTerminalExit({ id: sessionID, exitCode: 0, removed: true });
+    },
+    async RenameTerminalForTab(_tabID: string, sessionID: string, title: string) {
+      mockTerminalSessions = mockTerminalSessions.map((session) => session.id === sessionID ? { ...session, title } : session);
     },
     async ListProjectTree() {
       return cloneProjectTree();
@@ -3740,5 +4869,156 @@ function makeMockApp(): AppBindings {
         ],
       };
     },
+
+    // ── Remote (SSH) mock ──
+    async RemoteHosts() {
+      return mockRemoteHosts.slice();
+    },
+    async AddRemoteHost(input) {
+      const view = mockRemoteHostView(input.label, input);
+      mockRemoteHosts = [...mockRemoteHosts.filter((h) => h.id !== view.id), view];
+      return view;
+    },
+    async UpdateRemoteHost(id, input) {
+      const previous = mockRemoteHosts.find((h) => h.id === id);
+      const view = mockRemoteHostView(id, input, previous);
+      mockRemoteHosts = mockRemoteHosts.map((h) => (h.id === id ? view : h));
+      return view;
+    },
+    async RemoveRemoteHost(id) {
+      mockRemoteHosts = mockRemoteHosts.filter((h) => h.id !== id);
+      delete mockRemoteConn[id];
+    },
+    async ScanSSHConfig() {
+      return [
+        { label: "gpu-box", host: "gpu-box", port: 0, user: "", identityFile: "", proxyJump: "", defaultWorkspace: "", serveInstall: "auto", useSSHConfig: true, preserveExistingSettings: true },
+      ];
+    },
+    async ConnectRemoteHost(id) {
+      mockRemoteConn[id] = "connecting";
+      __emitMockRemote("status", { hostId: id, state: "connecting" });
+      setTimeout(() => {
+        mockRemoteConn[id] = "connected";
+        __emitMockRemote("status", { hostId: id, state: "connected" });
+      }, 300);
+    },
+    async DisconnectRemoteHost(id) {
+      mockRemoteConn[id] = "stopped";
+      __emitMockRemote("status", { hostId: id, state: "stopped" });
+    },
+    async RemoteConnectionStatuses() {
+      return Object.entries(mockRemoteConn).map(([hostId, state]) => ({ hostId, state: state as RemoteConnectionStatus["state"] }));
+    },
+    async ConfirmRemoteHostKey(hostId, accept) {
+      mockRemoteConn[hostId] = accept ? "connected" : "stopped";
+      __emitMockRemote("status", { hostId, state: mockRemoteConn[hostId] });
+    },
+    async ConfirmRemoteSecret(hostId, _promptId, _secret, accept) {
+      mockRemoteConn[hostId] = accept ? "connected" : "stopped";
+      __emitMockRemote("status", { hostId, state: mockRemoteConn[hostId] });
+    },
+    async ListRemoteDir(_hostId, path) {
+      const base = path.replace(/\/$/, "");
+      return [
+        { name: "src", path: `${base}/src`, isDir: true, size: 0, mtimeUnix: 1_700_000_000, symlink: false },
+        { name: "README.md", path: `${base}/README.md`, isDir: false, size: 1024, mtimeUnix: 1_700_000_500, symlink: false },
+      ];
+    },
+    async ReadRemoteFile(_hostId, path) {
+      return { path, body: `# Mock remote file\n${path}\n`, size: 40, mtimeUnix: 1_700_000_500, truncated: false, binary: false };
+    },
+    async WriteRemoteFile(_hostId, _path, _body, _expectMtimeUnix) {
+      return { ok: true, conflict: false, newMtimeUnix: 1_700_000_900 };
+    },
+    async MkdirRemote() {},
+    async RenameRemotePath() {},
+    async DeleteRemotePath() {},
+    async RemoteForwards(hostId) {
+      return mockRemoteForwards[hostId] ?? [];
+    },
+    async AddRemoteForward(hostId, input) {
+      const view: RemoteForwardView = { id: `L:${input.localPort}`, hostId, ...input, state: "active" };
+      mockRemoteForwards[hostId] = [...(mockRemoteForwards[hostId] ?? []), view];
+      __emitMockRemote("forwards", { hostId, forwards: mockRemoteForwards[hostId] });
+      return view;
+    },
+    async RemoveRemoteForward(hostId, forwardId) {
+      mockRemoteForwards[hostId] = (mockRemoteForwards[hostId] ?? []).filter((f) => f.id !== forwardId);
+      __emitMockRemote("forwards", { hostId, forwards: mockRemoteForwards[hostId] });
+    },
+    async EnsureRemoteServer(hostId, workspace) {
+      for (const state of ["starting", "detect", "launch", "ready"] as const) {
+        __emitMockRemote("server", { hostId, workspace, state, localUrl: state === "ready" ? "http://127.0.0.1:44321/" : "" });
+      }
+    },
+    async OpenRemoteWorkspace() {},
+    async StopRemoteServer(hostId) {
+      __emitMockRemote("server", { hostId, workspace: "", state: "stopped" });
+    },
+    async RemoteServerStatus(hostId) {
+      return { hostId, workspace: "~/app", state: "stopped" };
+    },
+    async RemoteServerLogs() {
+      return "mock serve log line 1\nmock serve log line 2\n";
+    },
+    async RemoteLastWorkspace() {
+      return "~/app";
+    },
+    async WorkbenchActiveTarget() {
+      return { ...mockWorkbenchTarget };
+    },
+    async WorkbenchLastRemoteHint() {
+      return mockWorkbenchTarget.kind === "ssh"
+        ? { hostId: mockWorkbenchTarget.hostId, workspace: mockWorkbenchTarget.workspace, label: mockWorkbenchTarget.hostId }
+        : {};
+    },
+    async WorkbenchSwitchLocal() {
+      mockWorkbenchTarget = { kind: "local", identityGen: (mockWorkbenchTarget.identityGen ?? 0) + 1, requestSeq: 1 };
+      return { ...mockWorkbenchTarget };
+    },
+    async WorkbenchConnectRemote(hostId, workspace) {
+      mockWorkbenchTarget = {
+        kind: "ssh",
+        hostId,
+        workspace,
+        identityGen: (mockWorkbenchTarget.identityGen ?? 0) + 1,
+        requestSeq: 1,
+      };
+    },
+    async WorkbenchDisconnectRemote() {
+      mockWorkbenchTarget = { kind: "local", identityGen: (mockWorkbenchTarget.identityGen ?? 0) + 1, requestSeq: 1 };
+    },
+    async WorkbenchRemoteRequest(_method, _paramsJSON) {
+      return "{}";
+    },
+    async WorkbenchResolveProviderTrust() {},
+    async WorkbenchPendingProviderTrust() {
+      return null;
+    },
   };
 }
+
+// Mock remote state, module-scoped so it survives across mock method calls.
+function mockRemoteHostView(id: string, input: RemoteHostInput, previous?: RemoteHostView): RemoteHostView {
+  return {
+    id,
+    label: input.label,
+    host: input.host,
+    port: input.port,
+    user: input.user,
+    identityFile: input.identityFile,
+    proxyJump: input.proxyJump,
+    defaultWorkspace: input.defaultWorkspace,
+    serveInstall: input.serveInstall,
+    useSSHConfig: input.useSSHConfig,
+    passwordSet: input.password ? true : input.clearPassword ? false : previous?.passwordSet,
+    keyPassphraseSet: input.keyPassphrase ? true : input.clearPassphrase ? false : previous?.keyPassphraseSet,
+  };
+}
+
+let mockRemoteHosts: RemoteHostView[] = [
+  { id: "demo", label: "demo", host: "192.168.1.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
+];
+const mockRemoteConn: Record<string, RemoteConnectionStatus["state"]> = {};
+const mockRemoteForwards: Record<string, RemoteForwardView[]> = {};
+let mockWorkbenchTarget: WorkbenchActiveTarget = { kind: "local", identityGen: 1, requestSeq: 1 };

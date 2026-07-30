@@ -3,6 +3,7 @@ package control
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -52,6 +53,29 @@ func (k *SessionLeaseKeeper) Rebind(path string) error {
 	}
 	k.releaseLocked()
 	k.lease = lease
+	return nil
+}
+
+// HandleSessionRecovered moves the single-session frontend lease before a
+// controller commits to a recovery branch. It is suitable for
+// Options.OnSessionRecovered in CLI chat/run/serve surfaces. Rebind acquires the
+// recovery path before releasing the original lease, so a failed handoff keeps
+// the previous session protected.
+func (k *SessionLeaseKeeper) HandleSessionRecovered(info SessionRecoveryInfo) error {
+	recoveryPath := strings.TrimSpace(info.RecoveryPath)
+	if k == nil || recoveryPath == "" {
+		return nil
+	}
+	if err := k.Rebind(recoveryPath); err != nil {
+		if errors.Is(err, agent.ErrSessionLeaseHeld) {
+			return fmt.Errorf("bind recovery session: %s; %s",
+				SessionInUseMessage(err), SessionLeaseCloseHint)
+		}
+		// The detailed error can contain a machine-local path. Keep it in
+		// diagnostics and return path-free text to every frontend.
+		slog.Error("control: bind recovery session lease", "err", err)
+		return fmt.Errorf("bind recovery session: unable to secure recovered transcript")
+	}
 	return nil
 }
 

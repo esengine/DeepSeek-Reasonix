@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "id": "official-rose-dawn",
+  "name": "Rose Dawn",
+  "author": "Reasonix Contributors",
+  "description": "Ivory dawn light, soft roses and an original illustrated muse on the right.",
+  "license": "MIT",
+  "baseStyle": "graphite",
+  "tokens": {
+    "light": {
+      "bg": "#FFF7F8",
+      "bgSoft": "#FBEFF1",
+      "bgElev": "#FFFFFF",
+      "panel": "#FFFFFF",
+      "sidebar": "#FBECEF",
+      "chat": "#FFFCFC",
+      "workspace": "#FFFFFF",
+      "workspaceFiles": "#FDF3F4",
+      "border": "#E2BCC6",
+      "borderSoft": "#F5E3E7",
+      "fg": "#3A252C",
+      "fgDim": "#6D4A55",
+      "fgFaint": "#A97B87",
+      "accent": "#B43F65",
+      "accentFg": "#FFF7F8"
+    },
+    "dark": {
+      "bg": "#1E1419",
+      "bgSoft": "#281B21",
+      "bgElev": "#312329",
+      "panel": "#2A1D24",
+      "sidebar": "#251922",
+      "chat": "#231820",
+      "workspace": "#312329",
+      "workspaceFiles": "#281C22",
+      "border": "#4C3440",
+      "borderSoft": "#3A2832",
+      "fg": "#FFF3F6",
+      "fgDim": "#D9B3C0",
+      "fgFaint": "#A87C8C",
+      "accent": "#E26D91",
+      "accentFg": "#2A121D"
+    }
+  },
+  "recipes": {
+    "density": "comfortable",
+    "corners": "round"
+  },
+  "background": {
+    "image": "background.webp",
+    "focusX": 0.72,
+    "focusY": 0.43,
+    "safeArea": "left",
+    "homeOpacity": 1.0,
+    "taskOpacity": 0.2,
+    "overlayStrength": 0.68,
+    "paneOpacity": 0.5
+  }
+}

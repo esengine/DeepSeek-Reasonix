@@ -30,25 +30,26 @@ func connectorBlock(lines []string) string {
 
 // toolVerb maps a tool's snake_case id to the verb shown in its card.
 var toolVerb = map[string]string{
-	"bash":          "Bash",
-	"bash_output":   "Output",
-	"kill_shell":    "Kill",
-	"wait":          "Wait",
-	"read_file":     "Read",
-	"write_file":    "Write",
-	"edit_file":     "Update",
-	"multi_edit":    "Update",
-	"move_file":     "Move",
-	"delete_range":  "Update",
-	"delete_symbol": "Update",
-	"notebook_edit": "Update",
-	"glob":          "Glob",
-	"grep":          "Search",
-	"ls":            "List",
-	"web_fetch":     "Fetch",
-	"web_search":    "Search",
-	"complete_step": "Step",
-	"task":          "Task",
+	"bash":           "Bash",
+	"bash_output":    "Output",
+	"kill_shell":     "Kill",
+	"wait":           "Wait",
+	"read_file":      "Read",
+	"write_file":     "Write",
+	"edit_file":      "Update",
+	"multi_edit":     "Update",
+	"move_file":      "Move",
+	"delete_range":   "Update",
+	"delete_symbol":  "Update",
+	"notebook_edit":  "Update",
+	"glob":           "Glob",
+	"grep":           "Search",
+	"ls":             "List",
+	"web_fetch":      "Fetch",
+	"web_search":     "Search",
+	"complete_step":  "Step",
+	"task":           "Task",
+	"use_capability": "MCP",
 }
 
 // toolArgKey is the JSON field shown in parentheses for each tool (wait is
@@ -123,6 +124,15 @@ func toolArg(name, args string) string {
 	}
 	if name == "wait" {
 		return argList(m["job_ids"])
+	}
+	if name == "use_capability" {
+		if id, ok := m["capability_id"].(string); ok && strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+		if action, ok := m["action"].(string); ok {
+			return strings.TrimSpace(action)
+		}
+		return ""
 	}
 	v, ok := m[toolArgKey[name]]
 	if !ok {

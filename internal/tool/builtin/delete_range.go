@@ -15,6 +15,8 @@ func init() { tool.RegisterBuiltin(deleteRange{}) }
 
 type deleteRange struct {
 	roots   []string
+	guard   SessionDataGuard
+	managed ManagedConfigPaths
 	workDir string
 }
 
@@ -42,6 +44,11 @@ func (deleteRange) ReadOnly() bool { return false }
 func (d deleteRange) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	change, err := d.preview(args)
 	if err != nil {
+		return "", err
+	}
+	// preview ran the ctx-less boundary check; the actual write needs the full
+	// one, which can gate a Reasonix-managed config target on user approval.
+	if err := confineWrite(ctx, d.roots, d.guard, d.managed, change.Path); err != nil {
 		return "", err
 	}
 	// Re-detect the file's encoding so the rewrite preserves it (GBK/UTF-16/BOM)
@@ -86,7 +93,7 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 	}
 
 	p.Path = resolveIn(d.workDir, p.Path)
-	if err := confine(d.roots, p.Path); err != nil {
+	if err := confinePreview(d.roots, d.guard, d.managed, p.Path); err != nil {
 		return diff.Change{}, err
 	}
 
