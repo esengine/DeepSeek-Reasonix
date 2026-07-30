@@ -367,47 +367,6 @@ func mergeExtraBody(m map[string]any, key string, value any) map[string]any {
 	return m
 }
 
-// applyDashScopeCacheControl marks the system message, the final message (when
-// markLast is true), and the final tool with cache_control: {type: "ephemeral"}
-// so DashScope's server-side prefix cache engages on all three prefix segments.
-// Content that is already a []chatContentPart gets the marker on its last text
-// part; string content is promoted to a single-element part array. Mirrors
-// qwen-code's addDashScopeCacheControl in 'all' mode for streaming requests.
-func applyDashScopeCacheControl(msgs []chatMessage, tools []chatTool, markLast bool) {
-	if len(msgs) == 0 {
-		return
-	}
-	markMsg := func(m *chatMessage) {
-		switch content := m.Content.(type) {
-		case string:
-			m.Content = []chatContentPart{{
-				Type:         "text",
-				Text:         content,
-				CacheControl: &cacheControl{Type: "ephemeral"},
-			}}
-		case []chatContentPart:
-			if len(content) > 0 {
-				content[len(content)-1].CacheControl = &cacheControl{Type: "ephemeral"}
-			}
-		}
-	}
-	// Always mark the system message.
-	for i := range msgs {
-		if msgs[i].Role == "system" {
-			markMsg(&msgs[i])
-			break
-		}
-	}
-	// In streaming (markLast=true), also mark the last message and last tool
-	// for full prefix cache coverage across all three segments.
-	if markLast {
-		markMsg(&msgs[len(msgs)-1])
-		if len(tools) > 0 {
-			tools[len(tools)-1].CacheControl = &cacheControl{Type: "ephemeral"}
-		}
-	}
-}
-
 func reservedExtraBodyField(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "model", "messages", "tools", "stream", "stream_options", "temperature", "max_tokens", "reasoning_effort", "thinking":
@@ -455,9 +414,9 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		httpReq.Header.Set("Accept", "text/event-stream")
 		applyCustomHeaders(httpReq.Header, c.headers)
 		if c.dashscope {
-			// DashScope's server-side prefix cache is opt-in via this header.
-			// qwen-code sends it unconditionally; we follow suit.
-			httpReq.Header.Set("X-DashScope-CacheControl", "enable")
+			// DashScope's session cache is opt-in via this header.
+			// Official header name per DashScope Responses API docs.
+			httpReq.Header.Set("x-dashscope-session-cache", "enable")
 		}
 		return httpReq, nil
 	}
@@ -671,25 +630,31 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		model := strings.ToLower(c.model)
 		switch {
 		case strings.HasPrefix(model, "qwen") || model == "coder-model":
-			// Qwen3.x uses top-level enable_thinking (boolean) plus the
-			// standard reasoning_effort field for depth. The server maps
-			// reasoning_effort → thinking_budget (low→4096, medium→16384,
-			// xhigh→262144). reasoning_effort and thinking_budget must not
-			// be set simultaneously (qwen3.8-max-preview rejects it).
+			// Qwen3.x thinking control per DashScope official docs:
+			// - reasoning.effort is the recommended parameter (replaces the
+			//   deprecated enable_thinking boolean).
+			// - Accepted ladder: low / medium / high / xhigh / max.
+			// - reasoning.effort and thinking_budget must NOT be set
+			//   simultaneously (qwen3.8-max-preview rejects it).
+			// - To disable thinking, enable_thinking: false is still the
+			//   explicit off switch.
 			if c.effort == "disabled" {
 				out.ExtraBody = mergeExtraBody(out.ExtraBody, "enable_thinking", false)
 				out.ReasoningEffort = ""
 			} else {
-				out.ExtraBody = mergeExtraBody(out.ExtraBody, "enable_thinking", true)
-				out.ExtraBody = mergeExtraBody(out.ExtraBody, "preserve_thinking", true)
-				// out.ReasoningEffort already carries c.effort from struct
-				// init; normalize max→xhigh for DashScope's accepted ladder.
-				// "enabled" (bare on) and "" (auto) omit the depth hint.
-				switch out.ReasoningEffort {
+				// Use reasoning.effort (nested object) instead of flat
+				// reasoning_effort. DashScope maps effort → thinking_budget
+				// server-side (low→4096, medium→16384, xhigh→262144).
+				effort := out.ReasoningEffort
+				switch effort {
 				case "max":
-					out.ReasoningEffort = "xhigh"
-				case "enabled", "disabled":
-					out.ReasoningEffort = ""
+					effort = "xhigh"
+				case "enabled", "":
+					effort = "" // auto: let model decide depth
+				}
+				out.ReasoningEffort = ""
+				if effort != "" {
+					out.ExtraBody = mergeExtraBody(out.ExtraBody, "reasoning", map[string]any{"effort": effort})
 				}
 			}
 		case strings.HasPrefix(model, "deepseek"):
@@ -711,16 +676,6 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			out.ReasoningEffort = ""
 		default:
 			out.ReasoningEffort = ""
-		}
-		// DashScope cache_control: mark system message, last message, and last
-		// tool with ephemeral cache hints so the server-side prefix cache
-		// engages. GLM models without tools skip this (their server drops array
-		// content in tool-less requests). Mirrors qwen-code's
-		// addDashScopeCacheControl with 'all' mode for streaming.
-		isGlm := strings.HasPrefix(model, "glm")
-		hasTools := len(out.Tools) > 0
-		if !(isGlm && !hasTools) {
-			applyDashScopeCacheControl(out.Messages, out.Tools, hasTools)
 		}
 	case c.thinkingType != "":
 		// Generic OpenAI-compatible provider with an explicit `thinking` config
@@ -1041,14 +996,9 @@ type chatMessage struct {
 }
 
 type chatContentPart struct {
-	Type         string        `json:"type"`
-	Text         string        `json:"text,omitempty"`
-	ImageURL     *chatImageURL `json:"image_url,omitempty"`
-	CacheControl *cacheControl `json:"cache_control,omitempty"`
-}
-
-type cacheControl struct {
-	Type string `json:"type"`
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *chatImageURL `json:"image_url,omitempty"`
 }
 
 type chatImageURL struct {
@@ -1068,9 +1018,8 @@ func imageContentParts(text string, images []string, detail string) []chatConten
 }
 
 type chatTool struct {
-	Type         string        `json:"type"`
-	Function     chatFunction  `json:"function"`
-	CacheControl *cacheControl `json:"cache_control,omitempty"`
+	Type     string       `json:"type"`
+	Function chatFunction `json:"function"`
 }
 
 type chatFunction struct {
