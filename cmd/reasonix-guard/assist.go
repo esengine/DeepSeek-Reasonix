@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
 	_ "reasonix/internal/provider/anthropic"
+	_ "reasonix/internal/provider/dashscope"
 	_ "reasonix/internal/provider/openai"
 	"reasonix/internal/repair"
 )

@@ -25,6 +25,7 @@ import (
 	// cmd/reasonix does — boot.Build resolves providers/tools from these registries.
 	"reasonix/internal/config"
 	_ "reasonix/internal/provider/anthropic"
+	_ "reasonix/internal/provider/dashscope"
 	_ "reasonix/internal/provider/openai"
 	"reasonix/internal/repair"
 	_ "reasonix/internal/tool/builtin"
