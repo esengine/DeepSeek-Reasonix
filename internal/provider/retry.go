@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -94,6 +95,122 @@ func (e *APIError) Error() string {
 		return base + "\n" + e.ToolContext
 	}
 	return base
+}
+
+// QuotaExceededError wraps an HTTP 429 that represents a periodic usage quota
+// exhaustion (not a transient TPM/RPM rate limit). Callers can still recover
+// the original *APIError via errors.As so metrics, Trace ID, and provider body
+// classification keep working.
+type QuotaExceededError struct {
+	API *APIError
+}
+
+func (e *QuotaExceededError) Error() string {
+	if e == nil || e.API == nil {
+		return "quota exceeded"
+	}
+	return e.API.Error()
+}
+
+func (e *QuotaExceededError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.API
+}
+
+// quotaExceededCodes are structured OpenAI/Anthropic-compatible error
+// code/type values that mean the account's periodic usage allotment is gone.
+// rate_limit_exceeded is deliberately excluded: that is TPM/RPM throttling and
+// must keep the existing backoff path.
+var quotaExceededCodes = map[string]struct{}{
+	"insufficient_quota":   {},
+	"quota_exceeded":       {},
+	"usage_quota_exceeded": {},
+	"usage_limit_reached":  {},
+}
+
+// IsQuotaExceededBody reports whether a non-OK provider response body describes
+// a periodic usage quota exhaustion rather than a transient rate limit.
+// Callers must still require HTTP 429 before treating the request as
+// non-retryable.
+func IsQuotaExceededBody(body string) bool {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return false
+	}
+	var parsed struct {
+		Error struct {
+			Code    string `json:"code"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Code    string `json:"code"`
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(body), &parsed) == nil {
+		tokens := []string{
+			parsed.Error.Code, parsed.Error.Type, parsed.Code, parsed.Type,
+		}
+		// An explicit structured rate-limit classification wins over free-text
+		// quota wording. Some gateways describe a short TPM/RPM window as a
+		// "quota" that was exceeded and will reset; those responses must retain
+		// the ordinary retry path.
+		for _, token := range tokens {
+			if looksLikeRateLimitCode(token) {
+				return false
+			}
+		}
+		for _, token := range tokens {
+			if _, ok := quotaExceededCodes[strings.ToLower(strings.TrimSpace(token))]; ok {
+				return true
+			}
+		}
+		if messageImpliesQuotaExceeded(parsed.Error.Message) || messageImpliesQuotaExceeded(parsed.Message) {
+			return true
+		}
+	}
+	return messageImpliesQuotaExceeded(body)
+}
+
+func looksLikeRateLimitCode(code string) bool {
+	code = strings.ToLower(strings.TrimSpace(code))
+	return code == "rate_limit_exceeded" || code == "rate_limit" ||
+		strings.Contains(code, "rate_limit")
+}
+
+// messageImpliesQuotaExceeded requires both a quota/usage-quota cue and an
+// exhausted/reached/reset cue so ordinary mentions of "quota" alone do not
+// fail-fast ordinary TPM/RPM 429s.
+func messageImpliesQuotaExceeded(msg string) bool {
+	lower := strings.ToLower(strings.TrimSpace(msg))
+	if lower == "" {
+		return false
+	}
+	hasQuota := strings.Contains(lower, "usage quota") ||
+		strings.Contains(lower, "usage limit") ||
+		strings.Contains(lower, "quota") ||
+		strings.Contains(lower, "额度") ||
+		strings.Contains(lower, "配額") ||
+		strings.Contains(lower, "配额")
+	if !hasQuota {
+		return false
+	}
+	// Explicit rate-limit wording wins over bare "quota" mentions.
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "tpm") || strings.Contains(lower, "rpm") {
+		return false
+	}
+	return strings.Contains(lower, "exceed") ||
+		strings.Contains(lower, "reached") ||
+		strings.Contains(lower, "reset") ||
+		strings.Contains(lower, "exhausted") ||
+		strings.Contains(lower, "用完") ||
+		strings.Contains(lower, "耗尽") ||
+		strings.Contains(lower, "耗盡") ||
+		strings.Contains(lower, "已达") ||
+		strings.Contains(lower, "已達")
 }
 
 // RetryableStatus reports whether a backoff can plausibly recover from status s:
@@ -241,6 +358,11 @@ func SendWithRetry(ctx context.Context, httpClient *http.Client, opts SendOption
 			Status:   resp.StatusCode,
 			Body:     strings.TrimSpace(string(msg)),
 			TraceID:  responseTraceID(resp.Header),
+		}
+		// Periodic usage quota is exhausted: fail immediately without a
+		// retrying event. Ordinary TPM/RPM 429s stay on the backoff path.
+		if resp.StatusCode == http.StatusTooManyRequests && IsQuotaExceededBody(apiErr.Body) {
+			return nil, &QuotaExceededError{API: apiErr}
 		}
 		if !RetryableStatus(resp.StatusCode) {
 			return nil, apiErr

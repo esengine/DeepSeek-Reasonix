@@ -53,9 +53,11 @@ import (
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/remote/workbench/target"
 	"reasonix/internal/repair"
+	"reasonix/internal/sessionruntime"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
+	"reasonix/internal/workspacelease"
 )
 
 // eventChannel is the Wails runtime event name the frontend subscribes to for the
@@ -1222,6 +1224,32 @@ func (a *App) SubmitDeliveryRecoveryToTab(tabID, display, input string) error {
 	tab := admission.tab
 	a.ensureTabTopicIndexedForUserTurn(tab)
 	ctrl.SubmitDeliveryRecovery(display, input)
+	admission.finish(ctrl)
+	return nil
+}
+
+// SubmitQuotaRecoveryForTab starts the fixed synthetic recovery turn after a
+// successful model switch from the quota-exhausted recovery card. Failure does
+// not roll back the model switch; the user can still send manually.
+func (a *App) SubmitQuotaRecoveryForTab(tabID string) error {
+	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
+		// Remote Workbench model-switch/recovery policy is unchanged for this
+		// release; callers should not reach this path on remote targets.
+		return fmt.Errorf("quota recovery is not available on Remote Workbench yet")
+	}
+	admission, ctrl, err := a.beginTabTurn(tabID, true)
+	if err != nil {
+		return err
+	}
+	defer admission.abort()
+	type quotaRecoverer interface {
+		SubmitQuotaRecovery()
+	}
+	recoverer, ok := ctrl.(quotaRecoverer)
+	if !ok {
+		return fmt.Errorf("controller does not support quota recovery")
+	}
+	recoverer.SubmitQuotaRecovery()
 	admission.finish(ctrl)
 	return nil
 }
@@ -6426,6 +6454,42 @@ func (a *App) JobsForTab(tabID string) []JobView {
 	return a.jobsForCtrl(ctrl, out)
 }
 
+// CancelJobForTab stops one background job on the given tab. Local controllers
+// scope the kill to the session so a colliding id elsewhere cannot be cancelled.
+// Remote Workbench reuses the job/cancel protocol.
+func (a *App) CancelJobForTab(tabID, jobID string) bool {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return false
+	}
+	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
+		raw, err := a.workbenchRequest(protocol.MethodJobCancel, protocol.JobCancelParams{JobID: protocol.JobID(jobID)})
+		if err != nil {
+			return false
+		}
+		decoded, err := protocol.DecodeResult(protocol.MethodJobCancel, raw)
+		if err != nil {
+			return false
+		}
+		if result, ok := decoded.(protocol.JobCancelResult); ok {
+			return result.Disposition == protocol.JobCancelled
+		}
+		return false
+	}
+	ctrl := a.ctrlByTabID(tabID)
+	if ctrl == nil {
+		return false
+	}
+	type jobCanceller interface {
+		CancelJob(id string) bool
+	}
+	canceller, ok := ctrl.(jobCanceller)
+	if !ok {
+		return false
+	}
+	return canceller.CancelJob(jobID)
+}
+
 func (a *App) jobsForCtrl(ctrl control.SessionAPI, out []JobView) []JobView {
 	if ctrl == nil {
 		return out
@@ -9287,6 +9351,31 @@ func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
 	return status.Running || status.PendingPrompt || status.BackgroundJobs > 0
 }
 
+// controllerHasForegroundRuntimeWork reports a running turn or pending
+// approval/ask. Background jobs alone do not count — model switch can migrate
+// them via shared session resources.
+func controllerHasForegroundRuntimeWork(ctrl control.SessionAPI) bool {
+	if ctrl == nil {
+		return false
+	}
+	status := ctrl.RuntimeStatus()
+	return status.Running || status.PendingPrompt
+}
+
+type sessionResourcesHolder interface {
+	SessionResources() *sessionruntime.Resources
+}
+
+func controllerSessionResources(ctrl control.SessionAPI) *sessionruntime.Resources {
+	if ctrl == nil {
+		return nil
+	}
+	if holder, ok := ctrl.(sessionResourcesHolder); ok {
+		return holder.SessionResources()
+	}
+	return nil
+}
+
 // rebuildBusyError reports a rebuild rejected because the controller still has
 // a running turn, pending prompt, or background jobs. Typed so the
 // deferred-rebuild retry loop can keep waiting instead of giving up.
@@ -9490,8 +9579,10 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	if a.controllerForTab(tab) == nil && prevPath != "" {
 		a.attachExistingSessionRuntime(tab, prevPath, a.ctx)
 	}
-	if controllerHasActiveRuntimeWork(a.controllerForTab(tab)) {
-		return rebuildControllerActiveWorkError("model")
+	// Model switch may keep background jobs alive when the controller exposes
+	// shared session resources. Foreground turns and pending prompts still block.
+	if err := a.modelSwitchActiveWorkError(a.controllerForTab(tab)); err != nil {
+		return err
 	}
 	if err := a.ensureTabControllerWorkspace(tab); err != nil {
 		return err
@@ -9505,8 +9596,8 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		if prevPath == "" {
 			prevPath = a.currentSessionPathFor(tab)
 		}
-		if controllerHasActiveRuntimeWork(a.controllerForTab(tab)) {
-			return rebuildControllerActiveWorkError("model")
+		if err := a.modelSwitchActiveWorkError(a.controllerForTab(tab)); err != nil {
+			return err
 		}
 	}
 	timing.Prepare = time.Since(stageStarted)
@@ -9560,6 +9651,29 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	// Preserve the shared plugin host across controller rebuilds — the tab
 	// stays in the same workspace root, so MCP processes must not be restarted.
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
+	// Migrate session-scoped jobs/LSP/scheduler/lease so background work survives
+	// the controller swap. When the old controller cannot expose a compatible
+	// bag and still has background jobs, refuse rather than orphan them.
+	sessionResources := controllerSessionResources(oldCtrl)
+	if sessionResources != nil {
+		workspaceKey := ""
+		if canonical, canErr := workspacelease.CanonicalWorkspace(snap.workspaceRoot); canErr == nil {
+			workspaceKey = canonical
+		}
+		if !sessionResources.CompatibleWith(
+			workspaceKey,
+			boot.NormalizeTokenMode(runtime.tokenMode),
+			boot.SessionResourceConfigKey(cfg),
+		) {
+			sessionResources = nil
+		}
+	}
+	if oldCtrl != nil {
+		status := oldCtrl.RuntimeStatus()
+		if status.BackgroundJobs > 0 && sessionResources == nil {
+			return rebuildControllerActiveWorkError("model")
+		}
+	}
 
 	stageStarted = time.Now()
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
@@ -9572,6 +9686,7 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		EffortOverride:           cloneStringPtr(effortOverride),
 		TokenMode:                runtime.tokenMode,
 		SharedHost:               sharedHost,
+		SessionResources:         sessionResources,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
@@ -9617,13 +9732,25 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	a.saveTabsLocked()
 	a.mu.Unlock()
 	if oldCtrl != nil {
-		oldCtrl.Close()
+		// ReleaseResources avoids SessionEnd for a same-session rebuild. Shared
+		// SessionResources keep background jobs alive across the refcount handoff.
+		oldCtrl.ReleaseResources()
 	}
 	// The runtime now reflects the on-disk config; drop any deferred refresh.
 	a.clearDeferredRebuild(tab.ID)
 	a.persistTabSessionPath(tab, path)
 	a.notifyTabRuntimeRebuilt(tab)
 	timing.SwapAndPersist = time.Since(stageStarted)
+	return nil
+}
+
+// modelSwitchActiveWorkError blocks model switch only for foreground turns and
+// pending prompts. Background jobs are allowed when shared session resources can
+// migrate them; without a migratable bag, SetModelForTab still rejects later.
+func (a *App) modelSwitchActiveWorkError(ctrl control.SessionAPI) error {
+	if controllerHasForegroundRuntimeWork(ctrl) {
+		return rebuildControllerActiveWorkError("model")
+	}
 	return nil
 }
 

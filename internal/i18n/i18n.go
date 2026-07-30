@@ -514,7 +514,8 @@ type Messages struct {
 	ProviderErrUnprocessable       string // 422
 	ProviderErrInputSensitive      string // MiniMax 1026
 	ProviderErrOutputSensitive     string // MiniMax 1027
-	ProviderErrRateLimited         string // 429
+	ProviderErrRateLimited         string // 429 TPM/RPM
+	ProviderErrQuotaExceeded       string // 429 periodic usage quota
 	ProviderErrServer              string // 500
 	ProviderErrServerBusy          string // 503
 

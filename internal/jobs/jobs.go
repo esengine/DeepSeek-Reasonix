@@ -175,6 +175,12 @@ type Manager struct {
 
 	stalledWarning time.Duration
 	teardownGrace  time.Duration
+
+	// closeOnce / done make Close idempotent and let sessionruntime wait until
+	// every job goroutine and temporary-artifact cleanup has finished before
+	// tearing down shared LSP or other dependents.
+	closeOnce sync.Once
+	done      chan struct{}
 }
 
 type completion struct {
@@ -243,6 +249,7 @@ func NewManager(sink event.Sink, opts ...Option) *Manager {
 		tempRoot:      tempRoot,
 		teardownGrace: DefaultTeardownGrace,
 		ownerID:       newManagerOwnerID(),
+		done:          make(chan struct{}),
 	}
 	registerManagerOwner(m.ownerID)
 	for _, opt := range opts {
@@ -1689,10 +1696,22 @@ func (m *Manager) purgeSessionLocked(parentSession string) {
 	m.order = kept
 }
 
+// Done is closed after Close/CloseAsync/CloseWithGrace finishes the manager's
+// final cleanup (job wait + owner release + temp root removal). It is safe to
+// receive from before Close; the channel stays open until cleanup completes.
+func (m *Manager) Done() <-chan struct{} {
+	if m == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return m.done
+}
+
 // Close cancels the session context and waits briefly for every background job
 // goroutine to return before unblocking. If a non-cooperative job ignores
 // cancellation, cleanup of the temporary artifact root continues in the
-// background after the goroutines eventually unwind.
+// background after the goroutines eventually unwind. Close is idempotent.
 func (m *Manager) Close() {
 	_ = m.CloseWithGrace(m.teardownGrace)
 }
@@ -1700,37 +1719,59 @@ func (m *Manager) Close() {
 // CloseAsync cancels the manager and returns immediately. It is used when a
 // caller has already begun session-specific teardown and owns the delayed
 // persistent cleanup, but still needs the manager's root context and temporary
-// artifact root released eventually.
+// artifact root released eventually. CloseAsync is idempotent with Close.
 func (m *Manager) CloseAsync() {
-	m.cancel()
-	go func() {
-		m.wg.Wait()
-		m.releaseOwner()
-		m.removeTempRoot()
-	}()
+	m.closeOnce.Do(func() {
+		m.cancel()
+		go func() {
+			m.wg.Wait()
+			m.releaseOwner()
+			m.removeTempRoot()
+			m.signalDone()
+		}()
+	})
 }
 
 // CloseWithGrace is Close with an explicit wait window, used by tests and
-// callers that need to surface non-cooperative jobs.
+// callers that need to surface non-cooperative jobs. It is idempotent: a second
+// call returns an empty result after the first close has finished or is in
+// flight.
 func (m *Manager) CloseWithGrace(grace time.Duration) TeardownResult {
-	m.cancel()
-	done := make(chan struct{})
-	go func() {
-		m.wg.Wait()
-		m.releaseOwner()
-		close(done)
-	}()
-	result, timedOut := waitTeardownTargets(context.Background(), m.closeTargets(), grace, done)
-	if timedOut {
-		m.emitTeardownTimeout("close", result)
+	var result TeardownResult
+	m.closeOnce.Do(func() {
+		m.cancel()
+		done := make(chan struct{})
 		go func() {
-			<-done
-			m.removeTempRoot()
+			m.wg.Wait()
+			m.releaseOwner()
+			close(done)
 		}()
-		return result
-	}
-	m.removeTempRoot()
+		var timedOut bool
+		result, timedOut = waitTeardownTargets(context.Background(), m.closeTargets(), grace, done)
+		if timedOut {
+			m.emitTeardownTimeout("close", result)
+			go func() {
+				<-done
+				m.removeTempRoot()
+				m.signalDone()
+			}()
+			return
+		}
+		m.removeTempRoot()
+		m.signalDone()
+	})
 	return result
+}
+
+func (m *Manager) signalDone() {
+	if m == nil || m.done == nil {
+		return
+	}
+	select {
+	case <-m.done:
+	default:
+		close(m.done)
+	}
 }
 
 func waitTeardownTargets(ctx context.Context, targets []teardownTarget, grace time.Duration, allDone ...<-chan struct{}) (TeardownResult, bool) {

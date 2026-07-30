@@ -203,6 +203,21 @@ const ordinaryTurnNotice = ordinaryTurnError.items[ordinaryTurnError.items.lengt
 eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.level, "warn", "ordinary turn errors remain warnings");
 eq(ordinaryTurnNotice.kind === "notice" && ordinaryTurnNotice.text, "provider failed", "ordinary turn errors keep their diagnostic text");
 
+const quotaExhausted = reducer(readinessStarted, {
+  type: "event",
+  e: {
+    kind: "turn_done",
+    outcome: "quota_exhausted",
+    err: "This model's usage quota is exhausted.\nYou exceeded your current quota. Reset at midnight.",
+  } as WireEvent,
+});
+const quotaNotice = quotaExhausted.items[quotaExhausted.items.length - 1];
+eq(quotaNotice.kind, "notice", "quota exhaustion appends a recovery notice");
+eq(quotaNotice.kind === "notice" && quotaNotice.level, "warn", "quota exhaustion uses warn severity");
+eq(quotaNotice.kind === "notice" && quotaNotice.variant, "quota", "quota exhaustion uses the quota card variant");
+eq(quotaNotice.kind === "notice" && quotaNotice.action, "switch_model", "quota exhaustion offers switch-model action");
+eq(quotaExhausted.running, false, "quota exhaustion clears the running indicator");
+
 const recoveryPaused = reducer(readinessStarted, {
   type: "event",
   e: {

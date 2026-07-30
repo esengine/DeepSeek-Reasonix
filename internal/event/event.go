@@ -103,6 +103,11 @@ const TurnOutcomeFinalReadiness = "final_readiness"
 // read Err text and ignore the unknown outcome.
 const TurnOutcomeRecoveryPaused = "recovery_paused"
 
+// TurnOutcomeQuotaExhausted marks a periodic model usage quota stop. New
+// clients render a recovery card with a model-switch action; older clients
+// ignore the unknown outcome and still show Err text.
+const TurnOutcomeQuotaExhausted = "quota_exhausted"
+
 // Level classifies a Notice so sinks can style or filter it.
 type Level int
 

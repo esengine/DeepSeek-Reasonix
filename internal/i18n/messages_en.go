@@ -474,6 +474,7 @@ var English = Messages{
 	ProviderErrInputSensitive:      "MiniMax rejected the input during content review (error 1026). The review may include conversation history and tool results; adjust the relevant content or start a new session with only the necessary context. Repeating the same request is unlikely to help.",
 	ProviderErrOutputSensitive:     "MiniMax rejected the generated output during content review (error 1027). Adjust the request and try again, or use another provider if the rejection persists.",
 	ProviderErrRateLimited:         "Rate limit reached (HTTP 429): too many requests (TPM/RPM). Retried with backoff — slow down or try again shortly.",
+	ProviderErrQuotaExceeded:       "This model's usage quota is exhausted. This turn has stopped; switch to another model to continue.",
 	ProviderErrServer:              "Server error (HTTP 500): the provider hit an internal fault. Retried with backoff; if it keeps failing, try again later.",
 	ProviderErrServerBusy:          "Server busy (HTTP 503): the provider is overloaded. Retried with backoff; please try again shortly.",
 

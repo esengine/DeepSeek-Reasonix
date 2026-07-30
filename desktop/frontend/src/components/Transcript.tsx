@@ -6,7 +6,7 @@ import { useT } from "../lib/i18n";
 import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
 import { ProcessBrainIcon, ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
-import { ArrowDown, ChevronRight, CirclePlay, Info, TriangleAlert } from "lucide-react";
+import { ArrowDown, ChevronRight, CirclePlay, Info, RefreshCw, TriangleAlert } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 import { ToolGroup, isCreationGroupableTool, toolGroupKind, type ToolGroupKind } from "./ToolGroup";
@@ -268,6 +268,7 @@ export function Transcript({
   footerHeight = 0,
   onPrompt,
   onDeliveryContinue,
+  onSwitchModel,
   onEditPrompt,
   onRewind,
   checkpoints = [],
@@ -295,6 +296,7 @@ export function Transcript({
   footerHeight?: number;
   onPrompt: (text: string) => void;
   onDeliveryContinue?: () => void;
+  onSwitchModel?: () => void;
   onEditPrompt?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onRewind?: (turn: number, scope: string) => void;
   checkpoints?: CheckpointMeta[];
@@ -830,7 +832,13 @@ export function Transcript({
                 key={item.id}
                 item={item}
                 actionDisabled={running}
-                onAction={item.action === "continue_delivery" ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt")))) : undefined}
+                onAction={
+                  item.action === "continue_delivery"
+                    ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt"))))
+                    : item.action === "switch_model"
+                      ? onSwitchModel
+                      : undefined
+                }
               />,
             );
           } else {
@@ -936,6 +944,7 @@ export function Transcript({
               warmOnEdit={onEditPrompt}
               warmOnPrompt={onPrompt}
               warmOnDeliveryContinue={onDeliveryContinue}
+              warmOnSwitchModel={onSwitchModel}
               warmRunning={running}
               tabId={tabId}
               creationMode={creationMode}
@@ -1011,6 +1020,7 @@ const WarmZone = memo(function WarmZone({
   warmOnEdit,
   warmOnPrompt,
   warmOnDeliveryContinue,
+  warmOnSwitchModel,
   warmRunning,
   tabId,
   creationMode,
@@ -1038,6 +1048,7 @@ const WarmZone = memo(function WarmZone({
   warmOnEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   warmOnPrompt: (text: string) => void;
   warmOnDeliveryContinue?: () => void;
+  warmOnSwitchModel?: () => void;
   warmRunning: boolean;
   tabId?: string;
   creationMode?: boolean;
@@ -1097,6 +1108,7 @@ const WarmZone = memo(function WarmZone({
               onEdit={warmOnEdit}
               onPrompt={warmOnPrompt}
               onDeliveryContinue={warmOnDeliveryContinue}
+              onSwitchModel={warmOnSwitchModel}
               running={warmRunning}
               tabId={tabId}
               creationMode={creationMode}
@@ -1149,6 +1161,7 @@ function WarmTurnItems({
   onEdit,
   onPrompt,
   onDeliveryContinue,
+  onSwitchModel,
   running,
   tabId,
   creationMode = false,
@@ -1170,6 +1183,7 @@ function WarmTurnItems({
   onEdit?: (turn: number, displayText: string, submitText?: string) => boolean | void | Promise<boolean | void>;
   onPrompt: (text: string) => void;
   onDeliveryContinue?: () => void;
+  onSwitchModel?: () => void;
   running: boolean;
   tabId?: string;
   creationMode?: boolean;
@@ -1229,7 +1243,13 @@ function WarmTurnItems({
             key={item.id}
             item={item}
             actionDisabled={running}
-            onAction={item.action === "continue_delivery" ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt")))) : undefined}
+            onAction={
+              item.action === "continue_delivery"
+                ? (onDeliveryContinue ?? (() => onPrompt(t("notice.deliveryIncompleteContinuePrompt"))))
+                : item.action === "switch_model"
+                  ? onSwitchModel
+                  : undefined
+            }
           />,
         );
       } else {
@@ -1689,6 +1709,10 @@ function SteerCard({ text }: { text: string }) {
 export function NoticeCard({ item, onAction, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; actionDisabled?: boolean }) {
   const t = useT();
   const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
+  const actionLabel = item.action === "switch_model"
+    ? t("notice.switchModel")
+    : t("notice.deliveryIncompleteContinue");
+  const ActionIcon = item.action === "switch_model" ? RefreshCw : CirclePlay;
   return (
     <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance="true">
       <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
@@ -1698,8 +1722,8 @@ export function NoticeCard({ item, onAction, actionDisabled = false }: { item: N
         {item.action && onAction ? (
           <div className="notice-line__actions">
             <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>
-              <CirclePlay size={13} aria-hidden="true" />
-              <span>{t("notice.deliveryIncompleteContinue")}</span>
+              <ActionIcon size={13} aria-hidden="true" />
+              <span>{actionLabel}</span>
             </button>
           </div>
         ) : null}

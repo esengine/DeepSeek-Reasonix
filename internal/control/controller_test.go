@@ -331,8 +331,22 @@ func TestTurnOutcomeClassifiesFinalReadiness(t *testing.T) {
 	if got := turnOutcome(err); got != event.TurnOutcomeFinalReadiness {
 		t.Fatalf("turnOutcome() = %q, want %q", got, event.TurnOutcomeFinalReadiness)
 	}
+	quota := explainError(&provider.QuotaExceededError{API: &provider.APIError{Provider: "p", Status: 429, Body: `{"error":{"code":"insufficient_quota"}}`}})
+	if got := turnOutcome(quota); got != event.TurnOutcomeQuotaExhausted {
+		t.Fatalf("turnOutcome(quota) = %q, want %q", got, event.TurnOutcomeQuotaExhausted)
+	}
 	if got := turnOutcome(errors.New("provider failed")); got != "" {
 		t.Fatalf("ordinary turn outcome = %q, want empty", got)
+	}
+}
+
+func TestQuotaRecoveryMessageUsesLegacySyntheticPrefix(t *testing.T) {
+	const legacyPrefix = "The previous assistant response was interrupted before visible"
+	if !strings.HasPrefix(quotaRecoveryMessage, legacyPrefix) {
+		t.Fatalf("quota recovery message must keep legacy synthetic prefix %q", legacyPrefix)
+	}
+	if !agent.IsSyntheticUserText(quotaRecoveryMessage) {
+		t.Fatal("quota recovery message must stay hidden from previews, titles, and turn counts")
 	}
 }
 

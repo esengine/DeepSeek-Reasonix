@@ -164,6 +164,7 @@ export interface AppBindings {
   SubmitDisplay(display: string, input: string): Promise<void>;
   SubmitDisplayToTab(tabID: string, display: string, input: string): Promise<void>;
   SubmitDeliveryRecoveryToTab(tabID: string, display: string, input: string): Promise<void>;
+  SubmitQuotaRecoveryForTab(tabID: string): Promise<void>;
   SubmitInvocationsToTab(tabID: string, display: string, input: string, invocations: InvocationRequest[]): Promise<void>;
   SubmitInitialGoalToTab(
     tabID: string,
@@ -262,6 +263,7 @@ export interface AppBindings {
   BalanceForTab(tabID: string): Promise<BalanceInfo>;
   Jobs(): Promise<JobView[]>;
   JobsForTab(tabID: string): Promise<JobView[]>;
+  CancelJobForTab(tabID: string, jobID: string): Promise<boolean>;
   ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string } | null>;
   Meta(): Promise<Meta>;
   MetaForTab(tabID: string): Promise<Meta>;
@@ -2504,6 +2506,11 @@ function makeMockApp(): AppBindings {
         async SubmitDeliveryRecoveryToTab(_tabID, display, input) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
+        async SubmitQuotaRecoveryForTab(_tabID) {
+          // Synthetic recovery has no visible user bubble in the real shell.
+          emit({ kind: "notice", level: "info", text: "Continuing after model switch (mock)." });
+          emitMockTurnDone();
+        },
         async SubmitInvocationsToTab(_tabID, display, input, _invocations) {
           await withMockTabScope(_tabID, () => this.SubmitDisplay(display, input));
         },
@@ -2927,6 +2934,9 @@ function makeMockApp(): AppBindings {
         },
         async JobsForTab() {
           return this.Jobs();
+        },
+        async CancelJobForTab() {
+          return false;
         },
         async ToolResultForTab() {
           return null;

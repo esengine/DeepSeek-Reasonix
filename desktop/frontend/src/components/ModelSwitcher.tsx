@@ -13,13 +13,25 @@ export function ModelSwitcher({
   label,
   tabId,
   onPick,
+  openSignal,
+  onOpenChange,
 }: {
   label: string;
   tabId?: string;
   onPick: (name: string) => boolean | Promise<boolean>;
+  /** Increment to force-open the popover (quota recovery card, etc.). */
+  openSignal?: number;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const setOpenTracked = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setOpen((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      if (value !== prev) onOpenChange?.(value);
+      return value;
+    });
+  }, [onOpenChange]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [query, setQuery] = useState("");
   const [triggerWidth, setTriggerWidth] = useState<number | undefined>(undefined);
@@ -77,6 +89,14 @@ export function ModelSwitcher({
     }
   }, [loadModels, open]);
 
+  // Controlled open from recovery cards / external actions. Each signal
+  // increment opens once and refreshes the catalog immediately.
+  useEffect(() => {
+    if (!openSignal || openSignal <= 0) return;
+    setOpenTracked(true);
+    void loadModels();
+  }, [loadModels, openSignal, setOpenTracked]);
+
   const keyword = query.trim().toLowerCase();
   const filtered = useMemo(
     () => keyword
@@ -115,13 +135,15 @@ export function ModelSwitcher({
   const triggerLabel = currentProvider ? `${label} · ${currentProvider}` : label;
 
   const pick = (model: ModelInfo) => {
-    setOpen(false);
     const pendingKey = tabId ?? "";
     const pendingPickCount = pendingPickCountByTabRef.current.get(pendingKey) ?? 0;
     // A catalog refresh can still report the outgoing model as current while
     // an earlier switch is rebuilding. In that window, selecting it again is
     // an intentional last-click-wins rollback rather than a no-op.
-    if (model.current && pendingPickCount === 0) return;
+    if (model.current && pendingPickCount === 0) {
+      setOpenTracked(false);
+      return;
+    }
     const previousModels = models;
     const pickSeq = (pickSeqByTabRef.current.get(pendingKey) ?? 0) + 1;
     pickSeqByTabRef.current.set(pendingKey, pickSeq);
@@ -149,6 +171,8 @@ export function ModelSwitcher({
       setModels(previousModels);
       void loadModelsForTab(tabId);
     };
+    // Start the switch before closing so parent recovery intent can mark a pick
+    // in-flight before onOpenChange(false) runs.
     try {
       void Promise.resolve(onPick(model.ref)).then(
         (switched) => settlePick(switched),
@@ -156,8 +180,10 @@ export function ModelSwitcher({
       );
     } catch (err) {
       settlePick(false);
+      setOpenTracked(false);
       throw err;
     }
+    setOpenTracked(false);
   };
 
   return (
@@ -169,7 +195,7 @@ export function ModelSwitcher({
           className="modelsw__trigger"
           aria-label={triggerLabel}
           aria-expanded={open}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setOpenTracked((v) => !v)}
         >
           <Brain size={14} className="modelsw__kind" />
           <span className="modelsw__label">{label}</span>
@@ -179,7 +205,7 @@ export function ModelSwitcher({
       <AnchoredPopover
         open={open}
         anchorRef={triggerRef}
-        onClose={() => setOpen(false)}
+        onClose={() => setOpenTracked(false)}
         className="modelsw__menu modelsw__menu--portal"
         style={{ minWidth: Math.max(triggerWidth || 200, 200), maxWidth: "min(90vw, 480px)" }}
       >
@@ -194,7 +220,7 @@ export function ModelSwitcher({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Escape") setOpen(false);
+                if (e.key === "Escape") setOpenTracked(false);
                 if (e.key === "Enter" && filtered.length === 1) pick(filtered[0]);
               }}
             />

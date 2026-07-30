@@ -36,6 +36,7 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessionruntime"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
@@ -3564,6 +3565,172 @@ func TestSetModelForTabReusesCurrentSessionLease(t *testing.T) {
 	history := tab.Ctrl.History()
 	if len(history) < 2 || history[1].Role != provider.RoleUser || history[1].Content != "hello" {
 		t.Fatalf("carried history = %+v, want original user message", history)
+	}
+}
+
+func TestSetModelForTabKeepsBackgroundJobsAlive(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
+	setDesktopTestCredential(t, "NEW_MODEL_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "old/old-model"
+	cfg.LSP.Enabled = false
+	cfg.Desktop.ProviderAccess = []string{"old", "new"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "old", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "old-model", APIKeyEnv: "OLD_MODEL_KEY"},
+		{Name: "new", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "new-model", APIKeyEnv: "NEW_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	oldPath := filepath.Join(dir, "bg-job-model-switch.jsonl")
+	jm := jobs.NewManager(event.Discard, jobs.WithTeardownGrace(50*time.Millisecond))
+	oldSession := agent.NewSession("sys")
+	oldSession.Add(provider.Message{Role: provider.RoleUser, Content: "run server"})
+	oldExec := agent.New(nil, nil, oldSession, agent.Options{Jobs: jm}, event.Discard)
+	maxSubagents, maxWriters := agent.NormalizeConcurrencyLimits(
+		cfg.Agent.MaxSubagentConcurrency,
+		cfg.Agent.MaxParallelWriters,
+	)
+	resources := sessionruntime.New(sessionruntime.Config{
+		Jobs:       jm,
+		Scheduler:  agent.NewSubagentScheduler(maxSubagents, maxWriters),
+		RuntimeKey: boot.TokenModeFull,
+		ConfigKey:  boot.SessionResourceConfigKey(cfg),
+	})
+	oldCtrl := control.New(control.Options{
+		Executor: oldExec, SessionDir: dir, SessionPath: oldPath, Label: "old", Sink: event.Discard,
+		Jobs: jm, SessionResources: resources,
+	})
+	// Cooperative job: exits on cancel so Close/Done do not hang in cleanup.
+	started := make(chan struct{})
+	jm.StartForSession(agent.BranchID(oldPath), "bash", "server", func(ctx context.Context, _ io.Writer) (string, error) {
+		close(started)
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background job never started")
+	}
+
+	jobViews := oldCtrl.Jobs()
+	if len(jobViews) != 1 {
+		t.Fatalf("old jobs = %d, want 1", len(jobViews))
+	}
+	jobID := jobViews[0].ID
+
+	app := NewApp()
+	app.ctx = context.Background()
+	tab := &WorkspaceTab{
+		ID:          "tab_bg",
+		Scope:       "global",
+		Ready:       true,
+		model:       "old/old-model",
+		Ctrl:        oldCtrl,
+		sink:        &tabEventSink{tabID: "tab_bg", app: app},
+		disabledMCP: map[string]ServerView{},
+	}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+	t.Cleanup(func() {
+		if tab.Ctrl != nil {
+			tab.Ctrl.Close()
+		}
+		tab.releaseSessionLease()
+	})
+	if err := tab.ensureSessionLease(oldPath); err != nil {
+		t.Fatalf("ensureSessionLease: %v", err)
+	}
+
+	if err := app.SetModelForTab(tab.ID, "new/new-model"); err != nil {
+		t.Fatalf("SetModelForTab with background job: %v", err)
+	}
+	if tab.Ctrl == nil || tab.Ctrl == oldCtrl {
+		t.Fatal("controller was not replaced")
+	}
+	if got := tab.model; got != "new/new-model" {
+		t.Fatalf("tab model = %q, want new/new-model", got)
+	}
+	newJobs := tab.Ctrl.Jobs()
+	if len(newJobs) != 1 || newJobs[0].ID != jobID {
+		t.Fatalf("new controller jobs = %+v, want id %q preserved", newJobs, jobID)
+	}
+	// A later resource-owned config change must not silently reuse the old scheduler/LSP
+	// bag. While the migrated job is still live, fail atomically and keep the
+	// current controller/job untouched.
+	cfg.LSP.Enabled = true
+	cfg.LSP.Servers = map[string]config.LSPServer{
+		"go": {Command: "custom-gopls"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save changed resource config: %v", err)
+	}
+	currentCtrl := tab.Ctrl
+	err := app.SetModelForTab(tab.ID, "old/old-model")
+	var busy *rebuildBusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("SetModelForTab with incompatible live resources error = %v, want rebuildBusyError", err)
+	}
+	if tab.Ctrl != currentCtrl || tab.model != "new/new-model" {
+		t.Fatal("failed incompatible-resource switch replaced the current controller")
+	}
+	if got := tab.Ctrl.Jobs(); len(got) != 1 || got[0].ID != jobID {
+		t.Fatalf("jobs after rejected incompatible-resource switch = %+v, want id %q", got, jobID)
+	}
+	// New controller can cancel the migrated job.
+	if !app.CancelJobForTab(tab.ID, jobID) {
+		t.Fatal("CancelJobForTab should stop the migrated job")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(tab.Ctrl.Jobs()) > 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("job still running after cancel: %+v", tab.Ctrl.Jobs())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestCancelJobForTabScopesToSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	path := filepath.Join(dir, "cancel-job-scope.jsonl")
+	jm := jobs.NewManager(event.Discard)
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+
+	release := make(chan struct{})
+	jm.StartForSession(agent.BranchID(path), "bash", "scoped", func(ctx context.Context, _ io.Writer) (string, error) {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-release:
+			return "", nil
+		}
+	})
+	defer close(release)
+	views := ctrl.Jobs()
+	if len(views) != 1 {
+		t.Fatalf("jobs = %d, want 1", len(views))
+	}
+	if !app.CancelJobForTab("", views[0].ID) {
+		t.Fatal("CancelJobForTab returned false")
+	}
+	if app.CancelJobForTab("", "missing-job-id") {
+		t.Fatal("CancelJobForTab should return false for unknown id")
 	}
 }
 

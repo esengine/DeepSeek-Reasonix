@@ -12,6 +12,23 @@ import (
 	"reasonix/internal/secrets"
 )
 
+// explainedError is a user-facing message that still unwraps to the original
+// typed provider error so outcome classification and metrics keep working.
+type explainedError struct {
+	msg   string
+	cause error
+}
+
+func (e *explainedError) Error() string { return e.msg }
+func (e *explainedError) Unwrap() error { return e.cause }
+
+func wrapExplained(msg string, cause error) error {
+	if cause == nil {
+		return errors.New(msg)
+	}
+	return &explainedError{msg: msg, cause: cause}
+}
+
 // explainError maps a provider HTTP failure to an actionable, localized message
 // so the turn-done error the UI shows is never a bare status code or silent
 // failure. Unknown errors (and nil) pass through unchanged.
@@ -25,22 +42,32 @@ func explainError(err error) error {
 	if provider.IsConnReset(err) {
 		return fmt.Errorf("model stream disconnected before completion after retry attempts: %s. Check the provider/proxy connection, then retry or ask Reasonix to continue", err.Error())
 	}
+	var quotaErr *provider.QuotaExceededError
+	if errors.As(err, &quotaErr) {
+		msg := i18n.M.ProviderErrQuotaExceeded
+		if quotaErr != nil && quotaErr.API != nil {
+			if reason := apiErrorReason(quotaErr.API); reason != "" {
+				return wrapExplained(msg+"\n"+reason, err)
+			}
+		}
+		return wrapExplained(msg, err)
+	}
 	var apiErr *provider.APIError
 	if errors.As(err, &apiErr) {
 		if msg := providerContentSafetyMessage(apiErr); msg != "" {
 			if reason := apiErrorReason(apiErr); reason != "" {
-				return fmt.Errorf("%s\n%s", msg, reason)
+				return wrapExplained(msg+"\n"+reason, err)
 			}
-			return errors.New(msg)
+			return wrapExplained(msg, err)
 		}
 		msg := i18n.M.ProviderStatusMessage(apiErr.Status)
 		if msg == "" {
 			return err
 		}
 		if reason := apiErrorReason(apiErr); reason != "" {
-			return fmt.Errorf("%s\n%s", msg, reason)
+			return wrapExplained(msg+"\n"+reason, err)
 		}
-		return errors.New(msg)
+		return wrapExplained(msg, err)
 	}
 	var authErr *provider.AuthError
 	if errors.As(err, &authErr) {
@@ -58,9 +85,9 @@ func explainError(err error) error {
 		// not entitled to the model) — as diagnostic here as on APIError, but
 		// auth bodies also echo credentials, so scrub key material first.
 		if reason := redactAuthReason(providerBodyReason(authErr.Body)); reason != "" {
-			return fmt.Errorf("%s\n%s", msg, reason)
+			return wrapExplained(msg+"\n"+reason, err)
 		}
-		return errors.New(msg)
+		return wrapExplained(msg, err)
 	}
 	return err
 }

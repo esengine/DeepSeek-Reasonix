@@ -82,7 +82,7 @@ export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery"; action?: "continue_delivery" }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery" | "quota"; action?: "continue_delivery" | "switch_model" }
   | {
       kind: "compaction";
       id: string;
@@ -1165,6 +1165,18 @@ function applyEvent(s: State, e: WireEvent): State {
           level: "info",
           title: t("notice.recoveryPausedTitle"),
           text: t("notice.recoveryPausedBody"),
+        }];
+      } else if (e.outcome === "quota_exhausted") {
+        // Dedicated recovery card — not a generic TPM/RPM rate-limit notice.
+        items = [...finalized, {
+          kind: "notice",
+          id: `e${s.seq}`,
+          level: "warn",
+          variant: "quota",
+          title: t("notice.quotaExhaustedTitle"),
+          text: t("notice.quotaExhaustedBody"),
+          detail: e.err || undefined,
+          action: "switch_model",
         }];
       } else if (e.err) {
         items = [...finalized, { kind: "notice", id: `e${s.seq}`, level: "warn", text: e.err }];
@@ -3516,6 +3528,18 @@ export function useController() {
     } catch { /* ignore */ }
   }, []);
 
+  const cancelJobForTab = useCallback(async (tabId: string, jobId: string) => {
+    if (!tabId || !jobId) return false;
+    const ok = await app.CancelJobForTab(tabId, jobId).catch(() => false);
+    if (!ok) return false;
+    const jobs = await app.JobsForTab(tabId).catch(() => undefined);
+    if (jobs !== undefined) {
+      dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
+    }
+    void refreshMetaForTab(tabId);
+    return true;
+  }, [dispatchTo, refreshMetaForTab]);
+
   return {
     state: activeState,
     liveStore,
@@ -3524,7 +3548,7 @@ export function useController() {
     setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
-    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, setModel, setEffort, setTokenMode,
+    refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, setModel, setEffort, setTokenMode, cancelJobForTab,
     fetchMemory, remember, forget, saveDoc,
     switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createDeliveryWorktree, closeTab, reorderTabs,
     // Invalidate in-flight navigation completions (activateTopic's stale

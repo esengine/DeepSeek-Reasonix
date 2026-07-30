@@ -51,6 +51,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/sessionruntime"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
@@ -135,8 +136,12 @@ type Controller struct {
 
 	// jobs is the session-scoped background-job manager. The agent's background
 	// tools spawn into it; Compose drains its completion notes into the next turn;
-	// Close cancels its still-running jobs.
+	// Close cancels its still-running jobs when this controller exclusively owns
+	// them (no SessionResources). With SessionResources, Close only drops a ref.
 	jobs *jobs.Manager
+	// sessionResources is the optional shared runtime bag. Nil preserves the
+	// historical exclusive ownership of jobs/LSP inside this controller.
+	sessionResources *sessionruntime.Resources
 
 	// mcp owns the session's live tool/plugin surface — the MCP plugin Host, the
 	// tool registry the executor reads each turn, and the session-scoped context a
@@ -401,7 +406,14 @@ type Options struct {
 	BalanceKey    string
 	BalanceClient *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
+	// Prefer SessionResources for new code. When Jobs is set without
+	// SessionResources, New wraps it so Close still tears the manager down via
+	// the shared refcount path.
 	Jobs *jobs.Manager
+	// SessionResources holds refcounted session-scoped runtime state (jobs,
+	// subagent scheduler, Delivery workspace lease, LSP). When non-nil, Close
+	// releases one reference instead of owning those components exclusively.
+	SessionResources *sessionruntime.Resources
 	// Registry is the executor's live tool set, and PluginCtx the session-scoped
 	// context; both are needed for hot-adding MCP servers via AddMCPServer.
 	Registry  *tool.Registry
@@ -476,6 +488,16 @@ func New(opts Options) *Controller {
 	if opts.Hooks != nil {
 		opts.Hooks.SetSessionID(agent.BranchID(opts.SessionPath))
 	}
+	sessionResources := opts.SessionResources
+	jobsMgr := opts.Jobs
+	if sessionResources == nil && jobsMgr != nil {
+		// Compat path: Options.Jobs without a shared bag still goes through
+		// refcounted cleanup so Close remains correct and idempotent.
+		sessionResources = sessionruntime.WrapJobs(jobsMgr)
+	}
+	if sessionResources != nil && jobsMgr == nil {
+		jobsMgr = sessionResources.Jobs
+	}
 	c := &Controller{
 		runner:                            opts.Runner,
 		executor:                          opts.Executor,
@@ -508,7 +530,8 @@ func New(opts Options) *Controller {
 		balanceURL:                        opts.BalanceURL,
 		balanceKey:                        opts.BalanceKey,
 		balanceClient:                     opts.BalanceClient,
-		jobs:                              opts.Jobs,
+		jobs:                              jobsMgr,
+		sessionResources:                  sessionResources,
 		mcp:                               newMcpManager(opts.Host, opts.Registry, pluginCtx),
 		mcpDefaultCallTimeout:             opts.MCPDefaultCallTimeout,
 		mcpConfigureSpec:                  opts.MCPConfigureSpec,
@@ -827,6 +850,10 @@ func turnOutcome(err error) string {
 	if errors.As(err, &pauseErr) {
 		return event.TurnOutcomeRecoveryPaused
 	}
+	var quotaErr *provider.QuotaExceededError
+	if errors.As(err, &quotaErr) {
+		return event.TurnOutcomeQuotaExhausted
+	}
 	return ""
 }
 
@@ -856,6 +883,27 @@ const SandboxEscapeApprovalTool = "sandbox_escape"
 // providers, sandbox rules, permissions, and MCP servers for future sessions,
 // so YOLO/auto approval must never answer it.
 const ManagedConfigWriteApprovalTool = "config_write"
+
+// quotaRecoveryMessage is the fixed synthetic follow-up after a desktop model
+// switch recovers from periodic usage quota exhaustion. Its opening reuses a
+// legacy agent.SyntheticUserPrefixes entry so older clients also skip it in the
+// UI, title derivation, and turn counts when reopening the same session.
+const quotaRecoveryMessage = "The previous assistant response was interrupted before visible output because the model's usage quota was exhausted. Continue the unfinished task from the current session. First reconcile completed work, pending todos, and running background jobs; do not repeat completed actions."
+
+// SubmitQuotaRecovery starts one synthetic recovery turn after the user switched
+// models because of quota exhaustion. It does not rewrite system prompt, memory
+// prefix, or tool schemas — only appends the fixed recovery instruction.
+func (c *Controller) SubmitQuotaRecovery() {
+	c.runGuarded(func(ctx context.Context) error {
+		goal, goalStatus, _, _ := c.goals.snapshot()
+		if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
+			// Keep the active goal/todo/delivery checkpoint; the fixed instruction
+			// only nudges the new model to reconcile state before continuing.
+			return c.runGoalLoopWithRawDisplay(ctx, quotaRecoveryMessage, quotaRecoveryMessage, "")
+		}
+		return newTurnOrchestrator(c).runComposedSyntheticTurn(ctx, quotaRecoveryMessage)
+	})
+}
 
 // planApprovedMessage is the follow-up turn sent once the user approves a plan —
 // the in-context nudge to execute and keep the (already-seeded) task list honest.
@@ -5131,7 +5179,20 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 		if fireSessionEnd && started {
 			c.hooks.SessionEnd(context.Background(), "other")
 		}
-		if c.jobs != nil {
+		// Shared session resources outlive this controller when another
+		// controller (or tab rebuild) still holds a reference. Release only
+		// drops this controller's ref; exclusive ownership still closes jobs
+		// through the bag's finalizer (or the legacy direct Close path when
+		// no bag was attached).
+		if c.sessionResources != nil {
+			if jobsMode == closeJobsAsync {
+				// Destroy-session path already began job teardown; drop the
+				// ref without waiting. Final cleanup still waits on Jobs.Done.
+				go c.sessionResources.Release()
+			} else {
+				c.sessionResources.Release()
+			}
+		} else if c.jobs != nil {
 			switch jobsMode {
 			case closeJobsAsync:
 				c.jobs.CloseAsync()
@@ -5143,6 +5204,15 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 			c.cleanup()
 		}
 	})
+}
+
+// SessionResources returns the shared session-scoped runtime bag, or nil when
+// this controller owns jobs/LSP exclusively (legacy / unshared boots).
+func (c *Controller) SessionResources() *sessionruntime.Resources {
+	if c == nil {
+		return nil
+	}
+	return c.sessionResources
 }
 
 // Jobs returns the still-running background jobs for the status bar (nil when
@@ -5157,11 +5227,13 @@ func (c *Controller) Jobs() []jobs.View {
 // CancelJob stops one background job owned by this controller's session.
 // Remote Workbench exposes this through its required jobCancel capability;
 // local callers may continue using the existing manager-backed lifecycle.
+// Cancellation is scoped to the controller's parent session so a colliding
+// job id from another session is never killed by mistake.
 func (c *Controller) CancelJob(id string) bool {
 	if c.jobs == nil {
 		return false
 	}
-	return c.jobs.Kill(id)
+	return c.jobs.KillForSession(c.parentSessionID(), id)
 }
 
 // SetToolApprovalMode changes the runtime approval posture for permission-gated

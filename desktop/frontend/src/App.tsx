@@ -44,6 +44,11 @@ import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n,
 import { localizedNoticeText, useController, type Item, type LiveStream } from "./lib/useController";
 import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered, onWorkbenchTarget, openExternal } from "./lib/bridge";
 import { preferredRemoteWorkspace, workbenchTargetTransitioning, type WorkbenchActiveTarget } from "./lib/workbenchTarget";
+import {
+  consumeQuotaRecoveryIntent,
+  quotaRecoverySessionPath,
+  type QuotaRecoveryIntent,
+} from "./lib/quotaRecovery";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
@@ -1084,6 +1089,7 @@ export default function App() {
     setModel,
     setEffort,
     setTokenMode,
+    cancelJobForTab,
     switchTab,
     openProjectTab,
     createDeliveryWorktree,
@@ -1889,25 +1895,74 @@ export default function App() {
     runGoalAction(() => applyCollaborationMode(collaborationMode === "plan" ? "normal" : "plan"));
   }, [applyCollaborationMode, collaborationMode, runGoalAction]);
 
+  // Quota recovery intent: only auto-continue after a model switch that was
+  // started from the quota-exhausted recovery card on the same tab+session.
+  const quotaRecoveryIntentRef = useRef<QuotaRecoveryIntent | null>(null);
+  const quotaRecoveryPicksInFlightRef = useRef(0);
+  const [modelSwitcherOpenSignal, setModelSwitcherOpenSignal] = useState(0);
+
   // Switching models rebuilds the controller, which starts in normal mode — so
   // re-apply the current mode, or the pill would say plan/YOLO while the fresh
   // controller silently uses normal gating.
   const switchModel = useCallback(
     async (name: string) => {
-      const switched = await setModel(name);
-      if (!switched) return false;
-      if (!activeTabId) return false;
-      const profileApplied = await setControllerComposerProfileForTab(
-        activeTabId,
-        controllerComposerProfileCollaborationMode(composerProfile),
-        toolApprovalMode,
-        goal,
-        { propagateError: true },
-      );
-      return profileApplied;
+      const intentAtStart = quotaRecoveryIntentRef.current;
+      const sessionPathAtStart = quotaRecoverySessionPath(activeTab?.sessionPath, state.meta?.sessionPath);
+      const fromQuotaRecovery =
+        Boolean(intentAtStart) &&
+        intentAtStart?.tabId === activeTabId &&
+        intentAtStart?.sessionPath === sessionPathAtStart;
+      if (fromQuotaRecovery) {
+        quotaRecoveryPicksInFlightRef.current += 1;
+      }
+      try {
+        const switched = await setModel(name);
+        if (!switched) return false;
+        if (!activeTabId) return false;
+        const profileApplied = await setControllerComposerProfileForTab(
+          activeTabId,
+          controllerComposerProfileCollaborationMode(composerProfile),
+          toolApprovalMode,
+          goal,
+          { propagateError: true },
+        );
+        if (!profileApplied) return false;
+        if (fromQuotaRecovery && consumeQuotaRecoveryIntent(quotaRecoveryIntentRef, intentAtStart)) {
+          // Consume only the attempt that is still current. Navigation clears the
+          // ref, and a newer card action replaces it, before this async rebuild
+          // finishes.
+          notice(t("notice.quotaRecoveryContinuing", { model: name }), "info");
+          void app.SubmitQuotaRecoveryForTab(activeTabId).catch((err) => {
+            notice(err instanceof Error ? err.message : String(err), "warn");
+          });
+        }
+        return true;
+      } finally {
+        if (fromQuotaRecovery) {
+          quotaRecoveryPicksInFlightRef.current = Math.max(0, quotaRecoveryPicksInFlightRef.current - 1);
+        }
+      }
     },
-    [activeTabId, composerProfile, goal, setControllerComposerProfileForTab, setModel, toolApprovalMode],
+    [activeTabId, activeTab?.sessionPath, composerProfile, goal, notice, setControllerComposerProfileForTab, setModel, state.meta?.sessionPath, t, toolApprovalMode],
   );
+
+  const openModelSwitcherForQuotaRecovery = useCallback(() => {
+    if (!activeTabId) return;
+    const sessionPath = quotaRecoverySessionPath(activeTab?.sessionPath, state.meta?.sessionPath);
+    quotaRecoveryIntentRef.current = { tabId: activeTabId, sessionPath };
+    setModelSwitcherOpenSignal((n) => n + 1);
+  }, [activeTabId, activeTab?.sessionPath, state.meta?.sessionPath]);
+
+  // Drop recovery intent when the user leaves the session surface without
+  // completing a recovery switch.
+  useEffect(() => {
+    const intent = quotaRecoveryIntentRef.current;
+    if (!intent) return;
+    const sessionPath = quotaRecoverySessionPath(activeTab?.sessionPath, state.meta?.sessionPath);
+    if (!activeTabId || intent.tabId !== activeTabId || intent.sessionPath !== sessionPath) {
+      quotaRecoveryIntentRef.current = null;
+    }
+  }, [activeTabId, activeTab?.sessionPath, state.meta?.sessionPath]);
 
   // Startup and workspace/model rebuilds create a fresh controller in normal
   // mode. Re-apply the UI mode once the controller is ready, including the case
@@ -4397,6 +4452,7 @@ export default function App() {
                 footerHeight={footerHeight}
                 onPrompt={handleTranscriptPrompt}
                 onDeliveryContinue={() => void handleDeliveryContinue()}
+                onSwitchModel={openModelSwitcherForQuotaRecovery}
                 onEditPrompt={handleEditPrompt}
                 onRewind={handleMessageAction}
                 checkpoints={state.checkpoints}
@@ -4533,6 +4589,23 @@ export default function App() {
               onToggleYoloApprovalMode={toggleYoloApprovalMode}
               onClearGoal={clearGoalFromUi}
               onSwitchModel={switchModelFromUi}
+              modelOpenSignal={modelSwitcherOpenSignal}
+              onModelOpenChange={(open) => {
+                if (
+                  !open &&
+                  quotaRecoveryPicksInFlightRef.current === 0 &&
+                  quotaRecoveryIntentRef.current?.tabId === activeTabId
+                ) {
+                  // Dismissing the picker without starting a recovery pick
+                  // clears the one-shot auto-continue intent.
+                  quotaRecoveryIntentRef.current = null;
+                }
+              }}
+              jobs={state.jobs}
+              onCancelJob={(jobId) => {
+                if (!activeTabId) return;
+                void cancelJobForTab(activeTabId, jobId);
+              }}
               onSetEffort={setEffort}
               onSetTokenMode={applyTokenMode}
               insertRequest={composerInsertRequest}

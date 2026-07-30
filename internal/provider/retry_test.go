@@ -19,11 +19,15 @@ type rtFunc func(*http.Request) (*http.Response, error)
 func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func statusResp(status int, hdr map[string]string) *http.Response {
+	return statusRespBody(status, "body", hdr)
+}
+
+func statusRespBody(status int, body string, hdr map[string]string) *http.Response {
 	h := http.Header{}
 	for k, v := range hdr {
 		h.Set(k, v)
 	}
-	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader("body")), Header: h}
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: h}
 }
 
 func newDummyReq(ctx context.Context) (*http.Request, error) {
@@ -261,5 +265,95 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 	}
 	if len(infos) != 1 || infos[0].Attempt != 1 || infos[0].Max != MaxRetries {
 		t.Fatalf("retry notify = %#v, want one Attempt 1/%d", infos, MaxRetries)
+	}
+}
+
+func TestIsQuotaExceededBody(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{name: "json code", body: `{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}`, want: true},
+		{name: "json type", body: `{"error":{"type":"usage_limit_reached","message":"limit"}}`, want: true},
+		{name: "json message", body: `{"error":{"message":"You exceeded your current quota, please check your plan and billing details. Quota will reset at 2026-08-01."}}`, want: true},
+		{name: "plain usage quota", body: "usage quota exceeded; resets in 3h", want: true},
+		{name: "rate_limit_exceeded code", body: `{"error":{"code":"rate_limit_exceeded","message":"Rate limit reached for requests"}}`, want: false},
+		{name: "rate_limit_exceeded wins over quota message", body: `{"error":{"code":"rate_limit_exceeded","message":"Usage quota exceeded; reset in 1 minute"}}`, want: false},
+		{name: "bare quota mention", body: `{"error":{"message":"check your quota plan for details"}}`, want: false},
+		{name: "tpm rate limit", body: "rate limit: TPM exceeded", want: false},
+		{name: "empty", body: "", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := IsQuotaExceededBody(tc.body); got != tc.want {
+				t.Fatalf("IsQuotaExceededBody(%q) = %v, want %v", tc.body, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSendWithRetryQuotaExceededFailsFast(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "json_code", body: `{"error":{"code":"insufficient_quota","message":"You exceeded your current quota. Please check your plan and billing details."}}`},
+		{name: "json_type", body: `{"error":{"type":"quota_exceeded","message":"quota exceeded; reset at midnight UTC"}}`},
+		{name: "plain_text", body: `usage quota has been exceeded and will reset later`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			var infos []RetryInfo
+			cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				return statusRespBody(http.StatusTooManyRequests, tc.body, map[string]string{"trace_id": "quota-trace-1"}), nil
+			})}
+			ctx := WithRetryNotify(context.Background(), func(i RetryInfo) { infos = append(infos, i) })
+			_, err := SendWithRetry(ctx, cl, SendOptions{Provider: "deepseek"}, newDummyReq)
+			if calls != 1 {
+				t.Fatalf("quota 429 retried (%d calls), want fail-fast once", calls)
+			}
+			if len(infos) != 0 {
+				t.Fatalf("quota 429 must not emit retrying events, got %#v", infos)
+			}
+			var qe *QuotaExceededError
+			if !errors.As(err, &qe) {
+				t.Fatalf("want *QuotaExceededError, got %T: %v", err, err)
+			}
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) || apiErr.Status != 429 || apiErr.TraceID != "quota-trace-1" {
+				t.Fatalf("QuotaExceededError must unwrap to *APIError with 429 + TraceID, got %#v / %v", apiErr, err)
+			}
+		})
+	}
+}
+
+func TestSendWithRetryOrdinaryRateLimitStillRetries(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls == 1 {
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"rate_limit_exceeded","message":"Usage quota exceeded; reset in 1 minute"}}`)),
+				Header:     http.Header{},
+			}, nil
+		}
+		return statusResp(200, nil), nil
+	})}
+	var infos []RetryInfo
+	ctx := WithRetryNotify(context.Background(), func(i RetryInfo) { infos = append(infos, i) })
+	resp, err := SendWithRetry(ctx, cl, SendOptions{Provider: "p"}, newDummyReq)
+	if err != nil {
+		t.Fatalf("ordinary 429 should retry: %v", err)
+	}
+	if resp.StatusCode != 200 || calls != 2 {
+		t.Fatalf("status=%d calls=%d, want 200 after 2 calls", resp.StatusCode, calls)
+	}
+	if len(infos) != 1 {
+		t.Fatalf("ordinary 429 should notify once, got %#v", infos)
 	}
 }

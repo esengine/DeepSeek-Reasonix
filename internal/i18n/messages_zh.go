@@ -475,6 +475,7 @@ var Chinese = Messages{
 	ProviderErrInputSensitive:      "输入被 MiniMax 内容审查拒绝（错误码 1026）。审查对象可能包含会话历史和工具结果；请调整相关内容，或新建会话仅保留必要上下文。原样重试通常无效。",
 	ProviderErrOutputSensitive:     "MiniMax 生成的内容被内容审查拒绝（错误码 1027）。请调整请求内容后重试；若持续出现，可改用其他服务商。",
 	ProviderErrRateLimited:         "请求速率达到上限 (HTTP 429)：请求过于频繁 (TPM/RPM)。已退避重试，请放慢速率或稍后再试。",
+	ProviderErrQuotaExceeded:       "当前模型的周期额度已用完，本轮回答已停止，可切换其他模型继续",
 	ProviderErrServer:              "服务器故障 (HTTP 500)：服务端内部错误。已退避重试；若持续失败请稍后再试。",
 	ProviderErrServerBusy:          "服务器繁忙 (HTTP 503)：服务端负载过高。已退避重试，请稍后再试。",
 

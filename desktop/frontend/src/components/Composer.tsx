@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, Loader2, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, StopCircle, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
 import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
-import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
+import { SPINNER_WORDS, useI18n, useT, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
@@ -24,7 +24,7 @@ import {
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type JobView, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -545,6 +545,10 @@ export function Composer({
   onToggleYoloApprovalMode,
   onClearGoal,
   onSwitchModel,
+  modelOpenSignal,
+  onModelOpenChange,
+  jobs,
+  onCancelJob,
   onSetEffort,
   onSetTokenMode,
   insertRequest,
@@ -602,6 +606,10 @@ export function Composer({
   onToggleYoloApprovalMode: () => void;
   onClearGoal: () => void;
   onSwitchModel: (name: string) => boolean | Promise<boolean>;
+  modelOpenSignal?: number;
+  onModelOpenChange?: (open: boolean) => void;
+  jobs?: JobView[];
+  onCancelJob?: (jobId: string) => void;
   onSetEffort: (level: string) => void;
   onSetTokenMode: (mode: TokenMode) => void;
   insertRequest?: ComposerInsertRequest | null;
@@ -4462,7 +4470,16 @@ export function Composer({
                   balance={balance}
                 />
               )}
-              <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
+              <ModelSwitcher
+                label={modelLabel}
+                tabId={tabId}
+                onPick={onSwitchModel}
+                openSignal={modelOpenSignal}
+                onOpenChange={onModelOpenChange}
+              />
+              {(jobs?.length ?? 0) > 0 ? (
+                <BackgroundJobsControl jobs={jobs ?? []} onCancelJob={onCancelJob} />
+              ) : null}
             </div>
             {hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">
@@ -4493,6 +4510,87 @@ export function Composer({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatJobDuration(startedAt: number, now: number): string {
+  if (!startedAt || startedAt <= 0) return "—";
+  const sec = Math.max(0, Math.floor((now - startedAt) / 1000));
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ${sec % 60}s`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ${min % 60}m`;
+}
+
+function BackgroundJobsControl({
+  jobs,
+  onCancelJob,
+}: {
+  jobs: JobView[];
+  onCancelJob?: (jobId: string) => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [open]);
+
+  return (
+    <div className="composer-bgjobs">
+      <Tooltip label={t("composer.backgroundJobs")}>
+        <button
+          ref={triggerRef}
+          type="button"
+          className="composer-bgjobs__trigger"
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={t("composer.backgroundJobsCount", { n: jobs.length })}
+        >
+          <Loader2 size={13} className="composer-bgjobs__spin" aria-hidden="true" />
+          <span>{jobs.length}</span>
+        </button>
+      </Tooltip>
+      <AnchoredPopover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        align="start"
+        className="composer-bgjobs__popover"
+      >
+        <div className="composer-bgjobs__list" role="list">
+          {jobs.length === 0 ? (
+            <div className="composer-bgjobs__empty">{t("composer.noBackgroundJobs")}</div>
+          ) : (
+            jobs.map((job) => (
+              <div key={job.id} className="composer-bgjobs__row" role="listitem">
+                <div className="composer-bgjobs__meta">
+                  <span className="composer-bgjobs__kind">{job.kind || "job"}</span>
+                  <span className="composer-bgjobs__label" title={job.label}>{job.label || job.id}</span>
+                  <span className="composer-bgjobs__duration">{formatJobDuration(job.startedAt, now)}</span>
+                </div>
+                {onCancelJob ? (
+                  <button
+                    type="button"
+                    className="btn btn--small composer-bgjobs__stop"
+                    onClick={() => onCancelJob(job.id)}
+                  >
+                    <StopCircle size={12} aria-hidden="true" />
+                    <span>{t("composer.stopJob")}</span>
+                  </button>
+                ) : null}
+              </div>
+            ))
+          )}
+        </div>
+      </AnchoredPopover>
     </div>
   );
 }

@@ -121,6 +121,24 @@ func TestExplainError(t *testing.T) {
 		t.Errorf("429 should append the provider reason, got %q", rate.Error())
 	}
 
+	quota := explainError(&provider.QuotaExceededError{API: &provider.APIError{
+		Provider: "deepseek",
+		Status:   429,
+		Body:     `{"error":{"code":"insufficient_quota","message":"You exceeded your current quota. Reset at midnight."}}`,
+		TraceID:  "quota-trace",
+	}})
+	if !strings.Contains(quota.Error(), i18n.M.ProviderErrQuotaExceeded) || !strings.Contains(quota.Error(), "exceeded your current quota") {
+		t.Errorf("quota 429 should use quota copy and keep provider detail, got %q", quota.Error())
+	}
+	var qe *provider.QuotaExceededError
+	if !errors.As(quota, &qe) {
+		t.Fatalf("explained quota error must unwrap to *QuotaExceededError, got %T", quota)
+	}
+	var apiFromQuota *provider.APIError
+	if !errors.As(quota, &apiFromQuota) || apiFromQuota.TraceID != "quota-trace" {
+		t.Fatalf("explained quota error must unwrap to *APIError with TraceID, got %#v", apiFromQuota)
+	}
+
 	// Relay gateways (one-api/new-api style) wrap the real failure — dead
 	// upstream channel, unsupported tools, exhausted quota — in a 5xx JSON
 	// body; the category line alone made those undiagnosable.
