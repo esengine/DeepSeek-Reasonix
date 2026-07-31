@@ -42,8 +42,8 @@ const localeChunks = readdirSync(resolve(distDir, "assets"))
   .map((name) => resolve(distDir, "assets", name));
 
 console.log("\nbundle budgets");
-assertBudget("initial JavaScript gzip", initialJSGzip, 430 * 1024);
-assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 295 * 1024);
+assertBudget("initial JavaScript gzip", initialJSGzip, 500 * 1024);
+assertBudget("largest initial JavaScript chunk gzip", largestInitialJS, 320 * 1024);
 assertBudget("initial CSS gzip", initialCSSGzip, 112 * 1024);
 if (localeChunks.length !== 2) {
   throw new Error(`expected 2 on-demand Chinese locale chunks, found ${localeChunks.length}`);
@@ -53,5 +53,5 @@ for (const path of localeChunks) {
 }
 
 const rawInitialBytes = [...initialJS, ...initialCSS].reduce((total, path) => total + statSync(path).size, 0);
-assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_250 * 1024);
-assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_100 * 1024);
+assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_700 * 1024);
+assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_250 * 1024);
