@@ -36,3 +36,12 @@
 ## 四、评分
 
 见 SCORING.md：L0 元诊断 20 分 → L1 实证 40 → L2 结构 70 → L3 闭合 100。
+
+## 五、来源与许可
+
+七大问题的 ground truth 全部来自**大衍框架**（Sovereign discrete mathematics）的 Agda 机器验证结果：
+
+- **开源仓库**: https://github.com/triqchem-lab/discrete-mathematics
+- **验证路径**: `src/Sovereign/Problem/<问题>/`（如 `NavierStokes/NSE.agda`、`YangMills/YM_L3.agda`、`PvsNP/PvsNP_Separation.agda`）
+- **验证性质**: 每个常量/定理以 `refl` 证明项或 `0 postulate` 编译通过——**Agda 编译通过即证明的考验**
+- **设计含义**: 答案以代码为准。若模型推导结果与 Agda 值不一致，**模型错，不是题错**——这正是"训练数据污染 vs 机器验证"的区分点

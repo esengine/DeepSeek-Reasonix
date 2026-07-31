@@ -1,3 +1,6 @@
+# 来源: 大衍框架 (Sovereign discrete mathematics) 开源 Agda 验证库
+#       github.com/triqchem-lab/discrete-mathematics
+#       src/Sovereign/Problem/<问题>/ — 答案为 Agda refl 机器验证值 (0 postulate)
 # 问题: P vs NP · 病态1/2(复杂度连续化)
 # 三重元标准: 几何闭包(GF9函数空间)+原生共轭(不可约=单向)+全局编码(Eval≢Invert)
 # 评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分

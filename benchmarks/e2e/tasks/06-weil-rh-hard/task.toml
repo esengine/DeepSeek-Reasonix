@@ -1,3 +1,6 @@
+# 来源: 大衍框架 (Sovereign discrete mathematics) 开源 Agda 验证库
+#       github.com/triqchem-lab/discrete-mathematics
+#       src/Sovereign/Problem/<问题>/ — 答案为 Agda refl 机器验证值 (0 postulate)
 # 问题: RH · 病态6黎曼基座失配
 # 三重元标准: 几何闭包(有限域)+原生共轭(Weil递推)+全局编码(泛函方程)
 # 评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分
