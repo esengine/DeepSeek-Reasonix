@@ -1228,7 +1228,7 @@ type ProviderEntry struct {
 	Headers       map[string]string `toml:"headers"`        // optional extra HTTP headers for compatible gateways; secrets should stay in api_key_env.
 	ExtraBody     map[string]any    `toml:"extra_body"`     // optional extra top-level JSON request body fields for OpenAI-compatible gateways.
 	AuthHeader    bool              `toml:"auth_header"`    // for Anthropic-compatible gateways that expect Authorization: Bearer instead of x-api-key.
-	// ResponsesStateful controls dashscope-responses provider context mode.
+	// ResponsesStateful controls the responses provider context mode.
 	// true (default) = server-managed previous_response_id (DashScope);
 	// false = stateless full-input (DeepSeek Responses API).
 	ResponsesStateful *bool `toml:"responses_stateful"`

@@ -2212,7 +2212,7 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
 // network proxy settings.
-// responsesStatefulDefault resolves the dashscope-responses context mode:
+// responsesStatefulDefault resolves the responses provider context mode:
 // nil (unset) defaults to true (stateful, DashScope previous_response_id);
 // an explicit false selects stateless full-input (DeepSeek Responses API).
 func responsesStatefulDefault(v *bool) bool {
@@ -2246,7 +2246,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"vision":                config.EffectiveVision(e),
 			"vision_model_explicit": config.ExplicitModelVision(e),
 			"vision_detail":         e.VisionDetail,
-			// dashscope-responses: false = stateless (DeepSeek), true/absent =
+			// responses: false = stateless (DeepSeek), true/absent =
 			// stateful previous_response_id (DashScope).
 			"stateful": responsesStatefulDefault(e.ResponsesStateful),
 		},

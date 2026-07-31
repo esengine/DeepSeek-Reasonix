@@ -1,13 +1,16 @@
-// Package dashscope implements a provider for Alibaba DashScope's Responses API
-// (/v1/responses). Unlike the Chat Completions API, the Responses API supports
-// server-managed context via previous_response_id, eliminating the need to
-// resend full conversation history each turn. This yields constant-size request
-// bodies and 4x lower latency on multi-turn conversations (measured: 7s vs 28s
-// on turn 3 with qwen3.7-plus).
+// Package responses implements a provider for the OpenAI Responses API
+// (/v1/responses), an upgrade over the Chat Completions API. Providers:
+//   - DashScope (https://dashscope.aliyuncs.com or Token Plan endpoints):
+//     stateful, server-managed context via previous_response_id, eliminating
+//     the need to resend full conversation history each turn. Yields
+//     constant-size request bodies and 4x lower latency on multi-turn
+//     conversations (measured: 7s vs 28s on turn 3 with qwen3.7-plus).
+//   - DeepSeek (https://api.deepseek.com): stateless, rejects
+//     previous_response_id; every turn sends the full input array.
 //
 // The provider implements provider.Provider and can be selected via
-// kind = "dashscope-responses" in reasonix.toml.
-package dashscope
+// kind = "responses" (legacy alias: "dashscope-responses") in reasonix.toml.
+package responses
 
 import (
 	"bufio"
@@ -25,6 +28,8 @@ import (
 )
 
 func init() {
+	provider.Register("responses", newFromConfig)
+	// Legacy alias: pre-rename kind name.
 	provider.Register("dashscope-responses", newFromConfig)
 }
 
@@ -108,12 +113,12 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	body, usePrevID := c.buildRequestBody(req)
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		return nil, fmt.Errorf("dashscope: marshal request: %w", err)
+		return nil, fmt.Errorf("responses: marshal request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/responses", bytes.NewReader(jsonBody))
 	if err != nil {
-		return nil, fmt.Errorf("dashscope: create request: %w", err)
+		return nil, fmt.Errorf("responses: create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -123,7 +128,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("dashscope: %w", err)
+		return nil, fmt.Errorf("responses: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
@@ -133,7 +138,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(b), "not found") {
 			c.ResetContext()
 		}
-		return nil, fmt.Errorf("dashscope: HTTP %d: %s", resp.StatusCode, string(b))
+		return nil, fmt.Errorf("responses: HTTP %d: %s", resp.StatusCode, string(b))
 	}
 
 	out := make(chan provider.Chunk, 16)
@@ -392,9 +397,9 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 				}
 			}
 			if event.Type == "response.failed" {
-				msg := "dashscope: response failed"
+				msg := "responses: response failed"
 				if event.Response != nil && event.Response.Error != nil {
-					msg = "dashscope: " + event.Response.Error.Message
+					msg = "responses: " + event.Response.Error.Message
 				}
 				out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s", msg)}
 			}

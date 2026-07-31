@@ -26,7 +26,7 @@ import (
 
 	// Register all provider kinds via init().
 	_ "reasonix/internal/provider/anthropic"
-	_ "reasonix/internal/provider/dashscope"
+	_ "reasonix/internal/provider/responses"
 	_ "reasonix/internal/provider/openai"
 )
 
