@@ -23,16 +23,36 @@ var (
 	client        = &http.Client{Timeout: 120 * time.Second}
 )
 
+// envOr returns env var v or fallback.
+func envOr(k, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
+		return v
+	}
+	return fallback
+}
+
 func main() {
+	if v := envOr("BENCH_BASE_URL", ""); v != "" {
+		baseURL = v
+	}
+	if v := envOr("BENCH_MODEL", ""); v != "" {
+		model = v
+	}
+	if v := envOr("BENCH_API_KEY", ""); v != "" {
+		apiKey = v
+	}
 	if apiKey == "" {
-		fmt.Println("ERROR: QWEN_TOKEN_PLAN_CN_API_KEY not set")
+		fmt.Println("ERROR: QWEN_TOKEN_PLAN_CN_API_KEY (or BENCH_API_KEY) not set")
 		os.Exit(1)
+	}
+	if strings.Contains(baseURL, "deepseek.com") {
+		fmt.Println("NOTE: DeepSeek Responses API is stateless — no previous_response_id")
 	}
 
 	systemPrompt := "You are a helpful coding assistant. You help users write, debug, and optimize code. Always provide clear explanations and working code examples. " + strings.Repeat("Context padding for cache testing. ", 100)
 
-	fmt.Println("=== DashScope API Format Benchmark ===")
-	fmt.Printf("Model: %s\n", model)
+	fmt.Println("=== Responses/Completions API Format Benchmark ===")
+	fmt.Printf("Base URL: %s\nModel: %s\n", baseURL, model)
 	fmt.Printf("System prompt: ~%d chars\n", len(systemPrompt))
 	fmt.Println()
 
@@ -42,13 +62,9 @@ func main() {
 	fmt.Println()
 
 	// Responses API: 3-turn conversation (uses previous_response_id)
-	fmt.Println("=== Responses API (previous_response_id) ===")
+	fmt.Println("=== Responses API ===")
 	responsesAPIBench(systemPrompt, 3)
 	fmt.Println()
-
-	// Anthropic Messages API: 3-turn conversation (full history per turn)
-	fmt.Println("=== Anthropic Messages API (full history per turn) ===")
-	anthropicBench(systemPrompt, 3)
 }
 
 func chatCompletionsBench(systemPrompt string, turns int) {
