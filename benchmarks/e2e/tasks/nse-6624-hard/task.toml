@@ -1,4 +1,4 @@
-prompt = """Write a Python script ns.py in the workdir that re-derives the machine-verified constants of the Sovereign discrete Navier-Stokes framework (NSE.agda, 12 theorems / 0 postulate; per the 7-28 progress report NS is the skeleton entry — 1 module — while the other six problems are L3).
+prompt = """Write a Python script ns.py in the workdir that re-derives the machine-verified constants of the Sovereign discrete Navier-Stokes framework (NSE.agda + NSRegularity + NSVortex, 537 lines, 0 postulate: existence via 12 exact-solution theorems, regularity via bounded discrete energy, blow-up excluded on GF(3)³).
 
 These are "constitution-locked" axioms — all verified by refl in Agda. Your job: reproduce the numbers with Python and check every identity.
 
