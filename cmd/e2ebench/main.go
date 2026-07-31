@@ -231,6 +231,10 @@ func runTask(bin, model, profile string, t task) result {
 	if t.MaxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprint(t.MaxSteps))
 	}
+	// Non-interactive benchmark: auto-approve ordinary writer fallbacks so the
+	// agent can write files/run commands without a human approver. Without this,
+	// tool calls stall in the default ask mode and every task fails.
+	args = append(args, "--permission-mode", "auto")
 	args = appendBenchmarkProfileArgs(args, profile)
 	args = append(args, t.Prompt)
 
