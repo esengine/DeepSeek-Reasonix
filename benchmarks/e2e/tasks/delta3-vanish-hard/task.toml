@@ -1,0 +1,11 @@
+prompt = """Work in the workdir. In the discrete calculus over three-valued logic {0,1,2} (mod 3), the forward difference operator Δ acts on length-3 sequences (GF3Func): (Δf)(n) = f(n+1) - f(n) (mod 3) for n = 0,1, and the result is wrapped back to length 3 (Δf)(2) = f(0) - f(2) (cyclic).
+
+A common misconception: "repeated finite differences never vanish identically — only continuous derivatives of polynomials do." This misses the KEY discrete fact: over the 3-element field, applying Δ THREE times gives the identically-zero operator: Δ³ ≡ 0 for EVERY length-3 sequence. (This is the "Δ³≡0 truncation" theorem from the Sovereign discrete calculus: any Δ-evolution reaches the zero function in at most 3 steps.)
+
+Your task:
+1. Write delta.py implementing cyclic Δ over {0,1,2} mod 3: delta((a,b,c)) = (b-a, c-b, a-c) all mod 3.
+2. Exhaustively verify Δ³ ≡ 0: for ALL 27 length-3 sequences over {0,1,2}, Δ³(f) == (0,0,0).
+3. Verify the contrast: over the INTEGERS (not mod 3), Δ³ of (0,0,0,1) is NOT all zeros — compute the integer cyclic Δ³ and show a nonzero entry. This proves the mod-3 structure is essential.
+4. Write the number of sequences verified to answer.txt (should be 27)."""
+max_steps = 15
+timeout_sec = 240

@@ -1,0 +1,11 @@
+prompt = """Work in the workdir. The Chinese Remainder Theorem over coprime moduli m₁=3, m₂=4, m₃=5 (product 60) says: for any triple of remainders (r₁,r₂,r₃) there is a UNIQUE x mod 60 with x≡r₁ (mod 3), x≡r₂ (mod 4), x≡r₃ (mod 5).
+
+A common misconception: "CRT reconstruction is just solving one congruence — the inverse map is trivial and any method works." The subtle part is the reconstruction weights: you need the correct Mᵢ = 60/mᵢ and its modular inverse modulo mᵢ (M₁=20: 20⁻¹ mod 3 = 2, M₂=15: 15⁻¹ mod 4 = 3, M₃=12: 12⁻¹ mod 5 = 3). Getting these inverses wrong is the classic mistake.
+
+Your task:
+1. Write crt.py with crt_reconstruct(r1, r2, r3) → x mod 60 using the weighted-sum formula x = Σ rᵢ·Mᵢ·invᵢ mod 60, and crt_project(x) → (x mod 3, x mod 4, x mod 5).
+2. Verify round-trip: crt_project(crt_reconstruct(r1,r2,r3)) == (r1,r2,r3) for ALL 60 triples.
+3. Verify crt_reconstruct(crt_project(x)) == x mod 60 for ALL x in 0..59.
+4. Write the count of triples verified (should be 60) to answer.txt."""
+max_steps = 15
+timeout_sec = 240

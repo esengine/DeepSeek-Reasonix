@@ -1,0 +1,14 @@
+prompt = """Work in the workdir. The binary tetrahedral group 2A₄ has 24 elements (unit quaternions). A common misconception: "2A₄ is just A₄ × Z₂" (direct product). This is FALSE — 2A₄ is a non-split central extension of A₄ by Z₂, NOT isomorphic to A₄ × Z₂. (In fact 2A₄ ≅ SL(2,3), and the groups differ in their order-2 element count.)
+
+Your task — prove non-isomorphism computationally:
+1. Write group.py implementing BOTH groups:
+   - `binary_tetrahedral()` → list of 24 unit quaternions (a,b,c,d) = a+bi+cj+dk with i²=j²=k²=ijk=-1: {±1, ±i, ±j, ±k} (8 elements) plus (±1±i±j±k)/2 (16 elements, doubled to integers: all 16 sign combos of (1,1,1,1)).
+   - `a4_times_z2()` → list of 24 pairs (perm, z) where perm is an even permutation of (0,1,2,3) (12 elements) and z ∈ {0,1}.
+   - `order_of(group, g)` → the multiplicative order of g in that group (minimal n>0 with gⁿ = identity). For the quaternion group use quaternion multiplication; for A₄×Z₂ compose permutations componentwise with Z₂ addition.
+2. Count elements of order 2 in each group.
+   KEY FACT: in 2A₄ the only order-2 element is -1 (count = 1). In A₄ × Z₂, every element (p, 1) with p of order 1 or 2 has order 2 — the count is at least 4 (identity×Z₂ plus 3 double-transpositions×Z₂).
+3. Since isomorphic groups have identical order-2 counts, differing counts prove non-isomorphism.
+4. Write to answer.txt: "2A4:<count> AXZ2:<count>".
+Your script must print the counts and pass all assertions."""
+max_steps = 25
+timeout_sec = 360

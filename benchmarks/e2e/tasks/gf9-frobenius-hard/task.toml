@@ -1,0 +1,15 @@
+prompt = """Work in the workdir. The finite field GF(9) is GF(3)[x]/(x²+1), elements a+bα where a,b ∈ {0,1,2} and α² = -1 = 2 (mod 3). Addition and multiplication are mod 3.
+
+A common misconception: "the Frobenius map x → x³ is only an automorphism of prime fields GF(p), not of extension fields GF(pⁿ)." This is WRONG — Frobenius is an automorphism of every finite field of characteristic p (it fixes GF(p) pointwise and generates Gal(GF(9)/GF(3)) ≅ C₂).
+
+Your task:
+1. Write a Python script gf9.py implementing GF(9) arithmetic (add, mul, pow3 = x³).
+2. Verify the Frobenius map σ(x) = x³ is a field automorphism by exhaustive check:
+   - σ(x+y) = σ(x)+σ(y) for all 81 pairs
+   - σ(x·y) = σ(x)·σ(y) for all 81 pairs
+   - σ is bijective (all 9 values distinct)
+3. Verify σ(α) = -α (i.e. σ(a+bα) = a-bα, the Galois conjugate).
+4. Write the count of the 81-pair checks that passed to answer.txt (should be 81 and 81).
+Run your script; it must pass all assertions."""
+max_steps = 20
+timeout_sec = 300
