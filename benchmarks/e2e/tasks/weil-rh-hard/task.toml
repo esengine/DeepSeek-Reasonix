@@ -1,4 +1,4 @@
-prompt = """Write a Python script weil.py in the workdir that re-derives the machine-verified Weil finite-field Riemann hypothesis (WeilRH.agda: GF(3)/GF(9) dual instances, 0 postulate, all ℤ arithmetic + refl).
+prompt = """Write a Python script weil.py in the workdir that re-derives the machine-verified Weil finite-field Riemann hypothesis (WeilRH.agda: GF(3)/GF(9) dual instances, 0 postulate, L3 (RH.agda: functional equation + Weil boundary + ζ symmetry)).
 
 Verified facts (from the Agda library):
 1. Over GF(3): the curve has #E = 4 points (e13ok: e13 ≡ 4), trace t₁ = q+1−#E = 3+1−4 = 0 (tE1-ok: tE1 ≡ +0).

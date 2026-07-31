@@ -1,4 +1,4 @@
-prompt = """Write a Python script langlands.py in the workdir that re-derives the machine-verified Burnside checks of the Sovereign Langlands framework (Langlands.agda: A₄ + S₄ dual instances, GL₂(GF(9)) subgroups, 0 postulate).
+prompt = """Write a Python script langlands.py in the workdir that re-derives the machine-verified Burnside checks of the Sovereign Langlands framework (Langlands.agda: A₄ + S₄ dual instances, GL₂(GF(9)) subgroups, 0 postulate, L3 (GL2TestVectors.agda: GL₂(5760) ℤ orthogonality)).
 
 Verified facts (from the Agda library):
 1. S₄ Burnside: 1·1 + 1·1 + 2·2 + 3·3 + 3·3 ≡ 24 (s4-burnside = refl). The conjugacy classes of S₄ have sizes 1, 1, 2, 3, 3 with class sizes squared summing to 24 — this is the Burnside/class-equation check.
