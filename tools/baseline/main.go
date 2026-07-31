@@ -26,23 +26,23 @@ import (
 
 	// Register all provider kinds via init().
 	_ "reasonix/internal/provider/anthropic"
-	_ "reasonix/internal/provider/responses"
 	_ "reasonix/internal/provider/openai"
+	_ "reasonix/internal/provider/responses"
 )
 
 // ---------- data types ----------
 
 // Sample is one completed inference call.
 type Sample struct {
-	Index          int     `json:"index"`
-	LatencyMs      float64 `json:"latency_ms"`       // wall-clock total
-	TTFTMs         float64 `json:"ttft_ms"`           // time to first text token
-	OutputChars    int     `json:"output_chars"`
-	OutputTokens   int     `json:"output_tokens"`
-	PromptTokens   int     `json:"prompt_tokens"`
-	ReasoningTok   int     `json:"reasoning_tokens"`
-	FinishReason   string  `json:"finish_reason"`
-	Error          string  `json:"error,omitempty"`
+	Index        int     `json:"index"`
+	LatencyMs    float64 `json:"latency_ms"` // wall-clock total
+	TTFTMs       float64 `json:"ttft_ms"`    // time to first text token
+	OutputChars  int     `json:"output_chars"`
+	OutputTokens int     `json:"output_tokens"`
+	PromptTokens int     `json:"prompt_tokens"`
+	ReasoningTok int     `json:"reasoning_tokens"`
+	FinishReason string  `json:"finish_reason"`
+	Error        string  `json:"error,omitempty"`
 }
 
 // Stats is a computed percentile summary.
@@ -58,16 +58,16 @@ type Stats struct {
 
 // Baseline is the output artifact consumed by model-watchdog.
 type Baseline struct {
-	Model       string  `json:"model"`
-	Provider    string  `json:"provider"`
-	N           int     `json:"n"`
-	Errors      int     `json:"errors"`
-	CreatedAt   string  `json:"created_at"`
-	LatencyMs   Stats   `json:"latency_ms"`
-	TTFTMs      Stats   `json:"ttft_ms"`
-	OutputChars Stats   `json:"output_chars"`
-	OutputTok   Stats   `json:"output_tokens"`
-	PromptTok   Stats   `json:"prompt_tokens"`
+	Model       string `json:"model"`
+	Provider    string `json:"provider"`
+	N           int    `json:"n"`
+	Errors      int    `json:"errors"`
+	CreatedAt   string `json:"created_at"`
+	LatencyMs   Stats  `json:"latency_ms"`
+	TTFTMs      Stats  `json:"ttft_ms"`
+	OutputChars Stats  `json:"output_chars"`
+	OutputTok   Stats  `json:"output_tokens"`
+	PromptTok   Stats  `json:"prompt_tokens"`
 	// Derived thresholds for watchdog (mean ± 3σ, p99 × 5, etc.)
 	Thresholds map[string]float64 `json:"thresholds"`
 	Samples    []Sample           `json:"samples,omitempty"` // only with -verbose
@@ -235,8 +235,8 @@ func main() {
 		PromptTok:   computeStats(promptToks),
 		Thresholds: map[string]float64{
 			// 🔴 hard gates
-			"latency_p99_red":    round2(latStats.P99 * 5),   // 5× P99 → red
-			"ttft_p99_red":       round2(ttftStats.P99 * 5),
+			"latency_p99_red": round2(latStats.P99 * 5), // 5× P99 → red
+			"ttft_p99_red":    round2(ttftStats.P99 * 5),
 			// 🟡 soft gates
 			"latency_mean_yellow": round2(latStats.Mean + 3*latStats.Stddev), // mean+3σ
 			"ttft_mean_yellow":    round2(ttftStats.Mean + 3*ttftStats.Stddev),

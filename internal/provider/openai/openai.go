@@ -1079,15 +1079,15 @@ type chatMessage struct {
 	// mode requires the reasoning_content key to be PRESENT on assistant
 	// tool_calls turns (an empty value passes; a missing key 400s), while every
 	// other message must keep omitting it.
-	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	ReasoningContent *string `json:"reasoning_content,omitempty"`
 	// Reasoning mirrors ReasoningContent for Qwen3 models on DashScope. Qwen3's
 	// multi-turn API expects both fields present on assistant turns for thinking
 	// continuity (preserve_thinking). Mirrors qwen-code's
 	// mirrorReasoningContentToReasoning.
-	Reasoning        *string        `json:"reasoning,omitempty"`
-	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string         `json:"tool_call_id,omitempty"`
-	Name             string         `json:"name,omitempty"`
+	Reasoning  *string        `json:"reasoning,omitempty"`
+	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Name       string         `json:"name,omitempty"`
 }
 
 type chatContentPart struct {
@@ -1164,7 +1164,7 @@ type wireUsage struct {
 	// DashScope returns cached_tokens at the top level (not nested under
 	// prompt_tokens_details) on some models. Mirrors qwen-code's
 	// extendedUsage.cached_tokens fallback.
-	CachedTokens         int `json:"cached_tokens"`
+	CachedTokens        int `json:"cached_tokens"`
 	PromptTokensDetails *struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`

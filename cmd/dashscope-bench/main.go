@@ -16,11 +16,11 @@ import (
 )
 
 var (
-	apiKey        = os.Getenv("QWEN_TOKEN_PLAN_CN_API_KEY")
-	baseURL       = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
-	anthropicURL  = "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
-	model         = "qwen3.7-plus"
-	client        = &http.Client{Timeout: 120 * time.Second}
+	apiKey       = os.Getenv("QWEN_TOKEN_PLAN_CN_API_KEY")
+	baseURL      = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+	anthropicURL = "https://token-plan.cn-beijing.maas.aliyuncs.com/apps/anthropic"
+	model        = "qwen3.7-plus"
+	client       = &http.Client{Timeout: 120 * time.Second}
 )
 
 // envOr returns env var v or fallback.
@@ -83,12 +83,12 @@ func chatCompletionsBench(systemPrompt string, turns int) {
 		messages = append(messages, map[string]any{"role": "user", "content": questions[i]})
 
 		body := map[string]any{
-			"model":    model,
-			"messages": messages,
-			"stream":   true,
-			"stream_options": map[string]any{"include_usage": true},
+			"model":           model,
+			"messages":        messages,
+			"stream":          true,
+			"stream_options":  map[string]any{"include_usage": true},
 			"enable_thinking": true,
-			"max_tokens": 200,
+			"max_tokens":      200,
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -121,10 +121,10 @@ func responsesAPIBench(systemPrompt string, turns int) {
 
 	for i := 0; i < turns; i++ {
 		body := map[string]any{
-			"model":        model,
-			"input":        questions[i],
-			"instructions": systemPrompt,
-			"stream":       true,
+			"model":             model,
+			"input":             questions[i],
+			"instructions":      systemPrompt,
+			"stream":            true,
 			"max_output_tokens": 200,
 		}
 		if prevResponseID != "" {
@@ -174,8 +174,8 @@ func anthropicBench(systemPrompt string, turns int) {
 			"system": []map[string]any{
 				{"type": "text", "text": systemPrompt, "cache_control": map[string]any{"type": "ephemeral"}},
 			},
-			"messages":   messages,
-			"stream":     true,
+			"messages": messages,
+			"stream":   true,
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -335,8 +335,8 @@ func streamChatCompletions(jsonBody []byte) (ttft time.Duration, promptTokens, c
 				} `json:"delta"`
 			} `json:"choices"`
 			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
+				PromptTokens        int `json:"prompt_tokens"`
+				CompletionTokens    int `json:"completion_tokens"`
 				PromptTokensDetails *struct {
 					CachedTokens int `json:"cached_tokens"`
 				} `json:"prompt_tokens_details"`
@@ -410,8 +410,8 @@ func streamResponses(jsonBody []byte) (ttft time.Duration, inputTokens, cachedTo
 			Response *struct {
 				ID    string `json:"id"`
 				Usage *struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
+					InputTokens        int `json:"input_tokens"`
+					OutputTokens       int `json:"output_tokens"`
 					InputTokensDetails *struct {
 						CachedTokens int `json:"cached_tokens"`
 					} `json:"input_tokens_details"`

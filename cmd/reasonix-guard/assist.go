@@ -14,8 +14,8 @@ import (
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	_ "reasonix/internal/provider/anthropic"
-	_ "reasonix/internal/provider/responses"
 	_ "reasonix/internal/provider/openai"
+	_ "reasonix/internal/provider/responses"
 	"reasonix/internal/repair"
 )
 

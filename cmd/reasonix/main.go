@@ -11,8 +11,8 @@ import (
 
 	// Blank imports wire compile-time built-ins into their registries.
 	_ "reasonix/internal/provider/anthropic"
-	_ "reasonix/internal/provider/responses"
 	_ "reasonix/internal/provider/openai"
+	_ "reasonix/internal/provider/responses"
 	_ "reasonix/internal/tool/builtin"
 )
 
