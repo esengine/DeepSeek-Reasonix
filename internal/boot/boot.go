@@ -2246,8 +2246,10 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"vision":                config.EffectiveVision(e),
 			"vision_model_explicit": config.ExplicitModelVision(e),
 			"vision_detail":         e.VisionDetail,
-			// responses: false = stateless (DeepSeek), true/absent =
-			// stateful previous_response_id (DashScope).
+			// responses provider context mode: "stateful" (previous_response_id,
+			// DashScope/OpenAI) or "stateless" (full input, DeepSeek). Vendor
+			// auto-detection in the provider fills the default when unset.
+			"mode":     e.ResponsesMode,
 			"stateful": responsesStatefulDefault(e.ResponsesStateful),
 		},
 	})

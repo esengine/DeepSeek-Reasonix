@@ -64,7 +64,7 @@ func TestResponsesStreamBasicText(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15,"input_tokens_details":{"cached_tokens":8},"output_tokens_details":{"reasoning_tokens":2}}}}`,
 	})
 
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: true})
+	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
 	chunks := collect(t, p, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: "sys"},
@@ -119,7 +119,7 @@ func TestResponsesStatefulUsesPreviousResponseID(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: true})
+	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
 
 	// Turn 1: full input, no previous_response_id.
 	collect(t, p, provider.Request{
@@ -168,7 +168,7 @@ func TestResponsesStatelessSendsFullInput(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Stateful: false})
+	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Stateful: boolPtr(false)})
 
 	collect(t, p, provider.Request{
 		Messages: []provider.Message{
@@ -203,7 +203,7 @@ func TestResponsesToolCallFunctionCallArguments(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
 	})
 
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Stateful: false})
+	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Stateful: boolPtr(false)})
 	chunks := collect(t, p, provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "list files"}},
 	})
@@ -235,7 +235,7 @@ func TestResponsesFailedEventSurfacesError(t *testing.T) {
 		`{"type":"response.failed","response":{"id":"resp_1","error":{"message":"model exploded"}}}`,
 	})
 
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: true})
+	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
 	chunks := collect(t, p, provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
 	})
@@ -261,7 +261,7 @@ func TestResponsesReasoningDialects(t *testing.T) {
 			ev,
 			`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
 		})
-		p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "m", Stateful: true})
+		p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "m", Stateful: boolPtr(true)})
 		chunks := collect(t, p, provider.Request{
 			Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
 		})
@@ -274,5 +274,38 @@ func TestResponsesReasoningDialects(t *testing.T) {
 		if !found {
 			t.Fatalf("event %q did not produce ChunkReasoning: %+v", ev, chunks)
 		}
+	}
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+
+func TestDetectVendorAndModeDefaults(t *testing.T) {
+	cases := []struct {
+		baseURL string
+		vendor  string
+		mode    string // default mode when nothing explicit
+	}{
+		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://api.deepseek.com", "deepseek", "stateless"},
+		{"https://api.minimaxi.com/v1", "minimax", "stateful"},
+		{"https://ark.cn-beijing.volces.com/api/v3", "volcano", "stateful"},
+		{"https://unknown.example.com/v1", "", "stateful"},
+	}
+	for _, c := range cases {
+		if got := DetectVendor(c.baseURL); got != c.vendor {
+			t.Errorf("DetectVendor(%q) = %q, want %q", c.baseURL, got, c.vendor)
+		}
+		if got := (Config{BaseURL: c.baseURL}).mode(); got != c.mode {
+			t.Errorf("default mode for %q = %q, want %q", c.baseURL, got, c.mode)
+		}
+	}
+	// Explicit config wins over vendor detection.
+	if got := (Config{BaseURL: "https://api.deepseek.com", Mode: "stateful"}).mode(); got != "stateful" {
+		t.Errorf("explicit Mode should win, got %q", got)
+	}
+	if got := (Config{BaseURL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", Stateful: boolPtr(false)}).mode(); got != "stateless" {
+		t.Errorf("explicit Stateful=false should win, got %q", got)
 	}
 }

@@ -36,18 +36,23 @@ func init() {
 // newFromConfig adapts the provider.Factory signature to our client.
 func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
-	stateful, _ := cfg.Extra["stateful"].(bool)
+	var stateful *bool
+	if v, ok := cfg.Extra["stateful"].(bool); ok {
+		stateful = &v
+	}
+	mode, _ := cfg.Extra["mode"].(string)
 	return New(Config{
 		Name:     cfg.Name,
 		APIKey:   cfg.APIKey,
 		BaseURL:  cfg.BaseURL,
 		Model:    cfg.Model,
 		Effort:   effort,
+		Mode:     mode,
 		Stateful: stateful,
 	}), nil
 }
 
-// Config holds the DashScope Responses API provider configuration.
+// Config holds the Responses API provider configuration.
 type Config struct {
 	Name    string
 	APIKey  string
@@ -55,14 +60,66 @@ type Config struct {
 	Model   string
 	Effort  string // "", "low", "medium", "high", "xhigh", "disabled"
 
-	// Stateful enables server-managed context via previous_response_id.
-	// DashScope supports it; DeepSeek's Responses API is stateless and
-	// rejects previous_response_id — set Stateful=false for DeepSeek so
-	// every turn sends the full input array.
-	Stateful bool
+	// Mode selects the server-context strategy. Supported values:
+	//   "stateful"  (default) — server-managed context via previous_response_id.
+	//     DashScope, OpenAI, Azure OpenAI, Volcano Ark.
+	//   "stateless" — every turn sends the full input array; the API rejects
+	//     previous_response_id. DeepSeek, and OpenAI Codex's own preference.
+	//   "" — resolved from Stateful, then vendor auto-detection.
+	Mode string
 
-	// SessionCache enables the x-dashscope-session-cache header (default true).
+	// Stateful is the legacy boolean form of Mode (nil = unset, falls back to
+	// vendor auto-detection; true → "stateful"; false → "stateless").
+	Stateful *bool
+
+	// SessionCache enables the x-dashscope-session-cache header (DashScope;
+	// default true).
 	SessionCache *bool
+}
+
+// mode resolves the effective context mode: explicit Mode wins, then legacy
+// Stateful, then vendor auto-detection (stateless for DeepSeek, stateful
+// otherwise).
+func (c Config) mode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case "stateful", "stateless":
+		return strings.ToLower(strings.TrimSpace(c.Mode))
+	}
+	if c.Stateful != nil {
+		if *c.Stateful {
+			return "stateful"
+		}
+		return "stateless"
+	}
+	if DetectVendor(c.BaseURL) == "deepseek" {
+		return "stateless"
+	}
+	return "stateful"
+}
+
+// Endpoint detection: identify well-known Responses API providers by base URL
+// so callers can pick sensible defaults (mode, session-cache header) without
+// explicit config. Each returns the vendor name or "" when unknown.
+//
+//   - DashScope:   dashscope.aliyuncs.com / token-plan.*.maas.aliyuncs.com
+//   - DeepSeek:    api.deepseek.com
+//   - MiniMax:     api.minimaxi.com (Responses API documented)
+//   - Volcano Ark: ark.cn-beijing.volces.com (Responses API supported)
+func DetectVendor(baseURL string) string {
+	u := strings.ToLower(strings.TrimSpace(baseURL))
+	switch {
+	case strings.Contains(u, "dashscope.aliyuncs.com"),
+		strings.Contains(u, ".maas.aliyuncs.com"),
+		strings.Contains(u, "token-plan."):
+		return "dashscope"
+	case strings.Contains(u, "api.deepseek.com"):
+		return "deepseek"
+	case strings.Contains(u, "api.minimaxi.com"), strings.Contains(u, "api.minimax.io"):
+		return "minimax"
+	case strings.Contains(u, "volces.com"), strings.Contains(u, "volcengine.com"):
+		return "volcano"
+	}
+	return ""
 }
 
 type client struct {
@@ -71,7 +128,7 @@ type client struct {
 	baseURL      string
 	model        string
 	effort       string
-	stateful     bool // DashScope: previous_response_id; DeepSeek: stateless
+	mode         string // "stateful" (previous_response_id) | "stateless" (full input)
 	sessionCache bool
 	http         *http.Client
 
@@ -79,7 +136,7 @@ type client struct {
 	lastResponseID string // previous_response_id for server-managed context
 }
 
-// New creates a DashScope Responses API provider.
+// New creates a Responses API provider.
 func New(cfg Config) provider.Provider {
 	sc := true
 	if cfg.SessionCache != nil {
@@ -91,7 +148,7 @@ func New(cfg Config) provider.Provider {
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
 		effort:       cfg.Effort,
-		stateful:     cfg.Stateful,
+		mode:         cfg.mode(),
 		sessionCache: sc,
 		http: &http.Client{
 			Timeout: 300 * time.Second,
@@ -189,11 +246,11 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 		body["tools"] = tools
 	}
 
-	// Decide: use previous_response_id (stateful DashScope) or send full input.
-	// DeepSeek's Responses API is stateless and rejects previous_response_id,
+	// Decide: use previous_response_id (stateful mode) or send full input.
+	// Stateless providers (DeepSeek, Codex-style) reject previous_response_id,
 	// so every turn sends the complete input array.
 	usePrevID := false
-	if c.stateful && prevID != "" && isSimpleContinuation(req.Messages) {
+	if c.mode == "stateful" && prevID != "" && isSimpleContinuation(req.Messages) {
 		// Only the last user message is new; server has the rest.
 		lastUser := lastUserContent(req.Messages)
 		body["input"] = lastUser
