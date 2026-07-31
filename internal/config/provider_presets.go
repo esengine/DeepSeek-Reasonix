@@ -440,6 +440,23 @@ var curatedProviderPresets = []ProviderPreset{
 		}},
 	},
 	{
+		ID:          "minimax-responses",
+		Label:       "MiniMax Responses API",
+		Description: "MiniMax OpenAI Responses API endpoint (Create Response, documented).",
+		KeyEnv:      "MINIMAX_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:          "minimax-responses",
+			Kind:          "responses",
+			BaseURL:       "https://api.minimaxi.com/v1",
+			Models:        minimaxMSeriesModels,
+			VisionModels:  minimaxMSeriesVisionModels,
+			Default:       "MiniMax-M3",
+			APIKeyEnv:     "MINIMAX_API_KEY",
+			ContextWindow: 1048576,
+			ResponsesMode: "stateful", // MiniMax documents previous_response_id support
+		}},
+	},
+	{
 		ID:          "glm-cn",
 		Label:       "GLM CN API",
 		Description: "Zhipu GLM China OpenAI-compatible API with thinking controls.",
