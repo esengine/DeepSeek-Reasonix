@@ -1,6 +1,6 @@
-[问题: Navier-Stokes · 病态5行列式爆炸]
-[三重元标准: 几何闭包(T⁶)+原生共轭(σ=x³)+全局编码(鸽巢收敛)]
-[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+# 问题: Navier-Stokes · 病态5行列式爆炸
+# 三重元标准: 几何闭包(T⁶)+原生共轭(σ=x³)+全局编码(鸽巢收敛)
+# 评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分
 
 prompt = """Write a Python script ns.py in the workdir that re-derives the machine-verified constants of the Sovereign discrete Navier-Stokes framework (NSE.agda + NSRegularity + NSVortex, 537 lines, 0 postulate: existence via 12 exact-solution theorems, regularity via bounded discrete energy, blow-up excluded on GF(3)³).
 

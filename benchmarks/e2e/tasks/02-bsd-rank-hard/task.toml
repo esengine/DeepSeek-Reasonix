@@ -1,6 +1,6 @@
-[问题: BSD · 病态6黎曼基座失配(离散版)]
-[三重元标准: 几何闭包(GF(q)曲线)+原生共轭(Frobenius迹)+全局编码(t-rec ∀n)]
-[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+# 问题: BSD · 病态6黎曼基座失配(离散版)
+# 三重元标准: 几何闭包(GF(q)曲线)+原生共轭(Frobenius迹)+全局编码(t-rec ∀n)
+# 评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分
 
 prompt = """Write a Python script bsd.py in the workdir that re-derives the machine-verified point counts of the Sovereign BSD framework (BSD.agda / BSD9.agda, 0 postulate, trace-recursion method).
 

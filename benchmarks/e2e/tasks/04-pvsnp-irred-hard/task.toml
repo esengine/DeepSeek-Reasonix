@@ -1,6 +1,6 @@
-[问题: P vs NP · 病态1/2(复杂度连续化)]
-[三重元标准: 几何闭包(GF9函数空间)+原生共轭(不可约=单向)+全局编码(Eval≢Invert)]
-[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+# 问题: P vs NP · 病态1/2(复杂度连续化)
+# 三重元标准: 几何闭包(GF9函数空间)+原生共轭(不可约=单向)+全局编码(Eval≢Invert)
+# 评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分
 
 prompt = """Write a Python script pvsnp.py in the workdir that re-derives the machine-verified core of the Sovereign P vs NP framework (PvsNP.agda: holographic-penetration conjecture, 0 postulate, L3 (PvsNP_Separation.agda: Eval ≢ Invert, 6 refl + 3 λ() closed)).
 
