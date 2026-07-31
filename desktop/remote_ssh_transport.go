@@ -72,10 +72,25 @@ var errRemoteSSHProcessIsolation = errors.New("OpenSSH process isolation is unav
 type RemoteSSHTransportFactory struct {
 	SSHPath        string
 	SSHConfigPath  string
+	RemoteBinary   string
 	AskPass        *RemoteAskPassBroker
 	AskPassHelper  string
 	StderrLimit    int
 	commandContext remoteSSHCommandContext // test seam; nil uses exec.CommandContext
+}
+
+func (f *RemoteSSHTransportFactory) workbenchCommand() ([]string, error) {
+	binary, err := validateRemoteWorkbenchBinary(f.RemoteBinary)
+	if err != nil {
+		return nil, err
+	}
+	if binary != "reasonix" {
+		// OpenSSH concatenates remote command argv with spaces before the remote
+		// login shell parses it. Quote the absolute managed path as shell data so
+		// home directories containing spaces or quotes remain one safe operand.
+		binary = shellSingleQuote(binary)
+	}
+	return []string{binary, "remote", "attach-workspace", "--stdio"}, nil
 }
 
 func (f *RemoteSSHTransportFactory) Start(ctx context.Context, alias string) (*RemoteSSHTransport, error) {
@@ -90,7 +105,12 @@ func (f *RemoteSSHTransportFactory) Start(ctx context.Context, alias string) (*R
 		args = append(args, "-F", f.SSHConfigPath)
 	}
 	args = append(args, remoteSSHPolicyArgs()...)
-	args = append(args, "--", alias, "reasonix", "remote", "attach-workspace", "--stdio")
+	command, err := f.workbenchCommand()
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--", alias)
+	args = append(args, command...)
 	return f.start(ctx, args)
 }
 
@@ -134,7 +154,12 @@ func (f *RemoteSSHTransportFactory) StartConfigured(ctx context.Context, alias, 
 		}
 		args = append(args, "-J", proxyJump)
 	}
-	args = append(args, "--", alias, "reasonix", "remote", "attach-workspace", "--stdio")
+	command, err := f.workbenchCommand()
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--", alias)
+	args = append(args, command...)
 	return f.start(ctx, args)
 }
 
@@ -178,7 +203,12 @@ func (f *RemoteSSHTransportFactory) StartDirectConfigured(ctx context.Context, d
 		}
 		args = append(args, "-J", proxyJump)
 	}
-	args = append(args, "--", target.Host, "reasonix", "remote", "attach-workspace", "--stdio")
+	command, err := f.workbenchCommand()
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, "--", target.Host)
+	args = append(args, command...)
 	return f.start(ctx, args)
 }
 
@@ -472,7 +502,8 @@ func classifyRemoteSSHExit(stderr []byte, bootstrapStarted bool, contextErr erro
 	}
 	if !bootstrapStarted && containsAnyRemoteSSHDiagnostic(lower,
 		"reasonix: command not found", "reasonix: not found",
-		"'reasonix' is not recognized", "exec: reasonix: not found") {
+		"/reasonix: not found", "'reasonix' is not recognized", "exec: reasonix: not found",
+		"unknown remote subcommand \"attach-workspace\"") {
 		return &RemoteSSHConnectionFailure{
 			Code: RemoteSSHCLINotFound, Stage: RemoteSSHStageBootstrap,
 			Retryable: false, Message: "The Reasonix CLI was not found on the remote Host.",

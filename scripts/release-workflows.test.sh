@@ -31,9 +31,22 @@ grep -Eq "workflow_id: 'release-desktop\.yml'" \
 	"$repo_root/.github/workflows/release-desktop-trigger.yml"
 grep -Fq 'Desktop Preview must be dispatched without a Git tag' \
 	"$repo_root/.github/workflows/release-desktop-trigger.yml"
-grep -Eq "workflow_id: 'release\.yml'" \
+grep -Fq "workflow_id: preview ? 'release-preview.yml' : 'release.yml'" \
 	"$repo_root/.github/workflows/release-cli-trigger.yml"
 grep -Eq "preview\\\\\." "$repo_root/.github/workflows/release-cli-trigger.yml"
+grep -Eq '^name: Release preview$' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq '^  group: preview-release$' "$repo_root/.github/workflows/release-preview.yml"
+if grep -Fq 'group: preview-release-${{ inputs.tag }}' "$repo_root/.github/workflows/release-preview.yml"; then
+	echo "Preview releases must serialize across versions" >&2
+	exit 1
+fi
+grep -Eq '^    environment: canary$' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq '^  signpath-preflight:$' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq 'signing_preflight: true' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq 'signing_preflight_verified: true' "$repo_root/.github/workflows/release-preview.yml"
+[ "$(grep -Ec 'needs: \[authorize, signpath-preflight\]' "$repo_root/.github/workflows/release-preview.yml")" = "3" ]
+grep -Eq 'release-event\.mjs generate' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq 'gh workflow run pages\.yml' "$repo_root/.github/workflows/release-preview.yml"
 grep -Eq 'release-cli-trigger\.yml' "$repo_root/.github/workflows/ci.yml"
 if grep -Eq '^  push:$' "$repo_root/.github/workflows/release-stable.yml" ||
 	grep -Eq '^  push:$' "$repo_root/.github/workflows/release.yml" ||
@@ -46,14 +59,13 @@ for workflow in release.yml release-npm.yml release-desktop.yml; do
 	grep -Eq 'github\.ref_protected' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'inputs\.approved_sha' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'verify-release-tag\.sh' "$repo_root/.github/workflows/$workflow"
-	grep -Eq 'release-stable\.yml' "$repo_root/.github/workflows/$workflow"
+	grep -Eq 'release-\{1\}\.yml' "$repo_root/.github/workflows/$workflow"
 	grep -Eq "needs\.cache-guard\.result == 'success'" "$repo_root/.github/workflows/$workflow"
 done
-grep -Eq 'options: \[stable, preview\]' "$repo_root/.github/workflows/release.yml"
+grep -Eq 'options: \[stable\]' "$repo_root/.github/workflows/release.yml"
 grep -A6 -E '^      channel:' "$repo_root/.github/workflows/release.yml" |
 	grep -Eq 'default: stable'
-grep -Eq "needs\.resolve\.outputs\.channel == 'preview'.*'canary'.*'release'" \
-	"$repo_root/.github/workflows/release.yml"
+grep -Eq '^    environment: release$' "$repo_root/.github/workflows/release.yml"
 grep -Eq 'GORELEASER_CURRENT_TAG:.*needs\.resolve\.outputs\.tag' \
 	"$repo_root/.github/workflows/release.yml"
 grep -Eq 'bash scripts/resolve-cli-release\.sh' "$repo_root/.github/workflows/release.yml"
@@ -90,6 +102,22 @@ if grep -Fq 'ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}' \
 fi
 grep -Fq "group: release-desktop-\${{ (inputs.channel == 'preview' || inputs.channel == 'canary') && 'preview' || 'stable' }}" \
 	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq 'IN_PRODUCTION_SIGNING_SMOKE:.*inputs\.production_signing_smoke' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq 'IN_SIGNING_PREFLIGHT:.*inputs\.signing_preflight' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq "group: release-npm-\${{ inputs.channel || 'next' }}" \
+	"$repo_root/.github/workflows/release-npm.yml"
+sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Eq 'default: stable'
+if sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Eq '^          - canary$'; then
+	echo "Standalone npm dispatch must not expose public Canary publication" >&2
+	exit 1
+fi
+grep -Fq 'if: ${{ !inputs.orchestrated }}' "$repo_root/.github/workflows/release-npm.yml"
+grep -Fq 'Publish or recover immutable npm packages' "$repo_root/.github/workflows/release-npm.yml"
+grep -Fq 'publishPackages' "$repo_root/npm/build.mjs"
 grep -Eq 'signing-policy-slug: release-signing' "$repo_root/.github/workflows/release-desktop.yml"
 if grep -Eq 'signing-policy-slug:.*test-signing' "$repo_root/.github/workflows/release-desktop.yml"; then
 	echo "public desktop workflow must not use the SignPath test certificate" >&2
@@ -129,6 +157,7 @@ if grep -Eq 'gh release create .*dist/' "$repo_root/.github/workflows/release-de
 fi
 grep -Fq 'scripts/decide-desktop-pointer-update.sh' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'scripts/verify-desktop-release-directory.sh' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'scripts/compare-desktop-release-manifests.sh' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'download_optional "preview/latest.json"' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'download_optional "canary/latest.json"' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'publish_pointer canary' "$repo_root/.github/workflows/release-desktop.yml"
@@ -163,7 +192,9 @@ desktop_r2_upload_line="$(
 grep -Eq '^  postflight:$' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'verify-stable-release-artifacts\.sh' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'name: Upload reviewed release notes' "$repo_root/.github/workflows/release-stable.yml"
-grep -Eq 'name: stable-reviewed-release-notes' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'name: orchestrator-reviewed-release-notes' "$repo_root/.github/workflows/release-stable.yml"
+grep -Eq 'name: Upload reviewed release notes' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq 'name: orchestrator-reviewed-release-notes' "$repo_root/.github/workflows/release-preview.yml"
 for channel in cli npm desktop; do
 	grep -Eq '^      publish_'"$channel"':' "$repo_root/.github/workflows/release-stable.yml"
 	grep -Eq "inputs\.publish_$channel" "$repo_root/.github/workflows/release-stable.yml"
@@ -177,7 +208,7 @@ grep -Eq '^v1:[0-9a-f]{64}$' <<<"$contract_fingerprint"
 grep -Eq 'public postflight will still verify it' "$repo_root/.github/workflows/release-stable.yml"
 for workflow in release.yml release-desktop.yml; do
 	grep -Eq 'name: Download orchestrator-reviewed release notes' "$repo_root/.github/workflows/$workflow"
-	grep -Eq 'name: stable-reviewed-release-notes' "$repo_root/.github/workflows/$workflow"
+	grep -Eq 'name: orchestrator-reviewed-release-notes' "$repo_root/.github/workflows/$workflow"
 	grep -Eq 'if: \$\{\{ !inputs\.orchestrated' "$repo_root/.github/workflows/$workflow"
 done
 
@@ -191,8 +222,8 @@ grep -Fq 'cli/${channel}/latest.json' "$cli_release_workflow"
 grep -Fq "group: release-cli-\${{ inputs.channel || 'stable' }}" "$cli_release_workflow"
 grep -Fq 'scripts/decide-cli-pointer-update.sh' "$cli_release_workflow"
 grep -Fq 'scripts/validate-cli-release-manifest.sh' "$cli_release_workflow"
+grep -Fq 'scripts/compare-cli-release-manifests.sh' "$cli_release_workflow"
 grep -Fq 'immutable CLI release metadata for $TAG already exists with different content' "$cli_release_workflow"
-grep -Fq 'cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json' "$cli_release_workflow"
 grep -Fq 'cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json' "$cli_release_workflow"
 grep -Eq 'internal CLI release .*Stable and Preview pointers remain unchanged' "$cli_release_workflow"
 cli_public_validation_line="$(
@@ -256,7 +287,9 @@ for asset in \
 	grep -Fq "\"$asset\"" "$cli_release_workflow"
 done
 manifest_validator="$repo_root/scripts/validate-cli-release-manifest.sh"
+manifest_comparator="$repo_root/scripts/compare-cli-release-manifests.sh"
 test -x "$manifest_validator"
+test -x "$manifest_comparator"
 manifest_assets='[
 	"reasonix-darwin-amd64.tar.gz",
 	"reasonix-darwin-arm64.tar.gz",
@@ -277,6 +310,7 @@ jq -n \
 		tag_name: $tag,
 		prerelease: false,
 		html_url: ("https://github.com/" + $repo + "/releases/tag/" + $tag),
+		release_notes_url: ("https://reasonix.io/changelog/" + $tag + "/"),
 		assets: [
 			$names[] as $name |
 			{
@@ -290,6 +324,45 @@ jq -n \
 ' >"$manifest_file"
 bash "$manifest_validator" stable "$manifest_tag" "$manifest_repo" "$manifest_file"
 bash "$manifest_validator" any "$manifest_tag" "$manifest_repo" "$manifest_file"
+
+legacy_manifest="$test_root/cli-release-manifest-legacy.json"
+jq 'del(.release_notes_url)' "$manifest_file" >"$legacy_manifest"
+bash "$manifest_validator" legacy-stable "$manifest_tag" "$manifest_repo" "$legacy_manifest"
+bash "$manifest_comparator" "$manifest_file" "$legacy_manifest"
+if bash "$manifest_validator" stable "$manifest_tag" "$manifest_repo" "$legacy_manifest" >/dev/null 2>&1; then
+	echo "strict CLI manifest validator accepted a legacy manifest" >&2
+	exit 1
+fi
+wrong_legacy_notes="$test_root/cli-release-manifest-wrong-legacy-notes.json"
+jq '.release_notes_url = "https://reasonix.io/changelog/v9.9.9/"' \
+	"$manifest_file" >"$wrong_legacy_notes"
+if bash "$manifest_validator" legacy-stable "$manifest_tag" "$manifest_repo" \
+	"$wrong_legacy_notes" >/dev/null 2>&1; then
+	echo "legacy CLI manifest validator accepted a mismatched release-notes URL" >&2
+	exit 1
+fi
+if bash "$manifest_comparator" "$manifest_file" "$wrong_legacy_notes" >/dev/null 2>&1; then
+	echo "CLI manifest comparator ignored a non-legacy difference" >&2
+	exit 1
+fi
+
+rc_manifest_tag="v1.2.4-rc.1"
+rc_notes_tag="v1.2.4"
+rc_manifest="$test_root/cli-release-manifest-rc.json"
+jq \
+	--arg repo "$manifest_repo" \
+	--arg tag "$rc_manifest_tag" \
+	--arg notes_tag "$rc_notes_tag" '
+	.tag_name = $tag |
+	.prerelease = true |
+	.html_url = ("https://github.com/" + $repo + "/releases/tag/" + $tag) |
+	.release_notes_url = ("https://reasonix.io/changelog/" + $notes_tag + "/") |
+	.assets |= map(
+		.browser_download_url =
+			("https://github.com/" + $repo + "/releases/download/" + $tag + "/" + .name)
+	)
+' "$manifest_file" >"$rc_manifest"
+bash "$manifest_validator" any "$rc_manifest_tag" "$manifest_repo" "$rc_manifest" "$rc_notes_tag"
 
 expect_invalid_cli_manifest() {
 	local description="$1"
@@ -430,6 +503,34 @@ cp "$candidate_directory/a" "$existing_directory/a"
 printf 'unexpected\n' >"$existing_directory/unexpected"
 if bash "$desktop_directory_verifier" --allow-missing "$candidate_directory" "$existing_directory" >/dev/null 2>&1; then
 	echo "Desktop release directory verifier accepted an unexpected immutable object" >&2
+	exit 1
+fi
+
+legacy_candidate_directory="$test_root/desktop-directory-legacy-candidate"
+legacy_existing_directory="$test_root/desktop-directory-legacy-existing"
+mkdir -p "$legacy_candidate_directory" "$legacy_existing_directory"
+printf 'asset\n' >"$legacy_candidate_directory/artifact"
+cp "$legacy_candidate_directory/artifact" "$legacy_existing_directory/artifact"
+jq -n '{
+	version: "v1.2.3",
+	release_notes_url: "https://reasonix.io/changelog/v1.2.3/",
+	platforms: {"darwin-arm64": {size: 42}}
+}' >"$legacy_candidate_directory/latest.json"
+jq 'del(.release_notes_url)' "$legacy_candidate_directory/latest.json" \
+	>"$legacy_existing_directory/latest.json"
+bash "$desktop_directory_verifier" --allow-legacy-manifest \
+	"$legacy_candidate_directory" "$legacy_existing_directory"
+if bash "$desktop_directory_verifier" \
+	"$legacy_candidate_directory" "$legacy_existing_directory" >/dev/null 2>&1; then
+	echo "Desktop release directory verifier accepted a legacy manifest without opt-in" >&2
+	exit 1
+fi
+jq '.platforms["darwin-arm64"].size = 99' "$legacy_existing_directory/latest.json" \
+	>"$legacy_existing_directory/latest-conflict.json"
+mv "$legacy_existing_directory/latest-conflict.json" "$legacy_existing_directory/latest.json"
+if bash "$desktop_directory_verifier" --allow-legacy-manifest \
+	"$legacy_candidate_directory" "$legacy_existing_directory" >/dev/null 2>&1; then
+	echo "Desktop release directory verifier ignored a non-legacy manifest difference" >&2
 	exit 1
 fi
 
@@ -619,12 +720,16 @@ if PATH="$fake_gh_bin:$PATH" FAKE_GH_STATE="$fake_gh_state" \
 fi
 
 desktop_validator="$repo_root/scripts/validate-desktop-release-manifest.sh"
+desktop_manifest_comparator="$repo_root/scripts/compare-desktop-release-manifests.sh"
 test -x "$desktop_validator"
+test -x "$desktop_manifest_comparator"
 write_desktop_manifest() {
 	local version="$1"
 	local base="$2"
 	local output="$3"
-	jq -n --arg version "$version" --arg base "$base" --arg sha "$(printf 'a%.0s' {1..64})" '
+	local notes_version="${4:-$version}"
+	jq -n --arg version "$version" --arg notes_version "$notes_version" \
+		--arg base "$base" --arg sha "$(printf 'a%.0s' {1..64})" '
 		def asset($name): {
 			url: ($base + $name),
 			sig: ($base + $name + ".minisig"),
@@ -634,6 +739,7 @@ write_desktop_manifest() {
 		{
 			version: $version,
 			download_page: "https://reasonix.io/?download=desktop#start",
+			release_notes_url: ("https://reasonix.io/changelog/" + $notes_version + "/"),
 			platforms: {
 				"darwin-arm64": asset("Reasonix-darwin-arm64.zip"),
 				"darwin-amd64": asset("Reasonix-darwin-amd64.zip"),
@@ -670,10 +776,31 @@ write_desktop_manifest "$desktop_preview_version" "$desktop_preview_base" "$desk
 bash "$desktop_validator" preview "$desktop_preview_version" "$desktop_preview_base" "$desktop_preview_manifest"
 
 desktop_rc_version="v1.3.0-rc.1"
+desktop_rc_notes_version="v1.3.0"
 desktop_rc_base="https://dl.reasonix.io/desktop-${desktop_rc_version}/"
 desktop_rc_manifest="$test_root/desktop-rc.json"
-write_desktop_manifest "$desktop_rc_version" "$desktop_rc_base" "$desktop_rc_manifest"
-bash "$desktop_validator" any "$desktop_rc_version" "$desktop_rc_base" "$desktop_rc_manifest"
+write_desktop_manifest "$desktop_rc_version" "$desktop_rc_base" "$desktop_rc_manifest" \
+	"$desktop_rc_notes_version"
+bash "$desktop_validator" any "$desktop_rc_version" "$desktop_rc_base" \
+	"$desktop_rc_manifest" "$desktop_rc_notes_version"
+
+desktop_legacy_notes_manifest="$test_root/desktop-stable-legacy-notes.json"
+jq 'del(.release_notes_url)' "$desktop_stable_manifest" >"$desktop_legacy_notes_manifest"
+bash "$desktop_validator" legacy-stable "$desktop_stable_version" \
+	"$desktop_stable_base" "$desktop_legacy_notes_manifest"
+bash "$desktop_manifest_comparator" "$desktop_stable_manifest" "$desktop_legacy_notes_manifest"
+if bash "$desktop_validator" stable "$desktop_stable_version" "$desktop_stable_base" \
+	"$desktop_legacy_notes_manifest" >/dev/null 2>&1; then
+	echo "strict Desktop manifest validator accepted a legacy release-notes manifest" >&2
+	exit 1
+fi
+jq '.release_notes_url = "https://reasonix.io/changelog/v9.9.9/"' \
+	"$desktop_stable_manifest" >"$test_root/desktop-wrong-legacy-notes.json"
+if bash "$desktop_manifest_comparator" "$desktop_stable_manifest" \
+	"$test_root/desktop-wrong-legacy-notes.json" >/dev/null 2>&1; then
+	echo "Desktop manifest comparator ignored a non-legacy difference" >&2
+	exit 1
+fi
 
 expect_invalid_desktop_manifest() {
 	local description="$1"
@@ -782,10 +909,16 @@ git clone -q "$test_root/remote.git" "$test_root/repo"
 	git tag v1.2.3
 	git tag npm-v1.2.3
 	git tag -a desktop-v1.2.3 -m "desktop release"
-	git push -q origin v1.2.3 npm-v1.2.3 desktop-v1.2.3
+	git tag v1.3.0-preview.42
+	git push -q origin v1.2.3 npm-v1.2.3 desktop-v1.2.3 v1.3.0-preview.42
 	GITHUB_OUTPUT="$test_root/stable.out" RELEASE_TAG=v1.2.3 "$repo_root/scripts/resolve-stable-release.sh"
 	grep -Eq '^version=1\.2\.3$' "$test_root/stable.out"
 	grep -Eq '^desktop_tag=desktop-v1\.2\.3$' "$test_root/stable.out"
+	GITHUB_OUTPUT="$test_root/preview.out" RELEASE_TAG=v1.3.0-preview.42 \
+		"$repo_root/scripts/resolve-preview-release.sh"
+	grep -Eq '^version=1\.3\.0-preview\.42$' "$test_root/preview.out"
+	grep -Eq '^desktop_tag=desktop-v1\.3\.0-preview\.42$' "$test_root/preview.out"
+	grep -Eq '^npm_version=1\.3\.0-canary\.42$' "$test_root/preview.out"
 	approved_sha="$(git rev-parse HEAD)"
 	GITHUB_OUTPUT="$test_root/desktop-stable-candidate.out" \
 		RELEASE_CHANNEL=stable RELEASE_TAG=desktop-v1.2.3 \
@@ -831,6 +964,12 @@ git clone -q "$test_root/remote.git" "$test_root/repo"
 		CALLER_EVENT_NAME=push CALLER_REF=refs/tags/v1.2.3 CALLER_REF_PROTECTED=true \
 		CALLER_WORKFLOW_SHA="$approved_sha" CALLER_SHA="$approved_sha" \
 		APPROVED_CLI_TAG=v1.2.3 APPROVED_SHA="$approved_sha" \
+		"$repo_root/scripts/verify-release-authorization.sh"
+	ACTUAL_CALLER_WORKFLOW_REF='example/reasonix/.github/workflows/release-preview.yml@refs/heads/main-v2' \
+		EXPECTED_CALLER_WORKFLOW_REF='example/reasonix/.github/workflows/release-preview.yml@refs/heads/main-v2' \
+		CALLER_EVENT_NAME=workflow_dispatch CALLER_REF=refs/heads/main-v2 CALLER_REF_PROTECTED=true \
+		CALLER_WORKFLOW_SHA="$approved_sha" CALLER_SHA="$approved_sha" \
+		APPROVED_CHANNEL=preview APPROVED_CLI_TAG=v1.3.0-preview.42 APPROVED_SHA="$approved_sha" \
 		"$repo_root/scripts/verify-release-authorization.sh"
 	RELEASE_TAG=desktop-v1.2.3 APPROVED_SHA="$approved_sha" \
 		"$repo_root/scripts/verify-release-tag.sh"
@@ -951,14 +1090,17 @@ EVENT_NAME=push IN_CHANNEL=stable IN_TAG=desktop-v1.2.3 REF_NAME=v1.2.3 RUN_NUMB
 	GITHUB_OUTPUT="$test_root/desktop-stable.out" bash "$repo_root/scripts/resolve-desktop-release.sh"
 grep -Eq '^tag=desktop-v1\.2\.3$' "$test_root/desktop-stable.out"
 grep -Eq '^version=v1\.2\.3$' "$test_root/desktop-stable.out"
+grep -Eq '^notes_version=v1\.2\.3$' "$test_root/desktop-stable.out"
 
-EVENT_NAME=workflow_dispatch IN_CHANNEL=preview IN_BASE_VERSION=1.3.0 IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=42 \
+EVENT_NAME=workflow_call IN_ORCHESTRATED=true IN_CHANNEL=preview IN_BASE_VERSION=1.3.0 \
+	IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=999 IN_PREVIEW_NUMBER=42 \
 	GITHUB_OUTPUT="$test_root/desktop-preview.out" bash "$repo_root/scripts/resolve-desktop-release.sh"
 grep -Eq '^version=v1\.3\.0-preview\.42$' "$test_root/desktop-preview.out"
 grep -Eq '^tag=desktop-v1\.3\.0-preview\.42$' "$test_root/desktop-preview.out"
 grep -Eq '^channel=preview$' "$test_root/desktop-preview.out"
+grep -Eq '^notes_version=v1\.3\.0-preview\.42$' "$test_root/desktop-preview.out"
 
-if EVENT_NAME=workflow_dispatch IN_CHANNEL=preview IN_BASE_VERSION=1.3.0 \
+if EVENT_NAME=workflow_call IN_ORCHESTRATED=true IN_CHANNEL=preview IN_BASE_VERSION=1.3.0 \
 	IN_TAG=desktop-v1.3.0-preview.42 REF_NAME=main-v2 RUN_NUMBER=42 \
 	GITHUB_OUTPUT="$test_root/desktop-preview-tagged.out" \
 	bash "$repo_root/scripts/resolve-desktop-release.sh" \
@@ -969,17 +1111,35 @@ fi
 grep -Eq 'Desktop Preview versions are synthesized from protected main-v2' \
 	"$test_root/desktop-preview-tagged.log"
 
-# Legacy automation may still dispatch `canary`; normalize it to Preview without
-# exposing a third user-facing release channel.
-EVENT_NAME=workflow_dispatch IN_CHANNEL=canary IN_BASE_VERSION=1.3.0 IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=43 \
+# Legacy signing automation may still dispatch `canary`; normalize it to Preview
+# without exposing a third public release path.
+EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_SIGNING_PREFLIGHT=true \
+	IN_CHANNEL=canary IN_BASE_VERSION=1.3.0 IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=43 \
 	GITHUB_OUTPUT="$test_root/desktop-canary-compat.out" bash "$repo_root/scripts/resolve-desktop-release.sh"
 grep -Eq '^version=v1\.3\.0-preview\.43$' "$test_root/desktop-canary-compat.out"
 grep -Eq '^tag=desktop-v1\.3\.0-preview\.43$' "$test_root/desktop-canary-compat.out"
 grep -Eq '^channel=preview$' "$test_root/desktop-canary-compat.out"
 
+EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_PRODUCTION_SIGNING_SMOKE=true \
+	IN_CHANNEL=preview IN_BASE_VERSION=1.3.0 IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=44 \
+	GITHUB_OUTPUT="$test_root/desktop-preview-smoke.out" bash "$repo_root/scripts/resolve-desktop-release.sh"
+grep -Eq '^version=v1\.3\.0-preview\.44$' "$test_root/desktop-preview-smoke.out"
+
+if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=preview \
+	IN_BASE_VERSION=1.3.0 IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=45 \
+	GITHUB_OUTPUT="$test_root/desktop-preview-direct.out" \
+	bash "$repo_root/scripts/resolve-desktop-release.sh" \
+	>"$test_root/desktop-preview-direct.log" 2>&1; then
+	echo "standalone public Desktop Preview unexpectedly passed" >&2
+	exit 1
+fi
+grep -Eq 'public Desktop Preview releases must be dispatched by release-preview.yml' \
+	"$test_root/desktop-preview-direct.log"
+
 EVENT_NAME=push IN_CHANNEL='' IN_TAG='' REF_NAME=desktop-v1.4.0-rc.1 RUN_NUMBER=50 \
 	GITHUB_OUTPUT="$test_root/desktop-rc.out" bash "$repo_root/scripts/resolve-desktop-release.sh"
 grep -Eq '^prerelease=true$' "$test_root/desktop-rc.out"
+grep -Eq '^notes_version=v1\.4\.0$' "$test_root/desktop-rc.out"
 
 if EVENT_NAME=workflow_dispatch IN_CHANNEL=stable IN_TAG=desktop-v1.4.0-preview.1 \
 	REF_NAME=main-v2 RUN_NUMBER=50 GITHUB_OUTPUT="$test_root/desktop-preview-as-stable.out" \
@@ -999,25 +1159,32 @@ if EVENT_NAME=workflow_dispatch IN_CHANNEL=stable IN_TAG='' REF_NAME=main-v2 RUN
 fi
 grep -Eq 'stable dispatch requires tag' "$test_root/desktop-missing-tag.log"
 
-EVENT_NAME=push IN_CHANNEL='' IN_TAG='' REF_NAME=v1.3.0-preview.42 \
-	GITHUB_OUTPUT="$test_root/cli-preview-push.out" bash "$repo_root/scripts/resolve-cli-release.sh"
-grep -Eq '^tag=v1\.3\.0-preview\.42$' "$test_root/cli-preview-push.out"
-grep -Eq '^version=1\.3\.0-preview\.42$' "$test_root/cli-preview-push.out"
-grep -Eq '^base_version=1\.3\.0$' "$test_root/cli-preview-push.out"
-grep -Eq '^notes_version=v1\.3\.0$' "$test_root/cli-preview-push.out"
-grep -Eq '^channel=preview$' "$test_root/cli-preview-push.out"
-grep -Eq '^prerelease=true$' "$test_root/cli-preview-push.out"
+EVENT_NAME=workflow_call IN_ORCHESTRATED=true IN_CHANNEL=preview IN_TAG=v1.3.0-preview.42 \
+	REF_NAME=main-v2 GITHUB_OUTPUT="$test_root/cli-preview-call.out" \
+	bash "$repo_root/scripts/resolve-cli-release.sh"
+grep -Eq '^tag=v1\.3\.0-preview\.42$' "$test_root/cli-preview-call.out"
+grep -Eq '^version=1\.3\.0-preview\.42$' "$test_root/cli-preview-call.out"
+grep -Eq '^base_version=1\.3\.0$' "$test_root/cli-preview-call.out"
+grep -Eq '^notes_version=v1\.3\.0-preview\.42$' "$test_root/cli-preview-call.out"
+grep -Eq '^channel=preview$' "$test_root/cli-preview-call.out"
+grep -Eq '^prerelease=true$' "$test_root/cli-preview-call.out"
 
-EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=preview \
+if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=preview \
 	IN_TAG=v1.3.0-preview.42 REF_NAME=main-v2 CALLER_REF=refs/heads/main-v2 \
 	CALLER_REF_PROTECTED=true GITHUB_OUTPUT="$test_root/cli-preview-dispatch.out" \
-	bash "$repo_root/scripts/resolve-cli-release.sh"
-grep -Eq '^channel=preview$' "$test_root/cli-preview-dispatch.out"
+	bash "$repo_root/scripts/resolve-cli-release.sh" \
+	>"$test_root/cli-preview-dispatch.log" 2>&1; then
+	echo "standalone public CLI Preview unexpectedly passed" >&2
+	exit 1
+fi
+grep -Eq 'public CLI Preview releases must be dispatched by release-preview.yml' \
+	"$test_root/cli-preview-dispatch.log"
 
 EVENT_NAME=push IN_CHANNEL='' IN_TAG='' REF_NAME=v1.3.0-rc.1 \
 	GITHUB_OUTPUT="$test_root/cli-rc.out" bash "$repo_root/scripts/resolve-cli-release.sh"
 grep -Eq '^channel=stable$' "$test_root/cli-rc.out"
 grep -Eq '^prerelease=true$' "$test_root/cli-rc.out"
+grep -Eq '^notes_version=v1\.3\.0$' "$test_root/cli-rc.out"
 
 if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable \
 	IN_TAG=v1.3.0-preview.42 REF_NAME=main-v2 CALLER_REF=refs/heads/main-v2 \
@@ -1055,6 +1222,21 @@ EVENT_NAME=push IN_ORCHESTRATED=true IN_CHANNEL=stable IN_BASE_VERSION=1.5.0 \
 	bash "$repo_root/scripts/resolve-npm-release.sh"
 grep -Eq '^arg=v1\.5\.0$' "$test_root/npm-stable.out"
 
+EVENT_NAME=workflow_call IN_ORCHESTRATED=true IN_CHANNEL=canary IN_BASE_VERSION=1.5.0 \
+	IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=999 IN_PREVIEW_NUMBER=42 \
+	GITHUB_OUTPUT="$test_root/npm-canary.out" bash "$repo_root/scripts/resolve-npm-release.sh"
+grep -Eq '^arg=v1\.5\.0-canary\.42$' "$test_root/npm-canary.out"
+
+if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=canary IN_BASE_VERSION=1.5.0 \
+	IN_TAG='' REF_NAME=main-v2 RUN_NUMBER=52 GITHUB_OUTPUT="$test_root/npm-canary-direct.out" \
+	bash "$repo_root/scripts/resolve-npm-release.sh" \
+	>"$test_root/npm-canary-direct.log" 2>&1; then
+	echo "standalone public npm Canary unexpectedly passed" >&2
+	exit 1
+fi
+grep -Eq 'public npm Canary releases must be dispatched by release-preview.yml' \
+	"$test_root/npm-canary-direct.log"
+
 if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable IN_BASE_VERSION=1.5.0 \
 	IN_TAG=npm-v1.5.1 REF_NAME=main-v2 RUN_NUMBER=52 GITHUB_OUTPUT="$test_root/npm-mismatch.out" \
 	bash "$repo_root/scripts/resolve-npm-release.sh" >"$test_root/npm-mismatch.log" 2>&1; then
@@ -1062,5 +1244,7 @@ if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable IN_BASE_
 	exit 1
 fi
 grep -Eq 'does not match requested version' "$test_root/npm-mismatch.log"
+
+node --test "$repo_root/npm/publish.test.mjs"
 
 echo "release workflow contract tests: PASS"

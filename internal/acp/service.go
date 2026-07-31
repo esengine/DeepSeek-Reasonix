@@ -126,6 +126,7 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, factory Factory, info 
 	conn.Handle("session/resume", svc.sessionResume)
 	conn.Handle("session/prompt", svc.sessionPrompt)
 	conn.Handle(sessionSteerMethod, svc.sessionSteer)
+	conn.Handle(sessionStatusMethod, svc.sessionStatus)
 	conn.Handle("session/set_config_option", svc.sessionSetConfigOption)
 	conn.Handle("session/set_model", svc.sessionSetModel)
 	conn.Handle("session/set_mode", svc.sessionSetMode)
@@ -227,6 +228,10 @@ type acpSession struct {
 	effortOverride   *string
 	runtimeProfile   string
 	toolApprovalMode string
+	// runtimeState is the effective planner/sandbox posture captured after CLI
+	// hard overrides. status snapshots never reconstruct it from user config.
+	runtimeState SessionRuntimeState
+	status       *statusTelemetry
 	// modeID is the ACP collaboration mode last reported to the client (normal |
 	// plan | goal). Goal draft mode turns the next user prompt into the goal.
 	// Both are guarded by mu; controller-side completion/plan exit is reconciled
@@ -555,6 +560,8 @@ func (s *service) initialize(_ context.Context, raw json.RawMessage) (any, error
 				"reasonix.io": ReasonixExtensionCapabilities{
 					SessionSteer: &SessionSteerCapability{Method: sessionSteerMethod},
 				},
+				sessionStatusMethod:       ReasonixSchemaCapability{SchemaVersion: reasonixStatusSchemaVersion},
+				sessionStatusUpdateMethod: ReasonixSchemaCapability{SchemaVersion: reasonixStatusSchemaVersion},
 			},
 		},
 		AgentInfo:   Implementation{Name: s.info.Name, Version: s.info.Version},
@@ -607,6 +614,12 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
 	}
 	cfgState = withToolApprovalConfig(cfgState, control.ToolApprovalAsk)
+	runtimeState, err := s.sessionRuntimeState(ctx, SessionRuntimeStateParams{
+		Cwd: cwd, Model: cfgState.Model, RuntimeProfile: cfgState.RuntimeProfile,
+	})
+	if err != nil {
+		return nil, &RPCError{Code: ErrInternal, Message: "session/new: " + err.Error()}
+	}
 
 	id, err := newSessionID()
 	if err != nil {
@@ -644,10 +657,13 @@ func (s *service) sessionNew(ctx context.Context, raw json.RawMessage) (any, err
 		effortOverride:   cloneStringPtr(cfgState.EffortOverride),
 		runtimeProfile:   cfgState.RuntimeProfile,
 		toolApprovalMode: control.ToolApprovalAsk,
+		runtimeState:     runtimeState,
+		status:           newStatusTelemetry(),
 		modeID:           sessionModeNormal,
 		createdAt:        now,
 		updatedAt:        now,
 	}
+	s.bindStatusEvents(sess)
 	// Pin a transcript file keyed by session id when the controller has a session
 	// dir, so every turn auto-saves there, session/prompt can hand the path back,
 	// and session/load can find it again by id across process restarts. The
@@ -898,6 +914,12 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 	if err != nil {
 		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
 	}
+	runtimeState, err := s.sessionRuntimeState(ctx, SessionRuntimeStateParams{
+		Cwd: cwd, Model: cfgState.Model, RuntimeProfile: cfgState.RuntimeProfile,
+	})
+	if err != nil {
+		return SessionConfigState{}, &RPCError{Code: ErrInternal, Message: method + ": " + err.Error()}
+	}
 
 	sink := newUpdateSink(s.conn, id)
 	sink.bindCwd(cwd)
@@ -981,6 +1003,8 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		effortOverride:   cloneStringPtr(cfgState.EffortOverride),
 		runtimeProfile:   cfgState.RuntimeProfile,
 		toolApprovalMode: toolApprovalMode,
+		runtimeState:     runtimeState,
+		status:           restoreStatusTelemetry(saved.Status),
 		modeID:           modeID,
 		goalDraftMode:    goalDraftMode,
 		title:            meta.Title,
@@ -988,6 +1012,7 @@ func (s *service) openExistingSession(ctx context.Context, method, id, cwdParam 
 		updatedAt:        meta.UpdatedAt,
 		lease:            lease,
 	}
+	s.bindStatusEvents(sess)
 	if err := saveACPMeta(path, sess.meta()); err != nil {
 		sess.releaseSessionLease()
 		ctrl.Close()
@@ -1065,6 +1090,11 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	if !ok {
 		return nil, &RPCError{Code: ErrInvalidRequest, Message: "session/prompt: session already has an active prompt"}
 	}
+	if sess.status == nil {
+		sess.status = newStatusTelemetry()
+	}
+	sess.status.beginTurn()
+	s.publishStatus(sess, "phase")
 	sess.sink.setTurnContext(runCtx)
 	if sess.takeGoalDraftMode() {
 		sess.currentCtrl().SetGoal(text)
@@ -1077,8 +1107,15 @@ func (s *service) sessionPrompt(ctx context.Context, raw json.RawMessage) (any, 
 	}()
 	runErr := sess.ctrl.RunTurn(runCtx, text)
 
-	// Persist after the turn (best-effort) so a crash loses at most this prompt;
-	// save even on cancel/error since the partial conversation is still resumable.
+	statusEvent := sess.status.finishTurn(
+		runErr,
+		runCtx.Err() != nil,
+		sess.currentCtrl().GoalStatus(),
+		finalAssistantSummary(sess.currentCtrl()),
+	)
+	s.publishStatus(sess, statusEvent)
+	// Persist after status finalization (best-effort) so reconnect recovers both
+	// the transcript and the same sequence/usage/outcome snapshot.
 	sess.persistAfterTurn(text)
 
 	stop := StopEndTurn
@@ -1505,6 +1542,13 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 		return &RPCError{Code: ErrInternal, Message: "session config: " + err.Error()}
 	}
 	newCtrl.EnableInteractiveApproval()
+	runtimeState, err := s.sessionRuntimeState(ctx, SessionRuntimeStateParams{
+		Cwd: cwd, Model: cfgState.Model, RuntimeProfile: cfgState.RuntimeProfile,
+	})
+	if err != nil {
+		newCtrl.ReleaseResources()
+		return &RPCError{Code: ErrInternal, Message: "session config: runtime state: " + err.Error()}
+	}
 	// The freshly built controller's own leading system message carries the
 	// target profile's contract (see boot/token_profile.go); AdoptHistory below
 	// replaces the whole history with carried, so splice that message in first
@@ -1570,6 +1614,7 @@ func (s *service) rebuildSessionLocked(ctx context.Context, sess *acpSession, cf
 	sess.effortOverride = cloneStringPtr(cfgState.EffortOverride)
 	sess.runtimeProfile = cfgState.RuntimeProfile
 	sess.toolApprovalMode = toolApprovalMode
+	sess.runtimeState = runtimeState
 	sess.modeID = modeID
 	sess.goalDraftMode = goalDraftMode
 	if sess.transcript != "" && sessionFileExists(sess.transcript) {
@@ -2126,6 +2171,7 @@ func (s *acpSession) metaLocked() acpSessionMeta {
 		Title:             s.title,
 		CreatedAt:         s.createdAt,
 		UpdatedAt:         s.updatedAt,
+		Status:            s.status.persisted(),
 	}
 }
 
@@ -2248,16 +2294,17 @@ func (s *service) resolveSlashPrompt(ctx context.Context, sess *acpSession, text
 }
 
 type acpSessionMeta struct {
-	SessionID         string    `json:"sessionId"`
-	Cwd               string    `json:"cwd"`
-	Model             string    `json:"model,omitempty"`
-	EffortOverride    *string   `json:"effortOverride,omitempty"`
-	RuntimeProfile    string    `json:"runtimeProfile,omitempty"`
-	ToolApprovalMode  string    `json:"toolApprovalMode,omitempty"`
-	CollaborationMode string    `json:"collaborationMode,omitempty"`
-	Title             string    `json:"title,omitempty"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	SessionID         string                    `json:"sessionId"`
+	Cwd               string                    `json:"cwd"`
+	Model             string                    `json:"model,omitempty"`
+	EffortOverride    *string                   `json:"effortOverride,omitempty"`
+	RuntimeProfile    string                    `json:"runtimeProfile,omitempty"`
+	ToolApprovalMode  string                    `json:"toolApprovalMode,omitempty"`
+	CollaborationMode string                    `json:"collaborationMode,omitempty"`
+	Title             string                    `json:"title,omitempty"`
+	CreatedAt         time.Time                 `json:"createdAt"`
+	UpdatedAt         time.Time                 `json:"updatedAt"`
+	Status            *persistedStatusTelemetry `json:"status,omitempty"`
 	// ActiveTranscript, when set on the id-keyed sidecar, is the basename of
 	// the transcript this session currently lives in: a snapshot recovery
 	// moved the live session onto a recovery branch and left this redirect

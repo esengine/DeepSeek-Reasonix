@@ -9,6 +9,7 @@ Reasonix Windows Authenticode 两阶段签名链路。
 - Preview 渠道改造：[esengine/DeepSeek-Reasonix#6155](https://github.com/esengine/DeepSeek-Reasonix/pull/6155)
 - 本 SOP 的验收对象：每次执行前通过 PR API 读回的当前 PR Head
 - 签名工作流：`.github/workflows/release-stable.yml`、
+  `.github/workflows/release-preview.yml`、
   `.github/workflows/release-desktop.yml`
 - 机器契约：`.signpath/contracts/release-signing.yml`
 - Authenticode 验证脚本：`scripts/verify-windows-authenticode.ps1`
@@ -73,6 +74,7 @@ SignPath 权限说明：
 - `release-signing` 开启 `Use approval process`，Required approvals 为 `1`。
 - `release-signing` 的 Allowed build definitions 精确允许：
   - `.github/workflows/release-stable.yml`
+  - `.github/workflows/release-preview.yml`
   - `.github/workflows/release-desktop.yml`
 - `release-signing` 的 Allowed branches 必须精确为 `main-v2`；稳定版和 RC
   标签由最小 relay workflow 转发到该受保护控制面。
@@ -250,10 +252,11 @@ GitHub `upload-artifact` 提交给 SignPath 的产物是 ZIP，因此配置根�
   ```
 
 - Allowed branches：**只能填写 `main-v2`**
-- Allowed build definitions：**只能逐行填写以下两个精确路径**：
+- Allowed build definitions：**只能逐行填写以下三个精确路径**：
 
   ```text
   .github/workflows/release-stable.yml
+  .github/workflows/release-preview.yml
   .github/workflows/release-desktop.yml
   ```
 
@@ -274,11 +277,11 @@ GitHub `upload-artifact` 提交给 SignPath 的产物是 ZIP，因此配置根�
   `desktop-v*` 或临时测试分支。
 - Allowed build definitions 与仓库机器契约逐项相同，没有通配符。
 
-正式版和 RC 的标签事件由 `release-stable-trigger.yml` /
-`release-desktop-trigger.yml` 转发：relay 只携带候选 tag，实际
-`release-desktop.yml` 固定运行在受保护的 `main-v2`，再签署该 tag 指向的
-不可变候选 SHA。不能把 Allowed branches 改成标签通配符，因为普通分支也可以
-取形如 `v-malicious` 的名字。
+Stable、Preview 和 RC 的标签事件由 `release-stable-trigger.yml`、
+`release-cli-trigger.yml` / `release-desktop-trigger.yml` 转发：relay
+只携带候选 tag，实际顶层发布 workflow 固定运行在受保护的 `main-v2`，
+再签署该 tag 指向的不可变候选 SHA。不能把 Allowed branches 改成标签通配符，
+因为普通分支也可以取形如 `v-malicious` 的名字。
 
 `Release certificate 2026` 的 Restrictions 明确要求所有使用该证书的策略启用
 审批流程。尝试关闭时，SignPath 会拒绝保存并提示：
@@ -357,6 +360,8 @@ gh workflow run release-desktop.yml \
 Stable 发布由 `.github/workflows/release-stable.yml` 在唯一的 `release`
 environment 审批之后自动调用相同预检。该预检完成前，CLI、npm 和 Desktop
 三个公开 publisher 均不会启动，因此 SignPath 策略漂移不会再形成半发布。
+统一 Preview 发布由 `.github/workflows/release-preview.yml` 在唯一的
+`canary` environment 审批之后执行同样的预检，并具有相同的失败关闭语义。
 
 ### 10.1 监控运行
 
@@ -419,7 +424,8 @@ SignPath Signing Requests 中应出现 4 个成功请求：
 - 旧 `windows-installer` 未改变。
 - `release-signing` 的证书级审批保持开启，正式审批人可用。
 - `release-signing` 的 Build Definitions 精确允许
-  `.github/workflows/release-stable.yml` 和
+  `.github/workflows/release-stable.yml`、
+  `.github/workflows/release-preview.yml` 和
   `.github/workflows/release-desktop.yml`。
 - `release-signing` 的 Allowed branches 精确为 `main-v2`。
 - `CI builds` 是 `release-signing` 的 Submitter 和 Approver，GitHub Secret 使用其专用
@@ -538,7 +544,7 @@ gh variable set SIGNPATH_RELEASE_SIGNING_ATTESTATION \
 - [ ] `SIGNPATH_API_TOKEN` 对应专用 `CI builds`，不是个人账号
 - [ ] `release-signing` 已开启 Trusted Build System
 - [ ] `release-signing` 已开启 Origin Verification
-- [ ] `release-signing` 的 Allowed build definitions 精确为 `.github/workflows/release-stable.yml` 和 `.github/workflows/release-desktop.yml`
+- [ ] `release-signing` 的 Allowed build definitions 精确为 `.github/workflows/release-stable.yml`、`.github/workflows/release-preview.yml` 和 `.github/workflows/release-desktop.yml`
 - [ ] `release-signing` 的 Allowed branches 精确为 `main-v2`
 - [ ] `release-signing` 的 SignPath 审批已开启，Required approvals 为 `1`
 - [ ] GitHub `release` environment 的正式发布审批人和响应流程已经明确

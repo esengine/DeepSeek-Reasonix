@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/remote"
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
+	"reasonix/internal/remote/protocol"
 	"reasonix/internal/remote/sftpfs"
 )
 
@@ -284,6 +285,34 @@ func TestEnsureServerResultCannotMutateReplacement(t *testing.T) {
 	}
 	if replacement.token != "new-token" {
 		t.Fatalf("replacement token = %q, want new-token", replacement.token)
+	}
+}
+
+func TestEnsureWorkbenchCLIUsesHostInstallPolicyAndExactBuild(t *testing.T) {
+	mgr := newDesktopRemoteManager(nil)
+	hostCtx, hostCancel := context.WithCancel(context.Background())
+	defer hostCancel()
+	mgr.hosts["box"] = &managedHost{ctx: hostCtx, cancel: hostCancel, client: newLifecycleSSHClient(nil)}
+	expected, err := protocol.NewBuildID("v1.2.3", strings.Repeat("a", 40))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.localBinary = func() string { return "/packaged/reasonix" }
+	mgr.fetchRemoteBinary = func(context.Context, string, string, string) ([]byte, error) {
+		return []byte("downloaded"), nil
+	}
+	mgr.ensureWorkbenchCLI = func(_ context.Context, _ bootstrap.Conn, opts bootstrap.WorkbenchOptions) (bootstrap.WorkbenchCLI, error) {
+		if opts.Install != "npm" || opts.LocalBinary != "/packaged/reasonix" || opts.ExpectedBuild != expected || opts.FetchBinary == nil {
+			t.Fatalf("Workbench options = %+v", opts)
+		}
+		return bootstrap.WorkbenchCLI{Path: "/home/dev/.reasonix/remote/workbench/build/reasonix", Installed: true}, nil
+	}
+	got, err := mgr.EnsureWorkbenchCLI(context.Background(), "box", config.RemoteHostEntry{ServeInstall: "npm"}, expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/home/dev/.reasonix/remote/workbench/build/reasonix" {
+		t.Fatalf("binary = %q", got)
 	}
 }
 

@@ -154,12 +154,17 @@ export function cliReleaseModel(releases, requestedChannel) {
   const assets = releaseAssetMap(release);
   if (!assets) return null;
   const releaseURL = `https://github.com/esengine/DeepSeek-Reasonix/releases/tag/${parsed.tag}`;
+  const exactChangelogURL = `https://reasonix.io/changelog/${parsed.tag}/`;
+  const changelogURL = release.release_notes_url === exactChangelogURL
+    ? exactChangelogURL
+    : `https://reasonix.io/changelog/${channel}/`;
   return {
     channel,
     version: parsed.tag,
     displayVersion: parsed.tag.slice(1),
     assets,
     releaseURL,
+    changelogURL,
   };
 }
 
@@ -230,6 +235,9 @@ export function desktopReleaseModel(manifest, requestedChannel) {
     version: parsed.tag,
     displayVersion: parsed.tag.slice(1),
     assets,
+    changelogURL: manifest.release_notes_url === `https://reasonix.io/changelog/${parsed.tag}/`
+      ? manifest.release_notes_url
+      : `https://reasonix.io/changelog/${parsed.channel}/`,
   };
 }
 
@@ -272,6 +280,7 @@ export function desktopGitHubReleaseModel(release) {
     version: match[1],
     displayVersion: match[1].slice(1),
     assets: Object.fromEntries(DESKTOP_ASSETS.map(([, , name]) => [name, found[name]])),
+    changelogURL: "https://reasonix.io/changelog/stable/",
   };
 }
 

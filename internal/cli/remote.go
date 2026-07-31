@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
 	"reasonix/internal/remote"
+	"reasonix/internal/remote/protocol"
 )
 
 // remoteCommand dispatches `reasonix remote <sub>`, mirroring mcpCommand.
@@ -37,13 +39,15 @@ func remoteCommand(args []string, version string) int {
 	case "forward":
 		return remoteForwardCLI(args[1:])
 	case "serve":
-		return remoteServeCLI(args[1:])
+		return remoteServeCLI(args[1:], version)
 	case "fs":
 		return remoteFSCLI(args[1:])
 	case "attach-workspace":
 		return remoteAttachWorkspaceCLI(args[1:], version)
 	case "runtime-workbench":
 		return remoteRuntimeWorkbenchCLI(args[1:], version)
+	case "workbench-build-id":
+		return remoteWorkbenchBuildIDCLI(args[1:], version)
 	case "help", "-h", "--help":
 		remoteUsage()
 		return 0
@@ -52,6 +56,21 @@ func remoteCommand(args []string, version string) int {
 		remoteUsage()
 		return 2
 	}
+}
+
+// remoteWorkbenchBuildIDCLI is a machine-only bootstrap probe. It intentionally
+// stays out of remoteUsage: Desktop uses it to prove that the remote executable
+// exactly matches the frozen Workbench protocol before opening rpcwire stdio.
+func remoteWorkbenchBuildIDCLI(args []string, version string) int {
+	if len(args) != 0 {
+		fmt.Fprintln(os.Stderr, "usage: reasonix remote workbench-build-id")
+		return 2
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(protocol.CurrentBuildID(version)); err != nil {
+		fmt.Fprintln(os.Stderr, "workbench-build-id:", err)
+		return 1
+	}
+	return 0
 }
 
 // editUserConfig runs mutate against the user-global config file under the edit
@@ -87,7 +106,7 @@ func remoteAddCLI(args []string) int {
 	jump := fs.String("jump", "", "ProxyJump chain (OpenSSH syntax)")
 	workspace := fs.String("workspace", "", "default remote workspace directory")
 	useSSHConfig := fs.Bool("use-ssh-config", false, "layer ~/.ssh/config values under unset fields")
-	serveInstall := fs.String("serve-install", "auto", "serve install strategy: auto|npm|upload|never")
+	serveInstall := fs.String("serve-install", "auto", "remote CLI install strategy: auto|npm|upload|never")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")
 	if err := fs.Parse(args[2:]); err != nil {

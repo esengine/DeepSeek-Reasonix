@@ -334,6 +334,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.AuthHeader {
 				b.WriteString("auth_header = true   # Anthropic-compatible: send Authorization: Bearer <api_key> instead of x-api-key\n")
 			}
+			if p.ResponsesMode != "" {
+				fmt.Fprintf(&b, "responses_mode = %q   # responses provider: stateless|stateful\n", p.ResponsesMode)
+			}
+			if p.ResponsesStateful != nil {
+				fmt.Fprintf(&b, "responses_stateful = %t   # legacy responses mode switch\n", *p.ResponsesStateful)
+			}
 			if p.BalanceURL != "" {
 				fmt.Fprintf(&b, "balance_url = %q   # optional; wallet-balance endpoint shown in the status bar\n", p.BalanceURL)
 			}
@@ -444,6 +450,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		mode = "ask"
 	}
 	fmt.Fprintf(&b, "mode  = %q\n", mode)
+	if c.Permissions.AllowDynamicBash {
+		b.WriteString("allow_dynamic_bash = true   # advanced: let mode=allow cover command substitution and interpreter -c/-e\n")
+	} else {
+		b.WriteString("# allow_dynamic_bash = false   # advanced opt-in; deny/ask and exact rules still take precedence\n")
+	}
 	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode`))
 	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["Bash(go test:*)", "Bash(git status:*)"]   # never prompted`))
 	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["Edit(src/**)"]   # force a prompt even if otherwise allowed`))
@@ -1005,6 +1016,12 @@ func RenderTOMLProjectDelta(c *Config) string {
 			if p.AuthHeader {
 				b.WriteString("auth_header = true\n")
 			}
+			if p.ResponsesMode != "" {
+				fmt.Fprintf(&b, "responses_mode = %q\n", p.ResponsesMode)
+			}
+			if p.ResponsesStateful != nil {
+				fmt.Fprintf(&b, "responses_stateful = %t\n", *p.ResponsesStateful)
+			}
 			if p.BalanceURL != "" {
 				fmt.Fprintf(&b, "balance_url = %q\n", p.BalanceURL)
 			}
@@ -1120,6 +1137,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if mode != "ask" {
 			fmt.Fprintf(&b, "mode = %q\n", mode)
+		}
+		if c.Permissions.AllowDynamicBash {
+			b.WriteString("allow_dynamic_bash = true\n")
 		}
 		if len(c.Permissions.Deny) > 0 {
 			fmt.Fprintf(&b, "deny = %s\n", renderStringArray(c.Permissions.Deny))

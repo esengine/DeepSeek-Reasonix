@@ -7,28 +7,28 @@ name: Release npm
 #   git tag npm-vX.Y.Z-rc.N     # prerelease -> publishes under `next`
 #   git push origin <tag>
 #
-# A manual workflow_dispatch can publish either an opt-in canary from the current
-# ref or recover an approved stable version from an existing tag. Canary publishes
-# to the `canary` dist-tag (npm i reasonix@canary) and never moves
-# `next`/`latest`. build.mjs decides the dist-tag: a `-canary.` build is `canary`,
-# any other prerelease is `next`, and a stable version is `latest` (#5822 — the
-# old "promote latest by hand" rule left it pinned at 0.53.2 and downgraded
-# `npm update -g` users). The verify step below asserts the tag actually landed.
+# Manual workflow_dispatch recovers only an approved Stable version from an
+# existing tag. Public canary publication is owned by release-preview.yml so its
+# version remains aligned with CLI, Desktop, and the immutable release marker.
+# build.mjs decides the dist-tag: a `-canary.` build is `canary`, any other
+# prerelease is `next`, and a stable version is `latest` (#5822 — the old
+# "promote latest by hand" rule left it pinned at 0.53.2 and downgraded
+# `npm update -g` users). The publisher verifies every immutable package and
+# advances each public dist-tag only when the candidate is newer.
 on:
   push:
     tags: ['npm-v*-*']
   workflow_dispatch:
     inputs:
       channel:
-        description: "Publish channel"
+        description: "Standalone npm recovery channel"
         required: true
-        default: canary
+        default: stable
         type: choice
         options:
-          - canary
           - stable
       base_version:
-        description: "Version to publish. Canary appends -canary.<run_number>; stable publishes exactly this version."
+        description: "Stable version to recover exactly"
         required: true
         type: string
       tag:
@@ -59,13 +59,29 @@ on:
         required: true
         type: string
       orchestrated:
-        description: "True only when called by release-stable.yml after approval"
+        description: "True only when called by an approved release orchestrator"
         required: false
         default: false
         type: boolean
+      orchestrator:
+        description: "Trusted release orchestrator: stable or preview"
+        required: false
+        default: stable
+        type: string
+      preview_number:
+        description: "Canonical Preview ordinal supplied by release-preview.yml"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+
+concurrency:
+  # Serialize every publisher for one npm dist-tag. In particular, canary
+  # remains ordered even if another approved orchestrator is added later.
+  group: release-npm-${{ inputs.channel || 'next' }}
+  cancel-in-progress: false
 
 jobs:
   orchestration-guard:
@@ -82,7 +98,7 @@ jobs:
       - name: Verify caller and approved release ref
         env:
           ACTUAL_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-stable.yml@{1}', github.repository, github.ref) }}
+          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-{1}.yml@{2}', github.repository, inputs.orchestrator, github.ref) }}
           CALLER_EVENT_NAME: ${{ github.event_name }}
           CALLER_REF: ${{ github.ref }}
           CALLER_REF_PROTECTED: ${{ github.ref_protected }}
@@ -90,7 +106,8 @@ jobs:
           CALLER_SHA: ${{ github.sha }}
           APPROVED_CLI_TAG: ${{ inputs.approved_cli_tag }}
           APPROVED_SHA: ${{ inputs.approved_sha }}
-          RELEASE_TAG: ${{ inputs.tag }}
+          APPROVED_CHANNEL: ${{ inputs.orchestrator }}
+          RELEASE_TAG: ${{ inputs.approved_cli_tag }}
           VERIFY_RELEASE_CHECKOUT: false
         run: |
           bash scripts/verify-release-authorization.sh
@@ -98,7 +115,7 @@ jobs:
 
   release-gate:
     name: approve standalone npm release
-    if: ${{ !inputs.orchestrated && !(github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') }}
+    if: ${{ !inputs.orchestrated }}
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -109,7 +126,7 @@ jobs:
   cache-guard:
     name: cache hit guard
     needs: [orchestration-guard, release-gate]
-    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && ((github.event_name == 'workflow_dispatch' && inputs.channel == 'canary') || needs.release-gate.result == 'success'))) }}
+    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -126,9 +143,8 @@ jobs:
     needs: cache-guard
     if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # The stable caller has already passed the single GitHub release approval.
-    # Direct prereleases/manual stable recovery pass release-gate above; canaries
-    # run free.
+    # Orchestrated releases have already passed their GitHub environment
+    # approval. Direct prereleases and manual Stable recovery pass release-gate.
     steps:
       - uses: actions/checkout@v7
         with:
@@ -141,8 +157,8 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      # Tag push uses the npm-v* tag. A canary dispatch synthesizes a
-      # <base>-canary.<run_number> version; a manual stable dispatch publishes
+      # Tag push uses the npm-v* tag. The Preview orchestrator synthesizes a
+      # <base>-canary.<preview_number> version; a manual Stable dispatch publishes
       # the requested semver exactly. build.mjs strips the leading `npm-`/`v`.
       - name: Resolve version
         id: ver
@@ -154,41 +170,16 @@ jobs:
           IN_TAG: ${{ inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
           RUN_NUMBER: ${{ github.run_number }}
+          IN_PREVIEW_NUMBER: ${{ inputs.preview_number }}
         run: bash scripts/resolve-npm-release.sh
       - name: Revalidate approved release ref
         if: ${{ inputs.orchestrated }}
         env:
-          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ inputs.approved_cli_tag }}
           APPROVED_SHA: ${{ inputs.approved_sha }}
         run: bash scripts/verify-release-tag.sh
-      - env:
+      - name: Publish or recover immutable npm packages
+        env:
           VERSION_ARG: ${{ steps.ver.outputs.arg }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node npm/build.mjs "$VERSION_ARG" --publish
-      # Assert the dist-tag landed where build.mjs aimed it. This is the guard
-      # that #5822 lacked: `latest` sat on 0.53.2 for months while stables went
-      # to `next`, and nothing noticed until users got downgraded. The registry
-      # applies tags asynchronously after publish, hence the poll.
-      - name: Verify dist-tags
-        env:
-          VERSION_ARG: ${{ steps.ver.outputs.arg }}
-        run: |
-          set -euo pipefail
-          version="$VERSION_ARG"
-          version="${version#npm-}"; version="${version#v}"
-          case "$version" in
-            *-canary.*) tag=canary ;;
-            *-*)        tag=next ;;
-            *)          tag=latest ;;
-          esac
-          for attempt in 1 2 3 4 5 6; do
-            got="$(npm view reasonix dist-tags."$tag" 2>/dev/null || true)"
-            if [ "$got" = "$version" ]; then
-              echo "dist-tag $tag -> $got"
-              exit 0
-            fi
-            echo "dist-tag $tag -> ${got:-<unset>}, want $version (attempt $attempt)"
-            sleep 10
-          done
-          echo "::error::npm dist-tag '$tag' never landed on $version"
-          exit 1

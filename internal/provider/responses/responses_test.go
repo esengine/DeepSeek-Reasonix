@@ -6,514 +6,372 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"reasonix/internal/provider"
 )
 
-// mockResponsesServer serves canned Responses API SSE streams.
-func mockResponsesServer(t *testing.T, events []string) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses" {
-			http.Error(w, "wrong path", http.StatusNotFound)
-			return
-		}
-		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
-			http.Error(w, "missing auth", http.StatusUnauthorized)
-			return
-		}
-		if got := r.Header.Get("x-dashscope-session-cache"); got != "enable" {
-			http.Error(w, "missing session cache header", http.StatusBadRequest)
-			return
-		}
-		fl := w.(http.Flusher)
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, e := range events {
-			if _, err := w.Write([]byte("data:" + e + "\n\n")); err != nil {
-				return
-			}
-			fl.Flush()
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
+func boolPtr(value bool) *bool { return &value }
 
 func collect(t *testing.T, p provider.Provider, req provider.Request) []provider.Chunk {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	ch, err := p.Stream(ctx, req)
+	stream, err := p.Stream(ctx, req)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	var out []provider.Chunk
-	for c := range ch {
-		out = append(out, c)
+	var chunks []provider.Chunk
+	for chunk := range stream {
+		chunks = append(chunks, chunk)
 	}
-	return out
+	return chunks
 }
 
-func TestResponsesStreamBasicText(t *testing.T) {
-	srv := mockResponsesServer(t, []string{
-		`{"type":"response.created","response":{"id":"resp_1"}}`,
-		`{"type":"response.output_text.delta","delta":"Hello "}`,
-		`{"type":"response.output_text.delta","delta":"world"}`,
-		`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15,"input_tokens_details":{"cached_tokens":8},"output_tokens_details":{"reasoning_tokens":2}}}}`,
-	})
-
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
-	chunks := collect(t, p, provider.Request{
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "hi"},
-		},
-	})
-
-	// text deltas
-	if len(chunks) < 2 || chunks[0].Type != provider.ChunkText || chunks[0].Text != "Hello " || chunks[1].Text != "world" {
-		t.Fatalf("text chunks wrong: %+v", chunks)
+func writeEvents(w http.ResponseWriter, events ...string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, event := range events {
+		_, _ = w.Write([]byte("event: ignored\n"))
+		_, _ = w.Write([]byte("data: " + event + "\n\n"))
 	}
-	// usage
-	var usage *provider.Usage
-	for _, c := range chunks {
-		if c.Type == provider.ChunkUsage {
-			usage = c.Usage
-		}
-	}
-	if usage == nil {
-		t.Fatal("no usage chunk")
-	}
-	if usage.PromptTokens != 10 || usage.CacheHitTokens != 8 || usage.CacheMissTokens != 2 || usage.ReasoningTokens != 2 {
-		t.Fatalf("usage wrong: %+v", usage)
-	}
-	// done
-	last := chunks[len(chunks)-1]
-	if last.Type != provider.ChunkDone {
-		t.Fatalf("last chunk = %v, want Done", last.Type)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
 	}
 }
-
-func TestResponsesStatefulUsesPreviousResponseID(t *testing.T) {
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		bodies = append(bodies, body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		fl := w.(http.Flusher)
-		// Echo the received previous_response_id back as the new response id.
-		prev, _ := body["previous_response_id"].(string)
-		w.Write([]byte(`data:{"type":"response.output_text.delta","delta":"ok"}` + "\n\n"))
-		if prev != "" {
-			w.Write([]byte(`data:{"type":"response.completed","response":{"id":"resp_next","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
-		} else {
-			w.Write([]byte(`data:{"type":"response.completed","response":{"id":"resp_first","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
-		}
-		fl.Flush()
-	}))
-	t.Cleanup(srv.Close)
-
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
-
-	// Turn 1: full input, no previous_response_id.
-	collect(t, p, provider.Request{
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "first"},
-		},
-	})
-	if _, has := bodies[0]["previous_response_id"]; has {
-		t.Fatal("first turn must not carry previous_response_id")
-	}
-
-	// Turn 2: only new user message + previous_response_id.
-	collect(t, p, provider.Request{
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "first"},
-			{Role: provider.RoleAssistant, Content: "ok"},
-			{Role: provider.RoleUser, Content: "second"},
-		},
-	})
-	prev, has := bodies[1]["previous_response_id"].(string)
-	if !has || prev != "resp_first" {
-		t.Fatalf("turn 2 previous_response_id = %q (has=%v), want resp_first", prev, has)
-	}
-	input, _ := bodies[1]["input"].(string)
-	if input != "second" {
-		t.Fatalf("turn 2 input = %q, want only the new user message", input)
-	}
-}
-
-func TestResponsesStatelessSendsFullInput(t *testing.T) {
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		bodies = append(bodies, body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		fl := w.(http.Flusher)
-		w.Write([]byte(`data:{"type":"response.output_text.delta","delta":"ok"}` + "\n\n"))
-		w.Write([]byte(`data:{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
-		fl.Flush()
-	}))
-	t.Cleanup(srv.Close)
-
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Stateful: boolPtr(false)})
-
-	collect(t, p, provider.Request{
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "first"},
-		},
-	})
-	collect(t, p, provider.Request{
-		Messages: []provider.Message{
-			{Role: provider.RoleSystem, Content: "sys"},
-			{Role: provider.RoleUser, Content: "first"},
-			{Role: provider.RoleAssistant, Content: "ok"},
-			{Role: provider.RoleUser, Content: "second"},
-		},
-	})
-
-	if _, has := bodies[1]["previous_response_id"]; has {
-		t.Fatal("stateless provider must never send previous_response_id")
-	}
-	// The leading system message lifts into top-level instructions; input
-	// carries the remaining 3 messages (user/assistant/user).
-	if got, ok := bodies[1]["instructions"].(string); !ok || got != "sys" {
-		t.Fatalf("stateless turn 2 instructions = %#v, want \"sys\"", bodies[1]["instructions"])
-	}
-	input, ok := bodies[1]["input"].([]any)
-	if !ok || len(input) != 3 {
-		t.Fatalf("stateless turn 2 input = %#v, want 3-item array (system lifted to instructions)", bodies[1]["input"])
-	}
-}
-
-func TestResponsesToolCallFunctionCallArguments(t *testing.T) {
-	srv := mockResponsesServer(t, []string{
-		`{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"bash"}}`,
-		`{"type":"response.function_call_arguments.delta","item_id":"call_1","delta":"{\"command\":"}`,
-		`{"type":"response.function_call_arguments.delta","item_id":"call_1","delta":"\"ls\"}"}`,
-		`{"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"command\":\"ls\"}"}}`,
-		`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
-	})
-
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Stateful: boolPtr(false)})
-	chunks := collect(t, p, provider.Request{
-		Messages: []provider.Message{{Role: provider.RoleUser, Content: "list files"}},
-	})
-
-	var start, delta, done *provider.Chunk
-	for i := range chunks {
-		switch chunks[i].Type {
-		case provider.ChunkToolCallStart:
-			start = &chunks[i]
-		case provider.ChunkToolCallArgsDelta:
-			delta = &chunks[i]
-		case provider.ChunkToolCall:
-			done = &chunks[i]
-		}
-	}
-	if start == nil || start.ToolCall == nil || start.ToolCall.Name != "bash" || start.ToolCall.ID != "call_1" {
-		t.Fatalf("tool start wrong: %+v", start)
-	}
-	if delta == nil || delta.ToolCall == nil || delta.ToolCall.ID != "call_1" || delta.ArgChars <= 0 {
-		t.Fatalf("tool args delta wrong: %+v", delta)
-	}
-	if done == nil || done.ToolCall == nil || done.ToolCall.Arguments != `{"command":"ls"}` {
-		t.Fatalf("tool done wrong: %+v", done)
-	}
-}
-
-func TestResponsesFailedEventSurfacesError(t *testing.T) {
-	srv := mockResponsesServer(t, []string{
-		`{"type":"response.failed","response":{"id":"resp_1","error":{"message":"model exploded"}}}`,
-	})
-
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
-	chunks := collect(t, p, provider.Request{
-		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
-	})
-
-	var errChunk *provider.Chunk
-	for i := range chunks {
-		if chunks[i].Type == provider.ChunkError {
-			errChunk = &chunks[i]
-		}
-	}
-	if errChunk == nil || !strings.Contains(errChunk.Err.Error(), "model exploded") {
-		t.Fatalf("failed event error wrong: %+v", errChunk)
-	}
-}
-
-func TestResponsesReasoningDialects(t *testing.T) {
-	// Both dialects must map to ChunkReasoning.
-	for _, ev := range []string{
-		`{"type":"response.reasoning_summary_text.delta","delta":"thinking..."}`,
-		`{"type":"response.reasoning_text.delta","delta":"thinking..."}`,
-	} {
-		srv := mockResponsesServer(t, []string{
-			ev,
-			`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
-		})
-		p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "m", Stateful: boolPtr(true)})
-		chunks := collect(t, p, provider.Request{
-			Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
-		})
-		found := false
-		for _, c := range chunks {
-			if c.Type == provider.ChunkReasoning && c.Text == "thinking..." {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("event %q did not produce ChunkReasoning: %+v", ev, chunks)
-		}
-	}
-}
-
-func boolPtr(v bool) *bool { return &v }
 
 func TestDetectVendorAndModeDefaults(t *testing.T) {
-	cases := []struct {
-		baseURL string
-		vendor  string
-		mode    string // default mode when nothing explicit
-	}{
-		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
-		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+	tests := []struct{ url, vendor, mode string }{
 		{"https://api.deepseek.com", "deepseek", "stateless"},
-		{"https://api.minimaxi.com/v1", "minimax", "stateful"},
-		{"https://ark.cn-beijing.volces.com/api/v3", "volcano", "stateful"},
-		{"https://unknown.example.com/v1", "", "stateful"},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://example.com/v1", "", "stateful"},
 	}
-	for _, c := range cases {
-		if got := DetectVendor(c.baseURL); got != c.vendor {
-			t.Errorf("DetectVendor(%q) = %q, want %q", c.baseURL, got, c.vendor)
+	for _, test := range tests {
+		if got := DetectVendor(test.url); got != test.vendor {
+			t.Errorf("DetectVendor(%q) = %q, want %q", test.url, got, test.vendor)
 		}
-		if got := (Config{BaseURL: c.baseURL}).mode(); got != c.mode {
-			t.Errorf("default mode for %q = %q, want %q", c.baseURL, got, c.mode)
+		if got := (Config{BaseURL: test.url}).mode(); got != test.mode {
+			t.Errorf("mode(%q) = %q, want %q", test.url, got, test.mode)
 		}
 	}
-	// Explicit config wins over vendor detection.
 	if got := (Config{BaseURL: "https://api.deepseek.com", Mode: "stateful"}).mode(); got != "stateful" {
-		t.Errorf("explicit Mode should win, got %q", got)
+		t.Fatalf("explicit mode = %q", got)
 	}
-	if got := (Config{BaseURL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", Stateful: boolPtr(false)}).mode(); got != "stateless" {
-		t.Errorf("explicit Stateful=false should win, got %q", got)
+	if got := (Config{BaseURL: "https://api.deepseek.com", Mode: "stateful", Stateful: boolPtr(false)}).mode(); got != "stateful" {
+		t.Fatalf("mode must win over legacy stateful, got %q", got)
+	}
+	if got := (Config{BaseURL: "https://example.com", Stateful: boolPtr(false)}).mode(); got != "stateless" {
+		t.Fatalf("legacy stateful=false mode = %q", got)
 	}
 }
 
-func TestSendChunkContextCancelUnblocks(t *testing.T) {
-	out := make(chan provider.Chunk) // unbuffered, no reader
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled
-
-	// Must return false promptly instead of blocking forever.
-	done := make(chan bool, 1)
-	go func() { done <- sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone}) }()
-	select {
-	case ok := <-done:
-		if ok {
-			t.Fatal("sendChunk on cancelled ctx should return false")
+func TestDeepSeekEffortUsesResponsesReasoningShape(t *testing.T) {
+	tests := []struct{ effort, want string }{
+		{"auto", ""}, {"disabled", "none"}, {"minimal", "minimal"}, {"low", "low"}, {"high", "high"}, {"max", "max"},
+	}
+	for _, test := range tests {
+		client := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: test.effort}).(*client)
+		body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+		reasoning, _ := body["reasoning"].(map[string]any)
+		got, _ := reasoning["effort"].(string)
+		if got != test.want {
+			t.Errorf("effort %q serialized as %q, want %q", test.effort, got, test.want)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("sendChunk blocked on cancelled context")
 	}
 }
 
-func TestSendChunkBufferedDelivers(t *testing.T) {
-	out := make(chan provider.Chunk, 1)
-	ctx := context.Background()
-	if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkText, Text: "x"}) {
-		t.Fatal("sendChunk should deliver into buffered channel")
+func TestFactoryPreservesUnsetLegacyStatefulForVendorDetection(t *testing.T) {
+	p, err := newFromConfig(provider.Config{
+		Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash",
+		Extra: map[string]any{"stateful": (*bool)(nil)},
+	})
+	if err != nil {
+		t.Fatalf("newFromConfig: %v", err)
 	}
-	select {
-	case c := <-out:
-		if c.Text != "x" {
-			t.Fatalf("got %q", c.Text)
-		}
-	default:
-		t.Fatal("chunk not delivered")
+	if got := p.(*client).mode; got != "stateless" {
+		t.Fatalf("unset stateful mode = %q, want DeepSeek vendor default stateless", got)
 	}
 }
 
-func TestResponsesCompactionFallsBackToFullInput(t *testing.T) {
-	var bodies []map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
+func TestStatelessRequestReplaysReasoningContentAndToolPair(t *testing.T) {
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		bodies = append(bodies, body)
-		w.Header().Set("Content-Type", "text/event-stream")
-		fl := w.(http.Flusher)
-		w.Write([]byte(`data:{"type":"response.output_text.delta","delta":"ok"}` + "\n\n"))
-		w.Write([]byte(`data:{"type":"response.completed","response":{"id":"resp_x","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
-		fl.Flush()
+		writeEvents(w, `{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":10,"output_tokens":2,"total_tokens":12}}}`)
 	}))
-	t.Cleanup(srv.Close)
+	defer server.Close()
 
-	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
-	c := p.(*client)
-
-	// Turn 1: establishes previous_response_id.
+	p := New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", Effort: "high"})
 	collect(t, p, provider.Request{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "first"},
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "weather"},
+		{Role: provider.RoleAssistant, Content: "checking", ReasoningContent: "need a tool", ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "weather", Arguments: `{"city":"SG"}`}}},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Name: "weather", Content: "sunny"},
 	}})
-	if c.lastResponseID == "" {
-		t.Fatal("turn 1 should record response id")
-	}
 
-	// Simulate compaction: session rewritten to system+summary, context reset.
-	c.ResetContext()
-	if c.lastResponseID != "" {
-		t.Fatal("ResetContext must clear previous_response_id")
+	if body["previous_response_id"] != nil {
+		t.Fatalf("stateless request has previous_response_id: %#v", body)
 	}
-
-	// Turn 2 after compaction: must send full input, no previous_response_id.
-	collect(t, p, provider.Request{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "summary..."},
-		{Role: provider.RoleUser, Content: "continue"},
-	}})
-	if _, has := bodies[1]["previous_response_id"]; has {
-		t.Fatal("post-compaction turn must not carry previous_response_id")
+	if body["instructions"] != "system" {
+		t.Fatalf("instructions = %#v", body["instructions"])
 	}
-	if _, ok := bodies[1]["input"].([]any); !ok {
-		t.Fatalf("post-compaction input should be full array, got %#v", bodies[1]["input"])
+	items, ok := body["input"].([]any)
+	if !ok || len(items) != 5 {
+		t.Fatalf("input = %#v, want user/reasoning/assistant/call/output", body["input"])
+	}
+	wantTypes := []string{"", "reasoning", "", "function_call", "function_call_output"}
+	for i, want := range wantTypes {
+		item := items[i].(map[string]any)
+		if got, _ := item["type"].(string); got != want {
+			t.Errorf("item[%d].type = %q, want %q: %#v", i, got, want, item)
+		}
+	}
+	assistant := items[2].(map[string]any)
+	if assistant["content"] != "checking" {
+		t.Fatalf("assistant content lost: %#v", assistant)
+	}
+	reasoning := items[1].(map[string]any)["content"].([]any)[0].(map[string]any)
+	if reasoning["type"] != "reasoning_text" || reasoning["text"] != "need a tool" {
+		t.Fatalf("reasoning item = %#v", reasoning)
 	}
 }
 
-func TestResponsesFailedAuthEventSurfacesAuthError(t *testing.T) {
-	srv := mockResponsesServer(t, []string{
-		`{"type":"response.failed","response":{"id":"resp_1","error":{"code":"invalid_api_key","message":"Incorrect API key"}}}`,
-	})
-	p := New(Config{Name: "test", APIKey: "k", KeyEnv: "QWEN_API_KEY", KeySource: ".env", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
+func TestStatelessRequestSanitizesMissingToolOutput(t *testing.T) {
+	client := New(Config{Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
+	body, _, _ := client.buildRequestBody(provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "run"},
+		{Role: provider.RoleAssistant, ReasoningContent: "call", ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "bash", Arguments: `{"command":"pwd"}`}}},
+	}})
+	items := body["input"].([]map[string]any)
+	if got := items[len(items)-1]["type"]; got != "function_call_output" {
+		t.Fatalf("last input item = %#v, want repaired function_call_output", items[len(items)-1])
+	}
+}
+
+func TestStreamDoesNotDuplicateDoneText(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeEvents(w,
+			`{"type":"response.output_text.delta","item_id":"msg_1","content_index":0,"delta":"hello"}`,
+			`{"type":"response.output_text.done","item_id":"msg_1","content_index":0,"text":"hello"}`,
+			`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":3,"input_tokens_details":{"cached_tokens":2},"output_tokens":1,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":4}}}`,
+		)
+	}))
+	defer server.Close()
+
+	chunks := collect(t, New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	var text string
+	var usage *provider.Usage
+	for _, chunk := range chunks {
+		if chunk.Type == provider.ChunkText {
+			text += chunk.Text
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
+	}
+	if text != "hello" {
+		t.Fatalf("streamed text = %q, want one copy", text)
+	}
+	if usage == nil || usage.CacheHitTokens != 2 || usage.CacheMissTokens != 1 || usage.ReasoningTokens != 1 {
+		t.Fatalf("usage = %+v", usage)
+	}
+	if chunks[len(chunks)-1].Type != provider.ChunkDone {
+		t.Fatalf("last chunk = %v", chunks[len(chunks)-1].Type)
+	}
+}
+
+func TestFunctionArgumentEventsUseOutputItemMappingAndCumulativeProgress(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeEvents(w,
+			`{"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"bash"}}`,
+			`{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"{\"command\":"}`,
+			`{"type":"response.function_call_arguments.delta","item_id":"fc_1","delta":"\"pwd\"}"}`,
+			`{"type":"response.function_call_arguments.done","item_id":"fc_1","arguments":"{\"command\":\"pwd\"}"}`,
+			`{"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","call_id":"call_1","name":"bash","arguments":"{\"command\":\"pwd\"}"}}`,
+			`{"type":"response.completed","response":{"id":"resp_1","usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}`,
+		)
+	}))
+	defer server.Close()
+
+	chunks := collect(t, New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "pwd"}}})
+	var starts, completed int
+	var progress []int
+	for _, chunk := range chunks {
+		switch chunk.Type {
+		case provider.ChunkToolCallStart:
+			starts++
+			if chunk.ToolCall.ID != "call_1" || chunk.ToolCall.Name != "bash" {
+				t.Errorf("start = %+v", chunk.ToolCall)
+			}
+		case provider.ChunkToolCallArgsDelta:
+			progress = append(progress, chunk.ArgChars)
+			if chunk.ToolCall.ID != "call_1" {
+				t.Errorf("delta ID = %q", chunk.ToolCall.ID)
+			}
+		case provider.ChunkToolCall:
+			completed++
+			if chunk.ToolCall.ID != "call_1" || chunk.ToolCall.Name != "bash" || chunk.ToolCall.Arguments != `{"command":"pwd"}` {
+				t.Errorf("complete = %+v", chunk.ToolCall)
+			}
+		}
+	}
+	if starts != 1 || completed != 1 {
+		t.Fatalf("starts=%d completed=%d", starts, completed)
+	}
+	if len(progress) != 2 || progress[1] <= progress[0] {
+		t.Fatalf("argument progress = %v, want cumulative", progress)
+	}
+}
+
+func TestIncompleteResponseSurfacesFinishReason(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeEvents(w, `{"type":"response.incomplete","response":{"id":"resp_1","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`)
+	}))
+	defer server.Close()
+	p := New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateful"}).(*client)
+	p.lastResponseID = "stale"
+	p.expectedPrefixDigest = "stale"
 	chunks := collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-
-	var ae *provider.AuthError
-	for i := range chunks {
-		if chunks[i].Type == provider.ChunkError {
-			ae, _ = chunks[i].Err.(*provider.AuthError)
-			if ae != nil {
-				break
+	for _, chunk := range chunks {
+		if chunk.Type == provider.ChunkUsage {
+			if chunk.Usage.FinishReason != "length" {
+				t.Fatalf("finish reason = %q", chunk.Usage.FinishReason)
 			}
+			if p.lastResponseID != "" || p.expectedPrefixDigest != "" {
+				t.Fatalf("incomplete response retained stateful context: id=%q digest=%q", p.lastResponseID, p.expectedPrefixDigest)
+			}
+			return
 		}
 	}
-	if ae == nil {
-		t.Fatal("expected AuthError from invalid_api_key failed event")
+	t.Fatal("missing usage chunk")
+}
+
+func TestStatefulContinuationValidatesConversationPrefix(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		id := len(bodies)
+		mu.Unlock()
+		writeEvents(w,
+			`{"type":"response.output_text.delta","item_id":"msg","delta":"answer"}`,
+			`{"type":"response.completed","response":{"id":"resp_`+string(rune('0'+id))+`","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		)
+	}))
+	defer server.Close()
+	p := New(Config{Name: "stateful", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateful"})
+
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleSystem, Content: "sys"}, {Role: provider.RoleUser, Content: "one"}}})
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleSystem, Content: "sys"}, {Role: provider.RoleUser, Content: "one"}, {Role: provider.RoleAssistant, Content: "answer"}, {Role: provider.RoleUser, Content: "two"}}})
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleSystem, Content: "different"}, {Role: provider.RoleUser, Content: "new session"}}})
+
+	if bodies[1]["previous_response_id"] != "resp_1" || bodies[1]["input"] != "two" {
+		t.Fatalf("valid continuation = %#v", bodies[1])
 	}
-	if ae.KeyEnv != "QWEN_API_KEY" || ae.Status != 401 || !ae.HasKey {
-		t.Fatalf("AuthError fields wrong: %+v", ae)
+	if bodies[1]["instructions"] != "sys" {
+		t.Fatalf("valid continuation instructions = %#v, want %q", bodies[1]["instructions"], "sys")
+	}
+	if _, ok := bodies[2]["previous_response_id"]; ok {
+		t.Fatalf("session switch reused previous response: %#v", bodies[2])
+	}
+	if _, ok := bodies[2]["input"].([]any); !ok {
+		t.Fatalf("session switch did not send full input: %#v", bodies[2]["input"])
 	}
 }
 
-func TestProviderResponsesUsageNormalisation(t *testing.T) {
-	cases := []struct {
-		name                                    string
-		input, output, total, cached, reasoning int
-		wantHit, wantMiss, wantTotal            int
-	}{
-		{"full", 100, 20, 120, 80, 5, 80, 20, 120},
-		{"no-cache", 100, 20, 0, 0, 0, 0, 100, 120}, // total derived, miss = input
-		{"partial-cache", 100, 20, 120, 30, 0, 30, 70, 120},
-		{"all-cached", 100, 20, 120, 100, 0, 100, 0, 120},
-	}
-	for _, c := range cases {
-		u := provider.ResponsesUsage(c.input, c.output, c.total, c.cached, c.reasoning)
-		if u.CacheHitTokens != c.wantHit || u.CacheMissTokens != c.wantMiss || u.TotalTokens != c.wantTotal {
-			t.Errorf("%s: got hit=%d miss=%d total=%d, want %d/%d/%d", c.name,
-				u.CacheHitTokens, u.CacheMissTokens, u.TotalTokens, c.wantHit, c.wantMiss, c.wantTotal)
+func TestExpiredPreviousResponseRetriesOnceWithFullHistory(t *testing.T) {
+	var mu sync.Mutex
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		bodies = append(bodies, body)
+		attempt := len(bodies)
+		mu.Unlock()
+		if attempt == 2 {
+			http.Error(w, `previous_response_id expired`, http.StatusBadRequest)
+			return
 		}
+		id := "resp_1"
+		if attempt == 3 {
+			id = "resp_2"
+		}
+		writeEvents(w,
+			`{"type":"response.output_text.delta","item_id":"msg","delta":"answer"}`,
+			`{"type":"response.completed","response":{"id":"`+id+`","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+		)
+	}))
+	defer server.Close()
+	p := New(Config{Name: "stateful", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateful"})
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "one"}}})
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "one"}, {Role: provider.RoleAssistant, Content: "answer"}, {Role: provider.RoleUser, Content: "two"}}})
+	if len(bodies) != 3 {
+		t.Fatalf("request count = %d, want initial + stale + retry", len(bodies))
+	}
+	if bodies[1]["previous_response_id"] != "resp_1" {
+		t.Fatalf("stale attempt = %#v", bodies[1])
+	}
+	if _, ok := bodies[2]["previous_response_id"]; ok {
+		t.Fatalf("retry still has previous response: %#v", bodies[2])
+	}
+	if _, ok := bodies[2]["input"].([]any); !ok {
+		t.Fatalf("retry input = %#v, want full array", bodies[2]["input"])
 	}
 }
 
-func TestDeepSeekEffortNormalisation(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string // "" = reasoning omitted (model default, thinking on)
-	}{
-		{"", ""}, // unset → model default (thinking on)
-		{"auto", ""},
-		{"disabled", "none"},
-		{"off", "none"},
-		{"none", "none"},
-		{"minimal", "minimal"},
-		{"low", "low"},
-		{"medium", "medium"},
-		{"high", "high"},
-		{"xhigh", "xhigh"},
-		{"max", "max"},
+func TestDashScopeCacheHeaderIsVendorScoped(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("x-dashscope-session-cache")
+		writeEvents(w, `{"type":"response.completed","response":{"id":"resp","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`)
+	}))
+	defer server.Close()
+	p := New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless", SessionCache: boolPtr(true)}).(*client)
+	p.vendor = "deepseek"
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if got != "" {
+		t.Fatalf("DeepSeek request leaked DashScope header %q", got)
 	}
-	for _, c := range cases {
-		var got string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if r, ok := body["reasoning"].(map[string]any); ok {
-				got, _ = r["effort"].(string)
-			}
-			w.Header().Set("Content-Type", "text/event-stream")
-			fl := w.(http.Flusher)
-			w.Write([]byte(`data:{"type":"response.completed","response":{"id":"r","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
-			fl.Flush()
-		}))
-		p := New(Config{Name: "t", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Effort: c.in})
-		p.(*client).vendor = "deepseek" // mock URL can't be vendor-detected
-		collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-		srv.Close()
-		if got != c.want {
-			t.Errorf("effort %q → %q, want %q", c.in, got, c.want)
-		}
+	p.vendor = "dashscope"
+	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	if got != "enable" {
+		t.Fatalf("DashScope header = %q", got)
 	}
 }
 
-func TestMiniMaxEffortNormalisation(t *testing.T) {
-	cases := []struct {
-		in   string
-		want string // "" = reasoning omitted
-	}{
-		{"", ""}, // omitted = reasoning off (M3 default)
-		{"minimal", "minimal"},
-		{"low", "low"},
-		{"medium", "medium"},
-		{"high", "high"},
-		{"disabled", "none"},
-		{"xhigh", "high"},
-		{"max", "high"},
+func TestRequiresToolCallReasoningOnlyForDeepSeek(t *testing.T) {
+	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"})
+	if !provider.RequiresToolCallReasoning(deepseek) {
+		t.Fatal("DeepSeek Responses provider must preserve tool-call reasoning")
 	}
-	for _, c := range cases {
-		var got string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if r, ok := body["reasoning"].(map[string]any); ok {
-				got, _ = r["effort"].(string)
+	other := New(Config{Name: "other", BaseURL: "https://example.com", Model: "m"})
+	if provider.RequiresToolCallReasoning(other) {
+		t.Fatal("unknown Responses endpoint unexpectedly requires DeepSeek reasoning")
+	}
+}
+
+func TestFailedEventSurfacesAuthenticationError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeEvents(w, `{"type":"response.failed","response":{"id":"resp","error":{"code":"invalid_api_key","message":"bad API key"}}}`)
+	}))
+	defer server.Close()
+	chunks := collect(t, New(Config{Name: "test", APIKey: "key", KeyEnv: "TEST_API_KEY", BaseURL: server.URL, Model: "m"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+	for _, chunk := range chunks {
+		if chunk.Type == provider.ChunkError {
+			if _, ok := chunk.Err.(*provider.AuthError); !ok || !strings.Contains(chunk.Err.Error(), "TEST_API_KEY") {
+				t.Fatalf("error = %T %v", chunk.Err, chunk.Err)
 			}
-			w.Header().Set("Content-Type", "text/event-stream")
-			fl := w.(http.Flusher)
-			w.Write([]byte(`data:{"type":"response.completed","response":{"id":"r","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
-			fl.Flush()
-		}))
-		p := New(Config{Name: "t", APIKey: "k", BaseURL: srv.URL, Model: "MiniMax-M3", Effort: c.in})
-		p.(*client).vendor = "minimax"
-		collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-		srv.Close()
-		if got != c.want {
-			t.Errorf("minimax effort %q → %q, want %q", c.in, got, c.want)
+			return
 		}
 	}
+	t.Fatal("missing error chunk")
 }

@@ -194,6 +194,24 @@ console.log("\nrich composer slash queries");
   eq(end?.query, "", "bare trailing slash exposes the full command menu");
 
   eq(
+    slashQueryAt("@00-基础文件/", { start: 9, end: 9 }),
+    null,
+    "a directory separator inside an active ref does not open slash completion",
+  );
+  const escapedRef = "看 @docs/my\\ dir/rev";
+  eq(
+    slashQueryAt(escapedRef, { start: escapedRef.length, end: escapedRef.length }),
+    null,
+    "a directory separator inside an escaped-space ref does not open slash completion",
+  );
+  const commandAfterRef = "@docs/README.md /review";
+  eq(
+    slashQueryAt(commandAfterRef, { start: commandAfterRef.length, end: commandAfterRef.length })?.query,
+    "review",
+    "slash completion remains available after a completed ref token",
+  );
+
+  eq(
     slashQueryAt("please /review", { start: 7, end: 14 }),
     null,
     "a range selection does not open slash completion",

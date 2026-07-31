@@ -34,6 +34,12 @@ as `Bash=<literal>`.
 - Outside a pending CLI Plan confirmation, `Esc` stops the current task.
 - If you `Tab` to a button and press `Enter`, that focused button runs (it is not overridden by the highlight).
 
+Headless `reasonix run` has no approval card to answer. Its default Ask posture
+therefore fails closed for writer fallback and explicit ask rules instead of
+adding prompts or silently approving them. Use the existing `--auto` / `-y`
+option when unattended automation should allow ordinary writer fallback; no
+additional safety setting is required.
+
 ## Auto mode
 
 Auto suits everyday development. It auto-approves ordinary tool permissions so you click less, but it is not unrestricted.

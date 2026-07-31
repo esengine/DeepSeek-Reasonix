@@ -207,6 +207,9 @@ func TestExecutionRiskDoesNotCreateAutoGuardPromptOrGrantState(t *testing.T) {
 		return "unexpected", nil
 	}
 	for _, command := range []string{
+		"npx vitest run src/lib/foo.test.ts 2>&1 | tail -40",
+		"svn diff",
+		"python3 -c 'import pandas as pd; pd.read_excel(\"report.xlsx\")'",
 		"git push origin feature-a",
 		"git push --force origin feature-a",
 		"gh pr merge 12",

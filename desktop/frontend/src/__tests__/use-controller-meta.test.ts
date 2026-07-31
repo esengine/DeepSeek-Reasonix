@@ -241,6 +241,11 @@ console.log("\nuse controller meta");
     "cancelled turn history explains the model-context boundary",
   );
   eq(
+    localizedNoticeText("reworded unapplied copy\nuse plan B", "unapplied_steer"),
+    "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:\nuse plan B",
+    "unapplied steer keeps the user's guidance while localizing the warning",
+  );
+  eq(
     localizedNoticeText("Tool round limit reached; asking the assistant to summarize progress.", "unknown_future_code"),
     "Tool round limit reached; asking the assistant to summarize progress.",
     "an unknown notice code falls back to exact-text matching",

@@ -12,6 +12,8 @@
 package event
 
 import (
+	"encoding/json"
+
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
@@ -173,7 +175,10 @@ type Approval struct {
 	Tool    string
 	Subject string
 	Reason  string // optional annotation explaining why approval is needed
-	Fresh   bool   // current human decision required; do not offer remembered grants
+	// RawInput is the exact structured tool input. ACP permission clients use it
+	// together with locations/reason instead of parsing a human title.
+	RawInput json.RawMessage
+	Fresh    bool // current human decision required; do not offer remembered grants
 	// Kind classifies the approval surface: "tool" (default), "plan", or
 	// "recovery". Empty means ordinary tool permission for backward compat.
 	Kind string
@@ -306,6 +311,7 @@ const (
 	NoticeCodeLoopGuard       = "loop_guard"
 	NoticeCodeWorkspaceLease  = "workspace_lease"
 	NoticeCodeCancelledTurn   = "cancelled_turn_display"
+	NoticeCodeUnappliedSteer  = "unapplied_steer"
 )
 
 type Event struct {

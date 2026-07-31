@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/shellparse"
 )
 
 // notifier is the slice of Conn the dispatch sink depends on: it pushes
@@ -54,6 +55,7 @@ type updateSink struct {
 	cwd     string
 	approve func(id string, allow, session, persist bool)
 	answer  func(id string, answers []event.AskAnswer)
+	status  func(event.Event)
 	mu      sync.Mutex
 	turnCtx context.Context
 }
@@ -81,6 +83,10 @@ func (s *updateSink) bindAnswer(fn func(id string, answers []event.AskAnswer)) {
 	s.answer = fn
 }
 
+// bindStatus installs the vendor-status observer. It receives typed events,
+// never raw reasoning text or terminal transcripts.
+func (s *updateSink) bindStatus(fn func(event.Event)) { s.status = fn }
+
 func (s *updateSink) setTurnContext(ctx context.Context) {
 	s.mu.Lock()
 	s.turnCtx = ctx
@@ -106,6 +112,9 @@ func (s *updateSink) currentTurnContext() context.Context {
 // Emit implements event.Sink. The agent calls it serially (see event.Sink), so no
 // locking is needed; write serialization lives in Conn.
 func (s *updateSink) Emit(e event.Event) {
+	if s.status != nil {
+		s.status(e)
+	}
 	switch e.Kind {
 	case event.Reasoning:
 		if e.Text == "" {
@@ -267,6 +276,9 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 			Title:      title,
 			Kind:       toolKindFor(a.Tool),
 			Status:     "pending",
+			RawInput:   rawJSON(string(a.RawInput)),
+			Locations:  s.toolLocations(a.Tool, string(a.RawInput)),
+			Meta:       s.permissionMeta(a),
 		},
 		Options: options,
 	}
@@ -284,6 +296,51 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 		}
 	}
 	s.approve(a.ID, allow, session, persist)
+}
+
+// permissionMeta carries Reasonix-owned structured data that an ACP supervisor
+// may trust independently from model-supplied rawInput. A foreground bash call
+// receives argv only when the command is a single static command: shell
+// expansion, control operators, redirects, assignments, and background jobs all
+// fail closed and remain interactive.
+func (s *updateSink) permissionMeta(a event.Approval) map[string]any {
+	reasonix := map[string]any{
+		"approvalId": a.ID,
+		"tool":       a.Tool,
+		"subject":    a.Subject,
+		"fresh":      a.Fresh,
+	}
+	if reason := strings.TrimSpace(a.Reason); reason != "" {
+		reasonix["reason"] = reason
+	}
+	if a.Tool == "bash" && strings.TrimSpace(s.cwd) != "" {
+		var input struct {
+			Command                     string `json:"command"`
+			RunInBackground             bool   `json:"run_in_background"`
+			PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
+		}
+		if json.Unmarshal(a.RawInput, &input) == nil &&
+			!input.RunInBackground && !input.PreserveBackgroundProcesses {
+			cwd, cwdErr := filepath.Abs(s.cwd)
+			features, featureOK := shellparse.AnalyzeApprovalFeatures(input.Command)
+			command, commandErr := shellparse.ParseStaticCommand(input.Command, shellparse.StaticCommandPolicy{})
+			exact := featureOK && !features.DynamicCommandName && !features.NestedExecution &&
+				!features.Expansion && !features.Assignment && !features.Redirection &&
+				!shellparse.ContainsUnquotedGlob(input.Command)
+			for _, arg := range command.Argv {
+				// Tilde expansion is shell-dependent and therefore not exact argv.
+				if strings.HasPrefix(arg, "~") {
+					exact = false
+				}
+			}
+			if cwdErr == nil && commandErr == nil && exact && len(command.Argv) > 0 {
+				reasonix["commandSchemaVersion"] = 1
+				reasonix["argv"] = command.Argv
+				reasonix["cwd"] = cwd
+			}
+		}
+	}
+	return map[string]any{"reasonix.io": reasonix}
 }
 
 func (s *updateSink) requestAsk(ctx context.Context, a event.Ask) {

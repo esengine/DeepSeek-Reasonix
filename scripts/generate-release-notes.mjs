@@ -157,9 +157,25 @@ async function main() {
   if (!args.version) throw new Error("--version is required");
   const version = normalizeVersion(args.version);
   const catalog = await loadCatalog();
-  const previous = args.from || catalog.releases.find((release) => release.version !== version)?.version;
+  const channel = version.includes("-") ? "prerelease" : "stable";
+  const baseVersion = version.split("-")[0];
+  const previousRecord = channel === "stable"
+    ? catalog.releases.find((release) => release.version !== version && release.channel === "stable")
+    : catalog.releases.find(
+        (release) =>
+          release.version !== version &&
+          release.channel === "prerelease" &&
+          release.baseVersion === baseVersion,
+      ) || catalog.releases.find((release) => release.channel === "stable");
+  const previous = args.from || previousRecord?.version;
   if (!previous) throw new Error("--from is required when no previous release exists");
-  const from = previous.match(/^(?:desktop-|npm-)?v/) ? previous : `desktop-v${previous}`;
+  const previousVersion = normalizeVersion(previous);
+  const previousIsPreview = previousVersion.includes("-");
+  const from = previous.match(/^(?:desktop-|npm-)?v/)
+    ? previous
+    : previousIsPreview
+      ? `v${previousVersion}`
+      : `desktop-v${previousVersion}`;
   const to = args.to || "HEAD";
   const repository = repositoryName();
   const commits = commitRange(from, to);
@@ -168,24 +184,45 @@ async function main() {
   if (!pulls.length) throw new Error(`no pull requests found in ${from}..${to}`);
   const docLinks = collectDocLinks(from, repository, to);
   const date = args.date || new Date().toISOString().slice(0, 10);
-  const tag = args.tag || `desktop-v${version}`;
+  const tag = args.tag || (channel === "prerelease" ? `v${version}` : `desktop-v${version}`);
   const source = {
     version,
     date,
-    channel: version.includes("-") ? "prerelease" : "stable",
+    channel,
     range: `${from}..${to}`,
     pullRequests: pulls,
     documentationUrls: docLinks,
   };
   const release = await askDeepSeek(source);
   release.version = version;
+  release.releaseId = version;
+  release.baseVersion = baseVersion;
   release.date = date;
   release.channel = source.channel;
+  release.status = "reviewed";
+  release.previousRelease = previousVersion;
+  const previewOrdinal = version.match(/-preview\.([1-9][0-9]*)$/)?.[1];
+  if (channel === "prerelease") {
+    if (!previewOrdinal) throw new Error("Preview release version must use MAJOR.MINOR.PATCH-preview.N");
+    release.builds = {
+      cli: `v${version}`,
+      desktop: `v${baseVersion}-preview.${previewOrdinal}`,
+      npm: `${baseVersion}-canary.${previewOrdinal}`,
+    };
+  } else {
+    release.builds = {
+      cli: `v${version}`,
+      desktop: `v${version}`,
+      npm: version,
+    };
+  }
   release.contributors = [...new Set(pulls.map((pull) => pull.author).filter(Boolean))];
   release.links = {
     github: `https://github.com/${repository}/releases/tag/${tag}`,
     compare: `https://github.com/${repository}/compare/${from}...${tag}`,
-    download: "https://reasonix.io/?download=desktop#start",
+    download: channel === "prerelease"
+      ? "https://reasonix.io/?download=desktop&channel=preview#start"
+      : "https://reasonix.io/?download=desktop&channel=stable#start",
   };
   release.guides = (release.guides || []).filter((guide) => docLinks.includes(guide.href));
   assertGroundedRefs(release, new Set(pulls.map((pull) => pull.number)));

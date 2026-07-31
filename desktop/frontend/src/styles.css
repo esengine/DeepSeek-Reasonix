@@ -2015,6 +2015,7 @@ a[href] {
   --chat-min-width: 760px;
   --workspace-width: 420px;
   --workspace-resizer-width: 8px;
+  --terminal-height: 280px;
   --app-chrome-height: 38px;
   --topicbar-height: 56px;
   --statusbar-height: var(--statusbar-dock-height);
@@ -2088,6 +2089,102 @@ a[href] {
 .layout--workspace-maximized.layout--sidebar-collapsed {
   grid-template-columns: 0px minmax(0, 1fr);
 }
+/* Terminal drawer — an independent bottom panel below the chat pane.
+   Sidebar and workspace panel stay full-height in columns 1 and 3;
+   the terminal occupies column 2 row 3, statusbar at row 4. */
+.layout--terminal-drawer-open {
+  grid-template-rows: var(--app-chrome-height) minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height);
+  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease;
+}
+/* Disable the open/close transition during a terminal resize drag. */
+.layout--terminal-resizing.layout--terminal-drawer-open {
+  transition: grid-template-columns 0.16s ease, min-width 0.16s ease;
+}
+.layout--terminal-drawer-open .terminal-drawer-resizer {
+  grid-row: 2;
+  grid-column: 2;
+  align-self: end;
+  position: relative;
+  height: 8px;
+  width: 100%;
+  cursor: row-resize;
+  z-index: var(--z-local-handle);
+  background: transparent;
+  border: 0;
+  margin-bottom: -4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.12s ease;
+}
+/* Show the resizer only when the terminal is actually expanded. */
+.layout--terminal-drawer-expanded .terminal-drawer-resizer {
+  opacity: 1;
+  pointer-events: auto;
+}
+.layout--terminal-drawer-open .terminal-drawer-resizer:hover,
+.layout--terminal-drawer-open .terminal-drawer-resizer:active {
+  background: var(--accent-soft);
+}
+.layout--terminal-drawer-open .terminal-drawer {
+  grid-row: 3;
+  grid-column: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* Border and background only visible when the terminal is actually expanded,
+   avoiding a 1px artifact line when the drawer is collapsed to 0px. */
+.layout--terminal-drawer-expanded .terminal-drawer {
+  background: var(--terminal-bg, #111315);
+  border-top: 1px solid var(--border-soft);
+}
+.layout--terminal-drawer-open .terminal-drawer .terminal-panel {
+  height: 100%;
+}
+.layout--terminal-drawer-open .terminal-drawer .terminal-panel__header {
+  border-bottom: 1px solid var(--border-soft);
+}
+/* When the terminal drawer is open, the sidebar and workspace panel span the
+   full content height (rows 2–3) so only the chat pane is shortened. */
+.layout.layout--terminal-drawer-open .sidebar {
+  grid-row: 2 / 4;
+}
+.layout.layout--terminal-drawer-open .workbench-dock {
+  grid-row: 2 / 4;
+}
+/* Chrome-hidden variants: rows shift up by one (3 rows total: content, terminal, statusbar). */
+.layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open .sidebar {
+  grid-row: 1 / 3 !important;
+}
+.layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open .workbench-dock {
+  grid-row: 1 / 3 !important;
+}
+.app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open .sidebar {
+  grid-row: 1 / 3 !important;
+}
+.app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open .workbench-dock {
+  grid-row: 1 / 3 !important;
+}
+.layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open {
+  grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height) !important;
+  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+}
+.app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open {
+  grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) !important;
+  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+}
+/* StatusBar shifts to row 4 when the terminal drawer adds an extra row. */
+.layout--terminal-drawer-open .statusbar {
+  grid-row: 4;
+}
+.layout--workbench-chrome-hidden.layout--terminal-drawer-open .statusbar {
+  grid-row: 3;
+}
+
+/* Keep the old layout--terminal-open rules for backward compat — they are
+   no longer added by App.tsx but may remain in cached localStorage styles. */
 .layout--terminal-open {
   grid-template-columns: var(--sidebar-expanded-width) minmax(0, 1fr);
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr) minmax(220px, min(42vh, 440px)) var(--statusbar-height);
@@ -2148,6 +2245,18 @@ a[href] {
 .layout--workbench-chrome-hidden .context-inspector,
 .layout--workbench-chrome-hidden .workbench-dock {
   grid-row: 1;
+}
+.layout--workbench-chrome-hidden .terminal-drawer-resizer {
+  grid-row: 1;
+}
+.layout--workbench-chrome-hidden .terminal-drawer {
+  grid-row: 2;
+}
+.app--creation .layout--creation-chrome-hidden .terminal-drawer-resizer {
+  grid-row: 1;
+}
+.app--creation .layout--creation-chrome-hidden .terminal-drawer {
+  grid-row: 2;
 }
 
 .layout--workbench-chrome-hidden .statusbar {
@@ -6629,6 +6738,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 1 auto;
   min-width: 216px;
   max-width: min(420px, 48vw);
+  margin-inline-start: 2px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -6742,7 +6852,7 @@ body > .mermaid-diagram--fullscreen {
 
 .composer-modebar__item:hover:not(:disabled) {
   color: var(--fg);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .composer-modebar__item:focus-visible {
@@ -6804,7 +6914,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   border-color: var(--border-soft);
   background: var(--bg-soft);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .composer-task-mode-trigger:disabled {
@@ -6880,7 +6990,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   border-color: var(--border-soft);
   background: var(--bg-soft);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .composer-profile-trigger:disabled {
@@ -21589,6 +21699,8 @@ body > .mermaid-diagram--fullscreen {
 }
 
 .topicbar {
+  position: relative;
+  z-index: var(--z-inline-sticky);
   flex: 0 0 auto;
   container-type: inline-size;
   display: flex;
@@ -27147,7 +27259,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
   border-color: var(--app-graphite-hairline-strong);
   background: var(--bg-elev);
-  transform: translateY(-1px);
+  transform: none;
 }
 
 :root[data-theme-style] .composer-task-mode-trigger:focus-visible,
@@ -27189,7 +27301,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .composer-modebar__item:hover:not(:disabled) {
   color: var(--text-2);
   background: transparent;
-  transform: translateY(-1px);
+  transform: none;
 }
 
 :root[data-theme-style] .composer-modebar__item--active,
@@ -33194,21 +33306,28 @@ body > .mermaid-diagram--fullscreen {
     display: none !important;
   }
 
-  .app .layout--terminal-open .workbench-dock,
-  :root[data-theme-style] .app .layout--terminal-open .workbench-dock {
+  .app .layout--terminal-drawer-open .terminal-drawer,
+  :root[data-theme-style] .app .layout--terminal-drawer-open .terminal-drawer {
     display: flex !important;
     grid-column: 1 !important;
     grid-row: 3;
   }
 
-  .app .layout--workbench-chrome-hidden.layout--terminal-open,
-  :root[data-theme-style] .app .layout--workbench-chrome-hidden.layout--terminal-open {
-    grid-template-rows: minmax(0, 1fr) minmax(220px, min(42vh, 440px)) var(--statusbar-height);
+  .app .layout--terminal-drawer-open .terminal-drawer-resizer,
+  :root[data-theme-style] .app .layout--terminal-drawer-open .terminal-drawer-resizer {
+    grid-column: 1 !important;
   }
 
-  .app .layout--workbench-chrome-hidden.layout--terminal-open .workbench-dock,
-  :root[data-theme-style] .app .layout--workbench-chrome-hidden.layout--terminal-open .workbench-dock {
+  .app .layout--workbench-chrome-hidden.layout--terminal-drawer-open .terminal-drawer,
+  :root[data-theme-style] .app .layout--workbench-chrome-hidden.layout--terminal-drawer-open .terminal-drawer,
+  .app--creation .layout--creation-chrome-hidden.layout--terminal-drawer-open .terminal-drawer,
+  :root[data-theme-style] .app--creation .layout--creation-chrome-hidden.layout--terminal-drawer-open .terminal-drawer {
     grid-row: 2;
+  }
+
+  .app .layout--workbench-chrome-hidden.layout--terminal-drawer-open,
+  :root[data-theme-style] .app .layout--workbench-chrome-hidden.layout--terminal-drawer-open {
+    grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height);
   }
 
   .app .chat-pane,
@@ -36012,4 +36131,13 @@ body > .mermaid-diagram--fullscreen {
     width: auto;
     height: 3px;
   }
+}
+
+/* Terminal-drawer footer compaction (terminal is open + non-Creation layout).
+   !important is necessary because the footer padding is set by multiple theme /
+   media-query rules with varying specificity that are hard to predict.
+   Keep the top spacing (composer→statusbar) intact; only reduce the bottom
+   padding that would otherwise waste space between the status bar and terminal. */
+.footer.footer--compact {
+  padding-bottom: 4px !important;
 }

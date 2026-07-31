@@ -55,6 +55,20 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	}
 }
 
+func TestNonDeliveryProfileNeverRequiresStructuredReview(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "review", readOnly: true})
+	reg.Add(fakeTool{name: "security_review", readOnly: true})
+	a := &Agent{deliveryProfile: false, evidence: ledger, tools: reg}
+
+	if got := a.deliveryReviewGateFailure(); got != "" {
+		t.Fatalf("non-Delivery review gate = %q, want disabled", got)
+	}
+}
+
 func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))

@@ -850,11 +850,25 @@ func (a *Agent) consumeSteer() (string, bool) {
 	return t, true
 }
 
-// flushSteerQueue ends the turn's steer intake: it drains whatever is still
-// queued and persists each entry to the session, exactly as the in-loop
-// consume would have (#6238 — a dropped steer vanished from both the model's
-// context and history). The flushed steers reach the model on the next turn;
-// the Steer event keeps the transcript honest about when they arrived.
+// closeSteerIntakeIfIdle atomically closes the normal-completion race between
+// the final queue check and Run returning. A steer accepted before this check
+// keeps the loop alive; one arriving after it is rejected so the host can keep
+// the user's draft and retry it as a regular follow-up.
+func (a *Agent) closeSteerIntakeIfIdle() bool {
+	a.steerMu.Lock()
+	defer a.steerMu.Unlock()
+	if len(a.steerQueue) > 0 {
+		return false
+	}
+	a.steerRunActive = false
+	return true
+}
+
+// flushSteerQueue ends the turn's steer intake. Guidance that arrived too late
+// to be consumed is persisted for transcript visibility but marked local-only:
+// replaying it to the model on the next unrelated user turn can execute a stale
+// historical task (#7045). An explicit warning keeps the transcript honest
+// without presenting the text as successfully applied guidance (#6238).
 func (a *Agent) flushSteerQueue() {
 	a.steerMu.Lock()
 	pending := a.steerQueue
@@ -865,9 +879,37 @@ func (a *Agent) flushSteerQueue() {
 	a.steerRunActive = false
 	a.steerMu.Unlock()
 	for _, text := range pending {
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-		a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+		a.RecordUnappliedSteer(text)
 	}
+}
+
+// UnappliedSteerNotice returns the durable warning shown for guidance that was
+// accepted during an abnormal turn exit but never reached a provider request.
+func UnappliedSteerNotice(text string) string {
+	return "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:\n" + text
+}
+
+// RecordUnappliedSteer stores guidance that could not affect its intended
+// in-flight turn. The orphan-tool sentinel makes older readers drop the record
+// during wire normalization, while current readers use LocalOnly to exclude it
+// before every provider request.
+func (a *Agent) RecordUnappliedSteer(text string) {
+	if a == nil || a.session == nil {
+		return
+	}
+	a.session.Add(provider.Message{
+		Role:       provider.RoleTool,
+		Content:    a.withTurnPreferences(midTurnSteerMessage(text)),
+		ToolCallID: provider.LocalOnlyToolID,
+		Name:       provider.LocalOnlyToolName,
+		LocalOnly:  true,
+	})
+	a.sink.Emit(event.Event{
+		Kind:  event.Notice,
+		Level: event.LevelWarn,
+		Code:  event.NoticeCodeUnappliedSteer,
+		Text:  UnappliedSteerNotice(text),
+	})
 }
 
 func (a *Agent) steerQueueLen() int {

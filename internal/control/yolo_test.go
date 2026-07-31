@@ -1023,6 +1023,46 @@ func TestSetAutoApproveToolsDoesNotDrainPendingAsk(t *testing.T) {
 	assertAskAnswers(t, result.answers, userAnswers)
 }
 
+func TestDismissedAskCancelsTurnWithoutModelContinuation(t *testing.T) {
+	askCh := make(chan event.Ask, 1)
+	turnDone := make(chan event.Event, 1)
+	c := New(Options{
+		Sink: event.FuncSink(func(e event.Event) {
+			switch e.Kind {
+			case event.AskRequest:
+				askCh <- e.Ask
+			case event.TurnDone:
+				turnDone <- e
+			}
+		}),
+	})
+
+	continued := false
+	if got := c.runGuarded(func(ctx context.Context) error {
+		_, err := c.Ask(ctx, sampleAskQuestions())
+		if err == nil {
+			continued = true
+		}
+		return err
+	}); got != turnStarted {
+		t.Fatalf("runGuarded = %v, want turnStarted", got)
+	}
+	ask := waitAskRequest(t, askCh)
+	c.AnswerQuestion(ask.ID, nil)
+
+	select {
+	case done := <-turnDone:
+		if !done.Cancelled {
+			t.Fatalf("dismissed Ask TurnDone = %+v, want Cancelled", done)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("dismissed Ask did not finish the turn")
+	}
+	if continued {
+		t.Fatal("dismissed Ask returned a model-facing result instead of stopping the turn")
+	}
+}
+
 func TestAskSerializesBehindPromptLockEvenWithAutoApproveTools(t *testing.T) {
 	askCh := make(chan event.Ask, 1)
 	c := New(Options{

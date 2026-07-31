@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -273,6 +274,56 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	}
 }
 
+func TestUpdateSinkPermissionCarriesStructuredContext(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		if string(p.ToolCall.RawInput) != `{"path":"src/main.go","content":"next"}` {
+			t.Fatalf("rawInput = %s", p.ToolCall.RawInput)
+		}
+		if len(p.ToolCall.Locations) != 1 || !strings.HasSuffix(filepath.ToSlash(p.ToolCall.Locations[0].Path), "/src/main.go") {
+			t.Fatalf("locations = %+v", p.ToolCall.Locations)
+		}
+		meta, ok := p.ToolCall.Meta["reasonix.io"].(map[string]any)
+		if !ok || meta["tool"] != "write_file" || meta["approvalId"] != "structured" || meta["reason"] != "write requested by the active goal" {
+			t.Fatalf("metadata = %#v", p.ToolCall.Meta)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatalf("permission wire shape: %v", err)
+		}
+		toolCall, ok := wire["toolCall"].(map[string]any)
+		if !ok {
+			t.Fatalf("toolCall wire shape = %#v", wire["toolCall"])
+		}
+		if _, present := toolCall["reason"]; present {
+			t.Fatalf("ACP v1 toolCall has non-standard root reason: %#v", toolCall)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptRejectOnce)}})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-structured")
+	sink.bindCwd(t.TempDir())
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "structured", Tool: "write_file", Subject: "src/main.go",
+		Reason:   "write requested by the active goal",
+		RawInput: json.RawMessage(`{"path":"src/main.go","content":"next"}`),
+	}})
+	select {
+	case decision := <-got:
+		if decision.allow {
+			t.Fatalf("rejected permission was allowed: %+v", decision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission was never resolved")
+	}
+}
+
 func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
 		raw, _ := json.Marshal(params)
@@ -321,6 +372,52 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("approve was never called")
+	}
+}
+
+func TestPermissionMetaOnlyTrustsForegroundStaticBash(t *testing.T) {
+	cwd := t.TempDir()
+	sink := newUpdateSink(&fakeNotifier{}, "sess-static-command")
+	sink.bindCwd(cwd)
+
+	for _, tc := range []struct {
+		name     string
+		rawInput string
+		wantArgv []string
+	}{
+		{name: "static", rawInput: `{"command":"go test ./..."}`, wantArgv: []string{"go", "test", "./..."}},
+		{name: "quoted static", rawInput: `{"command":"node -e 'process.exit(0)'"}`, wantArgv: []string{"node", "-e", "process.exit(0)"}},
+		{name: "expansion", rawInput: `{"command":"go test $PACKAGE"}`},
+		{name: "glob expansion", rawInput: `{"command":"go test ./*.go"}`},
+		{name: "brace expansion", rawInput: `{"command":"printf '%s' {a,b}"}`},
+		{name: "tilde expansion", rawInput: `{"command":"test -f ~/.config/reasonix.toml"}`},
+		{name: "control syntax", rawInput: `{"command":"go test ./... && git status"}`},
+		{name: "background", rawInput: `{"command":"go test ./...","run_in_background":true}`},
+		{name: "preserved descendants", rawInput: `{"command":"go test ./...","preserve_background_processes":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := sink.permissionMeta(event.Approval{
+				ID: "command", Tool: "bash", Subject: "command", RawInput: json.RawMessage(tc.rawInput),
+			})
+			reasonix, ok := meta["reasonix.io"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasonix metadata = %#v", meta)
+			}
+			argv, present := reasonix["argv"]
+			if len(tc.wantArgv) == 0 {
+				if present {
+					t.Fatalf("unsafe command received trusted argv: %#v", argv)
+				}
+				return
+			}
+			got, ok := argv.([]string)
+			if !ok || strings.Join(got, "\x00") != strings.Join(tc.wantArgv, "\x00") {
+				t.Fatalf("argv = %#v, want %#v", argv, tc.wantArgv)
+			}
+			if reasonix["commandSchemaVersion"] != 1 || reasonix["cwd"] != filepath.Clean(cwd) {
+				t.Fatalf("trusted command metadata = %#v", reasonix)
+			}
+		})
 	}
 }
 

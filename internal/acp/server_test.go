@@ -628,6 +628,12 @@ func TestServeLifecycle(t *testing.T) {
 	if steer == nil || steer.Method != sessionSteerMethod {
 		t.Errorf("sessionSteer capability = %+v, want method %q", steer, sessionSteerMethod)
 	}
+	for _, method := range []string{sessionStatusMethod, sessionStatusUpdateMethod} {
+		capability, ok := ir.AgentCapabilities.Meta[method].(map[string]any)
+		if !ok || capability["schemaVersion"] != float64(reasonixStatusSchemaVersion) {
+			t.Errorf("%s capability = %#v, want schemaVersion %d", method, ir.AgentCapabilities.Meta[method], reasonixStatusSchemaVersion)
+		}
+	}
 	if len(ir.AuthMethods) != 1 || ir.AuthMethods[0].ID != "reasonix-setup" || ir.AuthMethods[0].Type != "terminal" {
 		t.Fatalf("authMethods = %+v, want terminal reasonix setup", ir.AuthMethods)
 	}

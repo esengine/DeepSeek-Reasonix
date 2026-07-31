@@ -330,6 +330,32 @@ console.log("\napproval modal file references");
 }
 
 {
+  const dom = installDom("zh-CN");
+  mockApp({
+    ListDir: async () => [],
+    SearchFileRefs: async () => [],
+  });
+  const { root } = await renderApproval({
+    approval: {
+      id: "dynamic-bash-zh",
+      tool: "bash",
+      subject: "python3 -c \"print('hello')\"",
+      reason: "Matched permission rule: ask Bash(python3:*)\nThis command uses nested or indirect shell execution. Auto and broad allow rules cannot verify the inner command; approve this exact command or use YOLO.",
+    },
+  });
+
+  const text = document.body.textContent ?? "";
+  ok(text.includes("命中权限规则：ask Bash(python3:*)"), "approval identifies the exact matched permission rule");
+  ok(text.includes("嵌套或间接执行"), "dynamic Bash approval explains the matched safety boundary in Chinese");
+  ok(text.includes("精确命令"), "dynamic Bash approval tells the user how to grant the command");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
   const dom = installDom();
   mockApp({
     ListDir: async () => [],

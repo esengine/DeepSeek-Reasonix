@@ -3656,7 +3656,7 @@ func TestHeadlessGateRefusesFreshHumanApprovalTools(t *testing.T) {
 
 	allow, reason, err := gate.Check(context.Background(), "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
 	if err != nil || !allow || reason != "" {
-		t.Fatalf("ordinary headless ask = (%v,%q,%v), want autonomous allow", allow, reason, err)
+		t.Fatalf("legacy bootstrap ask = (%v,%q,%v), want compatibility allow", allow, reason, err)
 	}
 }
 

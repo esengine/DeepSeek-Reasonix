@@ -155,15 +155,24 @@ func (f *fakeReactionAdapter) cleanupMessages() []string {
 
 type queueTestController struct {
 	botController
-	mu       sync.Mutex
-	steers   []string
-	canceled bool
+	mu          sync.Mutex
+	steers      []string
+	rejectSteer bool
+	canceled    bool
 }
 
 func (c *queueTestController) Steer(text string) {
+	_ = c.TrySteer(text)
+}
+
+func (c *queueTestController) TrySteer(text string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.rejectSteer {
+		return false
+	}
 	c.steers = append(c.steers, text)
+	return true
 }
 
 func (c *queueTestController) Cancel() {
@@ -1525,6 +1534,39 @@ func TestGatewayDefaultQueueSteersActiveTurn(t *testing.T) {
 	}
 	if cleaned := adapter.cleanupMessages(); len(cleaned) != 1 || cleaned[0] != "m2" {
 		t.Fatalf("cleanup messages = %#v, want [m2]", cleaned)
+	}
+}
+
+func TestGatewayRejectedSteerFallsBackToFollowupQueue(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	gw := NewGateway(GatewayConfig{Allowlist: AllowlistConfig{AllowAll: true}}, nil, logger)
+	adapter := &fakeReactionAdapter{fakeAdapter: newFakeAdapter(PlatformFeishu, "fake-feishu")}
+	msg := InboundMessage{
+		Platform:     PlatformFeishu,
+		ConnectionID: "feishu-feishu",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+		Text:         "run this after the current turn",
+		MessageID:    "m-rejected-steer",
+	}
+	key := BuildSessionKey(msg.Session())
+	ctrl := &queueTestController{rejectSteer: true}
+	gw.controllers[key] = &sessionState{ctrl: ctrl, sink: &sessionEventSink{}}
+	if result := gw.sessions.TryAcquireWithQueue(key, msg, QueueOptions{Mode: QueueModeFollowup}); !result.Acquired {
+		t.Fatalf("failed to mark session active: %+v", result)
+	}
+
+	gw.handleMessage(context.Background(), AdapterBinding{ID: "feishu-feishu", Platform: PlatformFeishu, Adapter: adapter}, msg)
+
+	if got := ctrl.steered(); len(got) != 0 {
+		t.Fatalf("rejected steers = %#v, want none", got)
+	}
+	if pending := gw.sessions.PendingCount(key); pending != 1 {
+		t.Fatalf("pending = %d, want rejected steer preserved as one follow-up", pending)
+	}
+	if sent := adapter.sentMessages(); len(sent) != 0 {
+		t.Fatalf("sent = %#v, rejected steer must not receive an applied acknowledgement", sent)
 	}
 }
 

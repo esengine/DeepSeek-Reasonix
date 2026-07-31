@@ -142,8 +142,8 @@ type Options struct {
 	// (control.ToolApprovalAuto/DontAsk/Yolo) applied to every headless-only gate
 	// this boot constructs: the top-level executor, task/read_only_task,
 	// writer-capable skill sub-agents, and the planner runner. Empty (or "ask")
-	// keeps the default headless gate, which resolves ordinary ask decisions to
-	// allow. Callers that later call Controller.ApplyHeadlessApprovalMode with a
+	// keeps the default fail-closed headless gate. Callers that later call
+	// Controller.ApplyHeadlessApprovalMode with a
 	// different mode than they passed here should also pass it here, or
 	// sub-agent gates will not match the parent executor's mode.
 	HeadlessApprovalMode string
@@ -161,6 +161,15 @@ type Options struct {
 	// catalog. Remote Workbench injects a Broker resolver so no credential or
 	// provider endpoint has to exist on the Host. Nil preserves local behavior.
 	ProviderResolver provider.Resolver
+	// DisablePlanner is a process-local hard override used by supervised ACP
+	// workers. It wins over user/project planner_model configuration without
+	// mutating config or changing the provider-visible prompt/tool surface.
+	DisablePlanner bool
+	// SandboxNetworkOverride and WorkspaceOnly are process-local hard bounds for
+	// supervised ACP workers. Nil/false preserve normal Reasonix config.
+	SandboxNetworkOverride *bool
+	SandboxBashOverride    string
+	WorkspaceOnly          bool
 }
 
 func recoveryHeadlessMode(opts Options) bool {
@@ -234,15 +243,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	entry, modelRef, err := resolveModelEntry(opts, cfg, modelName)
 	if err != nil {
 		return nil, err
-	}
-	// Auto-detect context window from model name when the preset/config does not
-	// declare one. Mirrors qwen-code's tokenLimits.ts regex-based inference so
-	// new models (qwen3.8, glm-5.2, etc.) get correct compaction budgets without
-	// a preset update.
-	if entry.ContextWindow == 0 {
-		if auto := config.AutoContextWindow(entry.Model); auto > 0 {
-			entry.ContextWindow = auto
-		}
 	}
 	if opts.EffortOverride != nil {
 		entry.Effort = *opts.EffortOverride
@@ -468,6 +468,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	reg := tool.NewRegistry()
 	writeRoots := cfg.WriteRootsForRoot(root)
 	writeRoots = appendUniquePaths(writeRoots, additionalDirs...)
+	if opts.WorkspaceOnly {
+		writeRoots = []string{root}
+	}
+	networkEnabled := cfg.Sandbox.Network
+	if opts.SandboxNetworkOverride != nil {
+		networkEnabled = *opts.SandboxNetworkOverride
+	}
+	bashMode := cfg.BashMode()
+	if override := strings.TrimSpace(opts.SandboxBashOverride); override != "" {
+		bashMode = override
+	}
 	forbidReadRoots := RuntimeForbidReadRoots(cfg, root)
 	// managedConfig names the Reasonix-owned config FILES (config.toml,
 	// compatibility TOMLs, legacy v0.x config.json) the file-writers may repair
@@ -475,12 +486,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// OS-sandbox write roots deliberately stay unwidened: config repair goes
 	// through the approval-gated file tools, not raw shell writes.
 	managedConfig := builtin.NewManagedConfigPaths(config.ReasonixManagedConfigPaths())
-	bashSpec := sandbox.Spec{Mode: cfg.BashMode(), WriteRoots: writeRoots, ForbidReadRoots: forbidReadRoots, Network: cfg.Sandbox.Network}
+	bashSpec := sandbox.Spec{Mode: bashMode, WriteRoots: writeRoots, ForbidReadRoots: forbidReadRoots, Network: networkEnabled}
 	bashSpec.Shell = shell
 	// The session-data guard blocks agent writes into Reasonix's own session
 	// stores (they race the app's saves and surface as conflict-copy loops);
 	// explicit allow_write entries stay a sanctioned escape hatch.
-	sessionGuard := builtin.NewSessionDataGuard(config.MemoryUserDir(), cfg.AllowWriteRoots())
+	allowWriteRoots := cfg.AllowWriteRoots()
+	if opts.WorkspaceOnly {
+		allowWriteRoots = nil
+	}
+	sessionGuard := builtin.NewSessionDataGuard(config.MemoryUserDir(), allowWriteRoots)
 	if bashSpec.Mode == "enforce" && !sandbox.Available() {
 		fmt.Fprintln(stderr, "warning: "+sandbox.UnavailableMessage())
 	}
@@ -519,7 +534,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		StateHome:          config.ReasonixHomeDir(),
 		WriterRoots:        writeRoots,
 		ForbidReadRoots:    forbidReadRoots,
-		Network:            cfg.Sandbox.Network,
+		Network:            networkEnabled,
 		PackageOwners:      pluginPackageOwners(cfg),
 	}
 	autoStartEntries := cfg.EnabledPlugins(root, config.DefaultMCPActivationStore())
@@ -741,19 +756,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	// Permission policy gates every tool call. With no HeadlessApprovalMode
-	// (interactive default), the headless gate resolves ordinary "ask" decisions
-	// to allow — preserving `reasonix run` autonomy — while deny rules and
-	// fresh-human approval tools hard-block. Interactive frontends (chat,
-	// desktop) swap in an interactive gate later via
-	// Controller.EnableInteractiveApproval. When the caller selects a headless
-	// approval mode (`reasonix run --permission-mode auto/dontAsk/yolo`), this
-	// gate is built with that mode's contract instead — the same contract
-	// ApplyHeadlessApprovalMode installs on the parent executor — so the
-	// mode-vs-explicit-ask-rule boundary is not weaker for sub-agents than for
-	// the parent.
+	// (interactive bootstrap), the temporary gate preserves the legacy behavior
+	// until chat/desktop installs an interactive gate. A real headless caller
+	// such as `reasonix run` always supplies a mode: Ask fails closed, Auto
+	// allows ordinary writer fallbacks, and DontAsk denies them (#6927).
+	// The selected contract is also applied to sub-agents, so they cannot be a
+	// weaker path around the parent gate.
 	// Sub-agents always run headless: they have no UI to answer a prompt, so they
 	// inherit this same gate.
 	policy := permission.New(cfg.Permissions.Mode, cfg.Permissions.Allow, cfg.Permissions.Ask, cfg.Permissions.Deny).
+		WithAllowDynamicBashFallback(cfg.Permissions.AllowDynamicBash).
 		WithSessionAllow(opts.PermissionAllow)
 	headlessGate := control.NewSharedHeadlessGate(policy, opts.HeadlessApprovalMode)
 
@@ -1487,7 +1499,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// use_capability surface to both Planner and Executor. Their frontends keep
 	// independent ledgers/audits while sharing the session MCP runtime.
 	dualModelPlanner := false
-	if pm := cfg.Agent.PlannerModel; pm != "" && !tokenEconomy {
+	if pm := effectivePlannerModel(cfg, opts, tokenEconomy); pm != "" {
 		if pe, ok := resolveOptionalEntry(opts, cfg, pm); ok && pe.Model != entry.Model {
 			dualModelPlanner = true
 		}
@@ -1607,7 +1619,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Coordinator with its own session, kept separate for cache stability. The
 	// planner gets the same standing memory context and a filtered read-only
 	// research tool set, so it can inspect rules/code without side effects.
-	if pm := cfg.Agent.PlannerModel; pm != "" && !tokenEconomy {
+	if pm := effectivePlannerModel(cfg, opts, tokenEconomy); pm != "" {
 		pe, ok := resolveOptionalEntry(opts, cfg, pm)
 		if !ok {
 			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
@@ -1794,6 +1806,16 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ctrl.SetCapabilityProxyRouting(true)
 	}
 	return ctrl, nil
+}
+
+// effectivePlannerModel centralizes planner precedence. The explicit ACP hard
+// override is checked before user/project config and cannot be reversed by a
+// later assembly branch.
+func effectivePlannerModel(cfg *config.Config, opts Options, tokenEconomy bool) string {
+	if cfg == nil || opts.DisablePlanner || tokenEconomy {
+		return ""
+	}
+	return strings.TrimSpace(cfg.Agent.PlannerModel)
 }
 
 func applyRuntimeAutoPricingCurrency(cfg *config.Config, currency string) {
@@ -2212,16 +2234,6 @@ func NewProvider(e *config.ProviderEntry) (provider.Provider, error) {
 
 // NewProviderWithProxy builds a provider.Provider with the configured ordinary
 // network proxy settings.
-// responsesStatefulDefault resolves the responses provider context mode:
-// nil (unset) defaults to true (stateful, DashScope previous_response_id);
-// an explicit false selects stateless full-input (DeepSeek Responses API).
-func responsesStatefulDefault(v *bool) bool {
-	if v == nil {
-		return true
-	}
-	return *v
-}
-
 func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (provider.Provider, error) {
 	return provider.New(e.Kind, provider.Config{
 		Name:    e.Name,
@@ -2246,11 +2258,10 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"vision":                config.EffectiveVision(e),
 			"vision_model_explicit": config.ExplicitModelVision(e),
 			"vision_detail":         e.VisionDetail,
-			// responses provider context mode: "stateful" (previous_response_id,
-			// DashScope/OpenAI) or "stateless" (full input, DeepSeek). Vendor
-			// auto-detection in the provider fills the default when unset.
-			"mode":     e.ResponsesMode,
-			"stateful": responsesStatefulDefault(e.ResponsesStateful),
+			"mode":                  e.ResponsesMode,
+			// Keep nil as nil so the responses provider can vendor-detect its
+			// default instead of accidentally treating every endpoint as stateful.
+			"stateful": e.ResponsesStateful,
 		},
 	})
 }

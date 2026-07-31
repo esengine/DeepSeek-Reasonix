@@ -12,13 +12,14 @@ import "runtime"
 // Version against the running build, and looks up the running platform's artifact
 // via Asset / NativePackage.
 type Manifest struct {
-	Version        string           `json:"version"`                   // release version, e.g. "v1.1.0"
-	Notes          string           `json:"notes"`                     // markdown release notes
-	PubDate        string           `json:"pub_date"`                  // RFC3339, optional
-	DownloadPage   string           `json:"download_page"`             // human-facing download page (macOS manual-update fallback)
-	Platforms      map[string]Asset `json:"platforms"`                 // keyed by PlatformKey, e.g. "darwin-arm64"
-	NativePackages map[string]Asset `json:"native_packages,omitempty"` // optional OS package assets, e.g. linux-amd64 → .deb
-	Downloads      map[string]Asset `json:"downloads,omitempty"`       // optional signed human-download assets keyed by exact filename
+	Version         string           `json:"version"`                     // release version, e.g. "v1.1.0"
+	Notes           string           `json:"notes"`                       // markdown release notes
+	PubDate         string           `json:"pub_date"`                    // RFC3339, optional
+	DownloadPage    string           `json:"download_page"`               // human-facing download page (macOS manual-update fallback)
+	ReleaseNotesURL string           `json:"release_notes_url,omitempty"` // exact version history page; older manifests omit it
+	Platforms       map[string]Asset `json:"platforms"`                   // keyed by PlatformKey, e.g. "darwin-arm64"
+	NativePackages  map[string]Asset `json:"native_packages,omitempty"`   // optional OS package assets, e.g. linux-amd64 → .deb
+	Downloads       map[string]Asset `json:"downloads,omitempty"`         // optional signed human-download assets keyed by exact filename
 }
 
 // Asset is one platform's downloadable artifact plus the metadata the updater

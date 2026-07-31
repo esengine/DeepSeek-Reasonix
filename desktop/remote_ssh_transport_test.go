@@ -138,6 +138,28 @@ func TestRemoteSSHTransportConfiguredAliasPreservesExplicitOverrides(t *testing.
 	}
 }
 
+func TestRemoteSSHTransportUsesProvisionedWorkbenchBinary(t *testing.T) {
+	t.Setenv("GO_WANT_REMOTE_SSH_FAKE", "1")
+	t.Setenv("REMOTE_SSH_FAKE_MODE", "protocol")
+	var gotArgs []string
+	factory := &RemoteSSHTransportFactory{
+		RemoteBinary: "/home/dev user's/.reasonix/remote/workbench/abc/reasonix",
+		commandContext: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+			gotArgs = append([]string(nil), args...)
+			return remoteSSHFakeCommand(ctx)
+		},
+	}
+	transport, err := factory.Start(context.Background(), "gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = transport.Close() })
+	wantTail := []string{"--", "gpu", shellSingleQuote(factory.RemoteBinary), "remote", "attach-workspace", "--stdio"}
+	if len(gotArgs) < len(wantTail) || !reflect.DeepEqual(gotArgs[len(gotArgs)-len(wantTail):], wantTail) {
+		t.Fatalf("argv = %#v, want tail %#v", gotArgs, wantTail)
+	}
+}
+
 func slicesContains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

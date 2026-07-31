@@ -47,6 +47,11 @@ import (
 // would race other streams' watchdogs.
 const defaultStreamIdleTimeout = 120 * time.Second
 
+// maxPrefixContinuations keeps automatic recovery bounded. A second length
+// finish is surfaced through the existing truncation notice instead of opening
+// an unbounded (and billable) continuation loop against the Beta endpoint.
+const maxPrefixContinuations = 1
+
 func init() {
 	provider.Register("openai", New)
 }
@@ -71,11 +76,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		effort = ""
 	}
 	supportedEfforts, _ := cfg.Extra["supported_efforts"].([]string)
+	explicitLowEffort := supportsEffort(supportedEfforts, "low")
 	explicitMaxEffort := supportsEffort(supportedEfforts, "max")
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	chatURL, _ := cfg.Extra["chat_url"].(string)
 	chatURL = normalizeChatURL(cfg.BaseURL, chatURL)
+	prefixChatURL := deepSeekPrefixChatURL(chatURL)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
 	vision, _ := cfg.Extra["vision"].(bool)
@@ -93,11 +100,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		visionDetail = "" // auto — omit the field
 	}
 	deepseek := protocol == "deepseek" || (protocol == "" && officialDeepSeek)
+	deepseekV4Flash := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash")
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	zhipu := protocol == "" && IsZhipu(cfg.BaseURL)
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
-	dashscope := protocol == "" && IsDashScope(cfg.BaseURL)
 	kimiK3 := IsKimiAPI(cfg.BaseURL) && strings.EqualFold(strings.TrimSpace(cfg.Model), "kimi-k3")
 	// Optional explicit `thinking` config field — a vendor-agnostic escape hatch
 	// (credit @eghrhegpe, #5063) for OpenAI-compatible providers we don't
@@ -124,9 +131,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			// drop the depth hint so the wire carries thinking.type=disabled only.
 			effort = ""
 			thinkingType = "disabled"
+		case "low":
+			if !deepseekV4Flash && !explicitLowEffort {
+				return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash or explicit supported_efforts", name)
+			}
 		case "high", "max":
 		default:
-			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be high, max, or disabled", name)
+			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be low, high, max, or disabled", name)
 		}
 	case minimax:
 		// M3's knob is binary. The config effort layer normalises user input
@@ -174,18 +185,6 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		default:
 			return nil, fmt.Errorf("openai: provider %q uses Ollama Cloud thinking; effort must be none, low, medium, high, or max", name)
 		}
-	case dashscope:
-		// DashScope serves multiple model families under one endpoint. Thinking
-		// protocol varies per model (qwen: enable_thinking + reasoning_effort,
-		// deepseek: thinking.type, glm: thinking.type). Qwen3.x supports tiered
-		// effort: low/medium/high/xhigh/max (server maps to thinking_budget).
-		switch effort {
-		case "", "enabled", "disabled", "low", "medium", "high", "xhigh", "max":
-		case "auto", "off":
-			effort = ""
-		default:
-			return nil, fmt.Errorf("openai: provider %q uses DashScope multi-model thinking; effort must be disabled, low, medium, high, xhigh, or max", name)
-		}
 	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
 		// high) by default. Preserve max only when the resolved model explicitly
@@ -206,28 +205,28 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:         name,
-		apiKey:       cfg.APIKey,
-		keyEnv:       keyEnv,
-		keySource:    keySource,
-		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
-		chatURL:      chatURL,
-		headers:      cleanCustomHeaders(headers),
-		extraBody:    cleanExtraBody(extraBody),
-		model:        cfg.Model,
-		deepseek:     deepseek,
-		minimax:      minimax,
-		zhipu:        zhipu,
-		longcat:      longcat,
-		dashscope:    dashscope,
-		kimiK3:       kimiK3,
-		mimo:         IsMiMo(cfg.BaseURL),
-		thinkingType: thinkingType,
-		vision:       vision,
-		visionDetail: visionDetail,
-		effort:       effort,
-		http:         httpClient,
-		idleTimeout:  defaultStreamIdleTimeout,
+		name:          name,
+		apiKey:        cfg.APIKey,
+		keyEnv:        keyEnv,
+		keySource:     keySource,
+		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
+		chatURL:       chatURL,
+		prefixChatURL: prefixChatURL,
+		headers:       cleanCustomHeaders(headers),
+		extraBody:     cleanExtraBody(extraBody),
+		model:         normalizeModelID(cfg.BaseURL, cfg.Model),
+		deepseek:      deepseek,
+		minimax:       minimax,
+		zhipu:         zhipu,
+		longcat:       longcat,
+		kimiK3:        kimiK3,
+		mimo:          IsMiMo(cfg.BaseURL),
+		thinkingType:  thinkingType,
+		vision:        vision,
+		visionDetail:  visionDetail,
+		effort:        effort,
+		http:          httpClient,
+		idleTimeout:   defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -252,29 +251,29 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name         string
-	apiKey       string
-	keyEnv       string // api_key_env name, surfaced in auth errors
-	keySource    string // source of keyEnv, surfaced in auth errors
-	baseURL      string
-	chatURL      string
-	headers      map[string]string
-	extraBody    map[string]any
-	model        string
-	http         *http.Client
-	deepseek     bool
-	minimax      bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	zhipu        bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
-	longcat      bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
-	dashscope    bool          // true for DashScope (aliyuncs.com) — multi-model endpoint; thinking protocol varies per model name
-	kimiK3       bool          // true only for kimi-k3 on Moonshot's official direct API hosts
-	mimo         bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
-	thinkingType string        // explicit `thinking` config override (enabled|disabled); "" = no override
-	vision       bool          // model accepts image input — embed attached images as image_url parts
-	visionDetail string        // image_url detail hint (low|high); "" = auto/omit
-	effort       string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	idleTimeout  time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	authed       atomic.Bool   // a request has succeeded — gate transient-401 retry
+	name          string
+	apiKey        string
+	keyEnv        string // api_key_env name, surfaced in auth errors
+	keySource     string // source of keyEnv, surfaced in auth errors
+	baseURL       string
+	chatURL       string
+	prefixChatURL string // official DeepSeek Beta endpoint; empty for custom gateways
+	headers       map[string]string
+	extraBody     map[string]any
+	model         string
+	http          *http.Client
+	deepseek      bool
+	minimax       bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	zhipu         bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
+	longcat       bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	kimiK3        bool          // true only for kimi-k3 on Moonshot's official direct API hosts
+	mimo          bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	thinkingType  string        // explicit `thinking` config override (enabled|disabled); "" = no override
+	vision        bool          // model accepts image input — embed attached images as image_url parts
+	visionDetail  string        // image_url detail hint (low|high); "" = auto/omit
+	effort        string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout   time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed        atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
@@ -386,19 +385,6 @@ func cleanExtraBody(in map[string]any) map[string]any {
 	return out
 }
 
-// mergeExtraBody returns a copy of m with key=value set. A nil m allocates a
-// fresh map. User-configured extra_body values always win over vendor defaults,
-// so this only sets the key when it is absent.
-func mergeExtraBody(m map[string]any, key string, value any) map[string]any {
-	if m == nil {
-		m = make(map[string]any, 2)
-	}
-	if _, exists := m[key]; !exists {
-		m[key] = value
-	}
-	return m
-}
-
 func reservedExtraBodyField(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "model", "messages", "tools", "stream", "stream_options", "temperature", "max_tokens", "reasoning_effort", "thinking":
@@ -426,9 +412,23 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	stream, err := c.openStream(ctx, c.chatURL, c.buildRequest(req), req.Tools)
+	if err != nil {
+		return nil, err
+	}
+	if c.prefixChatURL == "" {
+		return stream, nil
+	}
+
+	out := make(chan provider.Chunk)
+	go c.streamWithPrefixContinuation(ctx, req, stream, out)
+	return out, nil
+}
+
+func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatRequest, tools []provider.ToolSchema) (<-chan provider.Chunk, error) {
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
+	if err := json.NewEncoder(buf).Encode(wireReq); err != nil {
 		bufPool.Put(buf)
 		return nil, fmt.Errorf("%s: marshal request: %w", c.name, err)
 	}
@@ -437,7 +437,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	bufPool.Put(buf)
 
 	newReq := func(ctx context.Context) (*http.Request, error) {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatURL, bytes.NewReader(body))
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 		if err != nil {
 			return nil, err
 		}
@@ -445,22 +445,120 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		applyAPIKeyHeader(httpReq.Header, c.baseURL, c.apiKey)
 		httpReq.Header.Set("Accept", "text/event-stream")
 		applyCustomHeaders(httpReq.Header, c.headers)
-		if c.dashscope {
-			// DashScope's session cache is opt-in via this header.
-			// Official header name per DashScope Responses API docs.
-			httpReq.Header.Set("x-dashscope-session-cache", "enable")
-		}
 		return httpReq, nil
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, provider.AnnotateToolSchemaError(err, req.Tools)
+		return nil, provider.AnnotateToolSchemaError(err, tools)
 	}
 	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
 	go c.streamWithReconnect(ctx, resp, newReq, out)
 	return out, nil
+}
+
+// streamWithPrefixContinuation makes a DeepSeek Beta continuation look like one
+// ordinary provider stream. Text/reasoning stays live, while usage is folded
+// across both requests so cost and cache accounting remain truthful. If the
+// Beta request fails before emitting anything, the original truncated response
+// is kept and its finish_reason=length reaches the agent's existing warning.
+func (c *client) streamWithPrefixContinuation(ctx context.Context, req provider.Request, current <-chan provider.Chunk, out chan<- provider.Chunk) {
+	defer close(out)
+
+	var fullText, fullReasoning strings.Builder
+	var totalUsage *provider.Usage
+	continuations := 0
+
+	for {
+		var currentUsage *provider.Usage
+		currentHadTool := false
+		currentEmitted := false
+
+		for chunk := range current {
+			switch chunk.Type {
+			case provider.ChunkText:
+				fullText.WriteString(chunk.Text)
+				currentEmitted = currentEmitted || chunk.Text != ""
+				if !sendChunk(ctx, out, chunk) {
+					return
+				}
+			case provider.ChunkReasoning:
+				fullReasoning.WriteString(chunk.Text)
+				currentEmitted = currentEmitted || chunk.Text != ""
+				if !sendChunk(ctx, out, chunk) {
+					return
+				}
+			case provider.ChunkToolCallStart, provider.ChunkToolCallArgsDelta, provider.ChunkToolCall:
+				currentHadTool = true
+				currentEmitted = true
+				if !sendChunk(ctx, out, chunk) {
+					return
+				}
+			case provider.ChunkUsage:
+				currentUsage = mergeUsage(currentUsage, chunk.Usage)
+			case provider.ChunkDone:
+				// The wrapper emits one final Done after any continuation.
+			case provider.ChunkError:
+				// A Beta failure before any continuation bytes is a safe fallback:
+				// the already-streamed first response remains visible and its
+				// length finish reason triggers the normal truncation warning.
+				if continuations > 0 && !currentEmitted && ctx.Err() == nil {
+					emitUsageAndDone(ctx, out, totalUsage)
+					return
+				}
+				_ = sendChunk(ctx, out, chunk)
+				return
+			default:
+				if !sendChunk(ctx, out, chunk) {
+					return
+				}
+			}
+		}
+
+		totalUsage = mergeUsage(totalUsage, currentUsage)
+		if continuations >= maxPrefixContinuations ||
+			currentUsage == nil || currentUsage.FinishReason != "length" ||
+			currentHadTool ||
+			(fullText.Len() == 0 && (c.thinkingType == "disabled" || fullReasoning.Len() == 0)) {
+			emitUsageAndDone(ctx, out, totalUsage)
+			return
+		}
+
+		prefixReq := c.buildPrefixRequest(req, fullText.String(), fullReasoning.String())
+		next, err := c.openStream(ctx, c.prefixChatURL, prefixReq, req.Tools)
+		if err != nil {
+			emitUsageAndDone(ctx, out, totalUsage)
+			return
+		}
+		continuations++
+		current = next
+	}
+}
+
+func emitUsageAndDone(ctx context.Context, out chan<- provider.Chunk, usage *provider.Usage) {
+	if usage != nil && !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkUsage, Usage: usage}) {
+		return
+	}
+	_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone})
+}
+
+func mergeUsage(total, next *provider.Usage) *provider.Usage {
+	if next == nil {
+		return total
+	}
+	if total == nil {
+		clone := *next
+		return &clone
+	}
+	total.PromptTokens += next.PromptTokens
+	total.CompletionTokens += next.CompletionTokens
+	total.TotalTokens += next.TotalTokens
+	total.CacheHitTokens += next.CacheHitTokens
+	total.CacheMissTokens += next.CacheMissTokens
+	total.ReasoningTokens += next.ReasoningTokens
+	total.FinishReason = next.FinishReason
+	return total
 }
 
 // maxStreamReconnects bounds how many times a mid-stream connection drop is
@@ -572,6 +670,15 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 			wire := chatToolCall{ID: tc.ID, Type: "function"}
 			wire.Function.Name = tc.Name
 			wire.Function.Arguments = tc.Arguments
+			if tc.ThoughtSignature != "" && usesGeminiThoughtSignatures(c.baseURL, c.model) {
+				// Gemini's current OpenAI compatibility schema carries the
+				// opaque signature beside the function payload. Keep the
+				// legacy function.thought_signature field decode-only below so
+				// older gateways remain readable without sending an unknown
+				// function parameter to current Google endpoints.
+				wire.ExtraContent = &chatToolCallExtraContent{}
+				wire.ExtraContent.Google.ThoughtSignature = tc.ThoughtSignature
+			}
 			cm.ToolCalls = append(cm.ToolCalls, wire)
 		}
 		switch {
@@ -667,69 +774,22 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		}
 		out.Thinking = &thinkingMode{Type: t}
 		out.ReasoningEffort = ""
-	case c.dashscope:
-		// DashScope serves multiple model families under one endpoint. Thinking
-		// protocol varies per model:
-		//   qwen*        → enable_thinking + reasoning_effort (tiered)
-		//   deepseek-v4* → thinking: {type: "enabled"} (DeepSeek protocol)
-		//   glm*         → thinking: {type: "enabled|disabled"} (Zhipu protocol)
-		//   other        → no thinking field (generic OpenAI-compatible)
-		model := strings.ToLower(c.model)
-		switch {
-		case strings.HasPrefix(model, "qwen") || model == "coder-model":
-			// Qwen3.x thinking control per DashScope official docs:
-			// - reasoning.effort is the recommended parameter (replaces the
-			//   deprecated enable_thinking boolean).
-			// - Accepted ladder: low / medium / high / xhigh / max.
-			// - reasoning.effort and thinking_budget must NOT be set
-			//   simultaneously (qwen3.8-max-preview rejects it).
-			// - To disable thinking, enable_thinking: false is still the
-			//   explicit off switch.
-			if c.effort == "disabled" {
-				out.ExtraBody = mergeExtraBody(out.ExtraBody, "enable_thinking", false)
-				out.ReasoningEffort = ""
-			} else {
-				// Use reasoning.effort (nested object) instead of flat
-				// reasoning_effort. DashScope maps effort → thinking_budget
-				// server-side (low→4096, medium→16384, xhigh→262144).
-				effort := out.ReasoningEffort
-				switch effort {
-				case "max":
-					effort = "xhigh"
-				case "enabled", "":
-					effort = "" // auto: let model decide depth
-				}
-				out.ReasoningEffort = ""
-				if effort != "" {
-					out.ExtraBody = mergeExtraBody(out.ExtraBody, "reasoning", map[string]any{"effort": effort})
-				}
-			}
-		case strings.HasPrefix(model, "deepseek"):
-			// DeepSeek models on DashScope use the same thinking.type
-			// protocol as api.deepseek.com.
-			if c.effort == "disabled" || c.thinkingType == "disabled" {
-				out.Thinking = &thinkingMode{Type: "disabled"}
-			} else {
-				out.Thinking = &thinkingMode{Type: "enabled"}
-			}
-			out.ReasoningEffort = ""
-		case strings.HasPrefix(model, "glm"):
-			// GLM on DashScope uses thinking.type (Zhipu protocol).
-			t := "enabled"
-			if c.effort == "disabled" || c.thinkingType == "disabled" {
-				t = "disabled"
-			}
-			out.Thinking = &thinkingMode{Type: t}
-			out.ReasoningEffort = ""
-		default:
-			out.ReasoningEffort = ""
-		}
 	case c.thinkingType != "":
 		// Generic OpenAI-compatible provider with an explicit `thinking` config
 		// field (e.g. opencode.ai) — emit thinking.type; reasoning_effort, if any,
 		// is left untouched for backends that also honour it.
 		out.Thinking = &thinkingMode{Type: c.thinkingType}
 	}
+	return out
+}
+
+func (c *client) buildPrefixRequest(req provider.Request, content, reasoning string) chatRequest {
+	out := c.buildRequest(req)
+	prefix := chatMessage{Role: "assistant", Content: content, Prefix: true}
+	if c.deepseek && c.thinkingType != "disabled" {
+		prefix.ReasoningContent = &reasoning
+	}
+	out.Messages = append(out.Messages, prefix)
 	return out
 }
 
@@ -869,6 +929,19 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				cur.Name = tc.Function.Name
 			}
 			cur.Arguments += tc.Function.Arguments
+			thoughtSignature := ""
+			if tc.ExtraContent != nil {
+				thoughtSignature = tc.ExtraContent.Google.ThoughtSignature
+			}
+			if thoughtSignature == "" {
+				// Early Gemini OpenAI-compatible responses placed the field in
+				// function. Accept that shape when replaying older sessions and
+				// when talking to compatibility gateways that still emit it.
+				thoughtSignature = tc.Function.ThoughtSignature
+			}
+			if thoughtSignature != "" {
+				cur.ThoughtSignature = thoughtSignature
+			}
 			// Signal the call's start the moment its name is known, so a frontend
 			// can show the tool card immediately rather than only after its
 			// (possibly large) arguments finish streaming.
@@ -970,11 +1043,6 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	if hit == 0 && u.PromptTokensDetails != nil {
 		hit = u.PromptTokensDetails.CachedTokens
 	}
-	// DashScope top-level cached_tokens fallback (some models report here
-	// instead of nested prompt_tokens_details).
-	if hit == 0 && u.CachedTokens > 0 {
-		hit = u.CachedTokens
-	}
 	if hit == 0 {
 		hit = u.CacheReadInputTokens
 	}
@@ -1075,19 +1143,17 @@ type chatMessage struct {
 	// (empty included — null is rejected by some backends for a tool message);
 	// and a []chatContentPart array for a vision user turn carrying images.
 	Content any `json:"content"`
+	// Prefix is wire-only and is set exclusively on an automatically recovered
+	// DeepSeek assistant tail. omitempty keeps every ordinary request byte-stable.
+	Prefix bool `json:"prefix,omitempty"`
 	// A pointer so the field can serialize as an empty string: DeepSeek thinking
 	// mode requires the reasoning_content key to be PRESENT on assistant
 	// tool_calls turns (an empty value passes; a missing key 400s), while every
 	// other message must keep omitting it.
-	ReasoningContent *string `json:"reasoning_content,omitempty"`
-	// Reasoning mirrors ReasoningContent for Qwen3 models on DashScope. Qwen3's
-	// multi-turn API expects both fields present on assistant turns for thinking
-	// continuity (preserve_thinking). Mirrors qwen-code's
-	// mirrorReasoningContentToReasoning.
-	Reasoning  *string        `json:"reasoning,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Name       string         `json:"name,omitempty"`
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	Name             string         `json:"name,omitempty"`
 }
 
 type chatContentPart struct {
@@ -1124,13 +1190,23 @@ type chatFunction struct {
 }
 
 type chatToolCall struct {
-	Index    int    `json:"index,omitempty"`
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Function struct {
+	Index        int                       `json:"index,omitempty"`
+	ID           string                    `json:"id,omitempty"`
+	Type         string                    `json:"type,omitempty"`
+	ExtraContent *chatToolCallExtraContent `json:"extra_content,omitempty"`
+	Function     struct {
 		Name      string `json:"name"`
 		Arguments string `json:"arguments"`
+		// Decode compatibility for the early Gemini OpenAI shape. New requests
+		// use extra_content.google.thought_signature.
+		ThoughtSignature string `json:"thought_signature,omitempty"`
 	} `json:"function"`
+}
+
+type chatToolCallExtraContent struct {
+	Google struct {
+		ThoughtSignature string `json:"thought_signature,omitempty"`
+	} `json:"google"`
 }
 
 type streamResponse struct {
@@ -1161,11 +1237,7 @@ type wireUsage struct {
 	PromptCacheMissTokens    int `json:"prompt_cache_miss_tokens"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	// DashScope returns cached_tokens at the top level (not nested under
-	// prompt_tokens_details) on some models. Mirrors qwen-code's
-	// extendedUsage.cached_tokens fallback.
-	CachedTokens        int `json:"cached_tokens"`
-	PromptTokensDetails *struct {
+	PromptTokensDetails      *struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokensDetails *struct {

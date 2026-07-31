@@ -269,6 +269,11 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 	if err != nil {
 		return fail(err)
 	}
+	currentBuild := protocol.CurrentBuildID(version)
+	remoteBinary, err := a.workbenchEnsureRemoteCLI(hostID, entry, currentBuild)
+	if err != nil {
+		return fail(err)
+	}
 	refs := localProviderRefs(cfg)
 	if len(refs) == 0 {
 		return fail(fmt.Errorf("no configured local chat model is available for Remote Workbench"))
@@ -305,7 +310,7 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 	// Bind the attach transport to the workspace selected for this connection,
 	// not a possibly stale default from the persisted host entry.
 	entry.Workspace = workspace
-	factory, err := a.workbenchTransportFactory(hostID, entry)
+	factory, err := a.workbenchTransportFactory(hostID, entry, remoteBinary)
 	if err != nil {
 		return fail(err)
 	}
@@ -331,7 +336,6 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 			return openLocalProviderStream(ctx, current, ref, effort, req)
 		},
 	}
-	currentBuild := protocol.CurrentBuildID(version)
 	buildID := map[string]any{
 		"productVersion": currentBuild.ProductVersion, "sourceRevision": currentBuild.SourceRevision,
 		"protocolVersion": currentBuild.ProtocolVersion, "schemaHash": currentBuild.SchemaHash,
@@ -430,6 +434,18 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 	a.emitReady(a.ctx, tabID)
 	a.emitRuntimeEvent("runtime:rebuilt", tabID)
 	return nil
+}
+
+func (a *App) workbenchEnsureRemoteCLI(hostID string, entry config.RemoteHostEntry, expected protocol.BuildID) (string, error) {
+	rt, err := a.remoteRT()
+	if err != nil {
+		return "", err
+	}
+	manager, ok := rt.(*desktopRemoteManager)
+	if !ok {
+		return "", fmt.Errorf("remote manager cannot provision the Workbench CLI")
+	}
+	return manager.EnsureWorkbenchCLI(a.bootContext(), hostID, entry, expected)
 }
 
 type workbenchPeerIdentitySource interface {
@@ -662,7 +678,7 @@ func (a *App) workbenchHostIdentity(hostID string) (fingerprint, keyType, hostLa
 	return fingerprint, keyType, hostLabel, nil
 }
 
-func (a *App) workbenchTransportFactory(hostID string, entry config.RemoteHostEntry) (transport.Factory, error) {
+func (a *App) workbenchTransportFactory(hostID string, entry config.RemoteHostEntry, remoteBinary ...string) (transport.Factory, error) {
 	// Windows: system OpenSSH. Other platforms: Go SSH stdio session.
 	rt, err := a.remoteRT()
 	if err != nil {
@@ -672,7 +688,11 @@ func (a *App) workbenchTransportFactory(hostID string, entry config.RemoteHostEn
 	if !ok {
 		return nil, fmt.Errorf("remote manager cannot service SSH authentication prompts")
 	}
-	return newWorkbenchSSHFactory(entry, manager.workbenchAskPassHandler(hostID, entry))
+	binary := ""
+	if len(remoteBinary) > 0 {
+		binary = remoteBinary[0]
+	}
+	return newWorkbenchSSHFactoryForBinary(entry, binary, manager.workbenchAskPassHandler(hostID, entry))
 }
 
 func (a *App) emitWorkbenchTarget(state string, id target.Identity, gen, seq uint64, errText string) {

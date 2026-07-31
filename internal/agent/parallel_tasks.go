@@ -75,6 +75,12 @@ type parallelTaskItem struct {
 
 type parallelTaskStatus string
 
+// parallelTasksMaxTasks bounds the request before any task-sized slices,
+// channels, or goroutines are allocated. The scheduler limits how many
+// children run simultaneously, but without an input cap a single model call
+// could still reserve unbounded memory and queue unbounded API work (#6933).
+const parallelTasksMaxTasks = 64
+
 const (
 	parallelTaskPending   parallelTaskStatus = "pending"
 	parallelTaskCompleted parallelTaskStatus = "completed"
@@ -97,6 +103,9 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	if len(params.Tasks) == 1 {
 		return "", fmt.Errorf("parallel_tasks with a single task is equivalent to task; use task instead")
+	}
+	if len(params.Tasks) > parallelTasksMaxTasks {
+		return "", fmt.Errorf("parallel_tasks accepts at most %d tasks; got %d", parallelTasksMaxTasks, len(params.Tasks))
 	}
 	if err := validateParallelTaskItems(params.Tasks); err != nil {
 		return "", err

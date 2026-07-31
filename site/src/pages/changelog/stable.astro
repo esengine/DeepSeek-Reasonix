@@ -1,0 +1,8 @@
+---
+import ChangelogPage from '../../components/ChangelogPage.astro';
+import { latestStableRelease, releases, releasePath } from '../../data/releases';
+
+const canonical = new URL(releasePath(latestStableRelease.version), Astro.site).href;
+---
+
+<ChangelogPage release={latestStableRelease} releases={releases} canonical={canonical} />

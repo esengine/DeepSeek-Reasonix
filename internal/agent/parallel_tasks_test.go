@@ -71,6 +71,28 @@ func TestParallelTasksRejectsHiddenDependencyFieldBeforeRuntimeLookup(t *testing
 	}
 }
 
+func TestParallelTasksRejectsUnboundedBatchBeforeRuntimeLookup(t *testing.T) {
+	tasks := make([]parallelTaskItem, parallelTasksMaxTasks+1)
+	for i := range tasks {
+		tasks[i].Prompt = "inspect"
+	}
+	args, err := json.Marshal(map[string]any{"tasks": tasks})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	_, err = (&ParallelTasksTool{}).Execute(context.Background(), args)
+	if err == nil {
+		t.Fatal("Execute returned nil error for an oversized batch")
+	}
+	if !strings.Contains(err.Error(), "at most 64 tasks") {
+		t.Fatalf("Execute error = %v, want bounded-task rejection", err)
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("Execute looked up runtime before enforcing the batch cap: %v", err)
+	}
+}
+
 func TestParallelTasksForegroundCompletesAndClosesWorkers(t *testing.T) {
 	task := newTestTaskTool(t, parallelStaticProvider{}, tool.NewRegistry(), "sys", "", "", nil)
 	parallel := NewParallelTasksTool(task, tool.NewRegistry())

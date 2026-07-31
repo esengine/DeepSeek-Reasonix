@@ -2,7 +2,7 @@
 
 export const REMOTE_SCHEMA_FORMAT = "reasonix.remote.schema.v1" as const;
 export const REMOTE_PROTOCOL_VERSION = "1" as const;
-export const REMOTE_SCHEMA_HASH = "sha256:1606f12a014111daa7f69b393b4af14ef96739c91afafe2a1ae434edcbff0df8" as const;
+export const REMOTE_SCHEMA_HASH = "sha256:ddde6a7dd832f74abc411ea632cc37df807c4f5eda6161b1da114d006d5275f8" as const;
 
 export const REMOTE_FIXED_RESOURCES = {
   "protocol": {
@@ -918,6 +918,7 @@ export type BrokerStreamChunkParamsRaw = {
       "removed"?: number;
       "resolved_name"?: string;
       "resolved_read_only"?: boolean;
+      "thought_signature"?: string;
     };
     "type": "done" | "error" | "reasoning" | "text" | "tool_call" | "tool_call_args_delta" | "tool_call_start" | "usage";
     "usage"?: {
@@ -952,6 +953,7 @@ export type BrokerStreamChunkParamsHydrated = {
       "removed"?: number;
       "resolved_name"?: string;
       "resolved_read_only"?: boolean;
+      "thought_signature"?: string;
     };
     "type": "done" | "error" | "reasoning" | "text" | "tool_call" | "tool_call_args_delta" | "tool_call_start" | "usage";
     "usage"?: {
@@ -1031,6 +1033,7 @@ export type BrokerStreamOpenParamsRaw = {
         "removed"?: number;
         "resolved_name"?: string;
         "resolved_read_only"?: boolean;
+        "thought_signature"?: string;
       }>;
       "workDurationMs"?: number;
     }>;
@@ -1093,6 +1096,7 @@ export type BrokerStreamOpenParamsHydrated = {
         "removed"?: number;
         "resolved_name"?: string;
         "resolved_read_only"?: boolean;
+        "thought_signature"?: string;
       }>;
       "workDurationMs"?: number;
     }>;

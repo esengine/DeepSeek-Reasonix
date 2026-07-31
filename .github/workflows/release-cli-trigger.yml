@@ -29,16 +29,11 @@ jobs:
               return;
             }
             const tag = process.env.RELEASE_TAG;
-            const channel = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-preview\.(?:0|[1-9]\d*)$/.test(tag)
-              ? 'preview'
-              : 'stable';
+            const preview = /^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-preview\.(?:0|[1-9]\d*)$/.test(tag);
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: 'release.yml',
+              workflow_id: preview ? 'release-preview.yml' : 'release.yml',
               ref: process.env.CONTROL_PLANE_REF,
-              inputs: {
-                channel,
-                tag,
-              },
+              inputs: preview ? { tag } : { channel: 'stable', tag },
             });

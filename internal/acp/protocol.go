@@ -681,12 +681,14 @@ type PermissionRequestParams struct {
 
 // PermissionToolCall describes the call awaiting approval.
 type PermissionToolCall struct {
-	ToolCallID string          `json:"toolCallId"`
-	Title      string          `json:"title,omitempty"`
-	Kind       string          `json:"kind,omitempty"`
-	Status     string          `json:"status,omitempty"`
-	Content    []toolContent   `json:"content,omitempty"`
-	RawInput   json.RawMessage `json:"rawInput,omitempty"`
+	ToolCallID string             `json:"toolCallId"`
+	Title      string             `json:"title,omitempty"`
+	Kind       string             `json:"kind,omitempty"`
+	Status     string             `json:"status,omitempty"`
+	Content    []toolContent      `json:"content,omitempty"`
+	RawInput   json.RawMessage    `json:"rawInput,omitempty"`
+	Locations  []ToolCallLocation `json:"locations,omitempty"`
+	Meta       map[string]any     `json:"_meta,omitempty"`
 }
 
 // PermissionRequestResult is the client's reply to a permission request.

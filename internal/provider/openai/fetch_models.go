@@ -93,8 +93,8 @@ func FetchModelsWithOptions(ctx context.Context, baseURL, apiKey string, opts Fe
 
 	ids := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
+		if id := normalizeModelID(baseURL, m.ID); id != "" {
+			ids = append(ids, id)
 		}
 	}
 

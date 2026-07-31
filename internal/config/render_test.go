@@ -227,9 +227,10 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Tools.Shell.Prefer = "bash"
 	orig.Tools.Shell.Path = "/usr/local/bin/bash"
 	orig.Permissions = PermissionsConfig{
-		Mode:  "deny",
-		Deny:  []string{"Bash(rm -rf*)"},
-		Allow: []string{"Bash(go test:*)", "read_file"},
+		Mode:             "deny",
+		Deny:             []string{"Bash(rm -rf*)"},
+		Allow:            []string{"Bash(go test:*)", "read_file"},
+		AllowDynamicBash: true,
 	}
 	orig.Network = NetworkConfig{
 		ProxyMode: "custom",
@@ -883,6 +884,30 @@ func TestProjectDeltaRendersToolsShellOverrides(t *testing.T) {
 	}
 	if got.Tools.Shell.Prefer != "bash" || got.Tools.Shell.Path != "/usr/local/bin/bash" {
 		t.Fatalf("tools.shell = %+v, want bash with path", got.Tools.Shell)
+	}
+}
+
+func TestResponsesProviderModeRoundTripsInUserAndProjectRender(t *testing.T) {
+	legacyFalse := false
+	cfg := Default()
+	cfg.Providers = append(cfg.Providers, ProviderEntry{
+		Name: "responses-test", Kind: "responses", BaseURL: "https://example.com/v1",
+		Model: "model", APIKeyEnv: "RESPONSES_API_KEY",
+		ResponsesMode: "stateful", ResponsesStateful: &legacyFalse,
+	})
+
+	for _, rendered := range []string{RenderTOMLForScope(cfg, RenderScopeUser), RenderTOMLProjectDelta(cfg)} {
+		if !strings.Contains(rendered, `responses_mode = "stateful"`) || !strings.Contains(rendered, "responses_stateful = false") {
+			t.Fatalf("responses settings missing from render:\n%s", rendered)
+		}
+		var decoded Config
+		if _, err := toml.Decode(rendered, &decoded); err != nil {
+			t.Fatalf("decode responses config: %v\n%s", err, rendered)
+		}
+		entry, ok := decoded.Provider("responses-test")
+		if !ok || entry.ResponsesMode != "stateful" || entry.ResponsesStateful == nil || *entry.ResponsesStateful {
+			t.Fatalf("responses settings did not round-trip: %+v, found=%v", entry, ok)
+		}
 	}
 }
 

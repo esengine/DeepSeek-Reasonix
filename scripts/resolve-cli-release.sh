@@ -36,7 +36,7 @@ esac
 
 if [[ "$tag" =~ $preview_semver_re ]]; then
 	channel="preview"
-	notes_version="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+	notes_version="$tag"
 else
 	case "$tag" in
 	v*-preview*)
@@ -45,7 +45,10 @@ else
 		;;
 	esac
 	channel="stable"
-	notes_version="$tag"
+	case "$version" in
+	*-*) notes_version="v${base_version}" ;;
+	*) notes_version="$tag" ;;
+	esac
 fi
 
 requested_channel="${IN_CHANNEL:-}"
@@ -61,6 +64,11 @@ if [ -n "$requested_channel" ]; then
 		echo "::error::CLI tag $tag belongs to $channel, not requested channel $requested_channel" >&2
 		exit 1
 	fi
+fi
+
+if [ "$channel" = "preview" ] && [ "${IN_ORCHESTRATED:-false}" != "true" ]; then
+	echo "::error::public CLI Preview releases must be dispatched by release-preview.yml" >&2
+	exit 1
 fi
 
 {

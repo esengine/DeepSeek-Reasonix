@@ -260,6 +260,7 @@ type pendingApproval struct {
 	tool         string
 	subject      string
 	reason       string
+	rawInput     json.RawMessage
 	fresh        bool
 	requireHuman bool
 	autoDrain    bool
@@ -2041,7 +2042,9 @@ func (c *Controller) TrySteer(text string) bool {
 	return running && exec != nil && exec.Steer(text)
 }
 
-// Steer queues mid-turn guidance without interrupting the in-flight request.
+// Steer is the compatibility path for callers that cannot observe admission.
+// Interactive hosts should call TrySteer so a rejected steer remains in their
+// draft/queue and can be retried as a regular follow-up.
 func (c *Controller) Steer(text string) {
 	if c.TrySteer(text) {
 		return
@@ -2052,15 +2055,16 @@ func (c *Controller) Steer(text string) {
 	c.submitSteerFallback(text)
 }
 
-// submitSteerFallback delivers steer text that no active turn accepted as a
-// regular turn. Steers are the user's own words, so admission parks the body
-// while another turn is running or finishing rather than dropping it — the
-// window between a turn's steer-queue flush and running=false would
-// otherwise lose the text silently. The text is submitted verbatim; steers
-// are never command-interpreted.
+// submitSteerFallback records steer text that no active turn accepted as
+// unapplied guidance, not as a new task. This compatibility path deliberately
+// never opens a provider turn: replaying stale historical guidance as the
+// user's current request caused unintended code changes (#7045).
 func (c *Controller) submitSteerFallback(text string) admissionResult {
-	return c.runGuardedOrPark(func(ctx context.Context) error {
-		return c.runRefTurnWithResolverSync(ctx, text, text, text, "", c.ResolveRefs)
+	return c.runGuardedOrPark(func(context.Context) error {
+		if c.executor != nil {
+			c.executor.RecordUnappliedSteer(text)
+		}
+		return nil
 	})
 }
 
@@ -2104,8 +2108,29 @@ func (c *Controller) Ask(ctx context.Context, questions []event.AskQuestion) ([]
 // Unknown/expired IDs are ignored.
 func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
 	if pending, ok := c.approval.resolveAsk(id); ok {
+		// An answer batch with no selections is the explicit "skip and continue
+		// chat" path. End the current turn instead of feeding a prose dismissal
+		// back to the model and trusting it not to ask again (#6869).
+		if !askAnswersHaveSelection(answers) {
+			c.mu.Lock()
+			activeTurn := c.cancel != nil
+			c.mu.Unlock()
+			if activeTurn {
+				c.Cancel()
+				return
+			}
+		}
 		pending.reply <- answers // buffered, never blocks
 	}
+}
+
+func askAnswersHaveSelection(answers []event.AskAnswer) bool {
+	for _, answer := range answers {
+		if len(answer.Selected) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // ReplayPendingPrompts re-emits the ApprovalRequest / AskRequest event for every
@@ -5347,12 +5372,32 @@ func (c *Controller) Memory() *memory.Set {
 // from the public Approve command (different signature, different direction).
 type gateApprover struct{ c *Controller }
 
+const dynamicBashApprovalReason = "This command uses nested or indirect shell execution. Auto and broad allow rules cannot verify the inner command; approve this exact command or use YOLO."
+
 func (g gateApprover) Approve(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, error) {
 	allow, remember, _, err := g.ApproveWithReason(ctx, tool, subject, args)
 	return allow, remember, err
 }
 
 func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, string, error) {
+	return g.approveWithPolicyReason(ctx, tool, subject, args, "")
+}
+
+func (g gateApprover) ApproveWithPolicyReason(ctx context.Context, tool, subject string, args json.RawMessage, policyReason string) (bool, bool, string, error) {
+	return g.approveWithPolicyReason(ctx, tool, subject, args, policyReason)
+}
+
+func combineApprovalReasons(reasons ...string) string {
+	var kept []string
+	for _, reason := range reasons {
+		if reason = strings.TrimSpace(reason); reason != "" {
+			kept = append(kept, reason)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+func (g gateApprover) approveWithPolicyReason(ctx context.Context, tool, subject string, args json.RawMessage, policyReason string) (bool, bool, string, error) {
 	if tool == memoryRememberTool && g.c.allowLowRiskRemember(args) {
 		return true, false, "", nil
 	}
@@ -5376,6 +5421,7 @@ func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject strin
 		if allow && !requiresFreshApprovalTool(tool) {
 			return true, false, "", nil
 		}
+		reason = combineApprovalReasons(policyReason, reason)
 		humanAllow, remember, err := g.c.requestApprovalWithReason(ctx, tool, subject, args, reason)
 		if err != nil {
 			return false, false, reason, err
@@ -5386,10 +5432,11 @@ func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject strin
 		return true, remember, "", nil
 	}
 	if requireHuman {
-		allow, remember, err := g.c.requestApprovalWithReasonOptions(ctx, tool, subject, args, "", approvalDecisionOptions{requireHuman: true})
+		reason := combineApprovalReasons(policyReason, dynamicBashApprovalReason)
+		allow, remember, err := g.c.requestApprovalWithReasonOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{requireHuman: true})
 		return allow, remember, "", err
 	}
-	allow, remember, err := g.c.requestApproval(ctx, tool, subject, args)
+	allow, remember, err := g.c.requestApprovalWithReason(ctx, tool, subject, args, policyReason)
 	return allow, remember, "", err
 }
 
@@ -5996,12 +6043,12 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 	var id string
 	var reply chan approvalReply
 	if opts.fresh || opts.requireHuman {
-		id, reply = c.approval.registerDecision(tool, subject, reason, opts.fresh, opts.requireHuman)
+		id, reply = c.approval.registerDecisionWithInput(tool, subject, reason, args, opts.fresh, opts.requireHuman)
 	} else {
-		id, reply = c.approval.register(tool, subject, reason)
+		id, reply = c.approval.registerWithInput(tool, subject, reason, args)
 	}
 
-	c.sink.Emit(c.approvalRequestEvent(event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason, Fresh: opts.fresh}))
+	c.sink.Emit(c.approvalRequestEvent(event.Approval{ID: id, Tool: tool, Subject: subject, Reason: reason, RawInput: append(json.RawMessage(nil), args...), Fresh: opts.fresh}))
 	// The agent now needs the user's attention; a Notification hook can ping an
 	// external channel (desktop notice, phone) while the run blocks on the reply.
 	go c.hooks.Notification(ctx, approvalNotificationText(tool, subject), "permission_prompt")

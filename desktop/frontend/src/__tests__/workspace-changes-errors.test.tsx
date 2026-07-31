@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/workspace-changes-errors.test.tsx
 
 import { JSDOM } from "jsdom";
+import { registerHooks } from "node:module";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -10,6 +11,18 @@ import { LocaleProvider } from "../lib/i18n";
 import { resetWorkspaceTreeMemoryForTests } from "../lib/workspaceTreeMemory";
 import type { AppBindings } from "../lib/bridge";
 import type { DirEntry, GitCommitView, WorkspaceChangeDetailView, WorkspaceChangesView } from "../lib/types";
+
+// Markdown previews lazy-load MarkdownRenderer, whose KaTeX stylesheet belongs
+// to the same production chunk. Node's tsx loader has no CSS module support,
+// so map stylesheet imports to the existing empty asset stub in this DOM test.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith(".css")) {
+      return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 let passed = 0;
 let failed = 0;

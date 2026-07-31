@@ -1231,6 +1231,112 @@ console.log("\ncomposer goal toggle");
 }
 
 {
+  // A backend steer rejection means the turn crossed its final admission
+  // boundary. Keep the guidance item, then submit it as a normal follow-up
+  // after TurnDone instead of treating the rejected call as consumed.
+  const dom = installDom();
+  let steerAttempts = 0;
+  const { root, calls, rerender } = await renderComposer({
+    running: true,
+    onSteer: async () => {
+      steerAttempts += 1;
+      throw new Error("turn ended before guidance could be applied");
+    },
+    onSend: (displayText, submitText) => {
+      calls.send.push(displayText);
+      calls.submit.push(submitText);
+      return Promise.resolve();
+    },
+  });
+
+  await rerender({ insertRequest: { id: 71, text: "preserve this late guidance", mode: "replace" } });
+  const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("running composer send button did not render");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+  const guidanceItem = document.querySelector(".composer-guidance-item") as HTMLElement | null;
+  const guideButton = guidanceItem?.querySelector(".composer-guidance-item__guide") as HTMLButtonElement | null;
+  if (!guideButton) throw new Error("late guidance guide button did not render");
+  await act(async () => {
+    guideButton.click();
+    await flushTimers();
+  });
+
+  eq(steerAttempts, 1, "late guidance attempts one strict steer admission");
+  eq(calls.send.length, 0, "rejected steer does not open a provider turn");
+  ok(document.querySelector(".composer-guidance-item") !== null, "rejected steer remains queued");
+
+  await rerender({ running: false });
+  await waitFor("rejected steer sent as follow-up", () => calls.send.length === 1);
+  eq(calls.send[0], "preserve this late guidance", "late guidance becomes the next explicit user turn");
+  ok(document.querySelector(".composer-guidance-item") === null, "follow-up clears only after successful send");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  // TurnDone can reach the frontend before an in-flight TrySteer rejection.
+  // Once that rejection settles, the preserved guidance must be re-evaluated
+  // as the next explicit turn instead of remaining stranded on the shelf.
+  const dom = installDom();
+  let steerAttempts = 0;
+  let rejectSteer: (error: Error) => void = () => {};
+  const pendingSteer = new Promise<void>((_, reject) => {
+    rejectSteer = reject;
+  });
+  pendingSteer.catch(() => {});
+  const { root, calls, rerender } = await renderComposer({
+    running: true,
+    onSteer: () => {
+      steerAttempts += 1;
+      return pendingSteer;
+    },
+    onSend: (displayText, submitText) => {
+      calls.send.push(displayText);
+      calls.submit.push(submitText);
+      return Promise.resolve();
+    },
+  });
+
+  await rerender({ insertRequest: { id: 72, text: "retry after TurnDone wins", mode: "replace" } });
+  const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("running composer send button did not render");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+  const guideButton = document.querySelector(".composer-guidance-item__guide") as HTMLButtonElement | null;
+  if (!guideButton) throw new Error("deferred steer guide button did not render");
+  await act(async () => {
+    guideButton.click();
+    await flushTimers();
+  });
+
+  eq(steerAttempts, 1, "deferred guidance starts one strict steer admission");
+  await rerender({ running: false });
+  eq(calls.send.length, 0, "TurnDone waits for the in-flight steer result before follow-up");
+
+  await act(async () => {
+    rejectSteer(new Error("turn ended before guidance could be applied"));
+    await flushTimers();
+  });
+  await waitFor("deferred rejected steer sent as follow-up", () => calls.send.length === 1);
+  eq(calls.send[0], "retry after TurnDone wins", "deferred rejection becomes the next explicit user turn");
+  eq(steerAttempts, 1, "deferred rejection is not retried as another steer");
+  ok(document.querySelector(".composer-guidance-item") === null, "deferred follow-up clears after successful send");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
   // Reproduces #6210: a message queued while a turn is running, without the
   // explicit "guide" steer click, must not vanish when the turn ends on its
   // own — it is the user's next turn, so it should send automatically.
@@ -1262,6 +1368,42 @@ console.log("\ncomposer goal toggle");
   eq(calls.send.join(","), "keep going after this finishes", "queued guidance is sent automatically once the turn ends naturally, not discarded");
   eq(calls.submit.join(","), "keep going after this finishes", "auto-sent guidance submits the same text it was queued with");
   ok(document.querySelector(".composer-guidance-item") === null, "guidance shelf clears once the queued message is sent");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  // A normal follow-up failure must remain user-controlled. The steer-race
+  // re-arm above must not turn ordinary onSend failures into a retry loop.
+  const dom = installDom();
+  let followupAttempts = 0;
+  const { root, rerender } = await renderComposer({
+    running: true,
+    onSend: () => {
+      followupAttempts += 1;
+      return Promise.reject(new Error("controller is not ready"));
+    },
+  });
+
+  await rerender({ insertRequest: { id: 81, text: "keep failed follow-up", mode: "replace" } });
+  const sendButton = document.querySelector(".composer__btn--send") as HTMLButtonElement | null;
+  if (!sendButton) throw new Error("running composer send button did not render");
+  await act(async () => {
+    sendButton.click();
+    await flushTimers();
+  });
+
+  await rerender({ running: false });
+  await waitFor("queued follow-up attempts once", () => followupAttempts === 1);
+  await act(async () => {
+    await flushTimers();
+    await flushTimers();
+  });
+  eq(followupAttempts, 1, "failed normal follow-up is not retried automatically");
+  ok(document.querySelector(".composer-guidance-item") !== null, "failed normal follow-up remains on the shelf");
 
   await act(async () => {
     root.unmount();

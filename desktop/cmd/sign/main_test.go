@@ -89,6 +89,9 @@ func TestGenManifest(t *testing.T) {
 	if m.DownloadPage != "https://reasonix.io/?download=desktop#start" {
 		t.Fatalf("download_page = %q, want official install page", m.DownloadPage)
 	}
+	if m.ReleaseNotesURL != "https://reasonix.io/changelog/v1.2.0/" {
+		t.Fatalf("release_notes_url = %q, want exact version history", m.ReleaseNotesURL)
+	}
 	if len(m.Platforms) != 5 {
 		t.Fatalf("want 5 platforms, got %d: %v", len(m.Platforms), m.Platforms)
 	}
@@ -151,6 +154,27 @@ func TestGenManifest(t *testing.T) {
 			asset.Size == 0 {
 			t.Fatalf("website download %q incomplete: %+v", name, asset)
 		}
+	}
+}
+
+func TestGenManifestCanReuseStableNotesForStandaloneRC(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Reasonix-linux-amd64.tar.gz"), []byte("rc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := genManifest(dir, "v1.3.0-rc.1", "desktop-v1.3.0-rc.1", "v1.3.0"); err != nil {
+		t.Fatalf("genManifest: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m update.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.ReleaseNotesURL != "https://reasonix.io/changelog/v1.3.0/" {
+		t.Fatalf("release_notes_url = %q, want stable base history", m.ReleaseNotesURL)
 	}
 }
 

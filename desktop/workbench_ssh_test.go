@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,36 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/remote/workbench/transport"
 )
+
+func TestGoSSHStreamSurfacesMissingRemoteCLI(t *testing.T) {
+	stderr := newBoundedRemoteSSHStderr(1024)
+	_, _ = stderr.Write([]byte("bash: reasonix: command not found\n"))
+	stream := &goSSHStream{
+		stdout: strings.NewReader(""), stderr: stderr, ctx: context.Background(),
+		waitCh: make(chan error, 1),
+	}
+	stream.waitCh <- errors.New("remote command exited")
+	_, err := stream.Read(make([]byte, 1))
+	var failure *RemoteSSHConnectionFailure
+	if !errors.As(err, &failure) || failure.Code != RemoteSSHCLINotFound || failure.Stage != RemoteSSHStageBootstrap {
+		t.Fatalf("Read error = %#v, want CLI_NOT_FOUND/bootstrap", err)
+	}
+	if strings.Contains(failure.Message, "command not found") {
+		t.Fatalf("safe error leaked raw stderr: %q", failure.Message)
+	}
+}
+
+func TestRemoteWorkbenchBinaryValidation(t *testing.T) {
+	got, err := validateRemoteWorkbenchBinary("/home/dev user/.reasonix/remote/workbench/abc/reasonix")
+	if err != nil || got == "" {
+		t.Fatalf("valid path = %q err=%v", got, err)
+	}
+	for _, value := range []string{"relative/reasonix", "/tmp/../bin/reasonix", "/tmp/x\n/evil"} {
+		if _, err := validateRemoteWorkbenchBinary(value); err == nil {
+			t.Fatalf("unsafe path %q accepted", value)
+		}
+	}
+}
 
 func TestMapConfigHostKeepsEverySSHConfigAliasInConfigMode(t *testing.T) {
 	for _, entry := range []config.RemoteHostEntry{

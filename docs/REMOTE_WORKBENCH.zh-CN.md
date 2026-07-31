@@ -26,7 +26,7 @@ remote-runtime --broker RPC→ Desktop Provider Broker → 本机 Provider / API
   - `desktop/frontend/src/generated/remoteProtocol.generated.ts`
 - 生成：`go run ./cmd/remote-protocol-gen -root .`
 - 校验：`go run ./cmd/remote-protocol-gen -check -root .`
-- 握手严格比较完整 Build ID（产品版本、源码 revision、协议版本、Schema Hash）；任何一项不一致都会在 Provider Broker 激活前拒绝连接。V1 不自动安装或升级 Host CLI。
+- 握手前，Desktop 会探测 Host CLI 的完整 Build ID（产品版本、源码 revision、协议版本、Schema Hash）。当 `serve_install = "auto"` 时，同平台优先上传桌面随附的精确 CLI；Host 平台不同时，Desktop 会下载对应的官方不可变 CLI 发布包，校验 `SHA256SUMS`，再原子上传到 `~/.reasonix/remote/workbench/` 下按构建隔离的路径。npm 仅作为最终兜底。`npm`、`upload`、`never` 仍保持各自明确的策略语义。仍不匹配的版本会在 Provider Broker 激活前拒绝连接。
 
 ## Provider Broker
 

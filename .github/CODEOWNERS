@@ -7,6 +7,8 @@
 /.signpath/ @SivanCola @esengine
 /.github/workflows/release-stable.yml @SivanCola @esengine
 /.github/workflows/release-stable-trigger.yml @SivanCola @esengine
+/.github/workflows/release-preview.yml @SivanCola @esengine
+/.github/workflows/release-cli-trigger.yml @SivanCola @esengine
 /.github/workflows/release-desktop.yml @SivanCola @esengine
 /.github/workflows/release-desktop-trigger.yml @SivanCola @esengine
 /scripts/complete-signpath-request.ps1 @SivanCola @esengine

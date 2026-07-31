@@ -89,7 +89,7 @@ jobs:
       - name: Upload reviewed release notes
         uses: actions/upload-artifact@v7
         with:
-          name: stable-reviewed-release-notes
+          name: orchestrator-reviewed-release-notes
           path: /tmp/release-notes.md
           if-no-files-found: error
           retention-days: 1
@@ -188,7 +188,8 @@ jobs:
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      actions: write
+      contents: write
     steps:
       - name: Require every publisher to succeed
         env:
@@ -230,3 +231,36 @@ jobs:
           CLI_TAG: ${{ needs.authorize.outputs.cli_tag }}
           DESKTOP_TAG: ${{ needs.authorize.outputs.desktop_tag }}
         run: bash scripts/verify-stable-release-artifacts.sh
+      - name: Publish exact Stable release record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+          CLI_TAG: ${{ needs.authorize.outputs.cli_tag }}
+          RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if ! node -e '
+            const catalog = require("./release-notes/releases.json");
+            const release = catalog.releases.find((item) => item.version === process.env.VERSION);
+            process.exit(release?.status === "reviewed" ? 0 : 1);
+          '; then
+            echo "Legacy Stable notes do not require a publication marker"
+            exit 0
+          fi
+          node scripts/release-event.mjs generate \
+            --version "$VERSION" --sha "$RELEASE_SHA" \
+            --published-at "$(gh api "repos/${{ github.repository }}/releases/tags/$CLI_TAG" --jq .published_at)" \
+            --output /tmp/release-event.json
+          existing="$(mktemp -d)"
+          if gh release download "$CLI_TAG" --pattern release-event.json --dir "$existing" 2>/dev/null; then
+            cmp -s /tmp/release-event.json "$existing/release-event.json" || {
+              echo "::error::published release-event.json differs from the approved Stable event"
+              exit 1
+            }
+          else
+            gh release upload "$CLI_TAG" /tmp/release-event.json
+          fi
+      - name: Refresh public changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main-v2

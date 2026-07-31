@@ -5,6 +5,7 @@ channel="${1:-}"
 tag="${2:-}"
 repository="${3:-}"
 manifest="${4:-}"
+notes_tag="${5:-$tag}"
 
 stable_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 preview_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$'
@@ -14,17 +15,35 @@ case "$channel" in
 	stable)
 		tag_pattern="$stable_tag_pattern"
 		expected_prerelease=false
+		legacy=false
 		;;
 	preview)
 		tag_pattern="$preview_tag_pattern"
 		expected_prerelease=true
+		legacy=false
 		;;
 	any)
 		tag_pattern="$release_tag_pattern"
 		expected_prerelease=any
+		legacy=false
+		;;
+	legacy-stable)
+		tag_pattern="$stable_tag_pattern"
+		expected_prerelease=false
+		legacy=true
+		;;
+	legacy-preview)
+		tag_pattern="$preview_tag_pattern"
+		expected_prerelease=true
+		legacy=true
+		;;
+	legacy-any)
+		tag_pattern="$release_tag_pattern"
+		expected_prerelease=any
+		legacy=true
 		;;
 	*)
-		echo "CLI manifest channel must be stable, preview, or any: $channel" >&2
+		echo "CLI manifest channel must be stable, preview, any, legacy-stable, legacy-preview, or legacy-any: $channel" >&2
 		exit 2
 		;;
 esac
@@ -35,6 +54,10 @@ if [[ ! "$tag" =~ $tag_pattern ]]; then
 fi
 if [[ ! "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
 	echo "invalid GitHub repository: $repository" >&2
+	exit 1
+fi
+if [[ ! "$notes_tag" =~ $release_tag_pattern ]]; then
+	echo "invalid CLI release-notes tag: $notes_tag" >&2
 	exit 1
 fi
 if [ ! -f "$manifest" ]; then
@@ -55,8 +78,10 @@ required_assets='[
 jq -e \
 	--arg channel "$channel" \
 	--arg tag "$tag" \
+	--arg notes_tag "$notes_tag" \
 	--arg repository "$repository" \
 	--arg expected_prerelease "$expected_prerelease" \
+	--argjson legacy "$legacy" \
 	--argjson required "$required_assets" '
 	(type == "object") and
 	(.tag_name == $tag) and
@@ -65,6 +90,11 @@ jq -e \
 		else (.prerelease == ($expected_prerelease == "true"))
 	end) and
 	(.html_url == ("https://github.com/" + $repository + "/releases/tag/" + $tag)) and
+	(if $legacy
+		then (.release_notes_url == null or
+			.release_notes_url == ("https://reasonix.io/changelog/" + $notes_tag + "/"))
+		else (.release_notes_url == ("https://reasonix.io/changelog/" + $notes_tag + "/"))
+	end) and
 	(.assets | type == "array") and
 	(.assets | length == ($required | length)) and
 	((.assets | map(.name) | sort) == ($required | sort)) and

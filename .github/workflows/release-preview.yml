@@ -1,0 +1,212 @@
+name: Release preview
+run-name: Release preview ${{ inputs.tag }}
+
+# One protected Preview event owns the public CLI, Desktop, npm, and changelog
+# identities. The CLI tag supplies the canonical preview ordinal; child
+# publishers retain their native version syntax but use that same ordinal.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing protected CLI Preview tag, e.g. v1.19.0-preview.3"
+        required: true
+        type: string
+
+concurrency:
+  # Every Preview version advances the same public CLI, Desktop, and npm
+  # channels. Keep the whole all-surface event serialized across versions.
+  group: preview-release
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  preflight:
+    name: validate Preview release event
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      base_version: ${{ steps.release.outputs.base_version }}
+      preview_number: ${{ steps.release.outputs.preview_number }}
+      cli_tag: ${{ steps.release.outputs.cli_tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Resolve Preview release
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: bash scripts/resolve-preview-release.sh
+      - name: Validate exact reviewed Preview notes
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          node scripts/release-notes.mjs render --version "$VERSION" --output /tmp/release-notes.md
+          node scripts/release-event.mjs generate \
+            --version "$VERSION" \
+            --sha "$RELEASE_SHA" \
+            --published-at 2000-01-01T00:00:00.000Z \
+            --output /tmp/release-event.json
+      - name: Upload reviewed release notes
+        uses: actions/upload-artifact@v7
+        with:
+          name: orchestrator-reviewed-release-notes
+          path: /tmp/release-notes.md
+          if-no-files-found: error
+          retention-days: 1
+
+  authorize:
+    name: approve Preview release
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: canary
+    outputs:
+      version: ${{ steps.approved.outputs.version }}
+      base_version: ${{ steps.approved.outputs.base_version }}
+      preview_number: ${{ steps.approved.outputs.preview_number }}
+      cli_tag: ${{ steps.approved.outputs.cli_tag }}
+      sha: ${{ steps.approved.outputs.sha }}
+    steps:
+      - name: Record approved Preview event
+        id: approved
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          BASE_VERSION: ${{ needs.preflight.outputs.base_version }}
+          PREVIEW_NUMBER: ${{ needs.preflight.outputs.preview_number }}
+          CLI_TAG: ${{ needs.preflight.outputs.cli_tag }}
+          RELEASE_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          {
+            echo "version=$VERSION"
+            echo "base_version=$BASE_VERSION"
+            echo "preview_number=$PREVIEW_NUMBER"
+            echo "cli_tag=$CLI_TAG"
+            echo "sha=$RELEASE_SHA"
+          } >> "$GITHUB_OUTPUT"
+          echo "Approved Preview release $VERSION at $RELEASE_SHA"
+
+  signpath-preflight:
+    name: verify Preview SignPath control plane
+    needs: authorize
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      channel: preview
+      base_version: ${{ needs.authorize.outputs.base_version }}
+      preview_number: ${{ needs.authorize.outputs.preview_number }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+      orchestrator: preview
+      signing_preflight: true
+    secrets: inherit
+
+  cli:
+    name: publish CLI Preview
+    needs: [authorize, signpath-preflight]
+    if: ${{ needs.authorize.result == 'success' && needs.signpath-preflight.result == 'success' }}
+    uses: ./.github/workflows/release.yml
+    with:
+      channel: preview
+      tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+      orchestrator: preview
+    secrets: inherit
+
+  npm:
+    name: publish npm Canary
+    needs: [authorize, signpath-preflight]
+    if: ${{ needs.authorize.result == 'success' && needs.signpath-preflight.result == 'success' }}
+    uses: ./.github/workflows/release-npm.yml
+    with:
+      channel: canary
+      base_version: ${{ needs.authorize.outputs.base_version }}
+      preview_number: ${{ needs.authorize.outputs.preview_number }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+      orchestrator: preview
+    secrets: inherit
+
+  desktop:
+    name: publish Desktop Preview
+    needs: [authorize, signpath-preflight]
+    if: ${{ needs.authorize.result == 'success' && needs.signpath-preflight.result == 'success' }}
+    uses: ./.github/workflows/release-desktop.yml
+    with:
+      channel: preview
+      base_version: ${{ needs.authorize.outputs.base_version }}
+      preview_number: ${{ needs.authorize.outputs.preview_number }}
+      approved_cli_tag: ${{ needs.authorize.outputs.cli_tag }}
+      approved_sha: ${{ needs.authorize.outputs.sha }}
+      orchestrated: true
+      orchestrator: preview
+      signing_preflight_verified: true
+    secrets: inherit
+
+  postflight:
+    name: publish Preview release record
+    needs: [authorize, cli, npm, desktop]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+    steps:
+      - name: Require every Preview publisher to succeed
+        env:
+          CLI_RESULT: ${{ needs.cli.result }}
+          NPM_RESULT: ${{ needs.npm.result }}
+          DESKTOP_RESULT: ${{ needs.desktop.result }}
+        run: |
+          set -euo pipefail
+          for surface in CLI NPM DESKTOP; do
+            result_var="${surface}_RESULT"
+            if [ "${!result_var}" != "success" ]; then
+              echo "::error::$surface Preview publisher result is ${!result_var}, expected success"
+              exit 1
+            fi
+          done
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Upload immutable public release marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.authorize.outputs.version }}
+          CLI_TAG: ${{ needs.authorize.outputs.cli_tag }}
+          RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/release-event.mjs generate \
+            --version "$VERSION" --sha "$RELEASE_SHA" \
+            --published-at "$(gh api "repos/${{ github.repository }}/releases/tags/$CLI_TAG" --jq .published_at)" \
+            --output /tmp/release-event.json
+          existing="$(mktemp -d)"
+          if gh release download "$CLI_TAG" --pattern release-event.json --dir "$existing" 2>/dev/null; then
+            cmp -s /tmp/release-event.json "$existing/release-event.json" || {
+              echo "::error::published release-event.json differs from the approved Preview event"
+              exit 1
+            }
+          else
+            gh release upload "$CLI_TAG" /tmp/release-event.json
+          fi
+      - name: Refresh public changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --ref main-v2

@@ -108,13 +108,12 @@ func TestRemoteWorkbenchWindowsToLinuxPhysicalAcceptance(t *testing.T) {
 
 	newClient := func(generation uint64) (*workbenchclient.Client, *windowsWorkbenchSSHFactory) {
 		t.Helper()
-		rawFactory, factoryErr := newWindowsWorkbenchSSHFactory(entry, func(context.Context, RemoteAskPassPrompt) (RemoteAskPassAnswer, error) {
+		factory, factoryErr := newWindowsWorkbenchSSHFactoryForBinary(entry, "reasonix", func(context.Context, RemoteAskPassPrompt) (RemoteAskPassAnswer, error) {
 			return RemoteAskPassAnswer{}, fmt.Errorf("unexpected SSH prompt; acceptance fixture must provide a trusted host key and non-interactive identity")
 		})
 		if factoryErr != nil {
 			t.Fatal(factoryErr)
 		}
-		factory := rawFactory.(*windowsWorkbenchSSHFactory)
 		brokerOpts := remotebroker.Options{
 			Catalog: func(context.Context, map[string]struct{}) ([]protocol.BrokerProviderDescriptor, error) {
 				return []protocol.BrokerProviderDescriptor{

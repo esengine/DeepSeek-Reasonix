@@ -5,6 +5,52 @@ import (
 	"testing"
 )
 
+func TestDeepSeekV4FlashEffortCapabilityIncludesLow(t *testing.T) {
+	flash := &ProviderEntry{Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}
+	cap := EffortCapabilityForEntry(flash)
+	want := []string{"auto", "disabled", "low", "high", "max"}
+	if !cap.Supported || len(cap.Levels) != len(want) {
+		t.Fatalf("Flash capability = %+v, want %v", cap, want)
+	}
+	for i := range want {
+		if cap.Levels[i] != want[i] {
+			t.Fatalf("Flash levels[%d] = %q, want %q", i, cap.Levels[i], want[i])
+		}
+	}
+	if cap.Default != "high" {
+		t.Fatalf("Flash default = %q, want high", cap.Default)
+	}
+	if got, err := NormalizeEffort(flash, "low"); err != nil || got != "low" {
+		t.Fatalf("Flash low = %q/%v, want low/nil", got, err)
+	}
+	if got, err := NormalizeEffort(flash, "xhigh"); err != nil || got != "high" {
+		t.Fatalf("Flash xhigh = %q/%v, want high/nil", got, err)
+	}
+	flash.ReasoningProtocol = ReasoningProtocolDeepSeek
+	if got := EffortCapabilityForEntry(flash); len(got.Levels) != len(want) || got.Levels[2] != "low" {
+		t.Fatalf("explicit DeepSeek Flash capability = %+v, want model-specific low", got)
+	}
+	if got, err := NormalizeEffort(flash, "low"); err != nil || got != "low" {
+		t.Fatalf("explicit DeepSeek Flash low = %q/%v, want low/nil", got, err)
+	}
+	if got, err := NormalizeEffort(flash, "xhigh"); err != nil || got != "high" {
+		t.Fatalf("explicit DeepSeek Flash xhigh = %q/%v, want high/nil", got, err)
+	}
+
+	pro := &ProviderEntry{Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}
+	if got, err := NormalizeEffort(pro, "low"); err != nil || got != "high" {
+		t.Fatalf("Pro low = %q/%v, want existing high mapping", got, err)
+	}
+	if got, err := NormalizeEffort(pro, "xhigh"); err != nil || got != "max" {
+		t.Fatalf("Pro xhigh = %q/%v, want max/nil", got, err)
+	}
+	for _, level := range EffortCapabilityForEntry(pro).Levels {
+		if level == "low" {
+			t.Fatalf("Pro capability unexpectedly exposes low: %+v", EffortCapabilityForEntry(pro))
+		}
+	}
+}
+
 func TestIsMiniMaxEntry(t *testing.T) {
 	for _, tc := range []struct {
 		baseURL string

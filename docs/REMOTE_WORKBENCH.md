@@ -26,7 +26,14 @@ remote-runtime --broker RPC→ Desktop Provider Broker → local Provider / API 
   - `desktop/frontend/src/generated/remoteProtocol.generated.ts`
 - Regenerate: `go run ./cmd/remote-protocol-gen -root .`
 - Check: `go run ./cmd/remote-protocol-gen -check -root .`
-- Handshake compares the complete **Build ID** (`productVersion`, source revision, protocol version, and Schema Hash). Any mismatch is rejected before the Provider Broker is activated. V1 does not auto-install or auto-upgrade the Host CLI.
+- Before the handshake, Desktop probes the Host CLI's complete **Build ID**
+  (`productVersion`, source revision, protocol version, and Schema Hash). With
+  `serve_install = "auto"`, an exact packaged CLI is uploaded for a matching
+  platform; for a different Host platform, Desktop downloads the corresponding
+  immutable official CLI release, verifies `SHA256SUMS`, and atomically uploads
+  it to a build-specific path under `~/.reasonix/remote/workbench/`. npm is only
+  the final fallback. `npm`, `upload`, and `never` retain their explicit policy
+  meanings. Any remaining mismatch is rejected before Provider Broker activation.
 
 ## Provider Broker
 

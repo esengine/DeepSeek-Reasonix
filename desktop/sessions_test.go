@@ -1498,3 +1498,36 @@ func TestRecordSessionDisplaySkipsNoop(t *testing.T) {
 		t.Fatalf("noop display should not create sidecar, stat err = %v", err)
 	}
 }
+
+func TestRecordSessionDisplaySerializesConcurrentTabs(t *testing.T) {
+	dir := t.TempDir()
+	const tabs = 32
+	errs := make(chan error, tabs)
+	var wg sync.WaitGroup
+	for i := 0; i < tabs; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			path := filepath.Join(dir, fmt.Sprintf("tab-%02d.jsonl", i))
+			content := fmt.Sprintf("expanded-%02d", i)
+			display := fmt.Sprintf("display-%02d", i)
+			errs <- recordSessionDisplay(dir, path, content, display)
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("recordSessionDisplay: %v", err)
+		}
+	}
+
+	got := loadSessionDisplays(dir)
+	for i := 0; i < tabs; i++ {
+		key := fmt.Sprintf("tab-%02d.jsonl", i)
+		content := fmt.Sprintf("expanded-%02d", i)
+		if display := got[key][messageDisplayKey(content)]; display != fmt.Sprintf("display-%02d", i) {
+			t.Fatalf("%s display = %q, want retained concurrent value", key, display)
+		}
+	}
+}

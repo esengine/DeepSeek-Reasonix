@@ -704,6 +704,7 @@ export function Composer({
   const [pendingGuidance, setPendingGuidance] = useState<PendingGuidance[]>([]);
   const [guidanceExpanded, setGuidanceExpanded] = useState(false);
   const [guidanceSendingId, setGuidanceSendingId] = useState<number | null>(null);
+  const [guidanceRetryNonce, setGuidanceRetryNonce] = useState(0);
   const [guidanceDraftKey, setGuidanceDraftKey] = useState(draftKey);
   const pendingGuidanceRef = useRef<PendingGuidance[]>([]);
   const guidanceExpandedRef = useRef(false);
@@ -1175,7 +1176,7 @@ export function Composer({
     if (guidanceDraftKey !== draftKey || running || submitDisabled || suspendedByDecision) return;
     const next = pendingGuidance[0];
     if (next) void sendQueuedGuidance(next, draftKey);
-  }, [draftKey, guidanceDraftKey, running, submitDisabled, pendingGuidance, suspendedByDecision]);
+  }, [draftKey, guidanceDraftKey, guidanceRetryNonce, running, submitDisabled, pendingGuidance, suspendedByDecision]);
 
   useEffect(() => {
     if (guidanceDraftKey !== draftKey || !running || !guidanceQueuePreviewKey) return;
@@ -2041,18 +2042,21 @@ export function Composer({
     const displayText = item.text.trim();
     const submitText = item.submitText.trim() || displayText;
     if (!displayText || !submitText) return;
+    const attemptedSteer = running && onSteer !== undefined;
+    let retryRejectedSteer = false;
     const selfDispatched = selfDispatchedGuidanceByDraftRef.current[targetDraftKey] ?? [];
     selfDispatched.push(submitText);
     selfDispatchedGuidanceByDraftRef.current[targetDraftKey] = selfDispatched;
     updateGuidanceSendingIdForDraft(targetDraftKey, item.id);
     try {
-      if (running && onSteer) await onSteer(submitText, targetTabId);
+      if (attemptedSteer) await onSteer(submitText, targetTabId);
       else await onSend(displayText, submitText, targetTabId, item.structured);
       updatePendingGuidanceForDraft(targetDraftKey, (items) => items.filter((queued) => queued.id !== item.id));
       window.setTimeout(() => {
         takeSelfDispatchedGuidance(submitText, targetDraftKey);
       }, 5000);
     } catch (error) {
+      retryRejectedSteer = attemptedSteer;
       takeSelfDispatchedGuidance(submitText, targetDraftKey);
       showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
@@ -2060,6 +2064,13 @@ export function Composer({
         ? guidanceSendingIdRef.current
         : draftsBySessionRef.current[targetDraftKey]?.guidanceSendingId;
       if (current === item.id) updateGuidanceSendingIdForDraft(targetDraftKey, null);
+      // TurnDone may render while TrySteer is still pending. That render cannot
+      // auto-send because the guidance item is marked in flight, so re-run the
+      // idle-queue effect after a rejected steer settles. Ordinary onSend
+      // failures intentionally do not re-arm, avoiding an automatic retry loop.
+      if (retryRejectedSteer && targetDraftKey === activeDraftKeyRef.current) {
+        setGuidanceRetryNonce((value) => value + 1);
+      }
     }
   };
 

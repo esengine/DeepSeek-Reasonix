@@ -270,6 +270,10 @@ import { initTheme } from "./theme.js";
     document.querySelectorAll('[data-release-summary="' + surface + '"] [data-channel-copy]').forEach((copy) => {
       copy.hidden = copy.dataset.channelCopy !== channel;
     });
+    document.querySelectorAll('[data-release-notes="' + surface + '"]').forEach((link) => {
+      const path = model?.changelogURL ? new URL(model.changelogURL).pathname : "changelog/" + channel + "/";
+      link.href = new URL(path, window.location.origin + "/").href;
+    });
     document.querySelectorAll('[data-release-switch="' + surface + '"] [data-release-channel]').forEach((button) => {
       const active = button.dataset.releaseChannel === channel;
       button.classList.toggle("active", active);

@@ -10,6 +10,8 @@ export const defaultCatalogPath = resolve(repoRoot, "release-notes/releases.json
 const localizedFields = ["title", "body"];
 const changeKinds = ["new", "improved", "fixed"];
 const itemKinds = new Set(["new", "improved", "fixed", "security"]);
+const releaseChannels = new Set(["stable", "prerelease"]);
+const releaseStatuses = new Set(["reviewed", "published"]);
 
 function invariant(condition, message) {
   if (!condition) throw new Error(message);
@@ -47,7 +49,7 @@ function semverParts(version) {
   return [Number(match[1]), Number(match[2]), Number(match[3]), match[4] || ""];
 }
 
-function compareVersionsDesc(a, b) {
+export function compareVersionsDesc(a, b) {
   const aa = semverParts(a);
   const bb = semverParts(b);
   for (let i = 0; i < 3; i += 1) {
@@ -72,7 +74,58 @@ export function validateCatalog(catalog) {
     invariant(!versions.has(release.version), `duplicate version ${release.version}`);
     versions.add(release.version);
     invariant(/^\d{4}-\d{2}-\d{2}$/.test(release.date), `${path}.date must use YYYY-MM-DD`);
-    invariant(release.channel === "stable" || release.channel === "prerelease", `${path}.channel is invalid`);
+    invariant(releaseChannels.has(release.channel), `${path}.channel is invalid`);
+    if (release.releaseId !== undefined) {
+      invariant(release.releaseId === release.version, `${path}.releaseId must equal version`);
+    }
+    if (release.baseVersion !== undefined) {
+      semverParts(release.baseVersion);
+      invariant(!release.baseVersion.includes("-"), `${path}.baseVersion must be stable semver`);
+      invariant(
+        release.version === release.baseVersion || release.version.startsWith(`${release.baseVersion}-`),
+        `${path}.baseVersion does not match version`,
+      );
+    }
+    if (release.status !== undefined) {
+      invariant(releaseStatuses.has(release.status), `${path}.status is invalid`);
+    }
+    if (release.candidateSha !== undefined) {
+      invariant(/^[0-9a-f]{40}$/.test(release.candidateSha), `${path}.candidateSha must be a full commit SHA`);
+    }
+    if (release.previousRelease !== undefined) {
+      semverParts(release.previousRelease);
+      invariant(release.previousRelease !== release.version, `${path}.previousRelease must differ from version`);
+    }
+    if (release.builds !== undefined) {
+      invariant(isObject(release.builds), `${path}.builds must be an object`);
+      for (const surface of ["cli", "desktop", "npm"]) {
+        invariant(
+          typeof release.builds[surface] === "string" && release.builds[surface].trim(),
+          `${path}.builds.${surface} must be a non-empty string`,
+        );
+      }
+    }
+    if (release.status !== undefined) {
+      for (const field of ["releaseId", "baseVersion", "previousRelease", "builds"]) {
+        invariant(release[field] !== undefined, `${path}.${field} is required for managed release records`);
+      }
+      if (release.channel === "stable") {
+        invariant(release.version === release.baseVersion, `${path}.stable version must equal baseVersion`);
+        invariant(release.builds.cli === `v${release.version}`, `${path}.builds.cli does not match Stable version`);
+        invariant(release.builds.desktop === `v${release.version}`, `${path}.builds.desktop does not match Stable version`);
+        invariant(release.builds.npm === release.version, `${path}.builds.npm does not match Stable version`);
+      } else {
+        const preview = release.version.match(/^(\d+\.\d+\.\d+)-preview\.([1-9][0-9]*)$/);
+        invariant(preview, `${path}.managed prerelease must use MAJOR.MINOR.PATCH-preview.N`);
+        invariant(preview[1] === release.baseVersion, `${path}.Preview baseVersion does not match version`);
+        invariant(release.builds.cli === `v${release.version}`, `${path}.builds.cli does not match Preview version`);
+        invariant(release.builds.desktop === `v${release.version}`, `${path}.builds.desktop does not match Preview version`);
+        invariant(
+          release.builds.npm === `${release.baseVersion}-canary.${preview[2]}`,
+          `${path}.builds.npm does not match Preview ordinal`,
+        );
+      }
+    }
     validateLocalized(release.title, `${path}.title`);
     validateLocalized(release.summary, `${path}.summary`);
     invariant(Array.isArray(release.surfaces) && release.surfaces.length > 0, `${path}.surfaces must not be empty`);
@@ -136,8 +189,12 @@ function renderItems(items, lang) {
 
 export function renderGitHubRelease(release, lang = "zh") {
   const isZh = lang === "zh";
+  const isPreview = release.channel === "prerelease";
+  const channelLabel = isPreview ? (isZh ? "预览版" : "Preview") : (isZh ? "稳定版" : "Stable");
   const lines = [
     `> ${localized(release.summary, lang)}`,
+    "",
+    `**${isZh ? "发布渠道" : "Release channel"}：${channelLabel} · v${release.version}**`,
     "",
     isZh
       ? `[English →](https://reasonix.io/changelog/v${release.version}/?lang=en) · [网页版完整更新日志 →](https://reasonix.io/changelog/v${release.version}/)`

@@ -315,6 +315,16 @@ func parsePermissionMode(value string) (cliPermissionMode, error) {
 	}
 }
 
+func resolveRunPermissionMode(value string, auto, modeExplicit bool) (string, error) {
+	if !auto {
+		return value, nil
+	}
+	if modeExplicit {
+		return "", errors.New("--auto/-y cannot be combined with --permission-mode")
+	}
+	return "auto", nil
+}
+
 func applyPermissionMode(ctrl *control.Controller, mode cliPermissionMode) {
 	if ctrl == nil {
 		return
@@ -440,6 +450,7 @@ func runAgent(args []string, version string) int {
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
+	autoApprove := fs.BoolP("auto", "y", false, "explicitly auto-approve ordinary writer fallbacks (alias for --permission-mode auto)")
 	printOnly := fs.BoolP("print", "p", false, "print only the final response")
 	eventsJSONL := fs.Bool("events-jsonl", false, "emit a redacted structured event stream as JSONL")
 	outputFormat := fs.String("output-format", "text", "output format: text | json | stream-json")
@@ -451,6 +462,12 @@ func runAgent(args []string, version string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	resolvedPermissionMode, err := resolveRunPermissionMode(*permissionMode, *autoApprove, fs.Changed("permission-mode"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	*permissionMode = resolvedPermissionMode
 	allowedTools, err := splitAllowedToolRules(allowedToolValues)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -618,9 +635,9 @@ func runAgent(args []string, version string) int {
 	// non-blocking headless gate instead — passed into boot.Build so every
 	// headless-only gate it constructs (task/read_only_task, writer-capable
 	// skill sub-agents, the planner runner) gets the same contract as the parent
-	// executor, not just the top-level one. Default/ask and acceptEdits already
-	// keep the default headless gate (ask decisions resolve to allow); only
-	// auto/dontAsk/yolo need the explicit contract.
+	// executor, not just the top-level one. Default/ask fails closed because no
+	// UI can answer; unattended writes require explicit --auto/-y,
+	// --permission-mode auto, or yolo.
 	overrides := cliBuildOverrides{
 		Effort:               effortOverride,
 		PermissionAllow:      allowedTools,

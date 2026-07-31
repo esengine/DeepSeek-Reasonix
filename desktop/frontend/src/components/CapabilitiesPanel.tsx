@@ -2433,18 +2433,21 @@ function MCPSettingsServerRow({
 	onOpen,
 	onRetry,
 	onToggle,
+	onRemove,
 }: {
 	server: ServerView;
 	busy: boolean;
 	onOpen: () => void;
 	onRetry: () => void;
 	onToggle: (enabled: boolean) => void;
+	onRemove: () => void;
 }) {
 	const t = useT();
 	const lifecycle = mcpServerLifecycleActions(server);
 	const target = serverCommand(server);
 	const opensAuth = shouldOpenAuth(server);
 	const actionLabel = serverActionLabel(server, t);
+	const canRemove = server.configured && !server.builtIn && !server.managedByPlugin;
 	const handlePrimaryAction = () => {
 		if (opensAuth) {
 			openExternal((server.authUrl || "").trim());
@@ -2478,6 +2481,16 @@ function MCPSettingsServerRow({
 				<ChevronRight className="cap-mcp-list-row__chevron" aria-hidden size={16} />
 			</button>
 			<div className="cap-mcp-list-row__actions">
+				{canRemove && (
+					<InlineConfirmButton
+						label={t("caps.remove")}
+						confirmLabel={t("caps.confirmRemove")}
+						cancelLabel={t("common.cancel")}
+						disabled={busy}
+						danger
+						onConfirm={onRemove}
+					/>
+				)}
 				{lifecycle.showRetryInRow ? (
 					<button className="btn btn--small" disabled={busy} type="button" onClick={handlePrimaryAction}>
 						{actionLabel}
@@ -2508,6 +2521,7 @@ function MCPSettingsServerGroup({
 	onOpen,
 	onRetry,
 	onToggle,
+	onRemove,
 }: {
 	title: string;
 	hint?: string;
@@ -2516,6 +2530,7 @@ function MCPSettingsServerGroup({
 	onOpen: (name: string) => void;
 	onRetry: (name: string) => void;
 	onToggle: (name: string, enabled: boolean) => void;
+	onRemove: (name: string) => void;
 }) {
 	if (servers.length === 0) return null;
 	return (
@@ -2533,8 +2548,9 @@ function MCPSettingsServerGroup({
 						server={server}
 						busy={busy}
 						onOpen={() => onOpen(server.name)}
-						onRetry={() => onRetry(server.name)}
-						onToggle={(enabled) => onToggle(server.name, enabled)}
+							onRetry={() => onRetry(server.name)}
+							onToggle={(enabled) => onToggle(server.name, enabled)}
+							onRemove={() => onRemove(server.name)}
 					/>
 				))}
 			</div>
@@ -3111,8 +3127,9 @@ export function MCPServersSettingsPage() {
 						servers={projectServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
 					<MCPSettingsServerGroup
 						title={t("caps.installedServers")}
@@ -3120,8 +3137,9 @@ export function MCPServersSettingsPage() {
 						servers={installedServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
 					<MCPSettingsServerGroup
 						title={t("caps.pluginServers")}
@@ -3129,8 +3147,9 @@ export function MCPServersSettingsPage() {
 						servers={managedServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
 				</>
 			)}

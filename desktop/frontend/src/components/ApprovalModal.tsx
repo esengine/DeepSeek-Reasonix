@@ -107,23 +107,35 @@ function localizeApprovalSubject(tool: string, subject: string, t: Translator): 
 }
 
 function localizeApprovalReason(tool: string, reason: string | undefined, t: Translator): string {
-  const trimmed = reason?.trim() ?? "";
+  let trimmed = reason?.trim() ?? "";
+  let matchedRule = "";
+  const matchedRulePrefix = "Matched permission rule: ";
+  if (trimmed.startsWith(matchedRulePrefix)) {
+    const [ruleLine, ...remainingLines] = trimmed.split(/\r?\n/);
+    matchedRule = t("approval.matchedPermissionRule", { rule: ruleLine.slice(matchedRulePrefix.length).trim() });
+    trimmed = remainingLines.join("\n").trim();
+  }
+  let localized = trimmed;
+  if (tool === "bash" && trimmed.includes("nested or indirect shell execution")) {
+    localized = t("approval.dynamicBashReason");
+  }
   if (tool === "config_write") {
-    if (!trimmed || trimmed.includes("Reasonix-managed configuration file")) return t("approval.configWriteReason");
-    return trimmed;
+    localized = !trimmed || trimmed.includes("Reasonix-managed configuration file") ? t("approval.configWriteReason") : trimmed;
   }
-  if (tool !== "sandbox_escape") return trimmed;
-  if (trimmed.includes("could not wrap this command") || trimmed.includes("does not provide an OS-level Bash sandbox")) {
-    return t("approval.sandboxEscapeWrapReason");
+  if (tool === "sandbox_escape") {
+    if (trimmed.includes("could not wrap this command") || trimmed.includes("does not provide an OS-level Bash sandbox")) {
+      localized = t("approval.sandboxEscapeWrapReason");
+    } else if (
+      trimmed.includes("failed while starting this command") ||
+      trimmed.includes("could not start this command") ||
+      trimmed.includes("Run this command unconfined once?")
+    ) {
+      localized = t("approval.sandboxEscapeRuntimeReason");
+    } else {
+      localized ||= t("approval.sandboxEscapeRuntimeReason");
+    }
   }
-  if (
-    trimmed.includes("failed while starting this command") ||
-    trimmed.includes("could not start this command") ||
-    trimmed.includes("Run this command unconfined once?")
-  ) {
-    return t("approval.sandboxEscapeRuntimeReason");
-  }
-  return trimmed || t("approval.sandboxEscapeRuntimeReason");
+  return [matchedRule, localized].filter(Boolean).join(" ");
 }
 
 function localizePlanModeApprovalReason(tool: string, reason: string, t: Translator): string {

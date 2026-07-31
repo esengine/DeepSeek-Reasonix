@@ -69,6 +69,11 @@ branch.
 
 ### Fixed
 
+- Fixed Remote Workbench failing with only `initialize: workbench-desktop:
+  connection closed` on fresh or cross-platform SSH hosts. Desktop now proves
+  the exact Host CLI Build ID, provisions the matching verified release without
+  requiring remote npm, runs the managed binary explicitly, and preserves a
+  safe structured bootstrap error when the remote command exits early.
 - Hardened Bash permission reuse for dynamic and indirect execution. Parameter/arithmetic expansions,
   assignments, redirects, heredocs, and globs can only be remembered as exact
   `Bash=<literal>` rules, while still using Auto's normal fallback. Nested or

@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
 	"reasonix/internal/netclient"
+	"reasonix/internal/releaseasset"
 	"reasonix/internal/remote"
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
@@ -199,12 +200,14 @@ func remoteConnectCLI(args []string, version string) int {
 
 	if !*noServe && !*forwardOnly {
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
-			Workspace:   ws,
-			Install:     entry.ServeInstallMode(),
-			LocalBinary: currentExecutable(),
-			LocalGOOS:   runtime.GOOS,
-			LocalGOARCH: runtime.GOARCH,
-			MinVersion:  bootstrap.MinServeVersion,
+			Workspace:      ws,
+			Install:        entry.ServeInstallMode(),
+			LocalBinary:    currentExecutable(),
+			LocalGOOS:      runtime.GOOS,
+			LocalGOARCH:    runtime.GOARCH,
+			ProductVersion: version,
+			FetchBinary:    fetchRemoteCLIBinary,
+			MinVersion:     bootstrap.MinServeVersion,
 			Progress: func(step, detail string) {
 				fmt.Fprintf(os.Stderr, i18n.M.RemoteBootstrapStepFmt+"\n", step, detail)
 			},
@@ -279,8 +282,23 @@ func currentExecutable() string {
 	return ""
 }
 
+func fetchRemoteCLIBinary(ctx context.Context, version, goos, goarch string) ([]byte, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{
+		ResponseHeaderTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	client.Timeout = 2 * time.Minute
+	return releaseasset.DownloadCLI(ctx, client, version, goos, goarch)
+}
+
 // remoteServeCLI: serve start|stop|status|logs <name>.
-func remoteServeCLI(args []string) int {
+func remoteServeCLI(args []string, version string) int {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: reasonix remote serve start|stop|status|logs <name> [--workspace PATH] [-n N]")
 		return 2
@@ -323,7 +341,7 @@ func remoteServeCLI(args []string) int {
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
 			Workspace: ws, Install: entry.ServeInstallMode(),
 			LocalBinary: currentExecutable(), LocalGOOS: runtime.GOOS, LocalGOARCH: runtime.GOARCH,
-			MinVersion: bootstrap.MinServeVersion,
+			ProductVersion: version, FetchBinary: fetchRemoteCLIBinary, MinVersion: bootstrap.MinServeVersion,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)

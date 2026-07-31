@@ -47,14 +47,16 @@ const MinServeVersion = "flag:port-file"
 
 // Options configures EnsureServe.
 type Options struct {
-	Workspace   string                    // remote workspace path (may start with ~)
-	Install     string                    // auto|npm|upload|never
-	LocalBinary string                    // path to the running reasonix binary, for same-platform upload
-	LocalGOOS   string                    // GOOS of LocalBinary
-	LocalGOARCH string                    // GOARCH of LocalBinary
-	MinVersion  string                    // minimum acceptable remote version
-	Progress    func(step, detail string) // optional progress callback
-	Clock       func() time.Time          // nil => time.Now
+	Workspace      string                                                        // remote workspace path (may start with ~)
+	Install        string                                                        // auto|npm|upload|never
+	LocalBinary    string                                                        // path to the running reasonix binary, for same-platform upload
+	LocalGOOS      string                                                        // GOOS of LocalBinary
+	LocalGOARCH    string                                                        // GOARCH of LocalBinary
+	ProductVersion string                                                        // exact local release used for a cross-platform official download
+	FetchBinary    func(context.Context, string, string, string) ([]byte, error) // local verified release fetcher
+	MinVersion     string                                                        // minimum acceptable remote version
+	Progress       func(step, detail string)                                     // optional progress callback
+	Clock          func() time.Time                                              // nil => time.Now
 }
 
 func (o Options) progress(step, detail string) {

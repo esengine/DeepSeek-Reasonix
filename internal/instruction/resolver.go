@@ -93,7 +93,7 @@ func Resolve(opts ResolveOptions) Resolution {
 	}
 
 	var candidates []candidate
-	appendDir := func(dir, boundary string, names []string, scope Scope, depth, priority int) {
+	appendDir := func(dir, boundary string, importBoundaries []string, names []string, scope Scope, depth, priority int) {
 		for _, name := range names {
 			path := filepath.Join(dir, name)
 			body, info, ok, code := readConfinedDocument(path, boundary, "document_symlink_escape")
@@ -110,7 +110,7 @@ func Resolve(opts ResolveOptions) Resolution {
 			identity := physicalIdentity(path, info)
 			imports := []Import{}
 			state := importState{active: map[string]bool{identity: true}, expanded: map[string]bool{}}
-			body = resolveDocumentImports(body, path, dir, 0, state, &imports, &result.Diagnostics)
+			body = resolveDocumentImports(body, path, importBoundaries, 0, state, &imports, &result.Diagnostics)
 			candidates = append(candidates, candidate{
 				doc:      Document{Path: path, Scope: scope, Directory: dir, Body: body, Imports: imports, Depth: depth},
 				priority: priority,
@@ -119,7 +119,7 @@ func Resolve(opts ResolveOptions) Resolution {
 	}
 
 	if userDir := absolutePath(opts.UserDir); userDir != "" {
-		appendDir(userDir, userDir, DocumentNames, ScopeUser, -1, 0)
+		appendDir(userDir, userDir, userInstructionImportRoots(userDir), DocumentNames, ScopeUser, -1, 0)
 	}
 	chain := directoryChain(root, target)
 	for depth, dir := range chain {
@@ -127,8 +127,8 @@ func Resolve(opts ResolveOptions) Resolution {
 		if depth == 0 {
 			scope = ScopeProject
 		}
-		appendDir(dir, root, DocumentNames, scope, depth, 10+depth*2)
-		appendDir(dir, root, LocalDocumentNames, ScopeLocal, depth, 11+depth*2)
+		appendDir(dir, root, []string{root}, DocumentNames, scope, depth, 10+depth*2)
+		appendDir(dir, root, []string{root}, LocalDocumentNames, ScopeLocal, depth, 11+depth*2)
 	}
 
 	// Content hashes are exact after decoding, trimming, and deterministic
@@ -205,7 +205,7 @@ func readConfinedDocument(path, boundary, escapeCode string) (string, os.FileInf
 	return body, info, ok, ""
 }
 
-func resolveDocumentImports(body, sourcePath, boundary string, depth int, state importState, imports *[]Import, diagnostics *[]Diagnostic) string {
+func resolveDocumentImports(body, sourcePath string, boundaries []string, depth int, state importState, imports *[]Import, diagnostics *[]Diagnostic) string {
 	if depth >= MaxImportDepth {
 		return body
 	}
@@ -215,7 +215,7 @@ func resolveDocumentImports(body, sourcePath, boundary string, depth int, state 
 		if !ok {
 			continue
 		}
-		resolved, code := confinedImportPath(target, filepath.Dir(sourcePath), boundary)
+		resolved, boundary, code := confinedImportPath(target, filepath.Dir(sourcePath), boundaries)
 		if code != "" {
 			*diagnostics = append(*diagnostics, Diagnostic{
 				Code: code, Path: target, SourcePath: sourcePath, Line: i + 1,
@@ -254,13 +254,16 @@ func resolveDocumentImports(body, sourcePath, boundary string, depth int, state 
 			continue
 		}
 		state.active[identity] = true
-		expanded := resolveDocumentImports(b, resolved, boundary, depth+1, state, imports, diagnostics)
+		expanded := resolveDocumentImports(b, resolved, boundaries, depth+1, state, imports, diagnostics)
 		delete(state.active, identity)
 		state.expanded[identity] = true
 		*imports = append(*imports, Import{Path: resolved, SourcePath: sourcePath})
 		rel, err := filepath.Rel(boundary, resolved)
 		if err != nil {
 			rel = resolved
+		}
+		if len(boundaries) > 0 && absolutePath(boundary) != absolutePath(boundaries[0]) {
+			rel = filepath.Join(filepath.Base(boundary), rel)
 		}
 		label := html.EscapeString(filepath.ToSlash(rel))
 		lines[i] = fmt.Sprintf("<instruction-import path=\"%s\">\n%s\n</instruction-import>", label, expanded)
@@ -280,19 +283,58 @@ func parseImportTarget(line string) (string, bool) {
 	return path, true
 }
 
-func confinedImportPath(target, sourceDir, boundary string) (string, string) {
-	if filepath.IsAbs(target) || strings.HasPrefix(target, "~") {
-		return "", "import_outside_source"
+func confinedImportPath(target, sourceDir string, boundaries []string) (string, string, string) {
+	pathTarget := target
+	if target == "~" || strings.HasPrefix(target, "~/") || strings.HasPrefix(target, `~\`) {
+		home, err := os.UserHomeDir()
+		if err != nil || strings.TrimSpace(home) == "" {
+			return "", "", "import_outside_source"
+		}
+		pathTarget = filepath.Join(home, filepath.FromSlash(strings.TrimLeft(target[1:], `/\`)))
+	} else if strings.HasPrefix(target, "~") {
+		return "", "", "import_outside_source"
 	}
-	path := filepath.Clean(filepath.Join(sourceDir, filepath.FromSlash(target)))
-	if !pathWithin(path, boundary) {
-		return "", "import_outside_source"
+	path := filepath.Clean(filepath.FromSlash(pathTarget))
+	if !filepath.IsAbs(path) {
+		path = filepath.Clean(filepath.Join(sourceDir, path))
+	}
+	boundary := importBoundaryForPath(path, boundaries)
+	if boundary == "" {
+		return "", "", "import_outside_source"
 	}
 	realPath, err := filepath.EvalSymlinks(path)
 	if err == nil && !pathWithin(realPath, realDirectory(boundary)) {
-		return "", "import_symlink_escape"
+		return "", "", "import_symlink_escape"
 	}
-	return path, ""
+	return path, boundary, ""
+}
+
+func importBoundaryForPath(path string, boundaries []string) string {
+	for _, boundary := range boundaries {
+		if pathWithin(path, boundary) {
+			return absolutePath(boundary)
+		}
+	}
+	return ""
+}
+
+func userInstructionImportRoots(userDir string) []string {
+	roots := []string{absolutePath(userDir)}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		for _, name := range []string{".reasonix", ".agents", ".agent", ".claude"} {
+			roots = append(roots, absolutePath(filepath.Join(home, name)))
+		}
+	}
+	out := make([]string, 0, len(roots))
+	seen := map[string]bool{}
+	for _, root := range roots {
+		if root == "" || seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, root)
+	}
+	return out
 }
 
 func directoryChain(root, target string) []string {

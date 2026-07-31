@@ -76,3 +76,5 @@ agent-complexity-report.txt
 # direnv local env
 .envrc
 .direnv/
+
+site/.generated/

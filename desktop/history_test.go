@@ -282,7 +282,10 @@ func TestHistoryPageFromProviderMessagesWindowsVisibleUsers(t *testing.T) {
 		{Role: provider.RoleAssistant, Content: "hidden continuation"},
 		{Role: provider.RoleUser, Content: "second"},
 		{Role: provider.RoleAssistant, Content: "two"},
-		{Role: provider.RoleUser, Content: agent.MidTurnSteerPrefix + "\nupdate the plan"},
+		{
+			Role: provider.RoleTool, Content: agent.MidTurnSteerPrefix + "\nupdate the plan",
+			ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName, LocalOnly: true,
+		},
 		{Role: provider.RoleUser, Content: "third"},
 		{Role: provider.RoleAssistant, Content: "three"},
 	}
@@ -307,8 +310,12 @@ func TestHistoryPageFromProviderMessagesWindowsVisibleUsers(t *testing.T) {
 	if latest.Messages[0].CheckpointTurn == nil || *latest.Messages[0].CheckpointTurn != 2 {
 		t.Fatalf("second user checkpoint = %v, want 2", latest.Messages[0].CheckpointTurn)
 	}
-	if latest.Messages[2].Role != "notice" || !strings.Contains(latest.Messages[2].Content, "update the plan") {
-		t.Fatalf("steer message = %+v, want notice in second turn window", latest.Messages[2])
+	if latest.Messages[2].Role != "notice" ||
+		latest.Messages[2].Code != event.NoticeCodeUnappliedSteer ||
+		latest.Messages[2].Level != "warn" ||
+		!strings.Contains(latest.Messages[2].Content, "not applied") ||
+		!strings.Contains(latest.Messages[2].Content, "update the plan") {
+		t.Fatalf("steer message = %+v, want explicit unapplied notice in second turn window", latest.Messages[2])
 	}
 	if latest.Messages[3].Role != "user" || latest.Messages[3].Content != "third" {
 		t.Fatalf("third latest message = %+v, want third user", latest.Messages[3])
@@ -1076,8 +1083,9 @@ func TestResumeSessionForTabTargetsSpecifiedTab(t *testing.T) {
 	if filepath.Clean(savedInactive) != filepath.Clean(targetPath) {
 		t.Fatalf("saved inactive session path = %q, want %q", savedInactive, targetPath)
 	}
-	if len(got) != 1 || got[0].Content != "target prompt" {
-		t.Fatalf("resumed history = %+v, want target prompt", got)
+	if len(got) != 2 || got[0].Role != string(provider.RoleSystem) || strings.TrimSpace(got[0].Content) == "" ||
+		got[1].Role != string(provider.RoleUser) || got[1].Content != "target prompt" {
+		t.Fatalf("resumed history = %+v, want fresh system prompt and target prompt", got)
 	}
 }
 
@@ -1153,8 +1161,9 @@ func TestResumeSessionForTabDetachesRunningRuntimeForDifferentSessionPath(t *tes
 	if gotPath := app.tabs[tab.ID].Ctrl.SessionPath(); gotPath != sessionB {
 		t.Fatalf("visible tab session path = %q, want %q", gotPath, sessionB)
 	}
-	if len(got) != 1 || got[0].Content != "session B prompt" {
-		t.Fatalf("resumed history = %+v, want session B prompt", got)
+	if len(got) != 2 || got[0].Role != string(provider.RoleSystem) || strings.TrimSpace(got[0].Content) == "" ||
+		got[1].Role != string(provider.RoleUser) || got[1].Content != "session B prompt" {
+		t.Fatalf("resumed history = %+v, want fresh system prompt and session B prompt", got)
 	}
 
 	visible := app.tabs[tab.ID]
@@ -1235,8 +1244,9 @@ func TestRebindTabToLoadedSessionReusesPreloadedTranscript(t *testing.T) {
 		t.Fatalf("rebindTabToLoadedSessionPath: %v", err)
 	}
 	got := app.HistoryForTab(tab.ID)
-	if len(got) != 1 || got[0].Content != "target prompt" {
-		t.Fatalf("rebound history = %+v, want target prompt", got)
+	if len(got) != 2 || got[0].Role != string(provider.RoleSystem) || strings.TrimSpace(got[0].Content) == "" ||
+		got[1].Role != string(provider.RoleUser) || got[1].Content != "target prompt" {
+		t.Fatalf("rebound history = %+v, want fresh system prompt and target prompt", got)
 	}
 	if gotPath := app.tabs[tab.ID].Ctrl.SessionPath(); gotPath != targetPath {
 		t.Fatalf("rebound session path = %q, want %q", gotPath, targetPath)

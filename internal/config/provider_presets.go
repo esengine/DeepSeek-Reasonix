@@ -50,6 +50,8 @@ func CuratedProviderPreset(id string) (ProviderPreset, bool) {
 
 func providerPresetDisplayRank(id string) int {
 	switch {
+	case id == "deepseek-responses":
+		return -1
 	case id == "glm-cn" || id == "zai-global" || strings.HasPrefix(id, "glm-coding-plan-") || strings.HasPrefix(id, "zai-coding-plan-"):
 		return 0
 	case strings.HasPrefix(id, "longcat-"):
@@ -76,6 +78,7 @@ var (
 
 	minimaxMSeriesModels       = []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"}
 	minimaxMSeriesVisionModels = []string{"MiniMax-M3"}
+	deepSeekResponsesModels    = []string{"deepseek-v4-flash"}
 
 	glmAPIModels       = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-5v-turbo", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-flash"}
 	glmAPIVisionModels = []string{"glm-5v-turbo"}
@@ -86,7 +89,6 @@ var (
 	qwenAPIVisionModels     = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
 	qwenPlanModels          = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.5", "deepseek-v4-pro", "glm-5.2", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
 	qwenPlanVisionModels    = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
-	deepSeekResponsesModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
 
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
 

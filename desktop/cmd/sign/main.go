@@ -10,7 +10,8 @@
 //	                             encrypted minisign private key in $MINISIGN_PRIVATE_KEY
 //	                             (decrypted with $MINISIGN_PASSWORD).
 //
-//	manifest <dir> <ver> <tag>   Scan <dir> for the per-platform artifacts, compute
+//	manifest <dir> <ver> <tag> [notes-ver]
+//	                             Scan <dir> for the per-platform artifacts, compute
 //	                             size + sha256, and write <dir>/latest.json with GitHub
 //	                             release download URLs. The R2 mirror step rewrites those
 //	                             URLs to the CDN afterwards (url + sig fields together).
@@ -54,10 +55,14 @@ func main() {
 	case "sign":
 		err = signFiles(os.Args[2:])
 	case "manifest":
-		if len(os.Args) != 5 {
+		if len(os.Args) != 5 && len(os.Args) != 6 {
 			usage()
 		}
-		err = genManifest(os.Args[2], os.Args[3], os.Args[4])
+		notesVersion := os.Args[3]
+		if len(os.Args) == 6 {
+			notesVersion = os.Args[5]
+		}
+		err = genManifest(os.Args[2], os.Args[3], os.Args[4], notesVersion)
 	case "windows-payload":
 		if len(os.Args) != 4 {
 			usage()
@@ -83,7 +88,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag>\n  windows-payload <dir> <version>\n  genkey <dir>\n  verify <file>")
+	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag> [notes-version]\n  windows-payload <dir> <version>\n  genkey <dir>\n  verify <file>")
 	os.Exit(2)
 }
 
@@ -205,17 +210,25 @@ func signFiles(files []string) error {
 // Portable updater channels land in platforms (tarballs/installers). Debian/Ubuntu
 // .deb packages land only in native_packages so older clients keep resolving the
 // tarball under platforms["linux-amd64"].
-func genManifest(dir, version, tag string) error {
+func genManifest(dir, version, tag string, notesVersions ...string) error {
 	repo := os.Getenv("GITHUB_REPOSITORY")
 	if repo == "" || repo == "esengine/reasonix" {
 		repo = "esengine/DeepSeek-Reasonix"
 	}
+	notesVersion := version
+	if len(notesVersions) > 1 {
+		return fmt.Errorf("manifest: expected at most one release-notes version")
+	}
+	if len(notesVersions) == 1 {
+		notesVersion = notesVersions[0]
+	}
 	m := update.Manifest{
-		Version:        version,
-		DownloadPage:   "https://reasonix.io/?download=desktop#start",
-		Platforms:      map[string]update.Asset{},
-		NativePackages: map[string]update.Asset{},
-		Downloads:      map[string]update.Asset{},
+		Version:         version,
+		DownloadPage:    "https://reasonix.io/?download=desktop#start",
+		ReleaseNotesURL: "https://reasonix.io/changelog/" + notesVersion + "/",
+		Platforms:       map[string]update.Asset{},
+		NativePackages:  map[string]update.Asset{},
+		Downloads:       map[string]update.Asset{},
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {

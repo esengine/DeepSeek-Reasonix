@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -19,26 +21,47 @@ import (
 	"reasonix/internal/remote/workbench/transport"
 )
 
-// newWorkbenchSSHFactory returns a transport factory for the workbench path.
+// newWorkbenchSSHFactoryForBinary returns a transport factory for the workbench path.
 // Windows uses system OpenSSH + AskPass + Job Object; other platforms use Go SSH
 // stdio running `reasonix remote attach-workspace --stdio`.
-func newWorkbenchSSHFactory(entry config.RemoteHostEntry, askPassHandler RemoteAskPassHandler) (transport.Factory, error) {
-	if runtime.GOOS == "windows" {
-		return newWindowsWorkbenchSSHFactory(entry, askPassHandler)
+func newWorkbenchSSHFactoryForBinary(entry config.RemoteHostEntry, remoteBinary string, askPassHandler RemoteAskPassHandler) (transport.Factory, error) {
+	binary, err := validateRemoteWorkbenchBinary(remoteBinary)
+	if err != nil {
+		return nil, err
 	}
-	return newGoSSHWorkbenchFactory(entry, askPassHandler)
+	if runtime.GOOS == "windows" {
+		return newWindowsWorkbenchSSHFactoryForBinary(entry, binary, askPassHandler)
+	}
+	return newGoSSHWorkbenchFactoryForBinary(entry, binary, askPassHandler)
+}
+
+func validateRemoteWorkbenchBinary(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "reasonix" {
+		return "reasonix", nil
+	}
+	if !strings.HasPrefix(value, "/") || path.Clean(value) != value {
+		return "", fmt.Errorf("remote Workbench binary must be an absolute POSIX path")
+	}
+	for _, r := range value {
+		if r == 0 || r == '\r' || r == '\n' {
+			return "", fmt.Errorf("remote Workbench binary path contains control characters")
+		}
+	}
+	return value, nil
 }
 
 type windowsWorkbenchSSHFactory struct {
 	entry      config.RemoteHostEntry
 	boundEntry RemoteHostEntry
 	helperPath string
+	binary     string
 	handler    RemoteAskPassHandler
 	mu         sync.Mutex
 	transport  *RemoteSSHTransport
 }
 
-func newWindowsWorkbenchSSHFactory(entry config.RemoteHostEntry, handler RemoteAskPassHandler) (transport.Factory, error) {
+func newWindowsWorkbenchSSHFactoryForBinary(entry config.RemoteHostEntry, binary string, handler RemoteAskPassHandler) (transport.Factory, error) {
 	if handler == nil {
 		return nil, fmt.Errorf("AskPass handler is required")
 	}
@@ -54,7 +77,7 @@ func newWindowsWorkbenchSSHFactory(entry config.RemoteHostEntry, handler RemoteA
 	if err != nil {
 		return nil, fmt.Errorf("resolve Desktop AskPass helper: %w", err)
 	}
-	return &windowsWorkbenchSSHFactory{entry: entry, boundEntry: hostEntry, helperPath: helperPath, handler: handler}, nil
+	return &windowsWorkbenchSSHFactory{entry: entry, boundEntry: hostEntry, helperPath: helperPath, binary: binary, handler: handler}, nil
 }
 
 func (f *windowsWorkbenchSSHFactory) Open(ctx context.Context) (transport.Stream, error) {
@@ -62,7 +85,7 @@ func (f *windowsWorkbenchSSHFactory) Open(ctx context.Context) (transport.Stream
 	if err != nil {
 		return nil, err
 	}
-	sshFactory := &RemoteSSHTransportFactory{AskPass: broker, AskPassHelper: f.helperPath}
+	sshFactory := &RemoteSSHTransportFactory{AskPass: broker, AskPassHelper: f.helperPath, RemoteBinary: f.binary}
 	var stream transport.Stream
 	stream, err = openWindowsWorkbenchSSH(ctx, sshFactory, f.entry, f.boundEntry)
 	if err != nil {
@@ -136,6 +159,7 @@ func mapConfigHostToWorkbenchEntry(entry config.RemoteHostEntry) (RemoteHostEntr
 
 type goSSHWorkbenchFactory struct {
 	entry   config.RemoteHostEntry
+	binary  string
 	handler RemoteAskPassHandler
 	mu      sync.Mutex
 	peer    remote.HostKeyQuestion
@@ -146,18 +170,18 @@ type workbenchPeerIdentity struct {
 	Fingerprint string
 }
 
-func newGoSSHWorkbenchFactory(entry config.RemoteHostEntry, handler RemoteAskPassHandler) (*goSSHWorkbenchFactory, error) {
+func newGoSSHWorkbenchFactoryForBinary(entry config.RemoteHostEntry, binary string, handler RemoteAskPassHandler) (*goSSHWorkbenchFactory, error) {
 	if strings.TrimSpace(entry.Name) == "" {
 		return nil, fmt.Errorf("remote host name is required")
 	}
 	if handler == nil {
 		return nil, fmt.Errorf("SSH secret prompt handler is required")
 	}
-	return &goSSHWorkbenchFactory{entry: entry, handler: handler}, nil
+	return &goSSHWorkbenchFactory{entry: entry, binary: binary, handler: handler}, nil
 }
 
 func (f *goSSHWorkbenchFactory) Open(ctx context.Context) (transport.Stream, error) {
-	return openGoSSHAttachWorkspace(ctx, f.entry, f.handler, func(q remote.HostKeyQuestion) {
+	return openGoSSHAttachWorkspace(ctx, f.entry, f.binary, f.handler, func(q remote.HostKeyQuestion) {
 		f.mu.Lock()
 		f.peer = q
 		f.mu.Unlock()
@@ -172,15 +196,56 @@ func (f *goSSHWorkbenchFactory) PeerIdentity() (workbenchPeerIdentity, bool) {
 
 // goSSHStream adapts a Go SSH session's stdio to transport.Stream.
 type goSSHStream struct {
-	client  *remote.Client
-	session *ssh.Session
-	stdin   io.WriteCloser
-	stdout  io.Reader
-	cancel  context.CancelFunc
+	client           *remote.Client
+	session          *ssh.Session
+	stdin            io.WriteCloser
+	stdout           io.Reader
+	stderr           *boundedRemoteSSHStderr
+	ctx              context.Context
+	cancel           context.CancelFunc
+	waitCh           chan error
+	waitMu           sync.Mutex
+	waitDone         bool
+	waitErr          error
+	bootstrapStarted bool
 }
 
-func (s *goSSHStream) Read(p []byte) (int, error)  { return s.stdout.Read(p) }
+func (s *goSSHStream) Read(p []byte) (int, error) {
+	n, err := s.stdout.Read(p)
+	if n > 0 {
+		s.waitMu.Lock()
+		s.bootstrapStarted = true
+		s.waitMu.Unlock()
+	}
+	if n == 0 && errors.Is(err, io.EOF) {
+		if waitErr := s.wait(); waitErr != nil {
+			return 0, waitErr
+		}
+	}
+	return n, err
+}
 func (s *goSSHStream) Write(p []byte) (int, error) { return s.stdin.Write(p) }
+
+func (s *goSSHStream) wait() error {
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	if s.waitDone {
+		return s.waitErr
+	}
+	err := <-s.waitCh
+	s.waitDone = true
+	if err == nil {
+		return nil
+	}
+	raw, _, _ := s.stderr.snapshot()
+	var contextErr error
+	if s.ctx != nil {
+		contextErr = s.ctx.Err()
+	}
+	s.waitErr = classifyRemoteSSHExit(raw, s.bootstrapStarted, contextErr)
+	return s.waitErr
+}
+
 func (s *goSSHStream) Close() error {
 	if s.cancel != nil {
 		s.cancel()
@@ -197,7 +262,7 @@ func (s *goSSHStream) Close() error {
 	return nil
 }
 
-func openGoSSHAttachWorkspace(ctx context.Context, entry config.RemoteHostEntry, handler RemoteAskPassHandler, verified func(remote.HostKeyQuestion)) (transport.Stream, error) {
+func openGoSSHAttachWorkspace(ctx context.Context, entry config.RemoteHostEntry, remoteBinary string, handler RemoteAskPassHandler, verified func(remote.HostKeyQuestion)) (transport.Stream, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -286,7 +351,14 @@ func openGoSSHAttachWorkspace(ctx context.Context, entry config.RemoteHostEntry,
 		_ = c.Close()
 		return nil, err
 	}
-	cmd := "reasonix remote attach-workspace --stdio"
+	stderr := newBoundedRemoteSSHStderr(defaultRemoteSSHStderrLimit)
+	sess.Stderr = stderr
+	binary, err := validateRemoteWorkbenchBinary(remoteBinary)
+	if err != nil {
+		_ = c.Close()
+		return nil, err
+	}
+	cmd := shellSingleQuote(binary) + " remote attach-workspace --stdio"
 	if ws := strings.TrimSpace(entry.Workspace); ws != "" {
 		cmd = "REASONIX_ATTACH_WORKSPACE=" + shellSingleQuote(ws) + " " + cmd
 	}
@@ -299,8 +371,15 @@ func openGoSSHAttachWorkspace(ctx context.Context, entry config.RemoteHostEntry,
 		<-ctx2.Done()
 		_ = sess.Close()
 	}()
-	go func() { _ = sess.Wait(); cancel() }()
-	return &goSSHStream{client: c, session: sess, stdin: stdin, stdout: stdout, cancel: cancel}, nil
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- sess.Wait()
+		cancel()
+	}()
+	return &goSSHStream{
+		client: c, session: sess, stdin: stdin, stdout: stdout, stderr: stderr,
+		ctx: ctx, cancel: cancel, waitCh: waitCh,
+	}, nil
 }
 
 func shellSingleQuote(s string) string {

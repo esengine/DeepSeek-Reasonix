@@ -33,9 +33,11 @@ import (
 )
 
 type fakeController struct {
-	model   string
-	history []provider.Message
-	status  control.RuntimeStatus
+	model         string
+	history       []provider.Message
+	status        control.RuntimeStatus
+	steerAccepted bool
+	steers        []string
 }
 
 type blockingController struct {
@@ -298,6 +300,13 @@ func (c *fakeController) RuntimeStatus() control.RuntimeStatus {
 func (c *fakeController) Submit(input string) {
 	c.history = append(c.history, provider.Message{Role: provider.RoleUser, Content: input})
 }
+func (c *fakeController) TrySteer(text string) bool {
+	if !c.steerAccepted {
+		return false
+	}
+	c.steers = append(c.steers, text)
+	return true
+}
 func (c *fakeController) Cancel()               {}
 func (c *fakeController) Close()                {}
 func (c *fakeController) SessionPath() string   { return "" }
@@ -502,6 +511,44 @@ func TestRuntimeMutationRequestIDConflictPrecedesEpochChecks(t *testing.T) {
 	var remoteErr *protocol.RemoteError
 	if !errors.As(err, &remoteErr) || remoteErr.Code != protocol.ErrRequestIDConflict {
 		t.Fatalf("conflicting request error = %v, want REQUEST_ID_CONFLICT", err)
+	}
+}
+
+func TestRuntimeSteerReportsTurnExitRaceInsteadOfFalseAcceptance(t *testing.T) {
+	srv := New(Options{Workspace: t.TempDir(), Version: "test"})
+	ctrl := &fakeController{model: "local/stub"}
+	target := srv.installTestSession(ctrl)
+	turnID := protocol.TurnID("turn_test")
+	srv.mu.Lock()
+	srv.sessions[target.SessionID].currentTurn = turnID
+	srv.mu.Unlock()
+	params := protocol.TurnSteerParams{
+		SessionMutation: protocol.SessionMutation{
+			RequestID:            "request-steer",
+			ExpectedHostEpoch:    srv.hostEpoch,
+			Target:               target,
+			ExpectedRuntimeEpoch: "runtime_test",
+		},
+		ExpectedTurnID: turnID,
+		Text:           "use plan B",
+	}
+
+	if _, err := srv.steer(params); err == nil {
+		t.Fatal("rejected steer returned false acceptance")
+	} else {
+		var remoteErr *protocol.RemoteError
+		if !errors.As(err, &remoteErr) || remoteErr.Code != protocol.ErrTurnNotActive {
+			t.Fatalf("rejected steer error = %v, want TURN_NOT_ACTIVE", err)
+		}
+	}
+
+	ctrl.steerAccepted = true
+	result, err := srv.steer(params)
+	if err != nil {
+		t.Fatalf("accepted steer: %v", err)
+	}
+	if !result.Accepted || result.TurnID != turnID || len(ctrl.steers) != 1 || ctrl.steers[0] != params.Text {
+		t.Fatalf("accepted steer result=%+v steers=%v", result, ctrl.steers)
 	}
 }
 

@@ -832,8 +832,8 @@ func (gw *BotGateway) steerActiveSession(ctx context.Context, adapter Adapter, k
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
-	state.ctrl.Steer(text)
-	return true
+	controller, ok := state.ctrl.(interface{ TrySteer(string) bool })
+	return ok && controller.TrySteer(text)
 }
 
 func (gw *BotGateway) cancelActiveSession(key string) {

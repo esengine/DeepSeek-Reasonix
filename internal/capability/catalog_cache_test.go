@@ -169,6 +169,52 @@ func TestCapabilityProxyRouteRenderKeepsConcreteMCPIDs(t *testing.T) {
 	}
 }
 
+func TestOrdinaryRouteRenderDeduplicatesCollapsedMCPSourceLines(t *testing.T) {
+	candidates := []RouteCandidate{
+		{
+			Entry: Entry{
+				ID: "mcp-tool:search/search", Kind: KindMCPTool, Name: "search/search",
+				Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "search",
+			},
+			Policy: AutoUsePrefer, Reason: "the task appears to need fresh external data",
+		},
+		{
+			Entry: Entry{
+				ID: "mcp-tool:search/fetch", Kind: KindMCPTool, Name: "search/fetch",
+				Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "search",
+			},
+			Policy: AutoUsePrefer, Reason: "the task appears to need fresh external data",
+		},
+		{
+			Entry: Entry{
+				ID: "mcp-tool:docs/read", Kind: KindMCPTool, Name: "docs/read",
+				Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "docs",
+			},
+			Policy: AutoUsePrefer, Reason: "the task appears to need fresh external data",
+		},
+	}
+
+	out := RenderTransientBlock(RouteDecision{Candidates: candidates})
+	if got := strings.Count(out, "- source:mcp/search "); got != 1 {
+		t.Fatalf("collapsed MCP source rendered %d times, want 1:\n%s", got, out)
+	}
+	if got := strings.Count(out, "- source:mcp/docs "); got != 1 {
+		t.Fatalf("independent MCP source rendered %d times, want 1:\n%s", got, out)
+	}
+
+	for _, decision := range []RouteDecision{
+		{Delivery: true, Candidates: candidates},
+		{CapabilityProxy: true, Candidates: candidates},
+	} {
+		proxyOut := RenderTransientBlock(decision)
+		for _, candidate := range candidates {
+			if !strings.Contains(proxyOut, "- "+candidate.Entry.ID+" ") {
+				t.Fatalf("proxy route lost concrete capability %q:\n%s", candidate.Entry.ID, proxyOut)
+			}
+		}
+	}
+}
+
 func TestCatalogKeepsProxyToolsAfterConnect(t *testing.T) {
 	proxy := map[string][]plugin.CachedTool{
 		"gh": {{Name: "search_issues", Description: "search", ReadOnly: true}},

@@ -26,11 +26,17 @@ type modelReasoningCapability struct {
 	Protocol string
 	Levels   []string
 	Default  string
+	Aliases  map[string]string
 }
 
 var modelReasoningCapabilities = map[string]modelReasoningCapability{
-	"deepseek-v4-flash": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
-	"deepseek-v4-pro":   {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
+	"deepseek-v4-flash": {
+		Protocol: ReasoningProtocolDeepSeek,
+		Levels:   []string{"disabled", "low", "high", "max"},
+		Default:  "high",
+		Aliases:  map[string]string{"xhigh": "high"},
+	},
+	"deepseek-v4-pro": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
 }
 
 // EffortCapabilityForEntry returns the user-facing /effort levels for a resolved
@@ -53,6 +59,9 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	}
 	switch explicitReasoningProtocol(e) {
 	case ReasoningProtocolDeepSeek:
+		if cap, ok := resolvedModelReasoningCapability(e); ok && cap.Protocol == ReasoningProtocolDeepSeek {
+			return effortCapabilityFromModel(cap)
+		}
 		return deepSeekEffortCapability()
 	case ReasoningProtocolOpenAI:
 		return openAIEffortCapability()
@@ -117,6 +126,20 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 			return level, nil
 		}
 		return "", fmt.Errorf("usage: /effort auto|%s", strings.Join(supported, "|"))
+	}
+	// V4 Flash 0731 added a real low depth. Keep this model-scoped: Pro and
+	// generic DeepSeek-compatible endpoints still normalize low to high unless
+	// they explicitly advertise a different supported_efforts list.
+	if cap, ok := resolvedModelReasoningCapability(e); ok {
+		explicit := explicitReasoningProtocol(e)
+		if explicit == "" || explicit == cap.Protocol {
+			if containsString(cap.Levels, level) {
+				return level, nil
+			}
+			if normalized, ok := cap.Aliases[level]; ok && containsString(cap.Levels, normalized) {
+				return normalized, nil
+			}
+		}
 	}
 	switch ReasoningProtocolForEntry(e) {
 	case ReasoningProtocolDeepSeek:

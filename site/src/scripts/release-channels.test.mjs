@@ -161,7 +161,7 @@ test("CLI selection compares arbitrarily large numeric version components exactl
   assert.equal(selectCLIRelease(releases, "stable")?.tag_name, "v100000000000000000000.0.0");
 });
 
-test("CLI release notes always use the canonical repository tag URL", () => {
+test("CLI release links are derived from the validated canonical tag", () => {
   const release = {
     tag_name: "v1.18.0",
     prerelease: false,
@@ -172,6 +172,12 @@ test("CLI release notes always use the canonical repository tag URL", () => {
     cliReleaseModel([release], "stable")?.releaseURL,
     "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.18.0",
   );
+  assert.equal(
+    cliReleaseModel([release], "stable")?.changelogURL,
+    "https://reasonix.io/changelog/stable/",
+  );
+  release.release_notes_url = "https://reasonix.io/changelog/v1.18.0/";
+  assert.equal(cliReleaseModel([release], "stable")?.changelogURL, release.release_notes_url);
 });
 
 test("CLI assets reject spoofed hosts and cross-tag URLs", () => {
@@ -226,6 +232,9 @@ test("Desktop manifests accept only the exact official Stable and Preview bases"
   assert.equal(desktopReleaseModel(preview, "stable"), null);
   const model = desktopReleaseModel(preview, "preview");
   assert.equal(model?.displayVersion, "1.18.0-preview.62");
+  assert.equal(model?.changelogURL, "https://reasonix.io/changelog/preview/");
+  preview.release_notes_url = "https://reasonix.io/changelog/v1.18.0-preview.62/";
+  assert.equal(desktopReleaseModel(preview, "preview")?.changelogURL, preview.release_notes_url);
   assert.equal(model?.assets["Reasonix-darwin-universal.dmg"],
     "https://dl.reasonix.io/desktop-v1.18.0-preview.62/Reasonix-darwin-universal.dmg");
   assert.equal(model?.assets["Reasonix-windows-amd64.zip"],

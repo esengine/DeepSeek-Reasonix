@@ -1031,11 +1031,13 @@ func (s *Server) steer(p protocol.TurnSteerParams) (protocol.TurnSteerResult, er
 	if current != p.ExpectedTurnID {
 		return protocol.TurnSteerResult{}, protocol.MustRemoteError(protocol.ErrTurnMismatch, protocol.ErrorOptions{Target: &p.Target, Expected: string(p.ExpectedTurnID), Actual: string(current)})
 	}
-	controller, ok := sess.ctrl.(interface{ Steer(string) })
+	controller, ok := sess.ctrl.(interface{ TrySteer(string) bool })
 	if !ok {
 		return protocol.TurnSteerResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
 	}
-	controller.Steer(p.Text)
+	if !controller.TrySteer(p.Text) {
+		return protocol.TurnSteerResult{}, protocol.MustRemoteError(protocol.ErrTurnNotActive, protocol.ErrorOptions{Target: &p.Target})
+	}
 	return protocol.TurnSteerResult{Accepted: true, TurnID: current}, nil
 }
 

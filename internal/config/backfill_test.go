@@ -115,7 +115,7 @@ func TestNormalizeLegacyProviderModelsLeavesCustomProviderUntouched(t *testing.T
 	}
 }
 
-func TestNormalizeLegacyStepFunBaseURLsMigratesPresetProviders(t *testing.T) {
+func TestNormalizeLegacyStepFunBaseURLsPreservesRegionalProviders(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{
 		{
 			Name:      "stepfun",
@@ -139,21 +139,21 @@ func TestNormalizeLegacyStepFunBaseURLsMigratesPresetProviders(t *testing.T) {
 		},
 	}}
 
-	if !normalizeLegacyStepFunBaseURLs(c) {
-		t.Fatal("legacy StepFun preset URL migration did not report a change")
+	if normalizeLegacyStepFunBaseURLs(c) {
+		t.Fatal("StepFun regional URL preservation unexpectedly reported a change")
 	}
-	if got := c.Providers[0].BaseURL; got != officialStepFunOpenAIBaseURL {
-		t.Fatalf("stepfun base_url = %q, want %q", got, officialStepFunOpenAIBaseURL)
+	if got := c.Providers[0].BaseURL; got != legacyStepFunOpenAIBaseURL {
+		t.Fatalf("global stepfun base_url = %q, want %q", got, legacyStepFunOpenAIBaseURL)
 	}
-	if got := c.Providers[1].BaseURL; got != officialStepFunAnthropicBaseURL {
-		t.Fatalf("stepfun-anthropic base_url = %q, want %q", got, officialStepFunAnthropicBaseURL)
+	if got := c.Providers[1].BaseURL; got != legacyStepFunAnthropicBaseURL+"/" {
+		t.Fatalf("global stepfun-anthropic base_url = %q, want preserved trailing slash", got)
 	}
 	if got := c.Providers[2].BaseURL; got != legacyStepFunOpenAIBaseURL {
 		t.Fatalf("custom provider base_url = %q, want untouched legacy URL", got)
 	}
 }
 
-func TestLoadForEditKeepsLegacyStepFunMigrationInMemoryUntilSave(t *testing.T) {
+func TestLoadAndSavePreserveStepFunRegionalBaseURLs(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	cfg := Default()
 	stepfun, ok := CuratedProviderPreset("stepfun")
@@ -175,11 +175,11 @@ func TestLoadForEditKeepsLegacyStepFunMigrationInMemoryUntilSave(t *testing.T) {
 	}
 
 	loaded := LoadForEdit(path)
-	if got, _ := loaded.Provider("stepfun"); got == nil || got.BaseURL != officialStepFunOpenAIBaseURL {
-		t.Fatalf("loaded stepfun = %+v, want official base URL", got)
+	if got, _ := loaded.Provider("stepfun"); got == nil || got.BaseURL != legacyStepFunOpenAIBaseURL {
+		t.Fatalf("loaded stepfun = %+v, want global base URL preserved", got)
 	}
-	if got, _ := loaded.Provider("stepfun-anthropic"); got == nil || got.BaseURL != officialStepFunAnthropicBaseURL {
-		t.Fatalf("loaded stepfun-anthropic = %+v, want official base URL", got)
+	if got, _ := loaded.Provider("stepfun-anthropic"); got == nil || got.BaseURL != legacyStepFunAnthropicBaseURL {
+		t.Fatalf("loaded stepfun-anthropic = %+v, want global base URL preserved", got)
 	}
 
 	var disk Config
@@ -196,11 +196,11 @@ func TestLoadForEditKeepsLegacyStepFunMigrationInMemoryUntilSave(t *testing.T) {
 	if _, err := toml.DecodeFile(path, &disk); err != nil {
 		t.Fatalf("decode explicitly saved config: %v", err)
 	}
-	if got, _ := disk.Provider("stepfun"); got == nil || got.BaseURL != officialStepFunOpenAIBaseURL {
-		t.Fatalf("persisted stepfun = %+v, want official base URL", got)
+	if got, _ := disk.Provider("stepfun"); got == nil || got.BaseURL != legacyStepFunOpenAIBaseURL {
+		t.Fatalf("persisted stepfun = %+v, want global base URL preserved", got)
 	}
-	if got, _ := disk.Provider("stepfun-anthropic"); got == nil || got.BaseURL != officialStepFunAnthropicBaseURL {
-		t.Fatalf("persisted stepfun-anthropic = %+v, want official base URL", got)
+	if got, _ := disk.Provider("stepfun-anthropic"); got == nil || got.BaseURL != legacyStepFunAnthropicBaseURL {
+		t.Fatalf("persisted stepfun-anthropic = %+v, want global base URL preserved", got)
 	}
 }
 

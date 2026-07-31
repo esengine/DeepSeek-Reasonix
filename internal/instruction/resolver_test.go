@@ -127,6 +127,72 @@ func TestResolveImportsAreProvenancedDeduplicatedAndConfined(t *testing.T) {
 	}
 }
 
+func TestResolveUserInstructionsImportTrustedConventionRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	userDir := filepath.Join(home, ".reasonix")
+	agentsDir := filepath.Join(home, ".agents")
+	root := filepath.Join(home, "repo")
+	mustWriteInstruction(t, filepath.Join(agentsDir, "AGENTS.md"), "SHARED USER RULE")
+	mustWriteInstruction(t, filepath.Join(userDir, "REASONIX.md"), "@~/.agents/AGENTS.md")
+	mustWriteInstruction(t, filepath.Join(root, "AGENTS.md"), "PROJECT RULE")
+
+	got := Resolve(ResolveOptions{WorkspaceRoot: root, TargetDir: root, UserDir: userDir})
+	body := documentBodies(got.Documents)
+	if !strings.Contains(body, "SHARED USER RULE") {
+		t.Fatalf("trusted user convention import missing: %+v", got)
+	}
+	if strings.Contains(body, home) {
+		t.Fatalf("provider-visible import provenance leaked home path:\n%s", body)
+	}
+	if len(got.Diagnostics) != 0 {
+		t.Fatalf("trusted user convention import diagnostics = %+v", got.Diagnostics)
+	}
+}
+
+func TestResolveProjectInstructionsCannotImportUserConventionRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	root := filepath.Join(home, "repo")
+	mustWriteInstruction(t, filepath.Join(home, ".agents", "AGENTS.md"), "PRIVATE USER RULE")
+	mustWriteInstruction(t, filepath.Join(root, "AGENTS.md"), "@~/.agents/AGENTS.md")
+
+	got := Resolve(ResolveOptions{WorkspaceRoot: root, TargetDir: root})
+	if strings.Contains(documentBodies(got.Documents), "PRIVATE USER RULE") {
+		t.Fatalf("project instruction escaped into user convention root: %+v", got)
+	}
+	if len(got.Diagnostics) != 1 || got.Diagnostics[0].Code != "import_outside_source" {
+		t.Fatalf("project external import diagnostics = %+v", got.Diagnostics)
+	}
+}
+
+func TestResolveUserInstructionsRejectArbitraryHomeAndConventionSymlinkEscape(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	userDir := filepath.Join(home, ".reasonix")
+	agentsDir := filepath.Join(home, ".agents")
+	mustWriteInstruction(t, filepath.Join(home, "secret.md"), "HOME SECRET")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "secret.md"), filepath.Join(agentsDir, "linked.md")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	mustWriteInstruction(t, filepath.Join(userDir, "REASONIX.md"), "@~/secret.md\n@~/.agents/linked.md")
+
+	got := Resolve(ResolveOptions{WorkspaceRoot: t.TempDir(), TargetDir: t.TempDir(), UserDir: userDir})
+	if strings.Contains(documentBodies(got.Documents), "HOME SECRET") {
+		t.Fatalf("arbitrary home content entered instructions: %+v", got)
+	}
+	codes := map[string]bool{}
+	for _, diagnostic := range got.Diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	if !codes["import_outside_source"] || !codes["import_symlink_escape"] {
+		t.Fatalf("user import rejection diagnostics = %+v", got.Diagnostics)
+	}
+}
+
 func TestResolveRejectsDirectInstructionSymlinkOutsideBoundary(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

@@ -2444,7 +2444,7 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	if !cap.Supported {
 		t.Fatalf("deepseek model behind proxy should expose effort, got %+v", cap)
 	}
-	wantLevels := []string{"auto", "disabled", "high", "max"}
+	wantLevels := []string{"auto", "disabled", "low", "high", "max"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}
@@ -2461,6 +2461,9 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	}
 	if got, err := NormalizeEffort(e, "max"); err != nil || got != "max" {
 		t.Fatalf("NormalizeEffort(max) = %q/%v, want max/nil", got, err)
+	}
+	if got, err := NormalizeEffort(e, "low"); err != nil || got != "low" {
+		t.Fatalf("NormalizeEffort(low) = %q/%v, want low/nil", got, err)
 	}
 }
 

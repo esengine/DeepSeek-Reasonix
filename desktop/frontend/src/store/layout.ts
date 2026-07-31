@@ -138,7 +138,69 @@ export function saveRightDockPreviewWidth(width: number): void {
 // dock survives restart. maximized/preview stay session-local — they are view
 // layout, not a durable preference. (Resize drag flags, button-press animation
 // flags, measured footer height, and viewport width stay as useState in App.tsx.)
-export type RightDockMode = "context" | "files" | "changed" | "remote" | "terminal";
+export type RightDockMode = "context" | "files" | "changed" | "remote";
+
+// terminalPanelOpen is independent from rightDockMode — the terminal is a
+// bottom drawer that coexists with the workspace panel, not a mode of it.
+// Persisted to localStorage so it survives restart.
+const TERMINAL_PANEL_OPEN_KEY = "reasonix.terminalPanel.open";
+const TERMINAL_PANEL_DEFAULT_OPEN = false;
+
+function loadTerminalPanelOpen(): boolean {
+  if (typeof window === "undefined") return TERMINAL_PANEL_DEFAULT_OPEN;
+  try {
+    return window.localStorage.getItem(TERMINAL_PANEL_OPEN_KEY) === "1";
+  } catch {
+    return TERMINAL_PANEL_DEFAULT_OPEN;
+  }
+}
+
+export function saveTerminalPanelOpen(open: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TERMINAL_PANEL_OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+// Terminal height defaults and clamps for the bottom drawer.
+export const TERMINAL_DEFAULT_HEIGHT = 280;
+export const TERMINAL_MIN_HEIGHT = 120;
+export const TERMINAL_MAX_HEIGHT_RATIO = 0.5; // max 50% of viewport height
+
+const TERMINAL_HEIGHT_KEY = "reasonix.terminalPanel.height";
+
+function loadTerminalHeight(): number {
+  if (typeof window === "undefined") return TERMINAL_DEFAULT_HEIGHT;
+  try {
+    const raw = window.localStorage.getItem(TERMINAL_HEIGHT_KEY);
+    if (raw === null) return TERMINAL_DEFAULT_HEIGHT;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= TERMINAL_MIN_HEIGHT) return parsed;
+    return TERMINAL_DEFAULT_HEIGHT;
+  } catch {
+    return TERMINAL_DEFAULT_HEIGHT;
+  }
+}
+
+export function saveTerminalHeight(height: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TERMINAL_HEIGHT_KEY, String(Math.round(height)));
+  } catch {
+    /* ignore storage failures */
+  }
+}
+
+export function terminalMaxHeight(viewportHeight: number): number {
+  return Math.max(TERMINAL_MIN_HEIGHT, Math.floor(Math.max(0, viewportHeight) * TERMINAL_MAX_HEIGHT_RATIO));
+}
+
+export function clampTerminalHeight(height: number, viewportHeight: number): number {
+  const max = terminalMaxHeight(viewportHeight);
+  return Math.min(max, Math.max(TERMINAL_MIN_HEIGHT, Math.round(height)));
+}
 
 function loadWorkspacePanelOpen(): boolean {
   if (typeof window === "undefined") return WORKSPACE_PANEL_DEFAULT_OPEN;
@@ -169,6 +231,8 @@ export type LayoutState = {
   workspacePanelMaximized: boolean;
   workspacePreviewActive: boolean;
   rightDockMode: RightDockMode;
+  terminalPanelOpen: boolean;
+  terminalHeight: number;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setRightDockTreeWidth: (width: number) => void;
@@ -177,6 +241,8 @@ export type LayoutState = {
   setWorkspacePanelMaximized: Dispatch<SetStateAction<boolean>>;
   setWorkspacePreviewActive: Dispatch<SetStateAction<boolean>>;
   setRightDockMode: Dispatch<SetStateAction<RightDockMode>>;
+  setTerminalPanelOpen: Dispatch<SetStateAction<boolean>>;
+  setTerminalHeight: (height: number) => void;
 };
 
 export const useLayoutStore = create<LayoutState>((set) => ({
@@ -188,6 +254,8 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   workspacePanelMaximized: false,
   workspacePreviewActive: false,
   rightDockMode: "context",
+  terminalPanelOpen: loadTerminalPanelOpen(),
+  terminalHeight: loadTerminalHeight(),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setSidebarWidth: (width) => set({ sidebarWidth: width }),
   setRightDockTreeWidth: (width) => set({ rightDockTreeWidth: width }),
@@ -196,6 +264,8 @@ export const useLayoutStore = create<LayoutState>((set) => ({
   setWorkspacePanelMaximized: (update) => set((s) => ({ workspacePanelMaximized: applySetState(s.workspacePanelMaximized, update) })),
   setWorkspacePreviewActive: (update) => set((s) => ({ workspacePreviewActive: applySetState(s.workspacePreviewActive, update) })),
   setRightDockMode: (update) => set((s) => ({ rightDockMode: applySetState(s.rightDockMode, update) })),
+  setTerminalPanelOpen: (update) => set((s) => ({ terminalPanelOpen: applySetState(s.terminalPanelOpen, update) })),
+  setTerminalHeight: (height) => set({ terminalHeight: height }),
 }));
 
 export function applyLayoutStyleDefaults(style: "classic" | "workbench" | "creation"): void {

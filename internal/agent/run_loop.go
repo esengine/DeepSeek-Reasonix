@@ -340,7 +340,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	if readiness.applies {
 		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, state.finalReadinessBlocks > 0))
 	}
-	if a.steerQueueLen() > 0 {
+	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}
 	// A final-answer turn otherwise skips compaction, so a large context

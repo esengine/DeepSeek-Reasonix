@@ -39,15 +39,18 @@
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "svg-pan-zoom": "^3.6.2",
+    "unist-util-visit": "^5.1.0",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
+    "@types/mdast": "^4.0.4",
     "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
     "jsdom": "^29.1.1",
+    "mdast-util-math": "^3.0.0",
     "terser": "^5.48.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",

@@ -1176,8 +1176,9 @@ func TestOpenGlobalTabResolvesTopicToLatestSessionRuntime(t *testing.T) {
 		t.Fatalf("visible session path = %q, want %q", got, newPath)
 	}
 	history := visible.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "new session prompt" {
-		t.Fatalf("visible history = %+v, want latest session prompt", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "new session prompt" {
+		t.Fatalf("visible history = %+v, want fresh system prompt and latest session prompt", history)
 	}
 
 	close(runner.release)

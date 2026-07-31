@@ -5,10 +5,10 @@
 #
 #   stable: from a desktop-v* prerelease tag push, a manual dispatch with `tag`,
 #           or the stable release orchestrator's workflow_call input.
-#   preview: a manual dispatch with channel=preview (legacy canary accepted);
-#            version is synthesized from base_version + the monotonic run_number,
-#            tag is the matching immutable asset directory, and it is always a
-#            prerelease.
+#   preview: public publication requires the approved Preview orchestrator;
+#            standalone Preview is limited to non-publishing signing checks.
+#            Legacy canary input is accepted for those checks. The version uses
+#            the orchestrator ordinal or, for a signing check, the run number.
 set -euo pipefail
 
 stable_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
@@ -16,6 +16,12 @@ release_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za
 preview_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$'
 
 if [ "${IN_CHANNEL:-stable}" = "preview" ] || [ "${IN_CHANNEL:-stable}" = "canary" ]; then
+	if [ "${IN_ORCHESTRATED:-false}" != "true" ] && \
+		[ "${IN_PRODUCTION_SIGNING_SMOKE:-false}" != "true" ] && \
+		[ "${IN_SIGNING_PREFLIGHT:-false}" != "true" ]; then
+		echo "::error::public Desktop Preview releases must be dispatched by release-preview.yml" >&2
+		exit 1
+	fi
 	if [ -n "${IN_TAG:-}" ]; then
 		echo "::error::Desktop Preview versions are synthesized from protected main-v2; tag must be empty" >&2
 		exit 1
@@ -27,10 +33,16 @@ if [ "${IN_CHANNEL:-stable}" = "preview" ] || [ "${IN_CHANNEL:-stable}" = "canar
 		echo "::error::preview base version must be MAJOR.MINOR.PATCH, got: $base" >&2
 		exit 1
 	fi
-	version="v${base}-preview.${RUN_NUMBER}"
+	preview_number="${IN_PREVIEW_NUMBER:-${RUN_NUMBER:-}}"
+	if [[ ! "$preview_number" =~ ^(0|[1-9][0-9]*)$ ]]; then
+		echo "::error::preview number must be a non-negative integer, got: $preview_number" >&2
+		exit 1
+	fi
+	version="v${base}-preview.${preview_number}"
 	tag="desktop-${version}"
 	channel="preview"
 	prerelease="true"
+	notes_version="$version"
 else
 	if [ -n "${IN_TAG:-}" ]; then
 		tag="${IN_TAG}"
@@ -51,8 +63,14 @@ else
 	fi
 	channel="stable"
 	case "$version" in
-	*-*) prerelease="true" ;;
-	*) prerelease="false" ;;
+	*-*)
+		prerelease="true"
+		notes_version="${version%%-*}"
+		;;
+	*)
+		prerelease="false"
+		notes_version="$version"
+		;;
 	esac
 fi
 
@@ -61,6 +79,7 @@ fi
 	echo "version=$version"
 	echo "channel=$channel"
 	echo "prerelease=$prerelease"
+	echo "notes_version=$notes_version"
 } >>"$GITHUB_OUTPUT"
 
 echo "resolved: tag=$tag version=$version channel=$channel prerelease=$prerelease"

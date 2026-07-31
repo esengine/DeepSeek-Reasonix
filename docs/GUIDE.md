@@ -296,7 +296,7 @@ host          = "203.0.113.7"
 user          = "dev"
 identity_file = "~/.ssh/id_ed25519"
 workspace     = "~/projects/app"
-serve_install = "auto"            # auto | npm | upload | never
+serve_install = "auto"            # Remote CLI: auto | npm | upload | never
 
 [[remote.hosts.forwards]]
 type   = "local"                  # local (-L) | remote (-R)
@@ -653,7 +653,14 @@ them without an extra prompt. Command/process substitution, a dynamic command
 name, `eval`, `source`, shell `-c`, inline runtime code, and unparseable forms
 require a human in interactive Ask/Auto. Headless Ask/Auto/DontAsk reject that
 nested/indirect class unless an exact literal exists; YOLO may bypass it.
-`reasonix run` otherwise stays autonomous and always honours `deny`.
+Advanced users can set `[permissions] allow_dynamic_bash = true` to let an
+Allow fallback, including Auto, cover that class; explicit `ask` and `deny`
+rules still take precedence.
+Because a headless run has no approval UI, the default Ask posture also fails
+closed on ordinary writer fallback and explicit ask rules. Use
+`reasonix run --auto ...`, `-y`, or `--permission-mode auto` when unattended
+automation should allow ordinary writer fallback; configured `ask` and `deny`
+rules always remain authoritative.
 
 Ask is not read-only: after approval, a writer can still run. Permissions decide
 whether to allow or prompt; the Sandbox is the enforced capability boundary.

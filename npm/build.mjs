@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { publishPackages } from "./publish.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -25,6 +26,10 @@ if (!tag) {
 const version = tag.replace(/^(npm-)?v/, "");
 const binaryVersion = `v${version}`;
 const publish = process.argv.includes("--publish");
+const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
+  cwd: ROOT,
+  encoding: "utf8",
+}).trim();
 
 rmSync(STAGE, { recursive: true, force: true });
 mkdirSync(STAGE, { recursive: true });
@@ -70,6 +75,7 @@ for (const t of TARGETS) {
           type: "git",
           url: "git+https://github.com/esengine/DeepSeek-Reasonix.git",
         },
+        reasonixCandidateSha: candidateSha,
       },
       null,
       2,
@@ -87,6 +93,7 @@ const mainPkg = JSON.parse(
   readFileSync(join(HERE, "reasonix", "package.json"), "utf8"),
 );
 mainPkg.version = version;
+mainPkg.reasonixCandidateSha = candidateSha;
 for (const key of Object.keys(mainPkg.optionalDependencies)) {
   mainPkg.optionalDependencies[key] = version;
 }
@@ -100,24 +107,11 @@ if (!publish) {
   process.exit(0);
 }
 
-// Three independent dist-tags: a `-canary.` build is the opt-in tester channel
-// (`canary`); any other prerelease (rc, beta) ships under `next`; a stable
-// version is promoted to `latest` automatically. The old "0.x stable owns
-// latest" rule was a migration guard while the 1.x Go line was rc-only — once
-// 1.x went stable it left `latest` pinned at 0.53.2, silently downgrading
-// every `npm update -g` / `pnpm update -g` user back to the retired line
-// (#5822). Stable now always moves `latest`; release-npm.yml verifies the tag
-// landed after publish.
-const distTag = version.includes("-canary.")
-  ? "canary"
-  : version.includes("-")
-    ? "next"
-    : "latest";
-const publishArgs = ["publish", "--access", "public", "--tag", distTag];
-
-for (const sub of subPackages) {
-  console.log(`publish ${sub.name}@${version} (${distTag})`);
-  execFileSync("npm", publishArgs, { cwd: sub.dir, stdio: "inherit" });
-}
-console.log(`publish reasonix@${version} (${distTag})`);
-execFileSync("npm", publishArgs, { cwd: mainDir, stdio: "inherit" });
+// Publish every immutable package before advancing the public channel. Recovery
+// reuses packages that already prove the same candidate SHA, fills only missing
+// packages, and never moves latest/next/canary back to an older version.
+publishPackages({
+  packages: [...subPackages, { name: "reasonix", dir: mainDir }],
+  version,
+  candidateSha,
+});

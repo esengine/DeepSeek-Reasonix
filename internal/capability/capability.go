@@ -233,6 +233,7 @@ func RenderTransientBlock(d RouteDecision) string {
 		return ""
 	}
 	var b strings.Builder
+	seenLines := make(map[string]struct{}, len(d.Candidates))
 	b.WriteString(`<capability-route version="1">` + "\n")
 	b.WriteString("Relevant capabilities for this turn:\n")
 	for _, c := range d.Candidates {
@@ -245,9 +246,10 @@ func RenderTransientBlock(d RouteDecision) string {
 				target += "/" + e.ConnectName
 			}
 		}
-		fmt.Fprintf(&b, "- %s %s: %s", target, c.Policy, c.Reason)
+		var line strings.Builder
+		fmt.Fprintf(&line, "- %s %s: %s", target, c.Policy, c.Reason)
 		if e.Status != "" && e.Status != StatusReady {
-			fmt.Fprintf(&b, " (status=%s)", e.Status)
+			fmt.Fprintf(&line, " (status=%s)", e.Status)
 		}
 		switch {
 		case d.Delivery || proxyMCP:
@@ -257,18 +259,24 @@ func RenderTransientBlock(d RouteDecision) string {
 			if e.Status != StatusReady {
 				switch e.Kind {
 				case KindMCPTool:
-					fmt.Fprintf(&b, "; call use_capability(action=\"call\", capability_id=%q, arguments={...}) — it connects the server on demand after approval", e.ID)
+					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q, arguments={...}) — it connects the server on demand after approval", e.ID)
 				case KindMCPServer:
-					fmt.Fprintf(&b, "; call use_capability(action=\"call\", capability_id=%q) to connect it (after approval) and list its tools, then call a listed mcp-tool id", e.ID)
+					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q) to connect it (after approval) and list its tools, then call a listed mcp-tool id", e.ID)
 				}
 			}
 		case e.ConnectSource != "":
 			if e.ConnectName != "" {
-				fmt.Fprintf(&b, "; first call connect_tool_source with source=%q name=%q", e.ConnectSource, e.ConnectName)
+				fmt.Fprintf(&line, "; first call connect_tool_source with source=%q name=%q", e.ConnectSource, e.ConnectName)
 			} else {
-				fmt.Fprintf(&b, "; first call connect_tool_source with source=%q", e.ConnectSource)
+				fmt.Fprintf(&line, "; first call connect_tool_source with source=%q", e.ConnectSource)
 			}
 		}
+		rendered := line.String()
+		if _, duplicate := seenLines[rendered]; duplicate {
+			continue
+		}
+		seenLines[rendered] = struct{}{}
+		b.WriteString(rendered)
 		b.WriteByte('\n')
 	}
 	b.WriteString("Policy: suggest means consider it; prefer means use it unless clearly unnecessary; require means call it or report a host-proven unavailable state. Do not treat planner claims about tool unavailability as facts.\n")

@@ -151,12 +151,15 @@ import {
   type RightDockMode,
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
+  TERMINAL_DEFAULT_HEIGHT,
+  TERMINAL_MIN_HEIGHT,
   applyLayoutStyleDefaults,
   clampCreationRightDockTreeWidth,
   clampCreationSidebarWidth,
   clampRightDockPreviewWidth,
   clampRightDockTreeWidth,
   clampSidebarWidth,
+  clampTerminalHeight,
   defaultCreationRightDockTreeWidth,
   defaultCreationSidebarWidth,
   defaultRightDockTreeWidth,
@@ -164,8 +167,11 @@ import {
   saveRightDockPreviewWidth,
   saveRightDockTreeWidth,
   saveSidebarCollapsed,
-  saveWorkspacePanelOpen,
   saveSidebarWidth,
+  saveTerminalHeight,
+  saveTerminalPanelOpen,
+  terminalMaxHeight,
+  saveWorkspacePanelOpen,
   useLayoutStore,
 } from "./store/layout";
 import { useOverlayStore } from "./store/overlays";
@@ -1188,6 +1194,7 @@ export default function App() {
   const [sidebarResizing, setSidebarResizing] = useState(false);
   const [liveSidebarWidth, setLiveSidebarWidth] = useState<number | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  const [viewportHeight, setViewportHeight] = useState(() => (typeof window === "undefined" ? 720 : window.innerHeight));
   const workspacePanelOpen = useLayoutStore((s) => s.workspacePanelOpen);
   const setWorkspacePanelOpen = useLayoutStore((s) => s.setWorkspacePanelOpen);
   const rightDockTreeWidth = useLayoutStore((s) => s.rightDockTreeWidth);
@@ -1243,10 +1250,17 @@ export default function App() {
 
   const [workspacePanelResizing, setWorkspacePanelResizing] = useState(false);
   const [liveWorkspacePanelRenderWidth, setLiveWorkspacePanelRenderWidth] = useState<number | null>(null);
+  const [liveTerminalHeight, setLiveTerminalHeight] = useState<number | null>(null);
+  const [terminalContentVisible, setTerminalContentVisible] = useState(false);
+  const terminalResizing = liveTerminalHeight !== null;
   const workspacePanelMaximized = useLayoutStore((s) => s.workspacePanelMaximized);
   const setWorkspacePanelMaximized = useLayoutStore((s) => s.setWorkspacePanelMaximized);
   const rightDockMode = useLayoutStore((s) => s.rightDockMode);
   const setRightDockMode = useLayoutStore((s) => s.setRightDockMode);
+  const terminalPanelOpen = useLayoutStore((s) => s.terminalPanelOpen);
+  const setTerminalPanelOpen = useLayoutStore((s) => s.setTerminalPanelOpen);
+  const terminalHeight = useLayoutStore((s) => s.terminalHeight);
+  const setTerminalHeight = useLayoutStore((s) => s.setTerminalHeight);
   const [dockRefreshKey, setDockRefreshKey] = useState(0);
   const [fileRefRefreshKey, setFileRefRefreshKey] = useState(0);
   const refreshComposerFileRefs = useCallback(() => setFileRefRefreshKey((value) => value + 1), []);
@@ -1483,7 +1497,10 @@ export default function App() {
   }, [closeTransientOverlays]);
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const onResize = () => setViewportWidth(window.innerWidth);
+    const onResize = () => {
+      setViewportWidth(window.innerWidth);
+      setViewportHeight(window.innerHeight);
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -1546,12 +1563,11 @@ export default function App() {
 
   const storedWorkspacePanelRenderWidth = workspacePanelMaximized ? preferredWorkspacePanelWidth : resolvedWorkspacePanelWidth;
   const workspacePanelRenderWidth = liveWorkspacePanelRenderWidth ?? storedWorkspacePanelRenderWidth;
-  // The terminal is a bottom drawer, so it must remain available even when a
-  // narrow window cannot satisfy the right-side workspace panel's width.
+  // The terminal is an independent bottom drawer; workspace panel renderability
+  // no longer depends on terminal mode.
   const workspacePanelRenderable =
     workspacePanelOpen && (
       workspacePanelMaximized ||
-      rightDockMode === "terminal" ||
       workspacePanelRenderWidth >= rightDockMinRenderWidth
     );
   const workspacePanelGridOpen = workspacePanelRenderable && !workspacePanelMaximized;
@@ -2683,6 +2699,89 @@ export default function App() {
     [rightDockDetailActive, rightDockTreeMinWidth, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
   );
 
+  const terminalRenderHeight = clampTerminalHeight(terminalHeight, viewportHeight);
+  const terminalResizeMaxHeight = terminalMaxHeight(viewportHeight);
+  const setSavedTerminalHeight = useCallback(
+    (height: number) => {
+      const next = clampTerminalHeight(height, viewportHeight);
+      setTerminalHeight(next);
+      saveTerminalHeight(next);
+    },
+    [setTerminalHeight, viewportHeight],
+  );
+
+  const startTerminalResize = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (!terminalPanelOpen) return;
+      const layout = layoutRef.current;
+      if (!layout) return;
+      event.preventDefault();
+      closeTransientOverlays();
+      const startY = event.clientY;
+      const startHeight = terminalRenderHeight;
+      let nextHeight = startHeight;
+      const liveResize = createRafResizeUpdater({
+        target: layout,
+        separator: event.currentTarget,
+        cssVar: "--terminal-height",
+        onApply: setLiveTerminalHeight,
+      });
+      const onMove = (moveEvent: PointerEvent) => {
+        const delta = startY - moveEvent.clientY;
+        nextHeight = clampTerminalHeight(startHeight + delta, viewportHeight);
+        liveResize.schedule(nextHeight);
+      };
+      const onDone = () => {
+        liveResize.flush();
+        setLiveTerminalHeight(null);
+        setSavedTerminalHeight(nextHeight);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onDone);
+        window.removeEventListener("pointercancel", onDone);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+      document.body.style.cursor = "row-resize";
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onDone);
+      window.addEventListener("pointercancel", onDone);
+    },
+    [closeTransientOverlays, setLiveTerminalHeight, setSavedTerminalHeight, terminalPanelOpen, terminalRenderHeight, viewportHeight],
+  );
+
+  const resizeTerminalWithKeyboard = useCallback(
+    (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (!terminalPanelOpen) return;
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault();
+        setSavedTerminalHeight(terminalRenderHeight + (event.key === "ArrowUp" ? 16 : -16));
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setSavedTerminalHeight(TERMINAL_MIN_HEIGHT);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setSavedTerminalHeight(terminalResizeMaxHeight);
+      }
+    },
+    [setSavedTerminalHeight, terminalPanelOpen, terminalRenderHeight, terminalResizeMaxHeight],
+  );
+
+  // Manage terminal content visibility for open/close animation.
+  // On open: mount content immediately. On close: wait for the grid-template-rows
+  // transition to finish before unmounting.
+  const handleTerminalTransitionEnd = useCallback((event: React.TransitionEvent<HTMLDivElement>) => {
+    if (event.propertyName === "grid-template-rows" && !terminalPanelOpen) {
+      setTerminalContentVisible(false);
+    }
+  }, [terminalPanelOpen]);
+
+  useEffect(() => {
+    if (terminalPanelOpen) {
+      setTerminalContentVisible(true);
+    }
+  }, [terminalPanelOpen]);
+
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
       closeTransientOverlays();
@@ -2742,24 +2841,33 @@ export default function App() {
     [openWorkspacePanel],
   );
 
+  const toggleTerminalPanel = useCallback(() => {
+    setTerminalPanelOpen((prev) => {
+      const next = !prev;
+      saveTerminalPanelOpen(next);
+      return next;
+    });
+  }, [setTerminalPanelOpen]);
+
   const openTerminalForPath = useCallback(
     (path = ".") => {
-      openRightDockMode("terminal");
+      setTerminalPanelOpen(true);
+      saveTerminalPanelOpen(true);
       if (!activeTabId) return;
       void useTerminalStore.getState().createSession(activeTabId, path || ".", "default").catch(() => {});
     },
-    [activeTabId, openRightDockMode],
+    [activeTabId, setTerminalPanelOpen],
   );
 
   useGlobalShortcut("terminal.toggle", () => {
-    if (workspacePanelRenderable && rightDockMode === "terminal") closeWorkspacePanel();
-    else openRightDockMode("terminal");
-  }, [closeWorkspacePanel, openRightDockMode, rightDockMode, workspacePanelRenderable]);
+    toggleTerminalPanel();
+  }, [toggleTerminalPanel]);
   useGlobalShortcut("terminal.newSession", () => {
     if (!activeTabId) return;
-    openRightDockMode("terminal");
+    setTerminalPanelOpen(true);
+    saveTerminalPanelOpen(true);
     void useTerminalStore.getState().createSession(activeTabId, ".", "default").catch(() => {});
-  }, [activeTabId, openRightDockMode]);
+  }, [activeTabId, setTerminalPanelOpen]);
 
   useEffect(() => {
     if (!remoteExplorerOpen) return;
@@ -2861,8 +2969,9 @@ export default function App() {
         "--chat-min-width": `${chatReservedWidth}px`,
         "--workspace-width": `${workspacePanelRenderWidth}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
+        "--terminal-height": `${liveTerminalHeight ?? (terminalPanelOpen ? terminalRenderHeight : 0)}px`,
       }) as CSSProperties,
-    [chatReservedWidth, sidebarRenderWidth, workspacePanelRenderWidth],
+    [chatReservedWidth, liveTerminalHeight, sidebarRenderWidth, terminalPanelOpen, terminalRenderHeight, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -3568,7 +3677,7 @@ export default function App() {
       },
       { id: "cmd-memory", group: t("palette.group.commands"), title: t("palette.cmd.memory"), icon: <Brain size={15} />, compact: true, keywords: ["memory", "记忆"], run: () => setSettingsTarget("memory") },
       { id: "cmd-models", group: t("palette.group.commands"), title: t("palette.cmd.models"), icon: <Cpu size={15} />, compact: true, keywords: ["model", "模型"], run: () => setSettingsTarget("models") },
-      { id: "cmd-terminal", group: t("palette.group.commands"), title: t("rightDock.terminal"), icon: <TerminalSquare size={15} />, compact: true, keywords: ["terminal", "shell", "终端"], run: () => openRightDockMode("terminal") },
+      { id: "cmd-terminal", group: t("palette.group.commands"), title: t("rightDock.terminal"), icon: <TerminalSquare size={15} />, compact: true, keywords: ["terminal", "shell", "终端"], run: () => toggleTerminalPanel() },
     ];
     const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const dayLabel = (ms: number) => {
@@ -3845,13 +3954,16 @@ export default function App() {
           sidebarCollapsed ? "layout--sidebar-collapsed" : "",
           sidebarResizing ? "layout--resizing layout--sidebar-resizing" : "",
           workspacePanelGridOpen ? "layout--workspace-open" : "",
-          workspacePanelGridOpen && rightDockMode === "terminal" ? "layout--terminal-open" : "",
+          "layout--terminal-drawer-open",
+          terminalPanelOpen ? "layout--terminal-drawer-expanded" : "",
+          terminalResizing ? "layout--terminal-resizing" : "",
           workspacePanelOpen && workspacePanelMaximized ? "layout--workspace-maximized" : "",
           workspacePanelResizing ? "layout--resizing layout--workspace-resizing" : "",
         ]
           .filter(Boolean)
           .join(" ")}
         style={layoutStyle}
+        onTransitionEnd={handleTerminalTransitionEnd}
       >
         {!appChromeHidden && (
           <AppChrome
@@ -4291,8 +4403,8 @@ export default function App() {
                     className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
                     type="button"
                     aria-label={t("rightDock.terminal")}
-                    aria-pressed={workspacePanelRenderable && rightDockMode === "terminal"}
-                    onClick={() => openRightDockMode("terminal")}
+                    aria-pressed={terminalPanelOpen}
+                    onClick={toggleTerminalPanel}
                   >
                     <TerminalSquare size={14} />
                   </button>
@@ -4421,7 +4533,7 @@ export default function App() {
           </main>
 
           {!sidebarImDetailConnection && (
-          <footer className="footer" ref={footerRef}>
+          <footer className={["footer", terminalPanelOpen && !sidebarCreation ? "footer--compact" : ""].filter(Boolean).join(" ")} ref={footerRef}>
             {showTodos && (
               <TodoPanel
                 key={scopedTodoBatch}
@@ -4644,9 +4756,9 @@ export default function App() {
                 <button
                   type="button"
                   role="tab"
-                  aria-selected={rightDockMode === "terminal"}
-                  className={`workbench-dock__tab${rightDockMode === "terminal" ? " workbench-dock__tab--active" : ""}`}
-                  onClick={() => openRightDockMode("terminal")}
+                  aria-selected={terminalPanelOpen}
+                  className={`workbench-dock__tab${terminalPanelOpen ? " workbench-dock__tab--active" : ""}`}
+                  onClick={toggleTerminalPanel}
                 >
                   <TerminalSquare size={13} />
                   <span className="workbench-dock__tab-label">{t("rightDock.terminal")}</span>
@@ -4657,16 +4769,6 @@ export default function App() {
               {rightDockMode === "remote" ? (
                 <Suspense fallback={null}>
                   <RemotePanel onClose={() => setWorkspacePanel(false)} />
-                </Suspense>
-              ) : rightDockMode === "terminal" ? (
-                <Suspense fallback={<div className="terminal-empty"><span className="terminal-empty__spinner" />{t("terminal.loading")}</div>}>
-                  <TerminalPanel
-                    tabId={activeTabId ?? ""}
-                    cwd={state.meta?.cwd}
-                    readOnly={Boolean(activeTab?.readOnly)}
-                    onClose={() => setWorkspacePanel(false)}
-                    onAddOutput={(sessionId) => void addTerminalOutputToComposer(sessionId)}
-                  />
                 </Suspense>
               ) : rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
                 <ContextPanel
@@ -4715,6 +4817,45 @@ export default function App() {
           </aside>
         )}
 
+        <>
+          <aside
+            className="terminal-drawer"
+            aria-label={t("terminal.title")}
+          >
+            {terminalContentVisible && (
+              <Suspense fallback={<div className="terminal-empty"><span className="terminal-empty__spinner" />{t("terminal.loading")}</div>}>
+                <TerminalPanel
+                  tabId={activeTabId ?? ""}
+                  cwd={state.meta?.cwd}
+                  readOnly={Boolean(activeTab?.readOnly)}
+                  onClose={() => {
+                    setTerminalPanelOpen(false);
+                    saveTerminalPanelOpen(false);
+                  }}
+                  onAddOutput={(sessionId) => void addTerminalOutputToComposer(sessionId)}
+                />
+              </Suspense>
+            )}
+          </aside>
+          <button
+            className="terminal-drawer-resizer"
+            type="button"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label={t("terminal.resize")}
+            aria-valuemin={TERMINAL_MIN_HEIGHT}
+            aria-valuemax={terminalResizeMaxHeight}
+            aria-valuenow={liveTerminalHeight ?? terminalRenderHeight}
+            aria-hidden={!terminalPanelOpen}
+            tabIndex={terminalPanelOpen ? 0 : -1}
+            onPointerDown={startTerminalResize}
+            onKeyDown={resizeTerminalWithKeyboard}
+            onDoubleClick={() => {
+              setSavedTerminalHeight(TERMINAL_DEFAULT_HEIGHT);
+            }}
+          />
+        </>
+
         {!sidebarImDetailConnection && (
           <StatusBar
             context={state.context}
@@ -4748,7 +4889,6 @@ export default function App() {
             }}
           />
         )}
-
       </div>
 
       {histView !== null && (

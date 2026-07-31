@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -406,7 +407,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		Content:          "Let me check.",
 		ReasoningContent: "I should look at main.go first.",
 		ToolCalls: []provider.ToolCall{{
-			ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
+			ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`, ThoughtSignature: "gemini-signed",
 		}},
 	})
 	s.Add(provider.Message{
@@ -436,8 +437,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		if loaded.Messages[i].ReasoningContent != m.ReasoningContent {
 			t.Errorf("message %d reasoning mismatch", i)
 		}
-		if len(loaded.Messages[i].ToolCalls) != len(m.ToolCalls) {
-			t.Errorf("message %d tool_calls count mismatch", i)
+		if !reflect.DeepEqual(loaded.Messages[i].ToolCalls, m.ToolCalls) {
+			t.Errorf("message %d tool_calls mismatch:\n got: %#v\nwant: %#v", i, loaded.Messages[i].ToolCalls, m.ToolCalls)
 		}
 	}
 }

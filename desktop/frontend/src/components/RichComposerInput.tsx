@@ -16,6 +16,7 @@ import {
   sortComposerInvocations,
   type ComposerInvocation,
 } from "../lib/invocationDisplay";
+import { activeRefTokenRe } from "../lib/refToken";
 import type { CommandInfo } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
 
@@ -473,6 +474,7 @@ export function recoverSelectionAfterEdit(
 export function slashQueryAt(text: string, selection: RichComposerSelection): RichSlashQuery | null {
   if (selection.start !== selection.end) return null;
   const before = text.slice(0, selection.start);
+  if (activeRefTokenRe.test(before)) return null;
   const match = /\/([A-Za-z0-9_.:-]*)$/.exec(before);
   if (!match) return null;
   const slashOffset = before.length - match[1].length - 1;

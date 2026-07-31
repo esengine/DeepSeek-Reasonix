@@ -15,7 +15,9 @@ func TestBrokerProviderRequestRoundTripIsLossless(t *testing.T) {
 	want := provider.Request{
 		Messages: []provider.Message{{
 			Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "thought",
-			ReasoningSignature: "signed", ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "read", Arguments: `{"path":"x"}`}},
+			ReasoningSignature: "signed", ToolCalls: []provider.ToolCall{{
+				ID: "call-1", Name: "read", Arguments: `{"path":"x"}`, ThoughtSignature: "gemini-signed",
+			}},
 		}},
 		Tools:       []provider.ToolSchema{{Name: "read", Description: "read a file", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)}},
 		Temperature: &temperature, MaxTokens: 4096,
@@ -32,6 +34,31 @@ func TestBrokerProviderRequestRoundTripIsLossless(t *testing.T) {
 	got := decoded.(BrokerStreamOpenParams).Request.ProviderRequest()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("provider request changed\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestBrokerProviderChunkRoundTripPreservesGeminiThoughtSignature(t *testing.T) {
+	want := provider.Chunk{
+		Type: provider.ChunkToolCall,
+		ToolCall: &provider.ToolCall{
+			ID: "call-1", Name: "read", Arguments: `{"path":"x"}`, ThoughtSignature: "gemini-signed",
+		},
+	}
+	raw, err := json.Marshal(BrokerStreamChunkParams{
+		StreamID: "stream-1",
+		Seq:      1,
+		Chunk:    BrokerProviderChunkFromProvider(want),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeBrokerNotificationParams(MethodBrokerStreamChunk, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.(BrokerStreamChunkParams).Chunk.ProviderChunk()
+	if !reflect.DeepEqual(got.ToolCall, want.ToolCall) {
+		t.Fatalf("provider tool call changed\n got: %#v\nwant: %#v", got.ToolCall, want.ToolCall)
 	}
 }
 

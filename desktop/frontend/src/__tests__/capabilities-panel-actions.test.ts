@@ -435,6 +435,7 @@ console.log("capabilities panel MCP actions");
     await flush();
   });
   await waitFor("github server row", () => Boolean(document.querySelector(".cap-mcp-list-row__name")?.textContent?.includes("github")));
+  ok(Boolean(findButton("Remove server")), "configured MCP exposes a removal action directly in the server list");
   ok(document.body.textContent?.includes("1 unavailable"), "server list summary reports one quarantined tool");
   ok(!document.body.textContent?.includes("invalid input schema: bad nested type"), "server list keeps raw tool diagnostics out of the overview");
 

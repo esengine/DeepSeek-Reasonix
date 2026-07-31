@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/remote"
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
+	"reasonix/internal/remote/protocol"
 )
 
 // ── View structs mirrored in frontend/src/lib/types.ts ──
@@ -517,13 +518,15 @@ type desktopRemoteManager struct {
 	mu    sync.Mutex
 	hosts map[string]*managedHost
 
-	newClient   func(remote.Options) (desktopSSHClient, error)
-	ensureServe func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error)
-	stopServe   func(context.Context, bootstrap.Conn, string) error
-	serveLogs   func(context.Context, bootstrap.Conn, string, int, *strings.Builder) error
-	localBinary func() string
-	promptGate  chan struct{}
-	promptSeq   uint64
+	newClient          func(remote.Options) (desktopSSHClient, error)
+	ensureServe        func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error)
+	ensureWorkbenchCLI func(context.Context, bootstrap.Conn, bootstrap.WorkbenchOptions) (bootstrap.WorkbenchCLI, error)
+	stopServe          func(context.Context, bootstrap.Conn, string) error
+	serveLogs          func(context.Context, bootstrap.Conn, string, int, *strings.Builder) error
+	localBinary        func() string
+	fetchRemoteBinary  func(context.Context, string, string, string) ([]byte, error)
+	promptGate         chan struct{}
+	promptSeq          uint64
 }
 
 func newDesktopRemoteManager(sink remoteEventSink) *desktopRemoteManager {
@@ -533,13 +536,15 @@ func newDesktopRemoteManager(sink remoteEventSink) *desktopRemoteManager {
 		newClient: func(opts remote.Options) (desktopSSHClient, error) {
 			return remote.New(opts)
 		},
-		ensureServe: bootstrap.EnsureServe,
-		stopServe:   bootstrap.Stop,
+		ensureServe:        bootstrap.EnsureServe,
+		ensureWorkbenchCLI: bootstrap.EnsureWorkbenchCLI,
+		stopServe:          bootstrap.Stop,
 		serveLogs: func(ctx context.Context, conn bootstrap.Conn, workspace string, n int, out *strings.Builder) error {
 			return bootstrap.Logs(ctx, conn, workspace, n, out)
 		},
-		localBinary: desktopCLIBinaryPath,
-		promptGate:  make(chan struct{}, 1),
+		localBinary:       desktopCLIBinaryPath,
+		fetchRemoteBinary: downloadRemoteCLIBinary,
+		promptGate:        make(chan struct{}, 1),
 	}
 }
 
@@ -1285,12 +1290,14 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)
 	}
 	res, err := m.ensureServe(opCtx, c, bootstrap.Options{
-		Workspace:   workspace,
-		Install:     entry.ServeInstallMode(),
-		LocalBinary: m.localBinary(),
-		LocalGOOS:   runtime.GOOS,
-		LocalGOARCH: runtime.GOARCH,
-		MinVersion:  bootstrap.MinServeVersion,
+		Workspace:      workspace,
+		Install:        entry.ServeInstallMode(),
+		LocalBinary:    m.localBinary(),
+		LocalGOOS:      runtime.GOOS,
+		LocalGOARCH:    runtime.GOARCH,
+		ProductVersion: version,
+		FetchBinary:    m.fetchRemoteBinary,
+		MinVersion:     bootstrap.MinServeVersion,
 		Progress: func(step, detail string) {
 			view := RemoteServerView{HostID: hostID, Workspace: workspace, State: step, Message: detail}
 			m.publishServerIfCurrent(hostID, mh, view, "")
@@ -1333,6 +1340,38 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)
 	}
 	return view, res.Token, nil
+}
+
+// EnsureWorkbenchCLI prepares the exact Host executable required by the
+// Desktop's strict Remote Workbench Build ID. The per-host bootstrap mutex also
+// prevents the legacy serve installer from racing the Workbench installer.
+func (m *desktopRemoteManager) EnsureWorkbenchCLI(ctx context.Context, hostID string, entry config.RemoteHostEntry, expected protocol.BuildID) (string, error) {
+	mh := m.managed(hostID)
+	if mh == nil || mh.client == nil {
+		return "", fmt.Errorf("host %q is not connected", hostID)
+	}
+	mh.serveMu.Lock()
+	defer mh.serveMu.Unlock()
+	if !m.isCurrent(hostID, mh) {
+		return "", fmt.Errorf("host %q connection was replaced", hostID)
+	}
+	opCtx, cancel := managedOperationContext(ctx, mh)
+	defer cancel()
+	result, err := m.ensureWorkbenchCLI(opCtx, mh.client, bootstrap.WorkbenchOptions{
+		Install:       entry.ServeInstallMode(),
+		LocalBinary:   m.localBinary(),
+		LocalGOOS:     runtime.GOOS,
+		LocalGOARCH:   runtime.GOARCH,
+		ExpectedBuild: expected,
+		FetchBinary:   m.fetchRemoteBinary,
+	})
+	if err != nil {
+		return "", err
+	}
+	if !m.isCurrent(hostID, mh) {
+		return "", fmt.Errorf("host %q connection was replaced", hostID)
+	}
+	return result.Path, nil
 }
 
 func (m *desktopRemoteManager) StopServer(hostID string) error {

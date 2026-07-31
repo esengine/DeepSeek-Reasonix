@@ -56,6 +56,26 @@ func TestBashSubjectRequiresExplicitApproval(t *testing.T) {
 	}
 }
 
+func TestPowerShellCmdletDenyPrefixIsCaseInsensitive(t *testing.T) {
+	p := New("allow", nil, nil, []string{
+		"Set-Content",
+		"Bash(Add-Content:*)",
+		"Bash(Out-File:*)",
+	})
+	for _, command := range []string{
+		`set-content -LiteralPath app.go -Value bad`,
+		`ADD-CONTENT -LiteralPath app.go -Value bad`,
+		`out-file -FilePath app.go`,
+	} {
+		if got := p.DecideSubject("bash", false, command); got != Deny {
+			t.Fatalf("DecideSubject(%q) = %v, want Deny", command, got)
+		}
+	}
+	if got := p.DecideSubject("bash", false, `Set-Location src`); got != Allow {
+		t.Fatalf("unrelated PowerShell command = %v, want Allow", got)
+	}
+}
+
 func TestPolicyDynamicBashRequiresExplicitApproval(t *testing.T) {
 	const command = "git status $(touch /tmp/reasonix-permission-bypass)"
 
@@ -65,6 +85,10 @@ func TestPolicyDynamicBashRequiresExplicitApproval(t *testing.T) {
 		want Decision
 	}{
 		{name: "writer fallback allow cannot bypass", p: New("allow", nil, nil, nil), want: Ask},
+		{name: "explicit dynamic fallback opt-in", p: New("allow", nil, nil, nil).WithAllowDynamicBashFallback(true), want: Allow},
+		{name: "dynamic opt-in still requires allow fallback", p: New("ask", nil, nil, nil).WithAllowDynamicBashFallback(true), want: Ask},
+		{name: "dynamic opt-in keeps ask precedence", p: New("allow", nil, []string{"Bash(git*)"}, nil).WithAllowDynamicBashFallback(true), want: Ask},
+		{name: "dynamic opt-in keeps deny precedence", p: New("allow", nil, nil, []string{"Bash(git*)"}).WithAllowDynamicBashFallback(true), want: Deny},
 		{name: "bare allow cannot bypass", p: New("ask", []string{"Bash"}, nil, nil), want: Ask},
 		{name: "ordinary glob cannot bypass", p: New("ask", []string{"Bash(git*)"}, nil, nil), want: Ask},
 		{name: "legacy prefix cannot bypass", p: New("ask", []string{"Bash(git *)"}, nil, nil), want: Ask},

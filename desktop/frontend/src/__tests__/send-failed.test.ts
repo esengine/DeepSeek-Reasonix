@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { acceptsRuntimeEventEpoch, initialState, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
+import { acceptsRuntimeEventEpoch, initialState, normalizeTurnSubmit, reducer, replayPendingPromptsForActiveTab, runtimeReadyForSubmit } from "../lib/useController";
 import { continueDelivery } from "../lib/deliveryContinue";
 import {
   activateGoalAndSubmit,
@@ -127,6 +127,14 @@ eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", r
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "lease_blocked", epoch: "e1" } }), false, "lease-blocked runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: false, eventChannel: "", cwd: "", runtime: { phase: "failed", epoch: "e1" } }), false, "failed runtime cannot submit");
 eq(runtimeReadyForSubmit({ label: "", ready: true, eventChannel: "", cwd: "", runtime: { phase: "ready", epoch: "e1" } }), true, "ready runtime can submit");
+eq(normalizeTurnSubmit(" visible prompt ", " provider prompt ").submit, "provider prompt", "submit normalization trims provider input");
+let rejectedVisibleOnlySubmit = false;
+try {
+  normalizeTurnSubmit("visible prompt", "   ");
+} catch {
+  rejectedVisibleOnlySubmit = true;
+}
+eq(rejectedVisibleOnlySubmit, true, "visible display text cannot start an empty provider turn");
 eq(acceptsRuntimeEventEpoch("e2", "e1"), false, "old runtime epoch is rejected");
 eq(acceptsRuntimeEventEpoch("e2", "e2"), true, "current runtime epoch is accepted");
 eq(acceptsRuntimeEventEpoch(undefined, "e1"), true, "first runtime epoch can establish the fence");

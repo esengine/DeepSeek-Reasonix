@@ -72,6 +72,9 @@ func TestDynamicBashRequiresInteractiveHumanInAutoAndApprovedPlan(t *testing.T) 
 			if approval.Fresh {
 				t.Fatal("dynamic Bash must keep the ordinary four-choice approval UI")
 			}
+			if approval.Reason != dynamicBashApprovalReason {
+				t.Fatalf("dynamic Bash approval reason = %q, want actionable classification", approval.Reason)
+			}
 			assertDynamicApprovalPending(t, done)
 			c.Approve(approval.ID, true, false, false)
 			select {
@@ -277,6 +280,12 @@ func TestHeadlessDynamicBashApprovalModes(t *testing.T) {
 	if err != nil || !allow || reason != "" {
 		t.Fatalf("headless exact literal = (%v,%q,%v), want allow", allow, reason, err)
 	}
+
+	optIn := permission.New("ask", nil, nil, nil).WithAllowDynamicBashFallback(true)
+	allow, reason, err = BuildHeadlessApprovalGate(optIn, ToolApprovalAuto).Check(context.Background(), "bash", args, false)
+	if err != nil || !allow || reason != "" {
+		t.Fatalf("headless dynamic fallback opt-in = (%v,%q,%v), want allow", allow, reason, err)
+	}
 }
 
 func TestHeadlessExactOnlyBashApprovalModes(t *testing.T) {
@@ -285,7 +294,7 @@ func TestHeadlessExactOnlyBashApprovalModes(t *testing.T) {
 		mode string
 		want bool
 	}{
-		{mode: ToolApprovalAsk, want: true},
+		{mode: ToolApprovalAsk},
 		{mode: ToolApprovalAuto, want: true},
 		{mode: ToolApprovalDontAsk},
 		{mode: ToolApprovalYolo, want: true},

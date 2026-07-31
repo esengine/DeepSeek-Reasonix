@@ -1663,8 +1663,9 @@ func TestBuildTabControllerRestoresPinnedSessionBeforeTopicFallback(t *testing.T
 		t.Fatalf("restored session path = %q, want pinned %q", got, pinned)
 	}
 	history := tab.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "full 64-turn conversation" {
-		t.Fatalf("restored history = %+v, want pinned long conversation", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "full 64-turn conversation" {
+		t.Fatalf("restored history = %+v, want fresh system prompt and pinned long conversation", history)
 	}
 	f := loadTabsFile()
 	if len(f.Tabs) != 1 || filepath.Clean(f.Tabs[0].SessionPath) != filepath.Clean(pinned) {
@@ -1714,8 +1715,9 @@ func TestBuildTabControllerUsesPinnedSessionMetaWorkspace(t *testing.T) {
 		t.Fatalf("tab workspace root = %q, want project A %q", got, normalizeProjectRoot(projectA))
 	}
 	history := tab.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "project A prompt" {
-		t.Fatalf("restored history = %+v, want project A prompt", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "project A prompt" {
+		t.Fatalf("restored history = %+v, want fresh system prompt and project A prompt", history)
 	}
 }
 
@@ -2942,8 +2944,9 @@ func TestOpenProjectTabResolvesProjectSessionFromLegacyDir(t *testing.T) {
 		t.Fatalf("opened session path = %q, want %q", got, sessionPath)
 	}
 	history := tab.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "legacy project prompt" {
-		t.Fatalf("opened history = %+v, want legacy project prompt", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "legacy project prompt" {
+		t.Fatalf("opened history = %+v, want fresh system prompt and legacy project prompt", history)
 	}
 }
 

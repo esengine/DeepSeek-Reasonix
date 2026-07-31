@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"reasonix/internal/config"
+	"reasonix/internal/remote/protocol"
 )
 
 func TestRemoteCommandUsageExit(t *testing.T) {
@@ -18,6 +21,29 @@ func TestRemoteCommandUsageExit(t *testing.T) {
 	}
 	if got := remoteCommand([]string{"help"}, "test"); got != 0 {
 		t.Errorf("help exit = %d, want 0", got)
+	}
+}
+
+func TestRemoteWorkbenchBuildIDCLI(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() { os.Stdout = old })
+	if got := remoteCommand([]string{"workbench-build-id"}, "v1.2.3"); got != 0 {
+		t.Fatalf("exit = %d", got)
+	}
+	_ = w.Close()
+	var output bytes.Buffer
+	_, _ = output.ReadFrom(r)
+	var id protocol.BuildID
+	if err := json.Unmarshal(output.Bytes(), &id); err != nil {
+		t.Fatal(err)
+	}
+	if id.ProductVersion != "v1.2.3" || id.ProtocolVersion == "" || !strings.HasPrefix(id.SchemaHash, "sha256:") {
+		t.Fatalf("build ID = %+v", id)
 	}
 }
 

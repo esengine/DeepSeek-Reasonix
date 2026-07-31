@@ -1736,6 +1736,8 @@ func bashSegmentIsVerification(fields []string) bool {
 			return true
 		}
 		return len(args) > 1 && args[0] == "run" && hasCommandArg(args[1:2], "test", "check", "lint", "typecheck")
+	case "npx":
+		return npxSegmentIsVerification(args)
 	case "node":
 		return nodeSegmentIsVerification(args)
 	case "make", "just":
@@ -1748,6 +1750,43 @@ func bashSegmentIsVerification(fields []string) bool {
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
 	}
 	return false
+}
+
+// npxSegmentIsVerification unwraps only known test runners invoked directly,
+// with no npx control flags. Treating arbitrary npx packages as verification
+// would let package installation or an opaque executable masquerade as a
+// read-only check. Runner flags that update snapshots, write reports, or enable
+// coverage are rejected by the caller and the checks below.
+func npxSegmentIsVerification(args []string) bool {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return false
+	}
+	runner := strings.ToLower(filepath.Base(args[0]))
+	if strings.HasPrefix(runner, "@") {
+		return false
+	}
+	if i := strings.LastIndexByte(runner, '@'); i > 0 {
+		runner = runner[:i]
+	}
+	switch runner {
+	case "vitest", "jest":
+	default:
+		return false
+	}
+	for _, arg := range args[1:] {
+		name := strings.ToLower(arg)
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		switch name {
+		case "--update", "-u", "--updatesnapshot":
+			return false
+		}
+		if name == "--coverage" || strings.HasPrefix(name, "--coverage=") || strings.HasPrefix(name, "--coverage.") {
+			return false
+		}
+	}
+	return true
 }
 
 func nodeSegmentIsVerification(args []string) bool {

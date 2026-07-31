@@ -438,6 +438,18 @@ func TestParsePermissionModeClaudeAliases(t *testing.T) {
 	}
 }
 
+func TestResolveRunPermissionModeRequiresExplicitAuto(t *testing.T) {
+	if got, err := resolveRunPermissionMode("ask", false, false); err != nil || got != "ask" {
+		t.Fatalf("default run permission mode = (%q, %v), want ask", got, err)
+	}
+	if got, err := resolveRunPermissionMode("ask", true, false); err != nil || got != "auto" {
+		t.Fatalf("-y run permission mode = (%q, %v), want auto", got, err)
+	}
+	if got, err := resolveRunPermissionMode("dontAsk", true, true); err == nil || got != "" {
+		t.Fatalf("combined permission flags = (%q, %v), want conflict", got, err)
+	}
+}
+
 func TestRunKeepsChatAndCodeCompatibilityAliases(t *testing.T) {
 	isolateCLIConfigHome(t)
 

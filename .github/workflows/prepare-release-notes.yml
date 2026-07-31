@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version without a tag prefix (for example 1.18.0)"
+        description: "Exact release version without a tag prefix (for example 1.18.0 or 1.19.0-preview.3)"
         required: true
         type: string
       from_tag:

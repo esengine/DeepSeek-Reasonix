@@ -27,6 +27,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const bridgeSource = readFileSync(resolve(here, "../lib/bridge.ts"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
+const enLocaleSource = readFileSync(resolve(here, "../locales/en.ts"), "utf8");
+const zhLocaleSource = readFileSync(resolve(here, "../locales/zh.ts"), "utf8");
+const zhTWLocaleSource = readFileSync(resolve(here, "../locales/zh-TW.ts"), "utf8");
 
 console.log("\nstartup settings contract");
 
@@ -53,6 +56,20 @@ ok(
 ok(
   /initialFocus\?\.target === "model-access" \? "access" : "usage"/.test(settingsSource),
   "model settings honor the onboarding access target while preserving usage as the default",
+);
+ok(
+  /case "deepseek-responses":\s*return t\("settings\.addProvider\.preset\.deepseekResponsesDesc"\)/.test(settingsSource),
+  "DeepSeek Responses preset uses a localized description",
+);
+ok(
+  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+    source.includes('"settings.addProvider.preset.deepseekResponsesDesc"'),
+  ),
+  "DeepSeek Responses description is present in every supported locale",
+);
+ok(
+  /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "deepseek-responses"\) return -1;/.test(bridgeSource),
+  "browser mock ranks DeepSeek Responses first among presets so it is second after DeepSeek Official",
 );
 
 const values = new Map<string, string>();

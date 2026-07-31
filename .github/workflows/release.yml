@@ -1,24 +1,22 @@
 name: Release
 
-# Native CLI binary line. Stable releases are called by release-stable.yml after
-# its single GitHub `release`-environment approval. Preview uses immutable
-# vX.Y.Z-preview.N tags, publishes a GitHub prerelease behind the same `canary`
-# gate as Desktop Preview, and never moves Homebrew or GitHub Latest. Other
-# standalone prereleases remain internal stable-channel checkpoints behind the
-# `release` gate.
+# Native CLI binary line. Stable and Preview releases are called by their
+# approved all-surface orchestrators. Manual dispatch remains available only for
+# Stable/RC recovery; standalone prereleases remain internal stable-channel
+# checkpoints behind the `release` gate.
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Native CLI release channel"
+        description: "Standalone CLI recovery channel"
         required: true
-        # Preserve existing tag-only recovery dispatches as Stable. Preview must
-        # be an explicit operator choice or arrive through the tag relay.
+        # Public Preview recovery reruns release-preview.yml so every surface and
+        # its immutable release-event marker stay aligned.
         default: stable
         type: choice
-        options: [stable, preview]
+        options: [stable]
       tag:
-        description: "Existing protected CLI tag (Preview: v1.18.0-preview.1; Stable/RC: v1.18.0-rc.1)"
+        description: "Existing protected Stable/RC CLI tag (for example v1.18.0 or v1.18.0-rc.1)"
         required: true
         type: string
   workflow_call:
@@ -41,10 +39,15 @@ on:
         required: true
         type: string
       orchestrated:
-        description: "True only when called by release-stable.yml after approval"
+        description: "True only when called by an approved release orchestrator"
         required: false
         default: false
         type: boolean
+      orchestrator:
+        description: "Trusted release orchestrator: stable or preview"
+        required: false
+        default: stable
+        type: string
 
 permissions:
   contents: write # create the release and upload archives
@@ -124,7 +127,7 @@ jobs:
       - name: Verify caller and approved release ref
         env:
           ACTUAL_CALLER_WORKFLOW_REF: ${{ github.workflow_ref }}
-          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-stable.yml@{1}', github.repository, github.ref) }}
+          EXPECTED_CALLER_WORKFLOW_REF: ${{ format('{0}/.github/workflows/release-{1}.yml@{2}', github.repository, inputs.orchestrator, github.ref) }}
           CALLER_EVENT_NAME: ${{ github.event_name }}
           CALLER_REF: ${{ github.ref }}
           CALLER_REF_PROTECTED: ${{ github.ref_protected }}
@@ -132,6 +135,7 @@ jobs:
           CALLER_SHA: ${{ github.sha }}
           APPROVED_CLI_TAG: ${{ inputs.approved_cli_tag }}
           APPROVED_SHA: ${{ inputs.approved_sha }}
+          APPROVED_CHANNEL: ${{ inputs.orchestrator }}
           RELEASE_TAG: ${{ inputs.tag }}
           VERIFY_RELEASE_CHECKOUT: false
         run: |
@@ -143,7 +147,7 @@ jobs:
     needs: resolve
     if: ${{ !inputs.orchestrated }}
     runs-on: ubuntu-latest
-    environment: ${{ needs.resolve.outputs.channel == 'preview' && 'canary' || 'release' }}
+    environment: release
     steps:
       - env:
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
@@ -189,13 +193,13 @@ jobs:
         if: ${{ inputs.orchestrated }}
         uses: actions/download-artifact@v8
         with:
-          name: stable-reviewed-release-notes
-          path: /tmp/stable-reviewed-release-notes
+          name: orchestrator-reviewed-release-notes
+          path: /tmp/orchestrator-reviewed-release-notes
       - name: Use orchestrator-reviewed release notes
         if: ${{ inputs.orchestrated }}
         run: |
-          test -s /tmp/stable-reviewed-release-notes/release-notes.md
-          cp /tmp/stable-reviewed-release-notes/release-notes.md /tmp/release-notes.md
+          test -s /tmp/orchestrator-reviewed-release-notes/release-notes.md
+          cp /tmp/orchestrator-reviewed-release-notes/release-notes.md /tmp/release-notes.md
       - name: Render reviewed release notes
         if: ${{ !inputs.orchestrated }}
         env:
@@ -228,6 +232,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
+          NOTES_TAG: ${{ needs.resolve.outputs.notes_version }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -260,7 +265,7 @@ jobs:
             "SHA256SUMS"
           ]'
           gh api "repos/${{ github.repository }}/releases/tags/$TAG" > /tmp/cli-release.raw.json
-          jq --arg tag "$TAG" --argjson required "$required_assets" '
+          jq --arg tag "$TAG" --arg notes_tag "$NOTES_TAG" --argjson required "$required_assets" '
             if .tag_name != $tag then error("release tag mismatch") else . end |
             if .draft then error("draft release cannot be published") else . end |
             . as $release |
@@ -270,6 +275,7 @@ jobs:
               tag_name: $release.tag_name,
               prerelease: $release.prerelease,
               html_url: $release.html_url,
+              release_notes_url: ("https://reasonix.io/changelog/" + $notes_tag + "/"),
               assets: [
                 $required[] as $name |
                 $assets[$name] |
@@ -285,10 +291,10 @@ jobs:
           ' /tmp/cli-release.raw.json > /tmp/cli-release.json
           if [ -n "$channel" ]; then
             bash scripts/validate-cli-release-manifest.sh \
-              "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.json
+              "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.json "$NOTES_TAG"
           else
             bash scripts/validate-cli-release-manifest.sh \
-              any "$TAG" "${{ github.repository }}" /tmp/cli-release.json
+              any "$TAG" "${{ github.repository }}" /tmp/cli-release.json "$NOTES_TAG"
           fi
 
           endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -298,9 +304,10 @@ jobs:
           if aws s3 cp "s3://${R2_BUCKET}/${immutable_key}" /tmp/cli-release.immutable.json \
             --endpoint-url "$endpoint" 2>"$immutable_error"; then
             bash scripts/validate-cli-release-manifest.sh \
-              "$validation_channel" "$TAG" "${{ github.repository }}" \
-              /tmp/cli-release.immutable.json
-            if ! cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json; then
+              "legacy-${validation_channel}" "$TAG" "${{ github.repository }}" \
+              /tmp/cli-release.immutable.json "$NOTES_TAG"
+            if ! bash scripts/compare-cli-release-manifests.sh \
+              /tmp/cli-release.json /tmp/cli-release.immutable.json; then
               echo "::error::immutable CLI release metadata for $TAG already exists with different content"
               exit 1
             fi
@@ -319,9 +326,10 @@ jobs:
           aws s3 cp "s3://${R2_BUCKET}/${immutable_key}" /tmp/cli-release.immutable.json \
             --endpoint-url "$endpoint"
           bash scripts/validate-cli-release-manifest.sh \
-            "$validation_channel" "$TAG" "${{ github.repository }}" \
-            /tmp/cli-release.immutable.json
-          cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json
+            "legacy-${validation_channel}" "$TAG" "${{ github.repository }}" \
+            /tmp/cli-release.immutable.json "$NOTES_TAG"
+          bash scripts/compare-cli-release-manifests.sh \
+            /tmp/cli-release.json /tmp/cli-release.immutable.json
 
           if [ -z "$channel" ]; then
             echo "internal CLI release $TAG; Stable and Preview pointers remain unchanged"
@@ -334,7 +342,8 @@ jobs:
             --endpoint-url "$endpoint" 2>"$pointer_error"; then
             current_tag="$(jq -er '.tag_name | strings' /tmp/cli-release.pointer.json)"
             bash scripts/validate-cli-release-manifest.sh \
-              "$channel" "$current_tag" "${{ github.repository }}" /tmp/cli-release.pointer.json
+              "legacy-${channel}" "$current_tag" "${{ github.repository }}" \
+              /tmp/cli-release.pointer.json "$current_tag"
           elif grep -Eiq '404|NoSuchKey|Not Found' "$pointer_error"; then
             echo "CLI $channel pointer does not exist yet"
           else
@@ -363,7 +372,8 @@ jobs:
           aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
             --endpoint-url "$endpoint"
           bash scripts/validate-cli-release-manifest.sh \
-            "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.pointer.json
+            "$channel" "$TAG" "${{ github.repository }}" \
+            /tmp/cli-release.pointer.json "$NOTES_TAG"
           cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json
           echo "CLI $channel pointer -> $TAG"
 

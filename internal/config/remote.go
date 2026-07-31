@@ -32,7 +32,7 @@ type RemoteHostEntry struct {
 	PasswordEnv   string               `toml:"password_env"`
 	ProxyJump     string               `toml:"proxy_jump"`     // OpenSSH ProxyJump syntax, comma-separated chain
 	Workspace     string               `toml:"workspace"`      // default remote workspace dir
-	ServeInstall  string               `toml:"serve_install"`  // auto|npm|upload|never
+	ServeInstall  string               `toml:"serve_install"`  // remote CLI: auto|npm|upload|never
 	UseSSHConfig  bool                 `toml:"use_ssh_config"` // layer ~/.ssh/config values under unset fields
 	Forwards      []RemoteForwardEntry `toml:"forwards"`
 }

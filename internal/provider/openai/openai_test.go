@@ -129,6 +129,345 @@ func TestBuildRequestScopesLegacyTupleMigrationToMiMo(t *testing.T) {
 	}
 }
 
+func TestBuildRequestOrdinaryDeepSeekBytesStayPrefixFree(t *testing.T) {
+	c := &client{model: "deepseek-v4-flash", deepseek: true, effort: "high"}
+	body, err := json.Marshal(c.buildRequest(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}}))
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	want := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true},"reasoning_effort":"high","thinking":{"type":"enabled"}}`
+	if string(body) != want {
+		t.Fatalf("ordinary DeepSeek request bytes changed:\n got: %s\nwant: %s", body, want)
+	}
+	if strings.Contains(string(body), `"prefix"`) {
+		t.Fatalf("ordinary request leaked prefix mode: %s", body)
+	}
+}
+
+func TestBuildPrefixRequestAppendsWireOnlyAssistantTail(t *testing.T) {
+	c := &client{model: "deepseek-v4-pro", deepseek: true, effort: "high"}
+	req := provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write a long answer"}}}
+	body, err := json.Marshal(c.buildPrefixRequest(req, "partial answer", "provider reasoning"))
+	if err != nil {
+		t.Fatalf("marshal prefix request: %v", err)
+	}
+	var decoded struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode prefix request: %v", err)
+	}
+	if len(decoded.Messages) != 2 {
+		t.Fatalf("messages = %d, want original user plus wire-only assistant prefix", len(decoded.Messages))
+	}
+	last := decoded.Messages[1]
+	if string(last["role"]) != `"assistant"` || string(last["content"]) != `"partial answer"` || string(last["prefix"]) != `true` {
+		t.Fatalf("prefix tail = %v, want assistant content with prefix=true", last)
+	}
+	if string(last["reasoning_content"]) != `"provider reasoning"` {
+		t.Fatalf("thinking prefix lost reasoning_content: %s", last)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatal("buildPrefixRequest mutated the caller's persisted message slice")
+	}
+
+	disabled := &client{model: c.model, deepseek: true, effort: c.effort, thinkingType: "disabled"}
+	disabledBody, err := json.Marshal(disabled.buildPrefixRequest(req, "partial answer", "must stay local"))
+	if err != nil {
+		t.Fatalf("marshal disabled prefix request: %v", err)
+	}
+	if strings.Contains(string(disabledBody), "reasoning_content") || strings.Contains(string(disabledBody), "must stay local") {
+		t.Fatalf("non-thinking prefix must omit reasoning_content: %s", disabledBody)
+	}
+}
+
+func TestNewScopesPrefixContinuationToOfficialDeepSeekChatURL(t *testing.T) {
+	official, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New official DeepSeek: %v", err)
+	}
+	if got := official.(*client).prefixChatURL; got != "https://api.deepseek.com/beta/chat/completions" {
+		t.Fatalf("official prefix URL = %q", got)
+	}
+
+	gateway, err := New(provider.Config{
+		Name: "gateway", BaseURL: "https://gateway.example/v1", Model: "deepseek-v4-flash", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "deepseek"},
+	})
+	if err != nil {
+		t.Fatalf("New custom gateway: %v", err)
+	}
+	if got := gateway.(*client).prefixChatURL; got != "" {
+		t.Fatalf("custom gateway must not bypass itself for Beta continuation, got %q", got)
+	}
+}
+
+func TestStreamContinuesDeepSeekLengthWithAssistantPrefix(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch r.URL.Path {
+		case "/chat/completions":
+			if strings.Contains(string(body), `"prefix":true`) {
+				t.Errorf("initial request unexpectedly enabled prefix mode: %s", body)
+			}
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think one. \"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13,\"prompt_cache_hit_tokens\":8,\"prompt_cache_miss_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		case "/beta/chat/completions":
+			var decoded struct {
+				Messages []map[string]json.RawMessage `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Errorf("decode continuation request: %v", err)
+				http.Error(w, "invalid continuation request", http.StatusBadRequest)
+				return
+			}
+			last := decoded.Messages[len(decoded.Messages)-1]
+			if string(last["role"]) != `"assistant"` || string(last["content"]) != `"partial"` || string(last["prefix"]) != `true` {
+				t.Errorf("continuation tail = %s", last)
+			}
+			if string(last["reasoning_content"]) != `"think one. "` {
+				t.Errorf("continuation reasoning_content = %s", last["reasoning_content"])
+			}
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think two. \"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\" rest\"},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,\"total_tokens\":22,\"prompt_cache_hit_tokens\":18,\"prompt_cache_miss_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text, reasoning strings.Builder
+	var usage *provider.Usage
+	usageChunks, doneChunks := 0, 0
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkReasoning:
+			reasoning.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usageChunks++
+			usage = chunk.Usage
+		case provider.ChunkDone:
+			doneChunks++
+		case provider.ChunkError:
+			t.Fatalf("automatic continuation errored: %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "partial rest" || reasoning.String() != "think one. think two. " {
+		t.Fatalf("requests=%d text=%q reasoning=%q", requests, text.String(), reasoning.String())
+	}
+	if usageChunks != 1 || doneChunks != 1 || usage == nil {
+		t.Fatalf("usage chunks=%d done chunks=%d usage=%+v", usageChunks, doneChunks, usage)
+	}
+	if usage.PromptTokens != 30 || usage.CompletionTokens != 5 || usage.TotalTokens != 35 ||
+		usage.CacheHitTokens != 26 || usage.CacheMissTokens != 4 || usage.ReasoningTokens != 2 || usage.FinishReason != "stop" {
+		t.Fatalf("merged usage = %+v", usage)
+	}
+}
+
+func TestStreamContinuesReasoningOnlyDeepSeekLength(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch r.URL.Path {
+		case "/chat/completions":
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think one. \"},\"finish_reason\":\"length\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13,\"completion_tokens_details\":{\"reasoning_tokens\":3}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		case "/beta/chat/completions":
+			var decoded struct {
+				Messages []map[string]json.RawMessage `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Errorf("decode continuation request: %v", err)
+				http.Error(w, "invalid continuation request", http.StatusBadRequest)
+				return
+			}
+			last := decoded.Messages[len(decoded.Messages)-1]
+			if string(last["role"]) != `"assistant"` || string(last["content"]) != `""` || string(last["prefix"]) != `true` {
+				t.Errorf("reasoning-only continuation tail = %s", last)
+			}
+			if string(last["reasoning_content"]) != `"think one. "` {
+				t.Errorf("continuation reasoning_content = %s", last["reasoning_content"])
+			}
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think two. \"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":4,\"total_tokens\":24,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text, reasoning strings.Builder
+	var usage *provider.Usage
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkReasoning:
+			reasoning.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usage = chunk.Usage
+		case provider.ChunkError:
+			t.Fatalf("automatic reasoning-only continuation errored: %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "answer" || reasoning.String() != "think one. think two. " {
+		t.Fatalf("requests=%d text=%q reasoning=%q", requests, text.String(), reasoning.String())
+	}
+	if usage == nil || usage.PromptTokens != 30 || usage.CompletionTokens != 7 || usage.TotalTokens != 37 ||
+		usage.ReasoningTokens != 5 || usage.FinishReason != "stop" {
+		t.Fatalf("merged usage = %+v", usage)
+	}
+}
+
+func TestStreamKeepsTruncatedAnswerWhenDeepSeekBetaFails(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path == "/beta/chat/completions" {
+			http.Error(w, `{"error":{"message":"beta unavailable"}}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"keep me\"},\"finish_reason\":\"length\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text strings.Builder
+	var usage *provider.Usage
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usage = chunk.Usage
+		case provider.ChunkError:
+			t.Fatalf("Beta failure must fall back to the original answer, got %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "keep me" || usage == nil || usage.FinishReason != "length" {
+		t.Fatalf("requests=%d text=%q usage=%+v", requests, text.String(), usage)
+	}
+}
+
+func TestStreamBoundsRepeatedDeepSeekLengthContinuation(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"piece\"},\"finish_reason\":\"length\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text strings.Builder
+	var usage *provider.Usage
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkText {
+			text.WriteString(chunk.Text)
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("unexpected stream error: %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "piecepiece" || usage == nil || usage.FinishReason != "length" {
+		t.Fatalf("requests=%d text=%q usage=%+v", requests, text.String(), usage)
+	}
+}
+
+func TestStreamDoesNotPrefixContinueToolCalls(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{}"}}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	toolCalls := 0
+	var usage *provider.Usage
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkToolCall {
+			toolCalls++
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("unexpected stream error: %v", chunk.Err)
+		}
+	}
+	if requests != 1 || toolCalls != 1 || usage == nil || usage.FinishReason != "length" {
+		t.Fatalf("requests=%d toolCalls=%d usage=%+v", requests, toolCalls, usage)
+	}
+}
+
 // TestStreamAuthError verifies a 401 surfaces as an actionable *provider.AuthError
 // (naming the provider and its key env var) rather than a raw status body.
 func TestStreamAuthError(t *testing.T) {
@@ -644,6 +983,57 @@ func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
 	}
 	if strings.Contains(string(b), "reasoning_effort") {
 		t.Errorf("empty effort must be omitted from the payload: %s", b)
+	}
+}
+
+func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-flash",
+		APIKey:  "test",
+		Extra: map[string]any{
+			"effort":             "low",
+			"reasoning_protocol": "deepseek",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New Flash low: %v", err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
+		t.Fatalf("Flash reasoning_effort = %q, want low", got)
+	}
+
+	_, err = New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-pro",
+		APIKey:  "test",
+		Extra: map[string]any{
+			"effort":             "low",
+			"reasoning_protocol": "deepseek",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires deepseek-v4-flash") {
+		t.Fatalf("New Pro low error = %v, want model-scoped rejection", err)
+	}
+
+	custom, err := New(provider.Config{
+		Name:    "custom-deepseek",
+		BaseURL: "https://gateway.example.com/v1",
+		Model:   "custom-flash",
+		APIKey:  "test",
+		Extra: map[string]any{
+			"effort":             "low",
+			"reasoning_protocol": "deepseek",
+			"supported_efforts":  []string{"low", "high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New explicit custom low: %v", err)
+	}
+	if got := custom.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
+		t.Fatalf("custom reasoning_effort = %q, want explicit low", got)
 	}
 }
 
@@ -1486,6 +1876,127 @@ func TestBuildRequestDefaultsEmptyToolParameters(t *testing.T) {
 	}
 	if got, want := string(fn["parameters"]), `{"properties":{},"type":"object"}`; got != want {
 		t.Fatalf("nil parameters should default to %s, got %s in %s", want, got, body)
+	}
+}
+
+func TestStreamReadsGeminiThoughtSignature(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolCall string
+	}{
+		{
+			name:     "current extra_content shape",
+			toolCall: `{"index":0,"id":"call_abc123","type":"function","extra_content":{"google":{"thought_signature":"gemini_sig_xyz789"}},"function":{"name":"write_file"}}`,
+		},
+		{
+			name:     "legacy function shape",
+			toolCall: `{"index":0,"id":"call_abc123","type":"function","function":{"name":"write_file","thought_signature":"gemini_sig_xyz789"}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w,
+					"data: {\"choices\":[{\"delta\":{\"tool_calls\":["+tc.toolCall+"]}}]}\n\n"+
+						"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"test.txt\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"+
+						"data: [DONE]\n\n")
+			}))
+			defer srv.Close()
+
+			p, err := New(provider.Config{Name: "gemini", BaseURL: srv.URL, Model: "gemini-3.6-flash"})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			ch, err := p.Stream(context.Background(), provider.Request{})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+
+			var got *provider.ToolCall
+			for chunk := range ch {
+				if chunk.Type == provider.ChunkToolCall {
+					got = chunk.ToolCall
+				}
+			}
+			if got == nil {
+				t.Fatal("expected ChunkToolCall but none received")
+			}
+			if got.ThoughtSignature != "gemini_sig_xyz789" {
+				t.Errorf("ThoughtSignature = %q, want %q", got.ThoughtSignature, "gemini_sig_xyz789")
+			}
+			if got.Arguments != `{"path":"test.txt"}` {
+				t.Errorf("Arguments = %q, want complete streamed arguments", got.Arguments)
+			}
+		})
+	}
+}
+
+func TestBuildRequestScopesGeminiThoughtSignature(t *testing.T) {
+	req := provider.Request{
+		Messages: []provider.Message{{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{{
+				ID:               "call_abc123",
+				Name:             "write_file",
+				Arguments:        `{"path":"test.txt"}`,
+				ThoughtSignature: "gemini_sig_xyz789",
+			}},
+		}},
+	}
+
+	for _, tc := range []struct {
+		name          string
+		baseURL       string
+		model         string
+		wantSignature string
+	}{
+		{"official Gemini endpoint", "https://generativelanguage.googleapis.com/v1beta/openai", "custom-alias", "gemini_sig_xyz789"},
+		{"Gemini-compatible gateway", "https://openrouter.ai/api/v1", "google/gemini-3.1-pro", "gemini_sig_xyz789"},
+		{"same history after provider switch", "https://api.deepseek.com/v1", "deepseek-chat", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &client{name: tc.name, baseURL: tc.baseURL, model: tc.model}
+			body, err := json.Marshal(c.buildRequest(req))
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			var wire struct {
+				Messages []struct {
+					ToolCalls []struct {
+						ExtraContent *struct {
+							Google struct {
+								ThoughtSignature string `json:"thought_signature"`
+							} `json:"google"`
+						} `json:"extra_content"`
+						Function struct {
+							ThoughtSignature string `json:"thought_signature"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &wire); err != nil {
+				t.Fatalf("unmarshal request: %v", err)
+			}
+			if len(wire.Messages) == 0 || len(wire.Messages[0].ToolCalls) != 1 {
+				t.Fatalf("unexpected request shape: %s", body)
+			}
+			toolCall := wire.Messages[0].ToolCalls[0]
+			gotSignature := ""
+			if toolCall.ExtraContent != nil {
+				gotSignature = toolCall.ExtraContent.Google.ThoughtSignature
+			}
+			if gotSignature != tc.wantSignature {
+				t.Errorf("thought_signature = %q, want %q", gotSignature, tc.wantSignature)
+			}
+			if tc.wantSignature == "" && toolCall.ExtraContent != nil {
+				t.Errorf("non-Gemini request should omit extra_content: %s", body)
+			}
+			if got := toolCall.Function.ThoughtSignature; got != "" {
+				t.Errorf("legacy function.thought_signature should not be sent, got %q", got)
+			}
+		})
 	}
 }
 
