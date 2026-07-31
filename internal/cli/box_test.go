@@ -90,3 +90,20 @@ func TestBoxedEmpty(t *testing.T) {
 		t.Error("boxed empty should still produce a box")
 	}
 }
+
+func TestTruncateVisible(t *testing.T) {
+	long := "这是一个非常长的中文描述用来测试截断是否会正确处理宽字符不会换行"
+	// CJK chars are width-2; a 20-column budget keeps roughly 9 chars + ellipsis.
+	got := truncateVisible(long, 20)
+	if visibleWidth(got) > 20 {
+		t.Fatalf("truncateVisible width = %d, want <= 20 (%q)", visibleWidth(got), got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("truncateVisible should append ellipsis, got %q", got)
+	}
+	// Short string passes through untouched.
+	short := "ok"
+	if truncateVisible(short, 20) != short {
+		t.Fatalf("short string should pass through")
+	}
+}

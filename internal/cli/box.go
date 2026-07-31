@@ -15,6 +15,16 @@ func visibleWidth(s string) int {
 	return ansi.StringWidth(s)
 }
 
+// truncateVisible returns s truncated so its visible width is at most w
+// columns, appending an ellipsis when anything was cut. Wide characters are
+// accounted for cell-wise so CJK hints never overflow into a wrap.
+func truncateVisible(s string, w int) string {
+	if visibleWidth(s) <= w {
+		return s
+	}
+	return ansi.TruncateWc(s, w, "…")
+}
+
 // padRight returns s padded with spaces on the right until it occupies w
 // terminal columns (visible width, not bytes). Strings already at or beyond
 // width are returned unchanged. Use this instead of fmt's %-Ns when content

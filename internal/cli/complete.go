@@ -641,7 +641,15 @@ func (m chatTUI) renderCompletion() string {
 			line = "  " + it.label
 		}
 		if it.hint != "" {
-			line += "  " + dim(it.hint)
+			// Truncate the hint to the remaining line width so a long
+			// description can never overflow the terminal and wrap. A wrapped
+			// menu line would occupy more rows than the layout reserved
+			// (rowsAboveBox counts one newline per item), letting the main
+			// content paint over the menu — the "list is occluded" bug.
+			remaining := m.width - visibleWidth(line)
+			if remaining > 0 {
+				line += "  " + dim(truncateVisible(it.hint, remaining))
+			}
 		}
 		b.WriteString(padCompletionLine(line, m.width))
 		b.WriteByte('\n')
