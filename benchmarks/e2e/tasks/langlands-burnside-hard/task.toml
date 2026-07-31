@@ -1,0 +1,17 @@
+prompt = """Write a Python script langlands.py in the workdir that re-derives the machine-verified Burnside checks of the Sovereign Langlands framework (Langlands.agda: A₄ + S₄ dual instances, GL₂(GF(9)) subgroups, 0 postulate).
+
+Verified facts (from the Agda library):
+1. S₄ Burnside: 1·1 + 1·1 + 2·2 + 3·3 + 3·3 ≡ 24 (s4-burnside = refl). The conjugacy classes of S₄ have sizes 1, 1, 2, 3, 3 with class sizes squared summing to 24 — this is the Burnside/class-equation check.
+2. A₄ Burnside: the 12-element alternating group has conjugacy classes 1+3+4+4 = 12 (from A4Group.agda).
+3. Langlands instance: A₄ (12) + S₄ (24) are two independent GL₂(GF(9)) subgroup Burnside verifications.
+4. The general Langlands functoriality is NOT proven (TypeError: OnlyA4Instance).
+
+Write langlands.py that:
+- Computes the conjugacy class sizes of S₄ by brute force: generate all 24 permutations of (0,1,2,3), conjugate (σ∘π∘σ⁻¹), group by cycle type, list class sizes.
+  The 5 classes by cycle type: identity (size 1), transposition (size 6), double transposition (size 3), 3-cycle (size 8), 4-cycle (size 6) — wait, that sums to 24. But the library says sizes 1,1,2,3,3... recheck: the library's equation 1·1+1·1+2·2+3·3+3·3 = 1+1+4+9+9 = 24 is a DIFFERENT decomposition (it's the sum of squares of class sizes squared?). Resolve this: compute the actual class sizes by brute force and verify THEIR squares sum to 24·something, OR verify the class equation Σ|class| = 24.
+  IMPORTANT: the library identity is 1²+1²+2²+3²+3²=24 — verify THIS exact identity numerically (it's a verified refl), and ALSO compute the true S₄ class sizes by brute force (1, 6, 3, 8, 6) verifying Σ = 24. Note the library's 1,1,2,3,3 are class sizes of the DIHEDRAL or another subgroup — verify A₄'s classes 1,3,4,4 by brute force (Σ=12).
+- Verifies A₄ class sizes: generate even permutations of (0,1,2,3), compute conjugacy classes, verify sizes are {1, 3, 4, 4}.
+- Prints "PASS <name>" per check and "ALL PASS" only if all pass
+- Writes the number of conjugacy classes of A₄ to answer.txt (should be 4)."""
+max_steps = 20
+timeout_sec = 300

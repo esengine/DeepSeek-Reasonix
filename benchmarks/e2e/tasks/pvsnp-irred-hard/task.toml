@@ -1,0 +1,17 @@
+prompt = """Write a Python script pvsnp.py in the workdir that re-derives the machine-verified core of the Sovereign P vs NP framework (PvsNP.agda: holographic-penetration conjecture, 0 postulate, L1.5 — irreducible-instance verified, general form open).
+
+Verified facts (from the Agda library):
+1. A polynomial p(x) = x² + ax + b over GF(3) is IRREDUCIBLE iff it has NO root in {0,1,2} (has-root T₀ T₁ ≡ T₀, refl).
+2. The verified instance: x² + T₁·x + T₀ (i.e. a=1, b=0) over GF(3) is irreducible — has no root.
+3. det3-gf9(I₃) ≡ 1gf9 (the 3×3 identity determinant over GF(9) is 1, refl).
+4. The conjecture (NOT proven, only stated): if the function-table matrix M_F has irreducible characteristic polynomial over GF(9), then F has no polynomial-size circuit family — algebraic irreducibility ⇒ not poly-time.
+
+Write pvsnp.py that:
+- Enumerates ALL 9 polynomials x² + ax + b over GF(3) (a,b ∈ {0,1,2}), and for each checks whether it has a root in GF(3). Count how many are irreducible (no root). The verified instance x²+x+0 must be among them.
+- Verifies x² + x + 0 (a=1,b=0) has NO root: check x=0 → 0, x=1 → 1+1=2, x=2 → 4+2=6≡0 — wait, recompute: for x=2, x²+x = 4+2 = 6 ≡ 0 mod 3 → it HAS a root! So x²+x+0 is REDUCIBLE. The verified instance in the library is x² + T₀·x + T₁ (a=0, b=1): x=0→1, x=1→1+1=2, x=2→4+1=5≡2 — no root, irreducible.
+  IMPORTANT: identify the CORRECT irreducible polynomial x²+0x+1 = x²+1 over GF(3) by exhaustive check, and note the library's has-root T₀ T₁ refers to (a=T₀, b=T₁).
+- Computes det of the 3×3 identity over GF(9)-style arithmetic (just verify 1·1·1 = 1).
+- Prints the list of irreducible polynomials over GF(3) and "ALL PASS" if the count is correct and x²+1 is irreducible.
+- Writes the number of irreducible quadratic polynomials over GF(3) to answer.txt (should be 3)."""
+max_steps = 20
+timeout_sec = 300

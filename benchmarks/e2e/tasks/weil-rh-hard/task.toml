@@ -1,0 +1,16 @@
+prompt = """Write a Python script weil.py in the workdir that re-derives the machine-verified Weil finite-field Riemann hypothesis (WeilRH.agda: GF(3)/GF(9) dual instances, 0 postulate, all ℤ arithmetic + refl).
+
+Verified facts (from the Agda library):
+1. Over GF(3): the curve has #E = 4 points (e13ok: e13 ≡ 4), trace t₁ = q+1−#E = 3+1−4 = 0 (tE1-ok: tE1 ≡ +0).
+2. The zeta function: Z₁(T) = (1+3T²)/((1−T)(1−3T)) — its numerator P₁(T) = 1+3T² has roots satisfying |root| = 3^{−1/2} (the Weil/RH statement).
+3. Over GF(9): #E = 16 (e23ok: e23 ≡ 7? — no: check the recursion), trace t₂ = t₁²−2q = −6, #E(GF(9)) = q²+1−t₂ = 16. The zeta numerator is 1−t₂·T+q²·T² = 1+6T+9T², roots of modulus 3^{−1} = 1/3.
+4. The classical RH is NOT touched — the compiler proves it is unprovable in the continuous universe (MetaTheoryOnly, TypeError: MetaTheoryOnly).
+
+Write weil.py that:
+- Verifies the GF(3) data: #E = 4, t₁ = 0, P₁(T) = 1 + 0·T + 3·T² = 1+3T²
+- Finds the roots of P₁(T) = 1+3T² (over ℂ): T² = −1/3 → T = ±i/√3. Verifies |T| = 1/√3 = 3^{−1/2} exactly.
+- Verifies the GF(9) recursion: t₂ = t₁² − 2·3 = −6, #E = 9+1−(−6) = 16, P₁(T) = 1 − t₂·T + q²·T² = 1+6T+9T², and its roots have modulus 1/3 = 9^{−1/2}.
+- Prints "PASS <name>" per check and "ALL PASS" only if all pass
+- Writes the modulus of the GF(3) roots (as a decimal string 0.5773502691896258, i.e. 1/√3) to answer.txt — compute it with Python, don't type from memory."""
+max_steps = 15
+timeout_sec = 300

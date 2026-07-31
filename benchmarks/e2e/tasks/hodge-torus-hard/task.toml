@@ -1,0 +1,20 @@
+prompt = """Write a Python script hodge.py in the workdir that re-derives the machine-verified core of the Sovereign Hodge framework (Hodge.agda: torus chain complex, h⁰≡h¹≡1, χ=0, rank-nullity 3, 0 postulate).
+
+Verified facts (from the Agda library):
+1. The T⁶ torus chain complex C₀ → C₁ has boundary operator ∂₁ with rank∂ and nullity∂ satisfying rank∂ + nullity∂ ≡ 3 (rank-nullity).
+2. h⁰ = dim H₀ = 3 ∸ rank∂ = 1 and h¹ = dim H₁ = nullity∂ = 1 (dims-ok: (h⁰ ≡ 1) × (h¹ ≡ 1)).
+3. Poincaré duality on the torus: h⁰ ≡ h¹ (poincare = refl) — the 0th and 1st Betti numbers coincide.
+4. Euler characteristic χ = h⁰ − h¹ = 0 (euler-zero = refl).
+
+Write hodge.py that:
+- Implements the T⁶ torus as a 3×3 grid with boundary map ∂₁ (the discrete exterior derivative): dim C₀ = 3, dim C₁ = 3 (or implement the standard 2-torus triangulation with V=4, E=6, F=4 — the tetrahedral boundary ∂Δ³: C₀=4, C₁=6, C₂=4).
+  Use the SIMPLER verified instance: the 3-cell chain with rank∂ + nullity∂ = 3 where rank∂ = 2, nullity∂ = 1.
+- Computes h⁰ = 3 − rank∂ = 1, h¹ = nullity∂ = 1
+- Verifies h⁰ == h¹ (Poincaré duality) and χ = h⁰ − h¹ = 0
+- Verifies rank∂ + nullity∂ == 3 (rank-nullity theorem)
+- Prints "PASS <name>" per check and "ALL PASS" only if all pass
+- Writes the Euler characteristic χ (should be 0) to answer.txt
+
+Run with: python3 hodge.py"""
+max_steps = 15
+timeout_sec = 300
