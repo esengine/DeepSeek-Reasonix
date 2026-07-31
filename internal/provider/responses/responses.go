@@ -353,11 +353,30 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 		body["previous_response_id"] = prevID
 		usePrevID = true
 	} else {
-		// Send full conversation as input array.
-		body["input"] = messagesToInput(req.Messages)
+		// Send full conversation as input array, lifting the leading system
+		// message to the top-level instructions field when present (the API
+		// treats instructions as the first system message; keeping it in-band
+		// too would duplicate it for multi-system sessions, so only the FIRST
+		// system message moves up and the rest stay in the array).
+		instructions, rest := splitInstructions(req.Messages)
+		if instructions != "" {
+			body["instructions"] = instructions
+		}
+		body["input"] = messagesToInput(rest)
 	}
 
 	return body, usePrevID
+}
+
+// splitInstructions lifts the first system message into a top-level
+// instructions string (OpenAI Responses API convention) and returns the
+// remaining messages. Extra system messages stay in-band.
+func splitInstructions(msgs []provider.Message) (string, []provider.Message) {
+	if len(msgs) == 0 || msgs[0].Role != provider.RoleSystem {
+		return "", msgs
+	}
+	rest := append([]provider.Message(nil), msgs[1:]...)
+	return msgs[0].Content, rest
 }
 
 // isSimpleContinuation returns true when the message list looks like a normal

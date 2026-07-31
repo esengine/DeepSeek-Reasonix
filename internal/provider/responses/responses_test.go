@@ -188,9 +188,14 @@ func TestResponsesStatelessSendsFullInput(t *testing.T) {
 	if _, has := bodies[1]["previous_response_id"]; has {
 		t.Fatal("stateless provider must never send previous_response_id")
 	}
+	// The leading system message lifts into top-level instructions; input
+	// carries the remaining 3 messages (user/assistant/user).
+	if got, ok := bodies[1]["instructions"].(string); !ok || got != "sys" {
+		t.Fatalf("stateless turn 2 instructions = %#v, want \"sys\"", bodies[1]["instructions"])
+	}
 	input, ok := bodies[1]["input"].([]any)
-	if !ok || len(input) != 4 {
-		t.Fatalf("stateless turn 2 input = %#v, want full 4-item array", bodies[1]["input"])
+	if !ok || len(input) != 3 {
+		t.Fatalf("stateless turn 2 input = %#v, want 3-item array (system lifted to instructions)", bodies[1]["input"])
 	}
 }
 
