@@ -1214,26 +1214,30 @@ type AgentConfig struct {
 // token budget; the harness compacts older history as a turn's prompt approaches
 // it (see agent compaction). 0 disables compaction for the instance.
 type ProviderEntry struct {
-	Name           string            `toml:"name"`
-	Kind           string            `toml:"kind"`
-	BaseURL        string            `toml:"base_url"`
-	ChatURL        string            `toml:"chat_url"`
-	Model          string            `toml:"model"`      // a single model (back-compat)
-	Models         []string          `toml:"models"`     // a vendor's model list (one base_url/key, many models)
-	ModelsURL      string            `toml:"models_url"` // auto-fetch models from this URL on startup
-	Default        string            `toml:"default"`    // default model when Models is set (else Models[0])
-	APIKeyEnv      string            `toml:"api_key_env"`
-	PresetID       string            `toml:"preset_id"`      // curated preset identity; UI-only metadata, not sent to model providers.
-	PresetVersion  int               `toml:"preset_version"` // curated preset schema version for future migrations.
-	Headers        map[string]string `toml:"headers"`        // optional extra HTTP headers for compatible gateways; secrets should stay in api_key_env.
-	ExtraBody      map[string]any    `toml:"extra_body"`     // optional extra top-level JSON request body fields for OpenAI-compatible gateways.
-	AuthHeader     bool              `toml:"auth_header"`    // for Anthropic-compatible gateways that expect Authorization: Bearer instead of x-api-key.
-	resolvedAPIKey string
-	resolvedSource CredentialSource
-	BalanceURL     string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
-	ContextWindow  int                          `toml:"context_window"`
-	Price          *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
-	Prices         map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
+	Name          string            `toml:"name"`
+	Kind          string            `toml:"kind"`
+	BaseURL       string            `toml:"base_url"`
+	ChatURL       string            `toml:"chat_url"`
+	Model         string            `toml:"model"`      // a single model (back-compat)
+	Models        []string          `toml:"models"`     // a vendor's model list (one base_url/key, many models)
+	ModelsURL     string            `toml:"models_url"` // auto-fetch models from this URL on startup
+	Default       string            `toml:"default"`    // default model when Models is set (else Models[0])
+	APIKeyEnv     string            `toml:"api_key_env"`
+	PresetID      string            `toml:"preset_id"`      // curated preset identity; UI-only metadata, not sent to model providers.
+	PresetVersion int               `toml:"preset_version"` // curated preset schema version for future migrations.
+	Headers       map[string]string `toml:"headers"`        // optional extra HTTP headers for compatible gateways; secrets should stay in api_key_env.
+	ExtraBody     map[string]any    `toml:"extra_body"`     // optional extra top-level JSON request body fields for OpenAI-compatible gateways.
+	AuthHeader    bool              `toml:"auth_header"`    // for Anthropic-compatible gateways that expect Authorization: Bearer instead of x-api-key.
+	// ResponsesStateful controls dashscope-responses provider context mode.
+	// true (default) = server-managed previous_response_id (DashScope);
+	// false = stateless full-input (DeepSeek Responses API).
+	ResponsesStateful *bool `toml:"responses_stateful"`
+	resolvedAPIKey    string
+	resolvedSource    CredentialSource
+	BalanceURL        string                       `toml:"balance_url"` // optional; a provider-specific wallet-balance endpoint (DeepSeek: https://api.deepseek.com/user/balance). Empty = no balance readout.
+	ContextWindow     int                          `toml:"context_window"`
+	Price             *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
+	Prices            map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
 
 	persistedOfficialCurrency string
 
